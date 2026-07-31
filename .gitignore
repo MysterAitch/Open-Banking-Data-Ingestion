@@ -1,0 +1,41 @@
+# SECRETS - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials/
+.cache/
+
+# FINANCIAL DATA - never commit to this repo.
+# This repo holds CODE. Raw artefacts and the derived store live elsewhere
+# (see README, "Where the data lives"). These rules are a backstop, not the plan.
+raw/
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.qif
+*.ofx
+*.qfx
+*.pdf
+!tests/fixtures/**/*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
