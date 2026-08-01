@@ -96,6 +96,9 @@ obdi import path/to/savings.csv --account starling-savings
 
 obdi pair-transfers      # after ingesting every account, by any route
 obdi status
+
+# emit an Actual Budget import payload
+obdi replay --out ./actual-import.json
 ```
 
 `pair-transfers` is a separate pass over the whole store, and has to be: a
@@ -152,6 +155,46 @@ Starling is the natural place to start, being the one account reachable both
 first-party and through the aggregator. Running both calibrates how far two
 providers' descriptions of the same payment diverge in practice — which tells
 you how much to trust matching on the accounts you can only see one way.
+
+## Replaying into Actual Budget
+
+Replay, not sync. The store is the record; Actual is a view over it. That is
+what makes Actual **disposable** — wipe the budget, replay, lose nothing. It is
+also what lets you run a second budgeting tool alongside it on the same real
+data, and drop whichever loses.
+
+```bash
+obdi replay --out ./actual-import.json
+```
+
+Accounts with no Actual binding are **not** replayed and are named in the
+output, because a budget quietly missing an account looks like missing spending.
+Internal transfers are excluded by default: both sides are real movements, but
+counting them inflates spending and income alike, and Actual models transfers
+as their own type which a flat import cannot express.
+
+### Why the payload rather than a direct write
+
+Actual's write path is Node-only. `@actual-app/api` embeds Actual's own budget
+engine and runs its JavaScript migrations, so it is versioned in lockstep with
+the server. The Python reimplementation is good for reading but its own
+documentation warns against using it to create budgets — exactly what a rebuild
+does. So this emits the payload and a small pinned Node process applies it,
+confining the polyglot split to one container whose only job is to track
+Actual's version.
+
+The applier must use Actual's **import** path, never the raw insert: the raw one
+skips reconciliation and silently duplicates on any re-run. Three things then
+fall out for free:
+
+- **`imported_id` is the idempotency key**, and ours is the canonical entity id.
+  The same payment maps to the same row on every replay, however many sources
+  observed it.
+- **On a match, existing values win.** Actual keeps a payee, category or note
+  you set by hand rather than overwriting it, and never touches a reconciled
+  transaction. Re-importing does not undo your categorisation.
+- **A full rebuild** uses Actual's import mode against a fresh budget file,
+  which is cleaner than deleting in place.
 
 ## What needs an account
 
@@ -262,8 +305,12 @@ UK CSV parsers, with layouts taken from research rather than real exports —
 **verify each against a first real download**; the header check will refuse a
 mismatch rather than misread it.
 
-Not built yet: Enable Banking and Starling API pullers, Actual Budget replay,
-valuations ingestion, MQTT events, review UI.
+Also working: live pulls from TrueLayer and Starling, connection storage with
+consent tracking, cross-source matching, and Actual replay payload generation.
+
+Not built yet: the Node applier that consumes the replay payload, a compose
+stack to run the callback receiver and a scheduled pull, valuations ingestion,
+MQTT events, and a review interface for unresolved matches.
 
 `scripts/check_uk_coverage.py` answers the outstanding design question — whether
 Enable Banking actually carries your banks.

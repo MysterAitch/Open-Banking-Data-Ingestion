@@ -34,5 +34,26 @@
       "provider_account_id": "REPLACE-with-truelayer-account_id",
       "label": "Single-sourced: no first-party API available"
     }
+  ],
+
+  "_actual_comment": [
+    "Where each canonical account goes in Actual Budget, used by `obdi replay`.",
+    "The same question as above, asked in the opposite direction.",
+    "",
+    "An account with no binding here is NOT replayed, and is named in the",
+    "command's output - a budget quietly missing an account looks like missing",
+    "spending, which is very hard to spot."
+  ],
+  "actual": [
+    {
+      "canonical_id": "starling-personal",
+      "actual_account_id": "REPLACE-with-actual-account-id",
+      "label": "Starling current account in Actual"
+    },
+    {
+      "canonical_id": "halifax-current",
+      "actual_account_id": "REPLACE-with-actual-account-id",
+      "label": "Halifax current account in Actual"
+    }
   ]
 }

@@ -20,6 +20,7 @@ from .connections import ConnectionStore
 from .ingest import import_file, pair_transfers_across_store
 from .parsers.base import ParseError
 from .pull import pull_starling, pull_truelayer
+from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
 from .store import Store
 
@@ -43,6 +44,57 @@ def _account_map() -> AccountMap:
         return AccountMap()
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     return AccountMap([AccountBinding(**binding) for binding in raw.get("bindings", [])])
+
+
+def _actual_bindings() -> list[ActualAccountBinding]:
+    """Map canonical accounts to Actual account ids.
+
+    Lives alongside the source bindings in OBDI_ACCOUNT_MAP, under its own key,
+    because both answer the same question - which real account is this? - just
+    in opposite directions.
+    """
+    path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not path or not Path(path).is_file():
+        return []
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [ActualAccountBinding(**entry) for entry in raw.get("actual", [])]
+
+
+def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -> int:
+    bindings = _actual_bindings()
+    if not bindings:
+        print(
+            "No Actual account bindings found. Add an 'actual' section to the file "
+            "named by OBDI_ACCOUNT_MAP - see docs/accounts.example.json.",
+            file=sys.stderr,
+        )
+        return 2
+
+    with Store(db_path) as store:
+        transactions = store.all_transactions()
+
+    payload = build_payload(
+        transactions, bindings, include_internal_transfers=include_internal_transfers
+    )
+    missing = unbound_accounts(transactions, bindings)
+
+    rendered = json.dumps(payload, indent=2)
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(rendered, encoding="utf-8")
+        counts = ", ".join(f"{account}: {len(rows)}" for account, rows in sorted(payload.items()))
+        print(f"Wrote {out} ({counts or 'nothing to import'})")
+    else:
+        print(rendered)
+
+    if missing:
+        # An account quietly absent from a budget looks like missing spending,
+        # so the gap is named rather than left to be noticed.
+        print(
+            "\nNot replayed - no Actual account bound for: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+    return 0
 
 
 def _pull(target: str, db_path: Path, since: date | None) -> int:
@@ -131,6 +183,21 @@ def main(argv: list[str] | None = None) -> int:
         help="earliest date to fetch; omit to backfill as far as the provider allows",
     )
 
+    replay_command = subcommands.add_parser(
+        "replay", help="emit the store as an Actual Budget import payload"
+    )
+    replay_command.add_argument(
+        "--out",
+        type=Path,
+        help="write the payload here; omit to write to stdout",
+    )
+    replay_command.add_argument(
+        "--include-internal-transfers",
+        action="store_true",
+        help="include movements between your own accounts (off by default: "
+        "counting both sides inflates spending and income alike)",
+    )
+
     subcommands.add_parser(
         "connections", help="show bank connections and how long consent has left"
     )
@@ -162,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pull":
         return _pull(args.target, db_path, args.since)
+
+    if args.command == "replay":
+        return _replay(db_path, args.out, args.include_internal_transfers)
 
     if args.command == "connections":
         store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
