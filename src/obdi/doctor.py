@@ -106,7 +106,7 @@ def run_checks() -> list[CheckResult]:
         except SecretError as exc:
             results.append(CheckResult(f"secret {name}", False, str(exc)))
             continue
-        problems = _shape_problems(name, value)
+        problems = shape_problems(name, value)
         if problems:
             results.append(CheckResult(f"secret {name}", False, "; ".join(problems)))
         else:
@@ -117,7 +117,7 @@ def run_checks() -> list[CheckResult]:
     return results
 
 
-def _shape_problems(name: str, value: str) -> list[str]:
+def shape_problems(name: str, value: str) -> list[str]:
     """What is wrong with a secret's SHAPE, described without its content.
 
     Readable is not usable. Wrapping quotes survive a YAML paste invisibly -

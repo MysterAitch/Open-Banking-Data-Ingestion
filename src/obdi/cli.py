@@ -20,7 +20,7 @@ from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
 from .coverage import agreements, coverage, gaps, transpositions
 from .coverage import report as coverage_report
-from .doctor import live_checks, report, run_checks
+from .doctor import live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
@@ -154,11 +154,22 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         )
         return 2
 
+    # Validate at startup, but do not CACHE at startup: the value passed on is
+    # a reader, so a rotated secret takes effect at the next exchange with no
+    # restart. Startup still fails fast when no secret exists at all - serving
+    # a connect button that cannot possibly finish helps nobody - but a merely
+    # malformed one only warns, because the page's local duties (consent
+    # clocks, reconnect links) owe nothing to an online-only credential.
     try:
-        client_secret = read_secret("TRUELAYER_CLIENT_SECRET")
+        startup_secret = read_secret("TRUELAYER_CLIENT_SECRET")
     except SecretError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    for problem in shape_problems("TRUELAYER_CLIENT_SECRET", startup_secret):
+        print(f"WARNING: the TrueLayer secret {problem}", file=sys.stderr)
+
+    def current_secret() -> str:
+        return read_secret("TRUELAYER_CLIENT_SECRET")
 
     def start_backfill(name: str) -> bool:
         """Fetch deep history immediately, in the background.
@@ -186,7 +197,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
     config = WebConfig(
         client_id=client_id,
-        client_secret=client_secret,
+        client_secret=current_secret,
         redirect_uri=redirect_uri,
         connection_store=ConnectionStore(store_path),
         start_backfill=start_backfill,

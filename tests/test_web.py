@@ -231,3 +231,46 @@ class TestDeepHistoryIsFetchedWhileItIsStillReachable:
         # Silence would be the dangerous outcome: the reader assumes history is
         # being fetched, and only discovers otherwise once it is too late.
         assert "obdi pull halifax" in response.text
+
+
+class TestTheHomepageWarnsAboutAnUnusableSecret:
+    """A malformed secret must announce itself where the person is.
+
+    Not by refusing to start - the consent clocks and reconnect links owe
+    nothing to an online-only credential - and not by waiting for the next
+    authorisation to fail with a burnt single-use code. Checked at render, so
+    fixing the file clears the banner on refresh with no restart.
+    """
+
+    def test_Index_WhenTheSecretIsMalformed_ShowsTheBanner(self, monkeypatch, tmp_path):
+        secret = tmp_path / "client-secret"
+        secret.write_text('"quoted-and-wrong"', encoding="utf-8")
+        monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
+
+        page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
+
+        assert "looks malformed" in page
+        assert "quoted-and-wrong" not in page, "never show the value, even a broken one"
+
+    def test_Index_WhenTheSecretIsWellFormed_ShowsNoBanner(self, monkeypatch, tmp_path):
+        secret = tmp_path / "client-secret"
+        secret.write_text("tlcs_live_abcdefghij1234567890", encoding="utf-8")
+        monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
+
+        page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
+
+        assert "malformed" not in page
+
+    def test_Index_AfterTheFileIsFixed_TheBannerClearsOnRefreshWithoutRestart(
+        self, monkeypatch, tmp_path
+    ):
+        secret = tmp_path / "client-secret"
+        secret.write_text('"quoted-and-wrong"', encoding="utf-8")
+        monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
+        store = ConnectionStore(tmp_path / "c.json")
+
+        assert "malformed" in render_index(store).decode()
+
+        secret.write_text("tlcs_live_abcdefghij1234567890", encoding="utf-8")
+
+        assert "malformed" not in render_index(store).decode()

@@ -35,7 +35,9 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from .callback import render_page
 from .connections import ConnectionStore, build_connection
+from .doctor import shape_problems
 from .providers.truelayer import build_auth_link, exchange_code
+from .secrets import SecretError, read_secret
 
 # A person walking to another room mid-authorisation is normal; a state hanging
 # around for hours is not.
@@ -97,7 +99,15 @@ class AuthorisationSession:
 @dataclass
 class WebConfig:
     client_id: str
-    client_secret: str
+    #: Either the value itself, or a callable that fetches it. The callable
+    #: form is what production uses, and it is the fix for a failure observed
+    #: live: the secret is used only at code exchange, a handful of times a
+    #: quarter, so caching it at startup buys nothing - and it made a rotation
+    #: invisible, with the new value on disk approved by every fresh process
+    #: while the serving one kept the old value in memory. Reading at USE makes
+    #: rotation atomic with the write, and no restart choreography exists to
+    #: get wrong.
+    client_secret: str | Callable[[], str]
     redirect_uri: str
     connection_store: ConnectionStore
     #: Called with the connection name the moment authorisation succeeds, to
@@ -107,6 +117,10 @@ class WebConfig:
     #: without a database or a bank. Returning False makes the page say plainly
     #: that no backfill ran, rather than implying one did.
     start_backfill: Callable[[str], bool] | None = None
+
+    def current_client_secret(self) -> str:
+        value = self.client_secret
+        return value() if callable(value) else value
 
 
 def _connection_rows(store: ConnectionStore) -> str:
@@ -149,8 +163,39 @@ def error_page(title: str, message_html: str) -> bytes:
     return render_page(title, f"{message_html}{HOME_LINK}")
 
 
+def _credential_banner() -> str:
+    """A prominent warning when the secret on disk cannot work, or empty.
+
+    On the homepage rather than at startup, and a banner rather than a refusal:
+    the page's local duties - consent clocks, reconnect links - owe nothing to
+    an online-only credential, so a malformed secret must not take them down.
+    But it must also not wait silently for the next authorisation to fail with
+    a burnt single-use code. Checked at render, so it reflects the file as it
+    is NOW - a fixed secret clears the banner on refresh, no restart.
+    """
+    try:
+        value = read_secret("TRUELAYER_CLIENT_SECRET", required=False)
+    except SecretError as exc:
+        return (
+            f'<p class="bad"><strong>TrueLayer secret unreadable:</strong> '
+            f"{html.escape(str(exc))} Bank authorisation will fail until this is fixed.</p>"
+        )
+    if not value:
+        return ""
+    problems = shape_problems("TRUELAYER_CLIENT_SECRET", value)
+    if not problems:
+        return ""
+    detail = html.escape("; ".join(problems))
+    return (
+        f'<p class="bad"><strong>TrueLayer secret looks malformed:</strong> {detail}. '
+        "Bank authorisation will fail until this is fixed - the value itself is "
+        "never shown here.</p>"
+    )
+
+
 def render_index(store: ConnectionStore) -> bytes:
     body = f"""
+{_credential_banner()}
 {_connection_rows(store)}
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
@@ -273,7 +318,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             tokens = exchange_code(
                 code=code,
                 client_id=self.bound_config.client_id,
-                client_secret=self.bound_config.client_secret,
+                client_secret=self.bound_config.current_client_secret(),
                 redirect_uri=self.bound_config.redirect_uri,
             )
             connection = build_connection(
@@ -285,7 +330,19 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # the phone browser, and this is the one failure that has to be
             # debuggable after the fact.
             print(f"authorisation for {name!r} failed: {exc}", file=sys.stderr)
-            self._respond(500, error_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
+            detail = f"<p>{html.escape(str(exc))}</p>"
+            if "invalid_client" in str(exc):
+                # Say what the secret file looks like RIGHT NOW, so a stale
+                # process and a bad file are distinguishable from the error
+                # page itself instead of needing a shell.
+                verdict = _credential_banner() or (
+                    '<p>The secret file currently on disk looks well-formed, so if '
+                    "this happened just after a rotation the provider may not have "
+                    "propagated it yet (up to 15 minutes) - or the value, though "
+                    "shaped correctly, is not the one the provider issued.</p>"
+                )
+                detail += verdict
+            self._respond(500, error_page("Could not save", detail))
             return
 
         # Start the backfill NOW, before the page is even rendered. Anything
