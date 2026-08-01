@@ -162,6 +162,16 @@ def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
         return None
 
     amount = item.get("amount") or {}
+    currency = amount.get("currency", "GBP")
+    if currency != "GBP":
+        # minorUnits sidesteps float problems but says nothing about which
+        # currency's minor units these are. Storing a euro figure as sterling
+        # would be silent, and the budgeting tool downstream is single-currency
+        # so there is nowhere correct for it to go.
+        raise StarlingError(
+            f"feed item {item.get('feedItemUid')} is in {currency}; only GBP is supported"
+        )
+
     minor_units = amount.get("minorUnits")
     if not isinstance(minor_units, int):
         raise StarlingError(
@@ -193,7 +203,7 @@ def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
     return Transaction(
         account_id=account_id,
         amount_minor=minor_units,
-        currency=amount.get("currency", "GBP"),
+        currency=currency,
         value_date=when,
         booking_date=when,
         description=description,

@@ -176,7 +176,11 @@ def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> T
     if raw_amount is None:
         raise TrueLayerError("transaction has no amount")
 
-    amount_minor = parse_amount(str(raw_amount))
+    # The record's own currency, not an assumed one. Parsing every amount as
+    # sterling routed around money.py's guard while still storing the true
+    # currency alongside, so the figure and its label disagreed in silence.
+    currency = record.get("currency", "GBP")
+    amount_minor = parse_amount(str(raw_amount), currency=currency)
 
     transaction_type = (record.get("transaction_type") or "").upper()
     if transaction_type == "DEBIT" and amount_minor > 0:
@@ -198,7 +202,7 @@ def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> T
     return Transaction(
         account_id=account_id,
         amount_minor=amount_minor,
-        currency=record.get("currency", "GBP"),
+        currency=currency,
         value_date=when,
         booking_date=when,
         description=description,

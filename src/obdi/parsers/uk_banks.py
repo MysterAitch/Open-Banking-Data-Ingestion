@@ -31,15 +31,21 @@ class StarlingCsvParser(StatementParser):
     date_format = "%d/%m/%Y"
     expected_headers = ("Date", "Counter Party", "Reference", "Type")
 
-    def _amount_column(self, row: dict[str, str]) -> str:
+    def _amount_column(self, row: dict[str, str]) -> tuple[str, str]:
+        """The amount column and the currency baked into its name.
+
+        The currency was previously read only to FIND the column and then
+        thrown away, so a euro export parsed silently as sterling.
+        """
         for key in row:
-            if key.startswith("Amount ("):
-                return key
+            if key.startswith("Amount (") and key.endswith(")"):
+                return key, key[len("Amount (") : -1].strip().upper()
         raise ParseError("Starling export has no 'Amount (...)' column")
 
     def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
         for row in self.rows(payload):
-            amount = parse_amount(row[self._amount_column(row)])
+            column, currency = self._amount_column(row)
+            amount = parse_amount(row[column], currency=currency)
             when = parse_date(row["Date"], self.date_format)
             description = row.get("Reference") or row.get("Counter Party", "")
             yield Transaction(
@@ -51,6 +57,7 @@ class StarlingCsvParser(StatementParser):
                 counterparty=row.get("Counter Party", ""),
                 source=self.source,
                 source_id=None,
+                currency=currency,
                 content_key=content_key(
                     account_id=account_id,
                     amount_minor=amount,

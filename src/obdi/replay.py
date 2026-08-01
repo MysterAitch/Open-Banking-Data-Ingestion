@@ -59,6 +59,16 @@ def to_actual_transaction(transaction: Transaction) -> dict:
             "Replaying it would create a duplicate on every run."
         )
 
+    if transaction.currency != "GBP":
+        # Actual is currency-agnostic but single-currency per budget file, so a
+        # foreign amount has nowhere correct to land. Emitting it unlabelled
+        # would silently book a euro figure as sterling.
+        raise ReplayError(
+            f"transaction {transaction.entity_id} is in {transaction.currency}; "
+            "the budget file is single-currency and there is no correct "
+            "destination for a foreign amount"
+        )
+
     payee = transaction.counterparty or transaction.description
 
     return {
