@@ -176,6 +176,38 @@ class Store:
         self.connection.execute("PRAGMA busy_timeout = 30000")
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
+        self._migrate_content_keys()
+
+    def _migrate_content_keys(self) -> None:
+        """Re-key any row whose stored key no longer matches its own content.
+
+        Content keys once included the account id; they deliberately no longer
+        do, so that re-binding an account is a rename rather than a rebuild.
+        Rows stored under the old scheme would silently stop content-matching
+        against fresh sightings of the same payments. Every input to the key
+        lives in stored columns, so this is a deterministic recompute - and a
+        no-op on every open after the first.
+        """
+        from .identity import content_key as compute
+
+        rows = self.connection.execute(
+            "SELECT entity_id, amount_minor, value_date, description, content_key "
+            "FROM transactions"
+        ).fetchall()
+        updates = []
+        for row in rows:
+            expected = compute(
+                amount_minor=row["amount_minor"],
+                value_date=date.fromisoformat(row["value_date"]),
+                description=row["description"],
+            )
+            if row["content_key"] != expected:
+                updates.append((expected, row["entity_id"]))
+        if updates:
+            self.connection.executemany(
+                "UPDATE transactions SET content_key = ? WHERE entity_id = ?", updates
+            )
+            self.connection.commit()
 
     def _migrate_raw_artefact_key(self) -> None:
         """Upgrade a digest-only raw_artefacts table to the composite key.

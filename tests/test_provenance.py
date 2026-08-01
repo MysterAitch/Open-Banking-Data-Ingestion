@@ -248,3 +248,35 @@ class TestRebindingIsAnOperationNotAFate:
 
             accounts = {t.account_id for t in store.all_transactions()}
             assert accounts == {"halifax-current", "other"}
+
+
+class TestOldFormatKeysAreMigrated:
+    """Rows stored under the old account-in-the-hash keys are re-keyed on open.
+
+    Every input to the new key lives in stored columns, so the migration is a
+    deterministic recompute - no raw replay, no refetch. Without it, a stored
+    row and a fresh sighting of the same payment would carry different keys and
+    tier-two matching would silently stop working for pre-change data.
+    """
+
+    def test_Open_RecomputesAnyKeyThatNoLongerMatchesItsOwnContent(self, tmp_path):
+        from obdi.identity import content_key as compute
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, [txn("truelayer", source_id="tl-1")], digest="d1")
+            entity = store.all_transactions()[0].entity_id
+            store.connection.execute(
+                "UPDATE transactions SET content_key = 'old-format-key' WHERE entity_id = ?",
+                (entity,),
+            )
+            store.connection.commit()
+
+        with Store(db) as store:
+            row = store.all_transactions()[0]
+            expected = compute(
+                amount_minor=row.amount_minor,
+                value_date=row.value_date,
+                description=row.description,
+            )
+            assert row.content_key == expected
