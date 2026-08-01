@@ -28,6 +28,31 @@ FUZZY_WINDOW_DAYS = 7
 INTERNAL_TRANSFER_WINDOW_DAYS = 1
 
 
+def could_be_one_payment(incoming: Transaction, candidate: Transaction) -> bool:
+    """Whether these two records could be one payment observed twice.
+
+    This is the question the original rules never asked. They were built around
+    "is this the same payment seen through a different door?" and answered it
+    well, but a statement is mostly full of the opposite case: different
+    payments that merely look alike.
+
+    Within ONE source, two records are two payments. A bank does not report the
+    same payment twice in one export, so an id-less file listing three weekly
+    standing orders of equal value is three payments, not one seen thrice.
+
+    The single exception is settlement: a pending record and a settled one from
+    the same source CAN be one payment, and that pairing must survive, which is
+    why the test is an exclusive-or rather than "neither is pending".
+    """
+    if candidate.source != incoming.source:
+        return True
+    if incoming.source_id and candidate.source_id and incoming.source_id == candidate.source_id:
+        return True
+    incoming_pending = incoming.status is TransactionStatus.PENDING
+    candidate_pending = candidate.status is TransactionStatus.PENDING
+    return incoming_pending != candidate_pending
+
+
 @dataclass(frozen=True)
 class MatchResult:
     tier: MatchTier
@@ -60,7 +85,9 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
 
     if incoming.content_key:
         for candidate in same_account:
-            if candidate.content_key == incoming.content_key:
+            if candidate.content_key == incoming.content_key and could_be_one_payment(
+                incoming, candidate
+            ):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
     window = timedelta(days=FUZZY_WINDOW_DAYS)
@@ -69,15 +96,11 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
         for t in same_account
         if t.amount_minor == incoming.amount_minor
         and abs(t.value_date - incoming.value_date) <= window
+        # The brake that was previously gated on the incoming record HAVING a
+        # provider id, which left every id-less export unprotected. Two rows of
+        # one file are two payments whether or not the format numbers them.
+        and could_be_one_payment(incoming, t)
     ]
-
-    # Within ONE source, two ids that did not match at tier 1 are two different
-    # transactions, and collapsing them would be a false positive. Across
-    # sources the opposite holds: an aggregator id and a bank's own id for the
-    # same payment are meant to differ, so they must stay eligible here or
-    # every cross-checked account would silently double-count.
-    if incoming.source_id:
-        near = [t for t in near if not t.source_id or t.source != incoming.source]
 
     if not near:
         return MatchResult(MatchTier.UNRESOLVED, None)
@@ -102,6 +125,14 @@ def supersede(previous: Transaction, observation: Transaction) -> Transaction:
         # answerable after settlement moves the dates.
         booking_date=min(previous.booking_date, observation.booking_date),
         status=observation.status or previous.status,
+        # Sticky. Confirming a transfer is expensive - it needs both sides
+        # present in different accounts - and a later sighting arriving from a
+        # feed that does not mark transfers would otherwise silently reclassify
+        # it as spending on every pull.
+        is_internal_transfer=previous.is_internal_transfer or observation.is_internal_transfer,
+        # A later observation may not carry a counterparty the earlier one did.
+        # Losing it would degrade the payee on every replay.
+        counterparty=observation.counterparty or previous.counterparty,
     )
 
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .identity import artefact_digest
-from .matching import MatchTier, pair_internal_transfers, resolve, supersede
+from .matching import pair_internal_transfers, resolve, supersede
 from .models import RawArtefact, Transaction
 from .parsers.uk_banks import detect
 from .store import Store
@@ -53,14 +53,11 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     parser = detect(payload)
     incoming = list(parser.parse(payload, account_id=account_id))
 
-    summary = ImportSummary(artefact_new=is_new_artefact, parsed=len(incoming))
-    existing = store.transactions_for_account(account_id)
-
-    for transaction in incoming:
-        stored = _reconcile(store, transaction, existing, digest, summary)
-        existing.append(stored)
-
-    store.connection.commit()
+    # Reconciliation is shared with API pulls rather than duplicated here, so
+    # identity resolution cannot drift between the two routes - the same
+    # payment arriving by file and by API must resolve identically.
+    summary = ImportSummary(artefact_new=is_new_artefact)
+    reconcile_batch(store, incoming, digest=digest, summary=summary)
     return summary
 
 
@@ -131,7 +128,20 @@ def reconcile_batch(
         existing = by_account.setdefault(
             transaction.account_id, store.transactions_for_account(transaction.account_id)
         )
-        existing.append(_reconcile(store, transaction, existing, digest, result))
+        merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
+
+        if matched_entity_id is None:
+            existing.append(merged)
+            continue
+
+        # REPLACE the candidate rather than appending alongside it. Appending
+        # left the pre-merge row in the list, so a later incoming record could
+        # claim the same stored transaction a second time - which is how
+        # repeated payments were swallowed and reported as matched.
+        for index, candidate in enumerate(existing):
+            if candidate.entity_id == matched_entity_id:
+                existing[index] = merged
+                break
 
     store.connection.commit()
     return result
@@ -143,7 +153,13 @@ def _reconcile(
     existing: list[Transaction],
     digest: str,
     summary: ImportSummary,
-) -> Transaction:
+) -> tuple[Transaction, str | None]:
+    """Resolve one transaction, returning it and the entity it merged into.
+
+    The second element is what lets the caller replace the candidate it
+    matched, rather than leaving the pre-merge row available to be claimed
+    again by the next record.
+    """
     result = resolve(transaction, existing)
 
     if result.existing is not None:
@@ -156,16 +172,9 @@ def _reconcile(
             summary.superseded += 1
         else:
             summary.matched += 1
-        return merged
+        return merged, result.existing.entity_id
 
     fresh = replace(transaction, entity_id=str(uuid.uuid4()), artefact_digest=digest)
     store.upsert_transaction(fresh, match_tier=result.tier.value)
     summary.inserted += 1
-
-    # Tier 4 means nothing matched. That is expected for genuinely new
-    # transactions, so it is not queued for review on its own - only a
-    # near-miss would be, once a heuristic for "suspiciously close" exists.
-    if result.tier is MatchTier.UNRESOLVED and transaction.source_id is None:
-        pass
-
-    return fresh
+    return fresh, None

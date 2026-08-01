@@ -170,10 +170,19 @@ class Store:
             ON CONFLICT(entity_id) DO UPDATE SET
                 amount_minor = excluded.amount_minor,
                 value_date = excluded.value_date,
+                booking_date = excluded.booking_date,
                 description = excluded.description,
+                counterparty = excluded.counterparty,
+                currency = excluded.currency,
                 status = excluded.status,
+                -- source and source_id MUST move together. Updating the id
+                -- alone leaves a row carrying one provider's identifier under
+                -- another provider's name, which breaks the tier-one lookup
+                -- and duplicates the transaction on the next pull.
+                source = excluded.source,
                 source_id = excluded.source_id,
                 content_key = excluded.content_key,
+                artefact_digest = excluded.artefact_digest,
                 is_internal_transfer = excluded.is_internal_transfer,
                 match_tier = excluded.match_tier,
                 matched_entity_id = excluded.matched_entity_id,

@@ -11,10 +11,16 @@ def txn(
     amount: int = -1499,
     day: int = 14,
     description: str = "TESCO",
+    source: str = "test",
     source_id: str | None = None,
     entity_id: str = "",
     status: TransactionStatus = TransactionStatus.BOOKED,
 ) -> Transaction:
+    # `source` is explicit because it is load-bearing: two records from ONE
+    # source are two payments, so a test that means "the same payment seen
+    # twice" must say which two doors it came through. Several tests here
+    # originally left it at the default and so asserted a merge that would
+    # silently destroy repeated payments.
     when = date(2026, 3, day)
     return Transaction(
         account_id=account,
@@ -22,7 +28,7 @@ def txn(
         value_date=when,
         booking_date=when,
         description=description,
-        source="test",
+        source=source,
         source_id=source_id,
         status=status,
         entity_id=entity_id,
@@ -49,36 +55,50 @@ class TestSourceIdMatching:
 class TestContentKeyMatching:
     def test_Transaction_WhenCsvBackfillOverlapsApiPull_MatchedOnContent(self):
         # The overlap is not optional: export caps force repeated downloads.
-        from_api = txn(source_id="tx-abc")
-        from_csv = txn(source_id=None)
+        from_api = txn(source="truelayer", source_id="tx-abc")
+        from_csv = txn(source="qif", source_id=None)
         result = resolve(from_csv, [from_api])
         assert result.tier is MatchTier.CONTENT_KEY
         assert result.existing is from_api
 
     def test_Transaction_WhenDescriptionCosmeticallyDifferent_StillMatched(self):
-        stored = txn(description="TESCO STORES")
-        incoming = txn(description="Tesco Stores CARD 4912")
+        stored = txn(source="truelayer", description="TESCO STORES")
+        incoming = txn(source="qif", description="Tesco Stores CARD 4912")
         assert resolve(incoming, [stored]).tier is MatchTier.CONTENT_KEY
+
+    def test_Transaction_WhenTwoIdenticalPurchasesInOneSource_NotMatched(self):
+        # The mirror case, and the one that was missing: two identical
+        # purchases through ONE door are two payments, not one seen twice.
+        stored = txn(source="monzo-csv", source_id="tx-1", description="COFFEE")
+        incoming = txn(source="monzo-csv", source_id="tx-2", description="COFFEE")
+        assert resolve(incoming, [stored]).tier is MatchTier.UNRESOLVED
 
 
 class TestFuzzyMatching:
     def test_Transaction_WhenDateShiftsWithinWindow_MatchedFuzzily(self):
-        stored = txn(day=14, description="TESCO")
-        incoming = txn(day=18, description="TESCO STORES LTD")
+        stored = txn(source="qif", day=14, description="TESCO")
+        incoming = txn(source="truelayer", day=18, description="TESCO STORES LTD")
         result = resolve(incoming, [stored])
         assert result.tier is MatchTier.FUZZY
         assert result.existing is stored
 
     def test_Transaction_WhenDateShiftsBeyondWindow_NotMatched(self):
-        stored = txn(day=1, description="TESCO")
-        incoming = txn(day=20, description="TESCO STORES LTD")
+        stored = txn(source="qif", day=1, description="TESCO")
+        incoming = txn(source="truelayer", day=20, description="TESCO STORES LTD")
         assert resolve(incoming, [stored]).tier is MatchTier.UNRESOLVED
 
     def test_Transaction_WhenSeveralCandidatesInWindow_NearestDateChosen(self):
-        near = txn(day=15, description="A")
-        far = txn(day=19, description="B")
-        result = resolve(txn(day=16, description="C"), [far, near])
+        near = txn(source="qif", day=15, description="A")
+        far = txn(source="qif", day=19, description="B")
+        result = resolve(txn(source="truelayer", day=16, description="C"), [far, near])
         assert result.existing is near
+
+    def test_Transaction_WhenDateShiftsWithinOneSource_NotMatched(self):
+        # A weekly standing order lands squarely inside the window. Merging
+        # these was how three instalments became one row.
+        stored = txn(source="qif", day=1, description="STANDING ORDER")
+        incoming = txn(source="qif", day=8, description="STANDING ORDER")
+        assert resolve(incoming, [stored]).tier is MatchTier.UNRESOLVED
 
     def test_Transaction_WhenBothSidesCarryDifferentProviderIds_NotFuzzyMatched(self):
         # Two authoritative ids that did not match are authoritatively
