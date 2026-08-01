@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from .callback import render_page
 from .connections import ConnectionStore, build_connection
+from .coverage import SourceCoverage
 from .doctor import shape_problems
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
@@ -125,6 +126,10 @@ class WebConfig:
     #: prevents is a completed bank login whose single-use code burns against a
     #: credential that could never exchange it.
     preflight: Callable[[], list[str]] | None = None
+    #: Returns per-account coverage rows for the homepage, so "did the backfill
+    #: work, and how far back?" is answered where the person already is instead
+    #: of in a shell. Injected like the others; None hides the section.
+    holdings: Callable[[], list[SourceCoverage]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -201,14 +206,43 @@ def _credential_banner() -> str:
     )
 
 
-def render_index(store: ConnectionStore) -> bytes:
+def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
+    """What the store holds, per account and source - or nothing, quietly.
+
+    Failure here must never take down the page that manages connections: the
+    store may legitimately be mid-write during a backfill, which is exactly
+    when someone is refreshing to see how it is going.
+    """
+    if holdings is None:
+        return ""
+    try:
+        rows = holdings()
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    items = []
+    for row in rows:
+        items.append(
+            f'<div class="row"><strong>{html.escape(row.account_id)}</strong>'
+            f" via {html.escape(row.source)}<br>"
+            f"{row.count:,} transactions, {row.earliest} .. {row.latest}</div>"
+        )
+    return "<h2>Held so far</h2>" + "".join(items)
+
+
+def render_index(
+    store: ConnectionStore, holdings: Callable[[], list[SourceCoverage]] | None = None
+) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
+{_holdings_rows(holdings)}
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
   <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
-  <p><button class="button" type="submit" style="border:0;width:100%">Connect</button></p>
+  <p><button class="button" type="submit"
+     style="border:0;width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
 </form>
 <p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>
@@ -268,7 +302,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
 
         if route == "/":
-            self._respond(200, render_index(self.bound_config.connection_store))
+            self._respond(
+                200,
+                render_index(
+                    self.bound_config.connection_store,
+                    holdings=self.bound_config.holdings,
+                ),
+            )
         elif route == "/connect":
             self._connect(params)
         elif route == "/callback":

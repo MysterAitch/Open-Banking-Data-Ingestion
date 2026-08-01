@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
-from .coverage import agreements, coverage, gaps, transpositions
+from .coverage import SourceCoverage, agreements, coverage, gaps, transpositions
 from .coverage import report as coverage_report
 from .doctor import live_checks, report, run_checks, shape_problems
 from .errors import DataError
@@ -211,6 +211,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         concerns += [check.detail for check in live_checks() if not check.ok]
         return concerns
 
+    def holdings() -> list[SourceCoverage]:
+        with Store(db_path) as store:
+            return list(coverage(store.transactions_by_sighting()))
+
     config = WebConfig(
         client_id=client_id,
         client_secret=current_secret,
@@ -218,6 +222,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         connection_store=ConnectionStore(store_path),
         start_backfill=start_backfill,
         preflight=preflight,
+        holdings=holdings,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

@@ -7,7 +7,7 @@ nobody chose.
 """
 
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from http.server import HTTPServer
 
 import httpx
@@ -348,3 +348,52 @@ class TestPreflightBeforeTheBank:
             httpd.shutdown()
 
         assert response.status_code == 302
+
+
+class TestTheHomepageShowsWhatIsHeld:
+    """The answer to "did the backfill work?" belongs on the page, not in a shell.
+
+    The whole interface exists so the quarterly chores happen from a phone;
+    sending someone to docker exec to learn what a connection fetched defeats
+    that at the moment of greatest curiosity - right after connecting.
+    """
+
+    def test_Index_WhenHoldingsAreProvided_ShowsCountAndRangePerAccount(self, tmp_path):
+        from obdi.coverage import SourceCoverage
+
+        holdings = [
+            SourceCoverage(
+                account_id="halifax-current",
+                source="truelayer",
+                count=1042,
+                earliest=date(2024, 8, 2),
+                latest=date(2026, 8, 1),
+                inflow_minor=100,
+                outflow_minor=200,
+                with_durable_id=1042,
+            )
+        ]
+
+        page = render_index(
+            ConnectionStore(tmp_path / "c.json"), holdings=lambda: holdings
+        ).decode()
+
+        assert "halifax-current" in page
+        assert "1,042" in page
+        assert "2024-08-02" in page and "2026-08-01" in page
+
+    def test_Index_WithNoHoldingsHook_RendersExactlyAsBefore(self, tmp_path):
+        page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
+
+        assert "Held so far" not in page
+
+    def test_Index_WhenTheHoldingsHookFails_ThePageStillRenders(self, tmp_path):
+        def boom():
+            raise RuntimeError("store locked")
+
+        page = render_index(ConnectionStore(tmp_path / "c.json"), holdings=boom).decode()
+
+        # A reporting extra must never take down the page that manages
+        # connections - the store may legitimately be mid-write during a
+        # backfill, which is exactly when someone is refreshing.
+        assert "Bank connections" in page

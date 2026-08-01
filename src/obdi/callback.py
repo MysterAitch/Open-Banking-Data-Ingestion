@@ -54,7 +54,8 @@ def render_page(title: str, body: str) -> bytes:
  h1 {{ font-size: 1.4rem; }}
  code {{ background: #8883; padding: .1rem .3rem; border-radius: .2rem; }}
  /* Tap targets sized for a thumb: this is used from a phone. */
- a.button {{ display: block; padding: .9rem 1rem; margin: .5rem 0; border-radius: .5rem;
+ a.button, button.button {{ display: block; padding: .9rem 1rem; margin: .5rem 0;
+            border-radius: .5rem;
             background: #2563eb; color: #fff; text-decoration: none; text-align: center;
             font-weight: 600; }}
  .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
