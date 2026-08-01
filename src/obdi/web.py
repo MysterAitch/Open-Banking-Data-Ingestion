@@ -424,12 +424,17 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # irreplaceable part of the job depend on remembering to act within
         # minutes, on a phone, having just finished a bank login.
         starter = self.bound_config.start_backfill
-        # The client address of THIS request is the device that just completed
-        # the bank's strong customer authentication - presence proven, not
-        # assumed - so the backfill it triggers may honestly declare it.
-        started = (
-            starter(name, self.client_address[0]) if starter is not None else False
-        )
+        # The device on THIS request just completed the bank's strong customer
+        # authentication - presence proven, not assumed - so the backfill may
+        # honestly declare its address. But behind the TLS-terminating proxy
+        # the socket peer is loopback, not the person: the true client address
+        # arrives in X-Forwarded-For. Prefer it, and when the only candidate is
+        # loopback, declare NOTHING - asserting 127.0.0.1 as a customer's
+        # address to a regulated counterparty is worse than silence.
+        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        peer = self.client_address[0]
+        psu_ip = forwarded or (peer if not peer.startswith("127.") else None)
+        started = starter(name, psu_ip) if starter is not None else False
 
         days = connection.consent_days_remaining()
         note = (

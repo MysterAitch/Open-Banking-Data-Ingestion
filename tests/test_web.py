@@ -397,3 +397,54 @@ class TestTheHomepageShowsWhatIsHeld:
         # connections - the store may legitimately be mid-write during a
         # backfill, which is exactly when someone is refreshing.
         assert "Bank connections" in page
+
+
+class TestTheAuthorisersAddressIsTheRealOne:
+    """Behind a reverse proxy, the socket peer is the proxy, not the person.
+
+    The TLS-terminating layer proxies from loopback, so the connection's own
+    address is 127.0.0.1 - and declaring THAT as the customer's address to a
+    regulated counterparty is worse than declaring nothing. The proxy forwards
+    the true client address in X-Forwarded-For; use it, and when neither source
+    is credible, stay silent rather than assert garbage.
+    """
+
+    def _authorise(self, monkeypatch, tmp_path, headers):
+        received: list[object] = []
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            start_backfill=lambda name, psu_ip=None: (received.append(psu_ip), True)[1],
+        )
+        monkeypatch.setattr(
+            "obdi.web.exchange_code",
+            lambda **_: {"access_token": "a", "refresh_token": "r", "expires_in": 3600},
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            state = handler.session.begin("halifax")
+            httpx.get(
+                f"{base}/callback", params={"code": "c", "state": state}, headers=headers
+            )
+        finally:
+            httpd.shutdown()
+        return received
+
+    def test_Backfill_BehindTheProxy_GetsTheForwardedAddress(self, monkeypatch, tmp_path):
+        received = self._authorise(
+            monkeypatch, tmp_path, {"X-Forwarded-For": "100.96.178.101"}
+        )
+
+        assert received == ["100.96.178.101"]
+
+    def test_Backfill_WithOnlyALoopbackPeer_DeclaresNothing(self, monkeypatch, tmp_path):
+        received = self._authorise(monkeypatch, tmp_path, {})
+
+        assert received == [None], "silence beats asserting 127.0.0.1 to a bank"
