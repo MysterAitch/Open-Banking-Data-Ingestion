@@ -110,6 +110,39 @@ Afterwards, if this account is also reachable another way (its own bank API, or
 a file export), bind them to one canonical account so the two sources
 cross-check instead of double-counting. See "Canonical accounts" in the README.
 
+## The shorter version, once the callback receiver is deployed
+
+Steps 2 and 3 collapse into one. The OAuth redirect happens **in your browser**,
+not server to server — the provider never connects to anything of yours, it just
+sends the browser somewhere. So the redirect target only has to be reachable by
+the machine holding the session, and a receiver bound to loopback and exposed
+over Tailscale Serve qualifies: real certificate, tailnet-only, no public
+exposure.
+
+With that running:
+
+1. `obdi connections` tells you what needs doing.
+2. Open the authorisation link, approve at the bank.
+3. The browser lands on the receiver, which exchanges the code and saves the
+   connection itself. It shows a confirmation page saying so.
+
+No copying URLs, no second command, nothing to mistype. The bank login stays —
+strong customer authentication is the point of the rule and cannot be automated.
+
+To set it up, register the Serve hostname as a redirect URI with the provider
+and set it as `TRUELAYER_REDIRECT_URI`, matching byte for byte:
+
+```
+https://<host>.<tailnet>.ts.net/callback
+```
+
+Two caveats worth knowing. Enabling HTTPS on a Tailscale hostname publishes that
+hostname to public Certificate Transparency logs — the name leaks, never the
+traffic — so avoid putting anything revealing in it. And this does nothing for
+webhooks, which would need genuine public ingress; nothing here needs them,
+since aggregator data is polled and their own polling runs on a four-to-six hour
+cycle regardless.
+
 ## What you cannot do
 
 - **Extend consent without re-authorising.** No API call does this.
