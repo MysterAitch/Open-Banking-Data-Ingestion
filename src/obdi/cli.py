@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
+from .doctor import report, run_checks
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
@@ -308,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
         "connections", help="show bank connections and how long consent has left"
     )
     subcommands.add_parser("status", help="show row counts per layer")
+    subcommands.add_parser(
+        "doctor",
+        help="check configuration and access before anything depends on them",
+    )
 
     args = parser.parse_args(argv)
     db_path = _store_path(args.db)
@@ -399,6 +404,15 @@ def main(argv: list[str] | None = None) -> int:
             print("\nUse the SAME name shown above, or you will create a duplicate")
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
+
+    if args.command == "doctor":
+        # Deliberately the whole report, pass or fail, on stdout. A deploy gates
+        # on the exit code; a human reading it wants to see what was checked,
+        # not only what broke - "nothing printed" is indistinguishable from
+        # "never ran", which is the failure mode this command exists to end.
+        results = run_checks()
+        print(report(results))
+        return 1 if any(not r.ok for r in results) else 0
 
     if args.command == "status":
         with Store(db_path) as store:
