@@ -46,9 +46,16 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
     """Decide whether `incoming` is already represented in `existing`."""
     same_account = [t for t in existing if t.account_id == incoming.account_id]
 
+    # Provider ids are only unique within a provider's own namespace, so tier 1
+    # matches on (source, source_id) rather than the id alone. Two sources
+    # reporting the same payment are SUPPOSED to disagree here.
     if incoming.source_id:
         for candidate in same_account:
-            if candidate.source_id and candidate.source_id == incoming.source_id:
+            if (
+                candidate.source_id
+                and candidate.source == incoming.source
+                and candidate.source_id == incoming.source_id
+            ):
                 return MatchResult(MatchTier.SOURCE_ID, candidate)
 
     if incoming.content_key:
@@ -64,11 +71,13 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
         and abs(t.value_date - incoming.value_date) <= window
     ]
 
-    # If both sides already carry provider ids and those ids did not match at
-    # tier 1, they are authoritatively different transactions. Collapsing them
-    # here would be a false positive, so they are excluded from fuzzy matching.
+    # Within ONE source, two ids that did not match at tier 1 are two different
+    # transactions, and collapsing them would be a false positive. Across
+    # sources the opposite holds: an aggregator id and a bank's own id for the
+    # same payment are meant to differ, so they must stay eligible here or
+    # every cross-checked account would silently double-count.
     if incoming.source_id:
-        near = [t for t in near if not t.source_id]
+        near = [t for t in near if not t.source_id or t.source != incoming.source]
 
     if not near:
         return MatchResult(MatchTier.UNRESOLVED, None)
