@@ -88,5 +88,6 @@ services:
         while true; do
           obdi pull || echo "pull failed, continuing"
           obdi pair-transfers || true
+          obdi export-raw --dir /data/raw || true
           sleep "$${OBDI_PULL_INTERVAL_SECONDS}"
         done
