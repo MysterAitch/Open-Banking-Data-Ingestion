@@ -77,7 +77,7 @@ def server(tmp_path):
     config = WebConfig(
         client_id="client-1",
         client_secret="secret-1",
-        redirect_uri="https://obdi.example.internal/callback",
+        redirect_uri="https://obdi.example.com/callback",
         connection_store=ConnectionStore(tmp_path / "c.json"),
     )
     handler = type(

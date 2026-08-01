@@ -136,6 +136,12 @@ it as `TRUELAYER_REDIRECT_URI`, matching byte for byte:
 https://<your-host>/callback
 ```
 
+Note the shape this takes in practice: a **publicly resolvable** name whose DNS
+answer is a **private address**. The name resolving publicly is what allows a
+public CA to issue for it; the address being private is what keeps the service
+unreachable from the internet. Both halves are needed, and they are not in
+tension.
+
 Two caveats worth knowing. Any publicly trusted certificate publishes its
 hostname to Certificate Transparency logs, including one issued for a service
 only reachable privately — the name leaks, never the traffic — so avoid putting

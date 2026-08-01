@@ -150,6 +150,6 @@ def configured_redirect_uri() -> str:
 
     Must match what is registered with the provider byte for byte. Whatever
     hostname the browser doing the authorising can reach, e.g.
-    https://obdi.example.internal/callback
+    https://obdi.example.com/callback
     """
     return os.getenv("TRUELAYER_REDIRECT_URI", "https://localhost:8080/callback")
