@@ -61,7 +61,12 @@ def credentials() -> tuple[str, str, str]:
     load_dotenv()
     client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
     client_secret = os.getenv("TRUELAYER_CLIENT_SECRET", "").strip()
-    redirect_uri = os.getenv("TRUELAYER_REDIRECT_URI", "https://localhost:8080/callback").strip()
+    # TrueLayer hosts a redirect page for exactly this manual flow, which
+    # renders the returned code rather than leaving you to read it out of a
+    # failed connection's address bar.
+    redirect_uri = os.getenv(
+        "TRUELAYER_REDIRECT_URI", "https://console.truelayer.com/redirect-page"
+    ).strip()
     if not client_id or not client_secret:
         sys.exit(
             "Set TRUELAYER_CLIENT_ID and TRUELAYER_CLIENT_SECRET in .env.\n"
@@ -73,27 +78,6 @@ def credentials() -> tuple[str, str, str]:
 
 def hosts(sandbox: bool) -> tuple[str, str]:
     return SANDBOX if sandbox else LIVE
-
-
-def client_credentials_token(auth_host: str, client_id: str, client_secret: str) -> str:
-    response = httpx.post(
-        f"{auth_host}/connect/token",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": "payments",
-        },
-        timeout=30.0,
-    )
-    if response.status_code != 200:
-        sys.exit(
-            f"Live credentials were rejected at the token endpoint "
-            f"(HTTP {response.status_code}).\n{response.text[:400]}\n\n"
-            "If this is a 401 on LIVE but works on --sandbox, the live "
-            "application is not enabled and TrueLayer is gated for you."
-        )
-    return response.json()["access_token"]
 
 
 def show_providers(sandbox: bool) -> int:
@@ -134,10 +118,11 @@ def show_auth_link(sandbox: bool) -> int:
     )
     print("Open this, authorise ONE bank, then copy the whole URL you land on:\n")
     print(f"{auth_host}/?{query}\n")
+    print(f"Redirecting to: {redirect_uri}")
     print(
-        "The browser will fail to load that final page - nothing is listening on\n"
-        "localhost - which is expected and harmless. The address bar still holds\n"
-        "the code. Then run:\n\n"
+        "\nIf that is TrueLayer's hosted redirect page it will display the code.\n"
+        "If it is a localhost URI the browser will fail to connect, which is\n"
+        "harmless - the address bar still holds the code. Either way:\n\n"
         '    python scripts/truelayer_probe.py exchange "<paste the URL>"'
     )
     return 0
