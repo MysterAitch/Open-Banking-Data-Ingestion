@@ -14,7 +14,10 @@ services:
       # Serve exposes this on the tailnet with a real certificate, which is
       # what makes it reachable from a phone without any public exposure.
       homelab.tsserve: "true"
-      wud.tag.include: '^\d+\.\d+\.\d+$'
+      # Deliberately NO wud.tag.include here. Update watching compares registry
+      # tags, and this image is built from source in this repository - there is
+      # no upstream tag to watch. A label would imply supervision that does not
+      # exist. Staying current is a git concern for this one.
     ports:
       # Loopback only. This page can start a bank authorisation, so it must not
       # answer to anything that merely reaches the host.
