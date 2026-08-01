@@ -293,6 +293,65 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "if the provider granted the window - press again to walk further."
         )
 
+    def artefact_index() -> list[dict[str, object]]:
+        import json as _json
+
+        with Store(db_path) as store:
+            rows = store.connection.execute(
+                "SELECT rowid, source, account_ref, fetched_at, length(payload) AS size, "
+                "origin, request_meta FROM raw_artefacts ORDER BY fetched_at DESC LIMIT 500"
+            ).fetchall()
+        listing = []
+        for row in rows:
+            meta = _json.loads(row["request_meta"]) if row["request_meta"] else {}
+            listing.append(
+                {
+                    "id": row["rowid"],
+                    "source": row["source"],
+                    "account_ref": row["account_ref"],
+                    "fetched_at": row["fetched_at"],
+                    "bytes": row["size"],
+                    "origin": row["origin"],
+                    "trigger": meta.get("trigger", "unrecorded"),
+                }
+            )
+        return listing
+
+    def artefact_detail(
+        artefact_id: int, with_payload: bool = False
+    ) -> dict[str, object] | None:
+        import json as _json
+
+        from .rawview import summarise
+
+        with Store(db_path) as store:
+            row = store.connection.execute(
+                "SELECT rowid, source, account_ref, fetched_at, media_type, origin, "
+                "payload, request_meta FROM raw_artefacts WHERE rowid = ?",
+                (artefact_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        detail: dict[str, object] = {
+            "id": row["rowid"],
+            "source": row["source"],
+            "account_ref": row["account_ref"],
+            "fetched_at": row["fetched_at"],
+            "origin": row["origin"],
+            "request_meta": _json.loads(row["request_meta"]) if row["request_meta"] else {},
+            "summary": summarise(row["payload"], row["media_type"]),
+        }
+        if with_payload:
+            # Pretty at DISPLAY time only - the stored bytes stay verbatim, so
+            # the digest keeps verifying them.
+            try:
+                detail["payload_pretty"] = _json.dumps(
+                    _json.loads(row["payload"]), indent=2
+                )
+            except (ValueError, UnicodeDecodeError):
+                detail["payload_pretty"] = row["payload"].decode("utf-8", "replace")
+        return detail
+
     def holdings() -> list[SourceCoverage]:
         with Store(db_path) as store:
             return list(coverage(store.transactions_by_sighting()))
@@ -307,6 +366,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         holdings=holdings,
         extendables=extendables,
         extend_window=extend_window,
+        artefact_index=artefact_index,
+        artefact_detail=artefact_detail,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

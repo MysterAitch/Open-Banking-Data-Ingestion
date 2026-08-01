@@ -541,3 +541,115 @@ class TestExtendingHistoryFromThePage:
         assert response.status_code == 502
         assert "invalid_date_range" in response.text
         assert "Back to connections" in response.text
+
+
+class TestBrowsingRawArtefactsFromThePage:
+    """The store's evidence, browsable where the person already is.
+
+    A listing of what was landed, then per artefact: the static circumstances
+    (origin, range asked, trigger, attended declaration) beside the computed
+    shape (fields, presence, min and max) - and the payload itself rendered
+    pretty at DISPLAY time, never modified at rest.
+    """
+
+    def _server(self, tmp_path, artefact_index, artefact_detail):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            artefact_index=artefact_index,
+            artefact_detail=artefact_detail,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Listing_ShowsEachArtefactWithItsCircumstances(self, tmp_path):
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                {
+                    "id": 7,
+                    "source": "truelayer-booked",
+                    "account_ref": "halifax-current",
+                    "fetched_at": "2026-08-01T22:30:00+00:00",
+                    "bytes": 412530,
+                    "origin": "https://api/transactions?from=2024-08-02&to=2026-08-01",
+                    "trigger": "post-auth-backfill",
+                }
+            ],
+            lambda _id, with_payload=False: None,
+        )
+        try:
+            page = httpx.get(f"{base}/artefacts").text
+        finally:
+            httpd.shutdown()
+
+        assert "truelayer-booked" in page
+        assert "post-auth-backfill" in page
+        assert "from=2024-08-02" in page
+        assert 'href="/artefact?id=7"' in page
+
+    def test_Detail_ShowsStaticAndComputedMetadata(self, tmp_path):
+        detail = {
+            "id": 7,
+            "source": "truelayer-booked",
+            "account_ref": "halifax-current",
+            "fetched_at": "2026-08-01T22:30:00+00:00",
+            "origin": "https://api/transactions?from=2024-08-02",
+            "request_meta": {"trigger": "web-extend", "attended_from": "100.96.178.101"},
+            "summary": {
+                "kind": "json",
+                "items": 660,
+                "bytes": 412530,
+                "fields": [
+                    {
+                        "path": "timestamp",
+                        "present": 660,
+                        "types": ["string"],
+                        "min": "2024-08-02T00:00:00Z",
+                        "max": "2026-08-01T00:00:00Z",
+                    }
+                ],
+            },
+        }
+        httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: detail)
+        try:
+            page = httpx.get(f"{base}/artefact", params={"id": "7"}).text
+        finally:
+            httpd.shutdown()
+
+        assert "web-extend" in page
+        assert "100.96.178.101" in page
+        assert "660" in page
+        assert "2024-08-02T00:00:00Z" in page
+        assert 'href="/artefact?id=7&view=payload"' in page
+
+    def test_PayloadView_RendersPrettyAndEscaped(self, tmp_path):
+        detail = {
+            "id": 7,
+            "source": "truelayer-booked",
+            "payload_pretty": '{\n  "note": "<script>alert(1)</script>"\n}',
+        }
+        httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: detail)
+        try:
+            page = httpx.get(f"{base}/artefact", params={"id": "7", "view": "payload"}).text
+        finally:
+            httpd.shutdown()
+
+        assert "&lt;script&gt;" in page, "payload content must never execute in the page"
+        assert "<script>alert" not in page
+
+    def test_Detail_UnknownId_IsANotFoundWithTheWayHome(self, tmp_path):
+        httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: None)
+        try:
+            response = httpx.get(f"{base}/artefact", params={"id": "999"})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 404
+        assert "Back to connections" in response.text

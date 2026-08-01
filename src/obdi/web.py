@@ -147,6 +147,12 @@ class WebConfig:
     #: legitimately exempt from the unattended cap rather than a workaround.
     extendables: Callable[[], list[ExtendableAccount]] | None = None
     extend_window: Callable[..., str] | None = None
+    #: The raw-evidence browser: a listing of landed artefacts, and per-id
+    #: detail carrying static circumstances beside computed shape. Injected
+    #: like every other hook; the page renders whatever dictionaries arrive,
+    #: so the analysis lives beside the store, not in the HTML.
+    artefact_index: Callable[[], list[dict[str, object]]] | None = None
+    artefact_detail: Callable[..., dict[str, object] | None] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -293,6 +299,7 @@ def render_index(
 {_connection_rows(store)}
 {_holdings_rows(holdings)}
 {_extend_rows(extendables)}
+<p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
   <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
@@ -356,6 +363,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         route = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
 
+        if route == "/artefacts":
+            self._artefacts()
+            return
+        if route == "/artefact":
+            self._artefact(params)
+            return
         if route == "/":
             self._respond(
                 200,
@@ -371,6 +384,92 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._callback(params)
         else:
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
+
+    def _artefacts(self) -> None:
+        hook = self.bound_config.artefact_index
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No browser wired.</p>"))
+            return
+        rows = []
+        for item in hook():
+            origin = html.escape(str(item.get("origin", "")))
+            rows.append(
+                f'<div class="row"><strong>{html.escape(str(item.get("source", "")))}</strong> '
+                f'- {html.escape(str(item.get("account_ref", "")))}<br>'
+                f'{html.escape(str(item.get("fetched_at", "")))} - '
+                f'{item.get("bytes", 0):,} bytes - '
+                f'trigger: {html.escape(str(item.get("trigger", "unrecorded")))}<br>'
+                f'<span style="opacity:.7;word-break:break-all">{origin}</span><br>'
+                f'<a class="button" href="/artefact?id={item.get("id")}">Inspect</a></div>'
+            )
+        body = (
+            "<p>Every payload landed, newest first: the evidence everything else "
+            "derives from.</p>" + ("".join(rows) or "<p>Nothing landed yet.</p>") + HOME_LINK
+        )
+        self._respond(200, render_page("Raw artefacts", body))
+
+    def _artefact(self, params: dict[str, list[str]]) -> None:
+        hook = self.bound_config.artefact_detail
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No browser wired.</p>"))
+            return
+        try:
+            artefact_id = int(params.get("id", ["0"])[0])
+        except ValueError:
+            artefact_id = 0
+        want_payload = params.get("view", [""])[0] == "payload"
+        detail = hook(artefact_id, with_payload=want_payload)
+        if detail is None:
+            self._respond(404, error_page("Not found", "<p>No such artefact.</p>"))
+            return
+
+        if want_payload:
+            pretty = html.escape(str(detail.get("payload_pretty", "")))
+            body = (
+                f'<p><a class="button" href="/artefact?id={artefact_id}">'
+                "Back to the analysis</a></p>"
+                f'<pre style="overflow-x:auto;white-space:pre-wrap">{pretty}</pre>'
+                + HOME_LINK
+            )
+            self._respond(200, render_page("Payload", body))
+            return
+
+        raw_meta = detail.get("request_meta")
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        meta_rows = "".join(
+            f"<tr><td>{html.escape(str(key))}</td>"
+            f"<td>{html.escape(str(value))}</td></tr>"
+            for key, value in meta.items()
+        )
+        raw_summary = detail.get("summary")
+        summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
+        raw_fields = summary.get("fields")
+        fields = raw_fields if isinstance(raw_fields, list) else []
+        field_rows = "".join(
+            f'<tr><td>{html.escape(str(field.get("path")))}</td>'
+            f'<td>{field.get("present")}</td>'
+            f'<td>{html.escape(", ".join(field.get("types", [])))}</td>'
+            f'<td>{html.escape(str(field.get("min")))}</td>'
+            f'<td>{html.escape(str(field.get("max")))}</td></tr>'
+            for field in fields
+            if isinstance(field, dict)
+        )
+        body = (
+            f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
+            f'{html.escape(str(detail.get("account_ref", "")))}<br>'
+            f'fetched {html.escape(str(detail.get("fetched_at", "")))}<br>'
+            f'<span style="opacity:.7;word-break:break-all">'
+            f'{html.escape(str(detail.get("origin", "")))}</span></p>'
+            "<h2>Request circumstances</h2>"
+            f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
+            "<h2>Computed shape</h2>"
+            f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
+            "<table><tr><th>field</th><th>present</th><th>types</th>"
+            f"<th>min</th><th>max</th></tr>{field_rows}</table>"
+            f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
+            "View payload</a></p>" + HOME_LINK
+        )
+        self._respond(200, render_page("Artefact", body))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
         name = (params.get("name", [""])[0] or "").strip()
