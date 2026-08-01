@@ -151,6 +151,27 @@ your ids. To find them, just run a pull: **any unbound account is named in the
 output**, since an unbound account still ingests but silently forgoes
 cross-source matching, and a silent omission is the thing worth avoiding.
 
+### Savings pots are accounts, not categories
+
+A Starling Space (and any equivalent pot elsewhere) gets its **own canonical
+account**. Moving money into one is a transfer between two accounts you own —
+not spending.
+
+This is worth stating because budgeting tools commonly get it wrong in one of
+two directions. Treating the movement as external makes saving look like
+spending and the return look like income, so the month reads as chaos. Silently
+discarding it — which this project did until it was corrected — swaps that for
+money that simply vanishes, and a pot balance you cannot see at all.
+
+Both sides are therefore kept, in different accounts, and paired. The pairing is
+what keeps them out of spending while preserving that the movement happened. It
+also requires the Space to be a separate account: pairing matches across
+accounts, so folding a Space into its parent leaves both sides unpairable.
+
+`obdi pair-transfers` reports **confirmed** pairs, and separately reports
+movements a provider *called* internal but which never paired — that means the
+opposite side is missing, usually an account or space not yet ingested or bound.
+
 Starling is the natural place to start, being the one account reachable both
 first-party and through the aggregator. Running both calibrates how far two
 providers' descriptions of the same payment diverge in practice — which tells

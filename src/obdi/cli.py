@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
-from .ingest import import_file, pair_transfers_across_store
+from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .parsers.base import ParseError
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
@@ -223,8 +223,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pair-transfers":
         with Store(db_path) as store:
-            flagged = pair_transfers_across_store(store)
-        print(f"flagged {flagged} transaction(s) as internal transfers")
+            confirmed = pair_transfers_across_store(store)
+            unconfirmed = unconfirmed_transfers(store)
+        print(f"confirmed {confirmed} transaction(s) as internal transfers")
+        if unconfirmed:
+            # An unpaired claim means the opposite side is missing, so the
+            # transfer is being excluded from spending on the provider's word
+            # alone. Usually an account or savings space not yet ingested.
+            accounts = sorted({t.account_id for t in unconfirmed})
+            print(
+                f"\n{len(unconfirmed)} marked internal by their provider but never paired, "
+                f"in: {', '.join(accounts)}"
+            )
+            print("The other side is missing - is every account and space ingested and bound?")
         return 0
 
     if args.command == "pull":

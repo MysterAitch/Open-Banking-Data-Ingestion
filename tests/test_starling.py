@@ -39,11 +39,20 @@ class TestAmountSign:
             to_transaction(item, account_id="a")
 
 
-class TestInternalTransfers:
-    def test_SpaceTransfer_WhenReportedInParentFeed_Dropped(self):
-        # Movements between your own Spaces are real to the bank but would
-        # double-count against spending.
-        assert to_transaction(feed_item(source="INTERNAL_TRANSFER"), account_id="a") is None
+class TestSpaceTransfers:
+    def test_SpaceTransfer_WhenSeen_KeptRatherThanDiscarded(self):
+        # Discarding it makes the money vanish and leaves the Space balance
+        # untrackable - the mirror of treating it as external, which inflates
+        # spending. Both are wrong; it is a transfer between your own accounts.
+        assert to_transaction(feed_item(source="INTERNAL_TRANSFER"), account_id="a") is not None
+
+    def test_SpaceTransfer_WhenSeen_FlaggedAsInternal(self):
+        # The flag is what keeps it out of spending without losing it.
+        transfer = to_transaction(feed_item(source="INTERNAL_TRANSFER"), account_id="a")
+        assert transfer.is_internal_transfer
+
+    def test_OrdinarySpending_WhenSeen_NotFlaggedAsInternal(self):
+        assert not to_transaction(feed_item(), account_id="a").is_internal_transfer
 
 
 class TestStatusHandling:

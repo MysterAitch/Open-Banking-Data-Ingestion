@@ -155,18 +155,34 @@ def pull_starling(
                 f"other sources - bind it to a canonical account"
             )
 
-        # Every Space is its own category. Fetching only the default silently
-        # loses all Space activity, and the omission is invisible.
-        for category_uid in starling.fetch_categories(token, account_uid):
-            items, body = starling.fetch_feed(token, account_uid, category_uid, since=since)
+        # Every Space is its own category AND its own account. Fetching only
+        # the default category silently loses all Space activity; folding
+        # Spaces into the parent loses the ability to pair a transfer, because
+        # pairing requires the two sides to sit in different accounts.
+        for category in starling.fetch_categories(token, account_uid):
+            if category.is_space:
+                # A Space is bound by its own id, so it can be given a
+                # recognisable canonical name and a destination of its own.
+                space_account = account_map.resolve("starling", category.uid)
+                if space_account.startswith("starling:"):
+                    result.notes.append(
+                        f"space '{category.name}' ({category.uid}) is unbound - bind it to "
+                        f"its own canonical account so transfers pair instead of "
+                        f"looking like spending"
+                    )
+                target = space_account
+            else:
+                target = canonical
+
+            items, body = starling.fetch_feed(token, account_uid, category.uid, since=since)
             if not items:
                 continue
-            artefact = starling.artefact_for(body, account_id=canonical, category_uid=category_uid)
+            artefact = starling.artefact_for(body, account_id=target, category_uid=category.uid)
             store.land_artefact(artefact)
 
             transactions = []
             for item in items:
-                transaction = starling.to_transaction(item, account_id=canonical)
+                transaction = starling.to_transaction(item, account_id=target)
                 if transaction is not None:
                     transactions.append(replace(transaction, artefact_digest=artefact.digest))
             reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
