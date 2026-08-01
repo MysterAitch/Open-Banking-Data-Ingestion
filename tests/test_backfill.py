@@ -52,7 +52,7 @@ class TestHowFarBackWeAsk:
                 return httpx.Response(400, json={"error": "invalid_date_range"})
             return httpx.Response(200, json={"results": []})
 
-        rows, _ = fetch_transactions("token", "acc", deep=True, client=_client(handler))
+        rows, _, _asked = fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         assert rows == []
         assert len(asked) == 2, "a rejected range must be retried narrower, not abandoned"
@@ -155,7 +155,7 @@ class TestAnIncompleteAnswerIsNotAnEmptyAccount:
         def handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"status": "Succeeded", "results": []})
 
-        rows, _ = fetch_transactions("token", "acc", deep=True, client=_client(handler))
+        rows, _, _asked = fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         # An account with no activity is a legitimate answer, not a failure.
         assert rows == []

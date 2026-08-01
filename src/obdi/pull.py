@@ -109,7 +109,7 @@ def pull_truelayer(
             )
 
         for pending in (False, True):
-            records, body = truelayer.fetch_transactions(
+            records, body, asked = truelayer.fetch_transactions(
                 connection.access_token,
                 provider_account_id,
                 since=since,
@@ -119,7 +119,15 @@ def pull_truelayer(
             if not records:
                 continue
             artefact = truelayer.artefact_for(
-                body, account_id=canonical, kind="pending" if pending else "booked"
+                body,
+                account_id=canonical,
+                kind="pending" if pending else "booked",
+                # The range asked for, landed with the payload. Rebuilding from
+                # raw is what makes a transformation bug recoverable, but only
+                # for questions the raw layer can still answer - and "was this
+                # account empty, or did we simply not ask far enough back?" is
+                # unanswerable without this.
+                requested=asked,
             )
             store.land_artefact(artefact)
             transactions = [

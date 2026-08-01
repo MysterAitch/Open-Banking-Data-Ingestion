@@ -185,8 +185,12 @@ def fetch_transactions(
     pending: bool = False,
     deep: bool = False,
     client: httpx.Client | None = None,
-) -> tuple[list[JsonObject], bytes]:
-    """Return parsed transactions and the raw body, so the raw body can be landed.
+) -> tuple[list[JsonObject], bytes, str]:
+    """Return the transactions, the raw body, and the range actually requested.
+
+    The third element is what lets the landed artefact record what was ASKED
+    for, not merely what came back. Without it an empty result is unreadable
+    forever: a dormant account and a too-narrow window are the same bytes.
 
     The raw bytes are returned alongside deliberately: landing the verbatim
     payload is what makes the derived tables rebuildable later.
@@ -201,7 +205,7 @@ def fetch_transactions(
         if response.status_code != 200:
             raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
         body = response.content
-        return rows(decode(body), "results"), body
+        return rows(decode(body), "results"), body, "pending=true"
 
     # The ladder costs one API call per rung, and the provider documents a limit
     # of FOUR calls per day per account unless the end user's IP is supplied to
@@ -221,14 +225,11 @@ def fetch_transactions(
     last_status = 0
     for days in windows:
         earliest = since or datetime.now(UTC).date() - timedelta(days=days or 0)
-        response = http.get(
-            url,
-            headers=headers,
-            params={
-                "from": earliest.isoformat(),
-                "to": (until or datetime.now(UTC).date()).isoformat(),
-            },
-        )
+        params = {
+            "from": earliest.isoformat(),
+            "to": (until or datetime.now(UTC).date()).isoformat(),
+        }
+        response = http.get(url, headers=headers, params=params)
         if response.status_code == 200:
             # The payload carries its own status alongside the results, and a
             # non-final one means the results are not the whole answer. Taking
@@ -256,7 +257,7 @@ def fetch_transactions(
                     file=sys.stderr,
                 )
             body = response.content
-            return rows(decode(body), "results"), body
+            return rows(decode(body), "results"), body, urlencode(sorted(params.items()))
         last_status = response.status_code
         if response.status_code == 429:
             # Narrowing cannot help, and each further attempt digs the hole
@@ -351,7 +352,21 @@ def to_transaction(
     )
 
 
-def artefact_for(body: bytes, *, account_id: str, kind: str) -> RawArtefact:
+def artefact_for(
+    body: bytes, *, account_id: str, kind: str, requested: str = ""
+) -> RawArtefact:
+    """Land a payload together with the request that produced it.
+
+    `requested` carries the query string, and it is not decoration. Rebuilding
+    the derived layers from raw is what makes a matching bug recoverable rather
+    than permanent - but only for questions the raw layer can still answer. An
+    empty result is meaningless without knowing what was asked: "this account
+    was dormant" and "only ninety days were requested" are the same bytes, and
+    no rebuild can tell them apart afterwards.
+
+    So the range asked for is part of the evidence, not part of the fetch.
+    """
+    origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions"
     return RawArtefact(
         source=f"truelayer-{kind}",
         account_ref=account_id,
@@ -359,5 +374,5 @@ def artefact_for(body: bytes, *, account_id: str, kind: str) -> RawArtefact:
         media_type="application/json",
         digest=artefact_digest(body),
         payload=body,
-        origin=f"{API_HOST}/data/v1/accounts/{account_id}/transactions",
+        origin=f"{origin}?{requested}" if requested else origin,
     )
