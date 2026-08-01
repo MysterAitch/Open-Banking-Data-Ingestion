@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import ClassVar
 
@@ -76,14 +76,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_source_id
 
 CREATE TABLE IF NOT EXISTS valuations (
     asset_id         TEXT NOT NULL,
+    kind             TEXT NOT NULL DEFAULT 'other',
     observed_at      TEXT NOT NULL,
-    value_minor      INTEGER NOT NULL,
+    -- Nullable, because an income entitlement has no pot to value. Exactly one
+    -- of these two carries the observation, enforced above the store.
+    value_minor      INTEGER,
+    annual_income_minor INTEGER,
     currency         TEXT NOT NULL DEFAULT 'GBP',
+    -- Captured whenever a statement supplies them, though nothing reads them
+    -- yet. Keeping only the total would foreclose unit-and-price modelling
+    -- permanently; this costs two columns.
     units            TEXT,
     unit_price_minor INTEGER,
     source           TEXT NOT NULL,
+    -- Points at the statement in Paperless rather than restating it.
     document_ref     TEXT NOT NULL DEFAULT '',
     ingested_at      TEXT NOT NULL,
+    -- One observation per asset per date per source: re-recording the same
+    -- statement is harmless, which matters because a document gets filed twice.
     PRIMARY KEY (asset_id, observed_at, source)
 );
 
@@ -256,6 +266,55 @@ class Store:
             "INSERT OR IGNORE INTO review_queue (entity_id, reason, created_at) VALUES (?, ?, ?)",
             (entity_id, reason, datetime.now().astimezone().isoformat()),
         )
+
+    def valuations_for(self, asset_id: str) -> list[dict[str, object]]:
+        """Every observation of one asset, oldest first.
+
+        A series rather than a current value: the history is the point, since
+        the change between observations is the only thing that reveals growth.
+        """
+        rows = self.connection.execute(
+            "SELECT asset_id, kind, observed_at, value_minor, annual_income_minor, "
+            "currency, units, unit_price_minor, source, document_ref, ingested_at "
+            "FROM valuations WHERE asset_id = ? ORDER BY observed_at",
+            (asset_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_valuation_row(
+        self,
+        *,
+        asset_id: str,
+        kind: str,
+        observed_at: date,
+        source: str,
+        value_minor: int | None = None,
+        annual_income_minor: int | None = None,
+        currency: str = "GBP",
+        units: str | None = None,
+        unit_price_minor: int | None = None,
+        document_ref: str = "",
+    ) -> None:
+        self.connection.execute(
+            "INSERT OR REPLACE INTO valuations "
+            "(asset_id, kind, observed_at, value_minor, annual_income_minor, currency, "
+            " units, unit_price_minor, source, document_ref, ingested_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                asset_id,
+                kind,
+                observed_at.isoformat(),
+                value_minor,
+                annual_income_minor,
+                currency,
+                units,
+                unit_price_minor,
+                source,
+                document_ref,
+                datetime.now().astimezone().isoformat(),
+            ),
+        )
+        self.connection.commit()
 
     def record_valuation(self, valuation: Valuation) -> None:
         self.connection.execute(
