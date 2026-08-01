@@ -81,18 +81,37 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         connections = list(ConnectionStore(store_path))
         if not connections:
-            print("No connections stored yet.")
+            print("No connections stored yet.\n")
+            print("To connect a bank:")
+            print("    python scripts/truelayer_probe.py auth-link")
+            print("\nFull procedure: docs/REAUTHORISE.md")
             return 0
+
+        needs_attention = []
         for connection in connections:
             days = connection.consent_days_remaining()
             if connection.consent_expired():
                 state = "CONSENT EXPIRED - re-authorise at the bank"
+                needs_attention.append(connection.connection_id)
             elif connection.consent_needs_attention():
                 state = f"consent expires in {days} days - re-authorise soon"
+                needs_attention.append(connection.connection_id)
             else:
                 state = f"consent ok, {days} days left"
             token = "access token valid" if connection.access_token_valid() else "needs refresh"
             print(f"{connection.connection_id:<20} {state:<45} {token}")
+
+        # Print the remedy where the problem is noticed. Consent expiry is a
+        # quarterly chore, so by the time it fires the procedure has been
+        # forgotten - the fix belongs here, not only in a document.
+        if needs_attention:
+            print("\nTo re-authorise, for EACH bank listed above:\n")
+            print("    python scripts/truelayer_probe.py auth-link")
+            print("    # open the link, approve at the bank, copy the whole URL you land on")
+            for name in needs_attention:
+                print(f'    python scripts/truelayer_probe.py exchange "<url>" --save {name}')
+            print("\nUse the SAME name shown above, or you will create a duplicate")
+            print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
 
     if args.command == "status":

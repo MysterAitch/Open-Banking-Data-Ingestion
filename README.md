@@ -100,6 +100,42 @@ The parser is chosen by inspecting the header row. If no parser recognises it,
 the import is **refused** rather than guessed at — a hard failure costs minutes,
 a silent misparse corrupts the store and is discovered months later.
 
+## Connecting a bank, and the 90-day chore
+
+**Runbook: [`docs/REAUTHORISE.md`](docs/REAUTHORISE.md).** Written for someone
+who remembers nothing, because that is who will be reading it.
+
+UK Open Banking consent lasts about 90 days per bank and **cannot be renewed by
+software**. Refresh tokens keep access tokens alive indefinitely while the
+consent clock runs out underneath them, so the connection stops dead and needs a
+human to re-authorise at the bank. It is a recurring manual chore.
+
+Three commands:
+
+```bash
+python -m obdi.cli connections                                   # what needs doing
+python scripts/truelayer_probe.py auth-link                      # open, approve at bank
+python scripts/truelayer_probe.py exchange "<url>" --save <name> # save it
+```
+
+You should not need to look any of that up. `connections` prints the exact
+re-authorisation commands when a consent is expiring, `auth-link` prints the
+exchange command with your existing connection names filled in, and running
+`truelayer_probe.py` with no arguments prints the whole sequence. Re-authorising
+uses the **same name** as before, or you get a duplicate connection.
+
+## Canonical accounts and cross-checking
+
+One account can be pulled from several sources at once — an aggregator, the
+bank's own API, a file export. This is deliberate: agreement between two
+independent routes is evidence the data is right, disagreement is a finding, and
+either route surviving an outage or a consent expiry keeps the record intact.
+
+It requires binding each provider's account id to one canonical account, or the
+sources form separate silos and the same payment is stored once per source.
+Unmapped accounts fall back to a source-qualified id, so they stay visibly
+separate rather than colliding — but they will not cross-check until bound.
+
 ## What needs an account
 
 Only the first item is needed to start. File import needs no credentials at all.

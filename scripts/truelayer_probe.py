@@ -144,10 +144,39 @@ def show_auth_link(sandbox: bool) -> int:
     print(
         "\nIf that is TrueLayer's hosted redirect page it will display the code.\n"
         "If it is a localhost URI the browser will fail to connect, which is\n"
-        "harmless - the address bar still holds the code. Either way:\n\n"
-        '    python scripts/truelayer_probe.py exchange "<paste the URL>"'
+        "harmless - the address bar still holds the code either way.\n"
     )
+
+    existing = _existing_connection_names()
+    if existing:
+        print("NEXT - copy the WHOLE url you land on, then run ONE of:\n")
+        print("  re-authorising an existing bank (keeps one connection, resets its clock):")
+        for name in existing:
+            print(f'    python scripts/truelayer_probe.py exchange "<url>" --save {name}')
+        print("\n  adding a new bank:")
+        print('    python scripts/truelayer_probe.py exchange "<url>" --save <new-name>')
+    else:
+        print("NEXT - copy the WHOLE url you land on, then run:\n")
+        print('    python scripts/truelayer_probe.py exchange "<url>" --save <name>')
+        print("\n  choose a name you will recognise in a year - the bank's name is usually right.")
+
+    print("\nThe code is single use and expires in minutes. If it lapses, re-run auth-link.")
     return 0
+
+
+def _existing_connection_names() -> list[str]:
+    """Names already in use, so re-authorising can suggest the right one.
+
+    Using a NEW name when re-authorising silently creates a second connection
+    to the same bank, which is the easiest mistake to make months later.
+    """
+    store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if not store_path:
+        return []
+    try:
+        return sorted(ConnectionStore(store_path).load())
+    except (OSError, ValueError):
+        return []
 
 
 def exchange(redirect_url: str, sandbox: bool, save_as: str = "") -> int:
@@ -218,15 +247,20 @@ def exchange(redirect_url: str, sandbox: bool, save_as: str = "") -> int:
             scopes=SCOPES,
         )
         ConnectionStore(store_path).put(connection)
+        days = connection.consent_days_remaining()
         print(f"\nSaved connection '{save_as}'.")
-        print(
-            f"Consent expires in {connection.consent_days_remaining()} days - "
-            "refreshing the access token will NOT extend it."
-        )
+        print(f"Consent expires in {days} days - refreshing the access token will NOT extend it.")
+        print("\nNEXT:")
+        print("    python -m obdi.cli connections        # confirm the clock reset")
+        print("\nCome back when that reports 're-authorise soon'. The procedure is")
+        print("in docs/REAUTHORISE.md, and `truelayer_probe.py` with no arguments")
+        print("prints the whole sequence.")
     else:
         print(
-            "\nTokens not saved. Re-run with --save <name> to persist the refresh "
-            "token and start the consent clock."
+            "\nTokens NOT saved - this run only proved the route works.\n"
+            "To keep the connection, re-run auth-link and then:\n\n"
+            '    python scripts/truelayer_probe.py exchange "<url>" --save <name>\n\n'
+            "The code you just used is spent, so a fresh auth-link is needed."
         )
 
     if "--json" in sys.argv:
@@ -234,8 +268,41 @@ def exchange(redirect_url: str, sandbox: bool, save_as: str = "") -> int:
     return 0
 
 
+SEQUENCE = """
+The full sequence, in order (see docs/REAUTHORISE.md for the runbook):
+
+  1. see what needs doing
+     python -m obdi.cli connections
+
+  2. get the authorisation link, and open it
+     python scripts/truelayer_probe.py auth-link
+
+  3. exchange the code and save under a name you will recognise
+     python scripts/truelayer_probe.py exchange "<the whole URL>" --save <name>
+
+  4. confirm the consent clock reset
+     python -m obdi.cli connections
+
+Re-authorising? Use the SAME --save name as before, so the connection is
+replaced rather than duplicated. Consent lasts about 90 days per bank and
+cannot be renewed by software - this is a manual chore, roughly quarterly.
+"""
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=SEQUENCE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # Running with no arguments is what happens when someone returns to this
+    # months later having forgotten everything. Show the whole procedure rather
+    # than a terse usage error.
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return 0
+
     parser.add_argument("--sandbox", action="store_true", help="use the sandbox environment")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("providers", help="list banks offered to this application")
