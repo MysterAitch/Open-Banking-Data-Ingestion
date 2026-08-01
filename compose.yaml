@@ -75,6 +75,8 @@ services:
       # data fetches at four a day, and the aggregator's own polling runs on
       # the same cycle. Polling harder buys nothing and risks a rate limit.
       OBDI_PULL_INTERVAL_SECONDS: "21600"
+      # Labels every artefact this container lands as scheduler-driven.
+      OBDI_TRIGGER: scheduled
     entrypoint: ["/bin/sh", "-c"]
     command:
       # Bare `obdi pull` fetches EVERY stored connection plus Starling when a
