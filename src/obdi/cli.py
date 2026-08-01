@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
-from .coverage import agreements, coverage, gaps
+from .coverage import agreements, coverage, gaps, transpositions
 from .coverage import report as coverage_report
 from .doctor import report, run_checks
 from .errors import DataError
@@ -481,7 +481,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "coverage":
         with Store(db_path) as store:
             held = store.all_transactions()
-        print(coverage_report(coverage(held), agreements(held), gaps(held)))
+        print(
+            coverage_report(
+                coverage(held), agreements(held), gaps(held), transpositions(held)
+            )
+        )
         return 0
 
     if args.command == "doctor":

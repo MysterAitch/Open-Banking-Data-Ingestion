@@ -15,11 +15,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.coverage import agreements, coverage, gaps
+from obdi.coverage import agreements, coverage, gaps, transpositions
 from obdi.models import SourceTier, Transaction
 
 
-def txn(source, day, amount, *, account="current", source_id=None, month=1,
+def txn(source, day, amount, *, account="current", source_id=None, month=1, desc=None,
         tier=SourceTier.SYNTHETIC):
     return Transaction(
         account_id=account,
@@ -27,7 +27,7 @@ def txn(source, day, amount, *, account="current", source_id=None, month=1,
         currency="GBP",
         value_date=date(2026, month, day),
         booking_date=date(2026, month, day),
-        description=f"txn {day}",
+        description=desc or f"txn {day}",
         source=source,
         source_id=source_id,
         tier=tier,
@@ -201,3 +201,75 @@ class TestHolesInWhatWeHold:
         assert [(g.source, g.month, g.seen_in) for g in missing] == [
             ("halifax-qif", "2026-02", ("truelayer",))
         ]
+
+
+class TestDatesReadTheWrongWayRound:
+    """A transposed date is the quietest corruption available.
+
+    Nothing looks wrong: the amount is right, the payee is right, the date is a
+    real date. It only shows when a second source disagrees about WHICH day -
+    and count-and-total checks are blind to it, because moving a transaction
+    between months changes neither.
+
+    Only days 1-12 can transpose; 13 upwards is unambiguous. So the classic
+    signature is a file where some rows moved and others did not.
+    """
+
+    def test_Transposition_WhenTwoSourcesSwapDayAndMonth_IsDetected(self):
+        found = transpositions(
+            [
+                txn("truelayer", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=3, desc="RENT"),
+            ]
+        )
+
+        assert len(found) == 1
+        assert {found[0].left_date, found[0].right_date} == {date(2026, 5, 3), date(2026, 3, 5)}
+
+    def test_Transposition_WhenTheSameSourceHasBothDates_IsNotFlagged(self):
+        # Two genuine payments of equal value within one source. Suspicious
+        # only across sources, where the same payment cannot be in two places.
+        found = transpositions(
+            [
+                txn("halifax-qif", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=3, desc="RENT"),
+            ]
+        )
+
+        assert found == []
+
+    def test_Transposition_WhenAmountsDiffer_IsNotFlagged(self):
+        found = transpositions(
+            [
+                txn("truelayer", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -9900, month=3, desc="RENT"),
+            ]
+        )
+
+        assert found == []
+
+    def test_Transposition_WhenDatesAreSimplyTheSame_IsNotFlagged(self):
+        found = transpositions(
+            [
+                txn("truelayer", 5, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=5, desc="RENT"),
+            ]
+        )
+
+        # Day equals month here, so a swap is undetectable AND harmless.
+        assert found == []
+
+    def test_Transposition_CatchesTheMixedCase_WhereOnlyAmbiguousRowsMoved(self):
+        found = transpositions(
+            [
+                # Day 20 cannot transpose, and agrees.
+                txn("truelayer", 20, -100, month=3, desc="BILL"),
+                txn("halifax-qif", 20, -100, month=3, desc="BILL"),
+                # Day 4 can, and does not agree.
+                txn("truelayer", 4, -700, month=9, desc="GYM"),
+                txn("halifax-qif", 9, -700, month=4, desc="GYM"),
+            ]
+        )
+
+        assert len(found) == 1, "the unambiguous row is fine; the ambiguous one moved"
+        assert found[0].amount_minor == -700

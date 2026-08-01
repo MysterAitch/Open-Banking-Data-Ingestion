@@ -227,12 +227,96 @@ def gaps(transactions: Iterable[Transaction]) -> list[Gap]:
     return found
 
 
+@dataclass(frozen=True)
+class DateTransposition:
+    """One payment, two sources, dates that are each other's day/month swap."""
+
+    account_id: str
+    amount_minor: int
+    description: str
+    left: str
+    left_date: date
+    right: str
+    right_date: date
+
+    def describe(self) -> str:
+        return (
+            f"{self.account_id}: {self.amount_minor / 100:,.2f} \"{self.description}\" "
+            f"dated {self.left_date} by {self.left} but {self.right_date} by {self.right}"
+        )
+
+
+def transpositions(transactions: Iterable[Transaction]) -> list[DateTransposition]:
+    """Find payments two sources date as each other's day/month swap.
+
+    The quietest corruption available: the amount is right, the payee is right,
+    and the date is a perfectly real date. Count-and-total checks are blind to
+    it, because moving a transaction between months changes neither the count
+    nor the sum - so a wholesale transposition passes every other check here
+    while the data is systematically wrong.
+
+    Only days 1-12 can transpose at all; 13 upwards is unambiguous and parses
+    identically either way. That produces the characteristic signature of an
+    auto-detecting parser: a file where the ambiguous rows moved and the rest
+    did not, which is far harder to spot by eye than a file that is wholly
+    wrong.
+
+    Requires the same amount AND description across DIFFERENT sources, so a
+    coincidence would have to be two equal payments to the same payee whose
+    dates happen to be each other's mirror. Within one source it is not
+    reported at all: two such payments are ordinary, and one payment cannot be
+    in two places.
+    """
+    grouped: dict[tuple[str, int, str], list[Transaction]] = {}
+    for transaction in transactions:
+        key = (transaction.account_id, transaction.amount_minor, transaction.description)
+        grouped.setdefault(key, []).append(transaction)
+
+    found = []
+    for (account_id, amount_minor, description), items in sorted(grouped.items()):
+        for left, right in combinations(items, 2):
+            if left.source == right.source:
+                continue
+            a, b = left.value_date, right.value_date
+            if a == b:
+                continue
+            if a.day == b.month and a.month == b.day and a.year == b.year:
+                found.append(
+                    DateTransposition(
+                        account_id=account_id,
+                        amount_minor=amount_minor,
+                        description=description,
+                        left=left.source,
+                        left_date=a,
+                        right=right.source,
+                        right_date=b,
+                    )
+                )
+    return found
+
+
 def report(
     rows: Sequence[SourceCoverage],
     checks: Sequence[Agreement],
     holes: Sequence[Gap] = (),
+    swapped: Sequence[DateTransposition] = (),
 ) -> str:
-    lines = ["What the store holds:", ""]
+    lines = []
+    if swapped:
+        # First, above everything. It is the only finding here that every other
+        # check passes while it is true: transposing a date changes neither the
+        # count nor the total, so agreement figures look perfect.
+        lines += ["DATES DISAGREE - possible day/month transposition:", ""]
+        lines += [f"  {item.describe()}" for item in swapped]
+        lines += [
+            "",
+            "  Two sources date the same payment as each other's day/month swap. "
+            "Only days 1-12 can do this, so a parser reading dates the wrong way "
+            "round moves the ambiguous rows and leaves the rest correct. Check "
+            "which source is right before importing more from the wrong one.",
+            "",
+        ]
+    lines += ["What the store holds:", ""]
     for row in rows:
         lines.append(
             f"  {row.account_id:<22} {row.source:<18} {row.count:>6} txns  "
