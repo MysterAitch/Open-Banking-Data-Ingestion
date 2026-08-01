@@ -24,6 +24,7 @@ import contextlib
 import json
 import os
 import stat
+import tempfile
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -154,12 +155,52 @@ class ConnectionStore:
         return {key: Connection(**value) for key, value in raw.items()}
 
     def save(self, connections: dict[str, Connection]) -> None:
+        """Write the file atomically, or leave the previous one untouched.
+
+        A plain write truncates before it fills, so a crash, a container stop
+        or a full disk mid-write destroys every refresh token at once - and
+        recovering means re-authorising every bank by hand, at the bank. The
+        replacement is built beside the target and swapped in one operation, so
+        a reader sees either the old file or the new one and never a half.
+
+        Permissions are set on the temporary file BEFORE it holds anything.
+        Restricting afterwards leaves a window in which the credentials exist
+        on disk readable by anyone.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {key: asdict(value) for key, value in connections.items()}
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        self._restrict_permissions()
+        rendered = json.dumps(payload, indent=2)
+
+        # Same directory, so the replace is a rename within one filesystem.
+        # Across filesystems it would not be atomic.
+        descriptor, temporary = tempfile.mkstemp(
+            dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp"
+        )
+        try:
+            os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(rendered)
+                handle.flush()
+                # Without this the rename can be durable while the contents are
+                # not, leaving an intact-looking but empty file after a crash.
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+            raise
 
     def put(self, connection: Connection) -> None:
+        """Add or replace one connection, re-reading first.
+
+        The read and the write are deliberately adjacent: the compose stack
+        runs a web service and a scheduler over the same file, and loading a
+        stale copy would drop whichever token the other had just rotated.
+        Re-reading immediately before writing narrows that window to the write
+        itself. It does not close it - genuine simultaneous rotation of two
+        different banks could still lose one - which is why the two containers
+        should not both be refreshing the same connections.
+        """
         connections = self.load()
         connections[connection.connection_id] = connection
         self.save(connections)
@@ -167,12 +208,3 @@ class ConnectionStore:
     def __iter__(self) -> Iterator[Connection]:
         return iter(self.load().values())
 
-    def _restrict_permissions(self) -> None:
-        """Best-effort owner-only permissions.
-
-        Meaningful on POSIX; on Windows the ACL model makes chmod largely
-        decorative, so the real protection there is keeping the file out of any
-        synced or shared directory.
-        """
-        with contextlib.suppress(OSError):
-            os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
