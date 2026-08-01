@@ -22,9 +22,15 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 
-from .models import MatchTier, Transaction, TransactionStatus
+from .models import MatchTier, SourceTier, Transaction, TransactionStatus
 
 FUZZY_WINDOW_DAYS = 7
+
+# Wider, because a hand-entered date is remembered rather than observed. YNAB
+# uses ten days when matching an import against a user-entered transaction, and
+# their reasoning applies here unchanged.
+MANUAL_WINDOW_DAYS = 10
+
 INTERNAL_TRANSFER_WINDOW_DAYS = 1
 
 
@@ -46,10 +52,23 @@ def could_be_one_payment(
     the same source CAN be one payment, and that pairing must survive, which is
     why the test is an exclusive-or rather than "neither is pending".
     """
+    # A person meant to record two things. Never collapse that, whatever the
+    # figures look like - it is the one input carrying intent rather than
+    # observation.
+    if incoming.tier is SourceTier.MANUAL and candidate.tier is SourceTier.MANUAL:
+        return False
+
+    # An import may CLAIM a hand-entered record: you note a payment, the feed
+    # reports it days later, and they are one payment. Deliberately permissive,
+    # because a remembered date is approximate - YNAB allows ten days for the
+    # same reason. The precise record absorbs the imprecise one.
+    if SourceTier.MANUAL in (incoming.tier, candidate.tier):
+        return True
+
     if candidate.source != incoming.source:
         return True
 
-    # Settlement first, because it is the one case where a source deliberately
+    # Settlement next, because it is the one case where a source deliberately
     # reissues a payment under a NEW identifier. Testing ids before this would
     # read that reissue as proof of two separate payments and duplicate every
     # transaction as it settled.
@@ -58,10 +77,13 @@ def could_be_one_payment(
     if incoming_pending != candidate_pending:
         return True
 
-    if incoming.source_id and candidate.source_id:
-        # Otherwise two authoritative identifiers from one source settle it
-        # outright, in both directions: equal means one payment, different
-        # means two. The source itself has told us.
+    both_authoritative = (
+        incoming.tier is SourceTier.AUTHORITATIVE and candidate.tier is SourceTier.AUTHORITATIVE
+    )
+    if both_authoritative and incoming.source_id and candidate.source_id:
+        # Two durable identifiers from one source settle it outright, in both
+        # directions. The source itself has told us, and nothing below can know
+        # better than that.
         return incoming.source_id == candidate.source_id
 
     if not same_content:
@@ -128,12 +150,19 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
             ):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
-    window = timedelta(days=FUZZY_WINDOW_DAYS)
+    # A hand-entered date is remembered rather than observed, so the window
+    # widens when one side was typed by a person. YNAB allows ten days for the
+    # same reason; between two machine-read sources seven is ample.
+    def window_for(candidate: Transaction) -> timedelta:
+        if SourceTier.MANUAL in (incoming.tier, candidate.tier):
+            return timedelta(days=MANUAL_WINDOW_DAYS)
+        return timedelta(days=FUZZY_WINDOW_DAYS)
+
     similar = [
         t
         for t in same_account
         if t.amount_minor == incoming.amount_minor
-        and abs(t.value_date - incoming.value_date) <= window
+        and abs(t.value_date - incoming.value_date) <= window_for(t)
     ]
 
     # The brake that was previously gated on the incoming record HAVING a

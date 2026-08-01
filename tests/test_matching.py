@@ -2,7 +2,7 @@ from datetime import date
 
 from obdi.identity import content_key
 from obdi.matching import MatchTier, pair_internal_transfers, resolve, supersede
-from obdi.models import Transaction, TransactionStatus
+from obdi.models import SourceTier, Transaction, TransactionStatus
 
 
 def txn(
@@ -22,6 +22,8 @@ def txn(
     # originally left it at the default and so asserted a merge that would
     # silently destroy repeated payments.
     when = date(2026, 3, day)
+    # A source supplying an id is authoritative by definition.
+    tier = SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC
     return Transaction(
         account_id=account,
         amount_minor=amount,
@@ -30,6 +32,7 @@ def txn(
         description=description,
         source=source,
         source_id=source_id,
+        tier=tier,
         status=status,
         entity_id=entity_id,
         content_key=content_key(

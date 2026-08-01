@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from ..identity import content_key
-from ..models import Transaction, TransactionStatus
+from ..models import SourceTier, Transaction, TransactionStatus
 from ..money import parse_amount
 from .base import ParseError, StatementParser, parse_date
 from .qif import QifParser
@@ -57,6 +57,7 @@ class StarlingCsvParser(StatementParser):
                 counterparty=row.get("Counter Party", ""),
                 source=self.source,
                 source_id=None,
+                tier=SourceTier.SYNTHETIC,
                 currency=currency,
                 content_key=content_key(
                     account_id=account_id,
@@ -101,6 +102,7 @@ class MonzoCsvParser(StatementParser):
                 counterparty=row.get("Name", ""),
                 source=self.source,
                 source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE,
                 content_key=content_key(
                     account_id=account_id,
                     amount_minor=amount,
@@ -147,6 +149,7 @@ class AmexUkCsvParser(StatementParser):
                 description=description,
                 source=self.source,
                 source_id=reference or None,
+                tier=SourceTier.AUTHORITATIVE,
                 status=TransactionStatus.BOOKED,
                 content_key=content_key(
                     account_id=account_id,

@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from datetime import date, datetime
 
 from ..identity import content_key
-from ..models import Transaction, TransactionStatus
+from ..models import SourceTier, Transaction, TransactionStatus
 from ..money import parse_amount
 from .base import ParseError, StatementParser
 
@@ -140,6 +140,7 @@ class QifParser(StatementParser):
             # QIF carries no transaction id, so identity rests wholly on
             # content. Overlapping exports depend on that working.
             source_id=None,
+            tier=SourceTier.SYNTHETIC,
             content_key=content_key(
                 account_id=account_id,
                 amount_minor=amount,

@@ -17,7 +17,7 @@ import pytest
 
 from obdi.ingest import import_file, reconcile_batch
 from obdi.matching import MatchTier, resolve, supersede
-from obdi.models import Transaction, TransactionStatus
+from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.store import Store
 
 
@@ -36,6 +36,8 @@ def txn(
     from obdi.identity import content_key
 
     when = date(2026, 3, day)
+    # A source supplying an id is authoritative by definition.
+    tier = SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC
     return Transaction(
         account_id=account,
         amount_minor=amount,
@@ -44,6 +46,7 @@ def txn(
         description=description,
         source=source,
         source_id=source_id,
+        tier=tier,
         status=status,
         entity_id=entity_id,
         is_internal_transfer=internal,

@@ -37,7 +37,7 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 
 from ..identity import artefact_digest, content_key
-from ..models import RawArtefact, Transaction, TransactionStatus
+from ..models import RawArtefact, SourceTier, Transaction, TransactionStatus
 
 API_HOST = "https://api.starlingbank.com"
 
@@ -211,6 +211,7 @@ def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
         status=status,
         source="starling",
         source_id=item.get("feedItemUid") or None,
+        tier=SourceTier.AUTHORITATIVE,
         # Marked here, confirmed later by pairing against the other side. The
         # flag is what keeps a Space transfer out of spending without losing it.
         is_internal_transfer=item.get("source") == INTERNAL_SOURCE,

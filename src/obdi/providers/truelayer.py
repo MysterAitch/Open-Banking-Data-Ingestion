@@ -25,7 +25,7 @@ from urllib.parse import urlencode
 import httpx
 
 from ..identity import artefact_digest, content_key
-from ..models import RawArtefact, Transaction, TransactionStatus
+from ..models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from ..money import parse_amount
 
 AUTH_HOST = "https://auth.truelayer.com"
@@ -212,6 +212,7 @@ def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> T
         # Pending records carry a different id from the settled version of the
         # same payment, which is why supersession exists rather than update.
         source_id=record.get("transaction_id") or None,
+        tier=SourceTier.AUTHORITATIVE,
         content_key=content_key(
             account_id=account_id,
             amount_minor=amount_minor,

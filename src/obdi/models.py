@@ -19,6 +19,37 @@ from datetime import date, datetime
 from enum import StrEnum
 
 
+class SourceTier(StrEnum):
+    """How much a source's own notion of transaction identity can be trusted.
+
+    The rules that follow from this were previously inferred case by case,
+    which is how the same reasoning ended up contradicting itself between two
+    adjacent matching tiers. Naming the tier puts it in one place.
+
+    Independently arrived at, then found to match YNAB's published import
+    identity design closely, which is reassuring: their import id combines
+    amount, date and an occurrence counter, and they separately match imported
+    transactions against hand-entered ones over a wider date window.
+    """
+
+    #: The source supplies a durable, stable id of its own - Monzo's
+    #: transaction id, an Amex reference, a provider's uid. Within one source
+    #: that id is decisive in BOTH directions: equal means one payment,
+    #: different means two.
+    AUTHORITATIVE = "authoritative"
+
+    #: No id exists, so one is derived from content and an occurrence counter.
+    #: Stable across re-parses of the same export, but it describes the payment
+    #: rather than naming it, so two genuinely identical payments are
+    #: indistinguishable except by how many times the content occurs.
+    SYNTHETIC = "synthetic"
+
+    #: Entered or adjusted by a person. The least precise and the most
+    #: authoritative about intent: never merged with another manual entry,
+    #: because a person meant to record two things.
+    MANUAL = "manual"
+
+
 class TransactionStatus(StrEnum):
     PENDING = "pending"
     BOOKED = "booked"
@@ -66,6 +97,7 @@ class Transaction:
     description: str
     source: str
     currency: str = "GBP"
+    tier: SourceTier = SourceTier.SYNTHETIC
     status: TransactionStatus = TransactionStatus.BOOKED
     source_id: str | None = None
     artefact_digest: str = ""

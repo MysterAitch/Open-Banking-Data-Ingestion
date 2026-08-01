@@ -23,7 +23,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from .models import RawArtefact, Transaction, Valuation
+from .models import RawArtefact, SourceTier, Transaction, Valuation
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_artefacts (
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     counterparty        TEXT NOT NULL DEFAULT '',
     status              TEXT NOT NULL,
     source              TEXT NOT NULL,
+    -- How far the source's own notion of identity can be trusted.
+    tier                TEXT NOT NULL DEFAULT 'synthetic',
     source_id           TEXT,
     content_key         TEXT NOT NULL,
     -- Which repeat of this content within its batch. Without it, two identical
@@ -168,10 +170,10 @@ class Store:
             """
             INSERT INTO transactions (
                 entity_id, account_id, amount_minor, currency, value_date, booking_date,
-                description, counterparty, status, source, source_id, content_key,
+                description, counterparty, status, source, tier, source_id, content_key,
                 occurrence, artefact_digest, is_internal_transfer, match_tier,
                 matched_entity_id, raw, first_seen_at, last_seen_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(entity_id) DO UPDATE SET
                 amount_minor = excluded.amount_minor,
                 value_date = excluded.value_date,
@@ -185,6 +187,7 @@ class Store:
                 -- another provider's name, which breaks the tier-one lookup
                 -- and duplicates the transaction on the next pull.
                 source = excluded.source,
+                tier = excluded.tier,
                 source_id = excluded.source_id,
                 content_key = excluded.content_key,
                 artefact_digest = excluded.artefact_digest,
@@ -204,6 +207,7 @@ class Store:
                 transaction.counterparty,
                 transaction.status.value,
                 transaction.source,
+                transaction.tier.value,
                 transaction.source_id,
                 transaction.content_key,
                 transaction.occurrence,
@@ -285,6 +289,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         counterparty=row["counterparty"],
         status=TransactionStatus(row["status"]),
         source=row["source"],
+        tier=SourceTier(row["tier"]),
         source_id=row["source_id"],
         content_key=row["content_key"],
         occurrence=row["occurrence"],
