@@ -112,6 +112,49 @@ def could_be_one_payment(
     return incoming.occurrence == candidate.occurrence
 
 
+def belongs_to_established_series(
+    incoming: Transaction, candidates: Sequence[Transaction]
+) -> bool:
+    """Whether this looks like the next instalment of a regular commitment.
+
+    A weekly standing order sits inside the fuzzy window, so every instalment
+    after the first resembles the ambiguous case. Technically true, but roughly
+    fifty flags a year for one commitment, and a queue that cries wolf weekly
+    stops being read - which defeats it exactly when it matters.
+
+    Regularity is what separates the two. Two prior instalments at a consistent
+    interval make a rhythm, and a third arriving on schedule is expected. A
+    repeat with NO established rhythm is still flagged, because that is the
+    shape a duplicate report takes.
+
+    Deliberately conservative: it takes two priors to establish a series, so
+    the second instalment is still flagged once. Confirming a commitment once
+    is a reasonable price for silence thereafter.
+    """
+    same_shape = sorted(
+        (
+            candidate
+            for candidate in candidates
+            if candidate.amount_minor == incoming.amount_minor
+            and candidate.description == incoming.description
+            and candidate.value_date < incoming.value_date
+        ),
+        key=lambda candidate: candidate.value_date,
+    )
+    if len(same_shape) < 2:
+        return False
+
+    latest, previous = same_shape[-1], same_shape[-2]
+    established = (latest.value_date - previous.value_date).days
+    arriving = (incoming.value_date - latest.value_date).days
+    if established <= 0:
+        return False
+
+    # A day either side, because a payment falling on a weekend or holiday
+    # moves without ceasing to be the same commitment.
+    return abs(arriving - established) <= 1
+
+
 @dataclass(frozen=True)
 class MatchResult:
     tier: MatchTier
@@ -126,15 +169,21 @@ class MatchResult:
     def is_new(self) -> bool:
         return self.existing is None
 
+    #: Set when the near-misses turned out to be an established rhythm rather
+    #: than a genuine puzzle - a standing order arriving on schedule.
+    recurring: bool = False
+
     @property
     def is_ambiguous(self) -> bool:
         """Stored as new, but something similar was deliberately not matched.
 
         Not the same as `is_new`: every genuinely new transaction is
         unresolved, and flagging all of them would bury the few worth looking
-        at under thousands that are not.
+        at under thousands that are not. Nor does a near-miss alone qualify - a
+        recognised recurring series resembles its own past instalments by
+        definition, and saying so weekly teaches the reader to ignore it.
         """
-        return self.existing is None and bool(self.near_misses)
+        return self.existing is None and bool(self.near_misses) and not self.recurring
 
 
 def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResult:
@@ -186,7 +235,12 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
     rejected = tuple(t for t in similar if t not in near)
 
     if not near:
-        return MatchResult(MatchTier.UNRESOLVED, None, near_misses=rejected)
+        return MatchResult(
+            MatchTier.UNRESOLVED,
+            None,
+            near_misses=rejected,
+            recurring=belongs_to_established_series(incoming, same_account),
+        )
 
     near.sort(key=lambda t: abs(t.value_date - incoming.value_date))
     return MatchResult(MatchTier.FUZZY, near[0])
