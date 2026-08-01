@@ -19,10 +19,12 @@ from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
+from .money import parse_amount
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
 from .store import Store
+from .valuations import Asset, AssetKind, record_observation
 from .web import WebConfig
 from .web import serve as serve_web
 
@@ -96,6 +98,38 @@ def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -
             "\nNot replayed - no Actual account bound for: " + ", ".join(missing),
             file=sys.stderr,
         )
+    return 0
+
+
+def _value(args: argparse.Namespace, db_path: Path) -> int:
+    """Record one observation.
+
+    Amounts are taken as text and parsed through the money reader rather than
+    as floats, so a command line typo is refused for the same reasons a bad
+    statement figure is.
+    """
+    asset = Asset(asset_id=args.asset, kind=AssetKind(args.kind))
+    try:
+        value_minor = parse_amount(args.amount) if args.amount else None
+        income_minor = parse_amount(args.annual_income) if args.annual_income else None
+        unit_price = parse_amount(args.unit_price) if args.unit_price else None
+        with Store(db_path) as store:
+            record_observation(
+                store,
+                asset,
+                observed_at=args.on,
+                source=args.source,
+                value_minor=value_minor,
+                annual_income_minor=income_minor,
+                units=args.units,
+                unit_price_minor=unit_price,
+                document_ref=args.document,
+            )
+    except DataError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"Recorded {args.asset} as at {args.on.isoformat()}.")
     return 0
 
 
@@ -248,6 +282,28 @@ def main(argv: list[str] | None = None) -> int:
     serve_command.add_argument("--host", default="127.0.0.1")
     serve_command.add_argument("--port", type=int, default=8080)
 
+    value_command = subcommands.add_parser(
+        "value", help="record an observation of an asset that has no transaction stream"
+    )
+    value_command.add_argument("asset", help="stable asset id you choose, e.g. workplace-pension")
+    value_command.add_argument(
+        "--kind",
+        required=True,
+        choices=[kind.value for kind in AssetKind],
+        help="defined_benefit and state_pension have no pot; record income instead",
+    )
+    value_command.add_argument("--on", required=True, type=date.fromisoformat, metavar="YYYY-MM-DD")
+    value_command.add_argument("--source", default="statement")
+    value_command.add_argument("--amount", type=str, help="pot value, e.g. 42317.00")
+    value_command.add_argument(
+        "--annual-income", type=str, help="accrued annual income, for entitlements with no pot"
+    )
+    value_command.add_argument("--units", help="unit holding, if the statement gives one")
+    value_command.add_argument("--unit-price", type=str, help="price per unit, if given")
+    value_command.add_argument("--document", default="", help="e.g. paperless:1234")
+
+    subcommands.add_parser("values", help="show recorded observations for an asset")
+
     subcommands.add_parser(
         "connections", help="show bank connections and how long consent has left"
     )
@@ -290,6 +346,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pull":
         return _pull(args.target, db_path, args.since)
+
+    if args.command == "value":
+        return _value(args, db_path)
+
+    if args.command == "values":
+        print("Usage: obdi values <asset-id>", file=sys.stderr)
+        return 2
 
     if args.command == "replay":
         return _replay(db_path, args.out, args.include_internal_transfers)
