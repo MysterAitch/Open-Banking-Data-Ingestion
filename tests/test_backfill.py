@@ -131,3 +131,31 @@ class TestNarrowingIsAudible:
 
         # Warning on the happy path would train the reader to ignore it.
         assert capsys.readouterr().err == ""
+
+
+class TestAnIncompleteAnswerIsNotAnEmptyAccount:
+    """Some accounts genuinely have no recent transactions - dormant is normal.
+
+    That makes an empty result ambiguous, and the provider's own status field is
+    the only thing that disambiguates it. Storing a non-final response as though
+    it were complete records "nothing here" for an account that has plenty, and
+    nothing downstream can tell the difference afterwards.
+    """
+
+    def test_Backfill_WhenTheProviderSaysTheAnswerIsNotReady_RefusesRatherThanStoringNothing(
+        self,
+    ):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"status": "Queued", "results": []})
+
+        with pytest.raises(TrueLayerError, match="Queued"):
+            fetch_transactions("token", "acc", client=_client(handler))
+
+    def test_Backfill_WhenGenuinelyDormant_AcceptsAnEmptyResultAsTheAnswer(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        rows, _ = fetch_transactions("token", "acc", client=_client(handler))
+
+        # An account with no activity is a legitimate answer, not a failure.
+        assert rows == []

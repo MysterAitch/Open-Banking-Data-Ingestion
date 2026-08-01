@@ -45,7 +45,8 @@ class TestMoneyGuard:
 class TestAggregatorHonoursCurrency:
     def base(self, **overrides) -> dict:
         record = {
-            "transaction_id": "tl-1",
+            "transaction_id": "volatile-1",
+            "normalised_provider_transaction_id": "tl-1",
             "timestamp": "2026-03-14T00:00:00Z",
             "description": "TESCO",
             "amount": -14.99,

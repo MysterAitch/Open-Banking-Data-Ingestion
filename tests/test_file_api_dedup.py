@@ -29,7 +29,8 @@ STARLING_CSV = (
 # own way of describing the merchant.
 TRUELAYER_RECORDS = [
     {
-        "transaction_id": "tl-tx-1",
+        "transaction_id": "volatile-1",
+        "normalised_provider_transaction_id": "tl-tx-1",
         "timestamp": "2026-03-14T00:00:00Z",
         "description": "TESCO STORES 4912",
         "amount": -14.99,
@@ -38,7 +39,8 @@ TRUELAYER_RECORDS = [
         "merchant_name": "Tesco",
     },
     {
-        "transaction_id": "tl-tx-2",
+        "transaction_id": "volatile-2",
+        "normalised_provider_transaction_id": "tl-tx-2",
         "timestamp": "2026-03-15T00:00:00Z",
         "description": "SALARY MARCH",
         "amount": 2500.00,

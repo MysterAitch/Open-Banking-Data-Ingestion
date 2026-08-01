@@ -217,6 +217,19 @@ def fetch_transactions(
             },
         )
         if response.status_code == 200:
+            # The payload carries its own status alongside the results, and a
+            # non-final one means the results are not the whole answer. Taking
+            # them at face value would record "this account has no transactions"
+            # for data that had simply not arrived - indistinguishable from a
+            # genuinely dormant account, and wrong in the one direction that
+            # cannot be corrected later.
+            payload_status = text(decode(response.content), "status")
+            if payload_status and payload_status.casefold() not in ("succeeded", "ok"):
+                raise TrueLayerError(
+                    f"Transaction fetch returned status '{payload_status}' for account "
+                    f"{account_id}: the results are not final and were NOT stored. "
+                    "Retry rather than treating this as an empty account."
+                )
             if days != windows[0]:
                 # Say when less was fetched than was asked for. A provider that
                 # caps the span per request makes a narrowed window look like a
@@ -278,6 +291,18 @@ def to_transaction(
     description = text(record, "description")
     merchant = text(record, "merchant_name").strip()
 
+    # `transaction_id` is deliberately NOT used, despite the name. The provider
+    # documents it as "it may change between requests", and an identifier that
+    # changes between fetches is the one thing tier one must never rest on: it
+    # would assert "the source says these are the same payment" on no evidence,
+    # and a re-fetch under a new id reads as a second payment. The damage is
+    # asymmetric - a missed match duplicates real money in the copy that is
+    # meant to be authoritative, and nothing downstream can tell.
+    #
+    # `normalised_provider_transaction_id` is the one the provider states will
+    # NOT change, so it is the only value here worth treating as durable.
+    durable_id = text(record, "normalised_provider_transaction_id") or None
+
     return Transaction(
         account_id=account_id,
         amount_minor=amount_minor,
@@ -290,8 +315,11 @@ def to_transaction(
         source="truelayer",
         # Pending records carry a different id from the settled version of the
         # same payment, which is why supersession exists rather than update.
-        source_id=text(record, "transaction_id") or None,
-        tier=SourceTier.AUTHORITATIVE,
+        source_id=durable_id,
+        # No durable id means exactly that. Claiming AUTHORITATIVE without one
+        # would license merges the evidence does not support; SYNTHETIC routes
+        # identity through the content key, which is what that tier is for.
+        tier=SourceTier.AUTHORITATIVE if durable_id else SourceTier.SYNTHETIC,
         content_key=content_key(
             account_id=account_id,
             amount_minor=amount_minor,
