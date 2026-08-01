@@ -142,6 +142,12 @@ public CA to issue for it; the address being private is what keeps the service
 unreachable from the internet. Both halves are needed, and they are not in
 tension.
 
+**A non-standard port is accepted.** `https://your-host:8087/callback` was
+registered and used against TrueLayer in August 2026. Worth stating, because
+plenty of OAuth providers reject anything but 443 and assuming this one does too
+costs you a reverse proxy you do not need. If you publish several services on
+one hostname by port, point the redirect straight at yours.
+
 Two caveats worth knowing. Any publicly trusted certificate publishes its
 hostname to Certificate Transparency logs, including one issued for a service
 only reachable privately — the name leaks, never the traffic — so avoid putting
