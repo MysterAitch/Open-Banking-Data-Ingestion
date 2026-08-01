@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from .errors import DataError
+
 # Currencies whose minor unit is not 1/100 of the major unit are not supported
 # until one is actually encountered; failing loudly beats a silent 100x error.
 MINOR_UNITS_PER_MAJOR = 100
 
 
-class AmountParseError(ValueError):
+class AmountParseError(DataError):
     """Raised when a source amount cannot be read exactly."""
 
 

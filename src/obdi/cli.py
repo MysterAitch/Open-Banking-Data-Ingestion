@@ -17,8 +17,8 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
+from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
-from .parsers.base import ParseError
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
@@ -263,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         with Store(db_path) as store:
             try:
                 summary = import_file(store, args.path, account_id=args.account)
-            except ParseError as exc:
+            except DataError as exc:
                 print(f"Refused to import: {exc}", file=sys.stderr)
                 return 1
         if not summary.artefact_new:

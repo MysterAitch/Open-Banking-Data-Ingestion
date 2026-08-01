@@ -2,14 +2,24 @@
 
 Tiered, highest fidelity first, and it never guesses:
 
-  1. exact source_id, scoped to the account
+  1. exact source_id, scoped to (account, source)
   2. exact content_key
   3. fuzzy - same account, exact amount, value date within a window
-  4. unresolved - flagged for human review, NOT silently inserted as new
+  4. unresolved - stored as new
 
-Tier 3's window is +/- 7 days. Actual Budget uses exactly that; beancount-import
-independently settled on 5. Two projects converging is the best evidence
-available that the right answer is "about a week".
+Every tier below the first also asks `could_be_one_payment`, which is where the
+source tier decides what a resemblance is worth. Without it the rules answer
+only "is this the same payment seen through a different door?" and never the
+commoner opposite, "are these two different payments that merely look alike?".
+
+Tier 3's window is +/- 7 days between machine-read sources, widening to 10 when
+one side was typed by a person, since a remembered date is approximate. Actual
+Budget uses 7 and beancount-import 5; YNAB uses 10 for hand-entered records.
+
+Note what tier 4 does NOT mean: unresolved is the normal state of every
+genuinely new transaction, so it is not by itself cause for review. Only a
+near-miss - something that matched on amount and date and was held apart by the
+source rules - is worth a human decision, and only that is queued.
 
 Separately, `pair_internal_transfers` handles a different problem: a movement
 between two of your own accounts arrives twice, once as a debit and once as a

@@ -1,5 +1,8 @@
 import pytest
 
+from obdi.errors import DataError
+from obdi.jsontypes import JsonShapeError
+from obdi.money import AmountParseError
 from obdi.parsers.base import ParseError
 from obdi.parsers.uk_banks import AmexUkCsvParser, MonzoCsvParser, StarlingCsvParser, detect
 
@@ -95,3 +98,34 @@ class TestFormatDetection:
     def test_Statement_WhenFileEmpty_Rejected(self):
         with pytest.raises(ParseError):
             detect(b"")
+
+
+class TestMalformedRows:
+    def test_Statement_WhenARowHasTooManyFields_RefusedAsAParseError(self):
+        # An unquoted comma in a description is the usual cause. This raised
+        # AttributeError from inside a comprehension, breaking the contract
+        # callers rely on to report which file failed and why.
+        payload = (
+            b"Date,Counter Party,Reference,Type,Amount (GBP)\n"
+            b"14/03/2026,Tesco,BIG SHOP, EXTRA,CARD,-14.99\n"
+        )
+        with pytest.raises(ParseError, match="more fields"):
+            list(StarlingCsvParser().parse(payload, account_id="a"))
+
+    def test_Statement_WhenARowHasTooFewFields_ReportedAsADataProblem(self):
+        # A short row yields None for the missing values, which also used to
+        # reach .strip(). It surfaces as a DataError - the shared base every
+        # parse failure now carries, so one handler can report which file
+        # failed instead of each layer raising something unrelated and one of
+        # them escaping as a traceback.
+        payload = b"Date,Counter Party,Reference,Type,Amount (GBP)\n14/03/2026,Tesco\n"
+        with pytest.raises(DataError):
+            list(StarlingCsvParser().parse(payload, account_id="a"))
+
+    def test_Statement_WhenAnyParseFailureOccurs_CatchableAsOneKind(self):
+        # The contract the command line relies on: it catches DataError and
+        # names the file. Before, an amount failure was unrelated to a parse
+        # failure and escaped that handler entirely.
+        assert issubclass(ParseError, DataError)
+        assert issubclass(AmountParseError, DataError)
+        assert issubclass(JsonShapeError, DataError)

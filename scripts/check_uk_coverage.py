@@ -1,19 +1,17 @@
-"""Answer the one open question blocking the design: does Enable Banking
-actually carry the UK banks we need?
+"""Check which GB institutions Enable Banking exposes to an application.
 
-Their public markets documentation has no UK page, yet GB connectors exist.
-Research found Barclays, HSBC, NatWest, RBS, Santander, Revolut and Wise, but
-could NOT find the Lloyds Banking Group, Nationwide, Monzo or Starling. That
-gap decides whether Enable Banking is the backbone or a partial solution.
+SETTLED 2026-08-01, and kept only as a record of how: Enable Banking does not
+serve the UK at all. Its account-linking country selector has no GB entry, an
+unactivated application returns 403, individuals can activate only by linking
+accounts, and the commercial quote form omits the United Kingdom too - so this
+is an uncovered market rather than a tier restriction that money would lift.
 
-No answer from reading is worth as much as one call against a real account.
+Still runnable against an activated application, and would distinguish "absent
+from the catalogue" from "present but withheld", but it no longer blocks
+anything. TrueLayer is the working route.
 
 Usage:
-    cp .env.example .env      # fill in EB_APPLICATION_ID and EB_PRIVATE_KEY_PATH
-    uv run python scripts/check_uk_coverage.py
-
-Prints every GB institution Enable Banking exposes, then explicitly reports on
-the banks whose absence would change the plan.
+    python scripts/check_uk_coverage.py
 """
 
 from __future__ import annotations

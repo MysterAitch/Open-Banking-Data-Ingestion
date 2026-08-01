@@ -18,11 +18,13 @@ from __future__ import annotations
 
 from typing import TypeAlias
 
+from .errors import DataError
+
 #: A decoded JSON object. Untrusted and unnarrowed by design.
 JsonObject: TypeAlias = dict[str, object]
 
 
-class JsonShapeError(ValueError):
+class JsonShapeError(DataError):
     """A payload did not have the shape the caller required."""
 
 

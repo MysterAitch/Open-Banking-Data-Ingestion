@@ -17,10 +17,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import date, datetime
 
+from ..errors import DataError
 from ..models import Transaction
 
 
-class ParseError(ValueError):
+class ParseError(DataError):
     """Raised when input does not match what the parser expects.
 
     Always preferred over a best-effort guess: a loud failure costs minutes, a
@@ -84,7 +85,19 @@ class StatementParser(ABC):
                 "Verify the format before widening the parser."
             )
         for row in reader:
-            yield {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+            # A row with MORE fields than the header puts the surplus under the
+            # restkey as a list, and one with fewer yields None. Both used to
+            # reach .strip() and raise AttributeError, which breaks the parser
+            # contract - callers catch ParseError and expect a message naming
+            # the file, not a stack trace from a comprehension.
+            if None in row:
+                raise ParseError(
+                    f"{self.source}: a row has more fields than the header. "
+                    "An unquoted comma in a description is the usual cause."
+                )
+            yield {
+                (key or "").strip(): (value or "").strip() for key, value in row.items()
+            }
 
     @abstractmethod
     def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
