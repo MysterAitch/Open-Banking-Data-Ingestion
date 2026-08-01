@@ -35,9 +35,25 @@ def read_secret(name: str, *, required: bool = True) -> str:
 
     if path_value:
         path = Path(path_value)
-        if not path.is_file():
-            raise SecretError(f"{path_variable} points at {path}, which does not exist")
-        value = path.read_text(encoding="utf-8").strip()
+        try:
+            if not path.is_file():
+                raise SecretError(f"{path_variable} points at {path}, which does not exist")
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            # Being refused is a configuration fault like any other here, and it
+            # must arrive as one. Left to escape, it surfaces as a traceback
+            # through pathlib internals - which names the failing library call
+            # rather than the path, and reads like a bug in this code rather
+            # than a file the process is not allowed to open. Containers make
+            # this the commonest deployment fault: the path is right, the file
+            # is right, and the uid is not.
+            raise SecretError(
+                f"{path_variable} points at {path}, which could not be read: "
+                f"{exc.strerror or exc}. Check the file and its parent directory "
+                "are readable by the user this process runs as - under a "
+                "container that is the image's user, not the one that owns the "
+                "files on the host."
+            ) from exc
         if not value:
             raise SecretError(f"{path_variable} points at {path}, which is empty")
         return value

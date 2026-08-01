@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from obdi.secrets import SecretError, describe_source, read_secret
@@ -87,3 +89,47 @@ class TestSourceDescription:
 
     def test_Diagnostics_WhenUnset_ReportsUnset(self):
         assert describe_source(NAME) == "unset"
+
+
+class TestSecretFileTheProcessCannotRead:
+    """A container runs as its own user; the host file belongs to another.
+
+    This is the commonest deployment fault for file-indirected secrets, and the
+    one that looks least like itself: the path is correct, the file exists and
+    holds the right value, and the process simply is not allowed to open it.
+    """
+
+    def test_ReadSecret_WhenTheFileCannotBeOpened_RaisesSecretErrorNamingThePath(
+        self, monkeypatch, tmp_path
+    ):
+        secret_file = tmp_path / "secret.txt"
+        secret_file.write_text("top-secret", encoding="utf-8")
+        monkeypatch.setenv(f"{NAME}_FILE", str(secret_file))
+
+        def refuse(*_args, **_kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "read_text", refuse)
+
+        with pytest.raises(SecretError) as raised:
+            read_secret(NAME)
+
+        assert str(secret_file) in str(raised.value)
+        assert "top-secret" not in str(raised.value)
+
+    def test_ReadSecret_WhenTheDirectoryCannotBeTraversed_RaisesSecretErrorNotOSError(
+        self, monkeypatch, tmp_path
+    ):
+        # 0700 on the parent directory: stat itself fails, before the file is
+        # ever reached, which is what a mismatched container uid actually hits.
+        secret_file = tmp_path / "secret.txt"
+        secret_file.write_text("top-secret", encoding="utf-8")
+        monkeypatch.setenv(f"{NAME}_FILE", str(secret_file))
+
+        def refuse(*_args, **_kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "is_file", refuse)
+
+        with pytest.raises(SecretError):
+            read_secret(NAME)
