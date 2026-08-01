@@ -116,20 +116,22 @@ def pull_truelayer(
                 pending=pending,
                 deep=deep,
             )
-            if not records:
-                continue
+            # Landed BEFORE the empty check, not after. An empty payload plus
+            # the range that produced it is exactly the evidence the requested-
+            # range provenance exists to keep: skip landing on empty and a
+            # dormant account leaves no trace it was ever asked, which is the
+            # precise ambiguity this whole chain was built to remove. The
+            # composite artefact key is what makes this safe - identical empty
+            # bytes from different accounts or days land as separate evidence.
             artefact = truelayer.artefact_for(
                 body,
                 account_id=canonical,
                 kind="pending" if pending else "booked",
-                # The range asked for, landed with the payload. Rebuilding from
-                # raw is what makes a transformation bug recoverable, but only
-                # for questions the raw layer can still answer - and "was this
-                # account empty, or did we simply not ask far enough back?" is
-                # unanswerable without this.
                 requested=asked,
             )
             store.land_artefact(artefact)
+            if not records:
+                continue
             transactions = [
                 replace(
                     truelayer.to_transaction(record, account_id=canonical, pending=pending),
@@ -185,10 +187,13 @@ def pull_starling(
                 target = canonical
 
             items, body = starling.fetch_feed(token, account_uid, category.uid, since=since)
-            if not items:
-                continue
+            # Same ordering as the TrueLayer path: the empty feed of a quiet
+            # Space is evidence, and it must land before the emptiness is
+            # acted on.
             artefact = starling.artefact_for(body, account_id=target, category_uid=category.uid)
             store.land_artefact(artefact)
+            if not items:
+                continue
 
             transactions = []
             for item in items:

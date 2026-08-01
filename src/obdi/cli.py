@@ -281,6 +281,15 @@ def _pull(target: str, db_path: Path, since: date | None, deep: bool = False) ->
                 connection_store=connection_store,
                 account_map=account_map,
                 since=since,
+                # Forwarded, not defaulted. Dropping this is what disconnected
+                # the backfill ladder from the only moment it exists for: the
+                # page said deep history was being fetched while a single
+                # routine window ran, and a provider rejecting that one range
+                # lost the post-authorisation window with nothing to fall back
+                # to. Found by adversarial review, invisible to the suite
+                # because no test traversed the CLI wiring between the thread
+                # and the provider.
+                deep=deep,
             )
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
@@ -480,7 +489,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "coverage":
         with Store(db_path) as store:
-            held = store.all_transactions()
+            # By sighting, never by stored row. The stored source is
+            # last-writer-wins after a merge, so the raw table understates
+            # every source that corroborated a payment - the per-sighting view
+            # is the only one the comparison reports are correct against.
+            held = store.transactions_by_sighting()
         print(
             coverage_report(
                 coverage(held), agreements(held), gaps(held), transpositions(held)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -27,14 +28,22 @@ from typing import ClassVar
 from .models import RawArtefact, SourceTier, Transaction, Valuation
 
 SCHEMA = """
+-- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
+-- from a different request are different EVIDENCE: every empty API body is
+-- byte-identical, so a digest-only key would collapse "account A asked for
+-- range R, got nothing" across every account and every day into one row -
+-- destroying exactly the asked-and-empty facts the origin column exists to
+-- preserve. Same bytes from the SAME request remain deduplicated, which is
+-- what makes re-importing a download harmless.
 CREATE TABLE IF NOT EXISTS raw_artefacts (
-    digest        TEXT PRIMARY KEY,
+    digest        TEXT NOT NULL,
     source        TEXT NOT NULL,
     account_ref   TEXT NOT NULL,
     media_type    TEXT NOT NULL,
     origin        TEXT NOT NULL DEFAULT '',
     fetched_at    TEXT NOT NULL,
-    payload       BLOB NOT NULL
+    payload       BLOB NOT NULL,
+    PRIMARY KEY (digest, account_ref, origin)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -138,10 +147,55 @@ class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path)
+        # 30s rather than the 5s default: the web container's backfill thread
+        # and the scheduler container write the same file, and reconcile_batch
+        # holds one transaction per landed payload - a deep backfill can hold
+        # the lock past 5s, and the loser of that race used to abort the one
+        # fetch that cannot be repeated.
+        self.connection = sqlite3.connect(self.path, timeout=30.0)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
+        # WAL lets the reader side proceed while a writer holds its
+        # transaction, and turns most writer-vs-writer collisions into a wait
+        # rather than an immediate 'database is locked'. Both containers are on
+        # one host and one real filesystem, which is the case WAL supports.
+        self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute("PRAGMA busy_timeout = 30000")
         self.connection.executescript(SCHEMA)
+        self._migrate_raw_artefact_key()
+
+    def _migrate_raw_artefact_key(self) -> None:
+        """Upgrade a digest-only raw_artefacts table to the composite key.
+
+        CREATE TABLE IF NOT EXISTS never alters an existing table, so a store
+        created before the key change keeps the old primary key silently -
+        and with it the empty-body collapse the new key exists to prevent.
+        Rebuilding the table preserves every row; the composite key is strictly
+        wider than the old one, so no existing data can conflict.
+        """
+        info = self.connection.execute("PRAGMA table_info(raw_artefacts)").fetchall()
+        pk_columns = [row["name"] for row in sorted(info, key=lambda r: r["pk"]) if row["pk"]]
+        if pk_columns == ["digest", "account_ref", "origin"]:
+            return
+        self.connection.executescript(
+            """
+            BEGIN;
+            ALTER TABLE raw_artefacts RENAME TO raw_artefacts_old;
+            CREATE TABLE raw_artefacts (
+                digest        TEXT NOT NULL,
+                source        TEXT NOT NULL,
+                account_ref   TEXT NOT NULL,
+                media_type    TEXT NOT NULL,
+                origin        TEXT NOT NULL DEFAULT '',
+                fetched_at    TEXT NOT NULL,
+                payload       BLOB NOT NULL,
+                PRIMARY KEY (digest, account_ref, origin)
+            );
+            INSERT INTO raw_artefacts SELECT * FROM raw_artefacts_old;
+            DROP TABLE raw_artefacts_old;
+            COMMIT;
+            """
+        )
 
     def close(self) -> None:
         self.connection.close()
@@ -220,11 +274,14 @@ class Store:
         return [(row[0], row[1]) for row in rows]
 
     def record_source(self, transaction: Transaction) -> None:
-        """Note that this source has seen this transaction.
+        """Note that this source has seen this transaction, in this artefact.
 
-        Idempotent per (entity, source): re-pulling one feed is routine and says
-        nothing new about corroboration, so a second sighting by the same source
-        must not read as a second source agreeing.
+        Idempotent per (entity, source, artefact): re-landing the same artefact
+        adds nothing, while a NEW artefact from the same source adds a sighting
+        row - that is what makes every observation walkable back to its exact
+        raw bytes. Per-source dedup happens downstream in sources_for's
+        DISTINCT, so sighting rows must never be counted as corroborating
+        sources.
         """
         self.connection.execute(
             """
@@ -241,6 +298,33 @@ class Store:
                 datetime.now().astimezone().isoformat(),
             ),
         )
+
+    def transactions_by_sighting(self) -> list[Transaction]:
+        """Each transaction once per DISTINCT source that observed it.
+
+        THE view the coverage reports must consume, and the difference is not
+        cosmetic. The stored row's `source` is last-writer-wins by design -
+        supersession keeps one winner - so grouping stored rows by source
+        undercounts every corroborated payment and then reports the shortfall
+        as disagreement or missing months. That is agreement described as
+        disagreement, found twice by review because the first fix wired only
+        the write side.
+
+        Rows with no sighting records (data predating the provenance table)
+        fall back to their stored source, so old stores degrade to the previous
+        behaviour rather than vanishing from the report.
+        """
+        sightings: dict[str, list[str]] = {}
+        for row in self.connection.execute(
+            "SELECT DISTINCT entity_id, source FROM transaction_sources ORDER BY source"
+        ):
+            sightings.setdefault(row["entity_id"], []).append(row["source"])
+
+        expanded = []
+        for transaction in self.all_transactions():
+            for source in sightings.get(transaction.entity_id) or [transaction.source]:
+                expanded.append(replace(transaction, source=source))
+        return expanded
 
     def upsert_transaction(
         self, transaction: Transaction, *, match_tier: str, matched_entity_id: str | None = None

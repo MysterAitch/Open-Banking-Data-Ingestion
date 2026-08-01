@@ -273,3 +273,114 @@ class TestDatesReadTheWrongWayRound:
 
         assert len(found) == 1, "the unambiguous row is fine; the ambiguous one moved"
         assert found[0].amount_minor == -700
+
+
+class TestAgainstTheRealStore:
+    """The reports must be right against a store fed through the real pipeline.
+
+    Every earlier test here hand-builds Transaction lists, which encodes the
+    pre-merge model: one row per source. The store does not work like that -
+    supersession leaves ONE row whose source is the last writer - and the
+    coverage reports were wrong against it while 356 hand-model tests passed.
+    This class exists so that mistake cannot come back.
+    """
+
+    def test_Coverage_AfterACrossSourceMerge_CreditsBothSources(self, tmp_path):
+        from obdi.ingest import reconcile_batch
+        from obdi.store import Store
+
+        def real(source, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=-2500,
+                currency="GBP",
+                value_date=date(2026, 3, 5),
+                booking_date=date(2026, 3, 5),
+                description="RENT",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key="shared-key",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(store, [real("halifax-qif")], digest="d-csv")
+            reconcile_batch(store, [real("truelayer", "tl-1")], digest="d-api")
+
+            held = store.transactions_by_sighting()
+            rows = coverage(held)
+
+            by_source = {row.source: row for row in rows}
+            # One payment, two witnesses: each source is credited with it. The
+            # stored row alone would say only the last writer ever saw it.
+            assert by_source["halifax-qif"].count == 1
+            assert by_source["truelayer"].count == 1
+
+    def test_Agreement_AfterACrossSourceMerge_ReportsAgreementNotDisagreement(self, tmp_path):
+        from obdi.ingest import reconcile_batch
+        from obdi.store import Store
+
+        def real(source, day, amount, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=amount,
+                currency="GBP",
+                value_date=date(2026, 3, day),
+                booking_date=date(2026, 3, day),
+                description=f"PAYEE {day}",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key=f"key-{day}-{amount}",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(
+                store, [real("halifax-qif", 5, -2500), real("halifax-qif", 9, 1000)], digest="d1"
+            )
+            reconcile_batch(
+                store,
+                [real("truelayer", 5, -2500, "t1"), real("truelayer", 9, 1000, "t2")],
+                digest="d2",
+            )
+
+            found = agreements(store.transactions_by_sighting())
+
+            assert len(found) == 1
+            assert found[0].agrees, (
+                "two sources that corroborated every payment must be reported as "
+                "agreeing - describing agreement as disagreement is the failure "
+                "this view exists to prevent"
+            )
+
+    def test_Gaps_AfterACrossSourceMerge_DoesNotInventMissingMonths(self, tmp_path):
+        from obdi.ingest import reconcile_batch
+        from obdi.store import Store
+
+        def real(source, month, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=-100 * month,
+                currency="GBP",
+                value_date=date(2026, month, 5),
+                booking_date=date(2026, month, 5),
+                description=f"BILL {month}",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key=f"key-{month}",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            for month in (1, 2, 3):
+                reconcile_batch(store, [real("halifax-qif", month)], digest=f"csv-{month}")
+                reconcile_batch(
+                    store, [real("truelayer", month, f"t{month}")], digest=f"api-{month}"
+                )
+
+            found = gaps(store.transactions_by_sighting())
+
+            assert found == [], (
+                "every month is covered by both sources; a MISSING report here "
+                "would be the stored-source undercount, not a real gap"
+            )

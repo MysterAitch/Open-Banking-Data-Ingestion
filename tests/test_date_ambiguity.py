@@ -28,3 +28,43 @@ class TestWhenAFileCannotVouchForItsOwnDates:
 
     def test_Import_WhenThereAreNoDates_MakesNoClaimEitherWay(self):
         assert not dates_cannot_confirm_format([])
+
+
+class TestTheWarningActuallyReachesTheUser:
+    """The helper being right is worthless if the wiring never fires.
+
+    These go through import_file - the user-recognisable scenario - so deleting
+    or breaking the warning glue in ingest.py fails a test, not just an intent.
+    """
+
+    def _csv(self, *dates: str) -> bytes:
+        rows = "\n".join(f"{d},SHOP,ref,PAYMENT,-4.50,100.00" for d in dates)
+        return (
+            "Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP)\n" + rows + "\n"
+        ).encode()
+
+    def test_Import_WhenEveryDateIsAmbiguous_WarnsOnStderr(self, tmp_path, capsys):
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        statement = tmp_path / "ambiguous.csv"
+        statement.write_bytes(self._csv("05/03/2026", "11/04/2026"))
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, statement, account_id="current")
+
+        err = capsys.readouterr().err
+        assert "WARNING" in err
+        assert "ambiguous.csv" in err
+
+    def test_Import_WhenADateProvesTheFormat_StaysQuiet(self, tmp_path, capsys):
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        statement = tmp_path / "provable.csv"
+        statement.write_bytes(self._csv("05/03/2026", "27/04/2026"))
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, statement, account_id="current")
+
+        assert "WARNING" not in capsys.readouterr().err

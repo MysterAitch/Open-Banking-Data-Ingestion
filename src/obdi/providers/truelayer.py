@@ -205,7 +205,18 @@ def fetch_transactions(
         if response.status_code != 200:
             raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
         body = response.content
-        return rows(decode(body), "results"), body, "pending=true"
+        # The same status guard as the booked path. Both endpoints share the
+        # response envelope, and a Queued/Running pending payload stored at
+        # face value records partial results as the truth - the guard existing
+        # on only one of two sibling paths was found by review, with the test
+        # suite encoding the same asymmetry.
+        payload_status = text(decode(body), "status")
+        if payload_status and payload_status.casefold() not in ("succeeded", "ok"):
+            raise TrueLayerError(
+                f"Pending fetch returned status '{payload_status}' for account "
+                f"{account_id}: the results are not final and were NOT stored."
+            )
+        return rows(decode(body), "results"), body, ""
 
     # The ladder costs one API call per rung, and the provider documents a limit
     # of FOUR calls per day per account unless the end user's IP is supplied to
@@ -366,7 +377,12 @@ def artefact_for(
 
     So the range asked for is part of the evidence, not part of the fetch.
     """
-    origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions"
+    # The URL actually requested, including the pending suffix. Recording a
+    # query-string form of the pending flag wrote a URL that was never fetched
+    # into layer 0 - provenance must describe the request that happened, not a
+    # paraphrase of it.
+    suffix = "/pending" if kind == "pending" else ""
+    origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
     return RawArtefact(
         source=f"truelayer-{kind}",
         account_ref=account_id,

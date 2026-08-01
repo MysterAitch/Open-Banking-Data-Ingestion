@@ -30,6 +30,12 @@ services:
       - /srv/appdata/obdi/credentials:/credentials
     environment:
       TZ: Europe/London
+      # Point the app at the mounted volumes - there is no fallback: `serve`
+      # refuses to start without a connection store, and an unset DB path
+      # writes inside the container and is lost on recreate.
+      OBDI_DB_PATH: /data/store.sqlite3
+      OBDI_ACCOUNT_MAP: /data/accounts.json
+      OBDI_CONNECTION_STORE: /credentials/connections.json
       TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}
       TRUELAYER_CLIENT_SECRET_FILE: /secrets/truelayer-client-secret
       # Must match a redirect URI registered with the provider byte for byte.
@@ -52,8 +58,16 @@ services:
     volumes:
       - /srv/appdata/obdi/data:/data
       - /srv/appdata/obdi/secrets:/secrets:ro
+      # Without this mount the scheduler cannot see any stored connection and
+      # is structurally Starling-only, whatever the loop below says.
+      - /srv/appdata/obdi/credentials:/credentials
     environment:
       TZ: Europe/London
+      # Identical to obdi-web on purpose: both operate on ONE store, and a
+      # divergence means the puller fills a database the web page never reads.
+      OBDI_DB_PATH: /data/store.sqlite3
+      OBDI_ACCOUNT_MAP: /data/accounts.json
+      OBDI_CONNECTION_STORE: /credentials/connections.json
       TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}
       TRUELAYER_CLIENT_SECRET_FILE: /secrets/truelayer-client-secret
       STARLING_PERSONAL_ACCESS_TOKEN_FILE: /secrets/starling-token
@@ -61,15 +75,16 @@ services:
       # data fetches at four a day, and the aggregator's own polling runs on
       # the same cycle. Polling harder buys nothing and risks a rate limit.
       OBDI_PULL_INTERVAL_SECONDS: "21600"
-      OBDI_PULL_TARGETS: ${OBDI_PULL_TARGETS:-starling}
     entrypoint: ["/bin/sh", "-c"]
     command:
+      # Bare `obdi pull` fetches EVERY stored connection plus Starling when a
+      # token is configured. Not a configured list of names: a list drifts from
+      # the connection store the moment a bank is authorised, and drifts
+      # silently - the loop keeps succeeding at the names it was given while
+      # the new bank is never fetched.
       - |
         while true; do
-          for target in $${OBDI_PULL_TARGETS}; do
-            echo "pulling $${target}"
-            obdi pull "$${target}" || echo "pull failed for $${target}, continuing"
-          done
+          obdi pull || echo "pull failed, continuing"
           obdi pair-transfers || true
           sleep "$${OBDI_PULL_INTERVAL_SECONDS}"
         done
