@@ -152,6 +152,14 @@ the authorisation round trip completing on it are different claims, and only the
 first has been tested here. If the redirect fails at the bank, the port is the
 first thing to suspect and a proxy on 443 is the fallback.
 
+**A loopback URI proves nothing about this.** If you have previously registered
+something like `http://127.0.0.1:3000/callback` and it was accepted, that is not
+evidence the same provider will accept a port on a real hostname. RFC 8252
+recommends allowing loopback redirects on *any* port, precisely because a native
+app cannot reserve one, so providers routinely permit that while still requiring
+443 for anything publicly resolvable. Only a non-loopback host on a non-standard
+port tests the thing you care about here.
+
 Two caveats worth knowing. Any publicly trusted certificate publishes its
 hostname to Certificate Transparency logs, including one issued for a service
 only reachable privately — the name leaks, never the traffic — so avoid putting
