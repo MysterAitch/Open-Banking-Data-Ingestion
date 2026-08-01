@@ -34,7 +34,7 @@ class TestHowFarBackWeAsk:
             asked.append(request.url.params["from"])
             return httpx.Response(200, json={"results": []})
 
-        fetch_transactions("token", "acc", client=_client(handler))
+        fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         assert len(asked) == 1, "a provider that accepts the widest window is asked once"
         # Widest rung first: settling for two years when ten were available would
@@ -52,7 +52,7 @@ class TestHowFarBackWeAsk:
                 return httpx.Response(400, json={"error": "invalid_date_range"})
             return httpx.Response(200, json={"results": []})
 
-        rows, _ = fetch_transactions("token", "acc", client=_client(handler))
+        rows, _ = fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         assert rows == []
         assert len(asked) == 2, "a rejected range must be retried narrower, not abandoned"
@@ -66,7 +66,7 @@ class TestHowFarBackWeAsk:
             return httpx.Response(401, json={"error": "invalid_token"})
 
         with pytest.raises(TrueLayerError):
-            fetch_transactions("token", "acc", client=_client(handler))
+            fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         # Every rung would fail identically, and each wasted attempt is spent
         # inside the post-authorisation window that cannot be recovered.
@@ -117,7 +117,7 @@ class TestNarrowingIsAudible:
                 return httpx.Response(400, json={"error": "range too wide"})
             return httpx.Response(200, json={"results": []})
 
-        fetch_transactions("token", "acc-1", client=_client(handler))
+        fetch_transactions("token", "acc-1", deep=True, client=_client(handler))
 
         warning = capsys.readouterr().err
         assert "narrowed" in warning
@@ -127,7 +127,7 @@ class TestNarrowingIsAudible:
         def handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"results": []})
 
-        fetch_transactions("token", "acc-1", client=_client(handler))
+        fetch_transactions("token", "acc-1", deep=True, client=_client(handler))
 
         # Warning on the happy path would train the reader to ignore it.
         assert capsys.readouterr().err == ""
@@ -149,13 +149,48 @@ class TestAnIncompleteAnswerIsNotAnEmptyAccount:
             return httpx.Response(200, json={"status": "Queued", "results": []})
 
         with pytest.raises(TrueLayerError, match="Queued"):
-            fetch_transactions("token", "acc", client=_client(handler))
+            fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
     def test_Backfill_WhenGenuinelyDormant_AcceptsAnEmptyResultAsTheAnswer(self):
         def handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"status": "Succeeded", "results": []})
 
-        rows, _ = fetch_transactions("token", "acc", client=_client(handler))
+        rows, _ = fetch_transactions("token", "acc", deep=True, client=_client(handler))
 
         # An account with no activity is a legitimate answer, not a failure.
         assert rows == []
+
+
+class TestTheDailyQuotaIsNotSpentOnRetries:
+    """Unattended access is capped at four calls per day, per account.
+
+    Each ladder rung is one call, so walking the whole ladder on a routine pull
+    would spend an entire day's allowance on a single account - and the pull
+    schedule itself already uses four. Deep history is worth that cost exactly
+    once, at authorisation; nothing else is.
+    """
+
+    def test_Backfill_WhenNotBackfilling_MakesOneCallRatherThanWalkingTheLadder(self):
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.params["from"])
+            return httpx.Response(400, json={"error": "invalid_date_range"})
+
+        with pytest.raises(TrueLayerError):
+            fetch_transactions("token", "acc", client=_client(handler))
+
+        assert len(calls) == 1, "a routine pull must not spend the quota on retries"
+
+    def test_Backfill_WhenRateLimited_StopsImmediatelyAndSaysWhy(self):
+        calls = []
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return httpx.Response(429, json={"error": "rate_limit_exceeded"})
+
+        with pytest.raises(TrueLayerError, match="four calls per day"):
+            fetch_transactions("token", "acc", deep=True, client=_client(handler))
+
+        # Retrying a quota that resets daily just digs deeper.
+        assert len(calls) == 1

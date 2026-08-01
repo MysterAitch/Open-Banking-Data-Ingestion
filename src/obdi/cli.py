@@ -175,7 +175,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         def run() -> None:
             try:
-                _pull(name, db_path, None)
+                _pull(name, db_path, None, deep=True)
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
 
@@ -235,7 +235,7 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     return worst
 
 
-def _pull(target: str, db_path: Path, since: date | None) -> int:
+def _pull(target: str, db_path: Path, since: date | None, deep: bool = False) -> int:
     account_map = _account_map()
 
     if target == "starling":

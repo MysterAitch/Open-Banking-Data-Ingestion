@@ -183,6 +183,7 @@ def fetch_transactions(
     since: date | None = None,
     until: date | None = None,
     pending: bool = False,
+    deep: bool = False,
     client: httpx.Client | None = None,
 ) -> tuple[list[JsonObject], bytes]:
     """Return parsed transactions and the raw body, so the raw body can be landed.
@@ -202,9 +203,21 @@ def fetch_transactions(
         body = response.content
         return rows(decode(body), "results"), body
 
-    # An explicit `since` is an instruction, not a preference, so it is used as
-    # given. Only the open-ended case walks the ladder.
-    windows = (None,) if since else backfill_ladder()
+    # The ladder costs one API call per rung, and the provider documents a limit
+    # of FOUR calls per day per account unless the end user's IP is supplied to
+    # show they are present. Walking four rungs on a routine pull would spend a
+    # whole day's quota on a single account, so it is reserved for the one
+    # occasion that justifies it: the post-authorisation backfill, which happens
+    # once and cannot be repeated.
+    #
+    # An explicit `since` is an instruction rather than a preference, so it is
+    # used as given either way.
+    if since:
+        windows: tuple[int | None, ...] = (None,)
+    elif deep:
+        windows = backfill_ladder()
+    else:
+        windows = (DEFAULT_BACKFILL_DAYS,)
     last_status = 0
     for days in windows:
         earliest = since or datetime.now(UTC).date() - timedelta(days=days or 0)
@@ -245,6 +258,14 @@ def fetch_transactions(
             body = response.content
             return rows(decode(body), "results"), body
         last_status = response.status_code
+        if response.status_code == 429:
+            # Narrowing cannot help, and each further attempt digs the hole
+            # deeper against a quota that resets daily rather than in seconds.
+            raise TrueLayerError(
+                f"Rate limited by the provider for account {account_id}. Unattended "
+                "access is capped at four calls per day per account; supplying the "
+                "end user's IP address lifts that, but only while they are present."
+            )
         # Only a rejected RANGE is worth narrowing for. A 401 means the token is
         # wrong and every rung will fail identically; retrying it three times
         # just spends the post-authorisation window on the same error.

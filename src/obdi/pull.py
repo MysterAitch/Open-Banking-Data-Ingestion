@@ -85,6 +85,7 @@ def pull_truelayer(
     connection_store: ConnectionStore,
     account_map: AccountMap,
     since: date | None = None,
+    deep: bool = False,
 ) -> PullResult:
     connection = ensure_access_token(
         connection,
@@ -109,7 +110,11 @@ def pull_truelayer(
 
         for pending in (False, True):
             records, body = truelayer.fetch_transactions(
-                connection.access_token, provider_account_id, since=since, pending=pending
+                connection.access_token,
+                provider_account_id,
+                since=since,
+                pending=pending,
+                deep=deep,
             )
             if not records:
                 continue
