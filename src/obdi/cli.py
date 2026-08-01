@@ -20,7 +20,7 @@ from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
 from .coverage import agreements, coverage, gaps, transpositions
 from .coverage import report as coverage_report
-from .doctor import report, run_checks
+from .doctor import live_checks, report, run_checks
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
@@ -399,9 +399,15 @@ def main(argv: list[str] | None = None) -> int:
         "coverage",
         help="what the store holds per account and source, and whether sources agree",
     )
-    subcommands.add_parser(
+    doctor_command = subcommands.add_parser(
         "doctor",
         help="check configuration and access before anything depends on them",
+    )
+    doctor_command.add_argument(
+        "--live",
+        action="store_true",
+        help="also verify the TrueLayer credentials against the provider (one "
+        "network call; only an explicit invalid_client counts against them)",
     )
 
     args = parser.parse_args(argv)
@@ -517,6 +523,8 @@ def main(argv: list[str] | None = None) -> int:
         # not only what broke - "nothing printed" is indistinguishable from
         # "never ran", which is the failure mode this command exists to end.
         results = run_checks()
+        if getattr(args, "live", False):
+            results += live_checks()
         print(report(results))
         return 1 if any(not r.ok for r in results) else 0
 

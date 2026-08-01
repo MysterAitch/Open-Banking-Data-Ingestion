@@ -136,6 +136,19 @@ def _connection_rows(store: ConnectionStore) -> str:
     return "".join(rows)
 
 
+HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
+
+
+def error_page(title: str, message_html: str) -> bytes:
+    """An error page that always offers the way back.
+
+    Read on a phone mid-flow, a dead-end error page forces editing the address
+    bar to recover - the exact friction this interface exists to remove, at the
+    moment the reader is most likely to retry.
+    """
+    return render_page(title, f"{message_html}{HOME_LINK}")
+
+
 def render_index(store: ConnectionStore) -> bytes:
     body = f"""
 {_connection_rows(store)}
@@ -208,12 +221,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         elif route == "/callback":
             self._callback(params)
         else:
-            self._respond(404, render_page("Not found", "<p>Nothing is served here.</p>"))
+            self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
         name = (params.get("name", [""])[0] or "").strip()
         if not name:
-            self._respond(400, render_page("Name required", "<p>Give the connection a name.</p>"))
+            self._respond(400, error_page("Name required", "<p>Give the connection a name.</p>"))
             return
 
         state = self.bound_session.begin(name)
@@ -230,7 +243,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         error = params.get("error", [""])[0]
         if error:
             detail = html.escape(params.get("error_description", [""])[0] or error)
-            self._respond(400, render_page("Authorisation failed", f"<p>{detail}</p>"))
+            self._respond(400, error_page("Authorisation failed", f"<p>{detail}</p>"))
             return
 
         code = params.get("code", [""])[0]
@@ -238,7 +251,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if not code:
             self._respond(
                 400,
-                render_page("No code returned", '<p><a href="/">Start again</a></p>'),
+                error_page(
+                    "No code returned",
+                    "<p>The provider sent no authorisation code back.</p>",
+                ),
             )
             return
 
@@ -249,7 +265,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # code could be redeemed into a connection nobody chose.
             self._respond(
                 400,
-                render_page("Could not verify this request", f"<p>{html.escape(str(exc))}</p>"),
+                error_page("Could not verify this request", f"<p>{html.escape(str(exc))}</p>"),
             )
             return
 
@@ -269,7 +285,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # the phone browser, and this is the one failure that has to be
             # debuggable after the fact.
             print(f"authorisation for {name!r} failed: {exc}", file=sys.stderr)
-            self._respond(500, render_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(500, error_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
             return
 
         # Start the backfill NOW, before the page is even rendered. Anything

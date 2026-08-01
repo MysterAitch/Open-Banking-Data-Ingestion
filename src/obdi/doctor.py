@@ -23,6 +23,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
 from .secrets import SecretError, read_secret
 
 # Where a secret comes from is checked only when the deployment claims to have
@@ -162,6 +164,77 @@ def _shape_problems(name: str, value: str) -> list[str]:
                 "was not captured then, create a new secret and store that"
             )
     return problems
+
+
+def live_checks(client: httpx.Client | None = None) -> list[CheckResult]:
+    """Ask the provider whether the credentials are actually valid.
+
+    Separate from run_checks and opt-in, because it talks to the network:
+    doctor's offline checks must stay runnable anywhere, any time, with no
+    side effects beyond a stat.
+
+    The instrument is a client_credentials grant - authentication with no user
+    in the loop. The reading is deliberately asymmetric: only an explicit
+    invalid_client condemns the pair, because scope and grant refusals happen
+    AFTER authentication - a provider that names the scope it dislikes has, in
+    the same breath, accepted the secret. And a network failure is reported as
+    inconclusive, never as a verdict: condemning a valid credential because the
+    connection dropped would send someone off to rotate a secret that works.
+    """
+    client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
+    if not client_id:
+        return []
+    try:
+        secret = read_secret("TRUELAYER_CLIENT_SECRET", required=False)
+    except SecretError:
+        return []  # the offline checks already report unreadable secrets
+    if not secret:
+        return []
+
+    http = client or httpx.Client(timeout=15.0)
+    label = "TrueLayer credentials (live)"
+    try:
+        response = http.post(
+            "https://auth.truelayer.com/connect/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": secret,
+                "scope": "info",
+            },
+        )
+    except httpx.HTTPError as exc:
+        return [
+            CheckResult(
+                label,
+                True,
+                f"inconclusive - the provider could not be reached ({type(exc).__name__}); "
+                "this says nothing about the credentials either way",
+            )
+        ]
+
+    if response.status_code == 200:
+        return [CheckResult(label, True, "the provider accepted the id and secret")]
+
+    body = response.text[:200]
+    if "invalid_client" in body:
+        return [
+            CheckResult(
+                label,
+                False,
+                f"the provider rejected the pair: {body} - the secret does not match "
+                "this client id. Re-enter the value, or create a fresh secret in the "
+                "console (its value is shown exactly once, at creation)",
+            )
+        ]
+    return [
+        CheckResult(
+            label,
+            True,
+            f"authenticated - the provider refused only the grant or scope ({body}), "
+            "which is decided after the secret was accepted",
+        )
+    ]
 
 
 def report(results: list[CheckResult]) -> str:

@@ -11,6 +11,7 @@ matters, and to say which of them is wrong in plain words.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from obdi.doctor import CheckResult, run_checks
@@ -195,3 +196,90 @@ class TestSecretsThatExistButCannotWork:
         self._configured(monkeypatch, tmp_path, "tlcs_live_abcdefghij1234567890")
 
         assert all(r.ok for r in run_checks()), [r.detail for r in run_checks() if not r.ok]
+
+
+class TestAskingTheProviderDirectly:
+    """The one question shape checks cannot answer: does the provider agree?
+
+    A client_credentials grant authenticates the id and secret with no user
+    in the loop. The reading is asymmetric on purpose: only an explicit
+    invalid_client condemns the pair, because a scope or grant refusal happens
+    AFTER authentication succeeded - proof the secret is right even when the
+    grant is not usable. And a network failure is reported as exactly that,
+    never as a verdict either way.
+    """
+
+    def _configured(self, monkeypatch, tmp_path):
+        secret = tmp_path / "client-secret"
+        secret.write_text("tlcs_live_abcdefghij1234567890", encoding="utf-8")
+        monkeypatch.setenv("TRUELAYER_CLIENT_ID", "personaldataaccess-e8326b")
+        monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
+
+    def test_LiveCheck_WhenTheProviderAcceptsTheGrant_ReportsValid(
+        self, monkeypatch, tmp_path
+    ):
+        from obdi.doctor import live_checks
+
+        self._configured(monkeypatch, tmp_path)
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _r: httpx.Response(200, json={"access_token": "t"})
+            )
+        )
+
+        results = live_checks(client=client)
+
+        assert results and results[0].ok
+
+    def test_LiveCheck_WhenTheProviderSaysInvalidClient_FailsNamingTheSecret(
+        self, monkeypatch, tmp_path
+    ):
+        from obdi.doctor import live_checks
+
+        self._configured(monkeypatch, tmp_path)
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _r: httpx.Response(400, json={"error": "invalid_client"})
+            )
+        )
+
+        results = live_checks(client=client)
+
+        assert not results[0].ok
+        assert "invalid_client" in results[0].detail
+
+    def test_LiveCheck_WhenOnlyTheScopeIsRefused_ReportsTheSecretAsProven(
+        self, monkeypatch, tmp_path
+    ):
+        from obdi.doctor import live_checks
+
+        self._configured(monkeypatch, tmp_path)
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _r: httpx.Response(400, json={"error": "invalid_scope"})
+            )
+        )
+
+        results = live_checks(client=client)
+
+        # Scope is evaluated after authentication: refusing the scope while
+        # naming it proves the id+secret pair was accepted.
+        assert results[0].ok
+        assert "authenticat" in results[0].detail.casefold()
+
+    def test_LiveCheck_WhenTheNetworkFails_SaysInconclusiveRatherThanGuessing(
+        self, monkeypatch, tmp_path
+    ):
+        from obdi.doctor import live_checks
+
+        self._configured(monkeypatch, tmp_path)
+
+        def boom(_request):
+            raise httpx.ConnectError("no route")
+
+        client = httpx.Client(transport=httpx.MockTransport(boom))
+
+        results = live_checks(client=client)
+
+        assert results[0].ok, "a network failure must not condemn a valid secret"
+        assert "inconclusive" in results[0].detail.casefold()
