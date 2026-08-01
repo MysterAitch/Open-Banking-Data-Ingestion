@@ -49,8 +49,13 @@ SCOPES = "info accounts balance cards transactions offline_access"
 # UK Open Banking providers, both the mandated and the OAuth-style connections.
 UK_PROVIDERS = "uk-ob-all uk-oauth-all"
 
-# Banks this project actually needs. Reported on explicitly, because a provider
-# list of several hundred entries hides the ones that matter.
+# A provider list runs to several hundred entries, which hides the handful you
+# actually care about. Pass --banks to name yours; this default is just a spread
+# of common UK institutions so the report says something useful out of the box.
+#
+# Deliberately NOT your real list: which banks somebody holds is personal
+# financial information, and a config file is the place for it, not source
+# control.
 DEFAULT_BANKS = [
     "Barclays",
     "HSBC",
@@ -96,7 +101,7 @@ def hosts(sandbox: bool) -> tuple[str, str]:
     return SANDBOX if sandbox else LIVE
 
 
-def show_providers(sandbox: bool) -> int:
+def show_providers(sandbox: bool, banks: list[str]) -> int:
     # The providers endpoint identifies the application by client id alone, so
     # this step needs no secret at all - which makes it the cheapest possible
     # test of whether a live application is real.
@@ -119,10 +124,10 @@ def show_providers(sandbox: bool) -> int:
     for name in names:
         print(f"  {name}")
 
-    print("\nBanks this project needs:\n")
+    print("\nBanks checked:\n")
     haystack = " | ".join(names).casefold()
-    for bank in DEFAULT_BANKS:
-        print(f"  {bank:<16} {'present' if bank.casefold() in haystack else 'MISSING'}")
+    for bank in banks:
+        print(f"  {bank:<20} {'present' if bank.casefold() in haystack else 'MISSING'}")
     return 0
 
 
@@ -305,7 +310,15 @@ def main() -> int:
 
     parser.add_argument("--sandbox", action="store_true", help="use the sandbox environment")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("providers", help="list banks offered to this application")
+    providers_command = subcommands.add_parser(
+        "providers", help="list banks offered to this application"
+    )
+    providers_command.add_argument(
+        "--banks",
+        default=",".join(DEFAULT_BANKS),
+        help="comma-separated names to report on explicitly, rather than reading a "
+        "list of several hundred",
+    )
     subcommands.add_parser("auth-link", help="print the bank authorisation URL")
     exchange_command = subcommands.add_parser("exchange", help="swap the returned code for tokens")
     exchange_command.add_argument("redirect_url")
@@ -319,7 +332,8 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.command == "providers":
-        return show_providers(args.sandbox)
+        banks = [b.strip() for b in args.banks.split(",") if b.strip()]
+        return show_providers(args.sandbox, banks)
     if args.command == "auth-link":
         return show_auth_link(args.sandbox)
     if args.command == "exchange":

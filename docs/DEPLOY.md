@@ -1,57 +1,66 @@
-# Deployment: now on the workstation, later on the Docker host
+# Deployment: local first, container later
 
-Two deployments run **the same code**, differing only in configuration. Nothing
-in the codebase knows which it is: every path arrives by environment variable,
-which is what makes the move a matter of mounts and values rather than a
+Both run **the same code**, differing only in configuration. Nothing in the
+codebase knows which it is: every path arrives by environment variable, which is
+what makes moving between them a matter of mounts and values rather than a
 rewrite.
 
 Worth separating the two, because the decisions differ.
 
-## Now: workstation, data on the C: drive
+## Local
 
 ```
-OBDI_DB_PATH=./data/obdi/store.sqlite3
-OBDI_CONNECTION_STORE=../obdi-secrets/obdi/connections.json
-OBDI_ACCOUNT_MAP=./data/obdi/accounts.json
-TRUELAYER_CLIENT_SECRET_FILE=../obdi-secrets/truelayer/<the secret file>
+OBDI_DB_PATH=./data/store.sqlite3
+OBDI_ACCOUNT_MAP=./data/accounts.json
+OBDI_CONNECTION_STORE=../obdi-secrets/connections.json
+TRUELAYER_CLIENT_SECRET_FILE=../obdi-secrets/truelayer-client-secret
 TRUELAYER_REDIRECT_URI=https://console.truelayer.com/redirect-page
 ```
 
-Run commands from the virtual environment. This is the right place to be while
-parsers are still being checked against real exports, because a failing import
-is a file you can look at immediately.
+Run from the virtual environment. This is the right place to be while parsers
+are still being checked against real exports, because a failing import is a file
+you can open immediately.
 
-**Keep `../obdi-secrets` and `./data` out of every repository**, and in
-the backup scheme. The connection store holds refresh tokens; the transaction
-store holds your financial history. Neither is replaceable from anywhere else.
+**Keep the data and credential directories outside the repository**, and in your
+backup scheme. The connection store holds refresh tokens; the transaction store
+holds your financial history. Neither is replaceable from anywhere else.
 
-## Later: Docker host, data under /srv/appdata
+## Container
+
+Three mounts, not one, because they have three different sensitivities:
 
 ```
-/srv/appdata/obdi/data      the store, connections and account map
-/srv/appdata/obdi/secrets   token files, mounted READ ONLY
+/data          transaction history - copied, backed up, queried by tools
+/secrets       provider credentials, mounted READ ONLY: read, never rewritten
+/credentials   refresh tokens, written by the app as they rotate
 ```
 
-The container reads token files and must never rewrite one, so the secrets
-mount is `:ro`. Both services run as a non-root user.
+The connection store must not live under `/data`. That volume exists to be
+freely copied and queried, and putting bank credentials in it would make every
+copy of the history also a copy of the credentials.
 
-Bring it up with the stack conventions already in use: `.env` rendered from
-Ansible Vault, the service bound to `127.0.0.1`, and exposure handled by
-Tailscale Serve rather than published to the LAN.
+Both services run as a non-root user, and the published port stays on loopback.
+That last part is deliberate and worth not "fixing": the page can begin a bank
+authorisation, so it must not answer everything that can reach the host.
+Exposure belongs to whatever you already use for private access.
+
+Prefer pulling a published image over building on the host. Build failures then
+surface in CI rather than during a deploy, and a published tag gives
+update-watching something to compare. Render the configuration from whatever
+secret store you run, so credentials are never hand-written on the host.
 
 ### The redirect URI changes, and that matters
 
-On the workstation the redirect is the provider's hosted page and you paste a
-URL back. On the Docker host it becomes the Serve hostname:
+Locally the redirect is the provider's hosted page and you paste a URL back. Once
+the web interface runs somewhere your phone can reach, it becomes that address:
 
 ```
-TRUELAYER_REDIRECT_URI=https://obdi.<tailnet>.ts.net/callback
+TRUELAYER_REDIRECT_URI=https://<your-host>/callback
 ```
 
-Register that with the provider **as well as**, not instead of, the existing
-one — up to several redirect URIs are allowed, and keeping both means the
-command line route still works if the container is down. Console changes take
-up to 15 minutes to propagate.
+Register it **as well as**, not instead of, the existing one - several redirect
+URIs are allowed, and keeping both means the command-line route still works when
+the service is down. Console changes can take about 15 minutes to propagate.
 
 Existing connections are unaffected: refreshing a token does not involve the
 redirect URI. Only new authorisations use it.
@@ -62,29 +71,23 @@ The store and the connection file move as plain files; nothing re-derives from
 scratch and no re-authorisation is needed.
 
 1. Stop anything that writes: the scheduler, and any command mid-run.
-2. Copy `store.sqlite3` and `accounts.json` to `/srv/appdata/obdi/data/`.
-3. Copy `connections.json` to the same place, and the token files to
-   `/srv/appdata/obdi/secrets/`.
-4. Bring the stack up and check `obdi connections` reports the same consent
-   clocks. If it reports none, the connection store is in the wrong place.
+2. Copy `store.sqlite3` and `accounts.json` into the data volume.
+3. Copy `connections.json` into the credentials volume, and the token files into
+   the secrets volume.
+4. Bring it up and check `obdi connections` reports the same consent clocks. If
+   it reports none, the connection store is in the wrong place.
 
-Consent clocks keep running across the move. The move does not reset them.
+Consent clocks keep running across the move; it does not reset them.
+
+**Regenerating beats copying** where you can. Provider secrets can usually be
+re-issued in a console, and bank connections re-authorised from a phone in a
+couple of minutes. Nothing transits, and you rotate every credential as a side
+effect.
 
 ## The scheduled pull
 
 Six hours, and that is not a tuning choice. Many banks cap unattended data
-fetches at four a day, and the aggregator's own polling runs on the same cycle,
-so a shorter interval buys nothing and risks a rate limit. A pull that fails is
-logged and the loop continues rather than stopping the schedule, because the
-commonest cause is a single expired consent that should not halt the others.
-
-## Exposure
-
-The published port is pinned to loopback in both deployments. That is
-deliberate and worth not "fixing": the page can begin a bank authorisation, so
-it must not answer to everything that can reach the host.
-
-Reaching it from a phone is Tailscale Serve's job, which gives a real
-certificate and a tailnet-only address. Note that enabling HTTPS on a Tailscale
-hostname publishes that hostname to public Certificate Transparency logs — the
-name leaks, never the traffic — so keep the name dull.
+fetches at four a day, and an aggregator's own polling runs on the same cycle, so
+a shorter interval buys nothing and risks a rate limit. A failed pull is logged
+and the loop continues rather than halting the schedule, because the commonest
+cause is a single expired consent that should not stop the others.

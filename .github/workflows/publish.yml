@@ -1,10 +1,9 @@
 # Publishes the container image the homelab stack pulls.
 #
-# Every stack in your stack repository pulls a published image; none build on the host.
-# That convention is worth keeping rather than making this the exception: the
-# Docker host stays a place that runs things rather than compiles them, a failed
-# build fails here instead of during a deploy, and the image gets a version tag
-# that update-watching can actually compare.
+# Publishing beats building on the deployment host: the host stays a place that
+# runs things rather than compiles them, a failed build fails here where it is
+# visible instead of mid-deploy, and the image gets a version tag that
+# update-watching can actually compare.
 name: publish
 
 on:

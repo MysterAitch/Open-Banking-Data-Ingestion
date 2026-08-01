@@ -8,8 +8,11 @@ that apps become disposable views over it: several can be trialled against the
 same real dataset, abandoned without loss, and analysed well past what any of
 them expose.
 
-Design rationale and the research behind it live in the homelab vault at
-`Projects/Personal finance data ingester.md`. This README covers running it.
+Built for UK accounts, where the aggregator landscape is unusually hostile to
+individuals: the free tier everyone recommends closed to new signups, the
+European alternative does not serve the UK at all, and most providers gate live
+access behind a sales conversation. TrueLayer's Data API and the banks' own
+first-party APIs are the routes that work.
 
 ## Where the data lives
 
@@ -113,7 +116,7 @@ a silent misparse corrupts the store and is discovered months later.
 ## Connecting a bank from a phone
 
 ```bash
-obdi serve      # then reach it over Tailscale from the phone
+obdi serve      # then reach it from the phone, however you reach your network
 ```
 
 A page listing every connection with its consent clock, and a button to add or
@@ -123,14 +126,18 @@ and a second factor juggled alongside it.
 
 This works because the OAuth redirect is a **browser** event: the provider never
 connects inbound, it sends the browser somewhere. So the flow needs only a page
-your phone can reach, which a loopback-bound service exposed over Tailscale
-provides — real certificate, tailnet-only, no public exposure.
+your phone can reach — a VPN, a mesh network or anything else that gets your
+handset to the service. **No public ingress is required**, which matters given
+what the page can start. Bind it to loopback and let whatever you already use
+for private access do the exposing.
 
-Deployment: the stack definition lives in **`your stack repository/obdi/`** and pulls
-the image this repo's CI publishes; its `.env` is rendered from Ansible Vault by
-the **`obdi`** role, so credentials are never hand-written on the host. The
+For a permanent deployment, keep the stack definition outside this repo and have
+it pull the image CI publishes rather than building on the host: build failures
+then surface in CI instead of during a deploy, and a published tag is something
+update-watching can compare. Render its configuration from whatever secret store
+you already run, so credentials are never hand-written on the host. The
 `compose.yaml` here builds from source and is for local development only.
-Workstation-to-host detail: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Deployment detail: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Connecting a bank, and the 90-day chore
 
