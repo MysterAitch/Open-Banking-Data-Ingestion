@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from datetime import date, datetime
+from datetime import date
 
 from ..identity import content_key
 from ..models import SourceTier, Transaction, TransactionStatus
@@ -30,10 +30,6 @@ from .base import ParseError, StatementParser
 
 # Quicken writes post-2000 two-digit years with an apostrophe separator.
 _DATE_SEPARATORS = re.compile(r"[/\-.']")
-
-# Cleared markers: 'X' and '*' mean reconciled or cleared, blank means pending.
-_CLEARED_MARKERS = {"X", "*", "R", "C"}
-
 
 def parse_qif_date(text: str) -> date:
     """Parse a QIF date as DAY FIRST, refusing anything that is not.
@@ -63,7 +59,9 @@ def parse_qif_date(text: str) -> date:
     year_number = 2000 + int(year) if len(year) == 2 else int(year)
 
     try:
-        return datetime(year_number, month_number, day_number).date()
+        # A calendar date, not an instant: a statement line has no time and
+        # no zone, so attaching one would invent precision.
+        return date(year_number, month_number, day_number)
     except ValueError as exc:
         raise ParseError(f"QIF date {text!r} is not a real date") from exc
 
@@ -129,13 +127,11 @@ class QifParser(StatementParser):
             booking_date=when,
             description=description,
             counterparty=payee,
-            # QIF's cleared flag is advisory and often absent; treat anything
-            # unmarked as booked rather than inventing pending records.
-            status=(
-                TransactionStatus.BOOKED
-                if record.get("C", "").upper() in _CLEARED_MARKERS or "C" not in record
-                else TransactionStatus.BOOKED
-            ),
+            # QIF's cleared flag is advisory and frequently absent, and an
+            # export is a record of what already happened. Everything in one is
+            # therefore booked; inventing pending records from a missing marker
+            # would create settlements that never arrive.
+            status=TransactionStatus.BOOKED,
             source=self.source,
             # QIF carries no transaction id, so identity rests wholly on
             # content. Overlapping exports depend on that working.

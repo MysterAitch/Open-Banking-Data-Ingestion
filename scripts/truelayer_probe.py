@@ -35,8 +35,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from obdi.connections import ConnectionStore, build_connection  # noqa: E402
-from obdi.secrets import SecretError, describe_source, read_secret  # noqa: E402
+from obdi.connections import ConnectionStore, build_connection
+from obdi.secrets import SecretError, describe_source, read_secret
 
 LIVE = ("https://auth.truelayer.com", "https://api.truelayer.com")
 SANDBOX = ("https://auth.truelayer-sandbox.com", "https://api.truelayer-sandbox.com")

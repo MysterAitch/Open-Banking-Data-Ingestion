@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 
+from .jsontypes import JsonObject
+
 
 class SourceTier(StrEnum):
     """How much a source's own notion of transaction identity can be trusted.
@@ -111,7 +113,10 @@ class Transaction:
     occurrence: int = 0
     is_internal_transfer: bool = False
     counterparty: str = ""
-    raw: dict = field(default_factory=dict)
+    # The provider's own record, kept verbatim for provenance. Typed as
+    # unnarrowed on purpose: nothing here should read a field out of it
+    # without narrowing first, and the raw layer is the place for that.
+    raw: JsonObject = field(default_factory=dict)
 
     @property
     def is_credit(self) -> bool:

@@ -22,6 +22,7 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 from .models import RawArtefact, SourceTier, Transaction, Valuation
 
@@ -105,7 +106,7 @@ CREATE TABLE IF NOT EXISTS review_queue (
 
 
 class Store:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.path)
@@ -221,18 +222,26 @@ class Store:
             ),
         )
 
-    def review_queue(self, *, include_resolved: bool = False) -> list[dict]:
+    def review_queue(self, *, include_resolved: bool = False) -> list[dict[str, object]]:
         """Transactions awaiting a human decision.
 
         The backstop that was promised and missing. When matching cannot tell a
         repeated payment from a duplicate report, it stores the transaction and
         records the doubt here rather than deciding silently.
         """
-        clause = "" if include_resolved else " WHERE resolved_at IS NULL"
-        rows = self.connection.execute(
-            f"SELECT entity_id, reason, created_at, resolved_at FROM review_queue{clause} "
-            "ORDER BY created_at"
-        ).fetchall()
+        # Two fixed statements rather than one built by interpolation. Nothing
+        # here comes from outside, but a query assembled from strings is the
+        # shape injection takes, and the next edit is where it starts mattering.
+        if include_resolved:
+            rows = self.connection.execute(
+                "SELECT entity_id, reason, created_at, resolved_at FROM review_queue "
+                "ORDER BY created_at"
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                "SELECT entity_id, reason, created_at, resolved_at FROM review_queue "
+                "WHERE resolved_at IS NULL ORDER BY created_at"
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def resolve_review(self, entity_id: str) -> None:
@@ -266,11 +275,21 @@ class Store:
             ),
         )
 
+    #: Written out rather than interpolated from a list, so no query in this
+    #: module is assembled from a string at all. A table name cannot be bound
+    #: as a parameter, so the only safe form is a literal.
+    _COUNT_QUERIES: ClassVar[dict[str, str]] = {
+        "raw_artefacts": "SELECT COUNT(*) FROM raw_artefacts",
+        "transactions": "SELECT COUNT(*) FROM transactions",
+        "valuations": "SELECT COUNT(*) FROM valuations",
+        "events": "SELECT COUNT(*) FROM events",
+        "review_queue": "SELECT COUNT(*) FROM review_queue",
+    }
+
     def counts(self) -> dict[str, int]:
-        tables = ["raw_artefacts", "transactions", "valuations", "events", "review_queue"]
         return {
-            table: self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in tables
+            table: int(self.connection.execute(query).fetchone()[0])
+            for table, query in self._COUNT_QUERIES.items()
         }
 
 

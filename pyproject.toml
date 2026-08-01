@@ -16,6 +16,7 @@ dependencies = [
 dev = [
     "pytest>=9.1",
     "ruff>=0.16",
+    "mypy>=2.3",
 ]
 
 [project.scripts]
@@ -37,4 +38,44 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# Several review findings were exactly the classes these families catch, which
+# is a better argument for them than any style preference: naive datetime
+# handling, a bare except swallowing a failure, and a path built by string
+# concatenation.
+select = [
+    "E", "F", "I", "UP", "B", "SIM",
+    "ANN",   # missing annotations - the entry point for type checking
+    "S",     # common security mistakes
+    "DTZ",   # naive datetimes; every timestamp here must carry a zone
+    "PTH",   # pathlib over os.path
+    "RUF",   # ruff's own checks
+    "C4",    # comprehension clarity
+    "RET",   # return-flow clarity
+]
+ignore = [
+    "ANN401",  # deliberate: `object` is used as the unknown type, never Any
+    "S101",    # assert is how tests express intent
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests describe scenarios rather than expose an API, and their fixtures are
+# self-evidently typed by what they return.
+"tests/*" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "S105", "S106"]
+# Scripts are operator tools run by hand, not a library surface.
+"scripts/*" = ["ANN001", "ANN201", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# The point of the exercise: an untyped call or an implicit Any silently
+# switches checking off for everything downstream of it, which is how a bare
+# `dict` from a provider ends up flowing unchecked into stored money.
+disallow_any_unimported = true
+warn_unreachable = true
+files = ["src/obdi"]
+
+[[tool.mypy.overrides]]
+# Tests exercise deliberately malformed inputs, so they type-check loosely on
+# purpose - a test proving a wrong type is refused must be able to pass one.
+module = "tests.*"
+ignore_errors = true

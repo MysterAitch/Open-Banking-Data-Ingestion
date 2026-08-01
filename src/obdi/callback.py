@@ -73,7 +73,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
     callback_path = "/callback"
     code_handler: CodeHandler | None = None
 
-    def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.rstrip("/") != self.callback_path.rstrip("/"):
             self._respond(404, render_page("Not found", "Nothing is served here."))
@@ -106,7 +106,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
 
         try:
             message = self.code_handler(code, params.get("state", [""])[0])
-        except Exception as exc:  # noqa: BLE001 - the browser must see the reason
+        except Exception as exc:
             self._respond(500, render_page("Exchange failed", html.escape(str(exc))))
             return
 

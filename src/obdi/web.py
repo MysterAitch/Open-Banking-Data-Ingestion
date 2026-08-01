@@ -144,6 +144,25 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
 
+    @property
+    def bound_config(self) -> WebConfig:
+        """Configuration, or a clear failure if the handler was never bound.
+
+        The class attributes exist because the server instantiates handlers
+        itself, so they cannot be constructor arguments. Narrowing here means
+        an unbound handler fails once, saying so, rather than raising an
+        attribute error on None somewhere inside request handling.
+        """
+        if self.config is None:
+            raise RuntimeError("handler was not bound to a configuration")
+        return self.config
+
+    @property
+    def bound_session(self) -> AuthorisationSession:
+        if self.session is None:
+            raise RuntimeError("handler was not bound to an authorisation session")
+        return self.session
+
     # A socket that opens and then says nothing must not hold the handler
     # forever. Without this a single idle connection wedges the whole service,
     # including the OAuth callback - so an authorisation already in flight
@@ -167,13 +186,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         except TimeoutError:
             self.close_connection = True
 
-    def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
 
         if route == "/":
-            self._respond(200, render_index(self.config.connection_store))
+            self._respond(200, render_index(self.bound_config.connection_store))
         elif route == "/connect":
             self._connect(params)
         elif route == "/callback":
@@ -187,10 +206,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._respond(400, render_page("Name required", "<p>Give the connection a name.</p>"))
             return
 
-        state = self.session.begin(name)
+        state = self.bound_session.begin(name)
         link = build_auth_link(
-            client_id=self.config.client_id,
-            redirect_uri=self.config.redirect_uri,
+            client_id=self.bound_config.client_id,
+            redirect_uri=self.bound_config.redirect_uri,
             state=state,
         )
         self.send_response(302)
@@ -214,7 +233,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            name = self.session.claim(state)
+            name = self.bound_session.claim(state)
         except KeyError as exc:
             # Refusing here is the point of the state parameter: without it a
             # code could be redeemed into a connection nobody chose.
@@ -227,15 +246,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         try:
             tokens = exchange_code(
                 code=code,
-                client_id=self.config.client_id,
-                client_secret=self.config.client_secret,
-                redirect_uri=self.config.redirect_uri,
+                client_id=self.bound_config.client_id,
+                client_secret=self.bound_config.client_secret,
+                redirect_uri=self.bound_config.redirect_uri,
             )
             connection = build_connection(
                 connection_id=name, provider=name, token_response=tokens
             )
-            self.config.connection_store.put(connection)
-        except Exception as exc:  # noqa: BLE001 - the phone must see the reason
+            self.bound_config.connection_store.put(connection)
+        except Exception as exc:
             self._respond(500, render_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
             return
 

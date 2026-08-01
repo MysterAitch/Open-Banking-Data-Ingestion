@@ -1,5 +1,6 @@
 import pytest
 
+from obdi.jsontypes import JsonShapeError
 from obdi.models import TransactionStatus
 from obdi.providers.starling import StarlingError, to_transaction
 
@@ -34,8 +35,11 @@ class TestAmountSign:
             to_transaction(feed_item(direction=""), account_id="a")
 
     def test_Amount_WhenMinorUnitsNotAnInteger_RefusedRatherThanCoerced(self):
+        # Caught at the JSON boundary rather than inside the mapper, which is
+        # the better place for it: the field is named in the error, and every
+        # other numeric field gets the same protection for free.
         item = feed_item(amount={"currency": "GBP", "minorUnits": 14.99})
-        with pytest.raises(StarlingError, match="minorUnits"):
+        with pytest.raises((StarlingError, JsonShapeError), match="minorUnits"):
             to_transaction(item, account_id="a")
 
 

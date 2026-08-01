@@ -47,7 +47,7 @@ class ActualAccountBinding:
     label: str = ""
 
 
-def to_actual_transaction(transaction: Transaction) -> dict:
+def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
     """Map one canonical transaction into Actual's import shape.
 
     Amounts pass through unchanged: Actual also stores integer minor units with
@@ -105,7 +105,7 @@ def build_payload(
     bindings: list[ActualAccountBinding],
     *,
     include_internal_transfers: bool = False,
-) -> dict[str, list[dict]]:
+) -> dict[str, list[dict[str, object]]]:
     """Group transactions by Actual account, ready to import.
 
     Internal transfers are excluded by default. They are real movements between
@@ -117,7 +117,7 @@ def build_payload(
     inventing a destination would scatter transactions into the wrong budget.
     """
     by_canonical = {binding.canonical_id: binding.actual_account_id for binding in bindings}
-    payload: dict[str, list[dict]] = defaultdict(list)
+    payload: dict[str, list[dict[str, object]]] = defaultdict(list)
 
     for transaction in transactions:
         if transaction.is_internal_transfer and not include_internal_transfers:

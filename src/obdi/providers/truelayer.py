@@ -25,6 +25,7 @@ from urllib.parse import urlencode
 import httpx
 
 from ..identity import artefact_digest, content_key
+from ..jsontypes import JsonObject, as_object, rows, text
 from ..models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from ..money import parse_amount
 
@@ -68,7 +69,7 @@ def build_auth_link(
 
 def exchange_code(
     *, code: str, client_id: str, client_secret: str, redirect_uri: str
-) -> dict:
+) -> JsonObject:
     """Swap a single-use authorisation code for tokens."""
     response = httpx.post(
         f"{AUTH_HOST}/connect/token",
@@ -90,15 +91,15 @@ def exchange_code(
     return decode(response.text)
 
 
-def decode(payload: bytes | str) -> dict:
+def decode(payload: bytes | str) -> JsonObject:
     """Decode provider JSON without letting floats near an amount."""
-    text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
-    return json.loads(text, parse_float=Decimal)
+    body = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+    return as_object(json.loads(body, parse_float=Decimal), field="response")
 
 
 def refresh_access_token(
     *, refresh_token: str, client_id: str, client_secret: str, client: httpx.Client | None = None
-) -> dict:
+) -> JsonObject:
     """Exchange a refresh token for a new access token.
 
     Note what this does NOT do: extend consent. That clock is independent and
@@ -122,7 +123,9 @@ def refresh_access_token(
     return decode(response.text)
 
 
-def fetch_accounts(access_token: str, *, client: httpx.Client | None = None) -> list[dict]:
+def fetch_accounts(
+    access_token: str, *, client: httpx.Client | None = None
+) -> list[JsonObject]:
     http = client or httpx.Client(timeout=30.0)
     response = http.get(
         f"{API_HOST}/data/v1/accounts",
@@ -130,7 +133,7 @@ def fetch_accounts(access_token: str, *, client: httpx.Client | None = None) -> 
     )
     if response.status_code != 200:
         raise TrueLayerError(f"Account fetch failed (HTTP {response.status_code})")
-    return decode(response.text).get("results", [])
+    return rows(decode(response.text), "results")
 
 
 def fetch_transactions(
@@ -141,7 +144,7 @@ def fetch_transactions(
     until: date | None = None,
     pending: bool = False,
     client: httpx.Client | None = None,
-) -> tuple[list[dict], bytes]:
+) -> tuple[list[JsonObject], bytes]:
     """Return parsed transactions and the raw body, so the raw body can be landed.
 
     The raw bytes are returned alongside deliberately: landing the verbatim
@@ -151,8 +154,9 @@ def fetch_transactions(
     suffix = "/pending" if pending else ""
     params = {}
     if not pending:
-        params["from"] = (since or date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS)).isoformat()
-        params["to"] = (until or date.today()).isoformat()
+        earliest = since or datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS)
+        params["from"] = earliest.isoformat()
+        params["to"] = (until or datetime.now(UTC).date()).isoformat()
 
     response = http.get(
         f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}",
@@ -162,10 +166,12 @@ def fetch_transactions(
     if response.status_code != 200:
         raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
     body = response.content
-    return decode(body).get("results", []), body
+    return rows(decode(body), "results"), body
 
 
-def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> Transaction:
+def to_transaction(
+    record: JsonObject, *, account_id: str, pending: bool = False
+) -> Transaction:
     """Map one provider record onto the canonical model.
 
     The amount arrives signed. Where `transaction_type` is also present the two
@@ -179,25 +185,25 @@ def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> T
     # The record's own currency, not an assumed one. Parsing every amount as
     # sterling routed around money.py's guard while still storing the true
     # currency alongside, so the figure and its label disagreed in silence.
-    currency = record.get("currency", "GBP")
+    currency = text(record, "currency", default="GBP")
     amount_minor = parse_amount(str(raw_amount), currency=currency)
 
-    transaction_type = (record.get("transaction_type") or "").upper()
+    transaction_type = text(record, "transaction_type").upper()
     if transaction_type == "DEBIT" and amount_minor > 0:
         amount_minor = -amount_minor
     elif transaction_type == "CREDIT" and amount_minor < 0:
         raise TrueLayerError(
-            f"transaction {record.get('transaction_id')} is typed CREDIT but carries a "
+            f"transaction {text(record, 'transaction_id')} is typed CREDIT but carries a "
             "negative amount; refusing to guess the sign convention"
         )
 
-    timestamp = record.get("timestamp", "")
+    timestamp = text(record, "timestamp")
     if not timestamp:
         raise TrueLayerError("transaction has no timestamp")
     when = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
 
-    description = record.get("description", "")
-    merchant = (record.get("merchant_name") or "").strip()
+    description = text(record, "description")
+    merchant = text(record, "merchant_name").strip()
 
     return Transaction(
         account_id=account_id,
@@ -211,7 +217,7 @@ def to_transaction(record: dict, *, account_id: str, pending: bool = False) -> T
         source="truelayer",
         # Pending records carry a different id from the settled version of the
         # same payment, which is why supersession exists rather than update.
-        source_id=record.get("transaction_id") or None,
+        source_id=text(record, "transaction_id") or None,
         tier=SourceTier.AUTHORITATIVE,
         content_key=content_key(
             account_id=account_id,

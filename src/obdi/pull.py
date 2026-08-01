@@ -19,12 +19,13 @@ Starling that does not exist, and a refresh step that does nothing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
+from .jsontypes import text
 from .providers import starling, truelayer
 from .store import Store
 
@@ -34,11 +35,7 @@ class PullResult:
     provider: str
     accounts: int = 0
     summary: ImportSummary | None = None
-    notes: list[str] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.notes is None:
-            self.notes = []
+    notes: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
         head = f"{self.provider}: {self.accounts} account(s)"
@@ -102,7 +99,7 @@ def pull_truelayer(
     result.accounts = len(accounts)
 
     for account in accounts:
-        provider_account_id = account.get("account_id", "")
+        provider_account_id = text(account, "account_id")
         canonical = account_map.resolve("truelayer", provider_account_id)
         if canonical.startswith("truelayer:"):
             result.notes.append(
@@ -147,7 +144,7 @@ def pull_starling(
     result.accounts = len(accounts)
 
     for account in accounts:
-        account_uid = account.get("accountUid", "")
+        account_uid = text(account, "accountUid")
         canonical = account_map.resolve("starling", account_uid)
         if canonical.startswith("starling:"):
             result.notes.append(

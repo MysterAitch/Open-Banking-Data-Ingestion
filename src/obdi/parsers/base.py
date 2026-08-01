@@ -17,6 +17,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import date, datetime
 
+from ..models import Transaction
+
 
 class ParseError(ValueError):
     """Raised when input does not match what the parser expects.
@@ -32,7 +34,10 @@ def parse_date(text: str, fmt: str) -> date:
     if not cleaned:
         raise ParseError("empty date")
     try:
-        return datetime.strptime(cleaned, fmt).date()
+        # Naive on purpose: a statement line is a calendar date, with no time
+        # and no zone. Attaching one would invent precision the bank never
+        # supplied, and the result is converted to a date immediately.
+        return datetime.strptime(cleaned, fmt).date()  # noqa: DTZ007
     except ValueError as exc:
         raise ParseError(f"date {cleaned!r} does not match pinned format {fmt!r}") from exc
 
@@ -82,5 +87,5 @@ class StatementParser(ABC):
             yield {(k or "").strip(): (v or "").strip() for k, v in row.items()}
 
     @abstractmethod
-    def parse(self, payload: bytes, *, account_id: str) -> Iterator:
+    def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
         """Yield Transaction records. Implementations must not swallow errors."""

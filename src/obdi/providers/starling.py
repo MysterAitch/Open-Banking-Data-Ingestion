@@ -37,6 +37,7 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 
 from ..identity import artefact_digest, content_key
+from ..jsontypes import JsonObject, as_object, nested, rows, text, whole_number
 from ..models import RawArtefact, SourceTier, Transaction, TransactionStatus
 
 API_HOST = "https://api.starlingbank.com"
@@ -66,8 +67,8 @@ class StarlingError(RuntimeError):
 
 
 def _get(
-    path: str, token: str, *, client: httpx.Client | None = None, **params
-) -> tuple[dict, bytes]:
+    path: str, token: str, *, client: httpx.Client | None = None, **params: str
+) -> tuple[JsonObject, bytes]:
     http = client or httpx.Client(timeout=30.0)
     response = http.get(
         f"{API_HOST}{path}",
@@ -81,12 +82,12 @@ def _get(
         )
     if response.status_code != 200:
         raise StarlingError(f"Starling call to {path} failed (HTTP {response.status_code})")
-    return json.loads(response.text), response.content
+    return as_object(json.loads(response.text), field="response"), response.content
 
 
-def fetch_accounts(token: str, *, client: httpx.Client | None = None) -> list[dict]:
+def fetch_accounts(token: str, *, client: httpx.Client | None = None) -> list[JsonObject]:
     payload, _ = _get("/api/v2/accounts", token, client=client)
-    return payload.get("accounts", [])
+    return rows(payload, "accounts")
 
 
 @dataclass(frozen=True)
@@ -111,18 +112,22 @@ def fetch_categories(
     """
     accounts = fetch_accounts(token, client=client)
     categories = [
-        Category(uid=account["defaultCategory"], name=account.get("name", "main"), is_space=False)
+        Category(
+            uid=text(account, "defaultCategory"),
+            name=text(account, "name", default="main"),
+            is_space=False,
+        )
         for account in accounts
-        if account.get("accountUid") == account_uid and account.get("defaultCategory")
+        if text(account, "accountUid") == account_uid and text(account, "defaultCategory")
     ]
 
     payload, _ = _get(f"/api/v2/account/{account_uid}/spaces", token, client=client)
-    for goal in payload.get("savingsGoals", []):
-        if goal.get("savingsGoalUid"):
+    for goal in rows(payload, "savingsGoals"):
+        if text(goal, "savingsGoalUid"):
             categories.append(
                 Category(
-                    uid=goal["savingsGoalUid"],
-                    name=goal.get("name", "space"),
+                    uid=text(goal, "savingsGoalUid"),
+                    name=text(goal, "name", default="space"),
                     is_space=True,
                 )
             )
@@ -136,19 +141,22 @@ def fetch_feed(
     *,
     since: date | None = None,
     client: httpx.Client | None = None,
-) -> tuple[list[dict], bytes]:
+) -> tuple[list[JsonObject], bytes]:
     """Feed items for one category, with the raw body for landing."""
-    start = since or (date.today() - timedelta(days=DEFAULT_BACKFILL_DAYS))
+    # Explicitly UTC: date.today() reads the process timezone, so a
+    # container and a workstation can disagree about which day it is and
+    # silently shift the window boundary.
+    start = since or (datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS))
     payload, body = _get(
         f"/api/v2/feed/account/{account_uid}/category/{category_uid}",
         token,
         client=client,
         changesSince=datetime.combine(start, datetime.min.time()).isoformat() + "Z",
     )
-    return payload.get("feedItems", []), body
+    return rows(payload, "feedItems"), body
 
 
-def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
+def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     """Map one feed item, or None if it should not be stored.
 
     Returns None only for movements that never happened - declined cards and
@@ -157,48 +165,48 @@ def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
     the Space balance untrackable. They are marked as internal so that pairing
     can keep them out of spending without discarding them.
     """
-    status = STATUS_MAP.get((item.get("status") or "").upper())
+    status = STATUS_MAP.get(text(item, "status").upper())
     if status is None:
         return None
 
-    amount = item.get("amount") or {}
-    currency = amount.get("currency", "GBP")
+    amount = nested(item, "amount")
+    currency = text(amount, "currency", default="GBP")
     if currency != "GBP":
         # minorUnits sidesteps float problems but says nothing about which
         # currency's minor units these are. Storing a euro figure as sterling
         # would be silent, and the budgeting tool downstream is single-currency
         # so there is nowhere correct for it to go.
         raise StarlingError(
-            f"feed item {item.get('feedItemUid')} is in {currency}; only GBP is supported"
+            f"feed item {text(item, 'feedItemUid')} is in {currency}; only GBP is supported"
         )
 
-    minor_units = amount.get("minorUnits")
-    if not isinstance(minor_units, int):
+    minor_units = whole_number(amount, "minorUnits")
+    if minor_units is None:
         raise StarlingError(
-            f"feed item {item.get('feedItemUid')} has a non-integer minorUnits; "
+            f"feed item {text(item, 'feedItemUid')} has a non-integer minorUnits; "
             "refusing to coerce an amount"
         )
 
     # minorUnits is unsigned; the sign lives in direction. Ignoring it makes
     # every payment look like income.
-    direction = (item.get("direction") or "").upper()
+    direction = text(item, "direction").upper()
     if direction == "OUT":
         minor_units = -abs(minor_units)
     elif direction == "IN":
         minor_units = abs(minor_units)
     else:
         raise StarlingError(
-            f"feed item {item.get('feedItemUid')} has direction {direction!r}; "
+            f"feed item {text(item, 'feedItemUid')} has direction {direction!r}; "
             "refusing to guess the sign"
         )
 
-    timestamp = item.get("transactionTime") or item.get("settlementTime")
+    timestamp = text(item, "transactionTime") or text(item, "settlementTime")
     if not timestamp:
         raise StarlingError("feed item has no transaction time")
     when = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
 
-    counterparty = (item.get("counterPartyName") or "").strip()
-    description = (item.get("reference") or "").strip() or counterparty
+    counterparty = text(item, "counterPartyName").strip()
+    description = text(item, "reference").strip() or counterparty
 
     return Transaction(
         account_id=account_id,
@@ -210,11 +218,11 @@ def to_transaction(item: dict, *, account_id: str) -> Transaction | None:
         counterparty=counterparty,
         status=status,
         source="starling",
-        source_id=item.get("feedItemUid") or None,
+        source_id=text(item, "feedItemUid") or None,
         tier=SourceTier.AUTHORITATIVE,
         # Marked here, confirmed later by pairing against the other side. The
         # flag is what keeps a Space transfer out of spending without losing it.
-        is_internal_transfer=item.get("source") == INTERNAL_SOURCE,
+        is_internal_transfer=text(item, "source") == INTERNAL_SOURCE,
         content_key=content_key(
             account_id=account_id,
             amount_minor=minor_units,

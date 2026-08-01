@@ -33,7 +33,7 @@ class AccountBinding:
 class AccountMap:
     """Resolves (source, provider account id) to a canonical account id."""
 
-    def __init__(self, bindings: list[AccountBinding] | None = None):
+    def __init__(self, bindings: list[AccountBinding] | None = None) -> None:
         self._bindings: dict[tuple[str, str], str] = {}
         for binding in bindings or []:
             self.bind(binding)

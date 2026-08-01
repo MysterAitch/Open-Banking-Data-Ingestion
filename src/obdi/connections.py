@@ -30,6 +30,8 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from .jsontypes import JsonObject, text, whole_number
+
 # Refresh a little before expiry rather than on it, so a slow request cannot
 # start valid and arrive expired.
 REFRESH_MARGIN = timedelta(minutes=5)
@@ -91,7 +93,7 @@ def build_connection(
     *,
     connection_id: str,
     provider: str,
-    token_response: dict,
+    token_response: JsonObject,
     scopes: str = "",
     now: datetime | None = None,
     consent_days: int = DEFAULT_CONSENT_DAYS,
@@ -103,8 +105,8 @@ def build_connection(
     it gets forgotten.
     """
     moment = now or datetime.now(UTC)
-    expires_in = int(token_response.get("expires_in", 0))
-    refresh_token = token_response.get("refresh_token", "")
+    expires_in = whole_number(token_response, "expires_in") or 0
+    refresh_token = text(token_response, "refresh_token")
     if not refresh_token:
         raise ValueError(
             "No refresh token in the response. Without one every sync would need "
@@ -114,7 +116,7 @@ def build_connection(
         connection_id=connection_id,
         provider=provider,
         refresh_token=refresh_token,
-        access_token=token_response.get("access_token", ""),
+        access_token=text(token_response, "access_token"),
         access_expires_at=(moment + timedelta(seconds=expires_in)).isoformat(),
         consent_expires_at=(moment + timedelta(days=consent_days)).isoformat(),
         scopes=scopes,
@@ -123,7 +125,7 @@ def build_connection(
 
 
 def apply_refresh(
-    connection: Connection, token_response: dict, *, now: datetime | None = None
+    connection: Connection, token_response: JsonObject, *, now: datetime | None = None
 ) -> Connection:
     """Apply a refresh response, leaving the consent clock untouched.
 
@@ -133,11 +135,11 @@ def apply_refresh(
     would hide the wall until it was hit.
     """
     moment = now or datetime.now(UTC)
-    expires_in = int(token_response.get("expires_in", 0))
+    expires_in = whole_number(token_response, "expires_in") or 0
     return replace(
         connection,
-        access_token=token_response.get("access_token", connection.access_token),
-        refresh_token=token_response.get("refresh_token") or connection.refresh_token,
+        access_token=text(token_response, "access_token") or connection.access_token,
+        refresh_token=text(token_response, "refresh_token") or connection.refresh_token,
         access_expires_at=(moment + timedelta(seconds=expires_in)).isoformat(),
     )
 
@@ -145,7 +147,7 @@ def apply_refresh(
 class ConnectionStore:
     """A JSON file of connections, kept beside your other secrets."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
     def load(self) -> dict[str, Connection]:
@@ -177,17 +179,17 @@ class ConnectionStore:
             dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp"
         )
         try:
-            os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+            Path(temporary).chmod(stat.S_IRUSR | stat.S_IWUSR)
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(rendered)
                 handle.flush()
                 # Without this the rename can be durable while the contents are
                 # not, leaving an intact-looking but empty file after a crash.
                 os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
+            Path(temporary).replace(self.path)
         except BaseException:
             with contextlib.suppress(OSError):
-                os.unlink(temporary)
+                Path(temporary).unlink()
             raise
 
     def put(self, connection: Connection) -> None:
