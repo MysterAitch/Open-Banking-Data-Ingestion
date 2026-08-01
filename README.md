@@ -113,14 +113,16 @@ Only the first item is needed to start. File import needs no credentials at all.
 | TrueLayer | no | live access is sales-gated; sandbox is fake data |
 | GoCardless | no | closed to new signups since 2025 |
 
-**The UK aggregator picture is unsettled — test, do not assume.** Enable
-Banking's account-linking country selector had no GB entry as at 2026-08-01
-(checked in the page source), yet community reports say its coverage listing
-includes a handful of UK banks — so GB connectors may exist while being
-unavailable to restricted personal applications. `scripts/check_uk_coverage.py`
-distinguishes those two cases.
+**Enable Banking does not serve the UK** (established 2026-08-01). Its
+account-linking country selector has no GB entry; an unactivated application
+returns `403 Application is not active`; the console states that individuals
+activate only by linking accounts; and the *commercial* quote-request form also
+omits the United Kingdom. So this is an uncovered market rather than a tier
+restriction, and no amount of paying changes it. Keep the registered
+application only if you hold an account with an EEA-registered entity — Revolut
+and Wise both operate one — since Ireland and Lithuania are selectable.
 
-Other routes worth testing, none confirmed here:
+Routes still worth testing, none confirmed here:
 
 - **TrueLayer** and **Tink** consoles. A developer building UK sync for Actual
   and Firefly III reports running live data-only applications on TrueLayer
