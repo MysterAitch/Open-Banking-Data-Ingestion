@@ -116,8 +116,13 @@ CREATE TABLE IF NOT EXISTS transaction_sources (
     entity_id  TEXT NOT NULL,
     source     TEXT NOT NULL,
     source_id  TEXT,
+    -- The artefact this sighting came from, so a merged record can be walked
+    -- back to the exact raw bytes of EVERY observation that formed it - the
+    -- transaction row's own digest is last-writer-wins and cannot. This
+    -- traversal is what confidence in a derived record rests on.
+    artefact_digest TEXT NOT NULL DEFAULT '',
     first_seen_at TEXT NOT NULL,
-    PRIMARY KEY (entity_id, source)
+    PRIMARY KEY (entity_id, source, artefact_digest)
 );
 
 CREATE TABLE IF NOT EXISTS review_queue (
@@ -188,12 +193,31 @@ class Store:
         )
 
     def sources_for(self, entity_id: str) -> list[str]:
-        """Every source that has observed this transaction, oldest name first."""
+        """Every source that has observed this transaction.
+
+        Distinct on purpose: several sightings by one source are several
+        artefacts, not several sources, and only independent sources count as
+        corroboration.
+        """
         rows = self.connection.execute(
-            "SELECT source FROM transaction_sources WHERE entity_id = ? ORDER BY source",
+            "SELECT DISTINCT source FROM transaction_sources WHERE entity_id = ? ORDER BY source",
             (entity_id,),
         ).fetchall()
         return [row[0] for row in rows]
+
+    def sightings_for(self, entity_id: str) -> list[tuple[str, str]]:
+        """(source, artefact_digest) for every observation of this transaction.
+
+        The walk back to layer zero: each digest opens the verbatim payload the
+        sighting arrived in, so a derived record can always be checked against
+        the exact bytes behind it.
+        """
+        rows = self.connection.execute(
+            """SELECT source, artefact_digest FROM transaction_sources
+               WHERE entity_id = ? ORDER BY first_seen_at, source""",
+            (entity_id,),
+        ).fetchall()
+        return [(row[0], row[1]) for row in rows]
 
     def record_source(self, transaction: Transaction) -> None:
         """Note that this source has seen this transaction.
@@ -204,14 +228,16 @@ class Store:
         """
         self.connection.execute(
             """
-            INSERT INTO transaction_sources (entity_id, source, source_id, first_seen_at)
-            VALUES (?,?,?,?)
-            ON CONFLICT(entity_id, source) DO NOTHING
+            INSERT INTO transaction_sources
+                (entity_id, source, source_id, artefact_digest, first_seen_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
             """,
             (
                 transaction.entity_id,
                 transaction.source,
                 transaction.source_id,
+                transaction.artefact_digest,
                 datetime.now().astimezone().isoformat(),
             ),
         )

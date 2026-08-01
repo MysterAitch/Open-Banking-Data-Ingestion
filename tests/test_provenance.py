@@ -60,3 +60,36 @@ class TestWhoHasSeenThisPayment:
             # Re-pulling the same feed is routine and says nothing new about
             # corroboration - two sightings by one source are not two sources.
             assert store.sources_for(held[0].entity_id) == ["truelayer"]
+
+
+class TestTraversalBackToTheRawBytes:
+    """Every derived record must be traceable to the exact artefacts behind it.
+
+    Recording the source name alone says who saw it but not WHERE - and the
+    transaction row's own digest is last-writer-wins, so the artefact behind an
+    earlier sighting was unreachable. Confidence in a merged record comes from
+    being able to open the raw bytes of every observation that formed it.
+    """
+
+    def test_Provenance_EachSightingRecordsTheArtefactItCameFrom(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(store, [txn("truelayer", source_id="tl-1")], digest="digest-api")
+            reconcile_batch(store, [txn("halifax-qif")], digest="digest-csv")
+
+            held = store.all_transactions()
+            sightings = store.sightings_for(held[0].entity_id)
+            assert ("truelayer", "digest-api") in sightings
+            assert ("halifax-qif", "digest-csv") in sightings
+
+    def test_Provenance_ARepullRecordsItsOwnArtefactWithoutInventingASecondSource(
+        self, tmp_path
+    ):
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(store, [txn("truelayer", source_id="tl-1")], digest="digest-1")
+            reconcile_batch(store, [txn("truelayer", source_id="tl-1")], digest="digest-2")
+
+            held = store.all_transactions()
+            # Both artefacts are reachable - that is the traversal guarantee -
+            # while the source list still shows one source, not two.
+            assert len(store.sightings_for(held[0].entity_id)) == 2
+            assert store.sources_for(held[0].entity_id) == ["truelayer"]

@@ -212,7 +212,9 @@ def _reconcile(
         # only carry one, so the sighting that just arrived is exactly the fact
         # that would otherwise be lost - and it is the one that makes this a
         # corroboration rather than a repeat.
-        store.record_source(replace(transaction, entity_id=result.existing.entity_id))
+        store.record_source(
+            replace(transaction, entity_id=result.existing.entity_id, artefact_digest=digest)
+        )
         if merged.status != result.existing.status:
             summary.superseded += 1
         else:
