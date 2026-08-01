@@ -106,12 +106,25 @@ Only the first item is needed to start. File import needs no credentials at all.
 
 | Provider | Needed? | What to get |
 |---|---|---|
-| **Enable Banking** | already registered | Application ID + private key `.pem` |
 | **Starling** | only if you bank there | personal access token, read-only scopes |
 | **Monzo** | only if you bank there | **confidential** client id + secret |
 | **Actual Budget** | later, for replay | server URL, password, sync id |
+| Enable Banking | EEA accounts only | personal tier has no UK; see below |
 | TrueLayer | no | live access is sales-gated; sandbox is fake data |
 | GoCardless | no | closed to new signups since 2025 |
+
+**There is no general-purpose Open Banking route for a UK individual.** Verified
+2026-08-01 in Enable Banking's account-linking form: the country selector lists
+29 EEA countries and has no GB entry, and since linking is what activates a
+restricted production application, UK accounts cannot be read on the free tier.
+GoCardless closed to new signups in 2025; every other aggregator gates live
+access behind a sales conversation.
+
+That leaves **first-party bank APIs where they exist, and file import for
+everything else** — which promotes file import from a stepping stone to the
+primary mechanism. Enable Banking may still be worth keeping for accounts held
+with an EEA-registered entity rather than a UK one (Revolut and Wise both
+operate EEA banking entities).
 
 Notes that will save time:
 
