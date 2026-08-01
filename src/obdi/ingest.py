@@ -7,9 +7,11 @@ closes.
 
 from __future__ import annotations
 
+import sys
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from .identity import artefact_digest
@@ -35,6 +37,23 @@ class ImportSummary:
         )
 
 
+def dates_cannot_confirm_format(dates: Sequence[date]) -> bool:
+    """True when nothing in the data rules out the transposed reading.
+
+    Parsers pin their date format rather than guessing, and that is what
+    normally catches a file in the wrong convention: under %d/%m/%Y a day of 13
+    or more is an invalid month and fails immediately. One such date anywhere in
+    the file proves the format for all of it.
+
+    With no such date, both readings parse cleanly and the file is silently
+    wrong under one of them. That is not a reason to refuse the import - the
+    pinned format is still the best available guess - but it is a reason to say
+    so, because the alternative is a batch of transactions in the wrong month
+    that nothing will ever question.
+    """
+    return bool(dates) and all(value.day <= 12 for value in dates)
+
+
 def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     payload = path.read_bytes()
     digest = artefact_digest(payload)
@@ -52,6 +71,16 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
 
     parser = detect(payload)
     incoming = list(parser.parse(payload, account_id=account_id))
+
+    if dates_cannot_confirm_format([item.value_date for item in incoming]):
+        print(
+            f"WARNING: every date in {path.name} falls on the 12th or earlier, so "
+            f"nothing in the file rules out the opposite day/month reading. It was "
+            f"parsed as {parser.date_format}. If that is wrong, every date here is "
+            "in the wrong month - cross-check against another source before relying "
+            "on it.",
+            file=sys.stderr,
+        )
 
     # Reconciliation is shared with API pulls rather than duplicated here, so
     # identity resolution cannot drift between the two routes - the same
