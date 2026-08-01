@@ -335,6 +335,7 @@ def _pull(
     target: str,
     db_path: Path,
     since: date | None,
+    until: date | None = None,
     deep: bool = False,
     only_account: str | None = None,
 ) -> int:
@@ -381,6 +382,7 @@ def _pull(
                 connection_store=connection_store,
                 account_map=account_map,
                 since=since,
+                until=until,
                 only_account=only_account,
                 # Forwarded, not defaulted. Dropping this is what disconnected
                 # the backfill ladder from the only moment it exists for: the
@@ -437,6 +439,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="PROVIDER_REF",
         help="probe a single provider account rather than the whole connection",
+    )
+    pull_command.add_argument(
+        "--until",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="end of an offset probe window; with --since, places the window "
+        "anywhere in history rather than pinning it to today",
     )
     pull_command.add_argument(
         "--since",
@@ -553,7 +563,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pull":
         if not args.target:
             return _pull_everything(db_path, args.since)
-        return _pull(args.target, db_path, args.since, only_account=args.account)
+        return _pull(
+            args.target, db_path, args.since, until=args.until, only_account=args.account
+        )
 
     if args.command == "value":
         return _value(args, db_path)

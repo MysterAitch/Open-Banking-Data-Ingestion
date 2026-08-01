@@ -59,7 +59,7 @@ def _connection():
     )
 
 
-def _run(store, since=None, only_account=None):
+def _run(store, since=None, until=None, only_account=None):
     from obdi.connections import ConnectionStore
 
     return pull_truelayer(
@@ -70,6 +70,7 @@ def _run(store, since=None, only_account=None):
         connection_store=ConnectionStore(store.path.parent / "c.json"),
         account_map=AccountMap(),
         since=since,
+        until=until,
         only_account=only_account,
     )
 
@@ -98,3 +99,30 @@ class TestAWindowProbe:
             _run(store, since=date(2020, 8, 5), only_account="acc-1")
 
         assert calls["transactions"] == ["acc-1:booked"], "one call, the one measured"
+
+
+class TestAnOffsetWindowProbe:
+    """--until lets a probe place the window anywhere in history.
+
+    The discriminating experiment: every probe so far pinned `to` at today, so
+    "from may not be older than X" and "the window may not span more than X"
+    predict identical outcomes. A window of the known-accepted span placed
+    entirely in the past separates them - and if span is the real constraint,
+    the whole history is walkable in accepted-size pages.
+    """
+
+    def test_WithSinceAndUntil_TheExactWindowIsForwarded(self, calls, tmp_path, monkeypatch):
+        seen = {}
+
+        def fake_transactions(_token, account_id, **kwargs):
+            seen["since"] = kwargs.get("since")
+            seen["until"] = kwargs.get("until")
+            return [], b'{"results": [], "status": "Succeeded"}', "from=x&to=y"
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", fake_transactions)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _run(store, since=date(2022, 8, 3), until=date(2024, 8, 2), only_account="acc-1")
+
+        assert seen["since"] == date(2022, 8, 3)
+        assert seen["until"] == date(2024, 8, 2)

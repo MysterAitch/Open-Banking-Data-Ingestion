@@ -90,6 +90,7 @@ def pull_truelayer(
     connection_store: ConnectionStore,
     account_map: AccountMap,
     since: date | None = None,
+    until: date | None = None,
     deep: bool = False,
     only_account: str | None = None,
 ) -> PullResult:
@@ -161,6 +162,7 @@ def pull_truelayer(
                 connection.access_token,
                 provider_account_id,
                 since=since,
+                until=until,
                 pending=pending,
                 deep=deep,
                 known_ceiling_days=int(known_ceiling) if known_ceiling else None,
