@@ -181,8 +181,25 @@ def refresh_access_token(
     return decode(response.text)
 
 
+def _headers(access_token: str, psu_ip: str | None = None) -> dict[str, str]:
+    """Auth, plus the attended-access declaration when it is TRUE.
+
+    X-PSU-IP asserts the customer actively requested this access, which is the
+    regulation's exemption from the four-per-day unattended cap. It is a
+    statement of fact, not a knob: it is sent only when a human drove the
+    request and their address is known, and the scheduler - genuinely
+    unattended - never sends it. Declaring presence that did not happen would
+    be lying to a regulated counterparty about the one thing the rule exists
+    to know.
+    """
+    headers = {"Authorization": f"Bearer {access_token}"}
+    if psu_ip:
+        headers["X-PSU-IP"] = psu_ip
+    return headers
+
+
 def fetch_accounts(
-    access_token: str, *, client: httpx.Client | None = None
+    access_token: str, *, psu_ip: str | None = None, client: httpx.Client | None = None
 ) -> tuple[list[JsonObject], bytes]:
     """Accounts plus the raw body, which lands like any other payload.
 
@@ -193,7 +210,7 @@ def fetch_accounts(
     http = client or httpx.Client(timeout=30.0)
     response = http.get(
         f"{API_HOST}/data/v1/accounts",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
         raise TrueLayerError(f"Account fetch failed (HTTP {response.status_code})")
@@ -209,6 +226,7 @@ def fetch_transactions(
     pending: bool = False,
     deep: bool = False,
     known_ceiling_days: int | None = None,
+    psu_ip: str | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[list[JsonObject], bytes, str]:
     """Return the transactions, the raw body, and the range actually requested.
@@ -223,7 +241,7 @@ def fetch_transactions(
     http = client or httpx.Client(timeout=30.0)
     suffix = "/pending" if pending else ""
     url = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
-    headers = {"Authorization": f"Bearer {access_token}"}
+    headers = _headers(access_token, psu_ip)
 
     if pending:
         response = http.get(url, headers=headers)
@@ -399,7 +417,11 @@ def to_transaction(
 
 
 def fetch_balance(
-    access_token: str, account_id: str, *, client: httpx.Client | None = None
+    access_token: str,
+    account_id: str,
+    *,
+    psu_ip: str | None = None,
+    client: httpx.Client | None = None,
 ) -> tuple[list[JsonObject], bytes]:
     """The account balance now, with the raw body so it lands as evidence.
 
@@ -411,7 +433,7 @@ def fetch_balance(
     http = client or httpx.Client(timeout=30.0)
     response = http.get(
         f"{API_HOST}/data/v1/accounts/{account_id}/balance",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
         raise TrueLayerError(f"Balance fetch failed (HTTP {response.status_code})")

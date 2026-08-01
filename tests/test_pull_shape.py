@@ -23,7 +23,7 @@ from obdi.store import Store
 def calls(monkeypatch):
     made: dict[str, list[str]] = {"accounts": [], "balance": [], "transactions": []}
 
-    def fake_accounts(_token):
+    def fake_accounts(_token, **_kwargs):
         made["accounts"].append("x")
         return (
             [{"account_id": "acc-1", "display_name": "Current", "account_type": "TRANSACTION"},
@@ -59,7 +59,7 @@ def _connection():
     )
 
 
-def _run(store, since=None, until=None, only_account=None):
+def _run(store, since=None, until=None, only_account=None, psu_ip=None):
     from obdi.connections import ConnectionStore
 
     return pull_truelayer(
@@ -72,6 +72,7 @@ def _run(store, since=None, until=None, only_account=None):
         since=since,
         until=until,
         only_account=only_account,
+        psu_ip=psu_ip,
     )
 
 
@@ -126,3 +127,70 @@ class TestAnOffsetWindowProbe:
 
         assert seen["since"] == date(2022, 8, 3)
         assert seen["until"] == date(2024, 8, 2)
+
+
+class TestAttendedAccessIsDeclaredHonestly:
+    """The PSU-IP header is a statement of fact, sent only when it is one.
+
+    The regulation's axis is attended versus unattended: four unattended
+    accesses per day, unlimited when the customer actively requests. The header
+    is the designed mechanism for declaring the latter - so it is attached
+    exactly when a human drove the request and their address is known, and
+    NEVER by the scheduler, which is genuinely unattended and must not dress
+    itself up as anything else.
+    """
+
+    def test_Fetch_WithAPsuIp_SendsTheHeader(self):
+        import httpx
+
+        from obdi.providers.truelayer import fetch_transactions
+
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["psu"] = request.headers.get("X-PSU-IP")
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        fetch_transactions(
+            "token", "acc", psu_ip="100.96.178.101",
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+        assert seen["psu"] == "100.96.178.101"
+
+    def test_Fetch_Unattended_SendsNoHeaderAtAll(self):
+        import httpx
+
+        from obdi.providers.truelayer import fetch_transactions
+
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["psu"] = request.headers.get("X-PSU-IP")
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        fetch_transactions(
+            "token", "acc",
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+        assert seen["psu"] is None, "unattended must not claim otherwise"
+
+    def test_Pull_ForwardsThePsuIpToEveryFetch(self, calls, tmp_path, monkeypatch):
+        seen = {}
+
+        def fake_transactions(_token, account_id, **kwargs):
+            seen.setdefault("txn", kwargs.get("psu_ip"))
+            return [], b'{"results": [], "status": "Succeeded"}', "from=x&to=y"
+
+        def fake_balance(_token, account_id, **kwargs):
+            seen.setdefault("bal", kwargs.get("psu_ip"))
+            return [], b"{}"
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", fake_transactions)
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_balance", fake_balance)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _run(store, psu_ip="100.96.178.101")
+
+        assert seen == {"txn": "100.96.178.101", "bal": "100.96.178.101"}

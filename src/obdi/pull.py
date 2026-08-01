@@ -93,6 +93,7 @@ def pull_truelayer(
     until: date | None = None,
     deep: bool = False,
     only_account: str | None = None,
+    psu_ip: str | None = None,
 ) -> PullResult:
     connection = ensure_access_token(
         connection,
@@ -103,7 +104,9 @@ def pull_truelayer(
     result = PullResult(provider=f"truelayer/{connection.connection_id}")
     summary = ImportSummary(artefact_new=True)
 
-    accounts, accounts_body = truelayer.fetch_accounts(connection.access_token)
+    accounts, accounts_body = truelayer.fetch_accounts(
+        connection.access_token, psu_ip=psu_ip
+    )
     result.accounts = len(accounts)
     # Landed like any payload: the display names and types in here are what a
     # person needs to tell opaque account ids apart when binding them.
@@ -144,7 +147,7 @@ def pull_truelayer(
             if probing:
                 raise _SkipBalance
             _, balance_body = truelayer.fetch_balance(
-                connection.access_token, provider_account_id
+                connection.access_token, provider_account_id, psu_ip=psu_ip
             )
             store.land_artefact(
                 truelayer.artefact_for(balance_body, account_id=canonical, kind="balance")
@@ -165,6 +168,7 @@ def pull_truelayer(
                 until=until,
                 pending=pending,
                 deep=deep,
+                psu_ip=psu_ip,
                 known_ceiling_days=int(known_ceiling) if known_ceiling else None,
             )
             if deep and not pending and "from=" in asked:

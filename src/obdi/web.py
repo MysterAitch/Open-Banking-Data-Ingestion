@@ -111,13 +111,13 @@ class WebConfig:
     client_secret: str | Callable[[], str]
     redirect_uri: str
     connection_store: ConnectionStore
-    #: Called with the connection name the moment authorisation succeeds, to
+    #: Called with the connection name and the AUTHORISER'S address the moment
     #: fetch deep history while the strong customer authentication is still
     #: fresh. Injected rather than imported so this module keeps knowing nothing
     #: about stores and providers - and so a test can prove the callback fires
     #: without a database or a bank. Returning False makes the page say plainly
     #: that no backfill ran, rather than implying one did.
-    start_backfill: Callable[[str], bool] | None = None
+    start_backfill: Callable[[str, str | None], bool] | None = None
 
     #: Ran between the connect click and the redirect to the bank, returning
     #: human-readable concerns; empty means clear. Injected like the backfill
@@ -424,7 +424,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # irreplaceable part of the job depend on remembering to act within
         # minutes, on a phone, having just finished a bank login.
         starter = self.bound_config.start_backfill
-        started = starter(name) if starter is not None else False
+        # The client address of THIS request is the device that just completed
+        # the bank's strong customer authentication - presence proven, not
+        # assumed - so the backfill it triggers may honestly declare it.
+        started = (
+            starter(name, self.client_address[0]) if starter is not None else False
+        )
 
         days = connection.consent_days_remaining()
         note = (

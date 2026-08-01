@@ -181,7 +181,7 @@ class TestDeepHistoryIsFetchedWhileItIsStillReachable:
             client_secret="secret-1",
             redirect_uri="https://obdi.example.com/callback",
             connection_store=ConnectionStore(tmp_path / "c.json"),
-            start_backfill=lambda name: (started.append(name), True)[1],
+            start_backfill=lambda name, psu_ip=None: (started.append(name), True)[1],
         )
         monkeypatch.setattr(
             "obdi.web.exchange_code",

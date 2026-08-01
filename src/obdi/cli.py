@@ -171,7 +171,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def current_secret() -> str:
         return read_secret("TRUELAYER_CLIENT_SECRET")
 
-    def start_backfill(name: str) -> bool:
+    def start_backfill(name: str, psu_ip: str | None = None) -> bool:
         """Fetch deep history immediately, in the background.
 
         A thread rather than inline: a two-year backfill across several accounts
@@ -188,7 +188,11 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         def run() -> None:
             try:
-                _pull(name, db_path, None, deep=True)
+                # Carries the authoriser's address: they completed strong
+                # customer authentication from it seconds ago, so this is the
+                # one case where attended access is provable rather than
+                # merely declared.
+                _pull(name, db_path, None, deep=True, psu_ip=psu_ip)
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
 
@@ -338,6 +342,7 @@ def _pull(
     until: date | None = None,
     deep: bool = False,
     only_account: str | None = None,
+    psu_ip: str | None = None,
 ) -> int:
     account_map = _account_map()
 
@@ -384,6 +389,7 @@ def _pull(
                 since=since,
                 until=until,
                 only_account=only_account,
+                psu_ip=psu_ip,
                 # Forwarded, not defaulted. Dropping this is what disconnected
                 # the backfill ladder from the only moment it exists for: the
                 # page said deep history was being fetched while a single
@@ -439,6 +445,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="PROVIDER_REF",
         help="probe a single provider account rather than the whole connection",
+    )
+    pull_command.add_argument(
+        "--attended-from",
+        default=None,
+        metavar="YOUR_IP",
+        help="declare this pull as actively requested by you, giving the address "
+        "of the device you are driving it from. Sends X-PSU-IP, the regulation's "
+        "mechanism for attended access. State it only when it is true; scheduled "
+        "runs must never use this",
     )
     pull_command.add_argument(
         "--until",
@@ -564,7 +579,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.target:
             return _pull_everything(db_path, args.since)
         return _pull(
-            args.target, db_path, args.since, until=args.until, only_account=args.account
+            args.target,
+            db_path,
+            args.since,
+            until=args.until,
+            only_account=args.account,
+            psu_ip=args.attended_from,
         )
 
     if args.command == "value":
