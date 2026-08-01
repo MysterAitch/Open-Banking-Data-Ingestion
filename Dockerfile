@@ -20,15 +20,22 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
-# Mount points. /secrets is expected read-only: the container needs to READ a
-# token file, never to alter one.
-RUN mkdir -p /data /secrets && chown -R obdi:obdi /data
+# Three mounts, not two, because they have three different sensitivities:
+#   /data         transaction history - copied, backed up, queried by tools
+#   /secrets      token files, READ ONLY: read, never rewritten
+#   /credentials  refresh tokens, written by the app as it rotates them
+#
+# The connection store used to live in /data, which quietly reversed the
+# separation the code is built around: that volume is meant to be freely
+# copyable, and putting bank credentials in it would make every copy of the
+# data a copy of the credentials.
+RUN mkdir -p /data /secrets /credentials && chown -R obdi:obdi /data /credentials
 
 USER obdi
 
 ENV PYTHONUNBUFFERED=1 \
     OBDI_DB_PATH=/data/store.sqlite3 \
-    OBDI_CONNECTION_STORE=/data/connections.json \
+    OBDI_CONNECTION_STORE=/credentials/connections.json \
     OBDI_ACCOUNT_MAP=/data/accounts.json
 
 EXPOSE 8080

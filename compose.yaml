@@ -26,6 +26,10 @@ services:
       - /srv/appdata/obdi/data:/data
       # Read-only: the container reads token files and must never rewrite one.
       - /srv/appdata/obdi/secrets:/secrets:ro
+      # Refresh tokens, written as they rotate. Separate from /data because
+      # that volume is meant to be freely copied, backed up and queried, and
+      # bank credentials must not travel with every copy of it.
+      - /srv/appdata/obdi/credentials:/credentials
     environment:
       TZ: Europe/London
       TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}

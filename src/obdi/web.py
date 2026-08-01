@@ -26,9 +26,9 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from secrets import token_urlsafe
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .callback import render_page
 from .connections import ConnectionStore, build_connection
@@ -52,11 +52,27 @@ class AuthorisationSession:
         self._pending: dict[str, PendingAuthorisation] = {}
 
     def begin(self, connection_name: str, *, now: datetime | None = None) -> str:
+        moment = now or datetime.now(UTC)
+        # Evict on the way in. /connect needs no authentication, so anything on
+        # the tailnet could mint states indefinitely - and abandoned
+        # authorisations accumulate in ordinary use too, since starting one and
+        # not finishing it is common. Without this the process grows for as
+        # long as it runs.
+        self._evict_expired(moment)
         state = token_urlsafe(24)
         self._pending[state] = PendingAuthorisation(
-            connection_name=connection_name, created_at=now or datetime.now(UTC)
+            connection_name=connection_name, created_at=moment
         )
         return state
+
+    def _evict_expired(self, now: datetime) -> None:
+        expired = [
+            state
+            for state, pending in self._pending.items()
+            if now - pending.created_at > STATE_LIFETIME
+        ]
+        for state in expired:
+            del self._pending[state]
 
     def claim(self, state: str, *, now: datetime | None = None) -> str:
         """Consume a state and return its connection name.
@@ -97,10 +113,15 @@ def _connection_rows(store: ConnectionStore) -> str:
             state = f'<span class="warn">expires in {days} days</span>'
         else:
             state = f'<span class="ok">{days} days left</span>'
-        name = html.escape(connection.connection_id)
+        display = html.escape(connection.connection_id)
+        # Escaping protects the page but not the query string. An unencoded
+        # ampersand or hash truncates the name in the link, so the reconnect
+        # would target a DIFFERENT connection - and using a name that does not
+        # already exist silently creates a second connection to one bank.
+        target = quote(connection.connection_id, safe="")
         rows.append(
-            f'<div class="row"><strong>{name}</strong><br>{state}'
-            f'<br><a class="button" href="/connect?name={name}">Reconnect {name}</a></div>'
+            f'<div class="row"><strong>{display}</strong><br>{state}'
+            f'<br><a class="button" href="/connect?name={target}">Reconnect {display}</a></div>'
         )
     return "".join(rows)
 
@@ -122,6 +143,29 @@ a new name would create a second connection to the same bank.</p>
 class ConnectionHandler(BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
+
+    # A socket that opens and then says nothing must not hold the handler
+    # forever. Without this a single idle connection wedges the whole service,
+    # including the OAuth callback - so an authorisation already in flight
+    # could never complete, and the failure would look like the bank's fault.
+    timeout = 30
+
+    @staticmethod
+    def make_server(address: tuple[str, int], handler: type) -> ThreadingHTTPServer:
+        """Build the server this handler expects.
+
+        Threading rather than the single-threaded default: the callback must
+        stay answerable while anything else is connected, and a phone that
+        backgrounds mid-authorisation leaves exactly that kind of half-open
+        connection behind.
+        """
+        return ThreadingHTTPServer(address, handler)
+
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except TimeoutError:
+            self.close_connection = True
 
     def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
@@ -229,7 +273,7 @@ def serve(config: WebConfig, *, host: str = "127.0.0.1", port: int = 8080) -> No
         (ConnectionHandler,),
         {"config": config, "session": AuthorisationSession()},
     )
-    server = HTTPServer((host, port), handler)
+    server = ConnectionHandler.make_server((host, port), handler)
     try:
         server.serve_forever()
     finally:
