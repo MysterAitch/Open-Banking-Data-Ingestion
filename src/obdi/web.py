@@ -25,6 +25,7 @@ on return so that a code cannot be replayed into an unexpected connection.
 from __future__ import annotations
 
 import html
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -264,6 +265,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
             self.bound_config.connection_store.put(connection)
         except Exception as exc:
+            # To the container log as well as the page: the page vanishes with
+            # the phone browser, and this is the one failure that has to be
+            # debuggable after the fact.
+            print(f"authorisation for {name!r} failed: {exc}", file=sys.stderr)
             self._respond(500, render_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
             return
 

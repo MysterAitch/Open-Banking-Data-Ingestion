@@ -123,10 +123,19 @@ def exchange_code(
         timeout=30.0,
     )
     if response.status_code != 200:
+        # The provider's error body is the diagnosis, so it travels with the
+        # failure: invalid_client means the secret is wrong, invalid_grant a
+        # spent or expired code, invalid_redirect_uri a registration mismatch.
+        # Each has a different next step, and swallowing the body collapses
+        # them into one unanswerable page - read on a phone, mid-flow, with
+        # the single-use code already burnt. The body carries error codes,
+        # never credentials, so surfacing it leaks nothing.
         raise TrueLayerError(
-            f"Code exchange failed (HTTP {response.status_code}). A redirect URI "
-            "mismatch is the usual cause - it must match what is registered byte "
-            "for byte, trailing slash included."
+            f"Code exchange failed (HTTP {response.status_code}): "
+            f"{response.text[:300]}. invalid_grant means the code was already "
+            "used or expired (start a fresh authorisation); invalid_client "
+            "means the client secret is wrong; invalid_redirect_uri means the "
+            "registered URI differs from the one used."
         )
     return decode(response.text)
 

@@ -194,3 +194,32 @@ class TestTheDailyQuotaIsNotSpentOnRetries:
 
         # Retrying a quota that resets daily just digs deeper.
         assert len(calls) == 1
+
+
+class TestExchangeFailuresAreDiagnosable:
+    """HTTP 400 alone cannot be acted on; the provider's error body can.
+
+    invalid_client means the secret is wrong, invalid_grant means the code was
+    spent or expired, invalid_redirect_uri means registration. Discarding the
+    body collapses three different next-steps into one unanswerable page - on a
+    phone, mid-flow, with the authorisation code already burnt.
+    """
+
+    def test_Exchange_WhenTheProviderRejectsIt_TheErrorNamesTheProvidersReason(
+        self, monkeypatch
+    ):
+        from obdi.providers.truelayer import exchange_code
+
+        def refuse(*_args, **_kwargs):
+            return httpx.Response(
+                400,
+                json={"error": "invalid_client"},
+                request=httpx.Request("POST", "https://auth/connect/token"),
+            )
+
+        monkeypatch.setattr(httpx, "post", refuse)
+
+        with pytest.raises(TrueLayerError, match="invalid_client"):
+            exchange_code(
+                code="c", client_id="i", client_secret="s", redirect_uri="https://r/cb"
+            )
