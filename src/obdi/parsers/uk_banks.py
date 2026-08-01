@@ -60,7 +60,6 @@ class StarlingCsvParser(StatementParser):
                 tier=SourceTier.SYNTHETIC,
                 currency=currency,
                 content_key=content_key(
-                    account_id=account_id,
                     amount_minor=amount,
                     value_date=when,
                     description=description,
@@ -104,7 +103,6 @@ class MonzoCsvParser(StatementParser):
                 source_id=source_id,
                 tier=SourceTier.AUTHORITATIVE,
                 content_key=content_key(
-                    account_id=account_id,
                     amount_minor=amount,
                     value_date=when,
                     description=description,
@@ -152,7 +150,6 @@ class AmexUkCsvParser(StatementParser):
                 tier=SourceTier.AUTHORITATIVE,
                 status=TransactionStatus.BOOKED,
                 content_key=content_key(
-                    account_id=account_id,
                     amount_minor=amount,
                     value_date=when,
                     description=description,

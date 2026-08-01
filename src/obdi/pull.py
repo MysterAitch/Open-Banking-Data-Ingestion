@@ -20,7 +20,8 @@ Starling that does not exist, and a refresh step that does nothing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import UTC, date, datetime
+from urllib.parse import parse_qs
 
 from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
@@ -121,6 +122,24 @@ def pull_truelayer(
                 "bind it to a canonical account"
             )
 
+        # The balance is landed as evidence, not parsed into a table yet: a
+        # balance at a timestamp is the reconciliation anchor that says whether
+        # the transactions in a window account for all the money, and each
+        # pull adds another anchor to layer 0's timeline. A failure is noted
+        # and skipped - a missing anchor must not stop the transactions.
+        try:
+            _, balance_body = truelayer.fetch_balance(
+                connection.access_token, provider_account_id
+            )
+            store.land_artefact(
+                truelayer.artefact_for(balance_body, account_id=canonical, kind="balance")
+            )
+        except truelayer.TrueLayerError as exc:
+            result.notes.append(f"balance for {provider_account_id}: {exc}")
+
+        known_ceiling = store.provider_fact(
+            "truelayer", connection.connection_id, "accepted_backfill_days"
+        )
         for pending in (False, True):
             records, body, asked = truelayer.fetch_transactions(
                 connection.access_token,
@@ -128,7 +147,18 @@ def pull_truelayer(
                 since=since,
                 pending=pending,
                 deep=deep,
+                known_ceiling_days=int(known_ceiling) if known_ceiling else None,
             )
+            if deep and not pending and "from=" in asked:
+                # Record what the provider actually granted, so the NEXT deep
+                # backfill starts at the known-good rung instead of spending
+                # quota rediscovering a refusal already observed.
+                from_value = parse_qs(asked)["from"][0]
+                granted = (datetime.now(UTC).date() - date.fromisoformat(from_value)).days
+                store.record_provider_fact(
+                    "truelayer", connection.connection_id, "accepted_backfill_days",
+                    str(granted),
+                )
             # Landed BEFORE the empty check, not after. An empty payload plus
             # the range that produced it is exactly the evidence the requested-
             # range provenance exists to keep: skip landing on empty and a

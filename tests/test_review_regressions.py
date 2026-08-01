@@ -50,8 +50,7 @@ def txn(
         status=status,
         entity_id=entity_id,
         is_internal_transfer=internal,
-        content_key=content_key(
-            account_id=account, amount_minor=amount, value_date=when, description=description
+        content_key=content_key(amount_minor=amount, value_date=when, description=description
         ),
     )
 

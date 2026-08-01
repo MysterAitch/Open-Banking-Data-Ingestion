@@ -249,3 +249,61 @@ class TestRoutinePullsStayInsideTheUnattendedWindow:
 
         expected = (datetime.now(UTC).date() - timedelta(days=90)).isoformat()
         assert asked == [expected]
+
+
+class TestLearnedFactsAreNotRelearned:
+    """What a provider refused yesterday, do not ask again tomorrow.
+
+    Each ladder rung costs one call against the unattended quota. The first
+    backfill legitimately spends three discovering the accepted window; a
+    reconnection that spends three rediscovering the same fact is waste, and
+    the fear of that waste discourages reconnecting at all. A known ceiling
+    starts the ladder AT the known-good rung.
+    """
+
+    def test_Backfill_WithAKnownCeiling_AsksItFirstInsteadOfProbing(self):
+        asked: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            asked.append(request.url.params["from"])
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        fetch_transactions(
+            "token", "acc", deep=True, known_ceiling_days=730, client=_client(handler)
+        )
+
+        from datetime import UTC, datetime, timedelta
+
+        expected = (datetime.now(UTC).date() - timedelta(days=730)).isoformat()
+        assert asked == [expected], "one call, at the ceiling the provider already taught us"
+
+    def test_Backfill_WithAKnownCeiling_StillFallsBackIfTheProviderChangedItsMind(self):
+        asked: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            asked.append(request.url.params["from"])
+            if len(asked) < 2:
+                return httpx.Response(400, json={"error": "invalid_date_range"})
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        _rows, _, _ = fetch_transactions(
+            "token", "acc", deep=True, known_ceiling_days=730, client=_client(handler)
+        )
+
+        assert len(asked) == 2, "a remembered fact is a starting point, not a dead end"
+
+
+class TestBalanceIsFetchedAndKept:
+    def test_Balance_IsReturnedWithItsRawBody_SoItCanLand(self):
+        from obdi.providers.truelayer import fetch_balance
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path.endswith("/balance")
+            return httpx.Response(
+                200, json={"results": [{"current": 100.0, "available": 90.0}]}
+            )
+
+        rows, body = fetch_balance("token", "acc", client=_client(handler))
+
+        assert rows[0]["current"] is not None
+        assert b"available" in body

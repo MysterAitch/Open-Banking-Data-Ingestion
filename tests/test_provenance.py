@@ -19,9 +19,10 @@ from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 
-def txn(source, *, source_id=None, day=5, amount=-2500, tier=SourceTier.SYNTHETIC):
+def txn(source, *, source_id=None, day=5, amount=-2500, account="current",
+        tier=SourceTier.SYNTHETIC):
     return Transaction(
-        account_id="current",
+        account_id=account,
         amount_minor=amount,
         currency="GBP",
         value_date=date(2026, 3, day),
@@ -185,3 +186,65 @@ class TestEmptyResultsAreEvidence:
                 if row["pk"]
             ]
             assert pk == ["digest", "account_ref", "origin"]
+
+
+class TestLearnedProviderFacts:
+    """What a pull learns about a provider is worth keeping.
+
+    The first backfill spent three quota calls discovering the accepted
+    window; without a record, every reconnection re-spends them rediscovering
+    the same refusal. Facts are per-connection because banks differ, and
+    re-recording overwrites - the latest observation wins.
+    """
+
+    def test_Facts_RoundTrip_AndOverwrite(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            assert store.provider_fact("truelayer", "halifax", "accepted_backfill_days") is None
+
+            store.record_provider_fact("truelayer", "halifax", "accepted_backfill_days", "730")
+            assert (
+                store.provider_fact("truelayer", "halifax", "accepted_backfill_days") == "730"
+            )
+
+            store.record_provider_fact("truelayer", "halifax", "accepted_backfill_days", "3650")
+            assert (
+                store.provider_fact("truelayer", "halifax", "accepted_backfill_days") == "3650"
+            )
+
+
+class TestRebindingIsAnOperationNotAFate:
+    """Which canonical account a payment belongs to is revisable, cheaply.
+
+    Content keys no longer contain the account, so re-binding is a column
+    update: entity ids survive, sightings survive, raw is untouched, and
+    nothing is refetched. The alternative was discarding derived data and
+    re-authorising at the bank - spending quota to change a label.
+    """
+
+    def test_Rebind_MovesRowsAndReportsHowMany(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(
+                store,
+                [txn("truelayer", source_id="tl-1"), txn("truelayer", source_id="tl-2", day=6)],
+                digest="d1",
+            )
+            before = {t.entity_id for t in store.all_transactions()}
+
+            moved = store.rebind_account("current", "halifax-current")
+
+            held = store.all_transactions()
+            assert moved == 2
+            assert {t.account_id for t in held} == {"halifax-current"}
+            assert {t.entity_id for t in held} == before, "identity survives the rename"
+
+    def test_Rebind_TouchesOnlyTheNamedAccount(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(store, [txn("truelayer", source_id="tl-1")], digest="d1")
+            reconcile_batch(
+                store, [txn("truelayer", source_id="tl-9", account="other", day=9)], digest="d2"
+            )
+
+            store.rebind_account("current", "halifax-current")
+
+            accounts = {t.account_id for t in store.all_transactions()}
+            assert accounts == {"halifax-current", "other"}

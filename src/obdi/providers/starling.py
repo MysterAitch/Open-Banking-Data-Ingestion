@@ -224,7 +224,6 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
         # flag is what keeps a Space transfer out of spending without losing it.
         is_internal_transfer=text(item, "source") == INTERNAL_SOURCE,
         content_key=content_key(
-            account_id=account_id,
             amount_minor=minor_units,
             value_date=when,
             description=description,

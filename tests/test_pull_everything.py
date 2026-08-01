@@ -127,3 +127,52 @@ class TestConfiguredMeansResolvable:
         )
 
         assert _pull_everything(tmp_path / "db.sqlite3", None) == 1
+
+
+class TestBindCommand:
+    """Binding writes the map for the future and moves the rows from the past."""
+
+    def test_Bind_WritesAMapEntryTheLoaderAccepts_AndMovesStoredRows(
+        self, monkeypatch, tmp_path
+    ):
+        from datetime import date as date_type
+
+        from obdi.cli import _account_map, main
+        from obdi.ingest import reconcile_batch
+        from obdi.models import SourceTier, Transaction
+        from obdi.store import Store
+
+        db = tmp_path / "store.sqlite3"
+        monkeypatch.setenv("OBDI_DB_PATH", str(db))
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "accounts.json"))
+        monkeypatch.setattr("obdi.cli.load_dotenv", lambda *a, **k: None)
+
+        with Store(db) as store:
+            reconcile_batch(
+                store,
+                [
+                    Transaction(
+                        account_id="truelayer:e9f8",
+                        amount_minor=-100,
+                        currency="GBP",
+                        value_date=date_type(2026, 3, 5),
+                        booking_date=date_type(2026, 3, 5),
+                        description="X",
+                        source="truelayer",
+                        source_id="t1",
+                        tier=SourceTier.AUTHORITATIVE,
+                        content_key="k1",
+                    )
+                ],
+                digest="d1",
+            )
+
+        assert main(["bind", "truelayer", "e9f8", "halifax-current"]) == 0
+
+        # The loader must accept what bind wrote - a map the app cannot read
+        # is worse than no map.
+        resolved = _account_map().resolve("truelayer", "e9f8")
+        assert resolved == "halifax-current"
+
+        with Store(db) as store:
+            assert {t.account_id for t in store.all_transactions()} == {"halifax-current"}

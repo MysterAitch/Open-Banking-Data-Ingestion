@@ -5,7 +5,6 @@ from obdi.identity import content_key, normalise_description
 
 def key(description: str, *, amount: int = -1499, account: str = "acct-1") -> str:
     return content_key(
-        account_id=account,
         amount_minor=amount,
         value_date=date(2026, 3, 14),
         description=description,
@@ -52,18 +51,18 @@ class TestContentKey:
     def test_Transaction_WhenAmountDiffers_HashesDifferently(self):
         assert key("TESCO", amount=-1499) != key("TESCO", amount=-1500)
 
-    def test_Transaction_WhenDifferentAccount_HashesDifferently(self):
-        # Two accounts can legitimately hold identical-looking transactions.
-        assert key("TESCO", account="acct-1") != key("TESCO", account="acct-2")
+    def test_Transaction_WhenDifferentAccount_HashesIdentically(self):
+        # Deliberate, and the point of the design: which account a payment
+        # belongs to is the one revisable fact in the system, so it must not
+        # be inside the hash - re-binding would invalidate every stored key.
+        # Cross-account safety lives in matching, which filters to same-account
+        # candidates before any key is compared.
+        assert key("TESCO", account="acct-1") == key("TESCO", account="acct-2")
 
     def test_Transaction_WhenMerchantDiffers_HashesDifferently(self):
         assert key("TESCO") != key("SAINSBURYS")
 
     def test_Transaction_WhenValueDateDiffers_HashesDifferently(self):
-        a = content_key(
-            account_id="a", amount_minor=-100, value_date=date(2026, 3, 14), description="X"
-        )
-        b = content_key(
-            account_id="a", amount_minor=-100, value_date=date(2026, 3, 15), description="X"
-        )
+        a = content_key(amount_minor=-100, value_date=date(2026, 3, 14), description="X")
+        b = content_key(amount_minor=-100, value_date=date(2026, 3, 15), description="X")
         assert a != b

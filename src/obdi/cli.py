@@ -237,6 +237,57 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     return 0
 
 
+def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
+    """Bind a provider account to a canonical name - an operation, not a fate.
+
+    Two halves, both required. The account map entry makes FUTURE pulls resolve
+    to the canonical name. The row update brings the PAST along: rows landed
+    before the binding sit under the source-qualified fallback id, and content
+    keys deliberately exclude the account so this is a rename, not a rebuild -
+    entity ids survive, nothing is refetched, no quota is spent changing a
+    label.
+    """
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path:
+        print("Set OBDI_ACCOUNT_MAP to the account map path.", file=sys.stderr)
+        return 2
+
+    map_file = Path(map_path)
+    payload: dict[str, object] = {"bindings": [], "actual": []}
+    if map_file.is_file():
+        payload = json.loads(map_file.read_text(encoding="utf-8"))
+    raw_bindings = payload.get("bindings", [])
+    bindings = [b for b in raw_bindings if isinstance(b, dict)] if isinstance(
+        raw_bindings, list
+    ) else []
+
+    replaced = False
+    for binding in bindings:
+        if binding.get("source") == source and binding.get("provider_account_id") == provider_ref:
+            binding["canonical_id"] = canonical
+            replaced = True
+    if not replaced:
+        bindings.append(
+            {
+                "source": source,
+                "provider_account_id": provider_ref,
+                "canonical_id": canonical,
+            }
+        )
+    payload["bindings"] = bindings
+    map_file.parent.mkdir(parents=True, exist_ok=True)
+    map_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    with Store(db_path) as store:
+        moved = store.rebind_account(f"{source}:{provider_ref}", canonical)
+
+    print(
+        f"bound {source}:{provider_ref} -> {canonical} "
+        f"({'updated' if replaced else 'added'} map entry, {moved} stored row(s) moved)"
+    )
+    return 0
+
+
 def _pull_everything(db_path: Path, since: date | None) -> int:
     """Pull every stored connection, plus Starling if a token is configured.
 
@@ -427,6 +478,14 @@ def main(argv: list[str] | None = None) -> int:
     subcommands.add_parser(
         "connections", help="show bank connections and how long consent has left"
     )
+    bind_command = subcommands.add_parser(
+        "bind",
+        help="bind a provider account to a canonical name, past rows included",
+    )
+    bind_command.add_argument("source", help="the source, e.g. truelayer")
+    bind_command.add_argument("provider_ref", help="the provider's account id (see pull notes)")
+    bind_command.add_argument("canonical", help="the canonical account name, e.g. halifax-current")
+
     subcommands.add_parser("status", help="show row counts per layer")
     subcommands.add_parser(
         "coverage",
@@ -535,6 +594,9 @@ def main(argv: list[str] | None = None) -> int:
             print("\nUse the SAME name shown above, or you will create a duplicate")
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
+
+    if args.command == "bind":
+        return _bind(args.source, args.provider_ref, args.canonical, db_path)
 
     if args.command == "coverage":
         with Store(db_path) as store:

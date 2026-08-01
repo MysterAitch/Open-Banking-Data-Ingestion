@@ -44,8 +44,7 @@ def txn(
         source_id=source_id,
         tier=tier,
         occurrence=occurrence,
-        content_key=content_key(
-            account_id="a", amount_minor=amount, value_date=when, description=description
+        content_key=content_key(amount_minor=amount, value_date=when, description=description
         ),
     )
 
@@ -157,8 +156,7 @@ class TestAuthoritativeIdsAreDecisive:
             source_id="p-1",
             tier=SourceTier.AUTHORITATIVE,
             status=TransactionStatus.PENDING,
-            content_key=content_key(
-                account_id="a", amount_minor=-1499, value_date=date(2026, 3, 14),
+            content_key=content_key(amount_minor=-1499, value_date=date(2026, 3, 14),
                 description="TESCO",
             ),
         )

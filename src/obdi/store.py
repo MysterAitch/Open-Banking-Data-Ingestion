@@ -134,6 +134,19 @@ CREATE TABLE IF NOT EXISTS transaction_sources (
     PRIMARY KEY (entity_id, source, artefact_digest)
 );
 
+-- Facts a pull LEARNS about a provider, kept so they are not re-learnt at
+-- quota cost: the accepted backfill window took three API calls to discover,
+-- and without a record every reconnection re-spends them rediscovering the
+-- same refusal. Per connection, because banks differ; latest observation wins.
+CREATE TABLE IF NOT EXISTS provider_facts (
+    source        TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    fact          TEXT NOT NULL,
+    value         TEXT NOT NULL,
+    observed_at   TEXT NOT NULL,
+    PRIMARY KEY (source, connection_id, fact)
+);
+
 CREATE TABLE IF NOT EXISTS review_queue (
     entity_id  TEXT PRIMARY KEY,
     reason     TEXT NOT NULL,
@@ -245,6 +258,41 @@ class Store:
             "UPDATE transactions SET is_internal_transfer = 1 WHERE entity_id = ?",
             (entity_id,),
         )
+
+    def provider_fact(self, source: str, connection_id: str, fact: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT value FROM provider_facts WHERE source=? AND connection_id=? AND fact=?",
+            (source, connection_id, fact),
+        ).fetchone()
+        return row[0] if row else None
+
+    def record_provider_fact(
+        self, source: str, connection_id: str, fact: str, value: str
+    ) -> None:
+        self.connection.execute(
+            """INSERT INTO provider_facts (source, connection_id, fact, value, observed_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(source, connection_id, fact) DO UPDATE SET
+                   value = excluded.value, observed_at = excluded.observed_at""",
+            (source, connection_id, fact, value, datetime.now().astimezone().isoformat()),
+        )
+        self.connection.commit()
+
+    def rebind_account(self, old_account_id: str, new_account_id: str) -> int:
+        """Move every transaction from one account identity to another.
+
+        Cheap by DESIGN, not by luck: content keys deliberately exclude the
+        account, precisely so that the one revisable fact in the system - which
+        canonical account a payment belongs to - can be revised as a column
+        update. Entity ids survive, sightings survive, raw artefacts are
+        untouched, and nothing needs refetching from anyone.
+        """
+        cursor = self.connection.execute(
+            "UPDATE transactions SET account_id = ? WHERE account_id = ?",
+            (new_account_id, old_account_id),
+        )
+        self.connection.commit()
+        return cursor.rowcount
 
     def sources_for(self, entity_id: str) -> list[str]:
         """Every source that has observed this transaction.

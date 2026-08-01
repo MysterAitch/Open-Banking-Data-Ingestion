@@ -208,6 +208,7 @@ def fetch_transactions(
     until: date | None = None,
     pending: bool = False,
     deep: bool = False,
+    known_ceiling_days: int | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[list[JsonObject], bytes, str]:
     """Return the transactions, the raw body, and the range actually requested.
@@ -253,6 +254,16 @@ def fetch_transactions(
     # used as given either way.
     if since:
         windows: tuple[int | None, ...] = (None,)
+    elif deep and known_ceiling_days:
+        # What the provider refused yesterday, do not ask again tomorrow: a
+        # recorded ceiling starts the ladder AT the known-good rung, so a
+        # reconnection spends one call where discovery spent three. It is a
+        # starting point rather than a dead end - the narrower rungs remain
+        # beneath it in case the provider has tightened since.
+        windows = (
+            known_ceiling_days,
+            *(rung for rung in backfill_ladder() if rung < known_ceiling_days),
+        )
     elif deep:
         windows = backfill_ladder()
     else:
@@ -379,13 +390,32 @@ def to_transaction(
         # identity through the content key, which is what that tier is for.
         tier=SourceTier.AUTHORITATIVE if durable_id else SourceTier.SYNTHETIC,
         content_key=content_key(
-            account_id=account_id,
             amount_minor=amount_minor,
             value_date=when,
             description=description or merchant,
         ),
         raw=json.loads(json.dumps(record, default=str)),
     )
+
+
+def fetch_balance(
+    access_token: str, account_id: str, *, client: httpx.Client | None = None
+) -> tuple[list[JsonObject], bytes]:
+    """The account balance now, with the raw body so it lands as evidence.
+
+    A balance at a timestamp is a reconciliation anchor: if the transactions in
+    the window do not sum to it, activity exists outside the window - a fact
+    about coverage that no amount of transaction data can supply by itself.
+    Each scheduled pull adds another anchor to the timeline.
+    """
+    http = client or httpx.Client(timeout=30.0)
+    response = http.get(
+        f"{API_HOST}/data/v1/accounts/{account_id}/balance",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code != 200:
+        raise TrueLayerError(f"Balance fetch failed (HTTP {response.status_code})")
+    return rows(decode(response.content), "results"), response.content
 
 
 def artefact_for(
@@ -408,6 +438,8 @@ def artefact_for(
     # paraphrase of it.
     if kind == "accounts":
         origin = f"{API_HOST}/data/v1/accounts"
+    elif kind == "balance":
+        origin = f"{API_HOST}/data/v1/accounts/{account_id}/balance"
     else:
         suffix = "/pending" if kind == "pending" else ""
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"

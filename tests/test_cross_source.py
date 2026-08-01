@@ -35,7 +35,9 @@ def txn(
         source=source,
         source_id=source_id,
         content_key=content_key(
-            account_id=account, amount_minor=amount, value_date=when, description=description
+            amount_minor=amount,
+            value_date=when,
+            description=description,
         ),
     )
 

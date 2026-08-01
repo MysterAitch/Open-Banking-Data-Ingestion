@@ -47,7 +47,9 @@ def txn(
         tier=tier,
         status=status,
         content_key=content_key(
-            account_id="halifax", amount_minor=amount, value_date=when, description=description
+            amount_minor=amount,
+            value_date=when,
+            description=description,
         ),
     )
 

@@ -138,7 +138,6 @@ class QifParser(StatementParser):
             source_id=None,
             tier=SourceTier.SYNTHETIC,
             content_key=content_key(
-                account_id=account_id,
                 amount_minor=amount,
                 value_date=when,
                 description=description,

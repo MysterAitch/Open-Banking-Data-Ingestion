@@ -35,7 +35,9 @@ def txn(*, day: int, amount: int = -5000, description: str = "STANDING ORDER") -
         source="qif",
         tier=SourceTier.SYNTHETIC,
         content_key=content_key(
-            account_id="halifax", amount_minor=amount, value_date=when, description=description
+            amount_minor=amount,
+            value_date=when,
+            description=description,
         ),
     )
 

@@ -54,7 +54,6 @@ def normalise_description(raw: str) -> str:
 
 def content_key(
     *,
-    account_id: str,
     amount_minor: int,
     value_date: date,
     description: str,
@@ -62,11 +61,16 @@ def content_key(
     """Deterministic hash identifying a payment by its content.
 
     Note what is absent: no source name, no provider id, no balance, no
-    category, no booking date. Those differ legitimately between two sightings
-    of the same payment and would defeat the whole purpose.
+    category, no booking date - those differ legitimately between two sightings
+    of one payment. And no ACCOUNT: account scoping is a query-time filter
+    (matching selects same-account candidates before any key is compared), and
+    which canonical account a payment belongs to is the one deliberately
+    MUTABLE fact in the system - a binding decision a person may revise. Baking
+    it into the hash made every stored key hostage to that decision, so
+    re-binding an account meant discarding and refetching data that had not
+    changed. Stability lives in the key; naming lives on top.
     """
     parts = [
-        account_id.strip().casefold(),
         str(amount_minor),
         value_date.isoformat(),
         normalise_description(description),
