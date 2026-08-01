@@ -34,8 +34,8 @@ class StarlingCsvParser(StatementParser):
     def _amount_column(self, row: dict[str, str]) -> tuple[str, str]:
         """The amount column and the currency baked into its name.
 
-        The currency was previously read only to FIND the column and then
-        thrown away, so a euro export parsed silently as sterling.
+        Both are returned: reading the currency merely to locate the column and
+        then discarding it lets a foreign export parse silently as sterling.
         """
         for key in row:
             if key.startswith("Amount (") and key.endswith(")"):

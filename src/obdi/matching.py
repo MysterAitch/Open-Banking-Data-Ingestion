@@ -49,10 +49,10 @@ def could_be_one_payment(
 ) -> bool:
     """Whether these two records could be one payment observed twice.
 
-    This is the question the original rules never asked. They were built around
-    "is this the same payment seen through a different door?" and answered it
-    well, but a statement is mostly full of the opposite case: different
-    payments that merely look alike.
+    Two questions have to be answered, and they pull in opposite directions:
+    "is this the same payment seen through a different door?" and "are these two
+    different payments that merely look alike?". A statement is mostly full of
+    the second, so a rule that only answers the first destroys data.
 
     Within ONE source, two records are two payments. A bank does not report the
     same payment twice in one export, so an id-less file listing three weekly
@@ -224,9 +224,8 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
         and abs(t.value_date - incoming.value_date) <= window_for(t)
     ]
 
-    # The brake that was previously gated on the incoming record HAVING a
-    # provider id, which left every id-less export unprotected. Two rows of one
-    # file are two payments whether or not the format numbers them.
+    # Applies whether or not the source numbers its rows: two rows of one file
+    # are two payments either way, and an id-less format needs the brake most.
     near = [
         t
         for t in similar

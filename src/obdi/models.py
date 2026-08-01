@@ -24,9 +24,9 @@ from .jsontypes import JsonObject
 class SourceTier(StrEnum):
     """How much a source's own notion of transaction identity can be trusted.
 
-    The rules that follow from this were previously inferred case by case,
-    which is how the same reasoning ended up contradicting itself between two
-    adjacent matching tiers. Naming the tier puts it in one place.
+    Naming the tier keeps the rules that follow from it in one place. Inferred
+    per comparison instead, adjacent rules drift apart and end up contradicting
+    each other.
 
     Independently arrived at, then found to match YNAB's published import
     identity design closely, which is reassuring: their import id combines

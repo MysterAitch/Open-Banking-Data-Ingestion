@@ -49,13 +49,10 @@ SCOPES = "info accounts balance cards transactions offline_access"
 # UK Open Banking providers, both the mandated and the OAuth-style connections.
 UK_PROVIDERS = "uk-ob-all uk-oauth-all"
 
-# A provider list runs to several hundred entries, which hides the handful you
-# actually care about. Pass --banks to name yours; this default is just a spread
+# A provider list runs to several hundred entries, which hides the handful that
+# matter. Pass --banks to name the ones you care about; this default is a spread
 # of common UK institutions so the report says something useful out of the box.
-#
-# Deliberately NOT your real list: which banks somebody holds is personal
-# financial information, and a config file is the place for it, not source
-# control.
+# Keep your own list in configuration - which banks someone holds is personal.
 DEFAULT_BANKS = [
     "Barclays",
     "HSBC",

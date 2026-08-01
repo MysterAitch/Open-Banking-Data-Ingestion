@@ -85,11 +85,10 @@ class StatementParser(ABC):
                 "Verify the format before widening the parser."
             )
         for row in reader:
-            # A row with MORE fields than the header puts the surplus under the
-            # restkey as a list, and one with fewer yields None. Both used to
-            # reach .strip() and raise AttributeError, which breaks the parser
-            # contract - callers catch ParseError and expect a message naming
-            # the file, not a stack trace from a comprehension.
+            # A row with more fields than the header puts the surplus under a
+            # None key. Reaching .strip() on that raises AttributeError, which
+            # breaks the parser contract: callers catch a parse error and expect
+            # a message naming the file, not a stack trace from a comprehension.
             if None in row:
                 raise ParseError(
                     f"{self.source}: a row has more fields than the header. "
