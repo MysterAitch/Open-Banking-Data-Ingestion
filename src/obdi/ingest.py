@@ -208,6 +208,11 @@ def _reconcile(
         store.upsert_transaction(
             merged, match_tier=result.tier.value, matched_entity_id=result.existing.entity_id
         )
+        # Record the INCOMING source, not the merged row's. The merged row can
+        # only carry one, so the sighting that just arrived is exactly the fact
+        # that would otherwise be lost - and it is the one that makes this a
+        # corroboration rather than a repeat.
+        store.record_source(replace(transaction, entity_id=result.existing.entity_id))
         if merged.status != result.existing.status:
             summary.superseded += 1
         else:
@@ -216,6 +221,7 @@ def _reconcile(
 
     fresh = replace(transaction, entity_id=str(uuid.uuid4()), artefact_digest=digest)
     store.upsert_transaction(fresh, match_tier=result.tier.value)
+    store.record_source(fresh)
     summary.inserted += 1
 
     # Only the genuinely ambiguous cases: something matched on amount and date

@@ -106,6 +106,20 @@ CREATE TABLE IF NOT EXISTS events (
     published_at TEXT
 );
 
+-- Which sources have observed a given transaction. Append-only, and separate
+-- from the transactions table on purpose: merging collapses several sightings
+-- into one row that can carry only ONE source, so without this the act of
+-- merging destroys the evidence that made the result trustworthy - that two
+-- independent routes agreed. It is also what makes "present in the feed but
+-- missing from the export" an answerable question rather than a guess.
+CREATE TABLE IF NOT EXISTS transaction_sources (
+    entity_id  TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    source_id  TEXT,
+    first_seen_at TEXT NOT NULL,
+    PRIMARY KEY (entity_id, source)
+);
+
 CREATE TABLE IF NOT EXISTS review_queue (
     entity_id  TEXT PRIMARY KEY,
     reason     TEXT NOT NULL,
@@ -171,6 +185,35 @@ class Store:
         self.connection.execute(
             "UPDATE transactions SET is_internal_transfer = 1 WHERE entity_id = ?",
             (entity_id,),
+        )
+
+    def sources_for(self, entity_id: str) -> list[str]:
+        """Every source that has observed this transaction, oldest name first."""
+        rows = self.connection.execute(
+            "SELECT source FROM transaction_sources WHERE entity_id = ? ORDER BY source",
+            (entity_id,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def record_source(self, transaction: Transaction) -> None:
+        """Note that this source has seen this transaction.
+
+        Idempotent per (entity, source): re-pulling one feed is routine and says
+        nothing new about corroboration, so a second sighting by the same source
+        must not read as a second source agreeing.
+        """
+        self.connection.execute(
+            """
+            INSERT INTO transaction_sources (entity_id, source, source_id, first_seen_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(entity_id, source) DO NOTHING
+            """,
+            (
+                transaction.entity_id,
+                transaction.source,
+                transaction.source_id,
+                datetime.now().astimezone().isoformat(),
+            ),
         )
 
     def upsert_transaction(
