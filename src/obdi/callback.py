@@ -44,14 +44,26 @@ def render_page(title: str, body: str) -> bytes:
     """
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
- body {{ font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto;
+ :root {{ color-scheme: light dark; }}
+ body {{ font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto;
         padding: 0 1rem; line-height: 1.5; }}
  h1 {{ font-size: 1.4rem; }}
- code {{ background: #f1f1f1; padding: .1rem .3rem; border-radius: .2rem; }}
+ code {{ background: #8883; padding: .1rem .3rem; border-radius: .2rem; }}
+ /* Tap targets sized for a thumb: this is used from a phone. */
+ a.button {{ display: block; padding: .9rem 1rem; margin: .5rem 0; border-radius: .5rem;
+            background: #2563eb; color: #fff; text-decoration: none; text-align: center;
+            font-weight: 600; }}
+ .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
+ .warn {{ color: #b45309; font-weight: 600; }}
+ .bad {{ color: #b91c1c; font-weight: 600; }}
+ .ok {{ opacity: .75; }}
+ input {{ font-size: 1rem; padding: .7rem; width: 100%; box-sizing: border-box;
+         border-radius: .4rem; border: 1px solid #8886; }}
 </style></head>
-<body><h1>{html.escape(title)}</h1><p>{body}</p></body></html>
+<body><h1>{html.escape(title)}</h1>{body}</body></html>
 """.encode()
 
 

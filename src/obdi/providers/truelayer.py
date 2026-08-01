@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import httpx
 
@@ -37,6 +38,56 @@ DEFAULT_BACKFILL_DAYS = 730
 
 class TrueLayerError(RuntimeError):
     """A provider call failed in a way worth surfacing rather than retrying."""
+
+
+def build_auth_link(
+    *,
+    client_id: str,
+    redirect_uri: str,
+    state: str = "",
+    providers: str = "uk-ob-all uk-oauth-all",
+    scopes: str = "info accounts balance cards transactions offline_access",
+) -> str:
+    """The URL a person opens to authorise a bank.
+
+    `offline_access` is not optional in practice: without it no refresh token
+    is issued, and every sync would need re-authorising by hand.
+    """
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "scope": scopes,
+            "redirect_uri": redirect_uri,
+            "providers": providers,
+            **({"state": state} if state else {}),
+        }
+    )
+    return f"{AUTH_HOST}/?{query}"
+
+
+def exchange_code(
+    *, code: str, client_id: str, client_secret: str, redirect_uri: str
+) -> dict:
+    """Swap a single-use authorisation code for tokens."""
+    response = httpx.post(
+        f"{AUTH_HOST}/connect/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "code": code,
+        },
+        timeout=30.0,
+    )
+    if response.status_code != 200:
+        raise TrueLayerError(
+            f"Code exchange failed (HTTP {response.status_code}). A redirect URI "
+            "mismatch is the usual cause - it must match what is registered byte "
+            "for byte, trailing slash included."
+        )
+    return decode(response.text)
 
 
 def decode(payload: bytes | str) -> dict:

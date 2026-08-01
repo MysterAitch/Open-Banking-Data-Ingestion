@@ -110,6 +110,25 @@ The parser is chosen by inspecting the header row. If no parser recognises it,
 the import is **refused** rather than guessed at — a hard failure costs minutes,
 a silent misparse corrupts the store and is discovered months later.
 
+## Connecting a bank from a phone
+
+```bash
+obdi serve      # then reach it over Tailscale from the phone
+```
+
+A page listing every connection with its consent clock, and a button to add or
+reconnect one. Doing it from a phone means the bank's own app handles
+authentication — biometrics rather than a password typed into a desktop browser
+and a second factor juggled alongside it.
+
+This works because the OAuth redirect is a **browser** event: the provider never
+connects inbound, it sends the browser somewhere. So the flow needs only a page
+your phone can reach, which a loopback-bound service exposed over Tailscale
+provides — real certificate, tailnet-only, no public exposure.
+
+Deployment, and moving from the workstation to the Docker host later:
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## Connecting a bank, and the 90-day chore
 
 **Runbook: [`docs/REAUTHORISE.md`](docs/REAUTHORISE.md).** Written for someone

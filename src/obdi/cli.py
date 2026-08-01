@@ -23,6 +23,8 @@ from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
 from .store import Store
+from .web import WebConfig
+from .web import serve as serve_web
 
 DEFAULT_DB = "./data/store.sqlite3"
 
@@ -94,6 +96,48 @@ def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -
             "\nNot replayed - no Actual account bound for: " + ", ".join(missing),
             file=sys.stderr,
         )
+    return 0
+
+
+def _serve(host: str, port: int) -> int:
+    store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if not store_path:
+        print("Set OBDI_CONNECTION_STORE to the token store path.", file=sys.stderr)
+        return 2
+
+    client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
+    redirect_uri = os.getenv("TRUELAYER_REDIRECT_URI", "").strip()
+    if not client_id or not redirect_uri:
+        print(
+            "Set TRUELAYER_CLIENT_ID and TRUELAYER_REDIRECT_URI. The redirect URI must "
+            "be reachable from the phone AND registered with the provider byte for byte "
+            "- for a tailnet deployment that is the Serve hostname.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        client_secret = read_secret("TRUELAYER_CLIENT_SECRET")
+    except SecretError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    config = WebConfig(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        connection_store=ConnectionStore(store_path),
+    )
+    print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
+    if host not in ("127.0.0.1", "localhost"):
+        # Binding wider puts a page that can start bank authorisations onto the
+        # network. Exposure belongs to Tailscale Serve, not to this process.
+        print(
+            f"WARNING: bound to {host}, not loopback. Anything that can reach this "
+            "can begin a bank authorisation.",
+            file=sys.stderr,
+        )
+    serve_web(config, host=host, port=port)
     return 0
 
 
@@ -198,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
         "counting both sides inflates spending and income alike)",
     )
 
+    serve_command = subcommands.add_parser(
+        "serve", help="run the web interface for connecting banks from a phone"
+    )
+    serve_command.add_argument("--host", default="127.0.0.1")
+    serve_command.add_argument("--port", type=int, default=8080)
+
     subcommands.add_parser(
         "connections", help="show bank connections and how long consent has left"
     )
@@ -243,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "replay":
         return _replay(db_path, args.out, args.include_internal_transfers)
+
+    if args.command == "serve":
+        return _serve(args.host, args.port)
 
     if args.command == "connections":
         store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()

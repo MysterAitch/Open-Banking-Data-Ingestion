@@ -1,0 +1,70 @@
+# Ingester stack for the Docker host.
+#
+# Follows the lab conventions: services bind 127.0.0.1 and are exposed over
+# Tailscale Serve rather than published to the LAN; secrets arrive in a
+# gitignored .env rendered from Ansible Vault; data lives under /srv/appdata.
+
+services:
+  obdi-web:
+    build: .
+    image: obdi:local
+    container_name: obdi-web
+    restart: unless-stopped
+    labels:
+      # Serve exposes this on the tailnet with a real certificate, which is
+      # what makes it reachable from a phone without any public exposure.
+      homelab.tsserve: "true"
+      wud.tag.include: '^\d+\.\d+\.\d+$'
+    ports:
+      # Loopback only. This page can start a bank authorisation, so it must not
+      # answer to anything that merely reaches the host.
+      - "127.0.0.1:8087:8080"
+    volumes:
+      - /srv/appdata/obdi/data:/data
+      # Read-only: the container reads token files and must never rewrite one.
+      - /srv/appdata/obdi/secrets:/secrets:ro
+    environment:
+      TZ: Europe/London
+      TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}
+      TRUELAYER_CLIENT_SECRET_FILE: /secrets/truelayer-client-secret
+      # Must match a redirect URI registered with the provider byte for byte.
+      # For a tailnet deployment this is the Serve hostname, NOT localhost.
+      TRUELAYER_REDIRECT_URI: ${TRUELAYER_REDIRECT_URI}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8080/').status_code==200 else 1)"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  obdi-pull:
+    build: .
+    image: obdi:local
+    container_name: obdi-pull
+    restart: unless-stopped
+    depends_on:
+      - obdi-web
+    volumes:
+      - /srv/appdata/obdi/data:/data
+      - /srv/appdata/obdi/secrets:/secrets:ro
+    environment:
+      TZ: Europe/London
+      TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}
+      TRUELAYER_CLIENT_SECRET_FILE: /secrets/truelayer-client-secret
+      STARLING_PERSONAL_ACCESS_TOKEN_FILE: /secrets/starling-token
+      # Six hours because that is what the banks permit: many cap unattended
+      # data fetches at four a day, and the aggregator's own polling runs on
+      # the same cycle. Polling harder buys nothing and risks a rate limit.
+      OBDI_PULL_INTERVAL_SECONDS: "21600"
+      OBDI_PULL_TARGETS: ${OBDI_PULL_TARGETS:-starling}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          for target in $${OBDI_PULL_TARGETS}; do
+            echo "pulling $${target}"
+            obdi pull "$${target}" || echo "pull failed for $${target}, continuing"
+          done
+          obdi pair-transfers || true
+          sleep "$${OBDI_PULL_INTERVAL_SECONDS}"
+        done
