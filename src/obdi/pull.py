@@ -96,16 +96,29 @@ def pull_truelayer(
     result = PullResult(provider=f"truelayer/{connection.connection_id}")
     summary = ImportSummary(artefact_new=True)
 
-    accounts = truelayer.fetch_accounts(connection.access_token)
+    accounts, accounts_body = truelayer.fetch_accounts(connection.access_token)
     result.accounts = len(accounts)
+    # Landed like any payload: the display names and types in here are what a
+    # person needs to tell opaque account ids apart when binding them.
+    store.land_artefact(
+        truelayer.artefact_for(
+            accounts_body, account_id=connection.connection_id, kind="accounts"
+        )
+    )
 
     for account in accounts:
         provider_account_id = text(account, "account_id")
         canonical = account_map.resolve("truelayer", provider_account_id)
         if canonical.startswith("truelayer:"):
+            # Named, not just numbered: an opaque id is unbindable in practice,
+            # because the person doing the binding cannot tell which real
+            # account it is. The provider sends the name; use it.
+            display = text(account, "display_name") or "unnamed"
+            account_type = text(account, "account_type") or "unknown type"
             result.notes.append(
-                f"account {provider_account_id} is unbound, so it will not cross-check "
-                f"against other sources - bind it to a canonical account"
+                f"account {provider_account_id} ({display}, {account_type}) is "
+                "unbound, so it will not cross-check against other sources - "
+                "bind it to a canonical account"
             )
 
         for pending in (False, True):

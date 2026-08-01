@@ -223,3 +223,29 @@ class TestExchangeFailuresAreDiagnosable:
             exchange_code(
                 code="c", client_id="i", client_secret="s", redirect_uri="https://r/cb"
             )
+
+
+class TestRoutinePullsStayInsideTheUnattendedWindow:
+    """Routine pulls ask for 90 days, because that is what regulation permits.
+
+    Proven live: the deep ladder found this bank rejects a ten-year window,
+    which means a routine pull requesting one would fail on every cycle,
+    forever - the scheduler broken for exactly the connection that matters.
+    Ninety days is the SCA-RTS unattended-access limit, it is what a bank must
+    serve without fresh authentication, and the rolling window makes each pull
+    self-healing: a missed day is covered by the next pull's window.
+    """
+
+    def test_Pull_WhenRoutine_AsksForNinetyDaysNotYears(self):
+        asked: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            asked.append(request.url.params["from"])
+            return httpx.Response(200, json={"status": "Succeeded", "results": []})
+
+        fetch_transactions("token", "acc", client=_client(handler))
+
+        from datetime import UTC, datetime, timedelta
+
+        expected = (datetime.now(UTC).date() - timedelta(days=90)).isoformat()
+        assert asked == [expected]

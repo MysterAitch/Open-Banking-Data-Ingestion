@@ -63,6 +63,15 @@ API_HOST = "https://api.truelayer.com"
 BACKFILL_LADDER_DAYS = (20000, 3650, 730, 90)
 DEFAULT_BACKFILL_DAYS = BACKFILL_LADDER_DAYS[1]
 
+# Routine pulls ask for ninety days, and this is regulation rather than a
+# tuning choice: SCA-RTS limits unattended account access to ninety days of
+# history, anything older needing the authentication that only happens at
+# connection time. It is also self-healing - a missed cycle is covered by the
+# next pull's window - and it is safe against the behaviour the first real
+# bank demonstrated: rejecting wide ranges outright, which would have failed
+# every scheduled pull forever had they kept asking for years.
+ROUTINE_WINDOW_DAYS = 90
+
 
 def backfill_ladder() -> tuple[int, ...]:
     """Windows to try, widest first. `OBDI_BACKFILL_DAYS` prepends an override.
@@ -174,7 +183,13 @@ def refresh_access_token(
 
 def fetch_accounts(
     access_token: str, *, client: httpx.Client | None = None
-) -> list[JsonObject]:
+) -> tuple[list[JsonObject], bytes]:
+    """Accounts plus the raw body, which lands like any other payload.
+
+    The body carries the display names and account types the provider sends -
+    exactly what a person needs to tell three opaque account ids apart when
+    binding them to canonical accounts, and what was previously discarded.
+    """
     http = client or httpx.Client(timeout=30.0)
     response = http.get(
         f"{API_HOST}/data/v1/accounts",
@@ -182,7 +197,7 @@ def fetch_accounts(
     )
     if response.status_code != 200:
         raise TrueLayerError(f"Account fetch failed (HTTP {response.status_code})")
-    return rows(decode(response.text), "results")
+    return rows(decode(response.content), "results"), response.content
 
 
 def fetch_transactions(
@@ -241,7 +256,7 @@ def fetch_transactions(
     elif deep:
         windows = backfill_ladder()
     else:
-        windows = (DEFAULT_BACKFILL_DAYS,)
+        windows = (ROUTINE_WINDOW_DAYS,)
     last_status = 0
     for days in windows:
         earliest = since or datetime.now(UTC).date() - timedelta(days=days or 0)
@@ -270,10 +285,11 @@ def fetch_transactions(
                 # success, so without this the difference between "this account
                 # is young" and "we silently took a fraction" is invisible - and
                 # only discoverable once the missing years are unrecoverable.
+                refused = [str(w) for w in windows[: windows.index(days)]]
                 print(
-                    f"backfill narrowed to {days} days (from {windows[0]}) for account "
-                    f"{account_id}: the provider refused the wider range. If this "
-                    "account is older, some history was NOT fetched.",
+                    f"backfill narrowed to {days} days for account {account_id}: "
+                    f"the provider refused {', '.join(refused)}. If this account "
+                    "is older, some history was NOT fetched.",
                     file=sys.stderr,
                 )
             body = response.content
@@ -390,8 +406,11 @@ def artefact_for(
     # query-string form of the pending flag wrote a URL that was never fetched
     # into layer 0 - provenance must describe the request that happened, not a
     # paraphrase of it.
-    suffix = "/pending" if kind == "pending" else ""
-    origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
+    if kind == "accounts":
+        origin = f"{API_HOST}/data/v1/accounts"
+    else:
+        suffix = "/pending" if kind == "pending" else ""
+        origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
     return RawArtefact(
         source=f"truelayer-{kind}",
         account_ref=account_id,
