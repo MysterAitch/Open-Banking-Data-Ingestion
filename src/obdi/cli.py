@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
+from .coverage import agreements, coverage, gaps
+from .coverage import report as coverage_report
 from .doctor import report, run_checks
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
@@ -375,6 +377,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     subcommands.add_parser("status", help="show row counts per layer")
     subcommands.add_parser(
+        "coverage",
+        help="what the store holds per account and source, and whether sources agree",
+    )
+    subcommands.add_parser(
         "doctor",
         help="check configuration and access before anything depends on them",
     )
@@ -470,6 +476,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f'    python scripts/truelayer_probe.py exchange "<url>" --save {name}')
             print("\nUse the SAME name shown above, or you will create a duplicate")
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
+        return 0
+
+    if args.command == "coverage":
+        with Store(db_path) as store:
+            held = store.all_transactions()
+        print(coverage_report(coverage(held), agreements(held), gaps(held)))
         return 0
 
     if args.command == "doctor":
