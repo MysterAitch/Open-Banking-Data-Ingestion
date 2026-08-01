@@ -113,11 +113,22 @@ class TestFuzzyMatching:
 
 
 class TestUnresolvedHandling:
-    def test_Transaction_WhenNothingMatches_FlaggedForReviewNotSilentlyGuessed(self):
+    def test_Transaction_WhenNothingMatches_StoredAsNewWithoutGuessing(self):
         result = resolve(txn(), [])
         assert result.tier is MatchTier.UNRESOLVED
-        assert result.needs_review
         assert result.is_new
+
+    def test_Transaction_WhenNothingEvenResembledIt_NotFlaggedAsAmbiguous(self):
+        # Every genuinely new transaction is unresolved, so flagging all of
+        # them for review would bury the few that need a decision.
+        assert not resolve(txn(), []).is_ambiguous
+
+    def test_Transaction_WhenSomethingSimilarWasDeliberatelyNotMatched_FlaggedAsAmbiguous(self):
+        # Kept apart by the same-source rule, which is the one case where a
+        # repeated payment and a duplicate report look identical.
+        stored = txn(source="monzo-csv", source_id="tx-1")
+        incoming = txn(source="monzo-csv", source_id="tx-2")
+        assert resolve(incoming, [stored]).is_ambiguous
 
 
 class TestSupersession:

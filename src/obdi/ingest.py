@@ -123,8 +123,19 @@ def reconcile_batch(
     result = summary or ImportSummary(artefact_new=True)
     result.parsed += len(transactions)
 
-    by_account: dict[str, list[Transaction]] = {}
+    # Number each repeat of the same content within this batch. Deterministic
+    # across re-parses, because it depends only on the order the source
+    # presents its rows - which is what lets a re-downloaded export merge while
+    # two genuinely repeated payments stay apart.
+    seen: dict[tuple[str, str], int] = {}
+    numbered: list[Transaction] = []
     for transaction in transactions:
+        key = (transaction.account_id, transaction.content_key)
+        numbered.append(replace(transaction, occurrence=seen.get(key, 0)))
+        seen[key] = seen.get(key, 0) + 1
+
+    by_account: dict[str, list[Transaction]] = {}
+    for transaction in numbered:
         existing = by_account.setdefault(
             transaction.account_id, store.transactions_for_account(transaction.account_id)
         )
@@ -177,4 +188,17 @@ def _reconcile(
     fresh = replace(transaction, entity_id=str(uuid.uuid4()), artefact_digest=digest)
     store.upsert_transaction(fresh, match_tier=result.tier.value)
     summary.inserted += 1
+
+    # Only the genuinely ambiguous cases: something matched on amount and date
+    # and was kept apart solely by the same-source rule. Flagging every new
+    # transaction would bury these under thousands that need no thought.
+    if result.is_ambiguous:
+        store.queue_for_review(
+            fresh.entity_id,
+            f"stored as new, but {len(result.near_misses)} transaction(s) in this account "
+            f"match on amount and date and were kept apart only by the same source rule - "
+            f"confirm this is a repeated payment and not a duplicate report",
+        )
+        summary.needs_review += 1
+
     return fresh, None

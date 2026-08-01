@@ -28,7 +28,9 @@ FUZZY_WINDOW_DAYS = 7
 INTERNAL_TRANSFER_WINDOW_DAYS = 1
 
 
-def could_be_one_payment(incoming: Transaction, candidate: Transaction) -> bool:
+def could_be_one_payment(
+    incoming: Transaction, candidate: Transaction, *, same_content: bool
+) -> bool:
     """Whether these two records could be one payment observed twice.
 
     This is the question the original rules never asked. They were built around
@@ -46,25 +48,61 @@ def could_be_one_payment(incoming: Transaction, candidate: Transaction) -> bool:
     """
     if candidate.source != incoming.source:
         return True
-    if incoming.source_id and candidate.source_id and incoming.source_id == candidate.source_id:
-        return True
+
+    # Settlement first, because it is the one case where a source deliberately
+    # reissues a payment under a NEW identifier. Testing ids before this would
+    # read that reissue as proof of two separate payments and duplicate every
+    # transaction as it settled.
     incoming_pending = incoming.status is TransactionStatus.PENDING
     candidate_pending = candidate.status is TransactionStatus.PENDING
-    return incoming_pending != candidate_pending
+    if incoming_pending != candidate_pending:
+        return True
+
+    if incoming.source_id and candidate.source_id:
+        # Otherwise two authoritative identifiers from one source settle it
+        # outright, in both directions: equal means one payment, different
+        # means two. The source itself has told us.
+        return incoming.source_id == candidate.source_id
+
+    if not same_content:
+        # Different content within one source is two different payments, with
+        # no exception. A source never reports one payment twice under two
+        # different descriptions or dates in the same breath, so this is what
+        # keeps a weekly standing order from collapsing into a single row.
+        return False
+
+    # Identical content within one source is genuinely ambiguous: it is either
+    # two matching payments, or one payment appearing in two overlapping
+    # downloads. Occurrence separates them. A file holding two matching rows
+    # numbers them 0 and 1, and re-importing it, or fetching an overlapping
+    # range, reproduces that numbering - so first matches first and second
+    # matches second, merging a repeat without ever merging two payments.
+    return incoming.occurrence == candidate.occurrence
 
 
 @dataclass(frozen=True)
 class MatchResult:
     tier: MatchTier
     existing: Transaction | None
+    # Candidates that looked alike on amount and date but were kept apart by
+    # the same-source rule. Recorded because that is the one genuinely
+    # ambiguous case: a repeated payment and a duplicate report have the same
+    # shape, and being wrong is expensive in both directions.
+    near_misses: tuple[Transaction, ...] = ()
 
     @property
     def is_new(self) -> bool:
         return self.existing is None
 
     @property
-    def needs_review(self) -> bool:
-        return self.tier is MatchTier.UNRESOLVED
+    def is_ambiguous(self) -> bool:
+        """Stored as new, but something similar was deliberately not matched.
+
+        Not the same as `is_new`: every genuinely new transaction is
+        unresolved, and flagging all of them would bury the few worth looking
+        at under thousands that are not.
+        """
+        return self.existing is None and bool(self.near_misses)
 
 
 def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResult:
@@ -86,24 +124,30 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
     if incoming.content_key:
         for candidate in same_account:
             if candidate.content_key == incoming.content_key and could_be_one_payment(
-                incoming, candidate
+                incoming, candidate, same_content=True
             ):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
     window = timedelta(days=FUZZY_WINDOW_DAYS)
-    near = [
+    similar = [
         t
         for t in same_account
         if t.amount_minor == incoming.amount_minor
         and abs(t.value_date - incoming.value_date) <= window
-        # The brake that was previously gated on the incoming record HAVING a
-        # provider id, which left every id-less export unprotected. Two rows of
-        # one file are two payments whether or not the format numbers them.
-        and could_be_one_payment(incoming, t)
     ]
 
+    # The brake that was previously gated on the incoming record HAVING a
+    # provider id, which left every id-less export unprotected. Two rows of one
+    # file are two payments whether or not the format numbers them.
+    near = [
+        t
+        for t in similar
+        if could_be_one_payment(incoming, t, same_content=t.content_key == incoming.content_key)
+    ]
+    rejected = tuple(t for t in similar if t not in near)
+
     if not near:
-        return MatchResult(MatchTier.UNRESOLVED, None)
+        return MatchResult(MatchTier.UNRESOLVED, None, near_misses=rejected)
 
     near.sort(key=lambda t: abs(t.value_date - incoming.value_date))
     return MatchResult(MatchTier.FUZZY, near[0])

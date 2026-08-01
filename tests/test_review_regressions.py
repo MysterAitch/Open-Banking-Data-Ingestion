@@ -169,6 +169,54 @@ class TestUpsertKeepsProvenanceConsistent:
             assert len(store.transactions_for_account("halifax")) == 1
 
 
+class TestRepeatedDownloadsOfOneSource:
+    """Export caps force overlapping downloads, so this is the normal case."""
+
+    def test_Export_WhenImportedTwice_TransactionsNotDuplicated(self, tmp_path):
+        qif = b"!Type:Bank\nD01/03/2026\nT-20.00\nPTESCO\n^\nD02/03/2026\nT-35.00\nPSHELL\n^\n"
+        path = tmp_path / "export.qif"
+        path.write_bytes(qif)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, path, account_id="halifax")
+            import_file(store, path, account_id="halifax")
+            rows = store.transactions_for_account("halifax")
+
+        assert len(rows) == 2
+        assert sum(t.amount_minor for t in rows) == -5500
+
+    def test_Export_WhenItRepeatsAPaymentAndIsReimported_CountsPreserved(self, tmp_path):
+        # Two genuinely identical rows AND a re-import: the file must yield two
+        # rows, and importing it twice must still yield two.
+        qif = b"!Type:Bank\nD01/03/2026\nT-20.00\nPTESCO\n^\nD01/03/2026\nT-20.00\nPTESCO\n^\n"
+        path = tmp_path / "export.qif"
+        path.write_bytes(qif)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, path, account_id="halifax")
+            import_file(store, path, account_id="halifax")
+            rows = store.transactions_for_account("halifax")
+
+        assert len(rows) == 2
+        assert sum(t.amount_minor for t in rows) == -4000
+
+    def test_Export_WhenOverlappingRangeDownloaded_OverlapNotDuplicated(self, tmp_path):
+        first = b"!Type:Bank\nD01/03/2026\nT-20.00\nPTESCO\n^\nD05/03/2026\nT-31.00\nPBOOTS\n^\n"
+        overlapping = (
+            b"!Type:Bank\nD05/03/2026\nT-31.00\nPBOOTS\n^\nD09/03/2026\nT-42.00\nPARGOS\n^\n"
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            for name, payload in [("a.qif", first), ("b.qif", overlapping)]:
+                path = tmp_path / name
+                path.write_bytes(payload)
+                import_file(store, path, account_id="halifax")
+            rows = store.transactions_for_account("halifax")
+
+        assert len(rows) == 3
+        assert sum(t.amount_minor for t in rows) == -9300
+
+
 class TestOneStoredTransactionClaimedOnce:
     def test_Payments_WhenTwoIncomingCouldMatchOneStored_OnlyOneClaimsIt(self, tmp_path):
         # A file recorded one of two similar payments; the API then reports

@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     source              TEXT NOT NULL,
     source_id           TEXT,
     content_key         TEXT NOT NULL,
+    -- Which repeat of this content within its batch. Without it, two identical
+    -- purchases and one payment seen in two overlapping exports are
+    -- indistinguishable, and any rule that merges the second case merges the
+    -- first too.
+    occurrence          INTEGER NOT NULL DEFAULT 0,
     artefact_digest     TEXT NOT NULL DEFAULT '',
     is_internal_transfer INTEGER NOT NULL DEFAULT 0,
     match_tier          TEXT NOT NULL DEFAULT 'unresolved',
@@ -164,9 +169,9 @@ class Store:
             INSERT INTO transactions (
                 entity_id, account_id, amount_minor, currency, value_date, booking_date,
                 description, counterparty, status, source, source_id, content_key,
-                artefact_digest, is_internal_transfer, match_tier, matched_entity_id,
-                raw, first_seen_at, last_seen_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                occurrence, artefact_digest, is_internal_transfer, match_tier,
+                matched_entity_id, raw, first_seen_at, last_seen_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(entity_id) DO UPDATE SET
                 amount_minor = excluded.amount_minor,
                 value_date = excluded.value_date,
@@ -201,6 +206,7 @@ class Store:
                 transaction.source,
                 transaction.source_id,
                 transaction.content_key,
+                transaction.occurrence,
                 transaction.artefact_digest,
                 int(transaction.is_internal_transfer),
                 match_tier,
@@ -210,6 +216,27 @@ class Store:
                 now,
             ),
         )
+
+    def review_queue(self, *, include_resolved: bool = False) -> list[dict]:
+        """Transactions awaiting a human decision.
+
+        The backstop that was promised and missing. When matching cannot tell a
+        repeated payment from a duplicate report, it stores the transaction and
+        records the doubt here rather than deciding silently.
+        """
+        clause = "" if include_resolved else " WHERE resolved_at IS NULL"
+        rows = self.connection.execute(
+            f"SELECT entity_id, reason, created_at, resolved_at FROM review_queue{clause} "
+            "ORDER BY created_at"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def resolve_review(self, entity_id: str) -> None:
+        self.connection.execute(
+            "UPDATE review_queue SET resolved_at = ? WHERE entity_id = ?",
+            (datetime.now().astimezone().isoformat(), entity_id),
+        )
+        self.connection.commit()
 
     def queue_for_review(self, entity_id: str, reason: str) -> None:
         self.connection.execute(
@@ -260,6 +287,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         source=row["source"],
         source_id=row["source_id"],
         content_key=row["content_key"],
+        occurrence=row["occurrence"],
         artefact_digest=row["artefact_digest"],
         entity_id=row["entity_id"],
         is_internal_transfer=bool(row["is_internal_transfer"]),

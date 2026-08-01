@@ -71,6 +71,12 @@ class Transaction:
     artefact_digest: str = ""
     entity_id: str = ""
     content_key: str = ""
+    # Which occurrence of this content this is within its batch, counting from
+    # zero. Two identical purchases and one payment appearing in two
+    # overlapping exports are indistinguishable by content alone; they differ
+    # only in how MANY times the content occurs. Matching the nth occurrence
+    # against the nth settles both cases, and is stable across re-parses.
+    occurrence: int = 0
     is_internal_transfer: bool = False
     counterparty: str = ""
     raw: dict = field(default_factory=dict)
