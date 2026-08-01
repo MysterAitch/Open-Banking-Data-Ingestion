@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
@@ -46,7 +47,20 @@ API_HOST = "https://api.truelayer.com"
 # that clamps silently returns what it has; one that rejects the range gets
 # retried narrower, instead of the whole backfill failing and taking the
 # irreplaceable window with it.
-BACKFILL_LADDER_DAYS = (3650, 730, 90)
+# Top rung reaches back past 1970. Not because any UK current account has
+# transactions that old, but because "ask for everything" is only risky if the
+# provider REJECTS it - and the rung below catches that. Providers behave in
+# three ways here and only one of them is documented anywhere:
+#
+#   clamp     returns what exists and ignores the rest - asking wide is free
+#   reject    a 4xx on the range - the next rung down handles it
+#   cap span  limits how much may be requested at ONCE, needing pagination
+#
+# The third is the dangerous one, because narrowing "succeeds" and quietly
+# returns a fraction of what was there. That cannot be distinguished from a
+# genuinely short history without saying which window was actually satisfied,
+# which is why falling back is reported rather than silent.
+BACKFILL_LADDER_DAYS = (20000, 3650, 730, 90)
 DEFAULT_BACKFILL_DAYS = BACKFILL_LADDER_DAYS[1]
 
 
@@ -203,6 +217,18 @@ def fetch_transactions(
             },
         )
         if response.status_code == 200:
+            if days != windows[0]:
+                # Say when less was fetched than was asked for. A provider that
+                # caps the span per request makes a narrowed window look like a
+                # success, so without this the difference between "this account
+                # is young" and "we silently took a fraction" is invisible - and
+                # only discoverable once the missing years are unrecoverable.
+                print(
+                    f"backfill narrowed to {days} days (from {windows[0]}) for account "
+                    f"{account_id}: the provider refused the wider range. If this "
+                    "account is older, some history was NOT fetched.",
+                    file=sys.stderr,
+                )
             body = response.content
             return rows(decode(body), "results"), body
         last_status = response.status_code

@@ -101,3 +101,33 @@ class TestTheWindowIsConfigurable:
         monkeypatch.setenv("OBDI_BACKFILL_DAYS", "as-far-back-as-possible")
 
         assert backfill_ladder() == BACKFILL_LADDER_DAYS
+
+
+class TestNarrowingIsAudible:
+    """A narrowed window looks identical to a short account history.
+
+    If a provider caps how much may be requested at once, falling back
+    "succeeds" while returning a fraction of what exists - and the shortfall is
+    only discoverable once the missing years can no longer be fetched.
+    """
+
+    def test_Backfill_WhenItHasToNarrow_SaysSoRatherThanReportingPlainSuccess(self, capsys):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.params["from"] < "2015-01-01":
+                return httpx.Response(400, json={"error": "range too wide"})
+            return httpx.Response(200, json={"results": []})
+
+        fetch_transactions("token", "acc-1", client=_client(handler))
+
+        warning = capsys.readouterr().err
+        assert "narrowed" in warning
+        assert "acc-1" in warning, "the account must be named, or you cannot tell which"
+
+    def test_Backfill_WhenTheWidestWindowWorks_StaysQuiet(self, capsys):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"results": []})
+
+        fetch_transactions("token", "acc-1", client=_client(handler))
+
+        # Warning on the happy path would train the reader to ignore it.
+        assert capsys.readouterr().err == ""
