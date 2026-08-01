@@ -90,3 +90,40 @@ class TestUnhappyPaths:
 
         assert outcome == 1
         assert "Authorise a bank first" in capsys.readouterr().err
+
+
+class TestConfiguredMeansResolvable:
+    """A set variable is not a usable token, and the difference is six-hourly noise.
+
+    The deployment always sets the _FILE variable; what may be absent is the
+    file. Attempting Starling anyway prints a failure every cycle until the
+    token exists - a standing wolf-cry that trains the reader to skim past the
+    line that will one day matter.
+    """
+
+    def test_Pull_WhenTheTokenFileDoesNotExist_SkipsStarlingWithANoteNotAFailure(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        store_path = _store_with(tmp_path, ["a-bank"])
+        monkeypatch.setenv("OBDI_CONNECTION_STORE", str(store_path))
+        monkeypatch.setenv(
+            "STARLING_PERSONAL_ACCESS_TOKEN_FILE", str(tmp_path / "absent-token")
+        )
+        pulled: list[str] = []
+        monkeypatch.setattr("obdi.cli._pull", lambda t, d, s, deep=False: pulled.append(t) or 0)
+
+        outcome = _pull_everything(tmp_path / "db.sqlite3", None)
+
+        assert pulled == ["a-bank"], "the other banks must still be pulled"
+        assert outcome == 0, "an unconfigured token is not a pull failure"
+        err = capsys.readouterr().err
+        assert "starling" in err.casefold(), "but the skip must be said, once, plainly"
+
+    def test_Pull_WhenNothingResolvesAtAll_StillReportsNothingToPull(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv(
+            "STARLING_PERSONAL_ACCESS_TOKEN_FILE", str(tmp_path / "absent-token")
+        )
+
+        assert _pull_everything(tmp_path / "db.sqlite3", None) == 1

@@ -220,10 +220,20 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
             print(f"Could not read the connection store: {exc}", file=sys.stderr)
             return 2
 
-    if os.getenv("STARLING_PERSONAL_ACCESS_TOKEN_FILE", "").strip() or os.getenv(
-        "STARLING_PERSONAL_ACCESS_TOKEN", ""
-    ).strip():
-        names.append("starling")
+    # Include Starling only when its token actually RESOLVES, not merely when
+    # the variable is set. The deployment always sets the _FILE variable; what
+    # may be absent is the file - and attempting the pull anyway prints a
+    # failure every cycle until the token exists, a standing wolf-cry that
+    # teaches the reader to skim the one log line that will some day be real.
+    try:
+        if read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=False):
+            names.append("starling")
+    except SecretError as exc:
+        print(
+            f"starling skipped - token configured but not readable: {exc} "
+            "(obdi doctor shows the full picture)",
+            file=sys.stderr,
+        )
 
     if not names:
         print("No connections to pull. Authorise a bank first.", file=sys.stderr)
