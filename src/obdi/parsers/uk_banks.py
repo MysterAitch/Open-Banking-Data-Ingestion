@@ -14,6 +14,7 @@ from ..identity import content_key
 from ..models import Transaction, TransactionStatus
 from ..money import parse_amount
 from .base import ParseError, StatementParser, parse_date
+from .qif import QifParser
 
 
 class StarlingCsvParser(StatementParser):
@@ -154,6 +155,7 @@ PARSERS: tuple[type[StatementParser], ...] = (
     StarlingCsvParser,
     MonzoCsvParser,
     AmexUkCsvParser,
+    QifParser,
 )
 
 
