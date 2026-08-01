@@ -145,7 +145,7 @@ def _serve(host: str, port: int) -> int:
         print(
             "Set TRUELAYER_CLIENT_ID and TRUELAYER_REDIRECT_URI. The redirect URI must "
             "be reachable from the phone AND registered with the provider byte for byte "
-            "- for a tailnet deployment that is the Serve hostname.",
+            "- whatever hostname the phone's browser can actually reach.",
             file=sys.stderr,
         )
         return 2
@@ -165,7 +165,7 @@ def _serve(host: str, port: int) -> int:
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
         # Binding wider puts a page that can start bank authorisations onto the
-        # network. Exposure belongs to Tailscale Serve, not to this process.
+        # network. Exposure belongs to the layer in front, not to this process.
         print(
             f"WARNING: bound to {host}, not loopback. Anything that can reach this "
             "can begin a bank authorisation.",

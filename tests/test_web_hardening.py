@@ -1,10 +1,10 @@
-"""Hardening for the tailnet-exposed service.
+"""Hardening for the privately exposed service.
 
-Reachable by anything on the tailnet without authenticating, and it can begin a
-bank authorisation, so the bar is higher than for a local script. None of these
-are exploitable by a stranger from the internet - the service is not public -
-but "only reachable by devices I trust" is a weaker guarantee than it sounds
-once a phone, a laptop and a Docker host are all on the tailnet.
+Reachable without authenticating by anything on the network it is published to,
+and it can begin a bank authorisation, so the bar is higher than for a local
+script. None of these are exploitable by a stranger from the internet - the
+service is not public - but "only reachable by devices I trust" is a weaker
+guarantee than it sounds once a phone, a laptop and a Docker host all qualify.
 """
 
 import threading
@@ -21,7 +21,7 @@ TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
 
 class TestSessionDoesNotGrowWithoutBound:
     def test_Session_WhenAuthorisationsAreAbandoned_ExpiredStatesAreEvicted(self):
-        # /connect needs no authentication, so anything on the tailnet could
+        # /connect needs no authentication, so anything reaching it could
         # mint states indefinitely; abandoned ones also accumulate in normal
         # use, since starting an authorisation and not finishing it is common.
         session = AuthorisationSession()
@@ -77,7 +77,7 @@ def server(tmp_path):
     config = WebConfig(
         client_id="client-1",
         client_secret="secret-1",
-        redirect_uri="https://obdi.example.ts.net/callback",
+        redirect_uri="https://obdi.example.internal/callback",
         connection_store=ConnectionStore(tmp_path / "c.json"),
     )
     handler = type(

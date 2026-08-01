@@ -14,17 +14,11 @@ services:
     image: obdi:local
     container_name: obdi-web
     restart: unless-stopped
-    labels:
-      # Serve exposes this on the tailnet with a real certificate, which is
-      # what makes it reachable from a phone without any public exposure.
-      homelab.tsserve: "true"
-      # Deliberately NO wud.tag.include here. Update watching compares registry
-      # tags, and this image is built from source in this repository - there is
-      # no upstream tag to watch. A label would imply supervision that does not
-      # exist. Staying current is a git concern for this one.
     ports:
       # Loopback only. This page can start a bank authorisation, so it must not
-      # answer to anything that merely reaches the host.
+      # answer to anything that merely reaches the host. Reach it from a phone
+      # with whatever you already use for private access, rather than by
+      # widening this binding.
       - "127.0.0.1:8087:8080"
     volumes:
       - /srv/appdata/obdi/data:/data
@@ -39,7 +33,7 @@ services:
       TRUELAYER_CLIENT_ID: ${TRUELAYER_CLIENT_ID}
       TRUELAYER_CLIENT_SECRET_FILE: /secrets/truelayer-client-secret
       # Must match a redirect URI registered with the provider byte for byte.
-      # For a tailnet deployment this is the Serve hostname, NOT localhost.
+      # The externally reachable hostname of this service, NOT localhost.
       TRUELAYER_REDIRECT_URI: ${TRUELAYER_REDIRECT_URI}
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8080/').status_code==200 else 1)"]

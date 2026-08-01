@@ -1,4 +1,4 @@
-# Publishes the container image the homelab stack pulls.
+# Publishes the container image the deployment pulls.
 #
 # Publishing beats building on the deployment host: the host stays a place that
 # runs things rather than compiles them, a failed build fails here where it is
@@ -35,7 +35,7 @@ jobs:
   publish:
     needs: check
     # Nothing to publish from a pull request, and a fork must not be able to
-    # push an image into the registry this lab pulls from.
+    # push an image into the registry real deployments pull from.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

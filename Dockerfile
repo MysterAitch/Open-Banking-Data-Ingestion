@@ -41,6 +41,6 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 8080
 
 # Bound to all interfaces INSIDE the container only; the published port is
-# pinned to loopback in compose, and exposure beyond that is Tailscale Serve's
-# job. Binding to 127.0.0.1 here would make the container unreachable.
+# pinned to loopback in compose, and exposure beyond that is the fronting
+# layer's job. Binding to 127.0.0.1 here would make the container unreachable.
 CMD ["obdi", "serve", "--host", "0.0.0.0", "--port", "8080"]

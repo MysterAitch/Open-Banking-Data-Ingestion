@@ -7,8 +7,9 @@ password into a desktop browser and juggling a second factor.
 
 This works because the OAuth redirect is a BROWSER event. The provider never
 connects inbound; it sends the browser somewhere. So the whole flow needs only
-a page your phone can reach, which a loopback-bound service exposed over
-Tailscale provides - real certificate, tailnet-only, no public exposure.
+a page your phone can reach: a loopback-bound service fronted by anything that
+gives it a trusted certificate on a privately reachable hostname, with nothing
+published to the internet.
 
 Three routes:
 
@@ -53,8 +54,8 @@ class AuthorisationSession:
 
     def begin(self, connection_name: str, *, now: datetime | None = None) -> str:
         moment = now or datetime.now(UTC)
-        # Evict on the way in. /connect needs no authentication, so anything on
-        # the tailnet could mint states indefinitely - and abandoned
+        # Evict on the way in. /connect needs no authentication, so anything
+        # that can reach it could mint states indefinitely - and abandoned
         # authorisations accumulate in ordinary use too, since starting one and
         # not finishing it is common. Without this the process grows for as
         # long as it runs.
@@ -283,7 +284,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
 def serve(config: WebConfig, *, host: str = "127.0.0.1", port: int = 8080) -> None:
     """Run the interface.
 
-    Loopback by default. Exposure is Tailscale Serve's job - binding to all
+    Loopback by default. Exposure is the fronting layer's job - binding to all
     interfaces would put a page that can initiate bank authorisations onto the
     LAN, reachable by anything on the network.
     """

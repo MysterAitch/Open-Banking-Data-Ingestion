@@ -2,11 +2,12 @@
 
 The OAuth redirect happens in the BROWSER, not server to server. The provider
 never connects to this service - it sends the browser somewhere, and the
-browser follows. That is the whole reason a tailnet-only address works: the
-redirect target only has to be reachable by the machine holding the session.
+browser follows. That is the whole reason a private address works: the redirect
+target only has to be reachable by the machine holding the session.
 
-So a service bound to loopback and exposed over Tailscale Serve is a perfectly
-valid redirect target, with a real certificate and no public exposure. The
+So a service bound to loopback, fronted by anything that gives it a hostname and
+a certificate the browser trusts, is a valid redirect target with no public
+exposure whatsoever. The
 human step at the bank remains, because strong customer authentication is the
 point of the rule and cannot be automated. Everything after it can be.
 
@@ -132,7 +133,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
 def serve(code_handler: CodeHandler, *, host: str = "127.0.0.1", port: int = 8080) -> None:
     """Run the receiver.
 
-    Bound to loopback by convention: exposure is Tailscale Serve's job, not
+    Bound to loopback by convention: exposure is the fronting layer's job, not
     this process's. Binding to all interfaces would put an endpoint that
     accepts authorisation codes on the LAN.
     """
@@ -147,8 +148,8 @@ def serve(code_handler: CodeHandler, *, host: str = "127.0.0.1", port: int = 808
 def configured_redirect_uri() -> str:
     """The redirect URI this receiver expects to be reached at.
 
-    Must match what is registered with the provider byte for byte. For a
-    tailnet deployment that is the Serve hostname, e.g.
-    https://obdi.tailnet-name.ts.net/callback
+    Must match what is registered with the provider byte for byte. Whatever
+    hostname the browser doing the authorising can reach, e.g.
+    https://obdi.example.internal/callback
     """
     return os.getenv("TRUELAYER_REDIRECT_URI", "https://localhost:8080/callback")

@@ -115,9 +115,9 @@ cross-check instead of double-counting. See "Canonical accounts" in the README.
 Steps 2 and 3 collapse into one. The OAuth redirect happens **in your browser**,
 not server to server — the provider never connects to anything of yours, it just
 sends the browser somewhere. So the redirect target only has to be reachable by
-the machine holding the session, and a receiver bound to loopback and exposed
-over Tailscale Serve qualifies: real certificate, tailnet-only, no public
-exposure.
+the machine holding the session. A receiver bound to loopback and fronted by
+whatever you already use for private access qualifies, so long as it presents a
+certificate the browser trusts and nothing is published to the internet.
 
 With that running:
 
@@ -129,16 +129,17 @@ With that running:
 No copying URLs, no second command, nothing to mistype. The bank login stays —
 strong customer authentication is the point of the rule and cannot be automated.
 
-To set it up, register the Serve hostname as a redirect URI with the provider
-and set it as `TRUELAYER_REDIRECT_URI`, matching byte for byte:
+To set it up, register that hostname as a redirect URI with the provider and set
+it as `TRUELAYER_REDIRECT_URI`, matching byte for byte:
 
 ```
-https://<host>.<tailnet>.ts.net/callback
+https://<your-host>/callback
 ```
 
-Two caveats worth knowing. Enabling HTTPS on a Tailscale hostname publishes that
-hostname to public Certificate Transparency logs — the name leaks, never the
-traffic — so avoid putting anything revealing in it. And this does nothing for
+Two caveats worth knowing. Any publicly trusted certificate publishes its
+hostname to Certificate Transparency logs, including one issued for a service
+only reachable privately — the name leaks, never the traffic — so avoid putting
+anything revealing in it. And this does nothing for
 webhooks, which would need genuine public ingress; nothing here needs them,
 since aggregator data is polled and their own polling runs on a four-to-six hour
 cycle regardless.
