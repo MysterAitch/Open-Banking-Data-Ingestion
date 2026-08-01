@@ -196,6 +196,34 @@ first-party and through the aggregator. Running both calibrates how far two
 providers' descriptions of the same payment diverge in practice — which tells
 you how much to trust matching on the accounts you can only see one way.
 
+## Assets that have no transaction stream
+
+A pension pot, a fund or a property is not a ledger you sum — it is a value you
+*observe*, where the change between observations mixes contributions, growth and
+fees that a statement rarely separates.
+
+```bash
+obdi value workplace-pension --kind defined_contribution \
+    --on 2026-04-05 --amount 42317.00 \
+    --units 24210.55 --unit-price 174.80 --document paperless:1234
+```
+
+**Record units and unit price whenever the statement gives them.** Nothing reads
+them yet. Keeping only the total forecloses proper unit-and-price modelling
+permanently; keeping both costs two columns.
+
+**Defined benefit has no pot**, so recording one is refused. Store the accrued
+annual income — the fact a statement actually supplies — and derive any capital
+figure from a multiplier held as configuration. There is no agreed convention:
+the annual allowance test uses 16, the abolished lifetime allowance used 20, a
+scheme's own transfer value is lower again and actuaries warn it understates the
+member's benefit. The right answer depends on the question, so it must be
+re-runnable rather than baked in.
+
+**State pension is excluded from wealth** and capitalising it is refused —
+without a contractual entitlement it is a social benefit, and belongs in
+projected income.
+
 ## Replaying into Actual Budget
 
 Replay, not sync. The store is the record; Actual is a view over it. That is
@@ -346,11 +374,21 @@ UK CSV parsers, with layouts taken from research rather than real exports —
 mismatch rather than misread it.
 
 Also working: live pulls from TrueLayer and Starling, connection storage with
-consent tracking, cross-source matching, and Actual replay payload generation.
+consent tracking, cross-source matching with source tiers, savings spaces as
+accounts, valuation recording for assets with no transaction stream, a
+phone-usable connection interface, a Docker stack, and Actual replay payload
+generation.
 
-Not built yet: the Node applier that consumes the replay payload, a compose
-stack to run the callback receiver and a scheduled pull, valuations ingestion,
-MQTT events, and a review interface for unresolved matches.
+Not built yet: the **Node applier** that consumes the replay payload — it needs
+a reachable Actual server to verify against, so it is deliberately unwritten
+rather than shipped unverified — plus MQTT events and a review interface for
+the flagged-but-undecided queue.
+
+Assurance: 304 tests, `mypy --strict` clean, `ruff` clean under a widened rule
+set including annotations, security, timezone and pathlib families. An
+adversarial multi-lens review found 33 defects in an earlier state of this code
+that had 189 tests passing, four of them silent data loss; all are fixed and
+covered by regression tests that name the scenario rather than the mechanism.
 
 `scripts/check_uk_coverage.py` answers the outstanding design question — whether
 Enable Banking actually carries your banks.
