@@ -27,10 +27,15 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from dotenv import load_dotenv
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from obdi.secrets import SecretError, describe_source, read_secret  # noqa: E402
 
 LIVE = ("https://auth.truelayer.com", "https://api.truelayer.com")
 SANDBOX = ("https://auth.truelayer-sandbox.com", "https://api.truelayer-sandbox.com")
@@ -57,22 +62,32 @@ DEFAULT_BANKS = [
 ]
 
 
-def credentials() -> tuple[str, str, str]:
+def credentials(*, need_secret: bool = True) -> tuple[str, str, str]:
+    """Resolve credentials, preferring the file-indirection form.
+
+    The client id is not a secret and stays inline. The client secret is read
+    via `read_secret`, so `.env` need only hold a path to it.
+    """
     load_dotenv()
     client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
-    client_secret = os.getenv("TRUELAYER_CLIENT_SECRET", "").strip()
     # TrueLayer hosts a redirect page for exactly this manual flow, which
     # renders the returned code rather than leaving you to read it out of a
     # failed connection's address bar.
     redirect_uri = os.getenv(
         "TRUELAYER_REDIRECT_URI", "https://console.truelayer.com/redirect-page"
     ).strip()
-    if not client_id or not client_secret:
+
+    if not client_id:
         sys.exit(
-            "Set TRUELAYER_CLIENT_ID and TRUELAYER_CLIENT_SECRET in .env.\n"
-            "Take them from the environment you are testing - the live client id "
-            "does NOT start with 'sandbox-'."
+            "Set TRUELAYER_CLIENT_ID in .env. Take it from the environment you "
+            "are testing - a live client id does NOT start with 'sandbox-'."
         )
+
+    try:
+        client_secret = read_secret("TRUELAYER_CLIENT_SECRET", required=need_secret)
+    except SecretError as exc:
+        sys.exit(str(exc))
+
     return client_id, client_secret, redirect_uri
 
 
@@ -81,10 +96,16 @@ def hosts(sandbox: bool) -> tuple[str, str]:
 
 
 def show_providers(sandbox: bool) -> int:
+    # The providers endpoint identifies the application by client id alone, so
+    # this step needs no secret at all - which makes it the cheapest possible
+    # test of whether a live application is real.
+    client_id, _, _ = credentials(need_secret=False)
     auth_host, _ = hosts(sandbox)
+    print(f"client id: {client_id}")
+    print(f"client secret source: {describe_source('TRUELAYER_CLIENT_SECRET')}\n")
     response = httpx.get(
         f"{auth_host}/api/providers",
-        params={"clientId": credentials()[0], "scope": SCOPES},
+        params={"clientId": client_id, "scope": SCOPES},
         timeout=30.0,
     )
     if response.status_code != 200:
