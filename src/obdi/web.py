@@ -25,6 +25,7 @@ on return so that a code cannot be replayed into an unexpected connection.
 from __future__ import annotations
 
 import html
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -98,6 +99,13 @@ class WebConfig:
     client_secret: str
     redirect_uri: str
     connection_store: ConnectionStore
+    #: Called with the connection name the moment authorisation succeeds, to
+    #: fetch deep history while the strong customer authentication is still
+    #: fresh. Injected rather than imported so this module keeps knowing nothing
+    #: about stores and providers - and so a test can prove the callback fires
+    #: without a database or a bank. Returning False makes the page say plainly
+    #: that no backfill ran, rather than implying one did.
+    start_backfill: Callable[[str], bool] | None = None
 
 
 def _connection_rows(store: ConnectionStore) -> str:
@@ -259,12 +267,33 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._respond(500, render_page("Could not save", f"<p>{html.escape(str(exc))}</p>"))
             return
 
+        # Start the backfill NOW, before the page is even rendered. Anything
+        # older than ninety days needs strong customer authentication, and the
+        # only moment one has just happened is this one. A scheduler running
+        # hours later gets the ninety-day cap and the rest is unrecoverable -
+        # not harder to fetch, gone. Leaving it to the operator makes the
+        # irreplaceable part of the job depend on remembering to act within
+        # minutes, on a phone, having just finished a bank login.
+        starter = self.bound_config.start_backfill
+        started = starter(name) if starter is not None else False
+
         days = connection.consent_days_remaining()
+        note = (
+            "<p>Fetching your history now - this is the one moment deep history is "
+            "reachable, so it starts automatically. It runs in the background; "
+            "check back shortly.</p>"
+            if started
+            else "<p><strong>No backfill was started.</strong> Run "
+            f"<code>obdi pull {html.escape(name)}</code> <strong>now</strong> - "
+            "anything beyond ninety days needs the authentication you just "
+            "completed, and that window closes within minutes.</p>"
+        )
         self._respond(
             200,
             render_page(
                 f"Connected {name}",
                 f"<p>Consent lasts {days} days and cannot be extended by software.</p>"
+                f"{note}"
                 '<p><a class="button" href="/">Back to connections</a></p>',
             ),
         )

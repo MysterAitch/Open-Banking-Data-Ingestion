@@ -161,3 +161,73 @@ class TestRouting:
     def test_UnknownPath_WhenRequested_NotFound(self, server):
         base, _, _ = server
         assert httpx.get(f"{base}/admin").status_code == 404
+
+
+class TestDeepHistoryIsFetchedWhileItIsStillReachable:
+    """The backfill must start on authorisation, not on the next schedule.
+
+    Beyond ninety days needs strong customer authentication, and the only moment
+    one has just happened is the callback. A scheduler running hours later gets
+    the ninety-day cap and the remainder is unrecoverable - so "it will be
+    picked up on the next run" is not a substitute, it is data loss deferred.
+    """
+
+    def test_Authorisation_WhenItSucceeds_StartsTheBackfillImmediately(
+        self, monkeypatch, tmp_path
+    ):
+        started: list[str] = []
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="secret-1",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            start_backfill=lambda name: (started.append(name), True)[1],
+        )
+        monkeypatch.setattr(
+            "obdi.web.exchange_code",
+            lambda **_: {"access_token": "a", "refresh_token": "r", "expires_in": 3600},
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            state = handler.session.begin("nationwide")
+            response = httpx.get(f"{base}/callback", params={"code": "c", "state": state})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 200
+        assert started == ["nationwide"], "authorising must trigger its own backfill"
+
+    def test_Authorisation_WhenNoBackfillRuns_SaysSoRatherThanImplyingSuccess(
+        self, monkeypatch, tmp_path
+    ):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="secret-1",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            start_backfill=None,
+        )
+        monkeypatch.setattr(
+            "obdi.web.exchange_code",
+            lambda **_: {"access_token": "a", "refresh_token": "r", "expires_in": 3600},
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            state = handler.session.begin("halifax")
+            response = httpx.get(f"{base}/callback", params={"code": "c", "state": state})
+        finally:
+            httpd.shutdown()
+
+        # Silence would be the dangerous outcome: the reader assumes history is
+        # being fetched, and only discovers otherwise once it is too late.
+        assert "obdi pull halifax" in response.text

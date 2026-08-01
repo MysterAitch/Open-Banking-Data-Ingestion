@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -134,7 +135,7 @@ def _value(args: argparse.Namespace, db_path: Path) -> int:
     return 0
 
 
-def _serve(host: str, port: int) -> int:
+def _serve(host: str, port: int, db_path: Path) -> int:
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if not store_path:
         print("Set OBDI_CONNECTION_STORE to the token store path.", file=sys.stderr)
@@ -157,11 +158,36 @@ def _serve(host: str, port: int) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    def start_backfill(name: str) -> bool:
+        """Fetch deep history immediately, in the background.
+
+        A thread rather than inline: a two-year backfill across several accounts
+        outlasts a browser's patience, and a timed-out page straight after a
+        successful bank login reads as failure. The work must not depend on
+        someone keeping the tab open.
+
+        Daemon, so it never delays a shutdown. Errors go to the log rather than
+        propagating: the connection is already saved by this point, and a failed
+        fetch must not undo an authorisation that succeeded. It stays re-runnable
+        by hand - only the deep window is at stake, which is precisely what makes
+        starting it here rather than later worth the complexity.
+        """
+
+        def run() -> None:
+            try:
+                _pull(name, db_path, None)
+            except Exception as exc:  # nothing may escape a thread
+                print(f"backfill for {name} failed: {exc}", file=sys.stderr)
+
+        threading.Thread(target=run, name=f"backfill-{name}", daemon=True).start()
+        return True
+
     config = WebConfig(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
         connection_store=ConnectionStore(store_path),
+        start_backfill=start_backfill,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
@@ -174,6 +200,39 @@ def _serve(host: str, port: int) -> int:
         )
     serve_web(config, host=host, port=port)
     return 0
+
+
+def _pull_everything(db_path: Path, since: date | None) -> int:
+    """Pull every stored connection, plus Starling if a token is configured.
+
+    Keeps going after a failure rather than stopping at the first. One expired
+    consent is the commonest cause, and letting it abort the run would mean a
+    single stale bank silently stops every other bank being fetched.
+    """
+    store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    names: list[str] = []
+    if store_path:
+        try:
+            names = sorted(ConnectionStore(store_path).load())
+        except (OSError, ValueError) as exc:
+            print(f"Could not read the connection store: {exc}", file=sys.stderr)
+            return 2
+
+    if os.getenv("STARLING_PERSONAL_ACCESS_TOKEN_FILE", "").strip() or os.getenv(
+        "STARLING_PERSONAL_ACCESS_TOKEN", ""
+    ).strip():
+        names.append("starling")
+
+    if not names:
+        print("No connections to pull. Authorise a bank first.", file=sys.stderr)
+        return 1
+
+    worst = 0
+    for name in names:
+        print(f"--- {name}")
+        outcome = _pull(name, db_path, since)
+        worst = max(worst, outcome)
+    return worst
 
 
 def _pull(target: str, db_path: Path, since: date | None) -> int:
@@ -253,7 +312,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     pull_command.add_argument(
         "target",
-        help="a stored connection name (see `connections`), or 'starling' for the first-party API",
+        nargs="?",
+        # Optional on purpose. A static list of names drifts from the store the
+        # moment a bank is added, and the failure is silent: the scheduler keeps
+        # pulling the names it was given and the new connection is never
+        # fetched at all. Defaulting to "every connection there is" cannot drift.
+        help="a stored connection name (see `connections`), or 'starling' for the "
+        "first-party API. Omit to pull EVERY stored connection.",
     )
     pull_command.add_argument(
         "--since",
@@ -350,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "pull":
+        if not args.target:
+            return _pull_everything(db_path, args.since)
         return _pull(args.target, db_path, args.since)
 
     if args.command == "value":
@@ -363,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
         return _replay(db_path, args.out, args.include_internal_transfers)
 
     if args.command == "serve":
-        return _serve(args.host, args.port)
+        return _serve(args.host, args.port, db_path)
 
     if args.command == "connections":
         store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()

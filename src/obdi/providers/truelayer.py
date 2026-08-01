@@ -18,6 +18,7 @@ re-fetching the same transaction must be, and is, harmless.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
@@ -34,7 +35,32 @@ API_HOST = "https://api.truelayer.com"
 
 # First connect is the one chance at deep history: the extra authentication
 # that unlocks more than ninety days only happens at authorisation time.
-DEFAULT_BACKFILL_DAYS = 730
+#
+# 730 days is not an arbitrary number - it is 24 months, the maximum a UK bank
+# is REQUIRED to provide under the Open Banking rules. Anything older is at the
+# bank's discretion, and most decline.
+#
+# But "required to provide 24 months" is not "will refuse more", and the cost of
+# not asking is permanent: history you did not fetch during the post-SCA window
+# is gone. So ask wide and fall back rather than assume either way. A provider
+# that clamps silently returns what it has; one that rejects the range gets
+# retried narrower, instead of the whole backfill failing and taking the
+# irreplaceable window with it.
+BACKFILL_LADDER_DAYS = (3650, 730, 90)
+DEFAULT_BACKFILL_DAYS = BACKFILL_LADDER_DAYS[1]
+
+
+def backfill_ladder() -> tuple[int, ...]:
+    """Windows to try, widest first. `OBDI_BACKFILL_DAYS` prepends an override.
+
+    Configurable because the real ceiling is per-bank and undocumented: the only
+    way to find out what one will serve is to ask it, and that should not need a
+    code change.
+    """
+    override = os.getenv("OBDI_BACKFILL_DAYS", "").strip()
+    if override.isdigit() and int(override) > 0:
+        return (int(override), *BACKFILL_LADDER_DAYS)
+    return BACKFILL_LADDER_DAYS
 
 
 class TrueLayerError(RuntimeError):
@@ -152,21 +178,41 @@ def fetch_transactions(
     """
     http = client or httpx.Client(timeout=30.0)
     suffix = "/pending" if pending else ""
-    params = {}
-    if not pending:
-        earliest = since or datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS)
-        params["from"] = earliest.isoformat()
-        params["to"] = (until or datetime.now(UTC).date()).isoformat()
+    url = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
+    headers = {"Authorization": f"Bearer {access_token}"}
 
-    response = http.get(
-        f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params=params,
-    )
-    if response.status_code != 200:
-        raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
-    body = response.content
-    return rows(decode(body), "results"), body
+    if pending:
+        response = http.get(url, headers=headers)
+        if response.status_code != 200:
+            raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
+        body = response.content
+        return rows(decode(body), "results"), body
+
+    # An explicit `since` is an instruction, not a preference, so it is used as
+    # given. Only the open-ended case walks the ladder.
+    windows = (None,) if since else backfill_ladder()
+    last_status = 0
+    for days in windows:
+        earliest = since or datetime.now(UTC).date() - timedelta(days=days or 0)
+        response = http.get(
+            url,
+            headers=headers,
+            params={
+                "from": earliest.isoformat(),
+                "to": (until or datetime.now(UTC).date()).isoformat(),
+            },
+        )
+        if response.status_code == 200:
+            body = response.content
+            return rows(decode(body), "results"), body
+        last_status = response.status_code
+        # Only a rejected RANGE is worth narrowing for. A 401 means the token is
+        # wrong and every rung will fail identically; retrying it three times
+        # just spends the post-authorisation window on the same error.
+        if response.status_code not in (400, 416, 422):
+            break
+
+    raise TrueLayerError(f"Transaction fetch failed (HTTP {last_status})")
 
 
 def to_transaction(
