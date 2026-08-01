@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     origin        TEXT NOT NULL DEFAULT '',
     fetched_at    TEXT NOT NULL,
     payload       BLOB NOT NULL,
+    request_meta  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (digest, account_ref, origin)
 );
 
@@ -176,6 +177,7 @@ class Store:
         self.connection.execute("PRAGMA busy_timeout = 30000")
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
+        self._migrate_request_meta_column()
         self._migrate_content_keys()
 
     def _migrate_content_keys(self) -> None:
@@ -206,6 +208,23 @@ class Store:
         if updates:
             self.connection.executemany(
                 "UPDATE transactions SET content_key = ? WHERE entity_id = ?", updates
+            )
+            self.connection.commit()
+
+    def _migrate_request_meta_column(self) -> None:
+        """Add the request-circumstances column to stores created before it.
+
+        ALTER ADD COLUMN with a default is safe and a no-op after the first
+        run. Pre-existing artefacts keep an empty value, which is itself
+        honest: their circumstances were not recorded at the time.
+        """
+        columns = [
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
+        ]
+        if "request_meta" not in columns:
+            self.connection.execute(
+                "ALTER TABLE raw_artefacts ADD COLUMN request_meta TEXT NOT NULL DEFAULT ''"
             )
             self.connection.commit()
 
@@ -260,8 +279,8 @@ class Store:
         """
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO raw_artefacts "
-            "(digest, source, account_ref, media_type, origin, fetched_at, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(digest, source, account_ref, media_type, origin, fetched_at, "
+            "payload, request_meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 artefact.digest,
                 artefact.source,
@@ -270,6 +289,7 @@ class Store:
                 artefact.origin,
                 artefact.fetched_at.isoformat(),
                 artefact.payload,
+                artefact.request_meta,
             ),
         )
         self.connection.commit()
@@ -378,6 +398,35 @@ class Store:
                 datetime.now().astimezone().isoformat(),
             ),
         )
+
+    def accounts_for_connection(self, connection_id: str) -> list[dict[str, str]]:
+        """The provider's own account list, from the landed accounts artefact.
+
+        Read from layer 0 rather than re-fetched: the names were landed as
+        evidence, so listing them costs no API call and works offline.
+        """
+        row = self.connection.execute(
+            "SELECT payload FROM raw_artefacts WHERE source = 'truelayer-accounts' "
+            "AND account_ref = ? ORDER BY fetched_at DESC LIMIT 1",
+            (connection_id,),
+        ).fetchone()
+        if row is None:
+            return []
+        import json as _json
+
+        payload = _json.loads(row[0])
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+        accounts = []
+        for item in results:
+            if isinstance(item, dict) and item.get("account_id"):
+                accounts.append(
+                    {
+                        "account_id": str(item.get("account_id")),
+                        "display_name": str(item.get("display_name") or "unnamed"),
+                        "account_type": str(item.get("account_type") or ""),
+                    }
+                )
+        return accounts
 
     def transactions_by_sighting(self) -> list[Transaction]:
         """Each transaction once per DISTINCT source that observed it.

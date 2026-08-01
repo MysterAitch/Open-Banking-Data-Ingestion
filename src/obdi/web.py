@@ -28,7 +28,7 @@ import html
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from secrets import token_urlsafe
 from urllib.parse import parse_qs, quote, urlparse
@@ -97,6 +97,16 @@ class AuthorisationSession:
         return len(self._pending)
 
 
+@dataclass(frozen=True)
+class ExtendableAccount:
+    """One provider account whose history window can be pushed further back."""
+
+    connection: str
+    provider_ref: str
+    display: str
+    earliest: date | None
+
+
 @dataclass
 class WebConfig:
     client_id: str
@@ -130,6 +140,13 @@ class WebConfig:
     #: work, and how far back?" is answered where the person already is instead
     #: of in a shell. Injected like the others; None hides the section.
     holdings: Callable[[], list[SourceCoverage]] | None = None
+    #: Accounts whose history can be extended from the page, and the hook that
+    #: performs one extension. Injected like everything else. Each extension is
+    #: a real person pressing a real button - the forwarded address rides along
+    #: as the attended declaration, which is what makes button-driven probing
+    #: legitimately exempt from the unattended cap rather than a workaround.
+    extendables: Callable[[], list[ExtendableAccount]] | None = None
+    extend_window: Callable[..., str] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -231,13 +248,51 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
     return "<h2>Held so far</h2>" + "".join(items)
 
 
+EXTEND_CHOICES = (7, 30, 90, 365, 730)
+
+
+def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> str:
+    if extendables is None:
+        return ""
+    try:
+        accounts = extendables()
+    except Exception:
+        return ""
+    if not accounts:
+        return ""
+    rows = []
+    for account in accounts:
+        reach = account.earliest.isoformat() if account.earliest else "nothing held yet"
+        buttons = "".join(
+            f'<form action="/extend" method="post" style="display:inline">'
+            f'<input type="hidden" name="connection" value="{html.escape(account.connection)}">'
+            f'<input type="hidden" name="account" value="{html.escape(account.provider_ref)}">'
+            f'<button class="button" style="display:inline-block;width:auto;'
+            f'padding:.5rem .8rem;border:0;cursor:pointer" '
+            f'name="days" value="{days}">+{days}d</button></form> '
+            for days in EXTEND_CHOICES
+        )
+        rows.append(
+            f'<div class="row"><strong>{html.escape(account.display)}</strong> '
+            f"({html.escape(account.connection)})<br>history reaches {reach}<br>{buttons}</div>"
+        )
+    return (
+        "<h2>Extend history</h2>"
+        "<p>Each press fetches one further window, attended - you are the "
+        "customer, actively requesting.</p>" + "".join(rows)
+    )
+
+
 def render_index(
-    store: ConnectionStore, holdings: Callable[[], list[SourceCoverage]] | None = None
+    store: ConnectionStore,
+    holdings: Callable[[], list[SourceCoverage]] | None = None,
+    extendables: Callable[[], list[ExtendableAccount]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
 {_holdings_rows(holdings)}
+{_extend_rows(extendables)}
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
   <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
@@ -307,6 +362,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 render_index(
                     self.bound_config.connection_store,
                     holdings=self.bound_config.holdings,
+                    extendables=self.bound_config.extendables,
                 ),
             )
         elif route == "/connect":
@@ -354,6 +410,66 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", link)
         self.end_headers()
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if (parsed.path.rstrip("/") or "/") != "/extend":
+            self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        form = parse_qs(self.rfile.read(length).decode("utf-8"))
+
+        hook = self.bound_config.extend_window
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Extension is not wired.</p>"))
+            return
+
+        connection = (form.get("connection", [""])[0] or "").strip()
+        account = (form.get("account", [""])[0] or "").strip()
+        try:
+            days = int(form.get("days", ["0"])[0])
+        except ValueError:
+            days = 0
+        if not connection or not account or days <= 0:
+            self._respond(
+                400,
+                error_page("Bad request", "<p>Connection, account and days required.</p>"),
+            )
+            return
+
+        psu_ip = self._requester_address()
+        # The audit line: who pressed, from where, for what - to the container
+        # log now, and the landed artefact carries the same declaration
+        # permanently in layer 0.
+        print(
+            f"attended extend: connection={connection} account={account} "
+            f"days={days} requested_by={psu_ip or 'unknown'}",
+            file=sys.stderr,
+        )
+        try:
+            summary = hook(
+                connection=connection, provider_ref=account, days=days, psu_ip=psu_ip
+            )
+        except Exception as exc:
+            print(f"extend failed: {exc}", file=sys.stderr)
+            self._respond(
+                502,
+                error_page("Could not extend", f"<p>{html.escape(str(exc))}</p>"),
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Window extended",
+                f"<p>{html.escape(summary)}</p>{HOME_LINK}",
+            ),
+        )
+
+    def _requester_address(self) -> str | None:
+        """The pressing device's address: forwarded first, never loopback."""
+        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        peer = self.client_address[0]
+        return forwarded or (peer if not peer.startswith("127.") else None)
 
     def _callback(self, params: dict[str, list[str]]) -> None:
         error = params.get("error", [""])[0]
@@ -431,9 +547,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # arrives in X-Forwarded-For. Prefer it, and when the only candidate is
         # loopback, declare NOTHING - asserting 127.0.0.1 as a customer's
         # address to a regulated counterparty is worse than silence.
-        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        peer = self.client_address[0]
-        psu_ip = forwarded or (peer if not peer.startswith("127.") else None)
+        psu_ip = self._requester_address()
         started = starter(name, psu_ip) if starter is not None else False
 
         days = connection.consent_days_remaining()

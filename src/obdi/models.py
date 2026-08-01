@@ -81,6 +81,13 @@ class RawArtefact:
     digest: str
     payload: bytes
     origin: str = ""
+    #: JSON: circumstances of the request that produced this payload - the
+    #: trigger (scheduled / cli / post-auth-backfill / web-extend), the
+    #: attended declaration made, which connection's token was used, and the
+    #: app version that fetched. Provenance of HOW beside origin's WHAT: if
+    #: scheduled and attended responses ever differ, this column is what
+    #: makes the difference findable.
+    request_meta: str = ""
 
 
 @dataclass(frozen=True)

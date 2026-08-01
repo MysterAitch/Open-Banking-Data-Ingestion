@@ -448,3 +448,96 @@ class TestTheAuthorisersAddressIsTheRealOne:
         received = self._authorise(monkeypatch, tmp_path, {})
 
         assert received == [None], "silence beats asserting 127.0.0.1 to a bank"
+
+
+class TestExtendingHistoryFromThePage:
+    """Window probing as buttons: verifiably human, one click per window.
+
+    Every extend is a real person pressing a real button on their own device -
+    the forwarded address rides along as the attended declaration, and the
+    landed artefact carries it as permanent provenance. The CLI stays for
+    scripting; the page is where a human belongs.
+    """
+
+    def _server(self, tmp_path, extendables, extend_window):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            extendables=extendables,
+            extend_window=extend_window,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Index_ListsExtendableAccountsWithWindowButtons(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="e9f8",
+                    display="Current Account",
+                    earliest=date(2024, 8, 2),
+                )
+            ],
+            lambda **_: "",
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "Current Account" in page
+        assert "2024-08-02" in page
+        for days in (7, 30, 90, 365, 730):
+            assert f'name="days" value="{days}"' in page
+
+    def test_Extend_CallsTheHookWithTheForwardedAddress(self, tmp_path):
+        captured = {}
+
+        def extend(connection, provider_ref, days, psu_ip):
+            captured.update(
+                connection=connection, ref=provider_ref, days=days, psu_ip=psu_ip
+            )
+            return "landed 12 transactions; window now reaches 2024-01-01"
+
+        httpd, base = self._server(tmp_path, lambda: [], extend)
+        try:
+            response = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+                headers={"X-Forwarded-For": "100.96.178.101"},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert captured == {
+            "connection": "halifax", "ref": "e9f8", "days": 365,
+            "psu_ip": "100.96.178.101",
+        }
+        assert "2024-01-01" in response.text
+
+    def test_Extend_WhenTheProviderRefuses_ShowsTheReasonAndTheWayHome(self, tmp_path):
+        def refuse(**_):
+            raise RuntimeError("Transaction fetch failed (HTTP 400): invalid_date_range")
+
+        httpd, base = self._server(tmp_path, lambda: [], refuse)
+        try:
+            response = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 502
+        assert "invalid_date_range" in response.text
+        assert "Back to connections" in response.text

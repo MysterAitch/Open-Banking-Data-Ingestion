@@ -441,7 +441,12 @@ def fetch_balance(
 
 
 def artefact_for(
-    body: bytes, *, account_id: str, kind: str, requested: str = ""
+    body: bytes,
+    *,
+    account_id: str,
+    kind: str,
+    requested: str = "",
+    request_meta: str = "",
 ) -> RawArtefact:
     """Land a payload together with the request that produced it.
 
@@ -473,4 +478,5 @@ def artefact_for(
         digest=artefact_digest(body),
         payload=body,
         origin=f"{origin}?{requested}" if requested else origin,
+        request_meta=request_meta,
     )

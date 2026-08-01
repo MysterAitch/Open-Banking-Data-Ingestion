@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import threading
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,7 +29,7 @@ from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
-from .web import WebConfig
+from .web import ExtendableAccount, WebConfig
 from .web import serve as serve_web
 
 DEFAULT_DB = "./data/store.sqlite3"
@@ -192,7 +192,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 # customer authentication from it seconds ago, so this is the
                 # one case where attended access is provable rather than
                 # merely declared.
-                _pull(name, db_path, None, deep=True, psu_ip=psu_ip)
+                _pull(name, db_path, None, deep=True, psu_ip=psu_ip, trigger="post-auth-backfill")
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
 
@@ -215,6 +215,84 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         concerns += [check.detail for check in live_checks() if not check.ok]
         return concerns
 
+    def extendables() -> list[ExtendableAccount]:
+        """Provider accounts and how far their held history reaches.
+
+        Names come from the landed accounts artefacts - layer 0, no API call -
+        and the reach is computed per provider account through the account map,
+        so bound and unbound accounts both list correctly.
+        """
+        found = []
+        with Store(db_path) as store:
+            held = store.transactions_by_sighting()
+            connections = sorted(ConnectionStore(store_path).load())
+            for connection_id in connections:
+                for account in store.accounts_for_connection(connection_id):
+                    canonical = _account_map().resolve("truelayer", account["account_id"])
+                    dates = [
+                        t.value_date
+                        for t in held
+                        if t.account_id == canonical and t.source == "truelayer"
+                    ]
+                    found.append(
+                        ExtendableAccount(
+                            connection=connection_id,
+                            provider_ref=account["account_id"],
+                            display=f"{account['display_name']} "
+                            f"({account['account_type'] or 'account'})",
+                            earliest=min(dates) if dates else None,
+                        )
+                    )
+        return found
+
+    def extend_window(
+        *, connection: str, provider_ref: str, days: int, psu_ip: str | None
+    ) -> str:
+        """One backward step: fetch the window just beyond what is held.
+
+        Walks from the current earliest (or today, on a first press) back by
+        `days`, with a one-day overlap so the boundary transaction merges
+        rather than duplicates. Whether the provider grants offset windows at
+        all is exactly what pressing the button measures - a refusal surfaces
+        with the provider's own reason.
+        """
+        connections = ConnectionStore(store_path).load()
+        target = connections.get(connection)
+        if target is None:
+            raise RuntimeError(f"no connection named {connection!r}")
+
+        with Store(db_path) as store:
+            held = store.transactions_by_sighting()
+        canonical = _account_map().resolve("truelayer", provider_ref)
+        dates = [
+            t.value_date
+            for t in held
+            if t.account_id == canonical and t.source == "truelayer"
+        ]
+        anchor = min(dates) if dates else datetime.now(UTC).date()
+        window_since = anchor - timedelta(days=days)
+        window_until = anchor + timedelta(days=1)
+
+        with Store(db_path) as store:
+            result = pull_truelayer(
+                store,
+                target,
+                client_id=client_id,
+                client_secret=current_secret(),
+                connection_store=ConnectionStore(store_path),
+                account_map=_account_map(),
+                since=window_since,
+                until=window_until,
+                only_account=provider_ref,
+                psu_ip=psu_ip,
+                trigger="web-extend",
+            )
+        return (
+            f"asked {window_since} .. {window_until}: {result.describe()}. "
+            f"History for this account now reaches back to at least {window_since} "
+            "if the provider granted the window - press again to walk further."
+        )
+
     def holdings() -> list[SourceCoverage]:
         with Store(db_path) as store:
             return list(coverage(store.transactions_by_sighting()))
@@ -227,6 +305,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         start_backfill=start_backfill,
         preflight=preflight,
         holdings=holdings,
+        extendables=extendables,
+        extend_window=extend_window,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
@@ -238,6 +318,50 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             file=sys.stderr,
         )
     serve_web(config, host=host, port=port)
+    return 0
+
+
+_MEDIA_EXTENSIONS = {"application/json": ".json", "text/csv": ".csv"}
+
+
+def _export_raw(db_path: Path, out_dir: Path) -> int:
+    """Project layer 0 onto the filesystem, for eyes and ordinary tools.
+
+    The store keeps raw bytes in SQLite for atomicity and one-file backup, but
+    a person exploring the data reasonably expects files to open, grep and
+    diff. This is a PROJECTION, never a second source of truth: names are
+    deterministic (fetched-at plus digest prefix), re-running overwrites in
+    place, and the whole tree can be deleted at will. Each payload gets a
+    .meta.json sidecar carrying its provenance - origin including the range
+    asked for, the request circumstances, and the account it belongs to.
+    """
+    with Store(db_path) as store:
+        rows = store.connection.execute(
+            "SELECT source, account_ref, fetched_at, media_type, origin, payload, "
+            "request_meta, digest FROM raw_artefacts ORDER BY fetched_at"
+        ).fetchall()
+
+    written = 0
+    for row in rows:
+        stamp = row["fetched_at"][:16].replace(":", "").replace("T", "T")
+        name = f"{stamp}_{row['digest'][:8]}"
+        extension = _MEDIA_EXTENSIONS.get(row["media_type"], ".bin")
+        folder = out_dir / row["source"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}{extension}").write_bytes(row["payload"])
+        sidecar = {
+            "account_ref": row["account_ref"],
+            "origin": row["origin"],
+            "fetched_at": row["fetched_at"],
+            "digest": row["digest"],
+            "request_meta": json.loads(row["request_meta"]) if row["request_meta"] else {},
+        }
+        (folder / f"{name}.meta.json").write_text(
+            json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
+        )
+        written += 1
+
+    print(f"exported {written} artefact(s) to {out_dir}")
     return 0
 
 
@@ -343,6 +467,7 @@ def _pull(
     deep: bool = False,
     only_account: str | None = None,
     psu_ip: str | None = None,
+    trigger: str | None = None,
 ) -> int:
     account_map = _account_map()
 
@@ -390,6 +515,11 @@ def _pull(
                 until=until,
                 only_account=only_account,
                 psu_ip=psu_ip,
+                # Named pathways, so artefacts can be sliced by how they
+                # were requested when behaviour ever differs between them.
+                trigger=trigger
+                or os.getenv("OBDI_TRIGGER")
+                or ("cli-attended" if psu_ip else "cli"),
                 # Forwarded, not defaulted. Dropping this is what disconnected
                 # the backfill ladder from the only moment it exists for: the
                 # page said deep history was being fetched while a single
@@ -524,6 +654,18 @@ def main(argv: list[str] | None = None) -> int:
     bind_command.add_argument("provider_ref", help="the provider's account id (see pull notes)")
     bind_command.add_argument("canonical", help="the canonical account name, e.g. halifax-current")
 
+    export_command = subcommands.add_parser(
+        "export-raw",
+        help="write every raw artefact out as files, with a provenance sidecar each",
+    )
+    export_command.add_argument(
+        "--dir",
+        dest="export_dir",
+        type=Path,
+        default=Path("./data/raw"),
+        metavar="DIR",
+    )
+
     subcommands.add_parser("status", help="show row counts per layer")
     subcommands.add_parser(
         "coverage",
@@ -639,6 +781,9 @@ def main(argv: list[str] | None = None) -> int:
             print("\nUse the SAME name shown above, or you will create a duplicate")
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
+
+    if args.command == "export-raw":
+        return _export_raw(db_path, args.export_dir)
 
     if args.command == "bind":
         return _bind(args.source, args.provider_ref, args.canonical, db_path)

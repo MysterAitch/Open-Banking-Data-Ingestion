@@ -194,3 +194,44 @@ class TestAttendedAccessIsDeclaredHonestly:
             _run(store, psu_ip="100.96.178.101")
 
         assert seen == {"txn": "100.96.178.101", "bal": "100.96.178.101"}
+
+
+class TestTheCircumstancesLandAsProvenance:
+    """Layer 0 records HOW each payload was requested, beside what was asked.
+
+    Trigger pathway, attended declaration, connection and fetching version:
+    if scheduled and attended responses ever differ, this is the column that
+    makes the difference findable - and it outlives every container log.
+    """
+
+    def _metas(self, store):
+        import json
+
+        return [
+            json.loads(row[0])
+            for row in store.connection.execute(
+                "SELECT request_meta FROM raw_artefacts WHERE source='truelayer-booked'"
+            )
+            if row[0]
+        ]
+
+    def test_AnAttendedPull_RecordsDeclarationTriggerAndVersion(self, calls, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _run(store, since=date(2024, 8, 2), only_account="acc-1",
+                 psu_ip="100.96.178.101")
+            metas = self._metas(store)
+
+        assert metas
+        for meta in metas:
+            assert meta["attended_from"] == "100.96.178.101"
+            assert meta["trigger"] == "direct"
+            assert meta["connection_id"] == "halifax"
+            assert "app_version" in meta
+
+    def test_AnUnattendedPull_RecordsNoDeclaration(self, calls, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _run(store)
+            metas = self._metas(store)
+
+        assert metas
+        assert all("attended_from" not in meta for meta in metas)

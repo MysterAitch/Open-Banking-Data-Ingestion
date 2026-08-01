@@ -19,6 +19,7 @@ Starling that does not exist, and a refresh step that does nothing.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from urllib.parse import parse_qs
@@ -29,6 +30,15 @@ from .ingest import ImportSummary, reconcile_batch
 from .jsontypes import text
 from .providers import starling, truelayer
 from .store import Store
+
+
+def _app_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("obdi")
+    except Exception:
+        return "unknown"
 
 
 class _SkipBalance(Exception):
@@ -94,6 +104,7 @@ def pull_truelayer(
     deep: bool = False,
     only_account: str | None = None,
     psu_ip: str | None = None,
+    trigger: str = "direct",
 ) -> PullResult:
     connection = ensure_access_token(
         connection,
@@ -104,6 +115,15 @@ def pull_truelayer(
     result = PullResult(provider=f"truelayer/{connection.connection_id}")
     summary = ImportSummary(artefact_new=True)
 
+    request_meta = json.dumps(
+        {
+            "trigger": trigger,
+            "connection_id": connection.connection_id,
+            "app_version": _app_version(),
+            **({"attended_from": psu_ip} if psu_ip else {}),
+        },
+        sort_keys=True,
+    )
     accounts, accounts_body = truelayer.fetch_accounts(
         connection.access_token, psu_ip=psu_ip
     )
@@ -112,7 +132,10 @@ def pull_truelayer(
     # person needs to tell opaque account ids apart when binding them.
     store.land_artefact(
         truelayer.artefact_for(
-            accounts_body, account_id=connection.connection_id, kind="accounts"
+            accounts_body,
+            account_id=connection.connection_id,
+            kind="accounts",
+            request_meta=request_meta,
         )
     )
 
@@ -150,7 +173,12 @@ def pull_truelayer(
                 connection.access_token, provider_account_id, psu_ip=psu_ip
             )
             store.land_artefact(
-                truelayer.artefact_for(balance_body, account_id=canonical, kind="balance")
+                truelayer.artefact_for(
+                    balance_body,
+                    account_id=canonical,
+                    kind="balance",
+                    request_meta=request_meta,
+                )
             )
         except _SkipBalance:
             pass
@@ -193,6 +221,12 @@ def pull_truelayer(
                 account_id=canonical,
                 kind="pending" if pending else "booked",
                 requested=asked,
+                # The circumstances of the request - trigger, attended
+                # declaration, connection, fetching version - land beside
+                # the payload. Layer 0 outlives any container log, so
+                # "was this access customer-driven, and by which pathway?"
+                # stays answerable from the store forever.
+                request_meta=request_meta,
             )
             store.land_artefact(artefact)
             if not records:
