@@ -1,8 +1,13 @@
-# Ingester stack for the Docker host.
+# LOCAL DEVELOPMENT ONLY - builds from source in this working tree.
 #
-# Follows the lab conventions: services bind 127.0.0.1 and are exposed over
-# Tailscale Serve rather than published to the LAN; secrets arrive in a
-# gitignored .env rendered from Ansible Vault; data lives under /srv/appdata.
+# The DEPLOYED stack is your stack repository/obdi/, which pulls the image published by
+# this repo's CI, and its .env is rendered from Ansible Vault by the `obdi`
+# ansible role. That split is the lab convention rather than an accident: the
+# Docker host runs things rather than compiling them, a broken build fails in CI
+# instead of during a deploy, and a published tag is something update-watching
+# can actually compare against.
+#
+# Use this file to run the stack against uncommitted changes. Do not deploy it.
 
 services:
   obdi-web:

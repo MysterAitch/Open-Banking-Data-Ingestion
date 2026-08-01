@@ -1,0 +1,73 @@
+# Publishes the container image the homelab stack pulls.
+#
+# Every stack in your stack repository pulls a published image; none build on the host.
+# That convention is worth keeping rather than making this the exception: the
+# Docker host stays a place that runs things rather than compiles them, a failed
+# build fails here instead of during a deploy, and the image gets a version tag
+# that update-watching can actually compare.
+name: publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  check:
+    # Publishing an image that fails its own tests would defeat the point, so
+    # this gates the build rather than running alongside it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: mypy
+      - run: pytest -q
+
+  publish:
+    needs: check
+    # Nothing to publish from a pull request, and a fork must not be able to
+    # push an image into the registry this lab pulls from.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          # A semver tag is what update-watching compares, so a release gets
+          # x.y.z and main gets a moving tag that nothing is pinned to.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

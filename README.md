@@ -126,8 +126,11 @@ connects inbound, it sends the browser somewhere. So the flow needs only a page
 your phone can reach, which a loopback-bound service exposed over Tailscale
 provides — real certificate, tailnet-only, no public exposure.
 
-Deployment, and moving from the workstation to the Docker host later:
-[`docs/DEPLOY.md`](docs/DEPLOY.md).
+Deployment: the stack definition lives in **`your stack repository/obdi/`** and pulls
+the image this repo's CI publishes; its `.env` is rendered from Ansible Vault by
+the **`obdi`** role, so credentials are never hand-written on the host. The
+`compose.yaml` here builds from source and is for local development only.
+Workstation-to-host detail: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Connecting a bank, and the 90-day chore
 
