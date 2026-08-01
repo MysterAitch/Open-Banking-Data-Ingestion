@@ -195,12 +195,29 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         threading.Thread(target=run, name=f"backfill-{name}", daemon=True).start()
         return True
 
+    def preflight() -> list[str]:
+        """Definite faults only. Inconclusive must not block a real journey.
+
+        A shape problem or an explicit invalid_client from the provider will
+        certainly fail the exchange, so stopping now saves a bank login. A
+        network hiccup proves nothing and is let through - if the provider is
+        genuinely unreachable, the redirect to it will say so harmlessly,
+        with no code burnt.
+        """
+        try:
+            concerns = list(shape_problems("TRUELAYER_CLIENT_SECRET", current_secret()))
+        except SecretError as exc:
+            return [str(exc)]
+        concerns += [check.detail for check in live_checks() if not check.ok]
+        return concerns
+
     config = WebConfig(
         client_id=client_id,
         client_secret=current_secret,
         redirect_uri=redirect_uri,
         connection_store=ConnectionStore(store_path),
         start_backfill=start_backfill,
+        preflight=preflight,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

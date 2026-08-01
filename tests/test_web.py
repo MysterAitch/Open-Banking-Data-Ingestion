@@ -274,3 +274,77 @@ class TestTheHomepageWarnsAboutAnUnusableSecret:
         secret.write_text("tlcs_live_abcdefghij1234567890", encoding="utf-8")
 
         assert "malformed" not in render_index(store).decode()
+
+
+class TestPreflightBeforeTheBank:
+    """Concerns are cheaper before the bank than after it.
+
+    The expensive failure is a completed bank login whose code burns against a
+    credential that could never exchange it. A quick check between the connect
+    click and the redirect converts that into an immediate page - with a way
+    to proceed anyway, because a preflight that cannot be overridden becomes a
+    gate whenever the check itself is wrong.
+    """
+
+    def _server(self, tmp_path, preflight):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            preflight=preflight,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, handler, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Connect_WhenPreflightRaisesConcerns_StopsBeforeTheBankAndOffersOverride(
+        self, tmp_path
+    ):
+        httpd, handler, base = self._server(
+            tmp_path, lambda: ["the secret does not start with tlcs_live_"]
+        )
+        try:
+            response = httpx.get(f"{base}/connect", params={"name": "halifax"})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 200, "a concern page, not a redirect"
+        assert "tlcs_live_" in response.text
+        assert "force=1" in response.text, "the override must be offered"
+        assert len(handler.session) == 0, "no state minted for a journey not started"
+
+    def test_Connect_WhenForced_ProceedsToTheBankDespiteConcerns(self, tmp_path):
+        httpd, handler, base = self._server(tmp_path, lambda: ["definitely broken"])
+        try:
+            response = httpx.get(
+                f"{base}/connect", params={"name": "halifax", "force": "1"}
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 302
+        assert "auth.truelayer.com" in response.headers["location"]
+        assert len(handler.session) == 1
+
+    def test_Connect_WhenPreflightIsClear_RedirectsExactlyAsBefore(self, tmp_path):
+        httpd, handler, base = self._server(tmp_path, lambda: [])
+        try:
+            response = httpx.get(f"{base}/connect", params={"name": "halifax"})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 302
+        assert len(handler.session) == 1
+
+    def test_Connect_WithNoPreflightConfigured_BehavesAsBefore(self, tmp_path):
+        httpd, _handler, base = self._server(tmp_path, None)
+        try:
+            response = httpx.get(f"{base}/connect", params={"name": "halifax"})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 302

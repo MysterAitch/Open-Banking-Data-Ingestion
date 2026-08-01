@@ -118,6 +118,14 @@ class WebConfig:
     #: that no backfill ran, rather than implying one did.
     start_backfill: Callable[[str], bool] | None = None
 
+    #: Ran between the connect click and the redirect to the bank, returning
+    #: human-readable concerns; empty means clear. Injected like the backfill
+    #: hook, so this module stays ignorant of doctors and providers and a test
+    #: can exercise the fork without a network. The expensive failure this
+    #: prevents is a completed bank login whose single-use code burns against a
+    #: credential that could never exchange it.
+    preflight: Callable[[], list[str]] | None = None
+
     def current_client_secret(self) -> str:
         value = self.client_secret
         return value() if callable(value) else value
@@ -273,6 +281,29 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if not name:
             self._respond(400, error_page("Name required", "<p>Give the connection a name.</p>"))
             return
+
+        forced = params.get("force", ["0"])[0] == "1"
+        check = self.bound_config.preflight
+        if check is not None and not forced:
+            concerns = check()
+            if concerns:
+                # Stop HERE, before any state is minted: no journey has
+                # started, so nothing should be waiting for one to return. The
+                # override exists because a preflight that cannot be overridden
+                # becomes a gate whenever the check itself is wrong.
+                listed = "".join(f"<li>{html.escape(c)}</li>" for c in concerns)
+                target = quote(name, safe="")
+                self._respond(
+                    200,
+                    error_page(
+                        "Before you go to the bank",
+                        f"<p>These would make the authorisation fail at the last "
+                        f"step, after the bank login:</p><ul>{listed}</ul>"
+                        f'<p><a class="button" href="/connect?name={target}&force=1">'
+                        "Try anyway</a></p>",
+                    ),
+                )
+                return
 
         state = self.bound_session.begin(name)
         link = build_auth_link(
