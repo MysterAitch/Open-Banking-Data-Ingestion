@@ -142,11 +142,15 @@ public CA to issue for it; the address being private is what keeps the service
 unreachable from the internet. Both halves are needed, and they are not in
 tension.
 
-**A non-standard port is accepted.** `https://your-host:8087/callback` was
-registered and used against TrueLayer in August 2026. Worth stating, because
-plenty of OAuth providers reject anything but 443 and assuming this one does too
-costs you a reverse proxy you do not need. If you publish several services on
-one hostname by port, point the redirect straight at yours.
+**A non-standard port is at least accepted at registration.** TrueLayer's
+console saved `https://your-host:8087/callback` without complaint in August
+2026. Worth knowing, because plenty of OAuth providers reject anything but 443,
+and assuming this one does costs you a reverse proxy you may not need.
+
+Treat that as encouraging rather than settled: a console accepting a value and
+the authorisation round trip completing on it are different claims, and only the
+first has been tested here. If the redirect fails at the bank, the port is the
+first thing to suspect and a proxy on 443 is the fallback.
 
 Two caveats worth knowing. Any publicly trusted certificate publishes its
 hostname to Certificate Transparency logs, including one issued for a service
