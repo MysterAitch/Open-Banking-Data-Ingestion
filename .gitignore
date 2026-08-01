@@ -39,3 +39,5 @@ build/
 .idea/
 Thumbs.db
 .DS_Store
+applier/node_modules/
+applier/package-lock.json

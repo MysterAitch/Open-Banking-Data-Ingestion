@@ -1,0 +1,16 @@
+{
+  "name": "obdi-applier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Applies an obdi replay payload to Actual Budget. Pinned to the Actual server version.",
+  "scripts": {
+    "apply": "node apply.mjs"
+  },
+  "dependencies": {
+    "@actual-app/api": "^26.7.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
+  }
+}
