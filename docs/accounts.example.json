@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Binds each provider's account id to a canonical account. Copy to the path",
+    "named by OBDI_ACCOUNT_MAP and fill in with your own ids.",
+    "",
+    "Find the provider account ids by running a pull: any unbound account is",
+    "reported in the output, because an unbound account still ingests but",
+    "silently forgoes cross-source matching.",
+    "",
+    "Binding one account to two sources is the point. Where the routes agree",
+    "that is evidence the data is right; where they disagree the disagreement",
+    "is the finding; and either route surviving a consent expiry or an outage",
+    "keeps the record intact.",
+    "",
+    "This file names accounts, not balances. It is still yours - keep it with",
+    "your data, outside every repository."
+  ],
+  "bindings": [
+    {
+      "canonical_id": "starling-personal",
+      "source": "starling",
+      "provider_account_id": "REPLACE-with-accountUid",
+      "label": "Starling personal current account, first-party API"
+    },
+    {
+      "canonical_id": "starling-personal",
+      "source": "truelayer",
+      "provider_account_id": "REPLACE-with-truelayer-account_id",
+      "label": "The same account via the aggregator, for cross-checking"
+    },
+    {
+      "canonical_id": "halifax-current",
+      "source": "truelayer",
+      "provider_account_id": "REPLACE-with-truelayer-account_id",
+      "label": "Single-sourced: no first-party API available"
+    }
+  ]
+}

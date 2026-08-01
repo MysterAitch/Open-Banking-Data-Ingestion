@@ -85,9 +85,16 @@ never read by tooling in this repo.**
 ## Usage
 
 ```bash
+# pull from live APIs
+obdi pull starling                      # first-party, no consent clock
+obdi pull halifax                       # a stored TrueLayer connection
+obdi pull halifax --since 2026-01-01    # narrower window
+
+# import downloaded files
 obdi import path/to/export.csv --account starling-personal
 obdi import path/to/savings.csv --account starling-savings
-obdi pair-transfers      # after importing every account
+
+obdi pair-transfers      # after ingesting every account, by any route
 obdi status
 ```
 
@@ -135,6 +142,16 @@ It requires binding each provider's account id to one canonical account, or the
 sources form separate silos and the same payment is stored once per source.
 Unmapped accounts fall back to a source-qualified id, so they stay visibly
 separate rather than colliding — but they will not cross-check until bound.
+
+Copy `docs/accounts.example.json` to the path in `OBDI_ACCOUNT_MAP` and fill in
+your ids. To find them, just run a pull: **any unbound account is named in the
+output**, since an unbound account still ingests but silently forgoes
+cross-source matching, and a silent omission is the thing worth avoiding.
+
+Starling is the natural place to start, being the one account reachable both
+first-party and through the aggregator. Running both calibrates how far two
+providers' descriptions of the same payment diverge in practice — which tells
+you how much to trust matching on the accounts you can only see one way.
 
 ## What needs an account
 

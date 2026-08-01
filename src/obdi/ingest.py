@@ -86,6 +86,33 @@ def pair_transfers_across_store(store: Store) -> int:
     return newly_flagged
 
 
+def reconcile_batch(
+    store: Store,
+    transactions: list[Transaction],
+    *,
+    digest: str,
+    summary: ImportSummary | None = None,
+) -> ImportSummary:
+    """Resolve a batch against what is already stored, and persist the outcome.
+
+    Shared by file import and API pulls deliberately: identity resolution must
+    behave identically whichever route data arrives by, or the same payment
+    seen twice through different doors would be stored twice.
+    """
+    result = summary or ImportSummary(artefact_new=True)
+    result.parsed += len(transactions)
+
+    by_account: dict[str, list[Transaction]] = {}
+    for transaction in transactions:
+        existing = by_account.setdefault(
+            transaction.account_id, store.transactions_for_account(transaction.account_id)
+        )
+        existing.append(_reconcile(store, transaction, existing, digest, result))
+
+    store.connection.commit()
+    return result
+
+
 def _reconcile(
     store: Store,
     transaction: Transaction,
