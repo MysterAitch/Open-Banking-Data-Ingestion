@@ -13,6 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .connections import ConnectionStore
 from .ingest import import_file, pair_transfers_across_store
 from .parsers.base import ParseError
 from .store import Store
@@ -44,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
         "pair-transfers",
         help="flag movements between your own accounts across the whole store",
     )
+    subcommands.add_parser(
+        "connections", help="show bank connections and how long consent has left"
+    )
     subcommands.add_parser("status", help="show row counts per layer")
 
     args = parser.parse_args(argv)
@@ -68,6 +72,27 @@ def main(argv: list[str] | None = None) -> int:
         with Store(db_path) as store:
             flagged = pair_transfers_across_store(store)
         print(f"flagged {flagged} transaction(s) as internal transfers")
+        return 0
+
+    if args.command == "connections":
+        store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+        if not store_path:
+            print("Set OBDI_CONNECTION_STORE to the token store path.", file=sys.stderr)
+            return 2
+        connections = list(ConnectionStore(store_path))
+        if not connections:
+            print("No connections stored yet.")
+            return 0
+        for connection in connections:
+            days = connection.consent_days_remaining()
+            if connection.consent_expired():
+                state = "CONSENT EXPIRED - re-authorise at the bank"
+            elif connection.consent_needs_attention():
+                state = f"consent expires in {days} days - re-authorise soon"
+            else:
+                state = f"consent ok, {days} days left"
+            token = "access token valid" if connection.access_token_valid() else "needs refresh"
+            print(f"{connection.connection_id:<20} {state:<45} {token}")
         return 0
 
     if args.command == "status":

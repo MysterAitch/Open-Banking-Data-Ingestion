@@ -35,6 +35,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from obdi.connections import ConnectionStore, build_connection  # noqa: E402
 from obdi.secrets import SecretError, describe_source, read_secret  # noqa: E402
 
 LIVE = ("https://auth.truelayer.com", "https://api.truelayer.com")
@@ -149,7 +150,7 @@ def show_auth_link(sandbox: bool) -> int:
     return 0
 
 
-def exchange(redirect_url: str, sandbox: bool) -> int:
+def exchange(redirect_url: str, sandbox: bool, save_as: str = "") -> int:
     client_id, client_secret, redirect_uri = credentials()
     auth_host, api_host = hosts(sandbox)
 
@@ -201,10 +202,33 @@ def exchange(redirect_url: str, sandbox: bool) -> int:
             f"({account.get('account_type', '?')}, {account.get('currency', '?')})"
         )
 
-    print(
-        "\nTokens are NOT saved by this probe - it only proves the route works.\n"
-        "Persisting them belongs in the ingester, with the consent expiry tracked."
-    )
+    if save_as:
+        store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+        if not store_path:
+            print(
+                "\nSet OBDI_CONNECTION_STORE to a path for the token store, "
+                "beside your other secrets and outside every repo.",
+                file=sys.stderr,
+            )
+            return 2
+        connection = build_connection(
+            connection_id=save_as,
+            provider=save_as,
+            token_response=tokens,
+            scopes=SCOPES,
+        )
+        ConnectionStore(store_path).put(connection)
+        print(f"\nSaved connection '{save_as}'.")
+        print(
+            f"Consent expires in {connection.consent_days_remaining()} days - "
+            "refreshing the access token will NOT extend it."
+        )
+    else:
+        print(
+            "\nTokens not saved. Re-run with --save <name> to persist the refresh "
+            "token and start the consent clock."
+        )
+
     if "--json" in sys.argv:
         print(json.dumps(results, indent=2))
     return 0
@@ -218,6 +242,13 @@ def main() -> int:
     subcommands.add_parser("auth-link", help="print the bank authorisation URL")
     exchange_command = subcommands.add_parser("exchange", help="swap the returned code for tokens")
     exchange_command.add_argument("redirect_url")
+    exchange_command.add_argument(
+        "--save",
+        dest="save_as",
+        default="",
+        metavar="NAME",
+        help="persist the refresh token under this connection name, e.g. nationwide",
+    )
 
     args = parser.parse_args()
     if args.command == "providers":
@@ -225,7 +256,7 @@ def main() -> int:
     if args.command == "auth-link":
         return show_auth_link(args.sandbox)
     if args.command == "exchange":
-        return exchange(args.redirect_url, args.sandbox)
+        return exchange(args.redirect_url, args.sandbox, args.save_as)
     return 2
 
 
