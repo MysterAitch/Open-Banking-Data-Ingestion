@@ -32,7 +32,9 @@ class TestConfigurationThatIsSimplyAbsent:
 
     def test_Doctor_WhenFullyConfigured_PassesEveryCheck(self, monkeypatch, tmp_path):
         secret = tmp_path / "client-secret"
-        secret.write_text("value", encoding="utf-8")
+        # Well-formed, not merely present: doctor now checks shape, so a
+        # placeholder no provider would issue is no longer "configured".
+        secret.write_text("tlcs_live_abcdefghij1234567890", encoding="utf-8")
         monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "connections.json"))
         monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
@@ -128,3 +130,68 @@ def _clear(monkeypatch):
 def test_CheckResult_CarriesEnoughToPrintWithoutFurtherLookup():
     result = CheckResult(name="example", ok=False, detail="because of a reason")
     assert result.name and result.detail
+
+
+class TestSecretsThatExistButCannotWork:
+    """Readable is not usable: a malformed secret passes every presence check.
+
+    Wrapping quotes survive a YAML paste invisibly, because nothing ever prints
+    a secret. A value without the provider's prefix is almost certainly the
+    secret's IDENTIFIER - shown forever in the console - rather than its value,
+    which is shown exactly once at creation. Each produces the same distant
+    HTTP 400 hours later; doctor exists to say it now, and to say it without
+    revealing a single character of the value.
+    """
+
+    def _configured(self, monkeypatch, tmp_path, secret_text: str):
+        secret = tmp_path / "client-secret"
+        secret.write_text(secret_text, encoding="utf-8")
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
+        monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "connections.json"))
+        monkeypatch.setenv("TRUELAYER_CLIENT_SECRET_FILE", str(secret))
+
+    def test_Doctor_WhenTheSecretIsWrappedInQuotes_FailsNamingTheQuotes(
+        self, monkeypatch, tmp_path
+    ):
+        self._configured(monkeypatch, tmp_path, '"tlcs_live_abcdefghij1234567890"')
+
+        failed = [r for r in run_checks() if not r.ok]
+
+        assert any("quote" in r.detail.casefold() for r in failed)
+        assert not any("abcdefghij" in r.detail for r in failed), "never print the value"
+
+    def test_Doctor_WhenTheSecretHasWhitespaceInside_Fails(self, monkeypatch, tmp_path):
+        self._configured(monkeypatch, tmp_path, "tlcs_live_abcde fghij1234567890")
+
+        failed = [r for r in run_checks() if not r.ok]
+
+        assert any("whitespace" in r.detail.casefold() for r in failed)
+
+    def test_Doctor_WhenTheValueLacksTheLivePrefix_SuggestsTheIdentifierTrap(
+        self, monkeypatch, tmp_path
+    ):
+        # A UUID-shaped value: exactly what copying the secret's identifier
+        # instead of its value produces.
+        self._configured(monkeypatch, tmp_path, "9e0f8a2b-1234-5678-9abc-def012345678")
+
+        failed = [r for r in run_checks() if not r.ok]
+
+        assert any("identifier" in r.detail.casefold() for r in failed)
+        assert not any("9e0f8a2b" in r.detail for r in failed), "never print the value"
+
+    def test_Doctor_WhenASandboxSecretMeetsALiveClientId_SaysWhichWorldEachIsIn(
+        self, monkeypatch, tmp_path
+    ):
+        self._configured(monkeypatch, tmp_path, "tlcs_sandbox_abcdefghij1234567890")
+        monkeypatch.setenv("TRUELAYER_CLIENT_ID", "personaldataaccess-e8326b")
+
+        failed = [r for r in run_checks() if not r.ok]
+
+        assert any("sandbox" in r.detail.casefold() for r in failed)
+
+    def test_Doctor_WhenTheSecretIsWellFormed_PassesTheShapeCheck(
+        self, monkeypatch, tmp_path
+    ):
+        self._configured(monkeypatch, tmp_path, "tlcs_live_abcdefghij1234567890")
+
+        assert all(r.ok for r in run_checks()), [r.detail for r in run_checks() if not r.ok]

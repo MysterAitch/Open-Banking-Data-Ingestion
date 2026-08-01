@@ -100,13 +100,68 @@ def run_checks() -> list[CheckResult]:
         if not configured:
             continue
         try:
-            read_secret(name)
+            value = read_secret(name)
         except SecretError as exc:
             results.append(CheckResult(f"secret {name}", False, str(exc)))
+            continue
+        problems = _shape_problems(name, value)
+        if problems:
+            results.append(CheckResult(f"secret {name}", False, "; ".join(problems)))
         else:
-            results.append(CheckResult(f"secret {name}", True, f"{name} is readable"))
+            results.append(
+                CheckResult(f"secret {name}", True, f"{name} is readable and well-formed")
+            )
 
     return results
+
+
+def _shape_problems(name: str, value: str) -> list[str]:
+    """What is wrong with a secret's SHAPE, described without its content.
+
+    Readable is not usable. Wrapping quotes survive a YAML paste invisibly -
+    nothing ever prints a secret, so no eye catches them - and a value missing
+    the provider's prefix is almost certainly the secret's IDENTIFIER, shown
+    forever in the console, rather than its value, shown exactly once at
+    creation. Both fail hours later as a bare HTTP 400 at the worst possible
+    moment: after a bank authorisation, with the single-use code already burnt.
+
+    Every message here names the class of problem and nothing else. Printing
+    even a fragment of the value would put a credential in a report designed
+    to be pasteable.
+    """
+    problems = []
+    if value != value.strip():
+        problems.append("has leading or trailing whitespace")
+    if value and (value[0] in "\"'" or value[-1] in "\"'"):
+        problems.append(
+            "is wrapped in quote characters - remove the quotes in the vault or "
+            "secret file; they were stored as part of the value"
+        )
+    elif any(ch.isspace() for ch in value):
+        problems.append(
+            "contains whitespace inside the value - most likely a line-wrapped paste"
+        )
+
+    if name == "TRUELAYER_CLIENT_SECRET" and value:
+        # Judged on the core value: quote and whitespace problems are already
+        # reported above; the prefix question is about what the value IS once
+        # those wrappers are peeled off.
+        stripped = value.strip().strip('"\'')
+        if stripped.startswith("tlcs_sandbox_"):
+            live_client = not os.getenv("TRUELAYER_CLIENT_ID", "").startswith("sandbox-")
+            if live_client:
+                problems.append(
+                    "is a SANDBOX secret (tlcs_sandbox_) paired with a live client id - "
+                    "sandbox and live are separate environments with separate credentials"
+                )
+        elif not stripped.startswith("tlcs_live_"):
+            problems.append(
+                "does not start with tlcs_live_ - this looks like the secret's "
+                "IDENTIFIER rather than its value. The console shows identifiers "
+                "forever but reveals the value only once, at creation; if the value "
+                "was not captured then, create a new secret and store that"
+            )
+    return problems
 
 
 def report(results: list[CheckResult]) -> str:
