@@ -331,7 +331,13 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     return worst
 
 
-def _pull(target: str, db_path: Path, since: date | None, deep: bool = False) -> int:
+def _pull(
+    target: str,
+    db_path: Path,
+    since: date | None,
+    deep: bool = False,
+    only_account: str | None = None,
+) -> int:
     account_map = _account_map()
 
     if target == "starling":
@@ -375,6 +381,7 @@ def _pull(target: str, db_path: Path, since: date | None, deep: bool = False) ->
                 connection_store=connection_store,
                 account_map=account_map,
                 since=since,
+                only_account=only_account,
                 # Forwarded, not defaulted. Dropping this is what disconnected
                 # the backfill ladder from the only moment it exists for: the
                 # page said deep history was being fetched while a single
@@ -424,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
         # fetched at all. Defaulting to "every connection there is" cannot drift.
         help="a stored connection name (see `connections`), or 'starling' for the "
         "first-party API. Omit to pull EVERY stored connection.",
+    )
+    pull_command.add_argument(
+        "--account",
+        default=None,
+        metavar="PROVIDER_REF",
+        help="probe a single provider account rather than the whole connection",
     )
     pull_command.add_argument(
         "--since",
@@ -540,7 +553,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pull":
         if not args.target:
             return _pull_everything(db_path, args.since)
-        return _pull(args.target, db_path, args.since)
+        return _pull(args.target, db_path, args.since, only_account=args.account)
 
     if args.command == "value":
         return _value(args, db_path)

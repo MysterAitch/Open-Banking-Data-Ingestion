@@ -31,6 +31,10 @@ from .providers import starling, truelayer
 from .store import Store
 
 
+class _SkipBalance(Exception):
+    """Internal control flow: a probe declines the balance ride-along."""
+
+
 @dataclass
 class PullResult:
     provider: str
@@ -87,6 +91,7 @@ def pull_truelayer(
     account_map: AccountMap,
     since: date | None = None,
     deep: bool = False,
+    only_account: str | None = None,
 ) -> PullResult:
     connection = ensure_access_token(
         connection,
@@ -109,6 +114,8 @@ def pull_truelayer(
 
     for account in accounts:
         provider_account_id = text(account, "account_id")
+        if only_account and provider_account_id != only_account:
+            continue
         canonical = account_map.resolve("truelayer", provider_account_id)
         if canonical.startswith("truelayer:"):
             # Named, not just numbered: an opaque id is unbindable in practice,
@@ -127,20 +134,29 @@ def pull_truelayer(
         # the transactions in a window account for all the money, and each
         # pull adds another anchor to layer 0's timeline. A failure is noted
         # and skipped - a missing anchor must not stop the transactions.
+        # An explicit `since` is a window PROBE: one measured call, nothing
+        # else. Balance and pending ride along only on routine pulls - a probe
+        # that also fetched them would spend three calls to measure one, and
+        # nine across a three-account connection, against a quota of four.
+        probing = since is not None
         try:
+            if probing:
+                raise _SkipBalance
             _, balance_body = truelayer.fetch_balance(
                 connection.access_token, provider_account_id
             )
             store.land_artefact(
                 truelayer.artefact_for(balance_body, account_id=canonical, kind="balance")
             )
+        except _SkipBalance:
+            pass
         except truelayer.TrueLayerError as exc:
             result.notes.append(f"balance for {provider_account_id}: {exc}")
 
         known_ceiling = store.provider_fact(
             "truelayer", connection.connection_id, "accepted_backfill_days"
         )
-        for pending in (False, True):
+        for pending in ((False,) if probing else (False, True)):
             records, body, asked = truelayer.fetch_transactions(
                 connection.access_token,
                 provider_account_id,
