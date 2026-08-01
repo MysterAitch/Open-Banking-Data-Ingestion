@@ -235,9 +235,9 @@ class Store:
     def review_queue(self, *, include_resolved: bool = False) -> list[dict[str, object]]:
         """Transactions awaiting a human decision.
 
-        The backstop that was promised and missing. When matching cannot tell a
-        repeated payment from a duplicate report, it stores the transaction and
-        records the doubt here rather than deciding silently.
+        The backstop for the one case matching cannot settle. When a repeated
+        payment and a duplicate report are indistinguishable, the transaction is
+        stored and the doubt recorded here rather than decided silently.
         """
         # Two fixed statements rather than one built by interpolation. Nothing
         # here comes from outside, but a query assembled from strings is the

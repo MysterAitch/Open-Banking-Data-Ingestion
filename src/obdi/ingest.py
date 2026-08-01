@@ -146,9 +146,9 @@ def reconcile_batch(
             continue
 
         # REPLACE the candidate rather than appending alongside it. Appending
-        # left the pre-merge row in the list, so a later incoming record could
-        # claim the same stored transaction a second time - which is how
-        # repeated payments were swallowed and reported as matched.
+        # would leave the pre-merge row in the list, letting a later incoming
+        # record claim the same stored transaction a second time - which
+        # swallows repeated payments and reports them as matched.
         for index, candidate in enumerate(existing):
             if candidate.entity_id == matched_entity_id:
                 existing[index] = merged

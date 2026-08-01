@@ -183,8 +183,9 @@ def to_transaction(
         raise TrueLayerError("transaction has no amount")
 
     # The record's own currency, not an assumed one. Parsing every amount as
-    # sterling routed around money.py's guard while still storing the true
-    # currency alongside, so the figure and its label disagreed in silence.
+    # sterling routes around money.py's guard while still storing the true
+    # currency alongside, leaving the figure and its label disagreeing in
+    # silence.
     currency = text(record, "currency", default="GBP")
     amount_minor = parse_amount(str(raw_amount), currency=currency)
 

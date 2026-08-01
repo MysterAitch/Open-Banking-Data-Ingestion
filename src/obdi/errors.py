@@ -1,9 +1,9 @@
 """A common base for "this input was not what we required".
 
-Parsers, the money reader and the JSON boundary each raised their own
-unrelated exception, so a caller wanting to report "that file could not be
-read, here is why" had to know all three - and missing one turned a clear
-domain failure into an unhandled traceback naming an internal function.
+Parsers, the money reader and the JSON boundary each fail in their own way. Left
+unrelated, a caller wanting to report "that file could not be read, here is why"
+would have to know all three, and missing one turns a clear domain failure into
+an unhandled traceback naming an internal function.
 
 They share a base so the contract can be stated once: anything raised while
 turning external input into stored records is a `DataError`, and the layer

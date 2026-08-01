@@ -1,14 +1,14 @@
 """Check which GB institutions Enable Banking exposes to an application.
 
-SETTLED 2026-08-01, and kept only as a record of how: Enable Banking does not
-serve the UK at all. Its account-linking country selector has no GB entry, an
-unactivated application returns 403, individuals can activate only by linking
-accounts, and the commercial quote form omits the United Kingdom too - so this
-is an uncovered market rather than a tier restriction that money would lift.
+Enable Banking does not serve the UK. Its account-linking country selector has
+no GB entry, an unactivated application returns 403, individuals can activate
+only by linking accounts, and the commercial quote form omits the United Kingdom
+too - so this is an uncovered market rather than a tier restriction that paying
+would lift.
 
-Still runnable against an activated application, and would distinguish "absent
-from the catalogue" from "present but withheld", but it no longer blocks
-anything. TrueLayer is the working route.
+The probe remains useful against an activated application, and for any other
+country: it distinguishes "absent from the catalogue" from "present but withheld
+from this application", which the console alone does not tell you.
 
 Usage:
     python scripts/check_uk_coverage.py

@@ -28,10 +28,10 @@ class SourceTier(StrEnum):
     per comparison instead, adjacent rules drift apart and end up contradicting
     each other.
 
-    Independently arrived at, then found to match YNAB's published import
-    identity design closely, which is reassuring: their import id combines
-    amount, date and an occurrence counter, and they separately match imported
-    transactions against hand-entered ones over a wider date window.
+    The same three-way split as YNAB's published import identity design, arrived
+    at separately: their import id combines amount, date and an occurrence
+    counter, and they match imported transactions against hand-entered ones over
+    a wider date window. Convergence from two directions is worth something.
     """
 
     #: The source supplies a durable, stable id of its own - Monzo's
