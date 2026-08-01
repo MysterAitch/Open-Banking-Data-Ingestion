@@ -113,18 +113,27 @@ Only the first item is needed to start. File import needs no credentials at all.
 | TrueLayer | no | live access is sales-gated; sandbox is fake data |
 | GoCardless | no | closed to new signups since 2025 |
 
-**There is no general-purpose Open Banking route for a UK individual.** Verified
-2026-08-01 in Enable Banking's account-linking form: the country selector lists
-29 EEA countries and has no GB entry, and since linking is what activates a
-restricted production application, UK accounts cannot be read on the free tier.
-GoCardless closed to new signups in 2025; every other aggregator gates live
-access behind a sales conversation.
+**The UK aggregator picture is unsettled — test, do not assume.** Enable
+Banking's account-linking country selector had no GB entry as at 2026-08-01
+(checked in the page source), yet community reports say its coverage listing
+includes a handful of UK banks — so GB connectors may exist while being
+unavailable to restricted personal applications. `scripts/check_uk_coverage.py`
+distinguishes those two cases.
 
-That leaves **first-party bank APIs where they exist, and file import for
-everything else** — which promotes file import from a stepping stone to the
-primary mechanism. Enable Banking may still be worth keeping for accounts held
-with an EEA-registered entity rather than a UK one (Revolut and Wise both
-operate EEA banking entities).
+Other routes worth testing, none confirmed here:
+
+- **TrueLayer** and **Tink** consoles. A developer building UK sync for Actual
+  and Firefly III reports running live data-only applications on TrueLayer
+  without ever being asked for a payment method, then moving to Tink for wider
+  UK coverage. Working community integrations exist for both.
+- **LunchFlow** — a paid hosted service holding the aggregator relationships
+  (GoCardless among them, which is how it reaches UK banks), pushing into a
+  self-hosted Actual via `lunchflow/actual-flow`. Self-serve. One real test
+  reported UK connections stuck "pending" for hours, so treat reliability as
+  unproven.
+
+**File import is the dependable floor regardless**, which is why it is what
+this repo implements first.
 
 Notes that will save time:
 
