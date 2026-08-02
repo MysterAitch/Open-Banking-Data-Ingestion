@@ -1290,6 +1290,17 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
     )
 
+    rebuild_command = subcommands.add_parser(
+        "rebuild",
+        help="wipe the derived layers and replay every raw artefact through "
+        "the current rules",
+    )
+    rebuild_command.add_argument(
+        "--yes",
+        action="store_true",
+        help="required: this deletes and regenerates the transactions layer",
+    )
+
     subcommands.add_parser(
         "attempts",
         help="show the fetch-attempt ledger: every ask made of a provider",
@@ -1410,6 +1421,21 @@ def main(argv: list[str] | None = None) -> int:
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
 
+    if args.command == "rebuild":
+        if not args.yes:
+            print(
+                "rebuild wipes the derived transaction layers and replays "
+                "layer 0 through the current rules. Raw artefacts, provider "
+                "facts and the attempt ledger are untouched. Re-run with "
+                "--yes to proceed.",
+                file=sys.stderr,
+            )
+            return 2
+        from .rebuild import rebuild_from_raw
+
+        with Store(db_path) as store:
+            print(rebuild_from_raw(store).describe())
+        return 0
     if args.command == "attempts":
         return _attempts(db_path)
     if args.command == "export-raw":
