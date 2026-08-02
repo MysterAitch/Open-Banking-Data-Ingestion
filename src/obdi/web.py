@@ -2427,8 +2427,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     def _bind(self, form: dict[str, list[str]]) -> None:
         """Name an account from the page: the map entry plus label moves.
 
-        Mutating, so POST only - and the result page repeats the extend rows
-        so the newly named account is immediately visible under its name.
+        Mutating, so POST only. The result page is just the confirmation -
+        repeating the extend section here made a naming action look like a
+        fetching context, and the home page is one tap away.
         """
         hook = self.bound_config.bind_account
         if hook is None:
@@ -2454,9 +2455,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             200,
             render_page(
                 "Account bound",
-                f"<p>{html.escape(summary)}</p>"
-                + _extend_rows(self.bound_config.extendables)
-                + HOME_LINK,
+                f"<p>{html.escape(summary)}</p>" + HOME_LINK,
             ),
         )
 

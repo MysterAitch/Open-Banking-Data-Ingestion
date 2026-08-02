@@ -1634,7 +1634,7 @@ class TestBindingFromThePage:
 
     The bind form appears exactly where the unnamed account is listed, and a
     successful bind moves the label across every layer - the hook's job -
-    then shows the extend rows again so the new name is immediately visible.
+    then confirms plainly; the home page (one tap away) shows the new name.
     """
 
     def _server(self, tmp_path, extendables, bind_account):
