@@ -501,11 +501,13 @@ class TestRecurringDeclarationsLandOnDeepPulls:
         assert calls == []
 
 
-class TestCardsLandWithoutParsing:
-    """Cards fetch on deep pulls, land as evidence, parse NOTHING yet -
-    sign conventions are unverified, and unverified money stays in layer 0."""
+class TestCardsLandAndParse:
+    """Cards fetch on deep pulls and now PARSE too: the sign convention
+    was verified against landed evidence on 2026-08-02 (DEBIT positive,
+    CREDIT negative, zero mixing) and the mapper negates into the store's
+    outflow-negative canon with the type column verifying every row."""
 
-    def test_DeepPull_LandsCardListAndPerCardWindows(self, tmp_path, monkeypatch):
+    def test_DeepPull_LandsAndParsesCardWindows(self, tmp_path, monkeypatch):
         def fake_accounts(_token, **_kwargs):
             return ([], b'{"results": []}')
 
@@ -516,7 +518,17 @@ class TestCardsLandWithoutParsing:
             )
 
         def fake_card_txns(_token, card_id, **_kwargs):
-            return b'{"results": []}', "from=2026-05-04&to=2026-08-02"
+            record = (
+                '{"amount": 9.99, "currency": "GBP", "description": "COFFEE", '
+                '"timestamp": "2026-07-01T00:00:00Z", '
+                '"transaction_type": "DEBIT", "transaction_id": "c-1", '
+                '"normalised_provider_transaction_id": "txn-c-1", '
+                '"provider_transaction_id": "c-1"}'
+            )
+            return (
+                ('{"results": [' + record + "]}").encode("utf-8"),
+                "from=2026-05-04&to=2026-08-02",
+            )
 
         monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
         monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", fake_cards)
@@ -544,5 +556,10 @@ class TestCardsLandWithoutParsing:
 
         assert "truelayer-cards" in sources
         assert "truelayer-card-booked" in sources
-        # Landed as evidence; parsed into the transactions layer: nothing.
-        assert transactions == 0
+        # Landed as evidence AND parsed: one purchase, stored negated.
+        assert transactions == 1
+        with Store(tmp_path / "s.sqlite3") as store:
+            amount = store.connection.execute(
+                "SELECT amount_minor FROM transactions"
+            ).fetchone()[0]
+        assert amount == -999

@@ -715,3 +715,73 @@ class TestRecordCountMetadata:
                 "'starling-feed' ORDER BY record_count"
             ).fetchall()
         assert [r[0] for r in counts] == [2, 3]
+
+
+class TestCardReplay:
+    '''Signs wired against the landed evidence: DEBIT arrives positive
+    (spending), CREDIT arrives negative (payments) - statement language,
+    negated into the store's outflow-negative canon, with the type column
+    verifying every row.'''
+
+    def _card_artefact(self, records):
+        import json as _json
+
+        from obdi.providers.truelayer import artefact_for
+
+        return artefact_for(
+            _json.dumps({"results": records}).encode("utf-8"),
+            account_id="d000b07d",
+            kind="card-booked",
+            requested="from=2026-05-04&to=2026-08-02",
+        )
+
+    def _record(self, amount, kind, uid):
+        return {
+            "amount": amount,
+            "currency": "GBP",
+            "description": "PURCHASE" if kind == "DEBIT" else "PAYMENT RECEIVED",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "transaction_type": kind,
+            "transaction_id": uid,
+            "normalised_provider_transaction_id": f"txn-{uid}",
+            "provider_transaction_id": uid,
+        }
+
+    def test_CardRows_ReplayNegated_PurchasesOut_PaymentsIn(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                self._card_artefact(
+                    [
+                        self._record(335.64, "DEBIT", "c-1"),
+                        self._record(-1500.0, "CREDIT", "c-2"),
+                    ]
+                )
+            )
+
+            report = rebuild_from_raw(store)
+
+            rows = store.connection.execute(
+                "SELECT amount_minor FROM transactions ORDER BY amount_minor"
+            ).fetchall()
+        assert report.problems == []
+        assert [r[0] for r in rows] == [-33564, 150000]
+
+    def test_ConventionChange_FailsTheArtefactLoudly(self, tmp_path):
+        '''A DEBIT arriving negative means the statement convention this
+        mapping was verified against has changed - the artefact is
+        recorded as a problem, never guessed at.'''
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                self._card_artefact([self._record(-9.99, "DEBIT", "c-9")])
+            )
+
+            report = rebuild_from_raw(store)
+
+        assert len(report.problems) == 1
+        assert "convention" in report.problems[0]

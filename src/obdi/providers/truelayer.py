@@ -473,6 +473,72 @@ def to_transaction(
     )
 
 
+def to_card_transaction(record: JsonObject, *, account_id: str) -> Transaction:
+    """Map one CARD record onto the canonical model.
+
+    Cards speak statement language: the landed evidence shows DEBIT
+    (purchases) arriving POSITIVE and CREDIT (payments and refunds)
+    arriving NEGATIVE - the inverse of the account endpoints and of the
+    store's outflow-negative canon. So the amount is negated, and the
+    provider's own type column verifies every row: a DEBIT that arrives
+    negative or a CREDIT that arrives positive means the convention
+    changed, and refusing beats guessing with money.
+    """
+    raw_amount = record.get("amount")
+    if raw_amount is None:
+        raise TrueLayerError("card transaction has no amount")
+    currency = text(record, "currency", default="GBP")
+    provider_minor = parse_amount(str(raw_amount), currency=currency)
+
+    transaction_type = text(record, "transaction_type").upper()
+    if transaction_type == "DEBIT" and provider_minor < 0:
+        raise TrueLayerError(
+            f"card transaction {text(record, 'transaction_id')} is typed DEBIT "
+            "but arrives negative; the statement convention this mapping was "
+            "verified against has changed - refusing to guess"
+        )
+    if transaction_type == "CREDIT" and provider_minor > 0:
+        raise TrueLayerError(
+            f"card transaction {text(record, 'transaction_id')} is typed CREDIT "
+            "but arrives positive; the statement convention this mapping was "
+            "verified against has changed - refusing to guess"
+        )
+    amount_minor = -provider_minor
+
+    timestamp = text(record, "timestamp")
+    if not timestamp:
+        raise TrueLayerError("card transaction has no timestamp")
+    when = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
+
+    description = text(record, "description")
+    merchant = text(record, "meta", "provider_merchant_name") if False else ""
+    meta = record.get("meta")
+    if isinstance(meta, dict):
+        merchant = str(meta.get("provider_merchant_name", "") or "").strip()
+
+    durable_id = text(record, "normalised_provider_transaction_id") or None
+
+    return Transaction(
+        account_id=account_id,
+        amount_minor=amount_minor,
+        currency=currency,
+        value_date=when,
+        booking_date=when,
+        description=description,
+        counterparty=merchant,
+        status=TransactionStatus.BOOKED,
+        source="truelayer",
+        source_id=durable_id,
+        tier=SourceTier.AUTHORITATIVE if durable_id else SourceTier.SYNTHETIC,
+        content_key=content_key(
+            amount_minor=amount_minor,
+            value_date=when,
+            description=description or merchant,
+        ),
+        raw=json.loads(json.dumps(record, default=str)),
+    )
+
+
 def fetch_regulars(
     access_token: str,
     account_id: str,

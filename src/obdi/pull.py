@@ -28,6 +28,7 @@ from urllib.parse import parse_qs
 from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
+from .jsontypes import rows as json_rows
 from .jsontypes import text
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
@@ -431,6 +432,25 @@ def pull_truelayer(
                 artefact_digest=card_artefact.digest,
             )
             store.land_artefact(card_artefact)
+            card_records = json_rows(json.loads(card_body), "results")
+            card_target = account_map.resolve("truelayer", card_id)
+            card_transactions = []
+            for card_record in card_records:
+                card_transactions.append(
+                    replace(
+                        truelayer.to_card_transaction(
+                            card_record, account_id=card_target
+                        ),
+                        artefact_digest=card_artefact.digest,
+                    )
+                )
+            if card_transactions:
+                reconcile_batch(
+                    store,
+                    card_transactions,
+                    digest=card_artefact.digest,
+                    summary=summary,
+                )
 
     result.summary = summary
     return result

@@ -99,10 +99,6 @@ _NON_TRANSACTIONAL = {
     "starling-spaces",
     "starling-balance",
     "truelayer-cards",
-    # Card transactions land but are deliberately NOT replayed yet: their
-    # sign conventions are unverified, and parsing unverified money is the
-    # one mistake this project is built to never make.
-    "truelayer-card-booked",
 }
 
 
@@ -256,6 +252,17 @@ def rebuild_from_raw(
                         artefact_digest=digest,
                     )
                     for record in records
+                ]
+            elif source == "truelayer-card-booked":
+                decoded = json.loads(payload)
+                transactions = [
+                    replace(
+                        truelayer.to_card_transaction(
+                            record, account_id=account_ref
+                        ),
+                        artefact_digest=digest,
+                    )
+                    for record in json_rows(decoded, "results")
                 ]
             elif source == "starling-feed":
                 decoded = json.loads(payload)
