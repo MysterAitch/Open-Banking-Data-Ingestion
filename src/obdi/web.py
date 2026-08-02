@@ -290,6 +290,8 @@ class WebConfig:
     actual_queue: Callable[[], list[dict[str, object]]] | None = None
     #: Queue a read-only audit: the applier reads Actual back and reports.
     audit_actual: Callable[[], str] | None = None
+    #: The full sync history - every result, not just the newest handful.
+    actual_history: Callable[[], list[dict[str, object]]] | None = None
     #: When the applier last checked the queue (ISO stamp, empty if never).
     actual_heartbeat: Callable[[], str] | None = None
     #: Danger zone: wipe and replay the derived layers from raw artefacts.
@@ -1012,10 +1014,10 @@ def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
         minutes = int(age_seconds // 60)
         return (
             f'<p class="warn">work is queued but the applier last checked '
-            f"the queue at {stamp} UTC ({minutes} min ago) - look at the "
+            f"the queue at {stamp}Z ({minutes} min ago) - look at the "
             "obdi-applier container</p>"
         )
-    return f'<p class="muted">applier last checked the queue at {stamp} UTC</p>'
+    return f'<p class="muted">applier last checked the queue at {stamp}Z</p>'
 
 
 def _scheduler_row(
@@ -1050,16 +1052,16 @@ def _scheduler_row(
     if interval > 0 and age > interval * 1.5:
         hours = age / 3600
         return (
-            f'<p class="warn">the scheduler last completed a cycle at {stamp} UTC '
+            f'<p class="warn">the scheduler last completed a cycle at {stamp}Z '
             f"({hours:.1f} h ago, interval {interval // 3600} h) - look at "
             "the obdi-pull container</p>"
         )
     due = ""
     if interval > 0:
         due_at = datetime.fromtimestamp(seen.timestamp() + interval, tz=UTC)
-        due = f" - next due by ~{due_at.strftime('%H:%M')}"
+        due = f" - next due by ~{due_at.strftime('%H:%M')}Z"
     return (
-        f'<p class="muted">scheduler last completed a cycle at {stamp} UTC{due}</p>'
+        f'<p class="muted">scheduler last completed a cycle at {stamp}Z{due}</p>'
     )
 
 
@@ -1105,6 +1107,30 @@ def _danger_zone(rebuild_available: bool, forget_available: bool) -> str:
     return "".join(parts)
 
 
+def _result_row(result: dict[str, object]) -> str:
+    """One sync outcome, whatever its kind - shared by the homepage
+    section (newest handful) and the full history page."""
+    if str(result.get("kind", "")) == "audit":
+        return _audit_result_row(result)
+    ok = bool(result.get("ok"))
+    badge = (
+        '<span class="pill pill-ok">applied</span>'
+        if ok
+        else '<span class="pill pill-bad">failed</span>'
+    )
+    detail = (
+        f"{result.get('added', 0)} added, "
+        f"{result.get('provisioned', 0)} account(s) provisioned"
+        if ok
+        else html.escape(str(result.get("error", "")))
+    )
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    return (
+        f'<div class="row"><strong>{stamp}Z</strong> {badge}'
+        f'<br><span class="muted">{detail}</span></div>'
+    )
+
+
 def _audit_result_row(result: dict[str, object]) -> str:
     """One audit outcome: a verdict pill, then a line per account.
 
@@ -1114,7 +1140,7 @@ def _audit_result_row(result: dict[str, object]) -> str:
     stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
     if not result.get("ok"):
         return (
-            f'<div class="row"><strong>{stamp}</strong> '
+            f'<div class="row"><strong>{stamp}Z</strong> '
             '<span class="pill pill-bad">audit failed</span>'
             f'<br><span class="muted">{html.escape(str(result.get("error", "")))}'
             "</span></div>"
@@ -1155,7 +1181,7 @@ def _audit_result_row(result: dict[str, object]) -> str:
         css = "warn" if _dirty(account) else "muted"
         lines.append(f'<span class="{css}">{name}: {detail}</span>')
     return (
-        f'<div class="row"><strong>{stamp}</strong> {badge}<br>'
+        f'<div class="row"><strong>{stamp}Z</strong> {badge}<br>'
         + "<br>".join(lines)
         + "</div>"
     )
@@ -1193,12 +1219,21 @@ def _actual_rows(
             stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
                 str(entry.get("name", ""))
             )
-            what = "queued (audit)" if entry.get("kind") == "audit" else "queued"
+            kind_note = " (audit)" if entry.get("kind") == "audit" else ""
+            since = str(entry.get("in_progress_since", ""))
+            if since:
+                what = f"in progress{kind_note}"
+                note = (
+                    "the applier picked this up at "
+                    f"{html.escape(since[11:19])}Z and is working on it"
+                )
+            else:
+                what = f"queued{kind_note}"
+                note = "waiting for the applier"
             parts.append(
-                f'<div class="row"><strong>{stamp}</strong> '
+                f'<div class="row"><strong>{stamp}Z</strong> '
                 f'<span class="pill pill-quiet">{what}</span>'
-                '<br><span class="muted">waiting for the applier'
-                "</span></div>"
+                f'<br><span class="muted">{note}</span></div>'
             )
         queued_html = "".join(parts)
         heartbeat = ""
@@ -1216,28 +1251,7 @@ def _actual_rows(
             results = actual_status()
         except Exception:
             results = []
-    rows = []
-    for result in results:
-        if str(result.get("kind", "")) == "audit":
-            rows.append(_audit_result_row(result))
-            continue
-        ok = bool(result.get("ok"))
-        badge = (
-            '<span class="pill pill-ok">applied</span>'
-            if ok
-            else '<span class="pill pill-bad">failed</span>'
-        )
-        detail = (
-            f"{result.get('added', 0)} added, "
-            f"{result.get('provisioned', 0)} account(s) provisioned"
-            if ok
-            else html.escape(str(result.get("error", "")))
-        )
-        stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
-        rows.append(
-            f'<div class="row"><strong>{stamp}</strong> {badge}'
-            f'<br><span class="muted">{detail}</span></div>'
-        )
+    rows = [_result_row(result) for result in results]
     button = (
         '<form method="post" action="/push-actual">'
         '<p><button class="button" type="submit" '
@@ -1270,6 +1284,7 @@ def _actual_rows(
         + audit_button
         + queued_html
         + "".join(rows)
+        + ('<p><a href="/actual-history">Full sync history</a></p>' if rows else "")
     )
 
 
@@ -1542,6 +1557,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/attempts":
             self._attempts()
+            return
+        if route == "/actual-history":
+            self._actual_history()
             return
         if route == "/artefacts":
             self._artefacts()
@@ -1851,6 +1869,29 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", link)
         self.end_headers()
+
+    def _actual_history(self) -> None:
+        hook = self.bound_config.actual_history
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No history wired.</p>"))
+            return
+        try:
+            results = hook()
+        except Exception:
+            results = []
+        body = (
+            "<h2>Actual sync history</h2>"
+            "<p>Every recorded outcome, newest first - the home page shows "
+            "only the latest handful. Times are UTC (marked Z).</p>"
+            + "".join(_result_row(result) for result in results)
+            + (
+                "<p>Nothing recorded yet.</p>"
+                if not results
+                else f'<p class="muted">{len(results)} result(s)</p>'
+            )
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Actual sync history", body))
 
     def _read_form(self) -> dict[str, list[str]]:
         length = int(self.headers.get("Content-Length") or 0)

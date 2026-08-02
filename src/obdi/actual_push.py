@@ -128,6 +128,23 @@ def forget_actual_bindings(map_path: Path) -> int:
     return count
 
 
+def processing_request(actual_dir: Path) -> dict[str, object]:
+    """The request the applier is working on right now, if any.
+
+    Stale markers (a crash mid-request leaves one behind) are filtered by
+    the caller cross-checking against the queue: a marker naming a file no
+    longer queued is history, not status.
+    """
+    path = actual_dir / "processing.json"
+    if not path.is_file():
+        return {}
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def applier_heartbeat(actual_dir: Path) -> str:
     """When the applier last checked the queue, empty if never seen."""
     path = actual_dir / "heartbeat.json"

@@ -1244,6 +1244,63 @@ class TestActualRoster:
         assert 'action="/audit-actual"' in with_button
         assert 'action="/audit-actual"' not in without
 
+    def test_RequestBeingWorkedOn_ShowsInProgress_NotQueued(self):
+        """A long audit read as stuck: the request file stays queued until
+        the result lands, so "queued" and "the applier picked this up
+        seconds ago" looked identical. The marker tells them apart."""
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [],
+            True,
+            None,
+            lambda: [
+                {
+                    "name": "audit-20260802T133145118098.json",
+                    "kind": "audit",
+                    "queued_at": "2026-08-02T13:31:45",
+                    "in_progress_since": "2026-08-02T13:31:56Z",
+                }
+            ],
+        )
+
+        assert "in progress (audit)" in rendered
+        assert "13:31:56" in rendered
+        assert "waiting for the applier" not in rendered
+
+    def test_HistoryPage_ListsBeyondTheHomepageHandful(self, tmp_path):
+        results = [
+            {
+                "ok": True,
+                "added": n,
+                "provisioned": 0,
+                "finished_at": f"2026-08-02T{n:02}:00:00Z",
+            }
+            for n in range(12)
+        ]
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            actual_history=lambda: list(reversed(results)),
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            page = httpx.get(
+                f"http://127.0.0.1:{httpd.server_port}/actual-history"
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert "12 result(s)" in page
+        assert "11 added" in page
+        assert "0 added" in page
+
     def test_QueuedAudit_IsLabelledDistinctlyFromAPush(self):
         from obdi.web import _actual_rows
 

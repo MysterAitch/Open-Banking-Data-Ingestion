@@ -20,6 +20,7 @@ import {
   readdir,
   readFile,
   rename,
+  rm,
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -39,6 +40,7 @@ const RESULTS = join(BASE, 'results');
 const PROCESSED = join(BASE, 'processed');
 const BINDINGS = join(BASE, 'bindings-pending.json');
 const HEARTBEAT = join(BASE, 'heartbeat.json');
+const PROCESSING = join(BASE, 'processing.json');
 const LOCKS = (process.env.OBDI_LOCKS_DIR ?? '/data/locks').trim();
 
 async function readJsonOr(path, fallback) {
@@ -103,6 +105,13 @@ async function tick() {
     let result;
     try {
       await takeLease(LOCKS, 'actual-apply', 'obdi-applier', 900);
+      // The request file stays in the queue until the result is written,
+      // so without this marker the page cannot tell "waiting" from
+      // "being worked on right now" - a long audit read as stuck.
+      await writeFile(
+        PROCESSING,
+        JSON.stringify({ name, started_at: new Date().toISOString() }),
+      );
       result = await processRequest(name);
     } catch (error) {
       result = {
@@ -113,6 +122,7 @@ async function tick() {
       };
     }
     await releaseLease(LOCKS, 'actual-apply');
+    await rm(PROCESSING, { force: true });
     await writeFile(join(RESULTS, name), JSON.stringify(result, null, 2));
     await rename(join(REQUESTS, name), join(PROCESSED, name));
     let line = `${name}: FAILED - ${result.error}`;

@@ -18,6 +18,7 @@ from obdi.actual_push import (
     forget_actual_bindings,
     latest_results,
     merge_pending_bindings,
+    processing_request,
     queue_push,
     queued_requests,
 )
@@ -284,6 +285,25 @@ class TestBindingsRoundTrip:
             json.dumps({"at": "2026-08-02T13:38:00.000Z"}), encoding="utf-8"
         )
         assert applier_heartbeat(actual_dir) == "2026-08-02T13:38:00.000Z"
+
+    def test_ProcessingMarker_ReadsBack_EmptyWhenAbsent(self, tmp_path):
+        import json as _json
+
+        actual_dir = tmp_path / "actual"
+        assert processing_request(actual_dir) == {}
+
+        actual_dir.mkdir()
+        (actual_dir / "processing.json").write_text(
+            _json.dumps(
+                {
+                    "name": "audit-20260802T1331.json",
+                    "started_at": "2026-08-02T13:31:56Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        marker = processing_request(actual_dir)
+        assert marker["name"] == "audit-20260802T1331.json"
 
     def test_LatestResults_NewestFirst(self, tmp_path):
         results = tmp_path / "actual" / "results"

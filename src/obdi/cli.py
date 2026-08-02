@@ -949,9 +949,20 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         return queue_actual_audit(db_path)
 
     def actual_queue() -> list[dict[str, object]]:
-        from .actual_push import queued_requests
+        from .actual_push import processing_request, queued_requests
 
-        return queued_requests(_actual_dir(db_path))
+        queued = queued_requests(_actual_dir(db_path))
+        working = processing_request(_actual_dir(db_path))
+        working_name = str(working.get("name", ""))
+        for entry in queued:
+            if entry.get("name") == working_name:
+                entry["in_progress_since"] = str(working.get("started_at", ""))
+        return queued
+
+    def actual_history() -> list[dict[str, object]]:
+        from .actual_push import latest_results
+
+        return latest_results(_actual_dir(db_path), limit=200)
 
     def actual_heartbeat() -> str:
         from .actual_push import applier_heartbeat
@@ -1141,6 +1152,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_roster=actual_roster,
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
+        actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         rebuild_derived=rebuild_derived,
         forget_actual=forget_actual,
