@@ -10,13 +10,23 @@ from __future__ import annotations
 
 import json
 
-from tests.test_attempts import _connection
-
 from obdi.accounts import AccountMap
-from obdi.connections import ConnectionStore
+from obdi.connections import Connection, ConnectionStore
 from obdi.pull import pull_truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
+
+
+def _connection():
+    return Connection(
+        connection_id="halifax",
+        provider="halifax",
+        access_token="a",
+        refresh_token="r",
+        access_expires_at="2099-01-01T00:00:00+00:00",
+        consent_expires_at="2099-01-01T00:00:00+00:00",
+        scopes="",
+    )
 
 
 def _fake_provider(monkeypatch, records):
