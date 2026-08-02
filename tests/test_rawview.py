@@ -187,3 +187,42 @@ class TestCrossFieldInsights:
             {"month": "2026-05", "count": 2},
             {"month": "2026-07", "count": 1},
         ]
+
+
+class TestSettlementLag:
+    def test_LagsAndBoundaryCrossings_AreCounted(self):
+        """The Thursday-tap-Saturday-settle case, measured: a 2-day lag
+        inside one week crosses nothing; the same lag over a Sunday or a
+        month end files the payment into the wrong period."""
+        from obdi.rawview import settlement_lag_report
+
+        rows = [
+            {
+                "transactionTime": "2026-07-16T10:00:00Z",
+                "settlementTime": "2026-07-18T03:00:00Z",
+            },
+            {
+                "transactionTime": "2026-07-18T10:00:00Z",
+                "settlementTime": "2026-07-20T03:00:00Z",
+            },
+            {
+                "transactionTime": "2026-07-31T22:00:00Z",
+                "settlementTime": "2026-08-02T03:00:00Z",
+            },
+            {
+                "transactionTime": "2026-07-21T09:00:00Z",
+                "settlementTime": "2026-07-21T18:00:00Z",
+            },
+            {"transactionTime": "2026-07-21T09:00:00Z"},
+        ]
+
+        report = settlement_lag_report(rows)
+
+        assert report["measured"] == 4
+        assert report["lags"] == {"2d": 3, "same-day": 1}
+        # Jul 16 (Thu) -> 18 (Sat) stays in its week; Jul 18 (Sat) ->
+        # 20 (Mon) crosses one; Jul 31 (Fri) -> Aug 2 (Sun) crosses the
+        # MONTH while staying inside its ISO week - the two boundary
+        # kinds are genuinely independent.
+        assert report["week_crossings"] == 1
+        assert report["month_crossings"] == 1

@@ -285,3 +285,48 @@ def summarise(payload: bytes, media_type: str) -> dict[str, Any]:
         "presence_links": presence_links,
         "by_month": by_month,
     }
+
+
+def settlement_lag_report(rows: list[dict[str, object]]) -> dict[str, object]:
+    """Lag between economic and settlement time, and what it crosses.
+
+    Input rows are raw Starling feed items (each carries transactionTime
+    and settlementTime). A payment's week is its ISO week; a lag "crosses"
+    when the two stamps fall in different weeks or months - the exact
+    cases where week-to-week or month-boundary reporting would file the
+    payment under the wrong period if only settlement were recorded.
+    """
+    from datetime import datetime
+
+    lags: dict[str, int] = {}
+    week_crossings = 0
+    month_crossings = 0
+    measured = 0
+    for row in rows:
+        raw_txn = str(row.get("transactionTime", "") or "")
+        raw_settle = str(row.get("settlementTime", "") or "")
+        if not raw_txn or not raw_settle:
+            continue
+        try:
+            happened = datetime.fromisoformat(raw_txn.replace("Z", "+00:00"))
+            settled = datetime.fromisoformat(raw_settle.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        measured += 1
+        lag_days = (settled.date() - happened.date()).days
+        bucket = (
+            "same-day"
+            if lag_days <= 0
+            else f"{lag_days}d" if lag_days <= 3 else "4d+"
+        )
+        lags[bucket] = lags.get(bucket, 0) + 1
+        if happened.isocalendar()[:2] != settled.isocalendar()[:2]:
+            week_crossings += 1
+        if (happened.year, happened.month) != (settled.year, settled.month):
+            month_crossings += 1
+    return {
+        "measured": measured,
+        "lags": dict(sorted(lags.items())),
+        "week_crossings": week_crossings,
+        "month_crossings": month_crossings,
+    }

@@ -1413,6 +1413,48 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)
 
+    def date_lag_text() -> str:
+        from .rawview import settlement_lag_report
+
+        with Store(db_path) as store:
+            rows = [
+                json.loads(r[0])
+                for r in store.connection.execute(
+                    "SELECT raw FROM transactions WHERE source = 'starling' "
+                    "AND raw IS NOT NULL"
+                )
+                if r[0]
+            ]
+        report = settlement_lag_report(rows)
+        measured = int(str(report["measured"]))
+        if not measured:
+            return "no starling rows with both timestamps held yet"
+        lines = [
+            f"{measured} payment(s) carry both an economic and a "
+            "settlement stamp (starling, the truth set):",
+            "",
+        ]
+        lags = report["lags"]
+        if isinstance(lags, dict):
+            for bucket, count in lags.items():
+                share = count / measured * 100
+                lines.append(f"  lag {bucket}: {count} ({share:.1f}%)")
+        week = int(str(report["week_crossings"]))
+        month = int(str(report["month_crossings"]))
+        lines += [
+            "",
+            f"  crossing an ISO-week boundary: {week} "
+            f"({week / measured * 100:.1f}%)",
+            f"  crossing a month boundary: {month} "
+            f"({month / measured * 100:.1f}%)",
+            "",
+            "If only settlement dates were recorded, those crossings are "
+            "the payments week-to-week and month-boundary reporting would "
+            "file under the wrong period.",
+        ]
+        joiner = chr(10)
+        return joiner.join(lines)
+
     def review_report_text() -> str:
         from .review_report import review_report
 
@@ -1637,6 +1679,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
+        date_lag_text=date_lag_text,
         replay_artefact=replay_artefact,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
