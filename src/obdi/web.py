@@ -196,6 +196,10 @@ class WebConfig:
     #: window length, history boundaries) - a stricter bank shows up here as
     #: different numbers, not as a surprise.
     provider_knowledge: Callable[[], list[dict[str, object]]] | None = None
+    #: Starling's presence: a first-party token is not an OAuth connection,
+    #: so without this the configured-and-pulling Starling account was
+    #: entirely invisible on the page that lists banks.
+    starling_status: Callable[[], dict[str, object] | None] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -710,15 +714,43 @@ def _extend_rows(
     )
 
 
+def _starling_row(
+    starling_status: Callable[[], dict[str, object] | None] | None,
+) -> str:
+    if starling_status is None:
+        return ""
+    try:
+        status = starling_status()
+    except Exception:
+        return ""
+    if not status:
+        return ""
+    raw_accounts = status.get("accounts")
+    accounts = raw_accounts if isinstance(raw_accounts, list) else []
+    listed = "".join(
+        f'<br><span class="muted">{html.escape(str(a.get("name", "account")))} '
+        f"({html.escape(str(a.get('accountUid', ''))[:8])}...)</span>"
+        for a in accounts
+        if isinstance(a, dict)
+    )
+    return (
+        '<div class="row"><strong>starling</strong><br>'
+        '<span class="ok">first-party token - no consent clock, no expiry '
+        "chore</span>" + listed + "</div>"
+    )
+
+
 def render_index(
     store: ConnectionStore,
     holdings: Callable[[], list[SourceCoverage]] | None = None,
     provider_knowledge: Callable[[], list[dict[str, object]]] | None = None,
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
+    starling_status: Callable[[], dict[str, object] | None] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
+{_starling_row(starling_status)}
 {_holdings_rows(holdings)}
 {_knowledge_rows(provider_knowledge)}
 {_extend_rows(extendables)}
@@ -807,6 +839,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     holdings=self.bound_config.holdings,
                     provider_knowledge=self.bound_config.provider_knowledge,
                     extendables=self.bound_config.extendables,
+                    starling_status=self.bound_config.starling_status,
                 ),
             )
         elif route == "/connect":
@@ -852,6 +885,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 f'<span class="mono">{html.escape(str(r.get("detail", "")))}</span>'
                 "</details>"
                 if r.get("outcome") == "refused" and r.get("detail")
+                else ""
+            )
+            + (
+                f' <a href="/artefact?id={r.get("artefact_id")}">view artefact</a>'
+                if r.get("artefact_id")
                 else ""
             )
             + "</div>"

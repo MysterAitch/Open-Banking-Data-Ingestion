@@ -104,6 +104,7 @@ class TrueLayerError(RuntimeError):
         description: str = "",
         provider_details: str = "",
         raw: str = "",
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
@@ -111,6 +112,10 @@ class TrueLayerError(RuntimeError):
         self.description = description
         self.provider_details = provider_details
         self.raw = raw
+        #: The response headers worth keeping from a refusal: Retry-After is
+        #: the provider stating its own cooldown, the correlation id is what
+        #: their support asks for, Date anchors clock disputes.
+        self.headers = headers or {}
 
 
 def _refusal(prefix: str, response: httpx.Response) -> TrueLayerError:
@@ -127,6 +132,11 @@ def _refusal(prefix: str, response: httpx.Response) -> TrueLayerError:
         if isinstance(raw_details, dict):
             details = str(raw_details.get("provider_details") or "")
     summary = " - ".join(part for part in (code, description) if part) or response.text[:300]
+    kept = {
+        name: response.headers[name]
+        for name in ("retry-after", "tl-correlation-id", "x-correlation-id", "date")
+        if name in response.headers
+    }
     return TrueLayerError(
         f"{prefix} (HTTP {response.status_code}): {summary}",
         status=response.status_code,
@@ -134,6 +144,7 @@ def _refusal(prefix: str, response: httpx.Response) -> TrueLayerError:
         description=description,
         provider_details=details,
         raw=response.text[:4000],
+        headers=kept,
     )
 
 

@@ -104,6 +104,10 @@ class TestAttemptsAreRecorded:
         # Booked and pending both asked on a routine pull: two ledger rows.
         assert {row["outcome"] for row in rows} == {"landed"}
         assert len(rows) == 2
+        # Each landed row is JOINED to its evidence: the digest is recorded
+        # and resolves to the landed artefact's rowid for linking.
+        assert all(row["artefact_digest"] for row in rows)
+        assert all(row["artefact_id"] for row in rows)
         assert any(row["asked"] == "from=2026-05-01&to=2026-08-02" for row in rows)
         assert {row["source"] for row in rows} == {
             "truelayer-booked",

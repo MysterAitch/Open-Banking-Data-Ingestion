@@ -163,7 +163,10 @@ CREATE TABLE IF NOT EXISTS fetch_attempts (
     outcome       TEXT NOT NULL,
     http_status   INTEGER,
     error_code    TEXT NOT NULL DEFAULT '',
-    detail        TEXT NOT NULL DEFAULT ''
+    detail        TEXT NOT NULL DEFAULT '',
+    -- The artefact this landed ask produced, when it produced one: the join
+    -- that lets the ledger point at the evidence instead of describing it.
+    artefact_digest TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS fetch_attempts_by_time ON fetch_attempts(attempted_at);
 
@@ -197,6 +200,7 @@ class Store:
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
         self._migrate_request_meta_column()
+        self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
 
     def _migrate_content_keys(self) -> None:
@@ -244,6 +248,20 @@ class Store:
         if "request_meta" not in columns:
             self.connection.execute(
                 "ALTER TABLE raw_artefacts ADD COLUMN request_meta TEXT NOT NULL DEFAULT ''"
+            )
+            self.connection.commit()
+
+    def _migrate_attempt_artefact_column(self) -> None:
+        """Add the artefact link to ledgers created before it - same ALTER
+        pattern as request_meta; earlier rows keep an honest empty value."""
+        columns = [
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(fetch_attempts)")
+        ]
+        if "artefact_digest" not in columns:
+            self.connection.execute(
+                "ALTER TABLE fetch_attempts "
+                "ADD COLUMN artefact_digest TEXT NOT NULL DEFAULT ''"
             )
             self.connection.commit()
 
@@ -349,6 +367,7 @@ class Store:
         http_status: int | None = None,
         error_code: str = "",
         detail: str = "",
+        artefact_digest: str = "",
     ) -> None:
         """One row per ask, whatever the answer.
 
@@ -358,8 +377,9 @@ class Store:
         """
         self.connection.execute(
             "INSERT INTO fetch_attempts (attempted_at, source, connection_id, "
-            "account_ref, asked, request_meta, outcome, http_status, error_code, detail) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "account_ref, asked, request_meta, outcome, http_status, error_code, "
+            "detail, artefact_digest) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 datetime.now(UTC).isoformat(),
                 source,
@@ -371,15 +391,21 @@ class Store:
                 http_status,
                 error_code,
                 detail,
+                artefact_digest,
             ),
         )
         self.connection.commit()
 
     def attempts(self, limit: int = 200) -> list[dict[str, object]]:
         rows = self.connection.execute(
-            "SELECT attempted_at, source, connection_id, account_ref, asked, "
-            "request_meta, outcome, http_status, error_code, detail "
-            "FROM fetch_attempts ORDER BY attempted_at DESC, rowid DESC LIMIT ?",
+            "SELECT f.attempted_at, f.source, f.connection_id, f.account_ref, "
+            "f.asked, f.request_meta, f.outcome, f.http_status, f.error_code, "
+            "f.detail, f.artefact_digest, "
+            "(SELECT MIN(a.rowid) FROM raw_artefacts a "
+            " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
+            " AND f.artefact_digest != '') AS artefact_id "
+            "FROM fetch_attempts f "
+            "ORDER BY f.attempted_at DESC, f.rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]

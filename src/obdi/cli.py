@@ -541,6 +541,30 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "details": details,
         }
 
+    def starling_status() -> dict[str, object] | None:
+        """Starling on the front page: configured or not, and which accounts
+        the landed accounts artefact says exist. No API call - layer 0 only."""
+        try:
+            read_secret("STARLING_PERSONAL_ACCESS_TOKEN")
+        except SecretError:
+            return None
+        accounts: list[dict[str, object]] = []
+        with Store(db_path) as store:
+            row = store.connection.execute(
+                "SELECT payload FROM raw_artefacts "
+                "WHERE source = 'starling-accounts' "
+                "ORDER BY fetched_at DESC LIMIT 1"
+            ).fetchone()
+        if row is not None:
+            import contextlib as _contextlib
+
+            with _contextlib.suppress(ValueError):
+                decoded = json.loads(row["payload"])
+                raw = decoded.get("accounts") if isinstance(decoded, dict) else None
+                if isinstance(raw, list):
+                    accounts = [a for a in raw if isinstance(a, dict)]
+        return {"configured": True, "accounts": accounts}
+
     def attempts_index() -> dict[str, object]:
         with Store(db_path) as store:
             rows = store.attempts()
@@ -675,6 +699,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         account_shape=account_shape,
         bind_account=bind_account,
         provider_knowledge=provider_knowledge,
+        starling_status=starling_status,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

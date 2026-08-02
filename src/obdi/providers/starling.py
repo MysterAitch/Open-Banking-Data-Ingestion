@@ -70,10 +70,20 @@ class StarlingError(RuntimeError):
     ledger wants the parts, not a blob.
     """
 
-    def __init__(self, message: str, *, status: int | None = None, raw: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        raw: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.raw = raw
+        #: Retry-After and friends: the provider's own words about when to
+        #: come back, kept so the ledger can show them.
+        self.headers = headers or {}
 
 
 def _get(
@@ -85,6 +95,11 @@ def _get(
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         params=params or None,
     )
+    kept = {
+        name: response.headers[name]
+        for name in ("retry-after", "x-ratelimit-remaining", "date")
+        if name in response.headers
+    }
     if response.status_code == 403:
         raise StarlingError(
             f"Starling refused {path} (403): {response.text[:200]}. The token is "
@@ -92,6 +107,7 @@ def _get(
             "balance:read, transaction:read and space:read.",
             status=403,
             raw=response.text[:1000],
+            headers=kept,
         )
     if response.status_code != 200:
         raise StarlingError(
@@ -99,6 +115,7 @@ def _get(
             f"{response.text[:200]}",
             status=response.status_code,
             raw=response.text[:1000],
+            headers=kept,
         )
     return as_object(json.loads(response.text), field="response"), response.content
 

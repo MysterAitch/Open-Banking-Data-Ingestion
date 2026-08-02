@@ -33,6 +33,16 @@ from .providers import starling, truelayer
 from .store import Store
 
 
+def _refusal_detail(exc: Exception) -> str:
+    """The exception plus any harvested headers - Retry-After is the provider
+    naming its own cooldown, and it belongs in the ledger row."""
+    headers = getattr(exc, "headers", None)
+    if headers:
+        rendered = "; ".join(f"{k}={v}" for k, v in sorted(headers.items()))
+        return f"{exc} | headers: {rendered}"
+    return str(exc)
+
+
 def _app_version() -> str:
     # Version plus build commit: the number alone lied for a whole release
     # series, so artefact provenance records both.
@@ -218,7 +228,7 @@ def pull_truelayer(
                     outcome="refused",
                     http_status=getattr(exc, "status", None),
                     error_code=str(getattr(exc, "code", "") or ""),
-                    detail=str(exc),
+                    detail=_refusal_detail(exc),
                 )
                 # The provider names its own window ("within 5 minutes of PSU
                 # Authentication") - a fact worth keeping, since banks differ
@@ -236,6 +246,13 @@ def pull_truelayer(
                             match.group(1),
                         )
                 raise
+            landed_artefact = truelayer.artefact_for(
+                body,
+                account_id=canonical,
+                kind="pending" if pending else "booked",
+                requested=asked,
+                request_meta=request_meta,
+            )
             store.record_attempt(
                 source="truelayer-pending" if pending else "truelayer-booked",
                 connection_id=connection.connection_id,
@@ -244,6 +261,7 @@ def pull_truelayer(
                 request_meta=request_meta,
                 outcome="landed",
                 http_status=200,
+                artefact_digest=landed_artefact.digest,
             )
             if deep and not pending and "from=" in asked:
                 # Record what the provider actually granted, so the NEXT deep
@@ -262,18 +280,12 @@ def pull_truelayer(
             # precise ambiguity this whole chain was built to remove. The
             # composite artefact key is what makes this safe - identical empty
             # bytes from different accounts or days land as separate evidence.
-            artefact = truelayer.artefact_for(
-                body,
-                account_id=canonical,
-                kind="pending" if pending else "booked",
-                requested=asked,
-                # The circumstances of the request - trigger, attended
-                # declaration, connection, fetching version - land beside
-                # the payload. Layer 0 outlives any container log, so
-                # "was this access customer-driven, and by which pathway?"
-                # stays answerable from the store forever.
-                request_meta=request_meta,
-            )
+            # The circumstances of the request - trigger, attended
+            # declaration, connection, fetching version - land beside the
+            # payload. Layer 0 outlives any container log, so "was this
+            # access customer-driven, and by which pathway?" stays
+            # answerable from the store forever.
+            artefact = landed_artefact
             store.land_artefact(artefact)
             if not records:
                 continue
@@ -391,7 +403,7 @@ def pull_starling(
                     request_meta=request_meta,
                     outcome="refused",
                     http_status=getattr(exc, "status", None),
-                    detail=str(exc),
+                    detail=_refusal_detail(exc),
                 )
                 # Observed live on the very first scheduled pull: category one
                 # landed, category two drew a 429 seven seconds later - and
@@ -402,18 +414,10 @@ def pull_starling(
                     f"feed for category {category.uid} refused: {exc}"
                 )
                 continue
-            store.record_attempt(
-                source="starling-feed",
-                connection_id="starling",
-                account_ref=target,
-                asked=asked,
-                request_meta=request_meta,
-                outcome="landed",
-                http_status=200,
-            )
             # Same ordering as the TrueLayer path: the empty feed of a quiet
             # Space is evidence, and it must land before the emptiness is
-            # acted on.
+            # acted on - and the ledger row carries the artefact's digest so
+            # the ask and its evidence stay joined.
             artefact = starling.artefact_for(
                 body,
                 account_id=target,
@@ -423,6 +427,16 @@ def pull_starling(
                     f"/category/{category.uid}?{asked}"
                 ),
                 request_meta=request_meta,
+            )
+            store.record_attempt(
+                source="starling-feed",
+                connection_id="starling",
+                account_ref=target,
+                asked=asked,
+                request_meta=request_meta,
+                outcome="landed",
+                http_status=200,
+                artefact_digest=artefact.digest,
             )
             store.land_artefact(artefact)
             if not items:
