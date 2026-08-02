@@ -343,6 +343,73 @@ def pull_truelayer(
             ]
             reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
 
+    # Cards: a separate endpoint family, fetched on deep pulls only and
+    # LANDED WITHOUT PARSING. Card sign conventions are the classic silent
+    # corruption, so the evidence goes to layer 0 for inspection first;
+    # reconciliation into transactions follows once real payloads have
+    # confirmed the shapes. A refusal is noted, never fatal.
+    if deep:
+        try:
+            cards, cards_body = truelayer.fetch_cards(
+                connection.access_token, psu_ip=psu_ip
+            )
+        except truelayer.TrueLayerError as exc:
+            cards = []
+            result.notes.append(f"card list: {exc}")
+        else:
+            store.land_artefact(
+                truelayer.artefact_for(
+                    cards_body,
+                    account_id=connection.connection_id,
+                    kind="cards",
+                    request_meta=request_meta,
+                )
+            )
+        for card in cards:
+            card_id = text(card, "account_id")
+            if not card_id:
+                continue
+            card_ref = account_map.resolve("truelayer", card_id)
+            try:
+                card_body, card_asked = truelayer.fetch_card_transactions(
+                    connection.access_token,
+                    card_id,
+                    days=truelayer.ROUTINE_WINDOW_DAYS,
+                    psu_ip=psu_ip,
+                )
+            except truelayer.TrueLayerError as exc:
+                store.record_attempt(
+                    source="truelayer-card-booked",
+                    connection_id=connection.connection_id,
+                    account_ref=card_ref,
+                    asked="routine",
+                    request_meta=request_meta,
+                    outcome="refused",
+                    http_status=getattr(exc, "status", None),
+                    error_code=str(getattr(exc, "code", "") or ""),
+                    detail=_refusal_detail(exc),
+                )
+                result.notes.append(f"card {card_id}: {exc}")
+                continue
+            card_artefact = truelayer.artefact_for(
+                card_body,
+                account_id=card_ref,
+                kind="card-booked",
+                requested=card_asked,
+                request_meta=request_meta,
+            )
+            store.record_attempt(
+                source="truelayer-card-booked",
+                connection_id=connection.connection_id,
+                account_ref=card_ref,
+                asked=card_asked,
+                request_meta=request_meta,
+                outcome="landed",
+                http_status=200,
+                artefact_digest=card_artefact.digest,
+            )
+            store.land_artefact(card_artefact)
+
     result.summary = summary
     return result
 

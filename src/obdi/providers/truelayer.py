@@ -500,6 +500,59 @@ def fetch_regulars(
     return response.content
 
 
+def fetch_cards(
+    access_token: str,
+    *,
+    psu_ip: str | None = None,
+    client: httpx.Client | None = None,
+) -> tuple[list[JsonObject], bytes]:
+    """The card list, raw body included - the accounts call's sibling.
+
+    Cards are a separate endpoint family from accounts (which is why the
+    credit card never appears on the accounts consent journey), reachable
+    under the cards scope this application already requests.
+    """
+    http = client or httpx.Client(timeout=30.0)
+    response = http.get(
+        f"{API_HOST}/data/v1/cards", headers=_headers(access_token, psu_ip)
+    )
+    if response.status_code != 200:
+        raise _refusal("Card list fetch failed", response)
+    body = response.content
+    return rows(decode(body), "results"), body
+
+
+def fetch_card_transactions(
+    access_token: str,
+    card_id: str,
+    *,
+    days: int,
+    psu_ip: str | None = None,
+    client: httpx.Client | None = None,
+) -> tuple[bytes, str]:
+    """One window of card transactions, raw, with the range asked.
+
+    LAND-ONLY for now, deliberately: card sign conventions are the classic
+    silent-corruption risk, so nothing is parsed into the transactions
+    layer until real payloads have been inspected. The evidence lands
+    first; the interpretation follows the inspection.
+    """
+    http = client or httpx.Client(timeout=30.0)
+    until = datetime.now(UTC).date()
+    params = {
+        "from": (until - timedelta(days=days)).isoformat(),
+        "to": until.isoformat(),
+    }
+    response = http.get(
+        f"{API_HOST}/data/v1/cards/{card_id}/transactions",
+        headers=_headers(access_token, psu_ip),
+        params=params,
+    )
+    if response.status_code != 200:
+        raise _refusal("Card transaction fetch failed", response)
+    return response.content, urlencode(sorted(params.items()))
+
+
 def fetch_balance(
     access_token: str,
     account_id: str,
@@ -553,6 +606,10 @@ def artefact_for(
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/balance"
     elif kind in ("standing_orders", "direct_debits"):
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/{kind}"
+    elif kind == "cards":
+        origin = f"{API_HOST}/data/v1/cards"
+    elif kind == "card-booked":
+        origin = f"{API_HOST}/data/v1/cards/{account_id}/transactions"
     else:
         suffix = "/pending" if kind == "pending" else ""
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"

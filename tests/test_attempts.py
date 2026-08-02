@@ -470,3 +470,50 @@ class TestRecurringDeclarationsLandOnDeepPulls:
             )
 
         assert calls == []
+
+
+class TestCardsLandWithoutParsing:
+    """Cards fetch on deep pulls, land as evidence, parse NOTHING yet -
+    sign conventions are unverified, and unverified money stays in layer 0."""
+
+    def test_DeepPull_LandsCardListAndPerCardWindows(self, tmp_path, monkeypatch):
+        def fake_accounts(_token, **_kwargs):
+            return ([], b'{"results": []}')
+
+        def fake_cards(_token, **_kwargs):
+            return (
+                [{"account_id": "card-1"}],
+                b'{"results": [{"account_id": "card-1"}]}',
+            )
+
+        def fake_card_txns(_token, card_id, **_kwargs):
+            return b'{"results": []}', "from=2026-05-04&to=2026-08-02"
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", fake_cards)
+        monkeypatch.setattr(
+            "obdi.pull.truelayer.fetch_card_transactions", fake_card_txns
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            pull_truelayer(
+                store,
+                _connection(),
+                client_id="i",
+                client_secret="s",
+                connection_store=ConnectionStore(tmp_path / "c.json"),
+                account_map=AccountMap(),
+                deep=True,
+            )
+            sources = {
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT DISTINCT source FROM raw_artefacts"
+                ).fetchall()
+            }
+            transactions = store.counts()["transactions"]
+
+        assert "truelayer-cards" in sources
+        assert "truelayer-card-booked" in sources
+        # Landed as evidence; parsed into the transactions layer: nothing.
+        assert transactions == 0

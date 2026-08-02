@@ -63,6 +63,11 @@ _NON_TRANSACTIONAL = {
     "starling-accounts",
     "starling-spaces",
     "starling-balance",
+    "truelayer-cards",
+    # Card transactions land but are deliberately NOT replayed yet: their
+    # sign conventions are unverified, and parsing unverified money is the
+    # one mistake this project is built to never make.
+    "truelayer-card-booked",
 }
 
 
