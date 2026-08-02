@@ -274,6 +274,9 @@ class WebConfig:
     #: import_file as the CLI, so the two routes cannot drift.
     preview_upload: Callable[..., dict[str, object]] | None = None
     confirm_upload: Callable[..., str] | None = None
+    #: The provider id an existing connection goes through, for pinning the
+    #: bank picker on reconnects - the wrong bank should not be one tap away.
+    pinned_providers: Callable[[str], str | None] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -906,6 +909,14 @@ def _knowledge_rows(
         fact = str(row.get("fact", ""))
         value = html.escape(str(row.get("value", "")))
         connection = html.escape(str(row.get("connection_id", "")))
+        if fact == "reconnect_drift":
+            lines.append(
+                f'<li class="bad"><strong>{connection}</strong> - reconnect '
+                f"drift: {value} "
+                f'<span class="muted">'
+                f'({html.escape(str(row.get("observed_at", ""))[:10])})</span></li>'
+            )
+            continue
         if fact == "accepted_backfill_days":
             text = f"accepted backfill window: {value} days"
         elif fact == "sca_window_minutes":
@@ -1389,11 +1400,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 return
 
         state = self.bound_session.begin(name)
-        link = build_auth_link(
-            client_id=self.bound_config.client_id,
-            redirect_uri=self.bound_config.redirect_uri,
-            state=state,
-        )
+        # A reconnect pins the picker to the bank this connection already
+        # goes through - the wrong bank must not be one tap away. New
+        # connections get the full picker.
+        pinned = None
+        if self.bound_config.pinned_providers is not None:
+            try:
+                pinned = self.bound_config.pinned_providers(name)
+            except Exception:
+                pinned = None
+        if pinned:
+            link = build_auth_link(
+                client_id=self.bound_config.client_id,
+                redirect_uri=self.bound_config.redirect_uri,
+                state=state,
+                providers=pinned,
+            )
+        else:
+            link = build_auth_link(
+                client_id=self.bound_config.client_id,
+                redirect_uri=self.bound_config.redirect_uri,
+                state=state,
+            )
         self.send_response(302)
         self.send_header("Location", link)
         self.end_headers()

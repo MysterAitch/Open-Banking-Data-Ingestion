@@ -336,3 +336,71 @@ class TestOneRefusedCategoryDoesNotStarveTheRest:
         assert calls == ["cat-main", "space-1"]
         assert any(row["outcome"] == "refused" for row in attempts)
         assert any("429" in note for note in result.notes)
+
+
+class TestReconnectDriftIsDetected:
+    """A reconnect via the generic picker can come back through the wrong
+    bank or with a different subset of accounts approved - and both pass
+    silently unless the two latest accounts payloads are compared."""
+
+    def _land_accounts(self, store, payload_bytes):
+        from obdi.providers.truelayer import artefact_for
+
+        store.land_artefact(
+            artefact_for(payload_bytes, account_id="halifax", kind="accounts")
+        )
+
+    def test_SameAccountsSameProvider_NoFindings(self, tmp_path):
+        import json
+
+        body = json.dumps(
+            {
+                "results": [
+                    {
+                        "account_id": "acc-1",
+                        "provider": {"provider_id": "ob-halifax"},
+                    }
+                ]
+            }
+        ).encode()
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._land_accounts(store, body)
+            self._land_accounts(store, body + b" ")
+
+            assert store.detect_reconnect_drift("halifax") == []
+
+    def test_WrongBankAndVanishedAccounts_AreBothNamed(self, tmp_path):
+        import json
+
+        before = json.dumps(
+            {
+                "results": [
+                    {"account_id": "acc-1", "provider": {"provider_id": "ob-halifax"}},
+                    {"account_id": "acc-2", "provider": {"provider_id": "ob-halifax"}},
+                ]
+            }
+        ).encode()
+        after = json.dumps(
+            {
+                "results": [
+                    {
+                        "account_id": "acc-9",
+                        "provider": {"provider_id": "ob-nationwide"},
+                    }
+                ]
+            }
+        ).encode()
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._land_accounts(store, before)
+            self._land_accounts(store, after)
+
+            findings = store.detect_reconnect_drift("halifax")
+
+        joined = " | ".join(findings)
+        assert "ob-halifax -> ob-nationwide" in joined
+        assert "2 account(s) no longer approved" in joined
+        assert "1 new account(s) approved" in joined
+
+    def test_FirstEverAuthorisation_HasNothingToCompare(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            assert store.detect_reconnect_drift("halifax") == []

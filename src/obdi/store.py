@@ -527,14 +527,80 @@ class Store:
         accounts = []
         for item in results:
             if isinstance(item, dict) and item.get("account_id"):
+                provider = item.get("provider")
+                provider_id = (
+                    str(provider.get("provider_id") or "")
+                    if isinstance(provider, dict)
+                    else ""
+                )
                 accounts.append(
                     {
                         "account_id": str(item.get("account_id")),
                         "display_name": str(item.get("display_name") or "unnamed"),
                         "account_type": str(item.get("account_type") or ""),
+                        "provider_id": provider_id,
                     }
                 )
         return accounts
+
+    def detect_reconnect_drift(self, connection_id: str) -> list[str]:
+        """Compare the two latest accounts payloads for one connection.
+
+        A reconnect goes via the aggregator's generic bank picker, so it can
+        come back through the WRONG BANK entirely, or with a different subset
+        of accounts approved - and both would otherwise pass silently, since
+        the pull succeeds either way. Returns human-readable findings, empty
+        when the account set and provider are unchanged (or when there is
+        nothing yet to compare against).
+        """
+        import json as _json
+
+        rows = self.connection.execute(
+            "SELECT payload FROM raw_artefacts WHERE source = 'truelayer-accounts' "
+            "AND account_ref = ? ORDER BY fetched_at DESC LIMIT 2",
+            (connection_id,),
+        ).fetchall()
+        if len(rows) < 2:
+            return []
+
+        def read(payload_bytes: bytes) -> tuple[set[str], set[str]]:
+            payload = _json.loads(payload_bytes)
+            results = payload.get("results", []) if isinstance(payload, dict) else []
+            ids: set[str] = set()
+            providers: set[str] = set()
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("account_id"):
+                    ids.add(str(item["account_id"]))
+                provider = item.get("provider")
+                if isinstance(provider, dict) and provider.get("provider_id"):
+                    providers.add(str(provider["provider_id"]))
+            return ids, providers
+
+        new_ids, new_providers = read(rows[0][0])
+        old_ids, old_providers = read(rows[1][0])
+        findings: list[str] = []
+        if old_providers and new_providers and old_providers != new_providers:
+            findings.append(
+                f"provider changed: {', '.join(sorted(old_providers))} -> "
+                f"{', '.join(sorted(new_providers))} - the reconnect may have "
+                "gone through the wrong bank"
+            )
+        vanished = old_ids - new_ids
+        appeared = new_ids - old_ids
+        if vanished:
+            findings.append(
+                f"{len(vanished)} account(s) no longer approved: "
+                f"{', '.join(sorted(ref[:8] for ref in vanished))}... - their "
+                "pulls will silently stop"
+            )
+        if appeared:
+            findings.append(
+                f"{len(appeared)} new account(s) approved: "
+                f"{', '.join(sorted(ref[:8] for ref in appeared))}..."
+            )
+        return findings
 
     def transactions_by_sighting(self) -> list[Transaction]:
         """Each transaction once per DISTINCT source that observed it.

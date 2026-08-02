@@ -276,6 +276,20 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 # one case where attended access is provable rather than
                 # merely declared.
                 _pull(name, db_path, None, deep=True, psu_ip=psu_ip, trigger="post-auth-backfill")
+                # The pull landed a fresh accounts payload; compare it with
+                # the previous one NOW, while the reconnect is the freshest
+                # thing that happened. Drift recorded as facts, so the
+                # homepage warns about the wrong bank or a changed account
+                # subset instead of both passing silently.
+                with Store(db_path) as store:
+                    for finding in store.detect_reconnect_drift(name):
+                        print(
+                            f"reconnect drift on {name}: {finding}",
+                            file=sys.stderr,
+                        )
+                        store.record_provider_fact(
+                            "truelayer", name, "reconnect_drift", finding
+                        )
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
 
@@ -609,6 +623,27 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             ] = f"{name} (starling space)"
         return labels
 
+    def pinned_providers(name: str) -> str | None:
+        """The provider id this connection ALREADY goes through, for pinning
+        the bank picker on reconnects.
+
+        The id comes from the landed accounts payload - the provider's own
+        claim about itself - so a reconnect for "halifax" shows Halifax, not
+        a picker where the wrong bank is one tap away. New connections (no
+        landed accounts yet) return None and get the full picker. If the
+        pinned id were ever wrong the picker shows empty and the person
+        backs out - nothing is burned before the bank login itself.
+        """
+        with Store(db_path) as store:
+            ids = {
+                account.get("provider_id", "")
+                for account in store.accounts_for_connection(name)
+                if account.get("provider_id")
+            }
+        if len(ids) == 1:
+            return ids.pop()
+        return None
+
     def preview_upload(payload: bytes, filename: str) -> dict[str, object]:
         """Parse without landing: what IS this file, before anything commits.
 
@@ -849,6 +884,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
+        pinned_providers=pinned_providers,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

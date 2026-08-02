@@ -1284,6 +1284,33 @@ class TestUploadingAFileFromThePage:
         assert "No parser recognised" in response.text
 
 
+class TestReconnectPinsTheBankPicker:
+    def test_Reconnect_CarriesThePinnedProvider_InTheAuthLink(self, tmp_path):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            pinned_providers=lambda name: "ob-halifax" if name == "halifax" else None,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            reconnect = httpx.get(f"{base}/connect?name=halifax", follow_redirects=False)
+            fresh = httpx.get(f"{base}/connect?name=newbank", follow_redirects=False)
+        finally:
+            httpd.shutdown()
+
+        # The reconnect shows ONLY the bank this connection already uses;
+        # a brand-new name still gets the full picker.
+        assert "providers=ob-halifax" in reconnect.headers["location"]
+        assert "uk-ob-all" in fresh.headers["location"].replace("+", " ")
+
+
 class TestBrowsingTheAttemptLedger:
     """Every ask made of a provider, on a page: the quota ledger readable.
 
