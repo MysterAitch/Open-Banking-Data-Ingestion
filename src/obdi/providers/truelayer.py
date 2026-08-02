@@ -213,7 +213,9 @@ def fetch_accounts(
         headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
-        raise TrueLayerError(f"Account fetch failed (HTTP {response.status_code})")
+        raise TrueLayerError(
+            f"Account fetch failed (HTTP {response.status_code}): {response.text[:300]}"
+        )
     return rows(decode(response.content), "results"), response.content
 
 
@@ -246,7 +248,10 @@ def fetch_transactions(
     if pending:
         response = http.get(url, headers=headers)
         if response.status_code != 200:
-            raise TrueLayerError(f"Transaction fetch failed (HTTP {response.status_code})")
+            raise TrueLayerError(
+                f"Transaction fetch failed (HTTP {response.status_code}): "
+                f"{response.text[:300]}"
+            )
         body = response.content
         # The same status guard as the booked path. Both endpoints share the
         # response envelope, and a Queued/Running pending payload stored at
@@ -324,6 +329,7 @@ def fetch_transactions(
             body = response.content
             return rows(decode(body), "results"), body, urlencode(sorted(params.items()))
         last_status = response.status_code
+        last_body = response.text[:300]
         if response.status_code == 429:
             # Narrowing cannot help, and each further attempt digs the hole
             # deeper against a quota that resets daily rather than in seconds.
@@ -338,7 +344,13 @@ def fetch_transactions(
         if response.status_code not in (400, 416, 422):
             break
 
-    raise TrueLayerError(f"Transaction fetch failed (HTTP {last_status})")
+    # The body is the diagnosis: a 403 alone cannot distinguish a scope
+    # problem from a provider-side unattended limit from a refused window,
+    # and each has a different next step. Learnt once on the code exchange;
+    # the same rule holds everywhere a provider can say no.
+    raise TrueLayerError(
+        f"Transaction fetch failed (HTTP {last_status}): {last_body}"
+    )
 
 
 def to_transaction(
@@ -436,7 +448,9 @@ def fetch_balance(
         headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
-        raise TrueLayerError(f"Balance fetch failed (HTTP {response.status_code})")
+        raise TrueLayerError(
+            f"Balance fetch failed (HTTP {response.status_code}): {response.text[:300]}"
+        )
     return rows(decode(response.content), "results"), response.content
 
 

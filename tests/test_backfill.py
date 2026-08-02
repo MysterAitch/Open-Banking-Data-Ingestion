@@ -307,3 +307,28 @@ class TestBalanceIsFetchedAndKept:
 
         assert rows[0]["current"] is not None
         assert b"available" in body
+
+
+class TestFetchFailuresAreDiagnosable:
+    """A bare status number cannot be acted on; the provider's body can.
+
+    Learnt once on the code exchange and repeated here: a 403 may mean scope,
+    provider-side unattended limits, or the window itself, and each has a
+    different next step. Read on a phone, mid-press, the body IS the diagnosis.
+    """
+
+    def test_Fetch_WhenTheProviderRefuses_TheErrorCarriesTheBody(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                403, json={"error": "provider_permission_denied", "error_details": {}}
+            )
+
+        with pytest.raises(TrueLayerError, match="provider_permission_denied"):
+            fetch_transactions("token", "acc", client=_client(handler))
+
+    def test_PendingFetch_CarriesTheBodyToo(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(403, json={"error": "access_denied"})
+
+        with pytest.raises(TrueLayerError, match="access_denied"):
+            fetch_transactions("token", "acc", pending=True, client=_client(handler))

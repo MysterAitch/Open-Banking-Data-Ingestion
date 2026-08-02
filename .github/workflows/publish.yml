@@ -54,6 +54,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A tag that disagrees with pyproject would publish an image whose
+      # self-reported version is a lie - which happened, for a whole release
+      # series, and cost a night of chasing a "stale" container that was
+      # current all along. Refuse to build it.
+      - name: Refuse a tag that disagrees with the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag but pyproject says $pkg - bump pyproject before tagging"
+            exit 1
+          fi
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -70,6 +84,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

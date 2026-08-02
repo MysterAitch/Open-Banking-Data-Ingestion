@@ -9,6 +9,13 @@
 
 FROM python:3.13-slim
 
+# The commit this image was built from, shown in the page footer and
+# recorded in every artefact's request_meta. The package version alone
+# proved able to lie (pyproject sat at 0.1.2 for a whole release series);
+# the commit cannot.
+ARG GIT_COMMIT=
+ENV OBDI_BUILD_COMMIT=$GIT_COMMIT
+
 # Non-root by default. This process can begin a bank authorisation and holds
 # refresh tokens; there is no reason for it to be able to write anywhere else.
 RUN useradd --create-home --uid 10001 obdi

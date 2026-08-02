@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Protocol
 from urllib.parse import parse_qs, urlparse
 
+from .buildinfo import describe
+
 
 class CodeHandler(Protocol):
     """Exchanges an authorisation code and returns a message for the browser."""
@@ -65,7 +67,9 @@ def render_page(title: str, body: str) -> bytes:
  input {{ font-size: 1rem; padding: .7rem; width: 100%; box-sizing: border-box;
          border-radius: .4rem; border: 1px solid #8886; }}
 </style></head>
-<body><h1>{html.escape(title)}</h1>{body}</body></html>
+<body><h1>{html.escape(title)}</h1>{body}
+<footer style="margin-top:2rem;opacity:.6;font-size:.85rem">
+obdi {html.escape(describe())}</footer></body></html>
 """.encode()
 
 

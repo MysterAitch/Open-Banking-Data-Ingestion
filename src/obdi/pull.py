@@ -33,12 +33,11 @@ from .store import Store
 
 
 def _app_version() -> str:
-    try:
-        from importlib.metadata import version
+    # Version plus build commit: the number alone lied for a whole release
+    # series, so artefact provenance records both.
+    from .buildinfo import describe
 
-        return version("obdi")
-    except Exception:
-        return "unknown"
+    return describe()
 
 
 class _SkipBalance(Exception):
