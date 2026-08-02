@@ -137,6 +137,51 @@ class TestEnvelope:
         assert {entry["kind"] for entry in listed} == {"audit", "push"}
         assert all(entry["queued_at"] for entry in listed)
 
+    def test_AuditSummary_AccountsForEveryFate(self, tmp_path, monkeypatch):
+        """"Auditing 7" alone is a mystery number: the summary states what
+        was skipped and why - named accounts awaiting provisioning, and
+        unnamed ones that need a name before anything can happen."""
+        import json as _json
+
+        from obdi.cli import queue_actual_audit
+
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            _json.dumps(
+                {
+                    "bindings": [
+                        {
+                            "source": "truelayer",
+                            "provider_account_id": "uid-b",
+                            "canonical_id": "halifax-current",
+                        },
+                        {
+                            "source": "starling",
+                            "provider_account_id": "uid-n",
+                            "canonical_id": "starling-personal",
+                        },
+                    ],
+                    "actual": [
+                        {"canonical_id": "halifax-current", "actual_account_id": "X"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("ACTUAL_SYNC_ID", "sync-1")
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_path))
+        monkeypatch.setenv("OBDI_ACTUAL_DIR", str(tmp_path / "actual"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            _seed(store, "halifax-current", "e-1")
+            _seed(store, "starling:uid-u", "e-2")
+
+        summary = queue_actual_audit(db)
+
+        assert "auditing 1 Actual-bound account(s)" in summary
+        assert "1 named awaiting provisioning" in summary
+        assert "1 unnamed (bind first)" in summary
+
     def test_QueueWrite_IsAtomicAndOrdered(self, tmp_path):
         first = queue_push({"version": 2}, tmp_path / "actual")
         second = queue_push({"version": 2}, tmp_path / "actual")

@@ -187,12 +187,41 @@ def queue_actual_audit(db_path: Path) -> str:
     bindings = _actual_bindings()
     if not bindings:
         return "no Actual-bound accounts to audit - push first."
+    named: set[str] = set()
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if map_path and Path(map_path).is_file():
+        with contextlib.suppress(OSError, ValueError):
+            raw = json.loads(Path(map_path).read_text(encoding="utf-8"))
+            named = {
+                str(b.get("canonical_id"))
+                for b in raw.get("bindings", [])
+                if isinstance(b, dict) and b.get("canonical_id")
+            }
     with Store(db_path) as store:
         envelope = build_audit_envelope(store, bindings)
+        account_ids = {
+            str(row[0])
+            for row in store.connection.execute(
+                "SELECT DISTINCT account_id FROM transactions"
+            )
+        }
     queued = queue_push(envelope, _actual_dir(db_path), prefix="audit")
     raw_accounts = envelope.get("accounts")
     count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
-    return f"queued {queued.name}: auditing {count} bound account(s)"
+    # The audit can only read accounts that EXIST in Actual; saying what
+    # was skipped and why turns "auditing 7" from a mystery number into
+    # the whole picture. Named-but-unprovisioned accounts gain an Actual
+    # counterpart on the next push; unnamed ones need a name first.
+    bound = {binding.canonical_id for binding in bindings}
+    awaiting = len(
+        (named | {a for a in account_ids if ":" not in a}) - bound
+    )
+    unnamed = len({a for a in account_ids if ":" in a})
+    return (
+        f"queued {queued.name}: auditing {count} Actual-bound account(s); "
+        f"not auditable yet: {awaiting} named awaiting provisioning "
+        f"(next push creates them), {unnamed} unnamed (bind first)"
+    )
 
 
 def _push_actual(db_path: Path) -> int:
