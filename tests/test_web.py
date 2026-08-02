@@ -632,6 +632,86 @@ class TestBrowsingRawArtefactsFromThePage:
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         return httpd, f"http://127.0.0.1:{httpd.server_port}"
 
+    def test_Detail_RendersTalliesSignAgreementPresenceAndMonths(self, tmp_path):
+        def detail(_id, with_payload=False):
+            return {
+                "id": 7,
+                "source": "truelayer-booked",
+                "account_ref": "halifax-current",
+                "fetched_at": "2026-08-02T01:00:00+00:00",
+                "origin": "https://api/transactions",
+                "request_meta": {"trigger": "web-extend"},
+                "summary": {
+                    "kind": "json",
+                    "items": 3,
+                    "bytes": 999,
+                    "fields": [
+                        {
+                            "path": "transaction_type",
+                            "present": 3,
+                            "types": ["string"],
+                            "distinct": 2,
+                            "min": "CREDIT",
+                            "max": "DEBIT",
+                            "values": [
+                                {"value": "DEBIT", "count": 2},
+                                {"value": "CREDIT", "count": 1},
+                            ],
+                        },
+                        {
+                            "path": "ref",
+                            "present": 3,
+                            "types": ["string"],
+                            "distinct": 3,
+                            "min": None,
+                            "max": None,
+                            "length": {"min": 20, "max": 20},
+                            "prefix": "txn-",
+                            "format": "hex",
+                        },
+                    ],
+                    "sign_by": [
+                        {
+                            "field": "transaction_type",
+                            "value": "DEBIT",
+                            "positive": 0,
+                            "negative": 2,
+                            "zero": 0,
+                        }
+                    ],
+                    "presence_links": [
+                        {
+                            "field": "provider_reference",
+                            "by": "transaction_category",
+                            "value": "TRANSFER",
+                            "present": 0,
+                            "total": 6,
+                            "overall_present": 10,
+                        }
+                    ],
+                    "by_month": [
+                        {"month": "2026-05", "count": 2},
+                        {"month": "2026-07", "count": 1},
+                    ],
+                },
+            }
+
+        httpd, base = self._server(tmp_path, lambda: [], detail)
+        try:
+            page = httpx.get(f"{base}/artefact?id=7").text
+        finally:
+            httpd.shutdown()
+
+        # Categories are tallied, identifiers described by shape not range.
+        assert "2 distinct: DEBIT x2, CREDIT x1" in page
+        assert "3 distinct, length 20-20, prefix txn-, hex" in page
+        # Cross-field evidence sections.
+        assert "Amount sign by category" in page
+        assert "Presence patterns" in page
+        assert "0 of 6 items where" in page
+        assert "Items per month" in page
+        assert "2026-05" in page and "2026-07" in page
+
     def test_Listing_ShowsEachArtefactWithItsCircumstances(self, tmp_path):
         httpd, base = self._server(
             tmp_path,

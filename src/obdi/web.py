@@ -190,6 +190,109 @@ def _connection_rows(store: ConnectionStore) -> str:
 HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
 
 
+def _shape_detail(field: dict[str, object]) -> str:
+    """One cell saying what a field CONTAINS, chosen by what it is.
+
+    Categories get their values tallied, identifiers get their shape
+    (cardinality, length, prefix, format), ordered things keep their range.
+    Escaped here because the values are provider data, not our markup.
+    """
+    values = field.get("values")
+    if isinstance(values, list) and values:
+        listed = ", ".join(
+            f"{html.escape(str(v.get('value')))} x{v.get('count')}"
+            for v in values
+            if isinstance(v, dict)
+        )
+        return f"{field.get('distinct')} distinct: {listed}"
+    length = field.get("length")
+    if isinstance(length, dict):
+        bits = [
+            f"{field.get('distinct')} distinct",
+            f"length {length.get('min')}-{length.get('max')}",
+        ]
+        prefix = field.get("prefix")
+        if prefix:
+            bits.append(f"prefix {html.escape(str(prefix))}")
+        fmt = field.get("format")
+        if fmt:
+            bits.append(html.escape(str(fmt)))
+        return ", ".join(bits)
+    if field.get("min") is not None:
+        return (
+            f"{html.escape(str(field.get('min')))} .. "
+            f"{html.escape(str(field.get('max')))}"
+        )
+    return "-"
+
+
+def _insight_sections(summary: dict[str, object]) -> str:
+    """The cross-field evidence: sign agreement, presence patterns, months.
+
+    Payload forensics, deliberately not finance analytics - the boundary is
+    "evidence about the payload" (parsing decisions, gaps, provider
+    semantics) versus "insight about the money" (the budgeting app's job).
+    """
+    parts: list[str] = []
+    sign_by = summary.get("sign_by")
+    if isinstance(sign_by, list) and sign_by:
+        rows = "".join(
+            f'<tr><td>{html.escape(str(r.get("field")))}</td>'
+            f'<td>{html.escape(str(r.get("value")))}</td>'
+            f'<td>{r.get("positive")}</td><td>{r.get("negative")}</td>'
+            f'<td>{r.get("zero")}</td></tr>'
+            for r in sign_by
+            if isinstance(r, dict)
+        )
+        parts.append(
+            "<h2>Amount sign by category</h2>"
+            "<p>The sign-convention check: a category whose row mixes "
+            "positive and negative is either genuinely mixed or a parsing "
+            "problem.</p>"
+            "<table><tr><th>field</th><th>value</th><th>positive</th>"
+            f"<th>negative</th><th>zero</th></tr>{rows}</table>"
+        )
+    links = summary.get("presence_links")
+    if isinstance(links, list) and links:
+        items = "".join(
+            f"<li><code>{html.escape(str(link.get('field')))}</code> is present in "
+            f"{link.get('present')} of {link.get('total')} items where "
+            f"<code>{html.escape(str(link.get('by')))}</code> = "
+            f"{html.escape(str(link.get('value')))} "
+            f"({link.get('overall_present')} of {summary.get('items')} overall)</li>"
+            for link in links
+            if isinstance(link, dict)
+        )
+        parts.append(
+            "<h2>Presence patterns</h2>"
+            "<p>Fields that appear or vanish exactly with one category value "
+            "- provider semantics nothing documents.</p>"
+            f"<ul>{items}</ul>"
+        )
+    by_month = summary.get("by_month")
+    if isinstance(by_month, list) and by_month:
+        counts = [
+            int(str(m.get("count")))
+            for m in by_month
+            if isinstance(m, dict) and str(m.get("count")).isdigit()
+        ]
+        peak = max(counts, default=1) or 1
+        bars = "\n".join(
+            f"{html.escape(str(m.get('month')))} "
+            f"{'#' * max(1, round(int(str(m.get('count'))) * 40 / peak))} "
+            f"{m.get('count')}"
+            for m in by_month
+            if isinstance(m, dict)
+        )
+        parts.append(
+            "<h2>Items per month</h2>"
+            "<p>A month that should have data and shows no bar is a gap "
+            "worth chasing.</p>"
+            f'<pre style="overflow-x:auto">{bars}</pre>'
+        )
+    return "".join(parts)
+
+
 def refusal_html(exc: Exception) -> str:
     """A provider refusal in parts, not one blob.
 
@@ -546,8 +649,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f'<tr><td>{html.escape(str(field.get("path")))}</td>'
             f'<td>{field.get("present")}</td>'
             f'<td>{html.escape(", ".join(field.get("types", [])))}</td>'
-            f'<td>{html.escape(str(field.get("min")))}</td>'
-            f'<td>{html.escape(str(field.get("max")))}</td></tr>'
+            f"<td>{_shape_detail(field)}</td></tr>"
             for field in fields
             if isinstance(field, dict)
         )
@@ -562,7 +664,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "<h2>Computed shape</h2>"
             f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
             "<table><tr><th>field</th><th>present</th><th>types</th>"
-            f"<th>min</th><th>max</th></tr>{field_rows}</table>"
+            f"<th>values / shape</th></tr>{field_rows}</table>"
+            f"{_insight_sections(summary)}"
             f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
             "View payload</a></p>" + HOME_LINK
         )

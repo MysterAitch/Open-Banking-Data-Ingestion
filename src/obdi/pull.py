@@ -188,15 +188,46 @@ def pull_truelayer(
             "truelayer", connection.connection_id, "accepted_backfill_days"
         )
         for pending in ((False,) if probing else (False, True)):
-            records, body, asked = truelayer.fetch_transactions(
-                connection.access_token,
-                provider_account_id,
-                since=since,
-                until=until,
-                pending=pending,
-                deep=deep,
-                psu_ip=psu_ip,
-                known_ceiling_days=int(known_ceiling) if known_ceiling else None,
+            # One ledger row per ask, refused or landed. A deep fetch may try
+            # several ladder rungs inside one call; the ledger records the
+            # invocation and its final answer, so rung-level counts are a
+            # known under-estimate of quota spend on deep pulls.
+            asked_spec = (
+                f"since={since} until={until}" if probing
+                else ("deep-ladder" if deep else "routine")
+            ) + (" pending" if pending else "")
+            try:
+                records, body, asked = truelayer.fetch_transactions(
+                    connection.access_token,
+                    provider_account_id,
+                    since=since,
+                    until=until,
+                    pending=pending,
+                    deep=deep,
+                    psu_ip=psu_ip,
+                    known_ceiling_days=int(known_ceiling) if known_ceiling else None,
+                )
+            except truelayer.TrueLayerError as exc:
+                store.record_attempt(
+                    source="truelayer-pending" if pending else "truelayer-booked",
+                    connection_id=connection.connection_id,
+                    account_ref=canonical,
+                    asked=asked_spec,
+                    request_meta=request_meta,
+                    outcome="refused",
+                    http_status=getattr(exc, "status", None),
+                    error_code=str(getattr(exc, "code", "") or ""),
+                    detail=str(exc),
+                )
+                raise
+            store.record_attempt(
+                source="truelayer-pending" if pending else "truelayer-booked",
+                connection_id=connection.connection_id,
+                account_ref=canonical,
+                asked=asked or asked_spec,
+                request_meta=request_meta,
+                outcome="landed",
+                http_status=200,
             )
             if deep and not pending and "from=" in asked:
                 # Record what the provider actually granted, so the NEXT deep

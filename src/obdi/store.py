@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import ClassVar
 
@@ -147,6 +147,25 @@ CREATE TABLE IF NOT EXISTS provider_facts (
     observed_at   TEXT NOT NULL,
     PRIMARY KEY (source, connection_id, fact)
 );
+
+-- Every ask made of a provider, refused or landed: the quota ledger and the
+-- probe notebook. Refusals used to exist only in container stderr, which
+-- vanishes with the container - yet "how many calls hit this account in the
+-- last 24 hours" and "what exactly was asked when the provider said no" are
+-- questions only an on-disk record can answer.
+CREATE TABLE IF NOT EXISTS fetch_attempts (
+    attempted_at  TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    account_ref   TEXT NOT NULL,
+    asked         TEXT NOT NULL,
+    request_meta  TEXT NOT NULL,
+    outcome       TEXT NOT NULL,
+    http_status   INTEGER,
+    error_code    TEXT NOT NULL DEFAULT '',
+    detail        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS fetch_attempts_by_time ON fetch_attempts(attempted_at);
 
 CREATE TABLE IF NOT EXISTS review_queue (
     entity_id  TEXT PRIMARY KEY,
@@ -317,6 +336,53 @@ class Store:
             (source, connection_id, fact),
         ).fetchone()
         return row[0] if row else None
+
+    def record_attempt(
+        self,
+        *,
+        source: str,
+        connection_id: str,
+        account_ref: str,
+        asked: str,
+        request_meta: str,
+        outcome: str,
+        http_status: int | None = None,
+        error_code: str = "",
+        detail: str = "",
+    ) -> None:
+        """One row per ask, whatever the answer.
+
+        Written for refusals as much as successes: the refusal row carries
+        the window asked and the provider's code, which is the raw material
+        of both the quota model and the ceiling-probe protocol.
+        """
+        self.connection.execute(
+            "INSERT INTO fetch_attempts (attempted_at, source, connection_id, "
+            "account_ref, asked, request_meta, outcome, http_status, error_code, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                datetime.now(UTC).isoformat(),
+                source,
+                connection_id,
+                account_ref,
+                asked,
+                request_meta,
+                outcome,
+                http_status,
+                error_code,
+                detail,
+            ),
+        )
+        self.connection.commit()
+
+    def attempts(self, limit: int = 200) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            "SELECT attempted_at, source, connection_id, account_ref, asked, "
+            "request_meta, outcome, http_status, error_code, detail "
+            "FROM fetch_attempts ORDER BY attempted_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def record_provider_fact(
         self, source: str, connection_id: str, fact: str, value: str
