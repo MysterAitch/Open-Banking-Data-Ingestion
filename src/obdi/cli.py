@@ -119,6 +119,9 @@ def queue_actual_push(db_path: Path) -> str:
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
         return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        return busy
     map_path_env = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
     if not map_path_env:
         raise RuntimeError("Set OBDI_ACCOUNT_MAP to the account map path.")
@@ -172,6 +175,22 @@ def queue_actual_push(db_path: Path) -> str:
     return "; ".join(lines)
 
 
+def rebuild_in_progress_note(db_path: Path) -> str | None:
+    """The polite refusal for actions that read or move store rows while a
+    rebuild is replaying them. A bind mid-rebuild leaves a SPLIT state
+    (rows replayed before it move, rows after it land under the old ref),
+    and a push or audit reads a half-populated store - all recoverable,
+    none worth allowing."""
+    from . import leases
+
+    if leases.held(leases.locks_dir(db_path), "rebuild-derived"):
+        return (
+            "a rebuild is replaying the store - try again when the danger "
+            "zone shows it finished (nothing is lost by waiting)"
+        )
+    return None
+
+
 def start_background_rebuild(db_path: Path) -> str:
     """Kick off rebuild-from-raw in a background thread, immediately.
 
@@ -218,6 +237,14 @@ def start_background_rebuild(db_path: Path) -> str:
         from .rebuild import RebuildReport, rebuild_from_raw
 
         def on_progress(done: int, total: int, report: RebuildReport) -> None:
+            # Every 25th artefact into the container log too - dockge and
+            # docker logs are where people look when a page seems quiet.
+            if done % 25 == 0 or done == total:
+                print(
+                    f"rebuild: artefact {done} of {total}, "
+                    f"{report.transactions} transaction(s) so far",
+                    flush=True,
+                )
             status_path.write_text(
                 json.dumps(
                     {
@@ -275,6 +302,9 @@ def queue_actual_audit(db_path: Path) -> str:
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
         return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        return busy
     bindings = _actual_bindings()
     if not bindings:
         return "no Actual-bound accounts to audit - push first."
@@ -722,6 +752,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         Validation here rather than in the page: the canonical id becomes a
         query key across every layer, so it stays lowercase-slug shaped.
         """
+        busy = rebuild_in_progress_note(db_path)
+        if busy:
+            raise ValueError(busy)
         source, provider_ref = _split_bind_ref(provider_ref)
         import re as _re
 

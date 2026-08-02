@@ -204,3 +204,42 @@ class TestScheduledPullGate:
 
         assert reason is not None
         assert "update" in reason
+
+
+class TestRebuildGuards:
+    """While a rebuild replays the store, actions that read or move rows
+    must wait: a mid-rebuild bind leaves a split state, and a push or
+    audit reads a half-populated store."""
+
+    def _db_with_rebuild_running(self, tmp_path, monkeypatch):
+        from obdi.leases import acquire
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        acquire(locks, "rebuild-derived", "obdi-web", ttl_seconds=3600)
+        return db
+
+    def test_PushAndAudit_WaitPolitely(self, tmp_path, monkeypatch):
+        from obdi.cli import queue_actual_audit, queue_actual_push
+
+        db = self._db_with_rebuild_running(tmp_path, monkeypatch)
+        monkeypatch.setenv("ACTUAL_SYNC_ID", "sync-1")
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "accounts.json"))
+
+        assert "rebuild is replaying" in queue_actual_push(db)
+        assert "rebuild is replaying" in queue_actual_audit(db)
+
+    def test_NoRebuild_NoNote(self, tmp_path, monkeypatch):
+        from obdi.cli import rebuild_in_progress_note
+        from obdi.store import Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+
+        assert rebuild_in_progress_note(db) is None
