@@ -1600,6 +1600,47 @@ class TestBindingFromThePage:
             ).fetchall()
         assert [r[0] for r in rows] == ["starling-bills"]
 
+    def test_Bind_OntoADuplicatedTarget_ExplainsTheCureInsteadOfARawConstraint(
+        self, tmp_path
+    ):
+        """Seen live: binding a ref whose rows also exist under the target
+        (two label eras) tripped the uniqueness constraint and showed raw
+        SQL to a phone. The constraint is right; the message must carry
+        the cure - and the map must stay untouched."""
+        import pytest
+
+        from obdi.accounts import AccountMap
+        from obdi.cli import _apply_bind
+        from obdi.store import Store as _Store
+
+        db = tmp_path / "s.sqlite3"
+        with _Store(db) as store:
+            for account in ("starling:uid-1", "starling-space-bills"):
+                store.connection.execute(
+                    "INSERT INTO transactions (entity_id, account_id, "
+                    "amount_minor, value_date, booking_date, description, "
+                    "source, source_id, currency, tier, status, content_key, "
+                    "occurrence, first_seen_at, last_seen_at) "
+                    "VALUES (?, ?, -100, '2026-07-01', '2026-07-01', 'X', "
+                    "'starling', 'feed-1', 'GBP', 'authoritative', 'booked', "
+                    "?, 0, '2026-07-01T00:00:00', '2026-07-01T00:00:00')",
+                    (f"e-{account}", account, f"ck-{account}"),
+                )
+            store.connection.commit()
+        map_file = tmp_path / "accounts.json"
+
+        with pytest.raises(ValueError, match="Rebuild from raw"):
+            _apply_bind(
+                db,
+                map_file,
+                AccountMap(),
+                "starling",
+                "uid-1",
+                "starling-space-bills",
+            )
+
+        assert not map_file.exists()
+
     def test_SourceQualifiedRef_BindsUnderItsOwnSource(self):
         """The holdings and roster forms post "starling:uid"; the extend rows
         post bare TrueLayer refs. Both routes must land in the right column

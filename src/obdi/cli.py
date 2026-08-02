@@ -72,12 +72,29 @@ def _apply_bind(
     rescues rows stranded by an earlier bind that recorded its name but
     died before moving them - re-pressing Bind is the repair.
     """
+    import sqlite3 as _sqlite3
+
     old_canonical = account_map.resolve(source, provider_ref)
     qualified = f"{source}:{provider_ref}"
     with Store(db_path) as store:
         moved = 0
-        for stranded in {old_canonical, qualified} - {canonical}:
-            moved += store.rebind_account(stranded, canonical)
+        try:
+            for stranded in {old_canonical, qualified} - {canonical}:
+                moved += store.rebind_account(stranded, canonical)
+        except _sqlite3.IntegrityError as exc:
+            if "UNIQUE" not in str(exc):
+                raise
+            # The target already holds rows with the same provider ids -
+            # the store has duplicate copies of this account (two label
+            # eras), and moving one copy onto the other would double
+            # every transaction. The uniqueness constraint is doing its
+            # job; the cure is a rebuild, which collapses the duplicates.
+            raise ValueError(
+                f"'{canonical}' already holds rows with the same provider "
+                "ids - the store has duplicate copies of this account. "
+                "Run 'Rebuild from raw' first (it collapses duplicates), "
+                "then bind. Nothing was changed by this attempt."
+            ) from exc
     _persist_binding(map_file, source, provider_ref, canonical)
     return moved
 
