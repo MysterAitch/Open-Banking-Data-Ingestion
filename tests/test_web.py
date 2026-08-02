@@ -1571,7 +1571,7 @@ class TestActualRoster:
             "starling-personal"
         )
         assert _suggest_slug("mortgage (starling space)", "starling:e6a0") == (
-            "starling-mortgage"
+            "starling-space-mortgage"
         )
         # No label worth suggesting: leave the input empty rather than
         # suggesting a slugified uuid.
@@ -1580,6 +1580,49 @@ class TestActualRoster:
         # nothing either - an empty box beats "starling-343fa965-8bb7-...".
         ref = "starling:343fa965-8bb7-470a-a4b8-c84843627be2"
         assert _suggest_slug(ref, ref) == ""
+        # Spaces follow the house convention: source-space-name.
+        assert _suggest_slug("Bills (starling space)", "starling:bceb") == (
+            "starling-space-bills"
+        )
+
+    def test_ExtendSuggestions_TitleWhenInformative_TypeWhenColliding(self):
+        """Two Halifax accounts both display the holder's name - useless
+        as names, and detectable as a collision within the connection.
+        The reward account's real title slugs through whole."""
+        from obdi.web import ExtendableAccount, _extend_suggestions
+
+        accounts = [
+            ExtendableAccount(
+                connection="halifax",
+                provider_ref="e9f8",
+                display="Mr Roger Howell (TRANSACTION)",
+                earliest=None,
+                canonical="truelayer:e9f8",
+                unbound=True,
+            ),
+            ExtendableAccount(
+                connection="halifax",
+                provider_ref="b532",
+                display="Mr Roger Howell (SAVINGS)",
+                earliest=None,
+                canonical="truelayer:b532",
+                unbound=True,
+            ),
+            ExtendableAccount(
+                connection="halifax",
+                provider_ref="4095",
+                display="Committed Spends-Reward Current Account (TRANSACTION)",
+                earliest=None,
+                canonical="truelayer:4095",
+                unbound=True,
+            ),
+        ]
+
+        suggestions = _extend_suggestions(accounts)
+
+        assert suggestions["e9f8"] == "halifax-transaction"
+        assert suggestions["b532"] == "halifax-savings"
+        assert suggestions["4095"].startswith("halifax-committed-spends-reward")
 
 
 class TestBindingFromThePage:

@@ -877,12 +877,16 @@ def _holdings_rows(
             # binding must not require the extend section (TrueLayer-only)
             # or a shell. The provider's display label above makes the row
             # recognisable; this form makes the name canonical.
+            held_suggestion = _suggest_slug(
+                labels.get(row.account_id, ""), row.account_id
+            )
             bind_form = (
                 '<form method="post" action="/bind" '
                 'style="display:flex;gap:.4rem;margin:.35rem 0">'
                 f'<input type="hidden" name="account" '
                 f'value="{html.escape(row.account_id)}">'
-                '<input name="canonical" placeholder="name this account, '
+                f'<input name="canonical" value="{html.escape(held_suggestion)}" '
+                'placeholder="name this account, '
                 'e.g. starling-personal" style="flex:1">'
                 '<button class="button" style="display:inline-block;'
                 'padding:.5rem .8rem;border:0;cursor:pointer" '
@@ -935,11 +939,13 @@ def _holdings_rows(
         # moves no rows; the next rebuild applies the new edge.
         empty_bind = ""
         if ":" in ref:
+            empty_suggestion = _suggest_slug(labels.get(ref, ""), ref)
             empty_bind = (
                 '<form method="post" action="/bind" '
                 'style="display:flex;gap:.4rem;margin:.35rem 0">'
                 f'<input type="hidden" name="account" value="{html.escape(ref)}">'
-                '<input name="canonical" placeholder="name this account, '
+                f'<input name="canonical" value="{html.escape(empty_suggestion)}" '
+                'placeholder="name this account, '
                 'e.g. starling-personal" style="flex:1">'
                 '<button class="button" style="display:inline-block;'
                 'padding:.5rem .8rem;border:0;cursor:pointer" '
@@ -997,10 +1003,14 @@ def _suggest_slug(label: str, ref: str) -> str:
     if label == ref:
         return ""
     source = ref.split(":", 1)[0] if ":" in ref else ""
-    base = label.split("(", 1)[0].strip().lower()
-    base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+    head, _, parenthetical = label.partition("(")
+    base = re.sub(r"[^a-z0-9]+", "-", head.strip().lower()).strip("-")
     if not base:
         return ""
+    # "Bills (starling space)" is a Space and the house convention names
+    # it starling-space-bills; "Personal (starling)" is the main account.
+    if "space" in parenthetical.lower() and source:
+        return f"{source}-space-{base}"[:40]
     if source and source not in base:
         base = f"{source}-{base}"
     return base[:40]
@@ -1502,6 +1512,36 @@ def _knowledge_rows(
     )
 
 
+def _extend_suggestions(accounts: list[ExtendableAccount]) -> dict[str, str]:
+    """A suggested canonical name per unbound account, batch-aware.
+
+    The display is "Title (TYPE)". A real title slugs through whole; a
+    holder-name display is useless as a name and shows up as a COLLISION
+    within the connection (every account titled after the same person),
+    in which case the type is the informative part."""
+
+    def _slug(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+
+    titles: dict[tuple[str, str], int] = {}
+    parsed: dict[str, tuple[str, str, str]] = {}
+    for account in accounts:
+        head, _, parenthetical = account.display.partition("(")
+        title = head.strip()
+        kind = parenthetical.rstrip(")").strip()
+        parsed[account.provider_ref] = (account.connection, title, kind)
+        titles[(account.connection, title)] = (
+            titles.get((account.connection, title), 0) + 1
+        )
+    suggestions: dict[str, str] = {}
+    for ref, (connection, title, kind) in parsed.items():
+        informative = kind if titles[(connection, title)] > 1 else title
+        slug = _slug(f"{connection}-{informative}")
+        if slug:
+            suggestions[ref] = slug[:40]
+    return suggestions
+
+
 def _extend_rows(
     extendables: Callable[[], list[ExtendableAccount]] | None,
     only_ref: str | None = None,
@@ -1522,6 +1562,7 @@ def _extend_rows(
         accounts = [a for a in accounts if a.provider_ref == only_ref]
     if not accounts:
         return ""
+    suggestions = _extend_suggestions([a for a in accounts if a.unbound])
     rows = []
     for account in accounts:
         reach = account.earliest.isoformat() if account.earliest else "nothing held yet"
@@ -1557,12 +1598,14 @@ def _extend_rows(
         )
         bind_form = ""
         if account.unbound:
+            suggested = suggestions.get(account.provider_ref, "")
             bind_form = (
                 '<form method="post" action="/bind" '
                 'style="display:flex;gap:.4rem;margin:.4rem 0">'
                 f'<input type="hidden" name="account" '
                 f'value="{html.escape(account.provider_ref)}">'
-                '<input name="canonical" placeholder="name this account, '
+                f'<input name="canonical" value="{html.escape(suggested)}" '
+                'placeholder="name this account, '
                 'e.g. halifax-current" style="flex:1">'
                 '<button class="button" style="display:inline-block;'
                 'padding:.5rem .8rem;border:0;cursor:pointer" '
