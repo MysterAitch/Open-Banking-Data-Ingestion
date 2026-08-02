@@ -581,6 +581,41 @@ class TestExtendingHistoryFromThePage:
             assert 'name="days" value="365"' in page
             assert 'name="days" value="1"' in page
 
+    def test_Extend_ResultPage_ShowsOnlyThePressedAccount(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="e9f8",
+                    display="Current Account",
+                    earliest=date(2020, 8, 7),
+                ),
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="b532",
+                    display="Instant Saver",
+                    earliest=date(2021, 7, 7),
+                ),
+            ],
+            lambda **_: "landed 3",
+        )
+        try:
+            page = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "7"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        # Mid-probe, the page repeats ONE account's controls - the one just
+        # pressed - because a wall of every account's buttons is where the
+        # wrong account gets pressed.
+        assert "Current Account" in page
+        assert "Instant Saver" not in page
+
     def test_Extend_Refusal_StatesTheWindowThatWasAsked(self, tmp_path):
         from obdi.providers.truelayer import TrueLayerError
 
@@ -695,6 +730,177 @@ class TestExtendingHistoryFromThePage:
         # The SCA remedy exists on the page only inside the folded full list.
         assert "Re-authorise" not in prominent
         assert "Re-authorise" in page
+
+
+class TestProbingGuidanceOnThePage:
+    """The page says what pressing will meet: window freshness and walls.
+
+    Advisory, never gates - the provider is the only authority, and a
+    boundary is de-emphasised rather than forbidden.
+    """
+
+    def _server(self, tmp_path, extendables, extend_window=None, extend_max=None):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            extendables=extendables,
+            extend_window=extend_window or (lambda **_: ""),
+            extend_max=extend_max,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Row_ShowsTheAuthenticationFreshnessNote(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="e9f8",
+                    display="Current Account",
+                    earliest=date(2024, 8, 2),
+                    auth_note="deep-history window likely OPEN: about 3 min left",
+                )
+            ],
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "likely OPEN" in page
+
+    def test_Row_WithAKnownBoundary_FoldsTheButtonsAwayButKeepsThem(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="e9f8",
+                    display="Current Account",
+                    earliest=date(2013, 4, 12),
+                    boundary=date(2013, 4, 12),
+                )
+            ],
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "Boundary reached" in page and "2013-04-12" in page
+        # De-emphasised: inside a fold. Not forbidden: still present.
+        folded = page.split("<summary>Probe anyway</summary>", 1)
+        assert len(folded) == 2
+        assert 'name="days" value="1"' in folded[1]
+
+    def test_ExtendMax_OnePress_RunsTheWalkAndShowsTheTranscript(self, tmp_path):
+        calls = []
+
+        def walk(connection, provider_ref, psu_ip):
+            calls.append((connection, provider_ref, psu_ip))
+            return "+730d: landed\n+1d: refused (invalid_date_range)\nThe boundary is found"
+
+        httpd, base = self._server(tmp_path, lambda: [], extend_max=walk)
+        try:
+            page = httpx.post(
+                f"{base}/extend-max",
+                data={"connection": "halifax", "account": "e9f8"},
+                headers={"X-Forwarded-For": "100.96.178.101"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert calls == [("halifax", "e9f8", "100.96.178.101")]
+        assert "+730d: landed" in page
+        assert "The boundary is found" in page
+        # Transcript line breaks survive as breaks, not one blurred line.
+        assert "<br>" in page
+
+
+class TestAccountLevelShape:
+    """The merged layer, summarised like an artefact payload.
+
+    A dozen overlapping raw artefacts answer "what arrived"; this answers
+    "what does the store believe" - one table per account.
+    """
+
+    def _server(self, tmp_path, account_shape):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            account_shape=account_shape,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_AccountPage_RendersTheMergedShapeWithItsSources(self, tmp_path):
+        def shape(ref):
+            assert ref == "halifax-current"
+            return {
+                "ref": ref,
+                "count": 2,
+                "sources": ["halifax-csv", "truelayer"],
+                "summary": {
+                    "kind": "json",
+                    "items": 2,
+                    "bytes": 321,
+                    "fields": [
+                        {
+                            "path": "source",
+                            "present": 2,
+                            "types": ["string"],
+                            "distinct": 2,
+                            "min": "halifax-csv",
+                            "max": "truelayer",
+                            "values": [
+                                {"value": "halifax-csv", "count": 1},
+                                {"value": "truelayer", "count": 1},
+                            ],
+                        }
+                    ],
+                    "sign_by": [],
+                    "presence_links": [],
+                    "by_month": [{"month": "2026-07", "count": 2}],
+                },
+            }
+
+        httpd, base = self._server(tmp_path, shape)
+        try:
+            page = httpx.get(f"{base}/account?ref=halifax-current").text
+        finally:
+            httpd.shutdown()
+
+        assert "MERGED layer" in page
+        assert "halifax-csv, truelayer" in page
+        assert "2 distinct: halifax-csv x1, truelayer x1" in page
+        assert "Items per month" in page
+
+    def test_AccountPage_WhenNothingHeld_SaysSo(self, tmp_path):
+        httpd, base = self._server(tmp_path, lambda ref: None)
+        try:
+            response = httpx.get(f"{base}/account?ref=unknown")
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 404
+        assert "No merged transactions" in response.text
 
 
 class TestBrowsingTheAttemptLedger:

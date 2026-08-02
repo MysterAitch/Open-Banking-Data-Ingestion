@@ -110,6 +110,14 @@ class ExtendableAccount:
     #: This is what lets repeated presses on an empty account keep walking
     #: back instead of re-asking the same span forever.
     probed_back_to: date | None = None
+    #: One advisory line about the authentication window ("likely OPEN, 3 min
+    #: left" / "closed - re-authorise"). Never a gate: the provider is the
+    #: authority, this just saves spending a call to learn the obvious.
+    auth_note: str = ""
+    #: Where the provider stopped granting, once found to the day. When set,
+    #: probing is DE-EMPHASISED (folded away), not prohibited - the boundary
+    #: was observed, and observations can be re-tested.
+    boundary: date | None = None
 
 
 @dataclass
@@ -163,6 +171,13 @@ class WebConfig:
     #: workflow is press, read, decide - and deciding needs this without a
     #: shell.
     attempts_index: Callable[[], dict[str, object]] | None = None
+    #: One press, walked as far as the provider allows: attended because the
+    #: person is present and waiting, honest because it stops the moment the
+    #: provider says stop and never replays unattended.
+    extend_max: Callable[..., str] | None = None
+    #: The merged layer summarised per account - the same computed-shape
+    #: analysis as an artefact, over what the store believes after matching.
+    account_shape: Callable[..., dict[str, object] | None] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -241,6 +256,26 @@ def _shape_detail(field: dict[str, object]) -> str:
             f"{html.escape(str(field.get('max')))}"
         )
     return "-"
+
+
+def _shape_html(summary: dict[str, object]) -> str:
+    """The computed-shape block, shared by the artefact and account pages."""
+    raw_fields = summary.get("fields")
+    fields = raw_fields if isinstance(raw_fields, list) else []
+    field_rows = "".join(
+        f'<tr><td>{html.escape(str(field.get("path")))}</td>'
+        f'<td>{field.get("present")}</td>'
+        f'<td>{html.escape(", ".join(field.get("types", [])))}</td>'
+        f"<td>{_shape_detail(field)}</td></tr>"
+        for field in fields
+        if isinstance(field, dict)
+    )
+    return (
+        f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
+        "<table><tr><th>field</th><th>present</th><th>types</th>"
+        f"<th>values / shape</th></tr>{field_rows}</table>"
+        f"{_insight_sections(summary)}"
+    )
 
 
 def _insight_sections(summary: dict[str, object]) -> str:
@@ -475,7 +510,9 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
     items = []
     for row in rows:
         items.append(
-            f'<div class="row"><strong>{html.escape(row.account_id)}</strong>'
+            f'<div class="row"><strong>'
+            f'<a href="/account?ref={quote(row.account_id)}">'
+            f"{html.escape(row.account_id)}</a></strong>"
             f" via {html.escape(row.source)}<br>"
             f"{row.count:,} transactions, {row.earliest} .. {row.latest}</div>"
         )
@@ -487,13 +524,24 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
 EXTEND_CHOICES = (1, 7, 30, 90, 365, 730)
 
 
-def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> str:
+def _extend_rows(
+    extendables: Callable[[], list[ExtendableAccount]] | None,
+    only_ref: str | None = None,
+) -> str:
+    """The extend controls - all accounts on the homepage, ONE on a result.
+
+    A result page repeats only the account that was just pressed: mid-probe,
+    a wall of every account's buttons is where the wrong account gets
+    pressed, and it stops scaling past a handful of accounts at all.
+    """
     if extendables is None:
         return ""
     try:
         accounts = extendables()
     except Exception:
         return ""
+    if only_ref is not None:
+        accounts = [a for a in accounts if a.provider_ref == only_ref]
     if not accounts:
         return ""
     rows = []
@@ -508,6 +556,27 @@ def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> s
             f'name="days" value="{days}">+{days}d</button></form> '
             for days in EXTEND_CHOICES
         )
+        max_button = (
+            f'<form method="post" action="/extend-max" style="display:inline">'
+            f'<input type="hidden" name="connection" value="{html.escape(account.connection)}">'
+            f'<input type="hidden" name="account" value="{html.escape(account.provider_ref)}">'
+            f'<button class="button" style="display:inline-block;'
+            f'padding:.5rem .8rem;border:0;cursor:pointer" type="submit">'
+            f"Extend as far as possible</button></form>"
+        )
+        controls = f"{buttons}{max_button}"
+        if account.boundary:
+            controls = (
+                f'<p class="ok">Boundary reached: the provider refuses anything '
+                f"earlier than {account.boundary.isoformat()} - probing is "
+                f"de-emphasised, not forbidden.</p>"
+                f"<details><summary>Probe anyway</summary>{controls}</details>"
+            )
+        note = (
+            f'<br><span style="opacity:.75">{html.escape(account.auth_note)}</span>'
+            if account.auth_note
+            else ""
+        )
         rows.append(
             f'<div class="row"><strong>{html.escape(account.display)}</strong> '
             f"({html.escape(account.connection)})<br>history reaches {reach}"
@@ -517,7 +586,7 @@ def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> s
                 and (account.earliest is None or account.probed_back_to < account.earliest)
                 else ""
             )
-            + f"<br>{buttons}</div>"
+            + f"{note}<br>{controls}</div>"
         )
     return (
         "<h2>Extend history</h2>"
@@ -601,6 +670,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         route = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
 
+        if route == "/account":
+            self._account(params)
+            return
         if route == "/attempts":
             self._attempts()
             return
@@ -742,16 +814,6 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         raw_summary = detail.get("summary")
         summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
-        raw_fields = summary.get("fields")
-        fields = raw_fields if isinstance(raw_fields, list) else []
-        field_rows = "".join(
-            f'<tr><td>{html.escape(str(field.get("path")))}</td>'
-            f'<td>{field.get("present")}</td>'
-            f'<td>{html.escape(", ".join(field.get("types", [])))}</td>'
-            f"<td>{_shape_detail(field)}</td></tr>"
-            for field in fields
-            if isinstance(field, dict)
-        )
         body = (
             f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
@@ -761,14 +823,44 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "<h2>Request circumstances</h2>"
             f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
             "<h2>Computed shape</h2>"
-            f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
-            "<table><tr><th>field</th><th>present</th><th>types</th>"
-            f"<th>values / shape</th></tr>{field_rows}</table>"
-            f"{_insight_sections(summary)}"
-            f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
+            + _shape_html(summary)
+            + f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
             "View payload</a></p>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
+
+    def _account(self, params: dict[str, list[str]]) -> None:
+        hook = self.bound_config.account_shape
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No shape wired.</p>"))
+            return
+        ref = (params.get("ref", [""])[0] or "").strip()
+        shape = hook(ref) if ref else None
+        if shape is None:
+            self._respond(
+                404,
+                error_page(
+                    "Nothing held",
+                    "<p>No merged transactions for this account yet.</p>",
+                ),
+            )
+            return
+        raw_summary = shape.get("summary")
+        summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
+        sources = shape.get("sources")
+        source_list = ", ".join(
+            html.escape(str(s)) for s in (sources if isinstance(sources, list) else [])
+        )
+        body = (
+            f"<p><strong>{html.escape(ref)}</strong><br>"
+            f"{shape.get('count', 0):,} merged transaction(s) "
+            f"from {source_list or 'unknown sources'}</p>"
+            "<p>This is the MERGED layer - what the store believes after "
+            "matching - not one payload. The raw artefacts remain the "
+            "evidence underneath.</p>"
+            "<h2>Computed shape</h2>" + _shape_html(summary) + HOME_LINK
+        )
+        self._respond(200, render_page("Account", body))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
         name = (params.get("name", [""])[0] or "").strip()
@@ -811,13 +903,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if (parsed.path.rstrip("/") or "/") != "/extend":
+        route = parsed.path.rstrip("/") or "/"
+        if route not in ("/extend", "/extend-max"):
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
             return
+        walk = route == "/extend-max"
         length = int(self.headers.get("Content-Length") or 0)
         form = parse_qs(self.rfile.read(length).decode("utf-8"))
 
-        hook = self.bound_config.extend_window
+        hook = self.bound_config.extend_max if walk else self.bound_config.extend_window
         if hook is None:
             self._respond(404, error_page("Not available", "<p>Extension is not wired.</p>"))
             return
@@ -828,7 +922,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             days = int(form.get("days", ["0"])[0])
         except ValueError:
             days = 0
-        if not connection or not account or days <= 0:
+        if not connection or not account or (not walk and days <= 0):
             self._respond(
                 400,
                 error_page("Bad request", "<p>Connection, account and days required.</p>"),
@@ -840,14 +934,20 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # log now, and the landed artefact carries the same declaration
         # permanently in layer 0.
         print(
-            f"attended extend: connection={connection} account={account} "
-            f"days={days} requested_by={psu_ip or 'unknown'}",
+            f"attended extend{'-max' if walk else ''}: connection={connection} "
+            f"account={account} days={days if not walk else 'walk'} "
+            f"requested_by={psu_ip or 'unknown'}",
             file=sys.stderr,
         )
         try:
-            summary = hook(
-                connection=connection, provider_ref=account, days=days, psu_ip=psu_ip
-            )
+            if walk:
+                summary = hook(
+                    connection=connection, provider_ref=account, psu_ip=psu_ip
+                )
+            else:
+                summary = hook(
+                    connection=connection, provider_ref=account, days=days, psu_ip=psu_ip
+                )
         except Exception as exc:
             print(f"extend failed: {exc}", file=sys.stderr)
             # The buttons stay on the refusal page: probing is press, read,
@@ -857,16 +957,19 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 502,
                 error_page(
                     "Could not extend",
-                    refusal_html(exc) + _extend_rows(self.bound_config.extendables),
+                    refusal_html(exc)
+                    + _extend_rows(self.bound_config.extendables, only_ref=account),
                 ),
             )
             return
+        # A walk returns a multi-line transcript; line breaks are meaning.
+        rendered = html.escape(summary).replace(chr(10), "<br>")
         self._respond(
             200,
             render_page(
                 "Window extended",
-                f"<p>{html.escape(summary)}</p>"
-                + _extend_rows(self.bound_config.extendables)
+                f"<p>{rendered}</p>"
+                + _extend_rows(self.bound_config.extendables, only_ref=account)
                 + HOME_LINK,
             ),
         )

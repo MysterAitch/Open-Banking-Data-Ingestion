@@ -26,6 +26,7 @@ from .doctor import live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
+from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .secrets import SecretError, read_secret
@@ -270,8 +271,30 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         found = []
         with Store(db_path) as store:
             held = store.transactions_by_sighting()
-            connections = sorted(ConnectionStore(store_path).load())
-            for connection_id in connections:
+            connections = ConnectionStore(store_path).load()
+            for connection_id in sorted(connections):
+                target = connections[connection_id]
+                window_fact = store.provider_fact(
+                    "truelayer", connection_id, "sca_window_minutes"
+                )
+                refusal_seen = (
+                    store.connection.execute(
+                        "SELECT COUNT(*) FROM fetch_attempts "
+                        "WHERE connection_id = ? AND error_code = 'sca_exceeded' "
+                        "AND attempted_at > ?",
+                        (connection_id, target.created_at),
+                    ).fetchone()[0]
+                    > 0
+                )
+                note = sca_note(
+                    authorised_at=(
+                        datetime.fromisoformat(target.created_at)
+                        if target.created_at
+                        else None
+                    ),
+                    window_minutes=int(window_fact) if window_fact else None,
+                    refusal_seen=refusal_seen,
+                )
                 for account in store.accounts_for_connection(connection_id):
                     canonical = _account_map().resolve("truelayer", account["account_id"])
                     dates = [
@@ -279,6 +302,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         for t in held
                         if t.account_id == canonical and t.source == "truelayer"
                     ]
+                    boundary_fact = store.provider_fact(
+                        "truelayer", connection_id, f"history_boundary:{canonical}"
+                    )
                     found.append(
                         ExtendableAccount(
                             connection=connection_id,
@@ -287,12 +313,23 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             f"({account['account_type'] or 'account'})",
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
+                            auth_note=note,
+                            boundary=(
+                                date.fromisoformat(boundary_fact)
+                                if boundary_fact
+                                else None
+                            ),
                         )
                     )
         return found
 
     def extend_window(
-        *, connection: str, provider_ref: str, days: int, psu_ip: str | None
+        *,
+        connection: str,
+        provider_ref: str,
+        days: int,
+        psu_ip: str | None,
+        trigger: str = "web-extend",
     ) -> str:
         """One backward step: fetch the window just beyond what is held.
 
@@ -336,7 +373,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     until=window_until,
                     only_account=provider_ref,
                     psu_ip=psu_ip,
-                    trigger="web-extend",
+                    trigger=trigger,
                 )
         except Exception as exc:
             # Half the diagnosis is what was asked: a refused "since
@@ -346,12 +383,58 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 exc.asked_window = (  # type: ignore[attr-defined]
                     f"since {window_since} until {window_until} ({days} day step)"
                 )
+            # A refused 1-day step IS the boundary: the reach we already have
+            # is as far as this provider will go. Recorded so the page can
+            # de-emphasise further probing instead of encouraging it forever.
+            if getattr(exc, "code", "") == "invalid_date_range" and days == 1:
+                anchor = min(candidates) if candidates else datetime.now(UTC).date()
+                with Store(db_path) as store:
+                    store.record_provider_fact(
+                        "truelayer",
+                        connection,
+                        f"history_boundary:{canonical}",
+                        anchor.isoformat(),
+                    )
             raise
         return (
             f"asked {window_since} .. {window_until}: {result.describe()}. "
             f"History for this account now reaches back to at least {window_since} "
             "if the provider granted the window - press again to walk further."
         )
+
+    def account_shape(ref: str) -> dict[str, object] | None:
+        """The merged layer summarised the same way an artefact payload is.
+
+        More useful than a dozen overlapping artefacts for the same account:
+        this is what the store BELIEVES after matching, in one table.
+        """
+        from .rawview import summarise
+
+        with Store(db_path) as store:
+            held = store.transactions_by_sighting()
+        rows = [t for t in held if t.account_id == ref]
+        if not rows:
+            return None
+        items = [
+            {
+                "amount": t.amount_minor / 100,
+                "currency": t.currency,
+                "value_date": t.value_date.isoformat(),
+                "description": t.description,
+                "source": t.source,
+                "status": str(t.status),
+                "tier": str(t.tier),
+                "internal_transfer": t.is_internal_transfer,
+            }
+            for t in rows
+        ]
+        payload = json.dumps({"results": items}).encode()
+        return {
+            "ref": ref,
+            "count": len(rows),
+            "sources": sorted({t.source for t in rows}),
+            "summary": summarise(payload, "application/json"),
+        }
 
     def attempts_index() -> dict[str, object]:
         with Store(db_path) as store:
@@ -363,6 +446,49 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 "GROUP BY connection_id, account_ref ORDER BY count DESC"
             ).fetchall()
         return {"rows": rows, "last_day": [dict(r) for r in last_day]}
+
+    def extend_max(
+        *, connection: str, provider_ref: str, psu_ip: str | None
+    ) -> str:
+        """One press, walked as far as the provider allows.
+
+        Attended because the person IS present: the loop runs while they
+        wait, every call declares their address, it stops the moment the
+        provider says stop, and nothing ever replays it unattended. The
+        automation is the mechanics of one explicit request, exactly as the
+        post-authorisation backfill ladder already is.
+        """
+
+        def one_step(step_days: int) -> str:
+            try:
+                return extend_window(
+                    connection=connection,
+                    provider_ref=provider_ref,
+                    days=step_days,
+                    psu_ip=psu_ip,
+                    trigger="web-extend-max",
+                )
+            except Exception as exc:
+                raise StepRefused(
+                    str(getattr(exc, "code", "") or "error"), str(exc)
+                ) from exc
+
+        transcript, outcome = walk_history(one_step)
+        endings = {
+            "boundary": "The boundary is found: the provider refuses anything "
+            "earlier, even one day. Recorded - further probing of this account "
+            "is now de-emphasised.",
+            "sca_expired": "The authentication window closed mid-walk. "
+            "Re-authorise and press once more to continue from where this "
+            "stopped.",
+            "rate_limited": "The provider asked us to stop, so we stopped. "
+            "Try again after the limit resets.",
+            "cap": "Stopped at the per-press safety cap with the provider "
+            "still granting - press again to continue.",
+            "refused": "Stopped on an unexpected refusal - see the last line.",
+        }
+        joiner = chr(10)
+        return joiner.join([*transcript, endings.get(outcome, outcome)])
 
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
@@ -440,6 +566,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         artefact_index=artefact_index,
         artefact_detail=artefact_detail,
         attempts_index=attempts_index,
+        extend_max=extend_max,
+        account_shape=account_shape,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

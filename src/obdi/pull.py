@@ -20,6 +20,7 @@ Starling that does not exist, and a refresh step that does nothing.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from urllib.parse import parse_qs
@@ -219,6 +220,21 @@ def pull_truelayer(
                     error_code=str(getattr(exc, "code", "") or ""),
                     detail=str(exc),
                 )
+                # The provider names its own window ("within 5 minutes of PSU
+                # Authentication") - a fact worth keeping, since banks differ
+                # and the freshness note on the page reads it back.
+                if getattr(exc, "code", "") == "sca_exceeded":
+                    match = re.search(
+                        r"within (\d+) minutes?",
+                        f"{getattr(exc, 'provider_details', '')} {exc}",
+                    )
+                    if match:
+                        store.record_provider_fact(
+                            "truelayer",
+                            connection.connection_id,
+                            "sca_window_minutes",
+                            match.group(1),
+                        )
                 raise
             store.record_attempt(
                 source="truelayer-pending" if pending else "truelayer-booked",

@@ -140,3 +140,35 @@ class TestAttemptsCommand:
 
         assert _attempts(tmp_path / "s.sqlite3") == 0
         assert "no attempts recorded yet" in capsys.readouterr().out
+
+
+class TestScaWindowLengthIsLearnt:
+    def test_Refusal_NamingTheWindow_RecordsItAsAProviderFact(
+        self, tmp_path, provider
+    ):
+        def refuse(_token, _account_id, **_kwargs):
+            raise TrueLayerError(
+                "Transaction fetch failed (HTTP 403): sca_exceeded",
+                status=403,
+                code="sca_exceeded",
+                description="SCA exemption has expired.",
+                provider_details=(
+                    "403 access_denied: should be accessed within 5 minutes "
+                    "of PSU Authentication"
+                ),
+            )
+
+        provider.setattr("obdi.pull.truelayer.fetch_transactions", refuse)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            with pytest.raises(TrueLayerError):
+                pull_truelayer(
+                    store,
+                    _connection(),
+                    client_id="i",
+                    client_secret="s",
+                    connection_store=ConnectionStore(tmp_path / "c.json"),
+                    account_map=AccountMap(),
+                )
+
+            assert store.provider_fact("truelayer", "halifax", "sca_window_minutes") == "5"
