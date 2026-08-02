@@ -928,10 +928,28 @@ def _holdings_rows(
         reach = (
             f"asked back to {probed.isoformat()}" if probed else "never asked"
         ) + (f", covered to {covered.isoformat()}" if covered else "")
+        # A known-but-empty source-qualified ref still needs a way to be
+        # named - after a consolidating rebuild these rows hold nothing
+        # (their rows live under the map's canonical), and renaming the
+        # map edge is exactly the repair they exist to receive. The bind
+        # moves no rows; the next rebuild applies the new edge.
+        empty_bind = ""
+        if ":" in ref:
+            empty_bind = (
+                '<form method="post" action="/bind" '
+                'style="display:flex;gap:.4rem;margin:.35rem 0">'
+                f'<input type="hidden" name="account" value="{html.escape(ref)}">'
+                '<input name="canonical" placeholder="name this account, '
+                'e.g. starling-personal" style="flex:1">'
+                '<button class="button" style="display:inline-block;'
+                'padding:.5rem .8rem;border:0;cursor:pointer" '
+                'type="submit">Bind</button></form>'
+            )
+        feeder_note = _feeder_line(ref, feeders_map) if feeders_map else ""
         items.append(
             f'<div class="row" style="opacity:.62"><strong>{title}</strong>'
             f'{sub}<br><span class="muted">known account, nothing held yet - '
-            f"{reach}</span>{strip}</div>"
+            f"{reach}</span>{feeder_note}{empty_bind}{strip}</div>"
         )
 
     legend = (

@@ -946,6 +946,39 @@ class TestUpdateAwareness:
         assert _scheduler_row(None) == ""
 
 
+class TestEmptyKnownRefsStayBindable:
+    def test_SourceQualifiedEmptyRow_CarriesABindBox(self):
+        """After a consolidating rebuild the raw refs hold zero rows -
+        and renaming the map edge is exactly the repair such a row needs,
+        so losing the bind box with the rows locked the user out of the
+        fix. The bind moves nothing; the next rebuild applies the edge."""
+        from datetime import date
+
+        from obdi.coverage import SourceCoverage
+        from obdi.web import _holdings_rows
+
+        rendered = _holdings_rows(
+            lambda: [
+                SourceCoverage(
+                    account_id="halifax-current-account",
+                    source="truelayer",
+                    count=6,
+                    earliest=date(2021, 7, 7),
+                    latest=date(2025, 6, 2),
+                    inflow_minor=100,
+                    outflow_minor=200,
+                    with_durable_id=6,
+                )
+            ],
+            account_timelines=lambda: {
+                "starling:b2cec056": {"probed": "2016-08-04"}
+            },
+        )
+
+        assert 'value="starling:b2cec056"' in rendered
+        assert rendered.count('action="/bind"') == 1
+
+
 class TestAccountFeeders:
     def test_SeveralRefsFeedingOneAccount_RenderAsAWarning(self):
         """The invisible mis-config behind the reassembling blob: three
