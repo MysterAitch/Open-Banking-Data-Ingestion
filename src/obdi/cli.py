@@ -609,6 +609,40 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             ] = f"{name} (starling space)"
         return labels
 
+    def account_timelines() -> dict[str, dict[str, str]]:
+        """Timeline marks per canonical ref, from the store alone: how far
+        was probed, how recently covered, and any known provider boundary."""
+        out: dict[str, dict[str, str]] = {}
+        with Store(db_path) as store:
+            boundaries: dict[str, str] = {}
+            for fact_row in store.connection.execute(
+                "SELECT fact, value FROM provider_facts "
+                "WHERE fact LIKE 'history_boundary:%'"
+            ).fetchall():
+                boundaries[str(fact_row["fact"]).split(":", 1)[1]] = str(
+                    fact_row["value"]
+                )
+            refs = [
+                str(r[0])
+                for r in store.connection.execute(
+                    "SELECT DISTINCT account_ref FROM raw_artefacts "
+                    "WHERE source IN ('truelayer-booked', 'starling-feed')"
+                ).fetchall()
+            ]
+            for ref in refs:
+                entry: dict[str, str] = {}
+                probed = _earliest_asked(store, ref)
+                if probed:
+                    entry["probed"] = probed.isoformat()
+                covered, _ = _latest_asked(store, ref)
+                if covered:
+                    entry["covered"] = covered.isoformat()
+                if ref in boundaries:
+                    entry["boundary"] = boundaries[ref]
+                if entry:
+                    out[ref] = entry
+        return out
+
     def starling_status() -> dict[str, object] | None:
         """Starling on the front page: configured or not, and which accounts
         the landed accounts artefact says exist. No API call - layer 0 only."""
@@ -769,6 +803,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
         display_labels=display_labels,
+        account_timelines=account_timelines,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

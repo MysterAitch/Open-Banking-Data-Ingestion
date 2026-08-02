@@ -1108,6 +1108,64 @@ class TestNamesLeadAndDormancySpeaks:
         assert page.count("quiet since") == 1
 
 
+class TestTimelineSegments:
+    """One comparable axis; segment style is the claim being made.
+
+    Solid only where transactions are HELD; faint where asked and empty
+    (which is how a dormant tail becomes a long pale stretch); dotted before
+    a known provider boundary; dashed where nothing was ever asked; blank
+    future after today.
+    """
+
+    def test_HalifaxShape_TruncatedThenHeldThenFuture(self):
+        from obdi.web import timeline_segments
+
+        segments = timeline_segments(
+            date(2019, 1, 1),
+            date(2026, 9, 1),
+            earliest=date(2020, 8, 7),
+            latest=date(2026, 7, 31),
+            today=date(2026, 8, 2),
+            boundary=date(2020, 8, 1),
+            probed=date(2020, 8, 1),
+            covered=date(2026, 8, 2),
+        )
+
+        kinds = [kind for kind, _ in segments]
+        assert kinds == ["truncated", "empty", "held", "empty", "future"]
+        assert abs(sum(width for _, width in segments) - 100) < 0.5
+
+    def test_ArchivedSpace_DormantTailReadsAsALongEmptyStretch(self):
+        from obdi.web import timeline_segments
+
+        segments = timeline_segments(
+            date(2019, 1, 1),
+            date(2026, 9, 1),
+            earliest=date(2019, 1, 21),
+            latest=date(2022, 9, 27),
+            today=date(2026, 8, 2),
+            covered=date(2026, 8, 2),
+        )
+
+        kinds = dict(segments)
+        # The dormancy tail (2022 -> today) dwarfs everything else.
+        assert kinds["empty"] > kinds["held"] * 0.8
+        assert "truncated" not in kinds
+
+    def test_FutureIsCapped_NotFourYearsOfBlankTape(self):
+        from obdi.web import timeline_segments
+
+        segments = timeline_segments(
+            date(2026, 1, 1),
+            date(2026, 10, 1),
+            earliest=date(2026, 2, 1),
+            latest=date(2026, 8, 1),
+            today=date(2026, 8, 2),
+        )
+
+        assert segments[-1][0] == "future"
+
+
 class TestBrowsingTheAttemptLedger:
     """Every ask made of a provider, on a page: the quota ledger readable.
 

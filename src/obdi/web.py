@@ -25,6 +25,7 @@ on return so that a code cannot be replayed into an unexpected connection.
 from __future__ import annotations
 
 import html
+import itertools
 import json
 import sys
 from collections.abc import Callable
@@ -204,6 +205,10 @@ class WebConfig:
     #: these with the id demoted to small print - the id is the query key,
     #: not the thing a person recognises.
     display_labels: Callable[[], dict[str, str]] | None = None
+    #: Per-account timeline marks (boundary/probed/covered, iso dates) for
+    #: the holdings strips - the axis and segments render in the page, the
+    #: dates come from the store.
+    account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -535,9 +540,113 @@ def _credential_banner() -> str:
     )
 
 
+#: How each timeline state draws. Style IS meaning here: solid is held
+#: history, faint is asked-and-empty (a dormant tail reads as a long pale
+#: stretch), dotted amber is truncated-by-provider (the bank likely holds
+#: more; the API refuses), dashed grey is simply never-asked.
+_TIMELINE_STYLES = {
+    "held": "background:#2563eb",
+    "empty": "background:#2563eb40",
+    "truncated": (
+        "background:repeating-linear-gradient(90deg,#b45309aa 0 3px,"
+        "transparent 3px 7px)"
+    ),
+    "unknown": (
+        "background:repeating-linear-gradient(90deg,#8888 0 6px,"
+        "transparent 6px 12px)"
+    ),
+    "future": "background:transparent",
+}
+
+_TIMELINE_TITLES = {
+    "held": "held transactions",
+    "empty": "asked, nothing there",
+    "truncated": "before the provider's boundary - bank may hold more",
+    "unknown": "never asked",
+    "future": "future",
+}
+
+
+def timeline_segments(
+    axis_start: date,
+    axis_end: date,
+    *,
+    earliest: date | None,
+    latest: date | None,
+    today: date,
+    boundary: date | None = None,
+    probed: date | None = None,
+    covered: date | None = None,
+) -> list[tuple[str, float]]:
+    """Classify the axis into (kind, width-percent) segments.
+
+    Pure and interval-based: collect every meaningful date as a breakpoint,
+    then classify each interval by its midpoint. Precedence: future beats
+    everything right of today; held beats the rest inside the transaction
+    span; asked-and-empty covers probed-before-earliest and the
+    covered-after-latest dormancy tail; a known boundary marks everything
+    before it truncated; what remains was never asked.
+    """
+    span = (axis_end - axis_start).days
+    if span <= 0:
+        return []
+    points = {axis_start, axis_end}
+    for mark in (boundary, probed, earliest, latest, covered, today):
+        if mark is not None and axis_start < mark < axis_end:
+            points.add(mark)
+    ordered = sorted(points)
+
+    def classify(midpoint: date) -> str:
+        if midpoint > today:
+            return "future"
+        if earliest is not None and latest is not None and earliest <= midpoint <= latest:
+            return "held"
+        if (
+            probed is not None
+            and midpoint >= probed
+            and (earliest is None or midpoint < earliest)
+        ):
+            return "empty"
+        if (
+            covered is not None
+            and latest is not None
+            and latest < midpoint <= covered
+        ):
+            return "empty"
+        if boundary is not None and midpoint < boundary:
+            return "truncated"
+        return "unknown"
+
+    segments: list[tuple[str, float]] = []
+    for left, right in itertools.pairwise(ordered):
+        midpoint = left + (right - left) / 2
+        kind = classify(midpoint)
+        width = (right - left).days * 100 / span
+        if segments and segments[-1][0] == kind:
+            segments[-1] = (kind, segments[-1][1] + width)
+        else:
+            segments.append((kind, width))
+    return segments
+
+
+def _timeline_strip(segments: list[tuple[str, float]]) -> str:
+    if not segments:
+        return ""
+    parts = "".join(
+        f'<span title="{html.escape(_TIMELINE_TITLES.get(kind, kind))}" '
+        f'style="width:{width:.2f}%;{_TIMELINE_STYLES.get(kind, "")}"></span>'
+        for kind, width in segments
+    )
+    return (
+        '<div style="display:flex;height:6px;border-radius:3px;'
+        f'overflow:hidden;background:#8881;margin:.35rem 0">{parts}</div>'
+    )
+
+
 def _holdings_rows(
     holdings: Callable[[], list[SourceCoverage]] | None,
     display_labels: Callable[[], dict[str, str]] | None = None,
+    account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
 ) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
@@ -564,9 +673,44 @@ def _holdings_rows(
             labels = display_labels()
         except Exception:
             labels = {}
-    items = []
+    marks: dict[str, dict[str, str]] = {}
+    if account_timelines is not None:
+        try:
+            marks = account_timelines()
+        except Exception:
+            marks = {}
+
+    def _mark(ref: str, key: str) -> date | None:
+        value = marks.get(ref, {}).get(key)
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            return None
+
     today = datetime.now(UTC).date()
-    for row in rows:
+    # One axis for every account, so the bars are COMPARABLE: the left edge
+    # is the oldest date any account knows anything about, the right edge is
+    # the end of next month - scheduled payments can colonise that sliver
+    # once they are stored; years of future would just be blank tape.
+    starts = [
+        candidate
+        for row in rows
+        for candidate in (
+            _mark(row.account_id, "boundary"),
+            _mark(row.account_id, "probed"),
+            row.earliest,
+        )
+        if candidate is not None
+    ]
+    axis_start = min(starts) if starts else today
+    axis_end = (today.replace(day=1) + timedelta(days=62)).replace(day=1)
+
+    items = []
+    # Living accounts lead; the archive sinks. Same information, but the
+    # eye finds what changed this week without wading through 2022 first.
+    for row in sorted(rows, key=lambda r: r.latest, reverse=True):
         label = labels.get(row.account_id)
         title = html.escape(label) if label else html.escape(row.account_id)
         sub = (
@@ -580,14 +724,35 @@ def _holdings_rows(
                 f' <span class="pill pill-quiet">quiet since '
                 f"{row.latest.isoformat()}</span>"
             )
+        dormant = (today - row.latest).days > 365
+        strip = _timeline_strip(
+            timeline_segments(
+                axis_start,
+                axis_end,
+                earliest=row.earliest,
+                latest=row.latest,
+                today=today,
+                boundary=_mark(row.account_id, "boundary"),
+                probed=_mark(row.account_id, "probed"),
+                covered=_mark(row.account_id, "covered"),
+            )
+        )
+        row_style = ' style="opacity:.62"' if dormant else ""
         items.append(
-            f'<div class="row"><strong>'
+            f'<div class="row"{row_style}><strong>'
             f'<a href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong>"
             f" via {html.escape(row.source)}{quiet}{sub}<br>"
-            f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong></div>"
+            f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
+            f"{strip}</div>"
         )
-    return "<h2>Held so far</h2>" + "".join(items)
+    legend = (
+        '<p class="muted" style="font-size:.85em">timeline: solid = held, '
+        "faint = asked and empty, dotted = truncated by the provider, "
+        f"dashed = never asked; axis {axis_start.isoformat()} .. "
+        f"{axis_end.isoformat()}</p>"
+    )
+    return "<h2>Held so far</h2>" + legend + "".join(items)
 
 
 # 1 exists for the endgame: once +7 fails, the boundary is within a week,
@@ -779,12 +944,13 @@ def render_index(
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
     starling_status: Callable[[], dict[str, object] | None] | None = None,
     display_labels: Callable[[], dict[str, str]] | None = None,
+    account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
 {_starling_row(starling_status)}
-{_holdings_rows(holdings, display_labels)}
+{_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
@@ -874,6 +1040,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     extendables=self.bound_config.extendables,
                     starling_status=self.bound_config.starling_status,
                     display_labels=self.bound_config.display_labels,
+                    account_timelines=self.bound_config.account_timelines,
                 ),
             )
         elif route == "/connect":
