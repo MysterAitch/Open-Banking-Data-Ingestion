@@ -1199,6 +1199,23 @@ class TestDangerZone:
         assert "(at least)" in floor
         assert "ETA" not in floor
 
+        stale_counts = _rebuild_status_line(
+            lambda: {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 65,
+                "total": 71,
+                "transactions": 12834,
+                "updated_at": "2026-08-02T15:20:00Z",
+            },
+            now=__import__("datetime").datetime(
+                2026, 8, 2, 15, 26, 0,
+                tzinfo=__import__("datetime").timezone.utc,
+            ),
+        )
+        assert "counts last moved 6 min ago" in stale_counts
+        assert "large artefact" in stale_counts
+
         mid_run = _rebuild_status_line(
             lambda: {
                 "state": "running",

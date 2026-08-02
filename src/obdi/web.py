@@ -1161,10 +1161,26 @@ def _rebuild_status_line(
                             extra += f", ETA ~{max(eta_min, 1):.0f} min"
             elif isinstance(txns, int):
                 extra += f", {txns:,} transaction(s) so far"
+        updated_raw = str(status.get("updated_at", ""))
+        freshness = ""
+        if updated_raw:
+            with contextlib.suppress(ValueError):
+                updated = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+                age = ((now or datetime.now(UTC)) - updated).total_seconds()
+                # Counts move only at artefact boundaries, so a single big
+                # file freezes the numbers for minutes - the age of the
+                # freeze is what tells slow from stuck.
+                if age >= 60:
+                    freshness = (
+                        f" (counts last moved {int(age // 60)} min ago - a "
+                        "large artefact holds them still while it processes)"
+                    )
+                else:
+                    freshness = f" (counts moved {int(age)}s ago)"
         return (
             f'<p class="warn">a rebuild is running (started {started})'
-            f"{extra} - refresh to follow it; deploys defer while it "
-            "holds its lease</p>"
+            f"{extra}{freshness} - refresh to follow it; deploys defer "
+            "while it holds its lease</p>"
         )
     if state == "done":
         badge = "ok" if status.get("ok") else "bad"
