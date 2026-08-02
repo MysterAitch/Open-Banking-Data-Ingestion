@@ -688,6 +688,56 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         store.record_provider_fact(
                             "truelayer", name, "reconnect_drift", finding
                         )
+                # The five-minute window races from the moment of
+                # authorisation, and a machine races better than thumbs on
+                # a phone: walk EVERY account and card to its boundary NOW,
+                # in the one attended moment deep history is reachable. The
+                # manual buttons were the instrument era, when walls and
+                # windows were unmeasured; the knowledge is banked, so the
+                # ladder runs itself. Per-target it stops at the boundary
+                # or the safety cap; ENTIRELY on sca_expired (the window is
+                # spent) or rate_limited (the provider asked) - courtesy
+                # first on banks whose manners are still unknown. The
+                # buttons remain for continuing after the cap or a re-auth.
+                with Store(db_path) as store:
+                    ladder_targets = [
+                        account["account_id"]
+                        for account in store.accounts_for_connection(name)
+                    ] + [
+                        card["account_id"]
+                        for card in store.cards_for_connection(name)
+                    ]
+                for provider_ref in ladder_targets:
+
+                    def one_step(step_days: int, _ref: str = provider_ref) -> str:
+                        try:
+                            return extend_window(
+                                connection=name,
+                                provider_ref=_ref,
+                                days=step_days,
+                                psu_ip=psu_ip,
+                                trigger="post-auth-ladder",
+                            )
+                        except Exception as exc:
+                            raise StepRefused(
+                                str(getattr(exc, "code", "") or "error"),
+                                str(exc),
+                            ) from exc
+
+                    try:
+                        _transcript, outcome = walk_history(one_step)
+                    except Exception as exc:
+                        print(
+                            f"ladder for {name}/{provider_ref} failed: {exc}",
+                            file=sys.stderr,
+                        )
+                        continue
+                    print(
+                        f"post-auth ladder {name}/{provider_ref}: {outcome}",
+                        file=sys.stderr,
+                    )
+                    if outcome in ("sca_expired", "rate_limited"):
+                        break
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
 

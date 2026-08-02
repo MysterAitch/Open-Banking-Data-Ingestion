@@ -2620,9 +2620,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
 
         days = connection.consent_days_remaining()
         note = (
-            "<p>Fetching your history now - this is the one moment deep history is "
-            "reachable, so it starts automatically. It runs in the background; "
-            "check back shortly.</p>"
+            "<p>Fetching your history now, then walking every account and "
+            "card back as far as this provider allows - this is the one "
+            "moment deep history is reachable, so all of it starts "
+            "automatically. It runs in the background; check back shortly.</p>"
             if started
             else "<p><strong>No backfill was started.</strong> Run "
             f"<code>obdi pull {html.escape(name)}</code> <strong>now</strong> - "
