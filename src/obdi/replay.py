@@ -95,8 +95,17 @@ def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
 
 
 def _notes_for(transaction: Transaction) -> str:
-    """Carry provenance into Actual, where it is otherwise invisible."""
-    parts = [f"via {transaction.source}"]
+    """The transaction's own words, not ours.
+
+    "via truelayer" labelled every row identically - the definition of no
+    information - while the bank's actual narrative sat invisible in
+    imported_payee. Notes now carry the description when it says more
+    than the payee line already does, then the flags that matter in a
+    register. Provenance lives in obdi's ledger, where it belongs."""
+    payee = transaction.counterparty or transaction.description
+    parts = []
+    if transaction.description and transaction.description != payee:
+        parts.append(transaction.description)
     if transaction.is_internal_transfer:
         parts.append("internal transfer")
     if transaction.status is TransactionStatus.PENDING:

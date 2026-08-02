@@ -68,8 +68,17 @@ class TestFieldMapping:
         # Actual's renaming rules need the untidied text to work from.
         assert to_actual_transaction(txn())["imported_payee"] == "TESCO STORES"
 
-    def test_Transaction_WhenReplayed_ProvenanceCarriedIntoNotes(self):
-        assert "via starling" in to_actual_transaction(txn())["notes"]
+    def test_Notes_CarryTheBankNarrative_NotAProvenanceStamp(self):
+        """"via starling" labelled every row identically - no information -
+        while the bank's own narrative sat invisible. Notes carry the
+        description when it says more than the payee line; when the payee
+        IS the description, silence beats a stamp."""
+        row = to_actual_transaction(txn())
+        assert "via starling" not in row["notes"]
+        assert row["notes"] == "TESCO STORES"
+
+        same_text = to_actual_transaction(txn(counterparty=""))
+        assert same_text["notes"] == ""
 
 
 class TestPendingHandling:
