@@ -1622,7 +1622,11 @@ class TestActualRoster:
 
         assert suggestions["e9f8"] == "halifax-transaction"
         assert suggestions["b532"] == "halifax-savings"
-        assert suggestions["4095"].startswith("halifax-committed-spends-reward")
+        # The full title fits: 40 was an arbitrary cap that truncated
+        # this very name to a dangling dash the validator then refused.
+        assert suggestions["4095"] == (
+            "halifax-committed-spends-reward-current-account"
+        )
 
 
 class TestBindingFromThePage:
@@ -1833,7 +1837,7 @@ class TestBindingFromThePage:
 
     def test_Bind_RejectionsFromTheHook_AreShownNotSwallowed(self, tmp_path):
         def bind(account, canonical):
-            raise ValueError("canonical name must be 2-40 characters")
+            raise ValueError("canonical name must be 2-64 characters")
 
         httpd, base = self._server(tmp_path, lambda: [], bind)
         try:
@@ -1845,7 +1849,7 @@ class TestBindingFromThePage:
             httpd.shutdown()
 
         assert response.status_code == 400
-        assert "2-40 characters" in response.text
+        assert "2-64 characters" in response.text
 
 
 class TestAccountLevelShape:

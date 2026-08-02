@@ -1010,10 +1010,10 @@ def _suggest_slug(label: str, ref: str) -> str:
     # "Bills (starling space)" is a Space and the house convention names
     # it starling-space-bills; "Personal (starling)" is the main account.
     if "space" in parenthetical.lower() and source:
-        return f"{source}-space-{base}"[:40]
+        return f"{source}-space-{base}"[:64].rstrip("-")
     if source and source not in base:
         base = f"{source}-{base}"
-    return base[:40]
+    return base[:64].rstrip("-")
 
 
 def _roster_row(entry: dict[str, object]) -> str:
@@ -1538,7 +1538,7 @@ def _extend_suggestions(accounts: list[ExtendableAccount]) -> dict[str, str]:
         informative = kind if titles[(connection, title)] > 1 else title
         slug = _slug(f"{connection}-{informative}")
         if slug:
-            suggestions[ref] = slug[:40]
+            suggestions[ref] = slug[:64].rstrip("-")
     return suggestions
 
 

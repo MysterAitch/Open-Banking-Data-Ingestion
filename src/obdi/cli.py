@@ -814,10 +814,13 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         import re as _re
 
         canonical = canonical.strip().lower()
-        if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,39}", canonical):
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]", canonical) and not _re.fullmatch(
+            r"[a-z0-9][a-z0-9]", canonical
+        ):
             raise ValueError(
-                "canonical name must be 2-40 characters of lowercase "
-                "letters, digits and hyphens, e.g. halifax-current"
+                "canonical name must be 2-64 characters of lowercase "
+                "letters, digits and hyphens (not ending in a hyphen), "
+                "e.g. halifax-committed-spends-reward-current-account"
             )
         map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
         if not map_path:
