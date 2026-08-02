@@ -277,6 +277,11 @@ class WebConfig:
     #: The provider id an existing connection goes through, for pinning the
     #: bank picker on reconnects - the wrong bank should not be one tap away.
     pinned_providers: Callable[[str], str | None] | None = None
+    #: Queue a push to Actual (returns a summary line) and read the latest
+    #: applier results - the file-queue boundary rendered as a button and a
+    #: status list, so the budget sync needs neither a shell nor ansible.
+    push_actual: Callable[[], str] | None = None
+    actual_status: Callable[[], list[dict[str, object]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -890,6 +895,55 @@ def _freshness_line(account: ExtendableAccount) -> str:
     )
 
 
+def _actual_rows(
+    actual_status: Callable[[], list[dict[str, object]]] | None,
+    push_available: bool,
+) -> str:
+    """The budget sync, visible and pressable - results newest first."""
+    if actual_status is None and not push_available:
+        return ""
+    results = []
+    if actual_status is not None:
+        try:
+            results = actual_status()
+        except Exception:
+            results = []
+    rows = []
+    for result in results:
+        ok = bool(result.get("ok"))
+        badge = (
+            '<span class="pill pill-ok">applied</span>'
+            if ok
+            else '<span class="pill pill-bad">failed</span>'
+        )
+        detail = (
+            f"{result.get('added', 0)} added, "
+            f"{result.get('provisioned', 0)} account(s) provisioned"
+            if ok
+            else html.escape(str(result.get("error", "")))
+        )
+        stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+        rows.append(
+            f'<div class="row"><strong>{stamp}</strong> {badge}'
+            f'<br><span class="muted">{detail}</span></div>'
+        )
+    button = (
+        '<form method="post" action="/push-actual">'
+        '<p><button class="button" type="submit" '
+        'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+        "Push to Actual now</button></p></form>"
+        if push_available
+        else ""
+    )
+    return (
+        "<h2>Actual sync</h2>"
+        "<p>Pushes run through the applier container: bound accounts import, "
+        "named-but-unbound accounts are created in Actual automatically and "
+        "their transactions ride the next push. Scheduled cycles queue one "
+        "after every pull.</p>" + button + "".join(rows)
+    )
+
+
 def _knowledge_rows(
     provider_knowledge: Callable[[], list[dict[str, object]]] | None,
 ) -> str:
@@ -1059,6 +1113,8 @@ def render_index(
     starling_status: Callable[[], dict[str, object] | None] | None = None,
     display_labels: Callable[[], dict[str, str]] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
+    push_actual: Callable[[], str] | None = None,
+    actual_status: Callable[[], list[dict[str, object]]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1066,6 +1122,7 @@ def render_index(
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
+{_actual_rows(actual_status, push_actual is not None)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1163,6 +1220,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     starling_status=self.bound_config.starling_status,
                     display_labels=self.bound_config.display_labels,
                     account_timelines=self.bound_config.account_timelines,
+                    push_actual=self.bound_config.push_actual,
+                    actual_status=self.bound_config.actual_status,
                 ),
             )
         elif route == "/connect":
@@ -1437,6 +1496,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 int(self.headers.get("Content-Length") or 0)
             ).decode("utf-8")))
             return
+        if route == "/push-actual":
+            self._push_actual()
+            return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(
                 int(self.headers.get("Content-Length") or 0)
@@ -1615,6 +1677,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(
             200,
             render_page("Imported", f"<p>{html.escape(summary)}</p>" + HOME_LINK),
+        )
+
+    def _push_actual(self) -> None:
+        hook = self.bound_config.push_actual
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Push is not wired.</p>"))
+            return
+        try:
+            summary = hook()
+        except Exception as exc:
+            self._respond(500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        print(f"actual push queued via page: {summary}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Push queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>The applier container picks requests up within its poll "
+                "interval; results appear in the Actual sync section on the "
+                "home page.</p>" + HOME_LINK,
+            ),
         )
 
     def _bind(self, form: dict[str, list[str]]) -> None:

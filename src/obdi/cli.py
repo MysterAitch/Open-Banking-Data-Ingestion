@@ -71,6 +71,60 @@ def _actual_bindings() -> list[ActualAccountBinding]:
     return [ActualAccountBinding(**entry) for entry in raw.get("actual", [])]
 
 
+def _actual_dir(db_path: Path) -> Path:
+    configured = os.getenv("OBDI_ACTUAL_DIR", "").strip()
+    return Path(configured) if configured else db_path.parent / "actual"
+
+
+def queue_actual_push(db_path: Path) -> str:
+    """The push, as one call returning its summary - shared by the CLI
+    command and the web button so the two routes cannot drift."""
+    from .actual_push import build_envelope, merge_pending_bindings, queue_push
+    from .labels import collect_display_labels
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    map_path_env = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path_env:
+        raise RuntimeError("Set OBDI_ACCOUNT_MAP to the account map path.")
+    actual_dir = _actual_dir(db_path)
+
+    lines = []
+    merged = merge_pending_bindings(Path(map_path_env), actual_dir)
+    if merged:
+        lines.append(f"merged {merged} applier-minted binding(s) into the account map")
+
+    bindings = _actual_bindings()
+    connection_ids: list[str] = []
+    store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if store_path_env:
+        with contextlib.suppress(OSError, ValueError):
+            connection_ids = sorted(ConnectionStore(store_path_env).load())
+    with Store(db_path) as store:
+        labels = collect_display_labels(store, _account_map(), connection_ids)
+        envelope = build_envelope(store, bindings, labels)
+    queued = queue_push(envelope, actual_dir)
+    raw_accounts = envelope.get("accounts")
+    raw_provision = envelope.get("provision")
+    lines.append(
+        f"queued {queued.name}: "
+        f"{len(raw_accounts) if isinstance(raw_accounts, dict) else 0} bound "
+        f"account(s), "
+        f"{len(raw_provision) if isinstance(raw_provision, list) else 0} to "
+        "provision"
+    )
+    return "; ".join(lines)
+
+
+def _push_actual(db_path: Path) -> int:
+    try:
+        print(queue_actual_push(db_path))
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
 def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -> int:
     bindings = _actual_bindings()
     if not bindings:
@@ -745,6 +799,14 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     accounts = [a for a in raw if isinstance(a, dict)]
         return {"configured": True, "accounts": accounts}
 
+    def push_actual_hook() -> str:
+        return queue_actual_push(db_path)
+
+    def actual_status() -> list[dict[str, object]]:
+        from .actual_push import latest_results
+
+        return latest_results(_actual_dir(db_path))
+
     def attempts_index() -> dict[str, object]:
         with Store(db_path) as store:
             rows = store.attempts()
@@ -881,6 +943,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
         display_labels=display_labels,
+        push_actual=push_actual_hook,
+        actual_status=actual_status,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
@@ -1302,6 +1366,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     subcommands.add_parser(
+        "push-actual",
+        help="queue a push to Actual: merge minted bindings, build the "
+        "envelope (with provisioning), drop it for the applier container",
+    )
+
+    subcommands.add_parser(
         "review-report",
         help="calibration numbers for the review queue: reasons, clusters, "
         "and how many flags match a declared recurring payment",
@@ -1427,6 +1497,8 @@ def main(argv: list[str] | None = None) -> int:
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
 
+    if args.command == "push-actual":
+        return _push_actual(db_path)
     if args.command == "review-report":
         from .review_report import review_report
 
