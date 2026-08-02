@@ -216,3 +216,72 @@ class TestRebindCarriesEveryLayer:
 
         assert artefact_refs == ["halifax-current"]
         assert attempt_refs == ["halifax-current"]
+
+
+class TestStarlingInstrumentationParity:
+    """Every Starling fetch lands as evidence and hits the ledger - the
+    TrueLayer lessons applied BEFORE the first real pull, not after."""
+
+    def test_Pull_LandsEveryPayloadKind_AndLedgersTheFeedAsk(
+        self, tmp_path, monkeypatch
+    ):
+        from obdi.providers.starling import Category
+        from obdi.pull import pull_starling
+
+        def fake_accounts(_token, **_kwargs):
+            return (
+                [{"accountUid": "acc-1", "defaultCategory": "cat-main", "name": "main"}],
+                b'{"accounts": []}',
+            )
+
+        def fake_categories(_token, _account_uid, **_kwargs):
+            return (
+                [
+                    Category(uid="cat-main", name="main", is_space=False),
+                    Category(uid="space-1", name="holiday", is_space=True),
+                ],
+                b'{"savingsGoals": []}',
+            )
+
+        def fake_balance(_token, _account_uid, **_kwargs):
+            return b'{"effectiveBalance": {}}'
+
+        def fake_feed(_token, _account_uid, category_uid, **_kwargs):
+            return (
+                [],
+                b'{"feedItems": []}',
+                "changesSince=2016-08-04T00:00:00Z",
+            )
+
+        monkeypatch.setattr("obdi.pull.starling.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.pull.starling.fetch_categories", fake_categories)
+        monkeypatch.setattr("obdi.pull.starling.fetch_balance", fake_balance)
+        monkeypatch.setattr("obdi.pull.starling.fetch_feed", fake_feed)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            pull_starling(
+                store, "token", account_map=AccountMap(), trigger="scheduled"
+            )
+
+            sources = {
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT DISTINCT source FROM raw_artefacts"
+                ).fetchall()
+            }
+            attempts = store.attempts()
+
+        assert sources == {
+            "starling-accounts",
+            "starling-spaces",
+            "starling-balance",
+            "starling-feed",
+        }
+        # Two categories -> two ledger rows, each carrying the real ask and
+        # the trigger pathway.
+        assert len(attempts) == 2
+        assert all(row["outcome"] == "landed" for row in attempts)
+        assert all(
+            row["asked"] == "changesSince=2016-08-04T00:00:00Z" for row in attempts
+        )
+        assert all("scheduled" in str(row["request_meta"]) for row in attempts)

@@ -151,14 +151,14 @@ def _earliest_asked(store: Store, canonical: str) -> date | None:
     """
     rows = store.connection.execute(
         "SELECT origin FROM raw_artefacts "
-        "WHERE account_ref = ? AND source = 'truelayer-booked' "
-        "AND origin LIKE '%from=%'",
+        "WHERE account_ref = ? AND source IN ('truelayer-booked', 'starling-feed')",
         (canonical,),
     ).fetchall()
     asked: list[date] = []
     for row in rows:
         query = parse_qs(urlparse(str(row["origin"])).query)
-        for value in query.get("from", []):
+        # TrueLayer says from=, Starling says changesSince= - same edge.
+        for value in query.get("from", []) + query.get("changesSince", []):
             try:
                 asked.append(date.fromisoformat(value[:10]))
             except ValueError:
@@ -176,20 +176,26 @@ def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
     quietly stops for a week.
     """
     rows = store.connection.execute(
-        "SELECT origin, fetched_at FROM raw_artefacts "
-        "WHERE account_ref = ? AND source = 'truelayer-booked' "
-        "AND origin LIKE '%to=%'",
+        "SELECT origin, fetched_at, source FROM raw_artefacts "
+        "WHERE account_ref = ? AND source IN ('truelayer-booked', 'starling-feed')",
         (canonical,),
     ).fetchall()
     covered: date | None = None
     landed = ""
     for row in rows:
         query = parse_qs(urlparse(str(row["origin"])).query)
+        candidates: list[date] = []
         for value in query.get("to", []):
             try:
-                candidate = date.fromisoformat(value[:10])
+                candidates.append(date.fromisoformat(value[:10]))
             except ValueError:
                 continue
+        if not candidates and str(row["source"]) == "starling-feed":
+            # A changesSince feed has no upper bound: it covers up to the
+            # moment it was fetched, so the fetch date IS the forward edge.
+            with contextlib.suppress(ValueError):
+                candidates.append(date.fromisoformat(str(row["fetched_at"])[:10]))
+        for candidate in candidates:
             if covered is None or candidate > covered:
                 covered = candidate
         if str(row["fetched_at"]) > landed:
@@ -880,7 +886,13 @@ def _pull(
             print(str(exc), file=sys.stderr)
             return 2
         with Store(db_path) as store:
-            result = pull_starling(store, token, account_map=account_map, since=since)
+            result = pull_starling(
+                store,
+                token,
+                account_map=account_map,
+                since=since,
+                trigger=os.getenv("OBDI_TRIGGER", "").strip() or "direct",
+            )
         print(result.describe())
         return 0
 

@@ -296,12 +296,30 @@ def pull_starling(
     *,
     account_map: AccountMap,
     since: date | None = None,
+    trigger: str = "direct",
 ) -> PullResult:
     result = PullResult(provider="starling")
     summary = ImportSummary(artefact_new=True)
+    request_meta = json.dumps(
+        {
+            "trigger": trigger,
+            "connection_id": "starling",
+            "app_version": _app_version(),
+        },
+        sort_keys=True,
+    )
 
-    accounts = starling.fetch_accounts(token)
+    accounts, accounts_body = starling.fetch_accounts(token)
     result.accounts = len(accounts)
+    store.land_artefact(
+        starling.artefact_for(
+            accounts_body,
+            account_id="starling",
+            kind="accounts",
+            origin=f"{starling.API_HOST}/api/v2/accounts",
+            request_meta=request_meta,
+        )
+    )
 
     for account in accounts:
         account_uid = text(account, "accountUid")
@@ -316,7 +334,35 @@ def pull_starling(
         # the default category silently loses all Space activity; folding
         # Spaces into the parent loses the ability to pair a transfer, because
         # pairing requires the two sides to sit in different accounts.
-        for category in starling.fetch_categories(token, account_uid):
+        categories, spaces_body = starling.fetch_categories(token, account_uid)
+        store.land_artefact(
+            starling.artefact_for(
+                spaces_body,
+                account_id=canonical,
+                kind="spaces",
+                origin=f"{starling.API_HOST}/api/v2/account/{account_uid}/spaces",
+                request_meta=request_meta,
+            )
+        )
+        # A balance at a timestamp is the reconciliation anchor, exactly as
+        # on the TrueLayer side - and a failure to fetch one must not stop
+        # the transactions. Skipped when probing a window, for symmetry.
+        if since is None:
+            try:
+                balance_body = starling.fetch_balance(token, account_uid)
+                store.land_artefact(
+                    starling.artefact_for(
+                        balance_body,
+                        account_id=canonical,
+                        kind="balance",
+                        origin=f"{starling.API_HOST}/api/v2/accounts/{account_uid}/balance",
+                        request_meta=request_meta,
+                    )
+                )
+            except starling.StarlingError as exc:
+                result.notes.append(f"balance for {account_uid}: {exc}")
+
+        for category in categories:
             if category.is_space:
                 # A Space is bound by its own id, so it can be given a
                 # recognisable canonical name and a destination of its own.
@@ -331,11 +377,45 @@ def pull_starling(
             else:
                 target = canonical
 
-            items, body = starling.fetch_feed(token, account_uid, category.uid, since=since)
+            asked_spec = f"since={since}" if since else "routine"
+            try:
+                items, body, asked = starling.fetch_feed(
+                    token, account_uid, category.uid, since=since
+                )
+            except starling.StarlingError as exc:
+                store.record_attempt(
+                    source="starling-feed",
+                    connection_id="starling",
+                    account_ref=target,
+                    asked=asked_spec,
+                    request_meta=request_meta,
+                    outcome="refused",
+                    http_status=getattr(exc, "status", None),
+                    detail=str(exc),
+                )
+                raise
+            store.record_attempt(
+                source="starling-feed",
+                connection_id="starling",
+                account_ref=target,
+                asked=asked,
+                request_meta=request_meta,
+                outcome="landed",
+                http_status=200,
+            )
             # Same ordering as the TrueLayer path: the empty feed of a quiet
             # Space is evidence, and it must land before the emptiness is
             # acted on.
-            artefact = starling.artefact_for(body, account_id=target, category_uid=category.uid)
+            artefact = starling.artefact_for(
+                body,
+                account_id=target,
+                kind="feed",
+                origin=(
+                    f"{starling.API_HOST}/api/v2/feed/account/{account_uid}"
+                    f"/category/{category.uid}?{asked}"
+                ),
+                request_meta=request_meta,
+            )
             store.land_artefact(artefact)
             if not items:
                 continue

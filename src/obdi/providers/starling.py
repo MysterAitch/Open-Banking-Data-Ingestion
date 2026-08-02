@@ -63,7 +63,17 @@ STATUS_MAP = {
 
 
 class StarlingError(RuntimeError):
-    """A Starling call failed in a way worth surfacing rather than retrying."""
+    """A Starling call failed in a way worth surfacing rather than retrying.
+
+    Carries the status and the body excerpt, the lesson learnt live on the
+    TrueLayer side: a bare status number cannot be acted on, and the attempt
+    ledger wants the parts, not a blob.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None, raw: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.raw = raw
 
 
 def _get(
@@ -77,17 +87,37 @@ def _get(
     )
     if response.status_code == 403:
         raise StarlingError(
-            f"Starling refused {path} (403). The token is probably missing a scope - "
-            "read-only pulls need account:read, balance:read, transaction:read and space:read."
+            f"Starling refused {path} (403): {response.text[:200]}. The token is "
+            "probably missing a scope - read-only pulls need account:read, "
+            "balance:read, transaction:read and space:read.",
+            status=403,
+            raw=response.text[:1000],
         )
     if response.status_code != 200:
-        raise StarlingError(f"Starling call to {path} failed (HTTP {response.status_code})")
+        raise StarlingError(
+            f"Starling call to {path} failed (HTTP {response.status_code}): "
+            f"{response.text[:200]}",
+            status=response.status_code,
+            raw=response.text[:1000],
+        )
     return as_object(json.loads(response.text), field="response"), response.content
 
 
-def fetch_accounts(token: str, *, client: httpx.Client | None = None) -> list[JsonObject]:
-    payload, _ = _get("/api/v2/accounts", token, client=client)
-    return rows(payload, "accounts")
+def fetch_accounts(
+    token: str, *, client: httpx.Client | None = None
+) -> tuple[list[JsonObject], bytes]:
+    """The accounts, AND the raw body - evidence to land, not just parse."""
+    payload, body = _get("/api/v2/accounts", token, client=client)
+    return rows(payload, "accounts"), body
+
+
+def fetch_balance(
+    token: str, account_uid: str, *, client: httpx.Client | None = None
+) -> bytes:
+    """The balance body for landing: a reconciliation anchor at a timestamp,
+    same role as on the TrueLayer side."""
+    _, body = _get(f"/api/v2/accounts/{account_uid}/balance", token, client=client)
+    return body
 
 
 @dataclass(frozen=True)
@@ -101,7 +131,7 @@ class Category:
 
 def fetch_categories(
     token: str, account_uid: str, *, client: httpx.Client | None = None
-) -> list[Category]:
+) -> tuple[list[Category], bytes]:
     """Every category holding transactions: the account plus one per Space.
 
     Fetching only the default category is the commonest way to lose data here,
@@ -110,7 +140,7 @@ def fetch_categories(
     Spaces are returned as distinct categories rather than folded in, because
     each is its own account and its transactions belong to it.
     """
-    accounts = fetch_accounts(token, client=client)
+    accounts, _ = fetch_accounts(token, client=client)
     categories = [
         Category(
             uid=text(account, "defaultCategory"),
@@ -121,7 +151,9 @@ def fetch_categories(
         if text(account, "accountUid") == account_uid and text(account, "defaultCategory")
     ]
 
-    payload, _ = _get(f"/api/v2/account/{account_uid}/spaces", token, client=client)
+    payload, spaces_body = _get(
+        f"/api/v2/account/{account_uid}/spaces", token, client=client
+    )
     for goal in rows(payload, "savingsGoals"):
         if text(goal, "savingsGoalUid"):
             categories.append(
@@ -131,7 +163,7 @@ def fetch_categories(
                     is_space=True,
                 )
             )
-    return categories
+    return categories, spaces_body
 
 
 def fetch_feed(
@@ -141,19 +173,23 @@ def fetch_feed(
     *,
     since: date | None = None,
     client: httpx.Client | None = None,
-) -> tuple[list[JsonObject], bytes]:
-    """Feed items for one category, with the raw body for landing."""
+) -> tuple[list[JsonObject], bytes, str]:
+    """Feed items, the raw body for landing, and the range actually asked."""
     # Explicitly UTC: date.today() reads the process timezone, so a
     # container and a workstation can disagree about which day it is and
     # silently shift the window boundary.
     start = since or (datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS))
+    stamp = datetime.combine(start, datetime.min.time()).isoformat() + "Z"
     payload, body = _get(
         f"/api/v2/feed/account/{account_uid}/category/{category_uid}",
         token,
         client=client,
-        changesSince=datetime.combine(start, datetime.min.time()).isoformat() + "Z",
+        changesSince=stamp,
     )
-    return rows(payload, "feedItems"), body
+    # The range actually asked, in the API's own vocabulary - recorded so an
+    # empty feed stays distinguishable from a feed never asked about, and so
+    # the coverage trackers can read the window edges back.
+    return rows(payload, "feedItems"), body, f"changesSince={stamp}"
 
 
 def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
@@ -232,13 +268,28 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     )
 
 
-def artefact_for(body: bytes, *, account_id: str, category_uid: str) -> RawArtefact:
+def artefact_for(
+    body: bytes,
+    *,
+    account_id: str,
+    kind: str = "feed",
+    origin: str = "",
+    request_meta: str = "",
+    category_uid: str = "",
+) -> RawArtefact:
+    """Land any Starling payload with its provenance, TrueLayer-style.
+
+    `origin` is the REAL request including its query string - the coverage
+    trackers parse the window edges back out of it, and provenance must
+    describe the request that happened, not a paraphrase.
+    """
     return RawArtefact(
-        source="starling-feed",
+        source=f"starling-{kind}",
         account_ref=account_id,
         fetched_at=datetime.now(UTC),
         media_type="application/json",
         digest=artefact_digest(body),
         payload=body,
-        origin=f"{API_HOST}/api/v2/feed/.../category/{category_uid}",
+        origin=origin or f"{API_HOST}/api/v2/feed/.../category/{category_uid}",
+        request_meta=request_meta,
     )
