@@ -55,6 +55,11 @@ class RebuildReport:
     #: as "account: N -> 0 (VANISHED)" instead of hiding behind a page
     #: that quietly shows fewer rows.
     account_changes: dict[str, tuple[int, int]] = field(default_factory=dict)
+    #: Sum of stored record counts over transactional artefacts - the
+    #: denominator for record-level progress. Uncounted artefacts (landed
+    #: before counts existed) make it a floor, stated as such.
+    records_total_known: int = 0
+    artefacts_uncounted: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -202,10 +207,17 @@ def rebuild_from_raw(
     store.connection.commit()
 
     artefact_rows = store.connection.execute(
-        "SELECT source, account_ref, digest, payload, origin FROM raw_artefacts "
-        "ORDER BY fetched_at ASC, rowid ASC"
+        "SELECT rowid, source, account_ref, digest, payload, origin, "
+        "record_count FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
     ).fetchall()
     starling_defaults = _starling_defaults(artefact_rows)
+    for row in artefact_rows:
+        if str(row["source"]) in _NON_TRANSACTIONAL:
+            continue
+        if row["record_count"] is None:
+            report.artefacts_uncounted += 1
+        else:
+            report.records_total_known += int(row["record_count"])
 
     total = len(artefact_rows)
     for index, row in enumerate(artefact_rows, start=1):
@@ -276,6 +288,14 @@ def rebuild_from_raw(
             report.artefacts_skipped += 1
             continue
 
+        if row["record_count"] is None:
+            # Backfill exactly once: the count becomes landed metadata and
+            # is never recalculated again.
+            store.connection.execute(
+                "UPDATE raw_artefacts SET record_count = ? WHERE rowid = ?",
+                (len(transactions), int(row["rowid"])),
+            )
+            report.records_total_known += len(transactions)
         report.artefacts_replayed += 1
         if transactions:
             reconcile_batch(store, transactions, digest=digest, summary=summary)

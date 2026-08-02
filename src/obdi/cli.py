@@ -270,6 +270,8 @@ def start_background_rebuild(db_path: Path) -> str:
                         "done": done,
                         "total": total,
                         "transactions": report.transactions,
+                        "records_total": report.records_total_known,
+                        "artefacts_uncounted": report.artefacts_uncounted,
                     }
                 ),
                 encoding="utf-8",

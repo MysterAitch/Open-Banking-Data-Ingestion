@@ -1162,6 +1162,43 @@ class TestDangerZone:
         assert "warn" in running
         assert "15:00:00" in running
 
+        with_eta = _rebuild_status_line(
+            lambda: {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 60,
+                "total": 71,
+                "transactions": 6000,
+                "records_total": 18000,
+                "artefacts_uncounted": 0,
+            },
+            now=__import__("datetime").datetime(
+                2026, 8, 2, 15, 5, 0,
+                tzinfo=__import__("datetime").timezone.utc,
+            ),
+        )
+        assert "6,000 of 18,000 record(s)" in with_eta
+        assert "~1,200/min" in with_eta
+        assert "ETA ~10 min" in with_eta
+
+        floor = _rebuild_status_line(
+            lambda: {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 2,
+                "total": 71,
+                "transactions": 10,
+                "records_total": 500,
+                "artefacts_uncounted": 40,
+            },
+            now=__import__("datetime").datetime(
+                2026, 8, 2, 15, 0, 10,
+                tzinfo=__import__("datetime").timezone.utc,
+            ),
+        )
+        assert "(at least)" in floor
+        assert "ETA" not in floor
+
         mid_run = _rebuild_status_line(
             lambda: {
                 "state": "running",

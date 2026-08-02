@@ -249,6 +249,16 @@ class Store:
             self.connection.execute(
                 "ALTER TABLE raw_artefacts ADD COLUMN request_meta TEXT NOT NULL DEFAULT ''"
             )
+        if "record_count" not in {
+            str(row[1])
+            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
+        }:
+            # How many records the payload parses into - landed as metadata
+            # so progress and ETA maths never re-parse history. NULL means
+            # "not yet counted"; the next rebuild backfills it.
+            self.connection.execute(
+                "ALTER TABLE raw_artefacts ADD COLUMN record_count INTEGER"
+            )
             self.connection.commit()
 
     def _migrate_attempt_artefact_column(self) -> None:
@@ -317,7 +327,7 @@ class Store:
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO raw_artefacts "
             "(digest, source, account_ref, media_type, origin, fetched_at, "
-            "payload, request_meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "payload, request_meta, record_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 artefact.digest,
                 artefact.source,
@@ -327,6 +337,7 @@ class Store:
                 artefact.fetched_at.isoformat(),
                 artefact.payload,
                 artefact.request_meta,
+                artefact.record_count,
             ),
         )
         self.connection.commit()

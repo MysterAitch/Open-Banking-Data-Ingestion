@@ -1119,6 +1119,7 @@ def _rebuild_running_banner(
 
 def _rebuild_status_line(
     rebuild_status: Callable[[], dict[str, object]] | None,
+    now: datetime | None = None,
 ) -> str:
     if rebuild_status is None:
         return ""
@@ -1129,16 +1130,37 @@ def _rebuild_status_line(
         return ""
     state = str(status.get("state", ""))
     if state == "running":
-        started = html.escape(str(status.get("started_at", "")))
+        started_raw = str(status.get("started_at", ""))
+        started = html.escape(started_raw)
         extra = ""
         done = status.get("done")
         total = status.get("total")
         if isinstance(done, int) and isinstance(total, int) and total > 0:
+            extra = f" - artefact {done} of {total}"
             txns = status.get("transactions")
-            txn_note = (
-                f", {txns:,} transaction(s) so far" if isinstance(txns, int) else ""
-            )
-            extra = f" - artefact {done} of {total}{txn_note}"
+            records_total = status.get("records_total")
+            uncounted = status.get("artefacts_uncounted")
+            if isinstance(txns, int) and isinstance(records_total, int):
+                floor = (
+                    " (at least)"
+                    if isinstance(uncounted, int) and uncounted > 0
+                    else ""
+                )
+                extra += f", {txns:,} of {records_total:,}{floor} record(s)"
+                with contextlib.suppress(ValueError):
+                    began = datetime.fromisoformat(
+                        started_raw.replace("Z", "+00:00")
+                    )
+                    elapsed = ((now or datetime.now(UTC)) - began).total_seconds()
+                    if elapsed > 30 and txns > 0:
+                        per_minute = txns / (elapsed / 60)
+                        remaining = max(records_total - txns, 0)
+                        extra += f", ~{per_minute:,.0f}/min"
+                        if per_minute > 0 and remaining > 0:
+                            eta_min = remaining / per_minute
+                            extra += f", ETA ~{max(eta_min, 1):.0f} min"
+            elif isinstance(txns, int):
+                extra += f", {txns:,} transaction(s) so far"
         return (
             f'<p class="warn">a rebuild is running (started {started})'
             f"{extra} - refresh to follow it; deploys defer while it "

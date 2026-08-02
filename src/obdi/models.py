@@ -85,6 +85,10 @@ class RawArtefact:
     digest: str
     payload: bytes
     origin: str = ""
+    #: How many records the payload parses into, when the lander knew.
+    #: Progress metadata, not evidence: None means "count it on the next
+    #: rebuild" and transactional artefacts get backfilled exactly once.
+    record_count: int | None = None
     #: JSON: circumstances of the request that produced this payload - the
     #: trigger (scheduled / cli / post-auth-backfill / web-extend), the
     #: attended declaration made, which connection's token was used, and the

@@ -657,3 +657,61 @@ class TestStarlingFeedIdentityFromOrigin:
             ).fetchall()
         assert [tuple(r) for r in rows] == [("starling:cat-bills", 1)]
         assert report.problems == []
+
+
+class TestRecordCountMetadata:
+    """Artefact-count progress lies as overlapping pulls accumulate: one
+    artefact can carry 5,000 rows, the next 3. Counts are landed once as
+    metadata (or backfilled by the first rebuild that parses them) and
+    never recalculated."""
+
+    def _feed(self, store, uid, items):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+
+        body = _json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": f"{uid}-{n}",
+                        "amount": {"currency": "GBP", "minorUnits": 100 + n},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-14T09:15:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": "Tesco",
+                        "reference": "TESCO",
+                    }
+                    for n in range(items)
+                ]
+            }
+        ).encode("utf-8")
+        store.land_artefact(
+            artefact_for(
+                body,
+                account_id=f"starling:{uid}",
+                kind="feed",
+                origin=f"https://api.example.com/feed/account/a/category/{uid}?x=1",
+            )
+        )
+
+    def test_FirstRebuild_BackfillsCounts_SecondKnowsTotalsUpFront(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._feed(store, "uid-1", 3)
+            self._feed(store, "uid-2", 2)
+
+            first = rebuild_from_raw(store)
+            assert first.artefacts_uncounted == 2
+
+            second = rebuild_from_raw(store)
+            assert second.artefacts_uncounted == 0
+            assert second.records_total_known == 5
+            counts = store.connection.execute(
+                "SELECT record_count FROM raw_artefacts WHERE source = "
+                "'starling-feed' ORDER BY record_count"
+            ).fetchall()
+        assert [r[0] for r in counts] == [2, 3]
