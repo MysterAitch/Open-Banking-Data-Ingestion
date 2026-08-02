@@ -214,6 +214,19 @@ def _connection_rows(store: ConnectionStore) -> str:
 HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
 
 
+def _short_ref(ref: str) -> str:
+    """Account references compactly: opaque ids earn eight characters.
+
+    The full id is provenance and lives in the store; on a phone-width page
+    it is thirty-two characters of noise between the reader and the answer.
+    Bound accounts (human names) pass through untouched.
+    """
+    bare = ref.removeprefix("truelayer:")
+    if bare != ref and len(bare) > 12:
+        return f"{bare[:8]}..."
+    return ref
+
+
 def _trigger_of(request_meta: object) -> str:
     try:
         meta = json.loads(str(request_meta or ""))
@@ -272,8 +285,8 @@ def _shape_html(summary: dict[str, object]) -> str:
     )
     return (
         f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
-        "<table><tr><th>field</th><th>present</th><th>types</th>"
-        f"<th>values / shape</th></tr>{field_rows}</table>"
+        '<div class="scroll"><table><tr><th>field</th><th>present</th><th>types</th>'
+        f"<th>values / shape</th></tr>{field_rows}</table></div>"
         f"{_insight_sections(summary)}"
     )
 
@@ -301,8 +314,8 @@ def _insight_sections(summary: dict[str, object]) -> str:
             "<p>The sign-convention check: a category whose row mixes "
             "positive and negative is either genuinely mixed or a parsing "
             "problem.</p>"
-            "<table><tr><th>field</th><th>value</th><th>positive</th>"
-            f"<th>negative</th><th>zero</th></tr>{rows}</table>"
+            '<div class="scroll"><table><tr><th>field</th><th>value</th><th>positive</th>'
+            f"<th>negative</th><th>zero</th></tr>{rows}</table></div>"
         )
     links = summary.get("presence_links")
     if isinstance(links, list) and links:
@@ -329,18 +342,22 @@ def _insight_sections(summary: dict[str, object]) -> str:
             if isinstance(m, dict) and str(m.get("count")).isdigit()
         ]
         peak = max(counts, default=1) or 1
-        bars = "\n".join(
-            f"{html.escape(str(m.get('month')))} "
-            f"{'#' * max(1, round(int(str(m.get('count'))) * 40 / peak))} "
-            f"{m.get('count')}"
+        bars = "".join(
+            '<div style="display:flex;align-items:center;gap:.5rem;margin:.15rem 0">'
+            f'<span class="mono" style="flex:0 0 4.6rem">'
+            f"{html.escape(str(m.get('month')))}</span>"
+            '<div style="flex:1;background:#8882;border-radius:.25rem">'
+            f'<div style="width:{max(2, round(int(str(m.get("count"))) * 100 / peak))}%;'
+            'background:#2563eb;height:.8rem;border-radius:.25rem"></div></div>'
+            f'<span class="muted" style="flex:0 0 2.6rem;text-align:right">'
+            f"{m.get('count')}</span></div>"
             for m in by_month
-            if isinstance(m, dict)
+            if isinstance(m, dict) and str(m.get("count")).isdigit()
         )
         parts.append(
             "<h2>Items per month</h2>"
             "<p>A month that should have data and shows no bar is a gap "
-            "worth chasing.</p>"
-            f'<pre style="overflow-x:auto">{bars}</pre>'
+            "worth chasing.</p>" + bars
         )
     return "".join(parts)
 
@@ -707,26 +724,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         raw_day = ledger.get("last_day")
         day_rows = "".join(
             f'<tr><td>{html.escape(str(r.get("connection_id")))}</td>'
-            f'<td>{html.escape(str(r.get("account_ref")))}</td>'
+            f'<td>{html.escape(_short_ref(str(r.get("account_ref", ""))))}</td>'
             f'<td>{r.get("count")}</td></tr>'
             for r in (raw_day if isinstance(raw_day, list) else [])
             if isinstance(r, dict)
         )
         raw_rows = ledger.get("rows")
         rows = "".join(
-            f'<tr><td>{html.escape(str(r.get("attempted_at", ""))[:19])}</td>'
-            f'<td>{html.escape(str(r.get("connection_id")))} / '
-            f'{html.escape(str(r.get("account_ref")))}</td>'
-            f'<td>{html.escape(str(r.get("source", "")).removeprefix("truelayer-"))}</td>'
-            f'<td style="word-break:break-all">{html.escape(str(r.get("asked", "")))}</td>'
-            f'<td>{html.escape(_trigger_of(r.get("request_meta")))}</td>'
+            f'<div class="row"><strong>'
+            f'{html.escape(str(r.get("attempted_at", ""))[:19].replace("T", " "))}'
+            "</strong> "
             + (
-                f'<td class="bad">{r.get("http_status")} '
-                f'<code>{html.escape(str(r.get("error_code", "")))}</code></td>'
+                f'<span class="pill pill-bad">refused {r.get("http_status")} '
+                f'{html.escape(str(r.get("error_code", "")))}</span>'
                 if r.get("outcome") == "refused"
-                else f'<td class="ok">{html.escape(str(r.get("outcome", "")))}</td>'
+                else f'<span class="pill pill-ok">'
+                f'{html.escape(str(r.get("outcome", "")))}</span>'
             )
-            + "</tr>"
+            + f'<br><span class="muted">'
+            f'{html.escape(_short_ref(str(r.get("account_ref", ""))))} - '
+            f'{html.escape(str(r.get("source", "")).removeprefix("truelayer-"))} - '
+            f"{html.escape(_trigger_of(r.get('request_meta')))}</span>"
+            f'<br><span class="mono">{html.escape(str(r.get("asked", "")))}</span></div>'
             for r in (raw_rows if isinstance(raw_rows, list) else [])
             if isinstance(r, dict)
         )
@@ -744,10 +763,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 if day_rows
                 else ""
             )
-            + "<h2>Attempts</h2>"
+            + "<h2>Attempts (UTC)</h2>"
             + (
-                "<table><tr><th>when (UTC)</th><th>account</th><th>kind</th>"
-                f"<th>asked</th><th>trigger</th><th>answer</th></tr>{rows}</table>"
+                rows
                 if rows
                 else "<p>No attempts recorded yet - the ledger began at 0.4.5, "
                 "so only fetches after that deployment appear.</p>"

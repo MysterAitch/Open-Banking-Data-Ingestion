@@ -415,8 +415,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         rows = [t for t in held if t.account_id == ref]
         if not rows:
             return None
-        items = [
-            {
+        items = []
+        for t in rows:
+            item: dict[str, object] = {
                 "amount": t.amount_minor / 100,
                 "currency": t.currency,
                 "value_date": t.value_date.isoformat(),
@@ -426,8 +427,14 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 "tier": str(t.tier),
                 "internal_transfer": t.is_internal_transfer,
             }
-            for t in rows
-        ]
+            # The provider's verbatim record rides on every merged row for
+            # provenance - surfacing it here (prefixed) is what keeps
+            # running_balance, provider categories and the rest visible at
+            # the merged level, not only down in the raw artefacts.
+            if isinstance(t.raw, dict):
+                for key, value in t.raw.items():
+                    item[f"provider.{key}"] = value
+            items.append(item)
         payload = json.dumps({"results": items}).encode()
         return {
             "ref": ref,

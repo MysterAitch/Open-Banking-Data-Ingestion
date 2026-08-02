@@ -61,6 +61,18 @@ def render_page(title: str, body: str) -> bytes:
             background: #2563eb; color: #fff; text-decoration: none; text-align: center;
             font-weight: 600; }}
  .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
+ table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
+ th, td {{ padding: .45rem .5rem; text-align: left; border-bottom: 1px solid #8883;
+          vertical-align: top; }}
+ th {{ opacity: .7; font-weight: 600; }}
+ .scroll {{ overflow-x: auto; }}
+ .pill {{ display: inline-block; padding: .1rem .55rem; border-radius: 1rem;
+         font-size: .85em; font-weight: 600; white-space: nowrap; }}
+ .pill-ok {{ background: #16a34a22; color: #15803d; }}
+ .pill-bad {{ background: #dc262622; color: #b91c1c; }}
+ .muted {{ opacity: .65; }}
+ .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         font-size: .85em; word-break: break-all; }}
  .warn {{ color: #b45309; font-weight: 600; }}
  .bad {{ color: #b91c1c; font-weight: 600; }}
  .ok {{ opacity: .75; }}
