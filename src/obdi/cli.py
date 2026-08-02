@@ -57,6 +57,16 @@ def _account_map() -> AccountMap:
     return AccountMap([AccountBinding(**binding) for binding in raw.get("bindings", [])])
 
 
+def _split_bind_ref(ref: str) -> tuple[str, str]:
+    """A bind posted from the page is either a bare TrueLayer provider ref
+    (the extend rows) or a source-qualified id like "starling:uid" (the
+    holdings and sync-roster rows). Resolve to (source, provider_ref)."""
+    if ":" in ref:
+        source, provider_ref = ref.split(":", 1)
+        return source, provider_ref
+    return "truelayer", ref
+
+
 def _actual_bindings() -> list[ActualAccountBinding]:
     """Map canonical accounts to Actual account ids.
 
@@ -100,9 +110,20 @@ def queue_actual_push(db_path: Path) -> str:
     if store_path_env:
         with contextlib.suppress(OSError, ValueError):
             connection_ids = sorted(ConnectionStore(store_path_env).load())
+    named: set[str] = set()
+    with contextlib.suppress(OSError, ValueError):
+        import json as _json
+
+        raw_map = _json.loads(Path(map_path_env).read_text(encoding="utf-8"))
+        raw_bind = raw_map.get("bindings", []) if isinstance(raw_map, dict) else []
+        named = {
+            str(b.get("canonical_id"))
+            for b in raw_bind
+            if isinstance(b, dict) and b.get("canonical_id")
+        }
     with Store(db_path) as store:
         labels = collect_display_labels(store, _account_map(), connection_ids)
-        envelope = build_envelope(store, bindings, labels)
+        envelope = build_envelope(store, bindings, labels, named_canonicals=named)
     queued = queue_push(envelope, actual_dir)
     raw_accounts = envelope.get("accounts")
     raw_provision = envelope.get("provision")
@@ -515,9 +536,15 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def bind_account(provider_ref: str, canonical: str) -> str:
         """The CLI bind, callable from the page: map entry plus label moves.
 
+        Accepts either a bare provider ref (the extend rows post these, and
+        they are TrueLayer's) or a source-qualified canonical like
+        "starling:uid" (the holdings rows post these) - which is what makes
+        Starling accounts and Spaces bindable from the page at all.
+
         Validation here rather than in the page: the canonical id becomes a
         query key across every layer, so it stays lowercase-slug shaped.
         """
+        source, provider_ref = _split_bind_ref(provider_ref)
         import re as _re
 
         canonical = canonical.strip().lower()
@@ -529,8 +556,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
         if not map_path:
             raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
-        old_canonical = _account_map().resolve("truelayer", provider_ref)
-        _persist_binding(Path(map_path), "truelayer", provider_ref, canonical)
+        old_canonical = _account_map().resolve(source, provider_ref)
+        _persist_binding(Path(map_path), source, provider_ref, canonical)
         with Store(db_path) as store:
             moved = store.rebind_account(old_canonical, canonical)
         return (
@@ -802,6 +829,60 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def push_actual_hook() -> str:
         return queue_actual_push(db_path)
 
+    def actual_roster() -> list[dict[str, object]]:
+        """Which accounts a push syncs, creates, or skips - and why.
+
+        "2 to provision" must be explainable by reading the page, not the
+        source: every known account gets a row stating its fate, and the
+        one remaining blocker (no canonical name) carries its remedy.
+        """
+        from .labels import collect_display_labels
+
+        actual_bound = {b.canonical_id for b in _actual_bindings()}
+        named: set[str] = set()
+        map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+        if map_path and Path(map_path).is_file():
+            with contextlib.suppress(OSError, ValueError):
+                raw = json.loads(Path(map_path).read_text(encoding="utf-8"))
+                named = {
+                    str(b.get("canonical_id"))
+                    for b in raw.get("bindings", [])
+                    if isinstance(b, dict) and b.get("canonical_id")
+                }
+        connection_ids: list[str] = []
+        store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+        if store_path_env:
+            with contextlib.suppress(OSError, ValueError):
+                connection_ids = sorted(ConnectionStore(store_path_env).load())
+        with Store(db_path) as store:
+            labels = collect_display_labels(store, _account_map(), connection_ids)
+            counts = {
+                str(row[0]): int(row[1])
+                for row in store.connection.execute(
+                    "SELECT account_id, COUNT(*) FROM transactions"
+                    " GROUP BY account_id"
+                )
+            }
+        rows: list[dict[str, object]] = []
+        for ref in set(counts) | named | actual_bound:
+            if ":" in ref:
+                state = "unnamed"
+            elif ref in actual_bound:
+                state = "syncing"
+            else:
+                state = "provision"
+            rows.append(
+                {
+                    "ref": ref,
+                    "label": labels.get(ref, ref),
+                    "state": state,
+                    "count": counts.get(ref, 0),
+                }
+            )
+        order = {"syncing": 0, "provision": 1, "unnamed": 2}
+        rows.sort(key=lambda r: (order[str(r["state"])], str(r["label"]).lower()))
+        return rows
+
     def actual_status() -> list[dict[str, object]]:
         from .actual_push import latest_results
 
@@ -945,6 +1026,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         display_labels=display_labels,
         push_actual=push_actual_hook,
         actual_status=actual_status,
+        actual_roster=actual_roster,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,

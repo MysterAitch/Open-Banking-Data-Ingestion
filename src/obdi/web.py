@@ -27,6 +27,7 @@ from __future__ import annotations
 import html
 import itertools
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -282,6 +283,8 @@ class WebConfig:
     #: status list, so the budget sync needs neither a shell nor ansible.
     push_actual: Callable[[], str] | None = None
     actual_status: Callable[[], list[dict[str, object]]] | None = None
+    #: Per-account sync fates for the roster: syncing / provision / unnamed.
+    actual_roster: Callable[[], list[dict[str, object]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -811,13 +814,30 @@ def _holdings_rows(
             )
         )
         row_style = ' style="opacity:.62"' if dormant else ""
+        bind_form = ""
+        if ":" in row.account_id:
+            # A source-qualified id is an account nobody has NAMED - and
+            # binding must not require the extend section (TrueLayer-only)
+            # or a shell. The provider's display label above makes the row
+            # recognisable; this form makes the name canonical.
+            bind_form = (
+                '<form method="post" action="/bind" '
+                'style="display:flex;gap:.4rem;margin:.35rem 0">'
+                f'<input type="hidden" name="account" '
+                f'value="{html.escape(row.account_id)}">'
+                '<input name="canonical" placeholder="name this account, '
+                'e.g. starling-personal" style="flex:1">'
+                '<button class="button" style="display:inline-block;'
+                'padding:.5rem .8rem;border:0;cursor:pointer" '
+                'type="submit">Bind</button></form>'
+            )
         items.append(
             f'<div class="row"{row_style}><strong>'
             f'<a href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong>"
             f" via {html.escape(row.source)}{quiet}{sub}<br>"
             f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
-            f"{strip}</div>"
+            f"{bind_form}{strip}</div>"
         )
     # Accounts the store KNOWS about but holds nothing for must not vanish:
     # "this account exists, we asked back to 2020, nothing there" is a
@@ -895,13 +915,74 @@ def _freshness_line(account: ExtendableAccount) -> str:
     )
 
 
+def _suggest_slug(label: str, ref: str) -> str:
+    """A ready-to-accept canonical name from the provider's display label,
+    so naming an account is one tap rather than a typing exercise. Empty
+    when the label offers nothing better than the opaque ref."""
+    source = ref.split(":", 1)[0] if ":" in ref else ""
+    base = label.split("(", 1)[0].strip().lower()
+    base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+    if not base:
+        return ""
+    if source and source not in base:
+        base = f"{source}-{base}"
+    return base[:40]
+
+
+def _roster_row(entry: dict[str, object]) -> str:
+    label = html.escape(str(entry.get("label", "")))
+    ref = str(entry.get("ref", ""))
+    state = str(entry.get("state", ""))
+    raw_count = entry.get("count", 0)
+    count = raw_count if isinstance(raw_count, int) else 0
+    held = f"{count:,} transaction(s)" if count else "no transactions yet"
+    form = ""
+    if state == "syncing":
+        badge = '<span class="pill pill-ok">syncing</span>'
+        note = held
+    elif state == "provision":
+        badge = '<span class="pill pill-quiet">creates on next push</span>'
+        note = held + (
+            "" if count else " - created empty in Actual, fills as data arrives"
+        )
+    else:
+        badge = '<span class="pill pill-bad">not synced - needs a name</span>'
+        note = f"{held} - name it and the next push takes it"
+        suggestion = _suggest_slug(str(entry.get("label", "")), ref)
+        form = (
+            '<form method="post" action="/bind" '
+            'style="display:flex;gap:.4rem;margin:.35rem 0">'
+            f'<input type="hidden" name="account" value="{html.escape(ref)}">'
+            f'<input name="canonical" value="{html.escape(suggestion)}" '
+            'placeholder="e.g. starling-personal" style="flex:1">'
+            '<button class="button" style="display:inline-block;'
+            'padding:.5rem .8rem;border:0;cursor:pointer" '
+            'type="submit">Bind</button></form>'
+        )
+    return (
+        f'<div class="row"><strong>{label}</strong> {badge}'
+        f'<br><span class="muted">{note}</span>{form}</div>'
+    )
+
+
 def _actual_rows(
     actual_status: Callable[[], list[dict[str, object]]] | None,
     push_available: bool,
+    actual_roster: Callable[[], list[dict[str, object]]] | None = None,
 ) -> str:
-    """The budget sync, visible and pressable - results newest first."""
+    """The budget sync, visible and pressable: the per-account plan first
+    (what a push would do and why), then the button, then results newest
+    first."""
     if actual_status is None and not push_available:
         return ""
+    roster_html = ""
+    if actual_roster is not None:
+        try:
+            roster = actual_roster()
+        except Exception:
+            roster = []
+        if roster:
+            roster_html = "".join(_roster_row(entry) for entry in roster)
     results = []
     if actual_status is not None:
         try:
@@ -938,9 +1019,12 @@ def _actual_rows(
     return (
         "<h2>Actual sync</h2>"
         "<p>Pushes run through the applier container: bound accounts import, "
-        "named-but-unbound accounts are created in Actual automatically and "
-        "their transactions ride the next push. Scheduled cycles queue one "
-        "after every pull.</p>" + button + "".join(rows)
+        "named accounts are created in Actual automatically (empty ones "
+        "included) and their transactions ride the next push. Scheduled "
+        "cycles queue one after every pull.</p>"
+        + roster_html
+        + button
+        + "".join(rows)
     )
 
 
@@ -1115,6 +1199,7 @@ def render_index(
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
     push_actual: Callable[[], str] | None = None,
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
+    actual_roster: Callable[[], list[dict[str, object]]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1122,7 +1207,7 @@ def render_index(
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
-{_actual_rows(actual_status, push_actual is not None)}
+{_actual_rows(actual_status, push_actual is not None, actual_roster)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1222,6 +1307,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     account_timelines=self.bound_config.account_timelines,
                     push_actual=self.bound_config.push_actual,
                     actual_status=self.bound_config.actual_status,
+                    actual_roster=self.bound_config.actual_roster,
                 ),
             )
         elif route == "/connect":

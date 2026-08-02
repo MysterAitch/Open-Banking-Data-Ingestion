@@ -867,6 +867,77 @@ class TestProbingGuidanceOnThePage:
         assert "<br>" in page
 
 
+class TestActualRoster:
+    """The sync plan, readable on the page.
+
+    "0 bound account(s), 2 to provision" was technically true and completely
+    opaque - the roster states, per account, whether it imports, gets
+    created on the next push, or is skipped for want of a name, and puts
+    the remedy (a bind form pre-filled from the display label) in the row.
+    """
+
+    def test_Roster_ShowsEachStateWithItsExplanation(self):
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [],
+            True,
+            lambda: [
+                {
+                    "ref": "halifax-current-account",
+                    "label": "halifax-current-account",
+                    "state": "syncing",
+                    "count": 947,
+                },
+                {
+                    "ref": "halifax-reward-current-account",
+                    "label": "halifax-reward-current-account",
+                    "state": "provision",
+                    "count": 0,
+                },
+                {
+                    "ref": "starling:b2ce",
+                    "label": "Personal (starling)",
+                    "state": "unnamed",
+                    "count": 4690,
+                },
+            ],
+        )
+
+        assert "syncing" in rendered
+        assert "947" in rendered
+        assert "creates on next push" in rendered
+        assert "no transactions yet" in rendered
+        assert "needs a name" in rendered
+        # The remedy lives in the row: a bind form posting the qualified ref,
+        # with the canonical name suggested from the display label.
+        assert 'value="starling:b2ce"' in rendered
+        assert 'value="starling-personal"' in rendered
+
+    def test_Roster_HookFailure_DoesNotTakeDownTheSection(self):
+        from obdi.web import _actual_rows
+
+        def broken():
+            raise RuntimeError("map unreadable")
+
+        rendered = _actual_rows(lambda: [], True, broken)
+
+        assert "Push to Actual now" in rendered
+
+    def test_SuggestedName_ComesFromTheDisplayLabel(self):
+        from obdi.web import _suggest_slug
+
+        assert _suggest_slug("Personal (starling)", "starling:b2ce") == (
+            "starling-personal"
+        )
+        assert _suggest_slug("mortgage (starling space)", "starling:e6a0") == (
+            "starling-mortgage"
+        )
+        # No label worth suggesting: leave the input empty rather than
+        # suggesting a slugified uuid.
+        assert _suggest_slug("", "starling:e6a0") == ""
+
+
 class TestBindingFromThePage:
     """Naming an account should not need a shell.
 
@@ -943,6 +1014,15 @@ class TestBindingFromThePage:
 
         assert calls == [("e9f8", "halifax-current")]
         assert "947 stored row(s) moved" in page
+
+    def test_SourceQualifiedRef_BindsUnderItsOwnSource(self):
+        """The holdings and roster forms post "starling:uid"; the extend rows
+        post bare TrueLayer refs. Both routes must land in the right column
+        of the account map."""
+        from obdi.cli import _split_bind_ref
+
+        assert _split_bind_ref("starling:abc-def") == ("starling", "abc-def")
+        assert _split_bind_ref("e9f8") == ("truelayer", "e9f8")
 
     def test_Bind_RejectionsFromTheHook_AreShownNotSwallowed(self, tmp_path):
         def bind(account, canonical):

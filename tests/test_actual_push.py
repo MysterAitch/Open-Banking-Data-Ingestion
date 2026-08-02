@@ -55,6 +55,26 @@ class TestEnvelope:
             {"canonical_id": "halifax-reward", "label": "Reward (halifax)"}
         ]
 
+    def test_NamedButEmptyAccount_StillProvisions(self, tmp_path):
+        """Bound in the map means wanted: a freshly opened account with no
+        transactions yet must still appear in Actual, not wait offstage
+        until money moves."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _seed(store, "halifax-current", "e-1")
+
+            envelope = build_envelope(
+                store,
+                [ActualAccountBinding("halifax-current", "act-1")],
+                {},
+                named_canonicals={"halifax-current", "halifax-reward"},
+            )
+
+        # halifax-current is already bound to an Actual account, so only the
+        # empty-but-named account needs creating.
+        assert envelope["provision"] == [
+            {"canonical_id": "halifax-reward", "label": "halifax-reward"}
+        ]
+
     def test_QueueWrite_IsAtomicAndOrdered(self, tmp_path):
         first = queue_push({"version": 2}, tmp_path / "actual")
         second = queue_push({"version": 2}, tmp_path / "actual")

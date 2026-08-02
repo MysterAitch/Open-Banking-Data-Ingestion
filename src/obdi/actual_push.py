@@ -71,15 +71,24 @@ def build_envelope(
     store: Store,
     bindings: list[ActualAccountBinding],
     labels: dict[str, str],
+    *,
+    named_canonicals: set[str] | None = None,
 ) -> dict[str, object]:
     transactions = store.all_transactions()
     payload = build_payload(transactions, bindings)
+    # Everything a person has NAMED deserves an Actual account - including
+    # accounts holding nothing yet (bound means wanted; an empty account
+    # standing ready in the budget beats one that appears only once money
+    # moves). Source-qualified fallbacks are accounts nobody has named,
+    # and provisioning them would mint Actual accounts called
+    # "truelayer:3fc9..." - bind first, push after.
+    already_bound = {binding.canonical_id for binding in bindings}
+    candidates = set(unbound_accounts(transactions, bindings)) | (
+        (named_canonicals or set()) - already_bound
+    )
     provision = [
         {"canonical_id": canonical, "label": labels.get(canonical, canonical)}
-        for canonical in unbound_accounts(transactions, bindings)
-        # Source-qualified fallbacks are accounts nobody has NAMED yet;
-        # provisioning them would mint Actual accounts called
-        # "truelayer:3fc9..." - bind first, push after.
+        for canonical in sorted(candidates)
         if ":" not in canonical
     ]
     return {"version": 2, "provision": provision, "accounts": payload}
