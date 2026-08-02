@@ -27,6 +27,8 @@ class ReviewReport:
     by_reason: dict[str, int] = field(default_factory=dict)
     declaration_matches: int = 0
     declaration_names: list[str] = field(default_factory=list)
+    bank_recurring: int = 0
+    bank_categories: dict[str, int] = field(default_factory=dict)
     top_clusters: list[tuple[str, int]] = field(default_factory=list)
 
     def describe(self) -> str:
@@ -42,6 +44,16 @@ class ReviewReport:
         )
         for name in self.declaration_names:
             lines.append(f"    declaration: {name}")
+        lines.append(
+            f"  {self.bank_recurring} flagged transaction(s) are bank-labelled "
+            "DIRECT_DEBIT or STANDING_ORDER - calm candidates"
+        )
+        if self.bank_categories:
+            lines.append("  bank transaction_category across the flags:")
+            for category, count in sorted(
+                self.bank_categories.items(), key=lambda kv: -kv[1]
+            ):
+                lines.append(f"    {category}: {count}")
         if self.top_clusters:
             lines.append("  largest flagged clusters (description: flags):")
             for description, count in self.top_clusters:
@@ -92,11 +104,28 @@ def review_report(store: Store) -> ReviewReport:
     placeholders = ",".join("?" for _ in entity_ids)
     described = store.connection.execute(
         # Placeholders only - the interpolation builds "?,?,?", never data.
-        f"SELECT entity_id, description FROM transactions "  # noqa: S608
+        f"SELECT entity_id, description, raw FROM transactions "  # noqa: S608
         f"WHERE entity_id IN ({placeholders})",
         entity_ids,
     ).fetchall()
     descriptions = {str(r["entity_id"]): str(r["description"]) for r in described}
+
+    categories: dict[str, str] = {}
+    for r in described:
+        if not r["raw"]:
+            continue
+        try:
+            decoded = json.loads(r["raw"])
+        except ValueError:
+            continue
+        label = decoded.get("transaction_category") if isinstance(decoded, dict) else None
+        if isinstance(label, str) and label:
+            categories[str(r["entity_id"])] = label
+    flag_labels = [categories[e] for e in entity_ids if e in categories]
+    report.bank_categories = dict(Counter(flag_labels))
+    report.bank_recurring = sum(
+        1 for label in flag_labels if label in ("DIRECT_DEBIT", "STANDING_ORDER")
+    )
 
     names = _declaration_names(store)
     report.declaration_names = names

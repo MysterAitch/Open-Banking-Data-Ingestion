@@ -1413,6 +1413,88 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)
 
+    def balance_walk_text() -> str:
+        from .rawview import balance_walk_report
+
+        artefacts: list[dict[str, object]] = []
+        with Store(db_path) as store:
+            rows = store.connection.execute(
+                "SELECT account_ref, source, fetched_at, payload FROM raw_artefacts "
+                "WHERE source IN ('truelayer-booked', 'truelayer-card-booked') "
+                "ORDER BY account_ref, fetched_at"
+            ).fetchall()
+            for row in rows:
+                try:
+                    decoded = json.loads(row["payload"])
+                except ValueError:
+                    continue
+                results = decoded.get("results") if isinstance(decoded, dict) else None
+                if not isinstance(results, list):
+                    continue
+                artefacts.append(
+                    {
+                        "ref": str(row["account_ref"]),
+                        "label": f"{row['source']} {str(row['fetched_at'])[:16]}Z",
+                        "rows": results,
+                    }
+                )
+        report = balance_walk_report(artefacts)
+        with_balance = int(str(report["rows_with_balance"]))
+        if not with_balance:
+            return (
+                "no running balances held yet - the walk needs truelayer "
+                "artefacts that carry running_balance"
+            )
+        lines = [
+            f"{report['rows']} artefact row(s) held, {with_balance} carry "
+            "the bank's own running balance:",
+            "",
+        ]
+        total_breaks = 0
+        accounts = report["accounts"]
+        if isinstance(accounts, dict):
+            for ref in sorted(accounts):
+                entry = accounts[ref]
+                checks = int(str(entry["checks"]))
+                breaks = int(str(entry["breaks"]))
+                total_breaks += breaks
+                verdict = "clean" if not breaks else f"{breaks} BREAK(S)"
+                lines.append(f"  {ref}: {checks} chain check(s), {verdict}")
+                conventions = entry.get("conventions")
+                if isinstance(conventions, dict) and conventions:
+                    winner = max(conventions.items(), key=lambda kv: kv[1])
+                    lines.append(
+                        f"    convention: {winner[0]} "
+                        f"({winner[1]} artefact(s) agree)"
+                    )
+                examples = entry.get("examples")
+                for item in examples if isinstance(examples, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    expected = int(str(item["expected"])) / 100
+                    got = int(str(item["got"])) / 100
+                    delta = int(str(item["delta"])) / 100
+                    lines.append(
+                        f"    break at row {item['position']}: balance should "
+                        f"be {expected:.2f} but the bank says {got:.2f} "
+                        f"(unexplained {delta:+.2f}) [{item['artefact']}]"
+                    )
+        lines.append("")
+        if total_breaks:
+            lines.append(
+                f"{total_breaks} break(s): money moved that the held "
+                "transactions do not explain - candidate missing or "
+                "mis-valued rows worth a targeted re-fetch."
+            )
+        else:
+            lines.append(
+                "every balance movement is fully explained by the "
+                "transactions held - the store is arithmetically complete "
+                "over the walked range."
+            )
+        joiner = chr(10)
+        return joiner.join(lines)
+
     def date_lag_text() -> str:
         from .rawview import settlement_lag_report
 
@@ -1680,6 +1762,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
         date_lag_text=date_lag_text,
+        balance_walk_text=balance_walk_text,
         replay_artefact=replay_artefact,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,

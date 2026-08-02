@@ -9,15 +9,16 @@ from obdi.review_report import review_report
 from obdi.store import Store
 
 
-def _flag_transaction(store, entity_id, description, reason):
+def _flag_transaction(store, entity_id, description, reason, category=None):
+    raw = json.dumps({"transaction_category": category}) if category else "{}"
     store.connection.execute(
         "INSERT INTO transactions (entity_id, account_id, amount_minor, "
         "value_date, booking_date, description, source, currency, tier, "
-        "status, content_key, occurrence, first_seen_at, last_seen_at) "
+        "status, content_key, occurrence, first_seen_at, last_seen_at, raw) "
         "VALUES (?, 'halifax-current', -1200, '2026-07-01', '2026-07-01', "
         "?, 'truelayer', 'GBP', 'authoritative', 'booked', ?, 0, "
-        "'2026-07-01T00:00:00', '2026-07-01T00:00:00')",
-        (entity_id, description, f"key-{entity_id}"),
+        "'2026-07-01T00:00:00', '2026-07-01T00:00:00', ?)",
+        (entity_id, description, f"key-{entity_id}", raw),
     )
     store.connection.commit()
     store.queue_for_review(entity_id, reason)
@@ -59,3 +60,31 @@ class TestReviewReport:
 
         assert report.open_flags == 0
         assert report.declaration_matches == 0
+
+
+class TestBankCategories:
+    def test_Report_CountsBankLabelledRecurring_AsCalmCandidates(self, tmp_path):
+        """Flags the bank itself labels DIRECT_DEBIT or STANDING_ORDER are
+        expected payments by definition - the report quantifies how much
+        of the queue they explain before any matcher change is made."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _flag_transaction(
+                store, "e-1", "COUNCIL TAX", "recurring-amount", "DIRECT_DEBIT"
+            )
+            _flag_transaction(
+                store, "e-2", "SAVINGS SWEEP", "recurring-amount", "STANDING_ORDER"
+            )
+            _flag_transaction(store, "e-3", "COFFEE CORNER", "fuzzy-match", "PURCHASE")
+            _flag_transaction(store, "e-4", "MYSTERY SHOP", "fuzzy-match")
+
+            report = review_report(store)
+
+        assert report.bank_recurring == 2
+        assert report.bank_categories == {
+            "DIRECT_DEBIT": 1,
+            "STANDING_ORDER": 1,
+            "PURCHASE": 1,
+        }
+        text = report.describe()
+        assert "2 flagged transaction(s) are bank-labelled" in text
+        assert "DIRECT_DEBIT: 1" in text

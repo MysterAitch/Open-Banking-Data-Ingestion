@@ -330,3 +330,115 @@ def settlement_lag_report(rows: list[dict[str, object]]) -> dict[str, object]:
         "week_crossings": week_crossings,
         "month_crossings": month_crossings,
     }
+
+
+def _chain_breaks(
+    seq: list[tuple[int, int | None]], sign: int
+) -> tuple[int, list[dict[str, object]]]:
+    """Walk one ordered sequence of (amount, balance-or-None) pennies.
+
+    Each known balance must equal the previous known balance plus the
+    signed amounts landed in between. After a mismatch the walk re-anchors
+    on the reported balance, so one missing transaction surfaces as one
+    localised break rather than poisoning the rest of the chain.
+    """
+    checks = 0
+    breaks: list[dict[str, object]] = []
+    last_balance: int | None = None
+    moved = 0
+    for position, (amount, balance) in enumerate(seq):
+        if last_balance is None:
+            if balance is not None:
+                last_balance = balance
+            continue
+        moved += sign * amount
+        if balance is None:
+            continue
+        checks += 1
+        expected = last_balance + moved
+        if expected != balance:
+            breaks.append(
+                {
+                    "position": position,
+                    "expected": expected,
+                    "got": balance,
+                    "delta": balance - expected,
+                }
+            )
+        last_balance = balance
+        moved = 0
+    return checks, breaks
+
+
+def balance_walk_report(artefacts: list[dict[str, object]]) -> dict[str, object]:
+    """Do the bank's own running balances agree with the transactions held?
+
+    Each artefact's rows are walked in the order the provider returned
+    them. A break means money moved that no held transaction explains (a
+    completeness fault) or moved by a different amount (a value fault).
+    Row order and amount sign are never assumed: both directions and both
+    sign conventions are scored per artefact and the hypothesis with the
+    fewest breaks wins, so the report doubles as an empirical proof of the
+    provider's conventions - the same posture as the card sign check.
+    """
+    accounts: dict[str, dict[str, object]] = {}
+    rows_total = 0
+    rows_with_balance = 0
+    for artefact in artefacts:
+        rows = artefact.get("rows")
+        ref = str(artefact.get("ref", ""))
+        label = str(artefact.get("label", ""))
+        seq: list[tuple[int, int | None]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                amount = round(float(str(row.get("amount"))) * 100)
+            except (TypeError, ValueError):
+                continue
+            balance: int | None = None
+            running = row.get("running_balance")
+            if isinstance(running, dict) and running.get("amount") is not None:
+                try:
+                    balance = round(float(str(running["amount"])) * 100)
+                except (TypeError, ValueError):
+                    balance = None
+            seq.append((amount, balance))
+        rows_total += len(seq)
+        rows_with_balance += sum(1 for _, b in seq if b is not None)
+        hypotheses = []
+        for direction, ordered in (
+            ("as-returned", seq),
+            ("reversed", list(reversed(seq))),
+        ):
+            for sign in (1, -1):
+                checks, breaks = _chain_breaks(ordered, sign)
+                hypotheses.append(
+                    (len(breaks), -checks, direction, sign, checks, breaks)
+                )
+        hypotheses.sort(key=lambda h: (h[0], h[1]))
+        break_count, _, direction, sign, checks, breaks = hypotheses[0]
+        if not checks:
+            continue
+        entry = accounts.setdefault(
+            ref, {"checks": 0, "breaks": 0, "examples": [], "conventions": {}}
+        )
+        entry["checks"] = int(str(entry["checks"])) + checks
+        entry["breaks"] = int(str(entry["breaks"])) + break_count
+        convention = (
+            f"{direction} order, amounts {'as-is' if sign == 1 else 'negated'}"
+        )
+        conventions = entry["conventions"]
+        if isinstance(conventions, dict):
+            conventions[convention] = conventions.get(convention, 0) + 1
+        examples = entry["examples"]
+        if isinstance(examples, list):
+            for item in breaks[:3]:
+                if len(examples) >= 5:
+                    break
+                examples.append({**item, "artefact": label})
+    return {
+        "rows": rows_total,
+        "rows_with_balance": rows_with_balance,
+        "accounts": accounts,
+    }

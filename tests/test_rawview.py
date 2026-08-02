@@ -226,3 +226,63 @@ class TestSettlementLag:
         # kinds are genuinely independent.
         assert report["week_crossings"] == 1
         assert report["month_crossings"] == 1
+
+
+class TestBalanceWalk:
+    def test_CleanChain_NewestFirstProviderOrder_VerifiesWithZeroBreaks(self):
+        """The provider returns newest-first and one row lacks a balance;
+        the walk detects the direction, bridges the gap and verifies."""
+        from obdi.rawview import balance_walk_report
+
+        rows = [
+            {"amount": 5.0, "running_balance": {"amount": 85.0}},
+            {"amount": -30.0},
+            {"amount": 10.0, "running_balance": {"amount": 110.0}},
+            {"amount": -20.0, "running_balance": {"amount": 100.0}},
+        ]
+
+        report = balance_walk_report(
+            [{"ref": "truelayer:acc-1", "label": "a1", "rows": rows}]
+        )
+
+        account = report["accounts"]["truelayer:acc-1"]
+        assert account["breaks"] == 0
+        assert account["checks"] == 2
+        assert report["rows_with_balance"] == 3
+        assert "reversed" in next(iter(account["conventions"]))
+
+    def test_MissingTransaction_SurfacesAsOneLocalisedBreak(self):
+        """A transaction the bank counted but the store never held: the
+        balances jump by an unexplained 3.45, the chain re-anchors, and
+        later rows stay clean rather than cascading."""
+        from obdi.rawview import balance_walk_report
+
+        rows = [
+            {"amount": -20.0, "running_balance": {"amount": 100.0}},
+            {"amount": 10.0, "running_balance": {"amount": 110.0}},
+            {"amount": -30.0, "running_balance": {"amount": 76.55}},
+            {"amount": 5.0, "running_balance": {"amount": 81.55}},
+        ]
+
+        report = balance_walk_report(
+            [{"ref": "truelayer:acc-1", "label": "a1", "rows": rows}]
+        )
+
+        account = report["accounts"]["truelayer:acc-1"]
+        assert account["checks"] == 3
+        assert account["breaks"] == 1
+        example = account["examples"][0]
+        assert example["delta"] == -345
+        assert example["artefact"] == "a1"
+
+    def test_NoBalancesAtAll_AccountIsOmittedNotFabricated(self):
+        from obdi.rawview import balance_walk_report
+
+        rows = [{"amount": 5.0}, {"amount": -3.0}]
+
+        report = balance_walk_report(
+            [{"ref": "truelayer:acc-1", "label": "a1", "rows": rows}]
+        )
+
+        assert report["accounts"] == {}
+        assert report["rows_with_balance"] == 0

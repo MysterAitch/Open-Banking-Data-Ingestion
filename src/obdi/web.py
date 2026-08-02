@@ -298,6 +298,8 @@ class WebConfig:
     review_report_text: Callable[[], str] | None = None
     #: Settlement-lag measurement from the starling truth set.
     date_lag_text: Callable[[], str] | None = None
+    #: Balance-walk integrity: bank running balances vs held transactions.
+    balance_walk_text: Callable[[], str] | None = None
     #: Additively replay one landed artefact into the store (see the cli).
     replay_artefact: Callable[[int], str] | None = None
     #: When the applier last checked the queue (ISO stamp, empty if never).
@@ -1800,6 +1802,7 @@ def render_index(
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
+<p><a class="button" href="/balance-walk">Balance walk report</a></p>
 <h2>Import a file</h2>
 <p>Bank CSV or QIF exports - previewed before anything is stored, then
 reconciled through the same identity rules as the API pulls.</p>
@@ -1886,6 +1889,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/date-lag":
             self._date_lag()
+            return
+        if route == "/balance-walk":
+            self._balance_walk()
             return
         if route == "/artefacts":
             self._artefacts()
@@ -2305,6 +2311,30 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
         self._respond(200, render_page("Settlement lag", body))
+
+    def _balance_walk(self) -> None:
+        hook = self.bound_config.balance_walk_text
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        try:
+            text = hook()
+        except Exception as exc:
+            self._respond(
+                500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        body = (
+            "<h2>Balance walk</h2>"
+            "<p>TrueLayer reports the account's running balance on each "
+            "transaction. Consecutive balances must differ by exactly the "
+            "amounts in between - a break means money moved that no held "
+            "transaction explains. This is the store checked against the "
+            "bank's own arithmetic.</p>"
+            f'<pre class="scroll" style="white-space:pre-wrap">'
+            f"{html.escape(text)}</pre>" + HOME_LINK
+        )
+        self._respond(200, render_page("Balance walk", body))
 
     def _read_form(self) -> dict[str, list[str]]:
         length = int(self.headers.get("Content-Length") or 0)
