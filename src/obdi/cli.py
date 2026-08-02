@@ -541,6 +541,74 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "details": details,
         }
 
+    def display_labels() -> dict[str, str]:
+        """Human names for canonical refs, from layer 0 alone.
+
+        The providers have been TELLING us the names since the first pull -
+        TrueLayer's display_name, Starling's account and Space names - all
+        landed as evidence. Refusing to show them, and printing opaque ids
+        instead, was a page defect, not a data gap. Defaults aggregate the
+        provider's name with the connection; binding an account to a chosen
+        canonical name remains the override mechanism on top.
+        """
+        labels: dict[str, str] = {}
+        with Store(db_path) as store:
+            store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+            if store_path_env:
+                with contextlib.suppress(OSError, ValueError):
+                    for connection_id in sorted(ConnectionStore(store_path_env).load()):
+                        for account in store.accounts_for_connection(connection_id):
+                            canonical = _account_map().resolve(
+                                "truelayer", account["account_id"]
+                            )
+                            labels[canonical] = (
+                                f"{account['display_name']} ({connection_id})"
+                            )
+            row = store.connection.execute(
+                "SELECT payload FROM raw_artefacts WHERE source = 'starling-accounts' "
+                "ORDER BY fetched_at DESC LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                with contextlib.suppress(ValueError):
+                    decoded = json.loads(row["payload"])
+                    raw = decoded.get("accounts") if isinstance(decoded, dict) else None
+                    for account in raw if isinstance(raw, list) else []:
+                        if not isinstance(account, dict):
+                            continue
+                        uid = str(account.get("accountUid", ""))
+                        name = str(account.get("name", "") or "account")
+                        if uid:
+                            canonical = _account_map().resolve("starling", uid)
+                            labels[canonical] = f"{name} (starling)"
+                            # The default category holds the account's own
+                            # feed, so it inherits the account's name.
+                            default_cat = str(account.get("defaultCategory", ""))
+                            if default_cat:
+                                labels[
+                                    _account_map().resolve("starling", default_cat)
+                                ] = f"{name} (starling)"
+            for row in store.connection.execute(
+                "SELECT payload FROM raw_artefacts WHERE source = 'starling-spaces' "
+                "ORDER BY fetched_at ASC"
+            ).fetchall():
+                with contextlib.suppress(ValueError):
+                    decoded = json.loads(row["payload"])
+                    raw = (
+                        decoded.get("savingsGoals")
+                        if isinstance(decoded, dict)
+                        else None
+                    )
+                    for goal in raw if isinstance(raw, list) else []:
+                        if not isinstance(goal, dict):
+                            continue
+                        uid = str(goal.get("savingsGoalUid", ""))
+                        name = str(goal.get("name", "") or "space")
+                        if uid:
+                            labels[
+                                _account_map().resolve("starling", uid)
+                            ] = f"{name} (starling space)"
+        return labels
+
     def starling_status() -> dict[str, object] | None:
         """Starling on the front page: configured or not, and which accounts
         the landed accounts artefact says exist. No API call - layer 0 only."""
@@ -700,6 +768,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         bind_account=bind_account,
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
+        display_labels=display_labels,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

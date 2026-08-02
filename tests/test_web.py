@@ -1036,6 +1036,78 @@ class TestAccountLevelShape:
         assert "No merged transactions" in response.text
 
 
+class TestNamesLeadAndDormancySpeaks:
+    """The providers told us every name from the first pull; pages use them.
+
+    Ids demote to small print, and an account whose latest transaction is
+    over a year old carries a neutral quiet-since chip - the date range
+    matters most exactly when it is old.
+    """
+
+    def _server(self, tmp_path, holdings, display_labels):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            holdings=holdings,
+            display_labels=display_labels,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Holdings_ShowNamesWithIdsDemoted_AndQuietAccountsSaySo(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+
+        from obdi.coverage import SourceCoverage
+
+        today = datetime.now(UTC).date()
+        rows = [
+            SourceCoverage(
+                account_id="starling:343fa965-8bb7",
+                source="starling",
+                count=202,
+                earliest=today - timedelta(days=2000),
+                latest=today - timedelta(days=1400),
+                inflow_minor=0,
+                outflow_minor=0,
+                with_durable_id=202,
+            ),
+            SourceCoverage(
+                account_id="starling:b2cec056-b0d8",
+                source="starling",
+                count=4690,
+                earliest=today - timedelta(days=2000),
+                latest=today,
+                inflow_minor=0,
+                outflow_minor=0,
+                with_durable_id=4690,
+            ),
+        ]
+        labels = {
+            "starling:343fa965-8bb7": "Holiday Fund (starling space)",
+            "starling:b2cec056-b0d8": "Main (starling)",
+        }
+
+        httpd, base = self._server(tmp_path, lambda: rows, lambda: labels)
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "Holiday Fund (starling space)" in page
+        assert "Main (starling)" in page
+        # The id survives as small print, still the link target's query key.
+        assert "starling:343fa965-8bb7" in page
+        # One quiet chip: the archived space announces itself; the live
+        # account carries none.
+        assert page.count("quiet since") == 1
+
+
 class TestBrowsingTheAttemptLedger:
     """Every ask made of a provider, on a page: the quota ledger readable.
 

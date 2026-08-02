@@ -70,6 +70,7 @@ def render_page(title: str, body: str) -> bytes:
          font-size: .85em; font-weight: 600; white-space: nowrap; }}
  .pill-ok {{ background: #16a34a22; color: #15803d; }}
  .pill-bad {{ background: #dc262622; color: #b91c1c; }}
+ .pill-quiet {{ background: #8882; }}
  .muted {{ opacity: .65; }}
  .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
          font-size: .85em; word-break: break-all; }}

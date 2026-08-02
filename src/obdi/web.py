@@ -200,6 +200,10 @@ class WebConfig:
     #: so without this the configured-and-pulling Starling account was
     #: entirely invisible on the page that lists banks.
     starling_status: Callable[[], dict[str, object] | None] | None = None
+    #: Human names for canonical refs, resolved from layer 0. Pages show
+    #: these with the id demoted to small print - the id is the query key,
+    #: not the thing a person recognises.
+    display_labels: Callable[[], dict[str, str]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -531,12 +535,20 @@ def _credential_banner() -> str:
     )
 
 
-def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
+def _holdings_rows(
+    holdings: Callable[[], list[SourceCoverage]] | None,
+    display_labels: Callable[[], dict[str, str]] | None = None,
+) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
     Failure here must never take down the page that manages connections: the
     store may legitimately be mid-write during a backfill, which is exactly
     when someone is refreshing to see how it is going.
+
+    Names lead and ids demote to small print, and a quiet account SAYS so:
+    the date range matters most precisely when it is old, so the old case
+    gets a chip instead of hiding in a run of text. Neutral, not red -
+    dormancy is a fact about the account, not a fault in the fetching.
     """
     if holdings is None:
         return ""
@@ -546,14 +558,34 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
         return ""
     if not rows:
         return ""
+    labels: dict[str, str] = {}
+    if display_labels is not None:
+        try:
+            labels = display_labels()
+        except Exception:
+            labels = {}
     items = []
+    today = datetime.now(UTC).date()
     for row in rows:
+        label = labels.get(row.account_id)
+        title = html.escape(label) if label else html.escape(row.account_id)
+        sub = (
+            f'<br><span class="muted mono">{html.escape(row.account_id)}</span>'
+            if label
+            else ""
+        )
+        quiet = ""
+        if (today - row.latest).days > 365:
+            quiet = (
+                f' <span class="pill pill-quiet">quiet since '
+                f"{row.latest.isoformat()}</span>"
+            )
         items.append(
             f'<div class="row"><strong>'
             f'<a href="/account?ref={quote(row.account_id)}">'
-            f"{html.escape(row.account_id)}</a></strong>"
-            f" via {html.escape(row.source)}<br>"
-            f"{row.count:,} transactions, {row.earliest} .. {row.latest}</div>"
+            f"{title}</a></strong>"
+            f" via {html.escape(row.source)}{quiet}{sub}<br>"
+            f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong></div>"
         )
     return "<h2>Held so far</h2>" + "".join(items)
 
@@ -746,12 +778,13 @@ def render_index(
     provider_knowledge: Callable[[], list[dict[str, object]]] | None = None,
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
     starling_status: Callable[[], dict[str, object] | None] | None = None,
+    display_labels: Callable[[], dict[str, str]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
 {_starling_row(starling_status)}
-{_holdings_rows(holdings)}
+{_holdings_rows(holdings, display_labels)}
 {_knowledge_rows(provider_knowledge)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
@@ -840,6 +873,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     provider_knowledge=self.bound_config.provider_knowledge,
                     extendables=self.bound_config.extendables,
                     starling_status=self.bound_config.starling_status,
+                    display_labels=self.bound_config.display_labels,
                 ),
             )
         elif route == "/connect":
@@ -1016,6 +1050,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         source_list = ", ".join(
             html.escape(str(s)) for s in (sources if isinstance(sources, list) else [])
         )
+        label = ""
+        if self.bound_config.display_labels is not None:
+            try:
+                label = self.bound_config.display_labels().get(ref, "")
+            except Exception:
+                label = ""
         raw_details = shape.get("details")
         details = raw_details if isinstance(raw_details, dict) else {}
         details_html = ""
@@ -1026,8 +1066,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 f'({html.escape(str(details.get("account_type", "")))}) '
                 f'via {html.escape(str(details.get("connection", "")))}</span>'
             )
+        heading = html.escape(label) if label else html.escape(ref)
+        id_line = (
+            f'<br><span class="muted mono">{html.escape(ref)}</span>' if label else ""
+        )
         body = (
-            f"<p><strong>{html.escape(ref)}</strong>{details_html}<br>"
+            f"<p><strong>{heading}</strong>{id_line}{details_html}<br>"
             f"{shape.get('count', 0):,} merged transaction(s) "
             f"from {source_list or 'unknown sources'}</p>"
             "<p>This is the MERGED layer - what the store believes after "
