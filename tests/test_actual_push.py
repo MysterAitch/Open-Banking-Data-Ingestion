@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 from obdi.actual_push import (
+    build_audit_envelope,
     build_envelope,
     drop_conflicting_bindings,
     latest_results,
@@ -101,6 +102,37 @@ class TestEnvelope:
             {"canonical_id": "halifax-current", "label": "halifax-current"},
             {"canonical_id": "halifax-saver", "label": "halifax-saver"},
         ]
+
+    def test_AuditEnvelope_CoversEveryBoundAccount_EmptyOnesIncluded(self, tmp_path):
+        """The audit asks "what should this account hold" for every bound
+        account - an empty one can still hold orphans on the Actual side,
+        which is precisely what the audit exists to see."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _seed(store, "halifax-current", "e-1")
+
+            envelope = build_audit_envelope(
+                store,
+                [
+                    ActualAccountBinding("halifax-current", "act-1"),
+                    ActualAccountBinding("halifax-reward", "act-2"),
+                ],
+            )
+
+        assert envelope["kind"] == "audit"
+        accounts = envelope["accounts"]
+        assert len(accounts["act-1"]) == 1
+        assert accounts["act-2"] == []
+
+    def test_AuditQueue_UsesItsOwnPrefix_AndListsWithItsKind(self, tmp_path):
+        queued = queue_push(
+            {"version": 2, "kind": "audit"}, tmp_path / "actual", prefix="audit"
+        )
+        queue_push({"version": 2}, tmp_path / "actual")
+
+        assert queued.name.startswith("audit-")
+        listed = queued_requests(tmp_path / "actual")
+        assert {entry["kind"] for entry in listed} == {"audit", "push"}
+        assert all(entry["queued_at"] for entry in listed)
 
     def test_QueueWrite_IsAtomicAndOrdered(self, tmp_path):
         first = queue_push({"version": 2}, tmp_path / "actual")

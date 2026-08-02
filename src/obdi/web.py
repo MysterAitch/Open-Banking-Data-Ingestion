@@ -287,6 +287,8 @@ class WebConfig:
     actual_roster: Callable[[], list[dict[str, object]]] | None = None
     #: Envelopes queued but not yet picked up by the applier.
     actual_queue: Callable[[], list[dict[str, object]]] | None = None
+    #: Queue a read-only audit: the applier reads Actual back and reports.
+    audit_actual: Callable[[], str] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -969,11 +971,68 @@ def _roster_row(entry: dict[str, object]) -> str:
     )
 
 
+def _audit_result_row(result: dict[str, object]) -> str:
+    """One audit outcome: a verdict pill, then a line per account.
+
+    "yours" is the count of rows without an imported id - the person's own
+    entries, counted to show they were seen and deliberately not compared.
+    """
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    if not result.get("ok"):
+        return (
+            f'<div class="row"><strong>{stamp}</strong> '
+            '<span class="pill pill-bad">audit failed</span>'
+            f'<br><span class="muted">{html.escape(str(result.get("error", "")))}'
+            "</span></div>"
+        )
+    raw = result.get("accounts")
+    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+
+    def _dirty(account: dict[str, object]) -> bool:
+        return bool(
+            account.get("missing_account")
+            or account.get("missing")
+            or account.get("orphaned")
+            or account.get("diverged")
+        )
+
+    badge = (
+        '<span class="pill pill-bad">audit: differences</span>'
+        if any(_dirty(a) for a in accounts)
+        else '<span class="pill pill-ok">audit clean</span>'
+    )
+    lines = []
+    for account in accounts:
+        name = html.escape(str(account.get("name") or account.get("account_id", "")))
+        if account.get("missing_account"):
+            lines.append(
+                f'<span class="warn">{name}: account missing from Actual '
+                f"({account.get('expected', 0)} expected row(s))</span>"
+            )
+            continue
+        detail = (
+            f"expected {account.get('expected', 0)}, "
+            f"present {account.get('present', 0)}, "
+            f"missing {account.get('missing', 0)}, "
+            f"orphaned {account.get('orphaned', 0)}, "
+            f"yours {account.get('human', 0)}, "
+            f"diverged {account.get('diverged', 0)}"
+        )
+        css = "warn" if _dirty(account) else "muted"
+        lines.append(f'<span class="{css}">{name}: {detail}</span>')
+    return (
+        f'<div class="row"><strong>{stamp}</strong> {badge}<br>'
+        + "<br>".join(lines)
+        + "</div>"
+    )
+
+
 def _actual_rows(
     actual_status: Callable[[], list[dict[str, object]]] | None,
     push_available: bool,
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
+    audit_available: bool = False,
 ) -> str:
     """The budget sync, visible and pressable: the per-account plan first
     (what a push would do and why), then the button, then results newest
@@ -999,9 +1058,10 @@ def _actual_rows(
             stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
                 str(entry.get("name", ""))
             )
+            what = "queued (audit)" if entry.get("kind") == "audit" else "queued"
             parts.append(
                 f'<div class="row"><strong>{stamp}</strong> '
-                '<span class="pill pill-quiet">queued</span>'
+                f'<span class="pill pill-quiet">{what}</span>'
                 '<br><span class="muted">waiting for the applier'
                 "</span></div>"
             )
@@ -1014,6 +1074,9 @@ def _actual_rows(
             results = []
     rows = []
     for result in results:
+        if str(result.get("kind", "")) == "audit":
+            rows.append(_audit_result_row(result))
+            continue
         ok = bool(result.get("ok"))
         badge = (
             '<span class="pill pill-ok">applied</span>'
@@ -1039,6 +1102,15 @@ def _actual_rows(
         if push_available
         else ""
     )
+    audit_button = (
+        '<form method="post" action="/audit-actual">'
+        '<p><button class="button" type="submit" '
+        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
+        'background:#8882;color:inherit">'
+        "Audit Actual now</button></p></form>"
+        if audit_available
+        else ""
+    )
     return (
         "<h2>Actual sync</h2>"
         "<p>Pushes run through the applier container: bound accounts import, "
@@ -1046,8 +1118,12 @@ def _actual_rows(
         "included) and their transactions ride the next push. The applier "
         "checks the queue about every 20 seconds; the scheduler also "
         "queues a push after each pull cycle, every six hours.</p>"
+        "<p>The audit reads each bound account back from Actual and "
+        "reports differences without changing anything - rows without an "
+        "imported id are yours and are only counted.</p>"
         + roster_html
         + button
+        + audit_button
         + queued_html
         + "".join(rows)
     )
@@ -1226,6 +1302,7 @@ def render_index(
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
+    audit_actual: Callable[[], str] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1233,7 +1310,8 @@ def render_index(
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
-{_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue)}
+{_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
+              audit_available=audit_actual is not None)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1335,6 +1413,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_status=self.bound_config.actual_status,
                     actual_roster=self.bound_config.actual_roster,
                     actual_queue=self.bound_config.actual_queue,
+                    audit_actual=self.bound_config.audit_actual,
                 ),
             )
         elif route == "/connect":
@@ -1612,6 +1691,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if route == "/push-actual":
             self._push_actual()
             return
+        if route == "/audit-actual":
+            self._audit_actual()
+            return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(
                 int(self.headers.get("Content-Length") or 0)
@@ -1811,6 +1893,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 "<p>The applier container picks requests up within its poll "
                 "interval; results appear in the Actual sync section on the "
                 "home page.</p>" + HOME_LINK,
+            ),
+        )
+
+    def _audit_actual(self) -> None:
+        hook = self.bound_config.audit_actual
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Audit is not wired.</p>"))
+            return
+        try:
+            summary = hook()
+        except Exception as exc:
+            self._respond(500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        print(f"actual audit queued via page: {summary}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Audit queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>Read-only: the applier reads each bound account back "
+                "from Actual and reports differences in the Actual sync "
+                "section - nothing is changed on either side.</p>" + HOME_LINK,
             ),
         )
 

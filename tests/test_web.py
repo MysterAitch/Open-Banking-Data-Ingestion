@@ -938,6 +938,109 @@ class TestActualRoster:
         # itself" needs no shell either.
         assert "every six hours" in rendered
 
+    def test_AuditResults_RenderPerAccount_DifferencesWarned(self):
+        """The report the audit exists for: a clean account reads muted,
+        an account with orphans or divergence is flagged, and the person's
+        own rows appear as a count labelled theirs - never listed."""
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [
+                {
+                    "ok": True,
+                    "kind": "audit",
+                    "finished_at": "2026-08-02T13:00:00Z",
+                    "accounts": [
+                        {
+                            "account_id": "act-1",
+                            "name": "halifax-current-account",
+                            "missing_account": False,
+                            "expected": 947,
+                            "present": 947,
+                            "missing": 0,
+                            "orphaned": 0,
+                            "human": 2,
+                            "diverged": 0,
+                        },
+                        {
+                            "account_id": "act-2",
+                            "name": "halifax-instant-saver",
+                            "missing_account": False,
+                            "expected": 6,
+                            "present": 4,
+                            "missing": 2,
+                            "orphaned": 3,
+                            "human": 0,
+                            "diverged": 1,
+                        },
+                    ],
+                }
+            ],
+            True,
+        )
+
+        assert "audit: differences" in rendered
+        assert "yours 2" in rendered
+        assert "orphaned 3" in rendered
+        assert 'class="warn">halifax-instant-saver' in rendered
+        assert 'class="muted">halifax-current-account' in rendered
+
+    def test_AuditResults_CleanRun_GetsTheOkPill(self):
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [
+                {
+                    "ok": True,
+                    "kind": "audit",
+                    "finished_at": "2026-08-02T13:00:00Z",
+                    "accounts": [
+                        {
+                            "account_id": "act-1",
+                            "name": "halifax-current-account",
+                            "missing_account": False,
+                            "expected": 947,
+                            "present": 947,
+                            "missing": 0,
+                            "orphaned": 0,
+                            "human": 0,
+                            "diverged": 0,
+                        }
+                    ],
+                }
+            ],
+            True,
+        )
+
+        assert "audit clean" in rendered
+
+    def test_AuditButton_RendersOnlyWhenWired(self):
+        from obdi.web import _actual_rows
+
+        with_button = _actual_rows(lambda: [], True, audit_available=True)
+        without = _actual_rows(lambda: [], True, audit_available=False)
+
+        assert 'action="/audit-actual"' in with_button
+        assert 'action="/audit-actual"' not in without
+
+    def test_QueuedAudit_IsLabelledDistinctlyFromAPush(self):
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [],
+            True,
+            None,
+            lambda: [
+                {
+                    "name": "audit-20260802T130000000000.json",
+                    "kind": "audit",
+                    "queued_at": "2026-08-02T13:00:00",
+                }
+            ],
+        )
+
+        assert "queued (audit)" in rendered
+
     def test_Roster_HookFailure_DoesNotTakeDownTheSection(self):
         from obdi.web import _actual_rows
 

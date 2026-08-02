@@ -31,6 +31,16 @@ jobs:
       - run: ruff check .
       - run: mypy
       - run: pytest -q
+      # The applier's pure logic (envelope parsing, audit partitioning)
+      # is node:test covered; a failure here must gate the image build
+      # the same way pytest does.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: applier
+      - run: node --test
+        working-directory: applier
 
   publish:
     needs: check

@@ -25,6 +25,7 @@ import {
 import { join } from 'node:path';
 import process from 'node:process';
 
+import { auditAccounts } from './audit.mjs';
 import { mergeBindings, parseEnvelope } from './envelope.mjs';
 import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
 
@@ -47,7 +48,18 @@ async function readJsonOr(path, fallback) {
 async function processRequest(name) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
-  const { provision, accounts } = parseEnvelope(payload);
+  const { kind, provision, accounts } = parseEnvelope(payload);
+
+  if (kind === 'audit') {
+    const report = await withBudget((client) => auditAccounts(client, accounts));
+    return {
+      ok: true,
+      kind: 'audit',
+      request: name,
+      finished_at: new Date().toISOString(),
+      accounts: report,
+    };
+  }
 
   const outcome = await withBudget(async (client) => {
     const provisioned = await provisionAccounts(client, provision);
@@ -89,11 +101,14 @@ async function tick() {
     }
     await writeFile(join(RESULTS, name), JSON.stringify(result, null, 2));
     await rename(join(REQUESTS, name), join(PROCESSED, name));
-    console.log(
-      result.ok
-        ? `${name}: applied (${result.added} added, ${result.provisioned} provisioned)`
-        : `${name}: FAILED - ${result.error}`,
-    );
+    let line = `${name}: FAILED - ${result.error}`;
+    if (result.ok) {
+      line =
+        result.kind === 'audit'
+          ? `${name}: audited ${result.accounts.length} account(s)`
+          : `${name}: applied (${result.added} added, ${result.provisioned} provisioned)`;
+    }
+    console.log(line);
   }
 }
 

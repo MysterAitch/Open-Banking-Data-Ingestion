@@ -140,13 +140,29 @@ def build_envelope(
     return {"version": 2, "provision": provision, "accounts": payload}
 
 
+def build_audit_envelope(
+    store: Store, bindings: list[ActualAccountBinding]
+) -> dict[str, object]:
+    """What obdi believes Actual should hold, for the applier to check.
+
+    The same payload a push would carry, marked kind=audit so the applier
+    reads back and compares instead of importing. Every bound account is
+    included even when empty - an empty account can still hold orphans on
+    the Actual side, and those are precisely what the audit exists to see.
+    """
+    accounts = build_payload(store.all_transactions(), bindings)
+    for binding in bindings:
+        accounts.setdefault(binding.actual_account_id, [])
+    return {"version": 2, "kind": "audit", "accounts": accounts}
+
+
 def queue_push(
-    envelope: dict[str, object], actual_dir: Path
+    envelope: dict[str, object], actual_dir: Path, prefix: str = "push"
 ) -> Path:
     """Write the envelope atomically into the request directory."""
     requests = actual_dir / "requests"
     requests.mkdir(parents=True, exist_ok=True)
-    name = f"push-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.json"
+    name = f"{prefix}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.json"
     tmp = requests / f".{name}.tmp"
     tmp.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
     final = requests / name
@@ -165,18 +181,18 @@ def queued_requests(actual_dir: Path) -> list[dict[str, object]]:
     if not requests.is_dir():
         return []
     out: list[dict[str, object]] = []
-    for path in sorted(requests.glob("push-*.json"), reverse=True):
-        if path.name.startswith("."):
+    for path in sorted(requests.glob("*.json"), reverse=True):
+        if path.name.startswith(".") or "-" not in path.stem:
             continue
+        kind, _, stamp = path.stem.partition("-")
         queued_at = ""
-        stamp = path.stem.removeprefix("push-")
         with contextlib.suppress(ValueError):
             queued_at = (
                 datetime.strptime(stamp, "%Y%m%dT%H%M%S%f")
                 .replace(tzinfo=UTC)
                 .strftime("%Y-%m-%dT%H:%M:%S")
             )
-        out.append({"name": path.name, "queued_at": queued_at})
+        out.append({"name": path.name, "kind": kind, "queued_at": queued_at})
     return out
 
 

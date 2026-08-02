@@ -21,6 +21,10 @@ export function parseEnvelope(payload) {
         ? payload.accounts
         : {};
     return {
+      // 'audit' asks for a read-back-and-compare instead of an import;
+      // anything else is a push, so an unknown kind cannot silently
+      // become a write.
+      kind: payload.kind === 'audit' ? 'audit' : 'push',
       provision: provision.filter(
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),
@@ -29,6 +33,7 @@ export function parseEnvelope(payload) {
   }
   // Version 1: the whole payload IS the accounts map.
   return {
+    kind: 'push',
     provision: [],
     accounts: payload && typeof payload === 'object' ? payload : {},
   };

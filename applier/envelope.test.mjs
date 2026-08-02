@@ -37,3 +37,10 @@ test('minted bindings merge with pending ones, newest winning per canonical', ()
     { canonical_id: 'b', actual_account_id: 'b-1' },
   ]);
 });
+
+test('an audit envelope is recognised; unknown kinds stay pushes', () => {
+  assert.equal(parseEnvelope({ version: 2, kind: 'audit', accounts: {} }).kind, 'audit');
+  assert.equal(parseEnvelope({ version: 2, accounts: {} }).kind, 'push');
+  assert.equal(parseEnvelope({ version: 2, kind: 'surprise', accounts: {} }).kind, 'push');
+  assert.equal(parseEnvelope({ 'act-1': [] }).kind, 'push');
+});

@@ -172,6 +172,29 @@ def queue_actual_push(db_path: Path) -> str:
     return "; ".join(lines)
 
 
+def queue_actual_audit(db_path: Path) -> str:
+    """Ask the applier to read Actual back and report differences.
+
+    Read-only on both sides: the envelope carries what obdi believes each
+    bound account holds, the applier partitions what is actually there
+    (present / missing / orphaned / yours / diverged) and answers with a
+    result file the page renders. Nothing is changed anywhere.
+    """
+    from .actual_push import build_audit_envelope, queue_push
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    bindings = _actual_bindings()
+    if not bindings:
+        return "no Actual-bound accounts to audit - push first."
+    with Store(db_path) as store:
+        envelope = build_audit_envelope(store, bindings)
+    queued = queue_push(envelope, _actual_dir(db_path), prefix="audit")
+    raw_accounts = envelope.get("accounts")
+    count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
+    return f"queued {queued.name}: auditing {count} bound account(s)"
+
+
 def _push_actual(db_path: Path) -> int:
     try:
         print(queue_actual_push(db_path))
@@ -922,6 +945,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         return latest_results(_actual_dir(db_path))
 
+    def audit_actual_hook() -> str:
+        return queue_actual_audit(db_path)
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import queued_requests
 
@@ -1067,6 +1093,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_status=actual_status,
         actual_roster=actual_roster,
         actual_queue=actual_queue,
+        audit_actual=audit_actual_hook,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
