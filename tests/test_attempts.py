@@ -563,3 +563,144 @@ class TestCardsLandAndParse:
                 "SELECT amount_minor FROM transactions"
             ).fetchone()[0]
         assert amount == -999
+
+
+class TestCardDeepHistory:
+    """The card side of every payment must be walkable as deep as the
+    account side, or transfer pairing manufactures orphans forever. An
+    only_account ref that matches no current account is tried as a card,
+    with the explicit window passed through."""
+
+    def test_ExtendStyleWindow_FetchesTheCard_AndReconciles(
+        self, tmp_path, monkeypatch
+    ):
+        from datetime import date
+
+        asked_windows = []
+
+        def fake_accounts(_token, **_kwargs):
+            return ([], b'{"results": []}')
+
+        def fake_card_txns(_token, card_id, **kwargs):
+            asked_windows.append((card_id, kwargs.get("since"), kwargs.get("until")))
+            record = (
+                '{"amount": 25.00, "currency": "GBP", "description": "SHOP", '
+                '"timestamp": "2024-05-01T00:00:00Z", '
+                '"transaction_type": "DEBIT", "transaction_id": "c-7", '
+                '"normalised_provider_transaction_id": "txn-c-7", '
+                '"provider_transaction_id": "c-7"}'
+            )
+            return (
+                ('{"results": [' + record + "]}").encode("utf-8"),
+                "from=2024-04-01&to=2024-06-01",
+            )
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr(
+            "obdi.pull.truelayer.fetch_card_transactions", fake_card_txns
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            pull_truelayer(
+                store,
+                _connection(),
+                client_id="i",
+                client_secret="s",
+                connection_store=ConnectionStore(tmp_path / "c.json"),
+                account_map=AccountMap(),
+                since=date(2024, 4, 1),
+                until=date(2024, 6, 1),
+                only_account="card-1",
+            )
+            amount = store.connection.execute(
+                "SELECT amount_minor, account_id FROM transactions"
+            ).fetchone()
+            attempts = [row["source"] for row in store.attempts()]
+
+        assert asked_windows == [("card-1", date(2024, 4, 1), date(2024, 6, 1))]
+        assert amount[0] == -2500
+        assert amount[1] == "truelayer:card-1"
+        assert "truelayer-card-booked" in attempts
+
+    def test_CardRefusal_IsRecordedThenRaised(self, tmp_path, monkeypatch):
+        from datetime import date
+
+        import pytest
+
+        from obdi.providers.truelayer import TrueLayerError
+
+        def fake_accounts(_token, **_kwargs):
+            return ([], b'{"results": []}')
+
+        def refusing_card_txns(_token, _card_id, **_kwargs):
+            error = TrueLayerError("card window refused")
+            error.status = 400
+            error.code = "invalid_date_range"
+            raise error
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr(
+            "obdi.pull.truelayer.fetch_card_transactions", refusing_card_txns
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            with pytest.raises(TrueLayerError):
+                pull_truelayer(
+                    store,
+                    _connection(),
+                    client_id="i",
+                    client_secret="s",
+                    connection_store=ConnectionStore(tmp_path / "c.json"),
+                    account_map=AccountMap(),
+                    since=date(2011, 1, 1),
+                    until=date(2013, 1, 1),
+                    only_account="card-1",
+                )
+            refused = [
+                row
+                for row in store.attempts()
+                if row["outcome"] == "refused"
+                and row["source"] == "truelayer-card-booked"
+            ]
+        assert len(refused) == 1
+        assert refused[0]["error_code"] == "invalid_date_range"
+
+
+class TestCardsFromLayerZero:
+    def test_CardList_ReadsFromTheLandedArtefact(self, tmp_path):
+        import json as _json
+
+        from obdi.providers.truelayer import artefact_for
+
+        body = _json.dumps(
+            {
+                "results": [
+                    {
+                        "account_id": "card-1",
+                        "display_name": "Halifax Clarity Credit Card",
+                        "card_type": "CREDIT",
+                        "partial_card_number": "5501",
+                    }
+                ]
+            }
+        ).encode("utf-8")
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                artefact_for(
+                    body,
+                    account_id="halifax",
+                    kind="cards",
+                    account_ref="halifax",
+                )
+            )
+
+            cards = store.cards_for_connection("halifax")
+
+        assert cards == [
+            {
+                "account_id": "card-1",
+                "display_name": "Halifax Clarity Credit Card",
+                "card_type": "CREDIT",
+                "partial_card_number": "5501",
+            }
+        ]

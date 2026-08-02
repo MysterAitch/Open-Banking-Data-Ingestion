@@ -592,22 +592,29 @@ def fetch_card_transactions(
     access_token: str,
     card_id: str,
     *,
-    days: int,
+    days: int | None = None,
+    since: date | None = None,
+    until: date | None = None,
     psu_ip: str | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[bytes, str]:
     """One window of card transactions, raw, with the range asked.
 
-    LAND-ONLY for now, deliberately: card sign conventions are the classic
-    silent-corruption risk, so nothing is parsed into the transactions
-    layer until real payloads have been inspected. The evidence lands
-    first; the interpretation follows the inspection.
+    An explicit since/until is a deep-history step - the extend buttons
+    and the ladder drive these, exactly as they do for accounts. Without
+    a window it is the routine trailing fetch. (The land-only era ended
+    2026-08-02, when the sign convention was verified against landed
+    evidence and the mapper wired.)
     """
     http = client or httpx.Client(timeout=30.0)
-    until = datetime.now(UTC).date()
+    if since is not None and until is not None:
+        window_from, window_to = since, until
+    else:
+        window_to = datetime.now(UTC).date()
+        window_from = window_to - timedelta(days=days or ROUTINE_WINDOW_DAYS)
     params = {
-        "from": (until - timedelta(days=days)).isoformat(),
-        "to": until.isoformat(),
+        "from": window_from.isoformat(),
+        "to": window_to.isoformat(),
     }
     response = http.get(
         f"{API_HOST}/data/v1/cards/{card_id}/transactions",

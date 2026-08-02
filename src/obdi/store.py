@@ -576,6 +576,38 @@ class Store:
                 )
         return accounts
 
+    def cards_for_connection(self, connection_id: str) -> list[dict[str, str]]:
+        """The provider's own card list, from the landed cards artefact.
+
+        The accounts twin above; cards live in a separate endpoint family
+        and land as their own artefact, so listing them is equally free.
+        """
+        row = self.connection.execute(
+            "SELECT payload FROM raw_artefacts WHERE source = 'truelayer-cards' "
+            "AND account_ref = ? ORDER BY fetched_at DESC LIMIT 1",
+            (connection_id,),
+        ).fetchone()
+        if row is None:
+            return []
+        import json as _json
+
+        payload = _json.loads(row[0])
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+        cards = []
+        for item in results:
+            if isinstance(item, dict) and item.get("account_id"):
+                cards.append(
+                    {
+                        "account_id": str(item.get("account_id")),
+                        "display_name": str(item.get("display_name") or "unnamed"),
+                        "card_type": str(item.get("card_type") or ""),
+                        "partial_card_number": str(
+                            item.get("partial_card_number") or ""
+                        ),
+                    }
+                )
+        return cards
+
     def detect_reconnect_drift(self, connection_id: str) -> list[str]:
         """Compare the two latest accounts payloads for one connection.
 

@@ -546,7 +546,7 @@ def _earliest_asked(store: Store, canonical: str) -> date | None:
         # Only "?" placeholders are interpolated; the values themselves are
         # parameterised.
         f"SELECT origin FROM raw_artefacts WHERE account_ref IN ({placeholders}) "  # noqa: S608
-        "AND source IN ('truelayer-booked', 'starling-feed')",
+        "AND source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
         aliases,
     ).fetchall()
     asked: list[date] = []
@@ -575,7 +575,7 @@ def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
     rows = store.connection.execute(
         "SELECT origin, fetched_at, source FROM raw_artefacts "  # noqa: S608
         f"WHERE account_ref IN ({placeholders}) "
-        "AND source IN ('truelayer-booked', 'starling-feed')",
+        "AND source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
         aliases,
     ).fetchall()
     covered: date | None = None
@@ -761,6 +761,49 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             provider_ref=account["account_id"],
                             display=f"{account['display_name']} "
                             f"({account['account_type'] or 'account'})",
+                            earliest=min(dates) if dates else None,
+                            probed_back_to=_earliest_asked(store, canonical),
+                            auth_note=note,
+                            boundary=(
+                                date.fromisoformat(boundary_fact)
+                                if boundary_fact
+                                else None
+                            ),
+                            canonical=canonical,
+                            unbound=canonical.startswith("truelayer:"),
+                            covered_to=covered_to,
+                            last_landed=last_landed,
+                        )
+                    )
+                # Cards join the extend rows with the same buttons: the
+                # card side of every payment must be walkable as deep as
+                # the account side, or transfer pairing manufactures
+                # orphans forever. Whether /cards honours offset windows
+                # at all is exactly what pressing these will measure.
+                for card in store.cards_for_connection(connection_id):
+                    canonical = _account_map().resolve(
+                        "truelayer", card["account_id"]
+                    )
+                    dates = [
+                        t.value_date
+                        for t in held
+                        if t.account_id == canonical and t.source == "truelayer"
+                    ]
+                    boundary_fact = store.provider_fact(
+                        "truelayer", connection_id, f"history_boundary:{canonical}"
+                    )
+                    covered_to, last_landed = _latest_asked(store, canonical)
+                    suffix = (
+                        f"{card['card_type'] or 'card'} card "
+                        f"...{card['partial_card_number']}"
+                        if card["partial_card_number"]
+                        else f"{card['card_type'] or 'card'} card"
+                    )
+                    found.append(
+                        ExtendableAccount(
+                            connection=connection_id,
+                            provider_ref=card["account_id"],
+                            display=f"{card['display_name']} ({suffix})",
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
                             auth_note=note,
@@ -1136,7 +1179,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 str(r[0])
                 for r in store.connection.execute(
                     "SELECT DISTINCT account_ref FROM raw_artefacts "
-                    "WHERE source IN ('truelayer-booked', 'starling-feed')"
+                    "WHERE source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')"
                 ).fetchall()
             ]
             # Both vintages of a label group under one display key - the

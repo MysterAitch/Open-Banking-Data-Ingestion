@@ -152,10 +152,12 @@ def pull_truelayer(
         )
     )
 
+    matched_account = False
     for account in accounts:
         provider_account_id = text(account, "account_id")
         if only_account and provider_account_id != only_account:
             continue
+        matched_account = True
         canonical = account_map.resolve("truelayer", provider_account_id)
         if canonical.startswith("truelayer:"):
             # Named, not just numbered: an opaque id is unbindable in practice,
@@ -371,6 +373,68 @@ def pull_truelayer(
     # corruption, so the evidence goes to layer 0 for inspection first;
     # reconciliation into transactions follows once real payloads have
     # confirmed the shapes. A refusal is noted, never fatal.
+    if only_account and not matched_account:
+        # A ref that matches no current account is tried as a CARD: cards
+        # live in their own endpoint family, and the extend machinery
+        # reaches here with an explicit window. The card side of every
+        # payment must be walkable as deep as the account side, or the
+        # pairing manufactures orphans forever.
+        card_target = account_map.resolve("truelayer", only_account)
+        try:
+            card_body, card_asked = truelayer.fetch_card_transactions(
+                connection.access_token,
+                only_account,
+                since=since,
+                until=until,
+                psu_ip=psu_ip,
+            )
+        except truelayer.TrueLayerError as exc:
+            store.record_attempt(
+                source="truelayer-card-booked",
+                connection_id=connection.connection_id,
+                account_ref=f"truelayer:{only_account}",
+                asked=f"since={since}&until={until}" if since else "routine",
+                request_meta=request_meta,
+                outcome="refused",
+                http_status=getattr(exc, "status", None),
+                error_code=str(getattr(exc, "code", "") or ""),
+                detail=_refusal_detail(exc),
+            )
+            raise
+        window_artefact = truelayer.artefact_for(
+            card_body,
+            account_id=only_account,
+            kind="card-booked",
+            requested=card_asked,
+            request_meta=request_meta,
+        )
+        store.record_attempt(
+            source="truelayer-card-booked",
+            connection_id=connection.connection_id,
+            account_ref=f"truelayer:{only_account}",
+            asked=card_asked,
+            request_meta=request_meta,
+            outcome="landed",
+            http_status=200,
+            artefact_digest=window_artefact.digest,
+        )
+        store.land_artefact(window_artefact)
+        window_records = json_rows(json.loads(card_body), "results")
+        window_transactions = [
+            replace(
+                truelayer.to_card_transaction(record, account_id=card_target),
+                artefact_digest=window_artefact.digest,
+            )
+            for record in window_records
+        ]
+        if window_transactions:
+            reconcile_batch(
+                store,
+                window_transactions,
+                digest=window_artefact.digest,
+                summary=summary,
+            )
+
     if deep:
         try:
             cards, cards_body = truelayer.fetch_cards(
