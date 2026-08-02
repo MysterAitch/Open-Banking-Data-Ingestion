@@ -1028,6 +1028,31 @@ class TestRebuildBanner:
         assert _rebuild_running_banner(None) == ""
 
 
+class TestReviewReportPage:
+    def test_Report_RendersOnItsOwnPage(self, tmp_path):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            review_report_text=lambda: "662 open flag(s)\n  amount_mismatch: 419",
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            page = httpx.get(
+                f"http://127.0.0.1:{httpd.server_port}/review-report"
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert "662 open flag(s)" in page
+        assert "amount_mismatch: 419" in page
+
+
 class TestApplierLiveness:
     """A queued push that nobody consumes must diagnose itself: the
     applier stamps a heartbeat every poll, and the page compares it with

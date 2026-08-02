@@ -243,3 +243,90 @@ class TestRebuildGuards:
             pass
 
         assert rebuild_in_progress_note(db) is None
+
+
+class TestTransientBlocksAreWaitedOut:
+    """A deploy or rebuild holds its lease for minutes; the old behaviour
+    cost the whole six-hour cycle. Spacing skips keep the long sleep."""
+
+    def test_TransientLease_ClearsMidWait_AndThePullProceeds(
+        self, tmp_path, monkeypatch
+    ):
+        from obdi.cli import _await_scheduled_clearance
+        from obdi.leases import STACK_UPDATE, acquire, release
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        acquire(locks, STACK_UPDATE, "ansible", ttl_seconds=600)
+
+        calls = []
+
+        def fake_sleep(seconds):
+            calls.append(seconds)
+            if len(calls) == 2:
+                release(locks, STACK_UPDATE)
+
+        outcome = _await_scheduled_clearance(db, sleep=fake_sleep)
+
+        assert outcome is None
+        assert len(calls) == 2
+
+    def test_SpacingSkip_ReturnsImmediately_NoWaiting(
+        self, tmp_path, monkeypatch
+    ):
+        import json as _json
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+        from obdi.store import Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        monkeypatch.setenv("OBDI_PULL_INTERVAL_SECONDS", "21600")
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.connection.execute(
+                "INSERT INTO fetch_attempts (attempted_at, source, "
+                "connection_id, account_ref, asked, request_meta, outcome) "
+                "VALUES (?, 'truelayer', 'halifax', 'acc', "
+                "'window', ?, 'landed')",
+                (
+                    datetime.now(UTC).isoformat(),
+                    _json.dumps({"trigger": "scheduled"}),
+                ),
+            )
+            store.connection.commit()
+
+        def explode(_seconds):
+            raise AssertionError("a spacing skip must not wait")
+
+        outcome = _await_scheduled_clearance(db, sleep=explode)
+
+        assert outcome is not None
+        assert "quota" in outcome
+
+    def test_TransientThatNeverClears_GivesUpAfterTheBudget(
+        self, tmp_path, monkeypatch
+    ):
+        from obdi.cli import _await_scheduled_clearance
+        from obdi.leases import acquire
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        acquire(locks, "rebuild-derived", "obdi-web", ttl_seconds=3600)
+
+        sleeps = []
+        outcome = _await_scheduled_clearance(
+            db, wait_seconds=60, poll_seconds=15, sleep=sleeps.append
+        )
+
+        assert outcome is not None
+        assert "rebuild" in outcome
+        assert len(sleeps) == 4

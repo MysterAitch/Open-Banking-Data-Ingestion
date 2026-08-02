@@ -292,6 +292,8 @@ class WebConfig:
     audit_actual: Callable[[], str] | None = None
     #: The full sync history - every result, not just the newest handful.
     actual_history: Callable[[], list[dict[str, object]]] | None = None
+    #: The review queue decomposed: reasons, clusters, declaration matches.
+    review_report_text: Callable[[], str] | None = None
     #: When the applier last checked the queue (ISO stamp, empty if never).
     actual_heartbeat: Callable[[], str] | None = None
     #: Danger zone: wipe and replay the derived layers from raw artefacts.
@@ -1690,6 +1692,7 @@ def render_index(
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
+<p><a class="button" href="/review-report">Review queue report</a></p>
 <h2>Import a file</h2>
 <p>Bank CSV or QIF exports - previewed before anything is stored, then
 reconciled through the same identity rules as the API pulls.</p>
@@ -1770,6 +1773,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/actual-history":
             self._actual_history()
+            return
+        if route == "/review-report":
+            self._review_report()
             return
         if route == "/artefacts":
             self._artefacts()
@@ -2104,6 +2110,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + HOME_LINK
         )
         self._respond(200, render_page("Actual sync history", body))
+
+    def _review_report(self) -> None:
+        hook = self.bound_config.review_report_text
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        try:
+            text = hook()
+        except Exception as exc:
+            self._respond(
+                500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        body = (
+            "<h2>Review queue report</h2>"
+            "<p>The queue decomposed - flag reasons, largest clusters, and "
+            "how many flags match a declared standing order or direct "
+            "debit. The raw material for calibrating the matcher.</p>"
+            f'<pre class="scroll" style="white-space:pre-wrap">'
+            f"{html.escape(text)}</pre>" + HOME_LINK
+        )
+        self._respond(200, render_page("Review queue report", body))
 
     def _read_form(self) -> dict[str, list[str]]:
         length = int(self.headers.get("Content-Length") or 0)

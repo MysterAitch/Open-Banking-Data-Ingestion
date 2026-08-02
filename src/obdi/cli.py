@@ -12,6 +12,8 @@ import json
 import os
 import sys
 import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -1196,6 +1198,12 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)
 
+    def review_report_text() -> str:
+        from .review_report import review_report
+
+        with Store(db_path) as store:
+            return review_report(store).describe()
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
 
@@ -1402,6 +1410,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         audit_actual=audit_actual_hook,
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
+        review_report_text=review_report_text,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
         forget_actual=forget_actual,
@@ -1613,6 +1622,40 @@ def scheduled_pull_skip_reason(
     return None
 
 
+def _await_scheduled_clearance(
+    db_path: Path,
+    wait_seconds: int = 600,
+    poll_seconds: int = 15,
+    sleep: Callable[[float], None] = time.sleep,
+) -> str | None:
+    """Wait out TRANSIENT blocks before a scheduled cycle gives up.
+
+    A deploy or a rebuild holds its lease for minutes; the old behaviour
+    skipped the cycle and slept the full six hours - so every deploy cost
+    a cycle (observed live on the blank-slate boot, where the play's own
+    lease starved the first pull). Spacing skips return immediately: "not
+    due yet" deserves the long sleep, "blocked for a moment" does not.
+    Returns the final blocking reason, or None when clear to pull.
+    """
+    waited = 0
+    announced = False
+    while True:
+        reason = scheduled_pull_skip_reason(db_path)
+        if reason is None:
+            return None
+        transient = "in progress" in reason
+        if not transient or waited >= wait_seconds:
+            return reason
+        if not announced:
+            print(
+                f"{reason} - waiting up to {wait_seconds // 60} min "
+                "for it to clear"
+            )
+            announced = True
+        sleep(poll_seconds)
+        waited += poll_seconds
+
+
 def _pull_everything(db_path: Path, since: date | None) -> int:
     """Pull every stored connection, plus Starling if a token is configured.
 
@@ -1621,7 +1664,7 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     single stale bank silently stops every other bank being fetched.
     """
     if (os.getenv("OBDI_TRIGGER", "").strip() or "direct") == "scheduled":
-        reason = scheduled_pull_skip_reason(db_path)
+        reason = _await_scheduled_clearance(db_path)
         if reason:
             print(reason)
             return 0
