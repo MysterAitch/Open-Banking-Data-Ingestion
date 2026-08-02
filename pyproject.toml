@@ -1,6 +1,6 @@
 [project]
 name = "obdi"
-version = "0.4.29"
+version = "0.4.30"
 description = "Open banking data ingestion - canonical local store, app-agnostic"
 requires-python = ">=3.11"
 # Floors track the versions this project is actually tested against, so a

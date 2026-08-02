@@ -958,6 +958,33 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         return applier_heartbeat(_actual_dir(db_path))
 
+    def update_in_progress() -> bool:
+        from . import leases
+
+        return leases.held(leases.locks_dir(db_path), leases.STACK_UPDATE)
+
+    def auth_lease_take() -> None:
+        from . import leases
+
+        leases.acquire(
+            leases.locks_dir(db_path), "bank-auth", "obdi-web", ttl_seconds=600
+        )
+
+    def auth_lease_release() -> None:
+        from . import leases
+
+        leases.release(leases.locks_dir(db_path), "bank-auth")
+
+    def scheduler_heartbeat() -> dict[str, object]:
+        path = db_path.parent / "scheduler-heartbeat.json"
+        if not path.is_file():
+            return {}
+        with contextlib.suppress(OSError, ValueError):
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(decoded, dict):
+                return decoded
+        return {}
+
     def rebuild_derived() -> str:
         from .rebuild import rebuild_from_raw
 
@@ -1117,6 +1144,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_heartbeat=actual_heartbeat,
         rebuild_derived=rebuild_derived,
         forget_actual=forget_actual,
+        update_in_progress=update_in_progress,
+        auth_lease_take=auth_lease_take,
+        auth_lease_release=auth_lease_release,
+        scheduler_heartbeat=scheduler_heartbeat,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
@@ -1270,6 +1301,52 @@ def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
     return 0
 
 
+def scheduled_pull_skip_reason(
+    db_path: Path, now: datetime | None = None
+) -> str | None:
+    """Two gates before a scheduled cycle spends bank quota.
+
+    The compose loop runs a pull immediately on container start, so every
+    deploy and restart used to cost an unattended fetch - at development
+    tempo that is a firehose against a roughly four-per-day cap, and the
+    likely source of sca_exceeded refusals on routine asks. Minimum
+    spacing is measured from the attempt ledger, so it survives restarts
+    by construction. The second gate keeps a cycle from starting while
+    the stack is being updated underneath it.
+    """
+    from . import leases
+
+    directory = leases.locks_dir(db_path)
+    if leases.held(directory, leases.STACK_UPDATE):
+        return "a stack update is in progress - skipping this cycle"
+    interval = int(os.getenv("OBDI_PULL_INTERVAL_SECONDS", "21600") or "21600")
+    default_min = int(interval * 0.9)
+    raw_min = os.getenv("OBDI_PULL_MIN_INTERVAL_SECONDS", "").strip()
+    min_interval = int(raw_min) if raw_min.isdigit() else default_min
+    if min_interval <= 0:
+        return None
+    with Store(db_path) as store:
+        row = store.connection.execute(
+            "SELECT MAX(attempted_at) FROM fetch_attempts WHERE request_meta LIKE ?",
+            ('%"trigger": "scheduled"%',),
+        ).fetchone()
+    last_raw = row[0] if row else None
+    if not last_raw:
+        return None
+    try:
+        last = datetime.fromisoformat(str(last_raw))
+    except ValueError:
+        return None
+    age = ((now or datetime.now(UTC)) - last).total_seconds()
+    if age < min_interval:
+        return (
+            f"last scheduled cycle ran {int(age // 60)} min ago (minimum "
+            f"spacing {int(min_interval // 60)} min) - skipping so restarts "
+            "and deploys never spend bank quota"
+        )
+    return None
+
+
 def _pull_everything(db_path: Path, since: date | None) -> int:
     """Pull every stored connection, plus Starling if a token is configured.
 
@@ -1277,6 +1354,11 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     consent is the commonest cause, and letting it abort the run would mean a
     single stale bank silently stops every other bank being fetched.
     """
+    if (os.getenv("OBDI_TRIGGER", "").strip() or "direct") == "scheduled":
+        reason = scheduled_pull_skip_reason(db_path)
+        if reason:
+            print(reason)
+            return 0
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     names: list[str] = []
     if store_path:
@@ -1305,11 +1387,19 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
         print("No connections to pull. Authorise a bank first.", file=sys.stderr)
         return 1
 
+    from . import leases
+
     worst = 0
-    for name in names:
-        print(f"--- {name}")
-        outcome = _pull(name, db_path, since)
-        worst = max(worst, outcome)
+    # Held for the whole cycle so a stack update never recreates the
+    # container mid-fetch - a killed scheduled pull wastes quota that
+    # does not come back until tomorrow.
+    with leases.lease(
+        leases.locks_dir(db_path), "pull-cycle", "obdi-pull", ttl_seconds=1800
+    ):
+        for name in names:
+            print(f"--- {name}")
+            outcome = _pull(name, db_path, since)
+            worst = max(worst, outcome)
     return worst
 
 

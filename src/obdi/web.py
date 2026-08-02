@@ -296,6 +296,16 @@ class WebConfig:
     rebuild_derived: Callable[[], str] | None = None
     #: Danger zone: drop the canonical-to-Actual links (source names kept).
     forget_actual: Callable[[], int] | None = None
+    #: True while a stack update holds its lease - new bank authorisations
+    #: are deferred rather than risked mid-SCA (that window is five minutes
+    #: and does not come back).
+    update_in_progress: Callable[[], bool] | None = None
+    #: Taken while an authorisation is in flight, released on callback -
+    #: tells the updater a person is mid-SCA.
+    auth_lease_take: Callable[[], None] | None = None
+    auth_lease_release: Callable[[], None] | None = None
+    #: The scheduler's cycle heartbeat: {"at": iso, "interval_seconds": n}.
+    scheduler_heartbeat: Callable[[], dict[str, object]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -1008,6 +1018,51 @@ def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
     return f'<p class="muted">applier last checked the queue at {stamp}</p>'
 
 
+def _scheduler_row(
+    scheduler_heartbeat: Callable[[], dict[str, object]] | None,
+    now: datetime | None = None,
+) -> str:
+    """The pull loop's pulse: "container running" does not prove "loop
+    looping", so the cycle stamp gets the same treatment as the applier's
+    heartbeat - a quiet fact when fresh, a warning naming the container
+    when overdue."""
+    if scheduler_heartbeat is None:
+        return ""
+    beat: dict[str, object] = {}
+    try:
+        beat = scheduler_heartbeat() or {}
+    except Exception:
+        return ""
+    raw_at = str(beat.get("at", ""))
+    if not raw_at:
+        return ""
+    try:
+        seen = datetime.fromisoformat(raw_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    try:
+        interval = int(str(beat.get("interval_seconds", 0)))
+    except ValueError:
+        interval = 0
+    now = now or datetime.now(UTC)
+    age = (now - seen).total_seconds()
+    stamp = seen.strftime("%Y-%m-%d %H:%M")
+    if interval > 0 and age > interval * 1.5:
+        hours = age / 3600
+        return (
+            f'<p class="warn">the scheduler last completed a cycle at {stamp} '
+            f"({hours:.1f} h ago, interval {interval // 3600} h) - look at "
+            "the obdi-pull container</p>"
+        )
+    due = ""
+    if interval > 0:
+        due_at = datetime.fromtimestamp(seen.timestamp() + interval, tz=UTC)
+        due = f" - next due by ~{due_at.strftime('%H:%M')}"
+    return (
+        f'<p class="muted">scheduler last completed a cycle at {stamp}{due}</p>'
+    )
+
+
 def _danger_zone(rebuild_available: bool, forget_available: bool) -> str:
     if not (rebuild_available or forget_available):
         return ""
@@ -1395,6 +1450,7 @@ def render_index(
     actual_heartbeat: Callable[[], str] | None = None,
     rebuild_available: bool = False,
     forget_available: bool = False,
+    scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1402,6 +1458,7 @@ def render_index(
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
+{_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
               audit_available=audit_actual is not None,
               actual_heartbeat=actual_heartbeat)}
@@ -1511,6 +1568,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_heartbeat=self.bound_config.actual_heartbeat,
                     rebuild_available=self.bound_config.rebuild_derived is not None,
                     forget_available=self.bound_config.forget_actual is not None,
+                    scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
                 ),
             )
         elif route == "/connect":
@@ -1719,6 +1777,26 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(200, render_page("Account", body))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
+        checker = self.bound_config.update_in_progress
+        if checker is not None:
+            in_progress = False
+            with contextlib.suppress(Exception):
+                in_progress = checker()
+            if in_progress:
+                self._respond(
+                    503,
+                    error_page(
+                        "Stack update in progress",
+                        "<p>A stack update is running and could interrupt an "
+                        "authorisation mid-SCA - that five-minute window does "
+                        "not come back. Try again in a minute.</p>",
+                    ),
+                )
+                return
+        take = self.bound_config.auth_lease_take
+        if take is not None:
+            with contextlib.suppress(Exception):
+                take()
         name = (params.get("name", [""])[0] or "").strip()
         if not name:
             self._respond(400, error_page("Name required", "<p>Give the connection a name.</p>"))
@@ -2136,6 +2214,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         return forwarded or (peer if not peer.startswith("127.") else None)
 
     def _callback(self, params: dict[str, list[str]]) -> None:
+        release = self.bound_config.auth_lease_release
+        if release is not None:
+            with contextlib.suppress(Exception):
+                release()
         error = params.get("error", [""])[0]
         if error:
             detail = html.escape(params.get("error_description", [""])[0] or error)

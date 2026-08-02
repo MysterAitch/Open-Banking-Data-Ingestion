@@ -867,6 +867,85 @@ class TestProbingGuidanceOnThePage:
         assert "<br>" in page
 
 
+class TestUpdateAwareness:
+    """The updater and the humans must not trample each other: starting a
+    bank authorisation mid-update risks the five-minute SCA window, so
+    the page defers it; a normal connect takes the bank-auth lease so the
+    updater defers instead."""
+
+    def _server(self, tmp_path, **hooks):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            **hooks,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Connect_WhileStackUpdates_IsDeferredWithAnExplanation(self, tmp_path):
+        httpd, base = self._server(tmp_path, update_in_progress=lambda: True)
+        try:
+            response = httpx.get(f"{base}/connect?name=halifax")
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 503
+        assert "SCA" in response.text
+
+    def test_Connect_TakesTheBankAuthLease(self, tmp_path):
+        taken = []
+        httpd, base = self._server(
+            tmp_path,
+            update_in_progress=lambda: False,
+            auth_lease_take=lambda: taken.append(1),
+        )
+        try:
+            httpx.get(f"{base}/connect?name=halifax", follow_redirects=False)
+        finally:
+            httpd.shutdown()
+
+        assert taken == [1]
+
+    def test_SchedulerPulse_FreshCycle_ReadsQuietly(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _scheduler_row
+
+        row = _scheduler_row(
+            lambda: {"at": "2026-08-02T12:00:00Z", "interval_seconds": 21600},
+            now=datetime(2026, 8, 2, 13, 0, 0, tzinfo=UTC),
+        )
+
+        assert "12:00" in row
+        assert "warn" not in row
+        assert "next due" in row
+
+    def test_SchedulerPulse_Overdue_WarnsAndNamesTheContainer(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _scheduler_row
+
+        row = _scheduler_row(
+            lambda: {"at": "2026-08-02T00:00:00Z", "interval_seconds": 21600},
+            now=datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC),
+        )
+
+        assert "warn" in row
+        assert "obdi-pull" in row
+
+    def test_SchedulerPulse_NeverSeen_SaysNothing(self):
+        from obdi.web import _scheduler_row
+
+        assert _scheduler_row(lambda: {}) == ""
+        assert _scheduler_row(None) == ""
+
+
 class TestApplierLiveness:
     """A queued push that nobody consumes must diagnose itself: the
     applier stamps a heartbeat every poll, and the page compares it with

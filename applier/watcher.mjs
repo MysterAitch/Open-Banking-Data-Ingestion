@@ -27,6 +27,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 import { auditAccounts } from './audit.mjs';
+import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { mergeBindings, parseEnvelope } from './envelope.mjs';
 import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
 
@@ -38,6 +39,7 @@ const RESULTS = join(BASE, 'results');
 const PROCESSED = join(BASE, 'processed');
 const BINDINGS = join(BASE, 'bindings-pending.json');
 const HEARTBEAT = join(BASE, 'heartbeat.json');
+const LOCKS = (process.env.OBDI_LOCKS_DIR ?? '/data/locks').trim();
 
 async function readJsonOr(path, fallback) {
   try {
@@ -92,10 +94,15 @@ async function tick() {
   // this with the clock, so "queued and nobody is coming" diagnoses
   // itself instead of reading as an eight-minute mystery.
   await writeFile(HEARTBEAT, JSON.stringify({ at: new Date().toISOString() }));
+  // An update about to recreate this container takes the stack-update
+  // lease; starting an import underneath it would be killed half-done.
+  // The queue is durable - requests simply wait for the next tick.
+  if (await leaseHeld(LOCKS, 'stack-update')) return;
   const entries = (await readdir(REQUESTS)).filter((f) => f.endsWith('.json')).sort();
   for (const name of entries) {
     let result;
     try {
+      await takeLease(LOCKS, 'actual-apply', 'obdi-applier', 900);
       result = await processRequest(name);
     } catch (error) {
       result = {
@@ -105,6 +112,7 @@ async function tick() {
         error: String(error?.message ?? error),
       };
     }
+    await releaseLease(LOCKS, 'actual-apply');
     await writeFile(join(RESULTS, name), JSON.stringify(result, null, 2));
     await rename(join(REQUESTS, name), join(PROCESSED, name));
     let line = `${name}: FAILED - ${result.error}`;
@@ -119,7 +127,7 @@ async function tick() {
 }
 
 async function main() {
-  for (const dir of [REQUESTS, RESULTS, PROCESSED]) {
+  for (const dir of [REQUESTS, RESULTS, PROCESSED, LOCKS]) {
     await mkdir(dir, { recursive: true });
   }
   console.log(`watching ${REQUESTS} every ${POLL_SECONDS}s`);
