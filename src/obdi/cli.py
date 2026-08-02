@@ -1302,6 +1302,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     subcommands.add_parser(
+        "review-report",
+        help="calibration numbers for the review queue: reasons, clusters, "
+        "and how many flags match a declared recurring payment",
+    )
+
+    subcommands.add_parser(
         "attempts",
         help="show the fetch-attempt ledger: every ask made of a provider",
     )
@@ -1421,6 +1427,12 @@ def main(argv: list[str] | None = None) -> int:
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
 
+    if args.command == "review-report":
+        from .review_report import review_report
+
+        with Store(db_path) as store:
+            print(review_report(store).describe())
+        return 0
     if args.command == "rebuild":
         if not args.yes:
             print(
