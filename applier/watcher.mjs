@@ -29,7 +29,7 @@ import { pathToFileURL } from 'node:url';
 
 import { auditAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
-import { mergeBindings, parseEnvelope } from './envelope.mjs';
+import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
 import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
 
 const BASE = (process.env.OBDI_ACTUAL_DIR ?? '/data/actual').trim();
@@ -100,7 +100,9 @@ async function tick() {
   // lease; starting an import underneath it would be killed half-done.
   // The queue is durable - requests simply wait for the next tick.
   if (await leaseHeld(LOCKS, 'stack-update')) return;
-  const entries = (await readdir(REQUESTS)).filter((f) => f.endsWith('.json')).sort();
+  const entries = (await readdir(REQUESTS))
+    .filter((f) => f.endsWith('.json'))
+    .sort(byQueuedStamp);
   for (const name of entries) {
     let result;
     try {

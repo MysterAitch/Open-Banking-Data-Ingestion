@@ -52,3 +52,13 @@ export function mergeBindings(existing, minted) {
     a.canonical_id.localeCompare(b.canonical_id),
   );
 }
+
+export function byQueuedStamp(a, b) {
+  // Queue order is TEMPORAL, not alphabetical: every request filename
+  // embeds its queued-at stamp after the kind prefix, and sorting whole
+  // names made audit- precede push- within a tick regardless of when
+  // each was pressed - the third member of the filename-versus-time bug
+  // family in one day. Compare the stamps; the prefixes stay out of it.
+  const stampOf = (name) => name.slice(name.indexOf('-') + 1);
+  return stampOf(a) < stampOf(b) ? -1 : stampOf(a) > stampOf(b) ? 1 : 0;
+}

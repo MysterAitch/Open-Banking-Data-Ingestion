@@ -44,3 +44,18 @@ test('an audit envelope is recognised; unknown kinds stay pushes', () => {
   assert.equal(parseEnvelope({ version: 2, kind: 'surprise', accounts: {} }).kind, 'push');
   assert.equal(parseEnvelope({ 'act-1': [] }).kind, 'push');
 });
+
+test('the queue drains in the order things were pressed, not the alphabet', async () => {
+  const { byQueuedStamp } = await import('./envelope.mjs');
+  const names = [
+    'audit-20260802T185240377472Z.json',
+    'push-20260802T184956216920Z.json',
+    'audit-20260802T185427538211Z.json',
+  ];
+  names.sort(byQueuedStamp);
+  assert.deepEqual(names, [
+    'push-20260802T184956216920Z.json',
+    'audit-20260802T185240377472Z.json',
+    'audit-20260802T185427538211Z.json',
+  ]);
+});
