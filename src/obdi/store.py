@@ -355,6 +355,21 @@ class Store:
         ).fetchone()
         return row[0] if row else None
 
+    def append_event(self, kind: str, entity_id: str, payload: dict[str, object]) -> None:
+        """Append to the outbox - the first writer it has ever had.
+
+        Append-only by design: an emitted fact about the past does not
+        un-happen, and the MQTT fan-out (when built) consumes rows where
+        published_at is null.
+        """
+        self.connection.execute(
+            "INSERT INTO events (kind, entity_id, payload, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (kind, entity_id, json.dumps(payload, sort_keys=True),
+             datetime.now(UTC).isoformat()),
+        )
+        self.connection.commit()
+
     def record_attempt(
         self,
         *,

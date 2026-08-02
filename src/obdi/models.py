@@ -56,6 +56,10 @@ class TransactionStatus(StrEnum):
     PENDING = "pending"
     BOOKED = "booked"
     REVERSED = "reversed"
+    #: A pending row that vanished from the provider's complete pending set:
+    #: either settled under another identity or released without settling.
+    #: Kept in the store as history, excluded from spending and replay.
+    VOID = "void"
 
 
 class MatchTier(StrEnum):

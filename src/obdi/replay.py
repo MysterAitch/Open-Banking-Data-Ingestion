@@ -124,6 +124,10 @@ def build_payload(
     payload: dict[str, list[dict[str, object]]] = defaultdict(list)
 
     for transaction in transactions:
+        # A voided pending row is history, not money: it either settled as
+        # a different row (already in the payload) or never happened.
+        if transaction.status is TransactionStatus.VOID:
+            continue
         if transaction.is_internal_transfer and not include_internal_transfers:
             continue
         actual_account = by_canonical.get(transaction.account_id)

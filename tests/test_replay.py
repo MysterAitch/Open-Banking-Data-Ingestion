@@ -119,3 +119,23 @@ class TestInternalTransfers:
     def test_Transfer_WhenIncluded_LabelledInNotes(self):
         transfer = txn(is_internal_transfer=True)
         assert "internal transfer" in to_actual_transaction(transfer)["notes"]
+
+
+class TestVoidRowsNeverReachTheBudget:
+    def test_BuildPayload_SkipsVoidedPendingPhantoms(self):
+        from obdi.models import TransactionStatus
+        from obdi.replay import ActualAccountBinding, build_payload
+
+        bindings = [
+            ActualAccountBinding(
+                canonical_id="starling-personal", actual_account_id="act-1"
+            )
+        ]
+        phantom = txn(status=TransactionStatus.VOID, entity_id="ent-void")
+        real = txn(entity_id="ent-real")
+
+        payload = build_payload([phantom, real], bindings)
+
+        # The voided fuel-hold phantom is history, not money: exactly one
+        # transaction reaches the budget account.
+        assert len(payload["act-1"]) == 1

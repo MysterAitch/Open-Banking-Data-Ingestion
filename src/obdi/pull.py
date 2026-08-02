@@ -29,6 +29,7 @@ from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
 from .jsontypes import text
+from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .store import Store
 
@@ -342,6 +343,26 @@ def pull_truelayer(
                 for record in records
             ]
             reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
+            if pending:
+                # The pending endpoint returns the COMPLETE current set, so
+                # a stored pending row absent from it has settled or been
+                # released - resolve it now, while the evidence is fresh.
+                resolution = resolve_vanished_pending(
+                    store,
+                    canonical,
+                    present_source_ids={
+                        t.source_id for t in transactions if t.source_id
+                    },
+                    present_amount_dates={
+                        (t.amount_minor, t.value_date.isoformat())
+                        for t in transactions
+                    },
+                )
+                if resolution.voided:
+                    result.notes.append(
+                        f"pending lifecycle for {provider_account_id}: "
+                        f"{resolution.describe()}"
+                    )
 
     # Cards: a separate endpoint family, fetched on deep pulls only and
     # LANDED WITHOUT PARSING. Card sign conventions are the classic silent

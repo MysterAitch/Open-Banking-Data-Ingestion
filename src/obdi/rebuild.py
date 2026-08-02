@@ -32,6 +32,7 @@ from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
 from .parsers.uk_banks import detect
+from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .store import Store
 
@@ -142,6 +143,23 @@ def rebuild_from_raw(store: Store) -> RebuildReport:
         if transactions:
             reconcile_batch(store, transactions, digest=digest, summary=summary)
             report.transactions += len(transactions)
+        if source == "truelayer-pending":
+            # Complete-set semantics replayed in order: the same resolution
+            # the live pull runs, but WITHOUT re-emitting events - the
+            # outbox records what was announced at the time, and a rebuild
+            # re-derives state, not history.
+            resolve_vanished_pending(
+                store,
+                account_ref,
+                present_source_ids={
+                    t.source_id for t in transactions if t.source_id
+                },
+                present_amount_dates={
+                    (t.amount_minor, t.value_date.isoformat())
+                    for t in transactions
+                },
+                emit_events=False,
+            )
 
     report.transfers_paired = pair_transfers_across_store(store)
     return report
