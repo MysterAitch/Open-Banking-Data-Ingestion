@@ -236,15 +236,19 @@ def queued_requests(actual_dir: Path) -> list[dict[str, object]]:
 
 
 def latest_results(actual_dir: Path, limit: int = 5) -> list[dict[str, object]]:
+    """Newest first BY FINISH TIME, never by filename: audit- sorts before
+    push- alphabetically, and ranking on names buried the first real audit
+    report under five push results while it sat on disk the whole time."""
     results_dir = actual_dir / "results"
     if not results_dir.is_dir():
         return []
-    out: list[dict[str, object]] = []
-    for path in sorted(results_dir.glob("*.json"), reverse=True)[:limit]:
+    decoded_all: list[dict[str, object]] = []
+    for path in results_dir.glob("*.json"):
         try:
             decoded = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
             continue
         if isinstance(decoded, dict):
-            out.append(decoded)
-    return out
+            decoded_all.append(decoded)
+    decoded_all.sort(key=lambda r: str(r.get("finished_at", "")), reverse=True)
+    return decoded_all[:limit]

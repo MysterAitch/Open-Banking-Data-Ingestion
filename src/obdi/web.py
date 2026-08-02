@@ -1012,10 +1012,10 @@ def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
         minutes = int(age_seconds // 60)
         return (
             f'<p class="warn">work is queued but the applier last checked '
-            f"the queue at {stamp} ({minutes} min ago) - look at the "
+            f"the queue at {stamp} UTC ({minutes} min ago) - look at the "
             "obdi-applier container</p>"
         )
-    return f'<p class="muted">applier last checked the queue at {stamp}</p>'
+    return f'<p class="muted">applier last checked the queue at {stamp} UTC</p>'
 
 
 def _scheduler_row(
@@ -1050,7 +1050,7 @@ def _scheduler_row(
     if interval > 0 and age > interval * 1.5:
         hours = age / 3600
         return (
-            f'<p class="warn">the scheduler last completed a cycle at {stamp} '
+            f'<p class="warn">the scheduler last completed a cycle at {stamp} UTC '
             f"({hours:.1f} h ago, interval {interval // 3600} h) - look at "
             "the obdi-pull container</p>"
         )
@@ -1059,7 +1059,7 @@ def _scheduler_row(
         due_at = datetime.fromtimestamp(seen.timestamp() + interval, tz=UTC)
         due = f" - next due by ~{due_at.strftime('%H:%M')}"
     return (
-        f'<p class="muted">scheduler last completed a cycle at {stamp}{due}</p>'
+        f'<p class="muted">scheduler last completed a cycle at {stamp} UTC{due}</p>'
     )
 
 

@@ -288,10 +288,33 @@ class TestBindingsRoundTrip:
     def test_LatestResults_NewestFirst(self, tmp_path):
         results = tmp_path / "actual" / "results"
         results.mkdir(parents=True)
-        (results / "push-1.json").write_text('{"ok": true, "added": 1}')
-        (results / "push-2.json").write_text('{"ok": false, "error": "x"}')
+        (results / "push-1.json").write_text(
+            '{"ok": true, "added": 1, "finished_at": "2026-08-02T10:00:00Z"}'
+        )
+        (results / "push-2.json").write_text(
+            '{"ok": false, "error": "x", "finished_at": "2026-08-02T11:00:00Z"}'
+        )
 
         latest = latest_results(tmp_path / "actual")
 
-        assert latest[0] == {"ok": False, "error": "x"}
-        assert latest[1] == {"ok": True, "added": 1}
+        assert latest[0]["ok"] is False
+        assert latest[1]["ok"] is True
+
+    def test_AuditResult_RanksByTime_NotByFilenamePrefix(self, tmp_path):
+        """Found live: results sorted by filename, and push- outranks
+        audit- alphabetically - so the first real audit report sat on disk
+        invisible under five push results. Time decides, never the name."""
+        results = tmp_path / "actual" / "results"
+        results.mkdir(parents=True)
+        for hour in (9, 10, 11, 12, 13):
+            (results / f"push-20260802T{hour:02}.json").write_text(
+                f'{{"ok": true, "finished_at": "2026-08-02T{hour:02}:00:00Z"}}'
+            )
+        (results / "audit-20260802T1230.json").write_text(
+            '{"ok": true, "kind": "audit", "finished_at": "2026-08-02T12:30:00Z"}'
+        )
+
+        latest = latest_results(tmp_path / "actual")
+
+        assert latest[0]["finished_at"] == "2026-08-02T13:00:00Z"
+        assert latest[1]["kind"] == "audit"
