@@ -233,3 +233,47 @@ class TestStarlingReplay:
                 "SELECT COUNT(*) FROM transactions"
             ).fetchone()[0]
         assert count == 1
+
+
+class TestRebuildProgress:
+    def test_Progress_IsMonotonic_AndEndsComplete(self, tmp_path):
+        """A rebuild takes minutes; "running" with no number reads as hung
+        to anyone watching the page."""
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        calls = []
+        with Store(tmp_path / "s.sqlite3") as store:
+            for n in range(3):
+                body = _json.dumps({"feedItems": []}).encode("utf-8")
+                store.land_artefact(
+                    artefact_for(
+                        body + str(n).encode(),
+                        account_id=f"starling:uid-{n}",
+                        kind="feed",
+                        origin=f"https://api.example.com/feed?n={n}",
+                    )
+                )
+
+            rebuild_from_raw(
+                store, progress=lambda done, total, report: calls.append((done, total))
+            )
+
+        assert calls[0] == (1, 3)
+        assert calls[-1] == (3, 3)
+        assert [c[0] for c in calls] == sorted(c[0] for c in calls)
+
+    def test_FailingProgressCallback_NeverBreaksTheRebuild(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        def explode(done, total, report):
+            raise RuntimeError("reporting must never break the work")
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            report = rebuild_from_raw(store, progress=explode)
+
+        assert report.problems == []

@@ -1081,10 +1081,19 @@ def _rebuild_status_line(
     state = str(status.get("state", ""))
     if state == "running":
         started = html.escape(str(status.get("started_at", "")))
+        extra = ""
+        done = status.get("done")
+        total = status.get("total")
+        if isinstance(done, int) and isinstance(total, int) and total > 0:
+            txns = status.get("transactions")
+            txn_note = (
+                f", {txns:,} transaction(s) so far" if isinstance(txns, int) else ""
+            )
+            extra = f" - artefact {done} of {total}{txn_note}"
         return (
-            f'<p class="warn">a rebuild is running (started {started}) - '
-            "refresh to follow it; deploys defer while it holds its "
-            "lease</p>"
+            f'<p class="warn">a rebuild is running (started {started})'
+            f"{extra} - refresh to follow it; deploys defer while it "
+            "holds its lease</p>"
         )
     if state == "done":
         badge = "ok" if status.get("ok") else "bad"

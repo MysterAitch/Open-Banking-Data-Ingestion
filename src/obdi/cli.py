@@ -215,14 +215,28 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
     def run() -> None:
-        from .rebuild import rebuild_from_raw
+        from .rebuild import RebuildReport, rebuild_from_raw
+
+        def on_progress(done: int, total: int, report: RebuildReport) -> None:
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "state": "running",
+                        "started_at": started_at,
+                        "done": done,
+                        "total": total,
+                        "transactions": report.transactions,
+                    }
+                ),
+                encoding="utf-8",
+            )
 
         payload: dict[str, object]
         try:
             with leases.lease(
                 leases.locks_dir(db_path), "rebuild-derived", "obdi-web", 3600
             ), Store(db_path) as store:
-                report = rebuild_from_raw(store)
+                report = rebuild_from_raw(store, progress=on_progress)
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
             payload = {"ok": False, "summary": str(exc)}

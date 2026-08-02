@@ -25,7 +25,9 @@ duplication.
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from .errors import DataError
@@ -74,12 +76,20 @@ _NON_TRANSACTIONAL = {
 }
 
 
-def rebuild_from_raw(store: Store) -> RebuildReport:
+def rebuild_from_raw(
+    store: Store,
+    progress: Callable[[int, int, RebuildReport], None] | None = None,
+) -> RebuildReport:
     """Wipe the derived layers and replay layer 0 in arrival order.
 
     Arrival order matters: occurrence counting and supersession depend on
     which sighting came first, and replaying in fetched_at order reproduces
     the history the store actually lived through.
+
+    `progress` is called as (reaching, total, report) before each artefact
+    and once more at the end - a rebuild takes minutes, and "running" with
+    no number reads as "hung" to anyone watching a page. A failing
+    progress callback is ignored: reporting must never break the work.
     """
     report = RebuildReport()
 
@@ -93,7 +103,11 @@ def rebuild_from_raw(store: Store) -> RebuildReport:
         "ORDER BY fetched_at ASC, rowid ASC"
     ).fetchall()
 
-    for row in artefact_rows:
+    total = len(artefact_rows)
+    for index, row in enumerate(artefact_rows, start=1):
+        if progress is not None:
+            with contextlib.suppress(Exception):
+                progress(index, total, report)
         source = str(row["source"])
         account_ref = str(row["account_ref"])
         digest = str(row["digest"])
@@ -173,4 +187,7 @@ def rebuild_from_raw(store: Store) -> RebuildReport:
             )
 
     report.transfers_paired = pair_transfers_across_store(store)
+    if progress is not None:
+        with contextlib.suppress(Exception):
+            progress(total, total, report)
     return report

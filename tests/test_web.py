@@ -1113,6 +1113,18 @@ class TestDangerZone:
         assert "warn" in running
         assert "15:00:00" in running
 
+        mid_run = _rebuild_status_line(
+            lambda: {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 34,
+                "total": 120,
+                "transactions": 5210,
+            }
+        )
+        assert "artefact 34 of 120" in mid_run
+        assert "5,210 transaction(s) so far" in mid_run
+
         done = _rebuild_status_line(
             lambda: {
                 "state": "done",
