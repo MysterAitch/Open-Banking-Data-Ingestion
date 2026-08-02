@@ -25,6 +25,7 @@ on return so that a code cannot be replayed into an unexpected connection.
 from __future__ import annotations
 
 import html
+import json
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -187,6 +188,102 @@ def _connection_rows(store: ConnectionStore) -> str:
 
 
 HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
+
+
+def refusal_html(exc: Exception) -> str:
+    """A provider refusal in parts, not one blob.
+
+    The machine code, the provider's prose, and the upstream detail have
+    different audiences; rendered together they read as noise and the actual
+    fault hides inside the generic wrapper. Errors without parts fall back to
+    their plain text, and the one refusal with a known remedy states it.
+    """
+    code = str(getattr(exc, "code", "") or "")
+    description = str(getattr(exc, "description", "") or "")
+    if not code and not description:
+        return f"<p>{html.escape(str(exc))}</p>"
+    status = getattr(exc, "status", None)
+    details = str(getattr(exc, "provider_details", "") or "")
+    parts = [
+        '<p class="bad">'
+        + html.escape(f"HTTP {status}" if status else "Refused")
+        + (f" - <code>{html.escape(code)}</code>" if code else "")
+        + "</p>"
+    ]
+    if description:
+        parts.append(f"<p>{html.escape(description)}</p>")
+    if details:
+        parts.append(
+            f'<p style="opacity:.7">Provider detail: {html.escape(details)}</p>'
+        )
+    remedy = _REMEDIES.get(code)
+    if remedy:
+        parts.append(f"<p>{html.escape(remedy)}</p>")
+    jargon = [
+        (term, meaning)
+        for term, meaning in _JARGON.items()
+        if term in f"{code} {description} {details}"
+    ]
+    if jargon:
+        parts.append(
+            '<p style="opacity:.7;font-size:.9em">'
+            + "<br>".join(
+                f"<strong>{html.escape(term)}</strong>: {html.escape(meaning)}"
+                for term, meaning in jargon
+            )
+            + "</p>"
+        )
+    other = [(c, r) for c, r in _REMEDIES.items() if c != code]
+    if other:
+        parts.append(
+            "<details><summary>Other refusal codes and their remedies</summary><ul>"
+            + "".join(
+                f"<li><code>{html.escape(c)}</code> - {html.escape(r)}</li>"
+                for c, r in other
+            )
+            + "</ul></details>"
+        )
+    raw = str(getattr(exc, "raw", "") or "")
+    if raw:
+        try:
+            pretty = json.dumps(json.loads(raw), indent=2)
+        except ValueError:
+            pretty = raw
+        parts.append(
+            "<details><summary>Full provider response</summary>"
+            f'<pre style="overflow-x:auto;white-space:pre-wrap">{html.escape(pretty)}</pre>'
+            "</details>"
+        )
+    return "".join(parts)
+
+
+# Refusal codes met in practice, each with its one next step. The provider's
+# prose says what happened; this says what to do about it - kept apart so
+# neither reads as the other. The matching remedy is shown prominently; the
+# rest stay a fold away for when the page is being read as documentation.
+_JARGON = {
+    "SCA": "Strong Customer Authentication - the bank's own login-and-approve step",
+    "PSU": "Payment Services User - the account holder themselves; you",
+}
+
+_REMEDIES = {
+    "sca_exceeded": (
+        "History beyond the routine window is only reachable shortly after "
+        "authenticating with the bank. Re-authorise this connection from the "
+        "home page, then press extend again straight away."
+    ),
+    "invalid_grant": (
+        "The authorisation code was already used or has expired. Start a "
+        "fresh authorisation from the home page."
+    ),
+    "invalid_client": (
+        "The provider rejected the client secret."
+    ),
+    "invalid_redirect_uri": (
+        "The redirect URI registered with the provider differs from the one "
+        "this deployment used - they must match byte for byte."
+    ),
+}
 
 
 def error_page(title: str, message_html: str) -> bytes:
@@ -551,10 +648,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
         except Exception as exc:
             print(f"extend failed: {exc}", file=sys.stderr)
-            self._respond(
-                502,
-                error_page("Could not extend", f"<p>{html.escape(str(exc))}</p>"),
-            )
+            self._respond(502, error_page("Could not extend", refusal_html(exc)))
             return
         self._respond(
             200,
@@ -616,7 +710,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # the phone browser, and this is the one failure that has to be
             # debuggable after the fact.
             print(f"authorisation for {name!r} failed: {exc}", file=sys.stderr)
-            detail = f"<p>{html.escape(str(exc))}</p>"
+            detail = refusal_html(exc)
             if "invalid_client" in str(exc):
                 # Say what the secret file looks like RIGHT NOW, so a stale
                 # process and a bad file are distinguishable from the error

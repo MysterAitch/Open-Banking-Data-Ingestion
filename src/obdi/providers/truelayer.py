@@ -87,7 +87,54 @@ def backfill_ladder() -> tuple[int, ...]:
 
 
 class TrueLayerError(RuntimeError):
-    """A provider call failed in a way worth surfacing rather than retrying."""
+    """A provider call failed in a way worth surfacing rather than retrying.
+
+    Carries the provider's error body in parts - machine code, human prose,
+    upstream provider detail - because the parts have different audiences.
+    Blurring them into one string is how "SCA exemption has expired" once hid
+    inside a truncated JSON blob on a phone screen.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: str = "",
+        description: str = "",
+        provider_details: str = "",
+        raw: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.description = description
+        self.provider_details = provider_details
+        self.raw = raw
+
+
+def _refusal(prefix: str, response: httpx.Response) -> TrueLayerError:
+    """Parse a refusal into its parts, falling back to the raw excerpt."""
+    code = description = details = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        code = str(body.get("error") or "")
+        description = str(body.get("error_description") or "")
+        raw_details = body.get("error_details")
+        if isinstance(raw_details, dict):
+            details = str(raw_details.get("provider_details") or "")
+    summary = " - ".join(part for part in (code, description) if part) or response.text[:300]
+    return TrueLayerError(
+        f"{prefix} (HTTP {response.status_code}): {summary}",
+        status=response.status_code,
+        code=code,
+        description=description,
+        provider_details=details,
+        raw=response.text[:4000],
+    )
 
 
 def build_auth_link(
@@ -139,13 +186,7 @@ def exchange_code(
         # them into one unanswerable page - read on a phone, mid-flow, with
         # the single-use code already burnt. The body carries error codes,
         # never credentials, so surfacing it leaks nothing.
-        raise TrueLayerError(
-            f"Code exchange failed (HTTP {response.status_code}): "
-            f"{response.text[:300]}. invalid_grant means the code was already "
-            "used or expired (start a fresh authorisation); invalid_client "
-            "means the client secret is wrong; invalid_redirect_uri means the "
-            "registered URI differs from the one used."
-        )
+        raise _refusal("Code exchange failed", response)
     return decode(response.text)
 
 
@@ -213,9 +254,7 @@ def fetch_accounts(
         headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
-        raise TrueLayerError(
-            f"Account fetch failed (HTTP {response.status_code}): {response.text[:300]}"
-        )
+        raise _refusal("Account fetch failed", response)
     return rows(decode(response.content), "results"), response.content
 
 
@@ -248,10 +287,7 @@ def fetch_transactions(
     if pending:
         response = http.get(url, headers=headers)
         if response.status_code != 200:
-            raise TrueLayerError(
-                f"Transaction fetch failed (HTTP {response.status_code}): "
-                f"{response.text[:300]}"
-            )
+            raise _refusal("Transaction fetch failed", response)
         body = response.content
         # The same status guard as the booked path. Both endpoints share the
         # response envelope, and a Queued/Running pending payload stored at
@@ -291,7 +327,7 @@ def fetch_transactions(
         windows = backfill_ladder()
     else:
         windows = (ROUTINE_WINDOW_DAYS,)
-    last_status = 0
+    last_response: httpx.Response | None = None
     for days in windows:
         earliest = since or datetime.now(UTC).date() - timedelta(days=days or 0)
         params = {
@@ -328,8 +364,7 @@ def fetch_transactions(
                 )
             body = response.content
             return rows(decode(body), "results"), body, urlencode(sorted(params.items()))
-        last_status = response.status_code
-        last_body = response.text[:300]
+        last_response = response
         if response.status_code == 429:
             # Narrowing cannot help, and each further attempt digs the hole
             # deeper against a quota that resets daily rather than in seconds.
@@ -345,12 +380,11 @@ def fetch_transactions(
             break
 
     # The body is the diagnosis: a 403 alone cannot distinguish a scope
-    # problem from a provider-side unattended limit from a refused window,
-    # and each has a different next step. Learnt once on the code exchange;
-    # the same rule holds everywhere a provider can say no.
-    raise TrueLayerError(
-        f"Transaction fetch failed (HTTP {last_status}): {last_body}"
-    )
+    # problem from an expired SCA exemption from a refused window, and each
+    # has a different next step. Parsed into parts so no display has to.
+    if last_response is None:
+        raise TrueLayerError("Transaction fetch failed: no window was attempted")
+    raise _refusal("Transaction fetch failed", last_response)
 
 
 def to_transaction(
@@ -448,9 +482,7 @@ def fetch_balance(
         headers=_headers(access_token, psu_ip),
     )
     if response.status_code != 200:
-        raise TrueLayerError(
-            f"Balance fetch failed (HTTP {response.status_code}): {response.text[:300]}"
-        )
+        raise _refusal("Balance fetch failed", response)
     return rows(decode(response.content), "results"), response.content
 
 

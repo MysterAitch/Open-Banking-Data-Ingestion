@@ -332,3 +332,35 @@ class TestFetchFailuresAreDiagnosable:
 
         with pytest.raises(TrueLayerError, match="access_denied"):
             fetch_transactions("token", "acc", pending=True, client=_client(handler))
+
+
+class TestProviderErrorsAreStructured:
+    """The provider's error body has parts - code, prose, provider details -
+    and keeping them separate is what lets every display layer stop blurring
+    the actual fault into the generic wrapper around it."""
+
+    def test_Fetch_WhenRefusedWithAJsonBody_PartsAreParsedOut(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                403,
+                json={
+                    "error": "sca_exceeded",
+                    "error_description": "SCA exemption has expired.",
+                    "error_details": {"provider_details": "403 access_denied"},
+                },
+            )
+
+        with pytest.raises(TrueLayerError) as caught:
+            fetch_transactions("token", "acc", client=_client(handler))
+
+        assert caught.value.status == 403
+        assert caught.value.code == "sca_exceeded"
+        assert caught.value.description == "SCA exemption has expired."
+        assert caught.value.provider_details == "403 access_denied"
+
+    def test_Fetch_WhenTheBodyIsNotJson_TheRawExcerptStillSurfaces(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(502, text="<html>Bad gateway</html>")
+
+        with pytest.raises(TrueLayerError, match="Bad gateway"):
+            fetch_transactions("token", "acc", client=_client(handler))

@@ -543,6 +543,70 @@ class TestExtendingHistoryFromThePage:
         assert "Back to connections" in response.text
 
 
+    def test_Extend_ProviderErrorParts_AreRenderedSeparately_NotAsOneJsonBlob(self, tmp_path):
+        from obdi.providers.truelayer import TrueLayerError
+
+        def refuse(**_):
+            raise TrueLayerError(
+                "Transaction fetch failed (HTTP 403): sca_exceeded",
+                status=403,
+                code="sca_exceeded",
+                description="SCA exemption has expired. The PSU should re-authenticate.",
+                provider_details="403 access_denied: SCA exemption has expired",
+                raw='{"error":"sca_exceeded","error_description":"SCA exemption has expired."}',
+            )
+
+        httpd, base = self._server(tmp_path, lambda: [], refuse)
+        try:
+            response = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+            )
+        finally:
+            httpd.shutdown()
+
+        page = response.text
+        prominent = page.split("<details", 1)[0]
+        # The machine code stands alone, the prose stands alone, and the
+        # matching remedy is in the prominent part - not lost in a blob.
+        assert "<code>sca_exceeded</code>" in prominent
+        assert "SCA exemption has expired." in prominent
+        assert "Re-authorise" in prominent
+        # The acronyms the provider throws around are defined on the page.
+        assert "Strong Customer Authentication" in prominent
+        assert "Payment Services User" in prominent
+        # The raw body is available, but folded away, pretty at display time.
+        assert "<details><summary>Full provider response</summary>" in page
+        assert "error_description" in page.split("Full provider response", 1)[1]
+
+    def test_Extend_OtherProviderErrors_DoNotClaimTheScaRemedy(self, tmp_path):
+        from obdi.providers.truelayer import TrueLayerError
+
+        def refuse(**_):
+            raise TrueLayerError(
+                "Transaction fetch failed (HTTP 400): invalid_date_range",
+                status=400,
+                code="invalid_date_range",
+                description="The requested window is not valid.",
+            )
+
+        httpd, base = self._server(tmp_path, lambda: [], refuse)
+        try:
+            response = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+            )
+        finally:
+            httpd.shutdown()
+
+        page = response.text
+        prominent = page.split("<details", 1)[0]
+        assert "<code>invalid_date_range</code>" in prominent
+        # The SCA remedy exists on the page only inside the folded full list.
+        assert "Re-authorise" not in prominent
+        assert "Re-authorise" in page
+
+
 class TestBrowsingRawArtefactsFromThePage:
     """The store's evidence, browsable where the person already is.
 
