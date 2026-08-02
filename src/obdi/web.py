@@ -315,6 +315,8 @@ class WebConfig:
     auth_lease_release: Callable[[], None] | None = None
     #: The scheduler's cycle heartbeat: {"at": iso, "interval_seconds": n}.
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None
+    #: The post-auth backfill-and-ladder thread's progress.
+    backfill_status: Callable[[], dict[str, object]] | None = None
     #: canonical -> provider refs bound to it; the map's edges, readable.
     account_feeders: Callable[[], dict[str, list[str]]] | None = None
 
@@ -1131,6 +1133,48 @@ def _scheduler_row(
     )
 
 
+def _backfill_running_banner(
+    backfill_status: Callable[[], dict[str, object]] | None,
+    now: datetime | None = None,
+) -> str:
+    """The post-auth ladder announces itself: it races a five-minute
+    window in a background thread, and its silence read as not-started -
+    which sent a human off to race it manually, in parallel."""
+    if backfill_status is None:
+        return ""
+    status: dict[str, object] = {}
+    try:
+        status = backfill_status() or {}
+    except Exception:
+        return ""
+    if str(status.get("state", "")) != "running":
+        return ""
+    updated_raw = str(status.get("updated_at", ""))
+    with contextlib.suppress(ValueError):
+        updated = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+        # A crashed thread must not banner forever: the ladder updates its
+        # status every step, so a stale stamp means it is gone.
+        if ((now or datetime.now(UTC)) - updated).total_seconds() > 900:
+            return ""
+    connection = html.escape(str(status.get("connection", "")))
+    stage = str(status.get("stage", ""))
+    detail = "fetching deep history"
+    if stage == "ladder":
+        target = status.get("target")
+        targets = status.get("targets")
+        if isinstance(target, int) and isinstance(targets, int):
+            detail = (
+                f"walking history to each wall - account {target} of {targets}"
+            )
+        else:
+            detail = "walking history to each wall"
+    return (
+        f'<p class="warn">post-authorisation backfill running for '
+        f"{connection}: {detail} - it races the five-minute window in the "
+        "background; no need to press anything</p>"
+    )
+
+
 def _rebuild_running_banner(
     rebuild_status: Callable[[], dict[str, object]] | None,
 ) -> str:
@@ -1679,10 +1723,12 @@ def render_index(
     forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
+    backfill_status: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_rebuild_running_banner(rebuild_status)}
+{_backfill_running_banner(backfill_status)}
 {_connection_rows(store)}
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines, account_feeders)}
@@ -1807,6 +1853,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     forget_available=self.bound_config.forget_actual is not None,
                     rebuild_status=self.bound_config.rebuild_status,
                     scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
+                    backfill_status=self.bound_config.backfill_status,
                 ),
             )
         elif route == "/connect":

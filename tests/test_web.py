@@ -1008,6 +1008,48 @@ class TestAccountFeeders:
         assert _feeder_line("unbound", {}) == ""
 
 
+class TestBackfillBanner:
+    def test_RunningLadder_AnnouncesItself(self):
+        """Its silence read as not-started and sent a human off to race
+        the window manually, in parallel with the machine."""
+        from datetime import UTC, datetime
+
+        from obdi.web import _backfill_running_banner
+
+        banner = _backfill_running_banner(
+            lambda: {
+                "state": "running",
+                "stage": "ladder",
+                "connection": "halifax",
+                "targets": 4,
+                "target": 2,
+                "updated_at": "2026-08-02T19:57:30Z",
+            },
+            now=datetime(2026, 8, 2, 19, 58, 0, tzinfo=UTC),
+        )
+        assert "halifax" in banner
+        assert "account 2 of 4" in banner
+        assert "no need to press anything" in banner
+
+    def test_StaleOrDoneStatus_ShowsNothing(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _backfill_running_banner
+
+        assert _backfill_running_banner(lambda: {"state": "done"}) == ""
+        stale = _backfill_running_banner(
+            lambda: {
+                "state": "running",
+                "stage": "ladder",
+                "connection": "halifax",
+                "updated_at": "2026-08-02T18:00:00Z",
+            },
+            now=datetime(2026, 8, 2, 19, 0, 0, tzinfo=UTC),
+        )
+        assert stale == ""
+        assert _backfill_running_banner(None) == ""
+
+
 class TestRebuildBanner:
     def test_RunningRebuild_BannersTheWholePage(self):
         from obdi.web import _rebuild_running_banner

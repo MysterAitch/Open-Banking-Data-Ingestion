@@ -667,8 +667,26 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         starting it here rather than later worth the complexity.
         """
 
+        status_path = db_path.parent / "backfill-status.json"
+
+        def _status(**fields: object) -> None:
+            with contextlib.suppress(OSError):
+                status_path.write_text(
+                    json.dumps(
+                        {
+                            "connection": name,
+                            "updated_at": datetime.now(UTC).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            **fields,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
         def run() -> None:
             try:
+                _status(state="running", stage="backfill")
                 # Carries the authoriser's address: they completed strong
                 # customer authentication from it seconds ago, so this is the
                 # one case where attended access is provable rather than
@@ -707,7 +725,19 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         card["account_id"]
                         for card in store.cards_for_connection(name)
                     ]
-                for provider_ref in ladder_targets:
+                _status(
+                    state="running",
+                    stage="ladder",
+                    targets=len(ladder_targets),
+                )
+                for position, provider_ref in enumerate(ladder_targets, start=1):
+                    _status(
+                        state="running",
+                        stage="ladder",
+                        targets=len(ladder_targets),
+                        target=position,
+                        working_on=provider_ref,
+                    )
 
                     def one_step(step_days: int, _ref: str = provider_ref) -> str:
                         try:
@@ -738,8 +768,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     )
                     if outcome in ("sca_expired", "rate_limited"):
                         break
+                _status(state="done", outcome="completed")
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
+                _status(state="done", outcome=f"failed: {exc}")
 
         threading.Thread(target=run, name=f"backfill-{name}", daemon=True).start()
         return True
@@ -1396,6 +1428,16 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         leases.release(leases.locks_dir(db_path), "bank-auth")
 
+    def backfill_status() -> dict[str, object]:
+        path = db_path.parent / "backfill-status.json"
+        if not path.is_file():
+            return {}
+        with contextlib.suppress(OSError, ValueError):
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(decoded, dict):
+                return decoded
+        return {}
+
     def scheduler_heartbeat() -> dict[str, object]:
         path = db_path.parent / "scheduler-heartbeat.json"
         if not path.is_file():
@@ -1573,6 +1615,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         auth_lease_take=auth_lease_take,
         auth_lease_release=auth_lease_release,
         scheduler_heartbeat=scheduler_heartbeat,
+        backfill_status=backfill_status,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
