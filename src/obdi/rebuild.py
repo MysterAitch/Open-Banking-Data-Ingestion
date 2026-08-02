@@ -134,7 +134,18 @@ def rebuild_from_raw(store: Store) -> RebuildReport:
                 # original import did.
                 parser = detect(payload)
                 transactions = list(parser.parse(payload, account_id=account_ref))
-        except (DataError, ValueError, KeyError) as exc:
+        except (
+            DataError,
+            ValueError,
+            KeyError,
+            starling.StarlingError,
+            truelayer.TrueLayerError,
+        ) as exc:
+            # Provider errors subclass RuntimeError, and before they were
+            # listed here ONE problem item aborted the whole rebuild
+            # mid-loop - after the wipe, with everything later in arrival
+            # order (all of Starling, live) silently absent. A poison
+            # artefact is that artefact's problem, recorded and skipped.
             report.problems.append(f"{source} for {account_ref}: {exc}")
             report.artefacts_skipped += 1
             continue

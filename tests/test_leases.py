@@ -151,6 +151,43 @@ class TestScheduledPullGate:
         now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC)
         assert scheduled_pull_skip_reason(db, now=now) is None
 
+    def test_RunningRebuild_HoldsTheCycleBack(self, tmp_path, monkeypatch):
+        """A rebuild mid-replay and a pull cycle write the same store;
+        their collision aborted a live rebuild after the wipe. The pull
+        loses nothing by waiting one interval."""
+        from obdi.cli import scheduled_pull_skip_reason
+        from obdi.leases import acquire
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        acquire(locks, "rebuild-derived", "obdi-web", ttl_seconds=3600)
+
+        reason = scheduled_pull_skip_reason(db)
+
+        assert reason is not None
+        assert "rebuild" in reason
+
+    def test_MidCyclePull_HoldsTheRebuildBack(self, tmp_path, monkeypatch):
+        from obdi.cli import start_background_rebuild
+        from obdi.leases import acquire
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        acquire(locks, "pull-cycle", "obdi-pull", ttl_seconds=1800)
+
+        message = start_background_rebuild(db)
+
+        assert "mid-cycle" in message
+        assert not (tmp_path / "rebuild-status.json").exists()
+
     def test_StackUpdateLease_HoldsTheCycleBack(self, tmp_path, monkeypatch):
         from obdi.cli import scheduled_pull_skip_reason
         from obdi.leases import STACK_UPDATE, acquire

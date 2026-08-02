@@ -186,6 +186,12 @@ def start_background_rebuild(db_path: Path) -> str:
 
     from . import leases
 
+    if leases.held(leases.locks_dir(db_path), "pull-cycle"):
+        return (
+            "the scheduler is mid-cycle and shares the store - try again "
+            "in a few minutes (the cycle's lease expires by itself if it "
+            "crashed)"
+        )
     status_path = db_path.parent / "rebuild-status.json"
     with contextlib.suppress(OSError, ValueError):
         current = json.loads(status_path.read_text(encoding="utf-8"))
@@ -1431,6 +1437,11 @@ def scheduled_pull_skip_reason(
     directory = leases.locks_dir(db_path)
     if leases.held(directory, leases.STACK_UPDATE):
         return "a stack update is in progress - skipping this cycle"
+    if leases.held(directory, "rebuild-derived"):
+        # A rebuild mid-replay and a pull cycle write the same store; their
+        # collision is the observed cause of a rebuild aborting after the
+        # wipe. The pull loses nothing by waiting one interval.
+        return "a rebuild is in progress - skipping this cycle"
     interval = int(os.getenv("OBDI_PULL_INTERVAL_SECONDS", "21600") or "21600")
     default_min = int(interval * 0.9)
     raw_min = os.getenv("OBDI_PULL_MIN_INTERVAL_SECONDS", "").strip()
