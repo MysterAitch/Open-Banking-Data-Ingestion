@@ -123,6 +123,12 @@ class ExtendableAccount:
     #: form right in their row, because naming things should not need a shell.
     canonical: str = ""
     unbound: bool = False
+    #: The forward edge: how recent the asked coverage runs (latest `to=`
+    #: across landed windows) and when the last payload landed. This is what
+    #: makes a quietly-stopped scheduler VISIBLE - held transactions age
+    #: silently, but "covered to" falling behind today is unambiguous.
+    covered_to: date | None = None
+    last_landed: str = ""
 
 
 @dataclass
@@ -553,6 +559,30 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
 EXTEND_CHOICES = (1, 7, 30, 90, 365, 730)
 
 
+def _freshness_line(account: ExtendableAccount) -> str:
+    """One line saying how CURRENT the coverage is, loud when it is not.
+
+    The scheduler covers to today on every six-hour cycle, so covered-to
+    lagging more than two days behind means the pulls have quietly stopped -
+    the exact failure a week away from the system would otherwise hide.
+    """
+    if account.covered_to is None:
+        return ""
+    lag = (datetime.now(UTC).date() - account.covered_to).days
+    landed = account.last_landed[:16].replace("T", " ")
+    stale = (
+        f' <span class="pill pill-bad">stale: {lag} days behind</span>'
+        if lag > 2
+        else ""
+    )
+    return (
+        f'<br><span class="muted">covered to {account.covered_to.isoformat()}'
+        + (f", last landed {landed} UTC" if landed else "")
+        + "</span>"
+        + stale
+    )
+
+
 def _knowledge_rows(
     provider_knowledge: Callable[[], list[dict[str, object]]] | None,
 ) -> str:
@@ -670,6 +700,7 @@ def _extend_rows(
                 and (account.earliest is None or account.probed_back_to < account.earliest)
                 else ""
             )
+            + _freshness_line(account)
             + f"{note}{bind_form}<br>{controls}</div>"
         )
     return (

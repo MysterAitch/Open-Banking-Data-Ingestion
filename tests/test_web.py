@@ -643,6 +643,45 @@ class TestExtendingHistoryFromThePage:
         # The boundary-shaped remedy for a walking-back refusal.
         assert "fixed DATE" in prominent
 
+    def test_ExtendRow_ShowsCoverageFreshness_AndShoutsWhenStale(self, tmp_path):
+        from datetime import UTC, datetime, timedelta
+
+        from obdi.web import ExtendableAccount
+
+        today = datetime.now(UTC).date()
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="fresh",
+                    display="Fresh Account",
+                    earliest=date(2020, 8, 7),
+                    covered_to=today,
+                    last_landed="2026-08-02T01:27:03+00:00",
+                ),
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="stale",
+                    display="Stale Account",
+                    earliest=date(2020, 8, 7),
+                    covered_to=today - timedelta(days=9),
+                ),
+            ],
+            lambda **_: "",
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        # Fresh: stated quietly. Stale: a loud pill with the lag in days -
+        # the quietly-stopped-scheduler failure made visible from the page.
+        assert f"covered to {today.isoformat()}" in page
+        assert "stale: 9 days behind" in page
+        assert page.count("stale:") == 1
+
     def test_ExtendRow_ForAnEmptyAccount_ShowsHowFarProbing_HasAlreadyReached(
         self, tmp_path
     ):

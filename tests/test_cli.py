@@ -73,3 +73,45 @@ class TestProbedAnchorFromAskedWindows:
 
         with Store(tmp_path / "s.sqlite3") as store:
             assert _earliest_asked(store, "halifax-spare") is None
+
+
+class TestFreshnessFromAskedWindows:
+    """Covered-to is the forward edge: it must reflect what was ASKED, so a
+    stopped scheduler shows as coverage falling behind, not as silence."""
+
+    def test_LatestAsked_ReadsTheNewestWindowEnd_AndWhenItLanded(self, tmp_path):
+        from obdi.cli import _latest_asked
+        from obdi.providers.truelayer import artefact_for
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                artefact_for(
+                    b'{"results": [], "status": "Succeeded"}',
+                    account_id="halifax-current",
+                    kind="booked",
+                    requested="from=2026-02-01&to=2026-05-01",
+                )
+            )
+            store.land_artefact(
+                artefact_for(
+                    b'{"results": [{"x": 1}], "status": "Succeeded"}',
+                    account_id="halifax-current",
+                    kind="booked",
+                    requested="from=2026-05-04&to=2026-08-02",
+                )
+            )
+
+            covered, landed = _latest_asked(store, "halifax-current")
+
+        assert covered == date(2026, 8, 2)
+        assert landed  # a timestamp, present
+
+    def test_LatestAsked_WhenNothingLanded_IsNone(self, tmp_path):
+        from obdi.cli import _latest_asked
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            covered, landed = _latest_asked(store, "halifax-current")
+
+        assert covered is None and landed == ""

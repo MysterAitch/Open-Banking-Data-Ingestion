@@ -166,6 +166,37 @@ def _earliest_asked(store: Store, canonical: str) -> date | None:
     return min(asked) if asked else None
 
 
+def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
+    """How RECENT the asked coverage runs, and when the last payload landed.
+
+    The forward counterpart of _earliest_asked, and the honest freshness
+    measure: the latest transaction date only says when money last moved,
+    while the latest asked `to=` says how far the fetching has actually
+    covered - the difference is exactly what goes invisible if the scheduler
+    quietly stops for a week.
+    """
+    rows = store.connection.execute(
+        "SELECT origin, fetched_at FROM raw_artefacts "
+        "WHERE account_ref = ? AND source = 'truelayer-booked' "
+        "AND origin LIKE '%to=%'",
+        (canonical,),
+    ).fetchall()
+    covered: date | None = None
+    landed = ""
+    for row in rows:
+        query = parse_qs(urlparse(str(row["origin"])).query)
+        for value in query.get("to", []):
+            try:
+                candidate = date.fromisoformat(value[:10])
+            except ValueError:
+                continue
+            if covered is None or candidate > covered:
+                covered = candidate
+        if str(row["fetched_at"]) > landed:
+            landed = str(row["fetched_at"])
+    return covered, landed
+
+
 def extend_bounds(
     earliest: date | None, days: int, *, today: date
 ) -> tuple[date, date]:
@@ -305,6 +336,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     boundary_fact = store.provider_fact(
                         "truelayer", connection_id, f"history_boundary:{canonical}"
                     )
+                    covered_to, last_landed = _latest_asked(store, canonical)
                     found.append(
                         ExtendableAccount(
                             connection=connection_id,
@@ -321,6 +353,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             ),
                             canonical=canonical,
                             unbound=canonical.startswith("truelayer:"),
+                            covered_to=covered_to,
+                            last_landed=last_landed,
                         )
                     )
         return found
