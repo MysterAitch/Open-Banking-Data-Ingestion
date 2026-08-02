@@ -285,6 +285,8 @@ class WebConfig:
     actual_status: Callable[[], list[dict[str, object]]] | None = None
     #: Per-account sync fates for the roster: syncing / provision / unnamed.
     actual_roster: Callable[[], list[dict[str, object]]] | None = None
+    #: Envelopes queued but not yet picked up by the applier.
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -919,6 +921,8 @@ def _suggest_slug(label: str, ref: str) -> str:
     """A ready-to-accept canonical name from the provider's display label,
     so naming an account is one tap rather than a typing exercise. Empty
     when the label offers nothing better than the opaque ref."""
+    if label == ref:
+        return ""
     source = ref.split(":", 1)[0] if ":" in ref else ""
     base = label.split("(", 1)[0].strip().lower()
     base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
@@ -969,6 +973,7 @@ def _actual_rows(
     actual_status: Callable[[], list[dict[str, object]]] | None,
     push_available: bool,
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
 ) -> str:
     """The budget sync, visible and pressable: the per-account plan first
     (what a push would do and why), then the button, then results newest
@@ -983,6 +988,24 @@ def _actual_rows(
             roster = []
         if roster:
             roster_html = "".join(_roster_row(entry) for entry in roster)
+    queued_html = ""
+    if actual_queue is not None:
+        try:
+            queued = actual_queue()
+        except Exception:
+            queued = []
+        parts = []
+        for entry in queued:
+            stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
+                str(entry.get("name", ""))
+            )
+            parts.append(
+                f'<div class="row"><strong>{stamp}</strong> '
+                '<span class="pill pill-quiet">queued</span>'
+                '<br><span class="muted">waiting for the applier'
+                "</span></div>"
+            )
+        queued_html = "".join(parts)
     results = []
     if actual_status is not None:
         try:
@@ -1020,10 +1043,12 @@ def _actual_rows(
         "<h2>Actual sync</h2>"
         "<p>Pushes run through the applier container: bound accounts import, "
         "named accounts are created in Actual automatically (empty ones "
-        "included) and their transactions ride the next push. Scheduled "
-        "cycles queue one after every pull.</p>"
+        "included) and their transactions ride the next push. The applier "
+        "checks the queue about every 20 seconds; the scheduler also "
+        "queues a push after each pull cycle, every six hours.</p>"
         + roster_html
         + button
+        + queued_html
         + "".join(rows)
     )
 
@@ -1200,6 +1225,7 @@ def render_index(
     push_actual: Callable[[], str] | None = None,
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1207,7 +1233,7 @@ def render_index(
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
-{_actual_rows(actual_status, push_actual is not None, actual_roster)}
+{_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1308,6 +1334,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     push_actual=self.bound_config.push_actual,
                     actual_status=self.bound_config.actual_status,
                     actual_roster=self.bound_config.actual_roster,
+                    actual_queue=self.bound_config.actual_queue,
                 ),
             )
         elif route == "/connect":

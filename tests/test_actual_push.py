@@ -12,9 +12,11 @@ import json
 
 from obdi.actual_push import (
     build_envelope,
+    drop_conflicting_bindings,
     latest_results,
     merge_pending_bindings,
     queue_push,
+    queued_requests,
 )
 from obdi.replay import ActualAccountBinding
 from obdi.store import Store
@@ -75,6 +77,31 @@ class TestEnvelope:
             {"canonical_id": "halifax-reward", "label": "halifax-reward"}
         ]
 
+    def test_ProvisionLabelsCollide_FallBackToCanonicalNames(self, tmp_path):
+        """Two Halifax accounts both display as the account holder's name.
+
+        The applier provisions idempotently BY NAME, so duplicate labels
+        silently bind two canonicals to one Actual account - the first
+        live push did exactly that. Colliding labels must fall back to
+        the canonical names, which are unique by construction."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _seed(store, "halifax-current", "e-1")
+            _seed(store, "halifax-saver", "e-2")
+
+            envelope = build_envelope(
+                store,
+                [],
+                {
+                    "halifax-current": "Mr Roger Howell (halifax)",
+                    "halifax-saver": "Mr Roger Howell (halifax)",
+                },
+            )
+
+        assert envelope["provision"] == [
+            {"canonical_id": "halifax-current", "label": "halifax-current"},
+            {"canonical_id": "halifax-saver", "label": "halifax-saver"},
+        ]
+
     def test_QueueWrite_IsAtomicAndOrdered(self, tmp_path):
         first = queue_push({"version": 2}, tmp_path / "actual")
         second = queue_push({"version": 2}, tmp_path / "actual")
@@ -118,6 +145,64 @@ class TestBindingsRoundTrip:
         # Consumed, not deleted: renamed aside so a crash can only re-merge.
         assert not (actual_dir / "bindings-pending.json").exists()
         assert list(actual_dir.glob("bindings-pending.merged-*"))
+
+    def test_ConflictingBindings_AreDroppedForReprovisioning(self, tmp_path):
+        """Two canonicals sharing one Actual account id is the poisoned
+        state a label collision leaves behind. Both sharers are dropped
+        (which is ambiguous to resolve, and re-provisioning is cheap) so
+        the next push creates them cleanly; unique bindings survive."""
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            json.dumps(
+                {
+                    "bindings": [],
+                    "actual": [
+                        {"canonical_id": "halifax-current", "actual_account_id": "X"},
+                        {"canonical_id": "halifax-saver", "actual_account_id": "X"},
+                        {"canonical_id": "halifax-reward", "actual_account_id": "Y"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        dropped = drop_conflicting_bindings(map_path)
+
+        assert dropped == ["halifax-current", "halifax-saver"]
+        stored = json.loads(map_path.read_text(encoding="utf-8"))
+        assert stored["actual"] == [
+            {"canonical_id": "halifax-reward", "actual_account_id": "Y"}
+        ]
+
+    def test_NoConflicts_LeavesTheMapUntouched(self, tmp_path):
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            json.dumps(
+                {
+                    "bindings": [],
+                    "actual": [
+                        {"canonical_id": "halifax-current", "actual_account_id": "X"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert drop_conflicting_bindings(map_path) == []
+
+    def test_QueuedRequests_ListedWithTheirTimes_TmpFilesIgnored(self, tmp_path):
+        """A pressed button must be visible as in-flight, not vanish until
+        the applier answers."""
+        requests = tmp_path / "actual" / "requests"
+        requests.mkdir(parents=True)
+        (requests / "push-20260802T112545430836.json").write_text("{}")
+        (requests / ".push-x.json.tmp").write_text("{}")
+
+        queued = queued_requests(tmp_path / "actual")
+
+        assert len(queued) == 1
+        assert queued[0]["name"] == "push-20260802T112545430836.json"
+        assert queued[0]["queued_at"] == "2026-08-02T11:25:45"
 
     def test_LatestResults_NewestFirst(self, tmp_path):
         results = tmp_path / "actual" / "results"

@@ -57,6 +57,31 @@ def _account_map() -> AccountMap:
     return AccountMap([AccountBinding(**binding) for binding in raw.get("bindings", [])])
 
 
+def _apply_bind(
+    db_path: Path,
+    map_file: Path,
+    account_map: AccountMap,
+    source: str,
+    provider_ref: str,
+    canonical: str,
+) -> int:
+    """Move the stored rows, THEN record the name - in that order, so a
+    write failure (the store is shared with the scheduler container and
+    can be busy) leaves nothing half-bound. Rows are moved from both the
+    current resolution and the source-qualified fallback id: the latter
+    rescues rows stranded by an earlier bind that recorded its name but
+    died before moving them - re-pressing Bind is the repair.
+    """
+    old_canonical = account_map.resolve(source, provider_ref)
+    qualified = f"{source}:{provider_ref}"
+    with Store(db_path) as store:
+        moved = 0
+        for stranded in {old_canonical, qualified} - {canonical}:
+            moved += store.rebind_account(stranded, canonical)
+    _persist_binding(map_file, source, provider_ref, canonical)
+    return moved
+
+
 def _split_bind_ref(ref: str) -> tuple[str, str]:
     """A bind posted from the page is either a bare TrueLayer provider ref
     (the extend rows) or a source-qualified id like "starling:uid" (the
@@ -99,10 +124,20 @@ def queue_actual_push(db_path: Path) -> str:
         raise RuntimeError("Set OBDI_ACCOUNT_MAP to the account map path.")
     actual_dir = _actual_dir(db_path)
 
+    from .actual_push import drop_conflicting_bindings
+
     lines = []
     merged = merge_pending_bindings(Path(map_path_env), actual_dir)
     if merged:
         lines.append(f"merged {merged} applier-minted binding(s) into the account map")
+    dropped = drop_conflicting_bindings(Path(map_path_env))
+    if dropped:
+        lines.append(
+            "repaired a binding conflict: "
+            + ", ".join(dropped)
+            + " shared one Actual account - re-provisioning them under "
+            "unique names (delete the shared account in Actual)"
+        )
 
     bindings = _actual_bindings()
     connection_ids: list[str] = []
@@ -556,10 +591,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
         if not map_path:
             raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
-        old_canonical = _account_map().resolve(source, provider_ref)
-        _persist_binding(Path(map_path), source, provider_ref, canonical)
-        with Store(db_path) as store:
-            moved = store.rebind_account(old_canonical, canonical)
+        moved = _apply_bind(
+            db_path, Path(map_path), _account_map(), source, provider_ref, canonical
+        )
         return (
             f"bound {_short(provider_ref)} -> {canonical}: {moved} stored "
             "row(s) moved; artefacts and the attempt ledger follow the new name"
@@ -888,6 +922,11 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         return latest_results(_actual_dir(db_path))
 
+    def actual_queue() -> list[dict[str, object]]:
+        from .actual_push import queued_requests
+
+        return queued_requests(_actual_dir(db_path))
+
     def attempts_index() -> dict[str, object]:
         with Store(db_path) as store:
             rows = store.attempts()
@@ -1027,6 +1066,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         push_actual=push_actual_hook,
         actual_status=actual_status,
         actual_roster=actual_roster,
+        actual_queue=actual_queue,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,

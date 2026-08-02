@@ -914,6 +914,30 @@ class TestActualRoster:
         assert 'value="starling:b2ce"' in rendered
         assert 'value="starling-personal"' in rendered
 
+    def test_QueuedPushes_AreShownAsInFlight_WithPickupExpectation(self):
+        """Between the button press and the applier's answer, the push must
+        be visible - with a statement of when it gets picked up."""
+        from obdi.web import _actual_rows
+
+        rendered = _actual_rows(
+            lambda: [],
+            True,
+            None,
+            lambda: [
+                {
+                    "name": "push-20260802T112545430836.json",
+                    "queued_at": "2026-08-02T11:25:45",
+                }
+            ],
+        )
+
+        assert "11:25:45" in rendered
+        assert "queued" in rendered
+        assert "every 20 seconds" in rendered
+        # The scheduled route is stated too, so "when will it sync by
+        # itself" needs no shell either.
+        assert "every six hours" in rendered
+
     def test_Roster_HookFailure_DoesNotTakeDownTheSection(self):
         from obdi.web import _actual_rows
 
@@ -936,6 +960,10 @@ class TestActualRoster:
         # No label worth suggesting: leave the input empty rather than
         # suggesting a slugified uuid.
         assert _suggest_slug("", "starling:e6a0") == ""
+        # A label that IS the raw ref (no display name known) offers
+        # nothing either - an empty box beats "starling-343fa965-8bb7-...".
+        ref = "starling:343fa965-8bb7-470a-a4b8-c84843627be2"
+        assert _suggest_slug(ref, ref) == ""
 
 
 class TestBindingFromThePage:
@@ -1014,6 +1042,79 @@ class TestBindingFromThePage:
 
         assert calls == [("e9f8", "halifax-current")]
         assert "947 stored row(s) moved" in page
+
+    def test_Bind_MovesRowsBeforePersistingTheName(self, tmp_path):
+        """A fresh bind: rows keyed by the qualified fallback id move to
+        the chosen canonical and the map records the binding."""
+        import json as _json
+
+        from obdi.accounts import AccountMap
+        from obdi.cli import _apply_bind
+        from obdi.store import Store as _Store
+
+        db = tmp_path / "s.sqlite3"
+        with _Store(db) as store:
+            store.connection.execute(
+                "INSERT INTO transactions (entity_id, account_id, amount_minor, "
+                "value_date, booking_date, description, source, currency, tier, "
+                "status, content_key, occurrence, first_seen_at, last_seen_at) "
+                "VALUES ('e-1', 'starling:uid-1', -100, '2026-07-01', "
+                "'2026-07-01', 'X', 'starling', 'GBP', 'authoritative', "
+                "'booked', 'ck-1', 0, '2026-07-01T00:00:00', "
+                "'2026-07-01T00:00:00')"
+            )
+            store.connection.commit()
+        map_file = tmp_path / "accounts.json"
+
+        moved = _apply_bind(
+            db, map_file, AccountMap(), "starling", "uid-1", "starling-bills"
+        )
+
+        assert moved == 1
+        stored = _json.loads(map_file.read_text(encoding="utf-8"))
+        assert stored["bindings"][0]["canonical_id"] == "starling-bills"
+        with _Store(db) as store:
+            rows = store.connection.execute(
+                "SELECT account_id FROM transactions"
+            ).fetchall()
+        assert [r[0] for r in rows] == ["starling-bills"]
+
+    def test_Bind_AfterEarlierHalfAppliedBind_RescuesTheStrandedRows(self, tmp_path):
+        """The failure the lock left behind: the map says "starling-bills"
+        but the rows still sit under the qualified ref. Re-pressing Bind
+        (same name or a new one) must move the stranded rows, not no-op
+        because the map already resolves."""
+        from obdi.accounts import AccountBinding, AccountMap
+        from obdi.cli import _apply_bind
+        from obdi.store import Store as _Store
+
+        db = tmp_path / "s.sqlite3"
+        with _Store(db) as store:
+            store.connection.execute(
+                "INSERT INTO transactions (entity_id, account_id, amount_minor, "
+                "value_date, booking_date, description, source, currency, tier, "
+                "status, content_key, occurrence, first_seen_at, last_seen_at) "
+                "VALUES ('e-1', 'starling:uid-1', -100, '2026-07-01', "
+                "'2026-07-01', 'X', 'starling', 'GBP', 'authoritative', "
+                "'booked', 'ck-1', 0, '2026-07-01T00:00:00', "
+                "'2026-07-01T00:00:00')"
+            )
+            store.connection.commit()
+        map_file = tmp_path / "accounts.json"
+        half_applied = AccountMap(
+            [AccountBinding("starling", "uid-1", "starling-bills")]
+        )
+
+        moved = _apply_bind(
+            db, map_file, half_applied, "starling", "uid-1", "starling-bills"
+        )
+
+        assert moved == 1
+        with _Store(db) as store:
+            rows = store.connection.execute(
+                "SELECT account_id FROM transactions"
+            ).fetchall()
+        assert [r[0] for r in rows] == ["starling-bills"]
 
     def test_SourceQualifiedRef_BindsUnderItsOwnSource(self):
         """The holdings and roster forms post "starling:uid"; the extend rows

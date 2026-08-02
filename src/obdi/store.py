@@ -454,6 +454,13 @@ class Store:
         key: in the rare case the same bytes landed under both names, the
         old-named duplicate is retained rather than erred on.
         """
+        # BEGIN IMMEDIATE takes the write lock up front, where the busy
+        # timeout applies - a deferred transaction that upgrades to a write
+        # mid-way can fail with "database is locked" IMMEDIATELY (the busy
+        # handler is not consulted on an upgrade), which is how a bind died
+        # while the scheduler container held the store.
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
         cursor = self.connection.execute(
             "UPDATE transactions SET account_id = ? WHERE account_id = ?",
             (new_account_id, old_account_id),

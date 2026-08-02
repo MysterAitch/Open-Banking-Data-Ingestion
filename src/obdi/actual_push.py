@@ -14,7 +14,9 @@ than left as a point-and-click chore where typos and mismatches breed.
 
 from __future__ import annotations
 
+import contextlib
 import json
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -67,6 +69,38 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     return merged
 
 
+def drop_conflicting_bindings(map_path: Path) -> list[str]:
+    """Remove Actual bindings where two canonicals share one account id.
+
+    That state is what a provisioning label collision leaves behind (the
+    applier creates idempotently BY NAME), and it silently merges two real
+    accounts' transactions. Which sharer should keep the id is ambiguous,
+    and re-provisioning is cheap - so all sharers are dropped and the next
+    push recreates them under unique names. Returns the dropped canonicals.
+    """
+    if not map_path.is_file():
+        return []
+    try:
+        payload = json.loads(map_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return []
+    raw = payload.get("actual", []) if isinstance(payload, dict) else []
+    entries = [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+    uses = Counter(str(e.get("actual_account_id")) for e in entries)
+    dropped = sorted(
+        str(e.get("canonical_id"))
+        for e in entries
+        if uses[str(e.get("actual_account_id"))] > 1
+    )
+    if not dropped:
+        return []
+    payload["actual"] = [
+        e for e in entries if uses[str(e.get("actual_account_id"))] == 1
+    ]
+    map_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return dropped
+
+
 def build_envelope(
     store: Store,
     bindings: list[ActualAccountBinding],
@@ -86,10 +120,22 @@ def build_envelope(
     candidates = set(unbound_accounts(transactions, bindings)) | (
         (named_canonicals or set()) - already_bound
     )
-    provision = [
-        {"canonical_id": canonical, "label": labels.get(canonical, canonical)}
-        for canonical in sorted(candidates)
+    # The applier creates accounts idempotently BY NAME, so two canonicals
+    # sharing a display label (both Halifax accounts show the holder's
+    # name) would silently bind to one Actual account. Colliding labels
+    # fall back to the canonical names, which are unique by construction.
+    label_of = {
+        canonical: labels.get(canonical, canonical)
+        for canonical in candidates
         if ":" not in canonical
+    }
+    used = Counter(label_of.values())
+    provision = [
+        {
+            "canonical_id": canonical,
+            "label": canonical if used[label_of[canonical]] > 1 else label_of[canonical],
+        }
+        for canonical in sorted(label_of)
     ]
     return {"version": 2, "provision": provision, "accounts": payload}
 
@@ -106,6 +152,32 @@ def queue_push(
     final = requests / name
     tmp.rename(final)
     return final
+
+
+def queued_requests(actual_dir: Path) -> list[dict[str, object]]:
+    """Envelopes written but not yet picked up - the in-flight view.
+
+    Between the button press and the applier's answer a push exists only
+    as a file in requests/; listing it is what stops "did that work?"
+    refreshes. Queued-at comes from the filename stamp the queue writer
+    embeds."""
+    requests = actual_dir / "requests"
+    if not requests.is_dir():
+        return []
+    out: list[dict[str, object]] = []
+    for path in sorted(requests.glob("push-*.json"), reverse=True):
+        if path.name.startswith("."):
+            continue
+        queued_at = ""
+        stamp = path.stem.removeprefix("push-")
+        with contextlib.suppress(ValueError):
+            queued_at = (
+                datetime.strptime(stamp, "%Y%m%dT%H%M%S%f")
+                .replace(tzinfo=UTC)
+                .strftime("%Y-%m-%dT%H:%M:%S")
+            )
+        out.append({"name": path.name, "queued_at": queued_at})
+    return out
 
 
 def latest_results(actual_dir: Path, limit: int = 5) -> list[dict[str, object]]:
