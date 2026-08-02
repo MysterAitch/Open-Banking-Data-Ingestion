@@ -212,6 +212,16 @@ def build_audit_envelope(
     return {"version": 2, "kind": "audit", "accounts": accounts}
 
 
+def build_prune_envelope(
+    store: Store, bindings: list[ActualAccountBinding]
+) -> dict[str, object]:
+    """The audit payload, marked kind=prune: the applier deletes rows
+    that carry OUR imported ids but are absent from this expected set.
+    Rows without an imported id are the person's own and untouchable."""
+    envelope = build_audit_envelope(store, bindings)
+    return {**envelope, "kind": "prune"}
+
+
 def queue_push(
     envelope: dict[str, object], actual_dir: Path, prefix: str = "push"
 ) -> Path:

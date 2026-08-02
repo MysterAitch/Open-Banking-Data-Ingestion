@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-import { auditAccounts } from './audit.mjs';
+import { auditAccounts, pruneAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
 import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
@@ -61,6 +61,17 @@ async function processRequest(name) {
     return {
       ok: true,
       kind: 'audit',
+      request: name,
+      finished_at: new Date().toISOString(),
+      accounts: report,
+    };
+  }
+
+  if (kind === 'prune') {
+    const report = await withBudget((client) => pruneAccounts(client, accounts));
+    return {
+      ok: true,
+      kind: 'prune',
       request: name,
       finished_at: new Date().toISOString(),
       accounts: report,

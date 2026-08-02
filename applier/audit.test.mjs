@@ -96,3 +96,31 @@ test('accounts existing in Actual but bound to nothing are named as strays', asy
   assert.equal(stray.rows, 1);
   assert.ok(report.find((entry) => entry.account_id === 'act-1' && !entry.unbound_in_actual));
 });
+
+test('prunable rows are ours-and-unexpected only; yours are untouchable', async () => {
+  const { choosePrunable } = await import('./audit.mjs');
+  const expected = new Set(['ck-1:0', 'ck-2:0']);
+  const rows = [
+    { id: 'a', imported_id: 'ck-1:0' },
+    { id: 'b', imported_id: 'ck-stale:0' },
+    { id: 'c', imported_id: null },
+    { id: 'd', imported_id: 'ck-stale:1', is_child: true },
+  ];
+  const prunable = choosePrunable(expected, rows);
+  assert.deepEqual(prunable, [{ id: 'b', imported_id: 'ck-stale:0' }]);
+});
+
+test('an empty expected set is refused, never pruned blind', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => {
+      throw new Error('must not even read when refusing');
+    },
+    deleteTransaction: async () => {
+      throw new Error('must not delete');
+    },
+  };
+  const report = await pruneAccounts(client, { 'act-1': [] });
+  assert.ok(report[0].skipped);
+});

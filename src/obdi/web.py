@@ -292,6 +292,8 @@ class WebConfig:
     audit_actual: Callable[[], str] | None = None
     #: The full sync history - every result, not just the newest handful.
     actual_history: Callable[[], list[dict[str, object]]] | None = None
+    #: The audit's action arm: delete provably-ours orphaned imports.
+    prune_actual: Callable[[], str] | None = None
     #: The review queue decomposed: reasons, clusters, declaration matches.
     review_report_text: Callable[[], str] | None = None
     #: Additively replay one landed artefact into the store (see the cli).
@@ -1326,6 +1328,8 @@ def _result_row(result: dict[str, object]) -> str:
     section (newest handful) and the full history page."""
     if str(result.get("kind", "")) == "audit":
         return _audit_result_row(result)
+    if str(result.get("kind", "")) == "prune":
+        return _prune_result_row(result)
     ok = bool(result.get("ok"))
     badge = (
         '<span class="pill pill-ok">applied</span>'
@@ -1342,6 +1346,41 @@ def _result_row(result: dict[str, object]) -> str:
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}'
         f'<br><span class="muted">{detail}</span></div>'
+    )
+
+
+def _prune_result_row(result: dict[str, object]) -> str:
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    if not result.get("ok"):
+        return (
+            f'<div class="row"><strong>{stamp}Z</strong> '
+            '<span class="pill pill-bad">prune failed</span>'
+            f'<br><span class="muted">{html.escape(str(result.get("error", "")))}'
+            "</span></div>"
+        )
+    raw = result.get("accounts")
+    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+    removed_total = sum(
+        int(a.get("removed", 0)) for a in accounts if "removed" in a
+    )
+    lines = []
+    for account in accounts:
+        name = html.escape(str(account.get("name") or account.get("account_id", "")))
+        if account.get("skipped"):
+            lines.append(
+                f'<span class="warn">{name}: '
+                f"{html.escape(str(account.get('skipped')))}</span>"
+            )
+        elif account.get("removed"):
+            lines.append(
+                f'<span class="muted">{name}: removed '
+                f"{account.get('removed')} orphaned import(s)</span>"
+            )
+    return (
+        f'<div class="row"><strong>{stamp}Z</strong> '
+        f'<span class="pill pill-ok">pruned ({removed_total} removed)</span><br>'
+        + "<br>".join(lines)
+        + "</div>"
     )
 
 
@@ -1416,6 +1455,7 @@ def _actual_rows(
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_available: bool = False,
     actual_heartbeat: Callable[[], str] | None = None,
+    prune_available: bool = False,
 ) -> str:
     """The budget sync, visible and pressable: the per-account plan first
     (what a push would do and why), then the button, then results newest
@@ -1491,6 +1531,19 @@ def _actual_rows(
         if audit_available
         else ""
     )
+    prune_button = (
+        '<form method="post" action="/prune-actual">'
+        '<label style="display:block;margin:.35rem 0">'
+        '<input type="checkbox" name="confirm" value="yes" required> '
+        "I understand rows carrying obdi's imported ids that are no longer "
+        "expected will be deleted from Actual</label>"
+        '<p><button class="button" type="submit" '
+        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
+        'background:#dc262622;color:#b91c1c">'
+        "Remove orphaned imports</button></p></form>"
+        if prune_available
+        else ""
+    )
     return (
         "<h2>Actual sync</h2>"
         "<p>Pushes run through the applier container: bound accounts import, "
@@ -1504,6 +1557,7 @@ def _actual_rows(
         + roster_html
         + button
         + audit_button
+        + prune_button
         + queued_html
         + "".join(rows)
         + ('<p><a href="/actual-history">Full sync history</a></p>' if rows else "")
@@ -1718,6 +1772,7 @@ def render_index(
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_actual: Callable[[], str] | None = None,
+    prune_actual: Callable[[], str] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     rebuild_available: bool = False,
     forget_available: bool = False,
@@ -1736,7 +1791,8 @@ def render_index(
 {_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
               audit_available=audit_actual is not None,
-              actual_heartbeat=actual_heartbeat)}
+              actual_heartbeat=actual_heartbeat,
+              prune_available=prune_actual is not None)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1848,6 +1904,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_roster=self.bound_config.actual_roster,
                     actual_queue=self.bound_config.actual_queue,
                     audit_actual=self.bound_config.audit_actual,
+                    prune_actual=self.bound_config.prune_actual,
                     actual_heartbeat=self.bound_config.actual_heartbeat,
                     rebuild_available=self.bound_config.rebuild_derived is not None,
                     forget_available=self.bound_config.forget_actual is not None,
@@ -2240,6 +2297,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if route == "/audit-actual":
             self._audit_actual()
             return
+        if route == "/prune-actual":
+            self._prune_actual(self._read_form())
+            return
         if route == "/rebuild-derived":
             self._rebuild_derived(self._read_form())
             return
@@ -2470,6 +2530,40 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 "<p>Read-only: the applier reads each bound account back "
                 "from Actual and reports differences in the Actual sync "
                 "section - nothing is changed on either side.</p>" + HOME_LINK,
+            ),
+        )
+
+    def _prune_actual(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.prune_actual
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        if form.get("confirm") != ["yes"]:
+            self._respond(
+                400,
+                error_page(
+                    "Not confirmed",
+                    "<p>Pruning deletes rows from Actual (only ones carrying "
+                    "obdi's imported ids). Tick the confirmation box.</p>",
+                ),
+            )
+            return
+        try:
+            summary = hook()
+        except Exception as exc:
+            self._respond(
+                500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Prune queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>Rows without an imported id are yours and are never "
+                "touched; an account with an empty expected set is skipped "
+                "rather than pruned blind. Results appear in the Actual "
+                "sync section.</p>" + HOME_LINK,
             ),
         )
 

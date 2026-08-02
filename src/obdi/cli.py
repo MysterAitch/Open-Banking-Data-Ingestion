@@ -372,6 +372,32 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
     )
 
 
+def queue_actual_prune(db_path: Path) -> str:
+    """Queue the audit's action arm: remove rows in Actual that carry our
+    imported ids but are no longer in the expected payload - stale copies
+    of pendings that later VOIDed or superseded. Provably ours only."""
+    from .actual_push import build_prune_envelope, queue_push
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        return busy
+    bindings = _actual_bindings()
+    if not bindings:
+        return "no Actual-bound accounts to prune - push first."
+    with Store(db_path) as store:
+        envelope = build_prune_envelope(store, bindings)
+    queued = queue_push(envelope, _actual_dir(db_path), prefix="prune")
+    raw_accounts = envelope.get("accounts")
+    count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
+    return (
+        f"queued {queued.name}: pruning orphaned imports across {count} "
+        "bound account(s) - only rows carrying our imported ids are ever "
+        "touched"
+    )
+
+
 def queue_actual_audit(db_path: Path) -> str:
     """Ask the applier to read Actual back and report differences.
 
@@ -1381,6 +1407,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)
 
+    def prune_actual_hook() -> str:
+        return queue_actual_prune(db_path)
+
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)
 
@@ -1604,6 +1633,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_roster=actual_roster,
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
+        prune_actual=prune_actual_hook,
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,

@@ -122,3 +122,45 @@ export async function auditAccounts(client, accounts) {
   }
   return report;
 }
+
+export function choosePrunable(expectedIds, rows) {
+  // Only rows carrying one of OUR imported ids that the expected set no
+  // longer contains. No imported id = the person's own entry, untouchable.
+  // Split children ride with their parent.
+  return rows
+    .filter((row) => !row.is_child)
+    .filter((row) => row.imported_id && !expectedIds.has(row.imported_id))
+    .map((row) => ({ id: row.id, imported_id: row.imported_id }));
+}
+
+export async function pruneAccounts(client, accounts) {
+  const known = await client.getAccounts();
+  const nameOf = new Map(known.map((account) => [account.id, account.name]));
+  const report = [];
+  for (const [accountId, expectedRows] of Object.entries(accounts)) {
+    if (!nameOf.has(accountId)) continue;
+    const expectedIds = new Set(expectedRows.map((row) => row.imported_id));
+    if (expectedIds.size === 0) {
+      // An empty expected set would authorise deleting every one of our
+      // rows in the account - correct by definition, catastrophic by
+      // accident (a wiped store). Skip and say so.
+      report.push({
+        account_id: accountId,
+        name: nameOf.get(accountId),
+        skipped: 'expected set empty - refusing to prune blind',
+      });
+      continue;
+    }
+    const rows = await client.getTransactions(accountId, '1900-01-01', '2999-12-31');
+    const prunable = choosePrunable(expectedIds, rows);
+    for (const target of prunable) {
+      await client.deleteTransaction(target.id);
+    }
+    report.push({
+      account_id: accountId,
+      name: nameOf.get(accountId),
+      removed: prunable.length,
+    });
+  }
+  return report;
+}

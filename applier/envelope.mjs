@@ -24,7 +24,9 @@ export function parseEnvelope(payload) {
       // 'audit' asks for a read-back-and-compare instead of an import;
       // anything else is a push, so an unknown kind cannot silently
       // become a write.
-      kind: payload.kind === 'audit' ? 'audit' : 'push',
+      kind: payload.kind === 'audit' || payload.kind === 'prune'
+        ? payload.kind
+        : 'push',
       provision: provision.filter(
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),
