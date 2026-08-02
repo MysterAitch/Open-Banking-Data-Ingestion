@@ -30,6 +30,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
+from .accounts import AccountMap
 from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
@@ -98,15 +99,37 @@ _NON_TRANSACTIONAL = {
 }
 
 
+#: Artefact refs beginning with these are provider-qualified fallbacks
+#: ("source:provider_ref") and get resolved through the account map at
+#: replay time; anything else is already a canonical name.
+_SOURCES = ("starling", "truelayer")
+
+
+def _resolve_ref(account_ref: str, account_map: AccountMap | None) -> str:
+    if account_map is None or ":" not in account_ref:
+        return account_ref
+    source, _, provider_ref = account_ref.partition(":")
+    if source not in _SOURCES:
+        return account_ref
+    return account_map.resolve(source, provider_ref)
+
+
 def rebuild_from_raw(
     store: Store,
     progress: Callable[[int, int, RebuildReport], None] | None = None,
+    account_map: AccountMap | None = None,
 ) -> RebuildReport:
     """Wipe the derived layers and replay layer 0 in arrival order.
 
     Arrival order matters: occurrence counting and supersession depend on
     which sighting came first, and replaying in fetched_at order reproduces
     the history the store actually lived through.
+
+    Every source-qualified artefact ref is resolved through the CURRENT
+    account map - the promise the button makes. Without this, artefacts
+    landed before a bind replayed under the raw ref while coverage marks
+    sat under the canonical, and one real account rendered as two rows:
+    a nameless one holding the rows and a named ghost holding nothing.
 
     `progress` is called as (reaching, total, report) before each artefact
     and once more at the end - a rebuild takes minutes, and "running" with
@@ -138,7 +161,7 @@ def rebuild_from_raw(
             with contextlib.suppress(Exception):
                 progress(index, total, report)
         source = str(row["source"])
-        account_ref = str(row["account_ref"])
+        account_ref = _resolve_ref(str(row["account_ref"]), account_map)
         digest = str(row["digest"])
         payload = row["payload"]
 

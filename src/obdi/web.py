@@ -1152,7 +1152,9 @@ def _danger_zone(
         parts.append(
             '<form method="post" action="/rebuild-derived">'
             "<p>Wipe the derived transaction layer and replay every raw "
-            "artefact through the current account map and rules. Fixes "
+            "artefact through the current account map and rules - binds "
+            "made since the artefacts landed are applied, so rows and "
+            "coverage consolidate under one name per account. Fixes "
             "duplicated or misfiled rows; identities are content-keyed, so "
             "downstream imports dedupe cleanly. Runs in the background - "
             "the result appears here.</p>"

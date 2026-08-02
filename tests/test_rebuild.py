@@ -369,3 +369,130 @@ class TestRebuildReconciliation:
             report = rebuild_from_raw(store)
 
         assert "unchanged" in report.describe()
+
+
+class TestRebuildAppliesTheMap:
+    '''The button says "through the current account map" and for a while
+    that was false: artefacts landed before a bind replayed under the raw
+    ref while coverage sat under the canonical - one real account, two
+    rows, and a bind box offered for an account the map already named.'''
+
+    def _feed_body(self, uid):
+        import json as _json
+
+        return _json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": uid,
+                        "amount": {"currency": "GBP", "minorUnits": 1499},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-14T09:15:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": "Tesco",
+                        "reference": "TESCO",
+                    }
+                ]
+            }
+        ).encode("utf-8")
+
+    def test_QualifiedRefs_ResolveThroughTheMap(self, tmp_path):
+        from obdi.accounts import AccountBinding, AccountMap
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        bound = AccountMap(
+            [
+                AccountBinding(
+                    canonical_id="starling-space-bills",
+                    source="starling",
+                    provider_account_id="uid-1",
+                )
+            ]
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                artefact_for(
+                    self._feed_body("f-1"),
+                    account_id="starling:uid-1",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=1",
+                )
+            )
+
+            rebuild_from_raw(store, account_map=bound)
+
+            rows = store.connection.execute(
+                "SELECT DISTINCT account_id FROM transactions"
+            ).fetchall()
+        assert [r[0] for r in rows] == ["starling-space-bills"]
+
+    def test_RefAndGhostArtefacts_ConsolidateUnderOneName(self, tmp_path):
+        '''The blob-era state: the same feed item landed once under the
+        raw ref and once under the canonical. Resolution plus tier-1
+        identity must yield ONE row under the canonical, not two rows
+        under two names.'''
+        from obdi.accounts import AccountBinding, AccountMap
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        bound = AccountMap(
+            [
+                AccountBinding(
+                    canonical_id="starling-space-bills",
+                    source="starling",
+                    provider_account_id="uid-1",
+                )
+            ]
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                artefact_for(
+                    self._feed_body("f-1"),
+                    account_id="starling:uid-1",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=1",
+                )
+            )
+            store.land_artefact(
+                artefact_for(
+                    self._feed_body("f-1") + b" ",
+                    account_id="starling-space-bills",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=2",
+                )
+            )
+
+            rebuild_from_raw(store, account_map=bound)
+
+            rows = store.connection.execute(
+                "SELECT account_id, COUNT(*) FROM transactions GROUP BY account_id"
+            ).fetchall()
+        assert [tuple(r) for r in rows] == [("starling-space-bills", 1)]
+
+    def test_UnboundRefs_StayQualified_AndKeepTheirBindBoxEligibility(
+        self, tmp_path
+    ):
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                artefact_for(
+                    self._feed_body("f-1"),
+                    account_id="starling:uid-9",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=1",
+                )
+            )
+
+            rebuild_from_raw(store, account_map=None)
+
+            rows = store.connection.execute(
+                "SELECT DISTINCT account_id FROM transactions"
+            ).fetchall()
+        assert [r[0] for r in rows] == ["starling:uid-9"]

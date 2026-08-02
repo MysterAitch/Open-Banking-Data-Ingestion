@@ -263,7 +263,9 @@ def start_background_rebuild(db_path: Path) -> str:
             with leases.lease(
                 leases.locks_dir(db_path), "rebuild-derived", "obdi-web", 3600
             ), Store(db_path) as store:
-                report = rebuild_from_raw(store, progress=on_progress)
+                report = rebuild_from_raw(
+                    store, progress=on_progress, account_map=_account_map()
+                )
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
             payload = {"ok": False, "summary": str(exc)}
@@ -1950,7 +1952,7 @@ def main(argv: list[str] | None = None) -> int:
         from .rebuild import rebuild_from_raw
 
         with Store(db_path) as store:
-            print(rebuild_from_raw(store).describe())
+            print(rebuild_from_raw(store, account_map=_account_map()).describe())
         return 0
     if args.command == "attempts":
         return _attempts(db_path)

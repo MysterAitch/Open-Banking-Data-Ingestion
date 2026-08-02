@@ -1580,7 +1580,13 @@ class TestBindingFromThePage:
             store.connection.commit()
         map_file = tmp_path / "accounts.json"
         half_applied = AccountMap(
-            [AccountBinding("starling", "uid-1", "starling-bills")]
+            [
+                AccountBinding(
+                    canonical_id="starling-bills",
+                    source="starling",
+                    provider_account_id="uid-1",
+                )
+            ]
         )
 
         moved = _apply_bind(
