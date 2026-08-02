@@ -865,6 +865,29 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "details": details,
         }
 
+    def account_feeders() -> dict[str, list[str]]:
+        """canonical -> the provider refs bound to it, from the map.
+
+        More than one feeder is legitimate (a CSV import and an API feed
+        of the same real account) - but three Starling refs feeding one
+        Space was the invisible mis-config behind the reassembling blob,
+        and it must be readable on the page."""
+        path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+        if not path or not Path(path).is_file():
+            return {}
+        feeders: dict[str, list[str]] = {}
+        with contextlib.suppress(OSError, ValueError):
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            for binding in raw.get("bindings", []) if isinstance(raw, dict) else []:
+                if not isinstance(binding, dict):
+                    continue
+                canonical = str(binding.get("canonical_id", ""))
+                source = str(binding.get("source", ""))
+                ref = str(binding.get("provider_account_id", ""))
+                if canonical and source and ref:
+                    feeders.setdefault(canonical, []).append(f"{source}:{ref}")
+        return {c: sorted(refs) for c, refs in feeders.items()}
+
     def display_labels() -> dict[str, str]:
         """Human names for canonical refs, from layer 0 alone.
 
@@ -1318,6 +1341,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
         display_labels=display_labels,
+        account_feeders=account_feeders,
         push_actual=push_actual_hook,
         actual_status=actual_status,
         actual_roster=actual_roster,

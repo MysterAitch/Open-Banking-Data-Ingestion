@@ -946,6 +946,35 @@ class TestUpdateAwareness:
         assert _scheduler_row(None) == ""
 
 
+class TestAccountFeeders:
+    def test_SeveralRefsFeedingOneAccount_RenderAsAWarning(self):
+        """The invisible mis-config behind the reassembling blob: three
+        provider refs bound to one Space. The map's edges must be
+        readable where the account is listed."""
+        from obdi.web import _feeder_line
+
+        line = _feeder_line(
+            "starling-space-bills",
+            {
+                "starling-space-bills": [
+                    "starling:343fa965-8bb7",
+                    "starling:b2cec056-b0d8",
+                    "starling:bceb25f1-1fad",
+                ]
+            },
+        )
+        assert "warn" in line
+        assert "several sources feed this one account" in line
+
+        single = _feeder_line(
+            "halifax-current-account", {"halifax-current-account": ["truelayer:e9f8"]}
+        )
+        assert "warn" not in single
+        assert "bound from:" in single
+
+        assert _feeder_line("unbound", {}) == ""
+
+
 class TestRebuildBanner:
     def test_RunningRebuild_BannersTheWholePage(self):
         from obdi.web import _rebuild_running_banner

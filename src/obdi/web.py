@@ -311,6 +311,8 @@ class WebConfig:
     auth_lease_release: Callable[[], None] | None = None
     #: The scheduler's cycle heartbeat: {"at": iso, "interval_seconds": n}.
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None
+    #: canonical -> provider refs bound to it; the map's edges, readable.
+    account_feeders: Callable[[], dict[str, list[str]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -745,10 +747,30 @@ def _timeline_strip(segments: list[tuple[str, float]]) -> str:
     )
 
 
+def _feeder_line(
+    account_id: str, feeders: dict[str, list[str]]
+) -> str:
+    """Which provider refs the map binds to this canonical account.
+
+    Shown so a mis-binding is READABLE: three refs feeding one Space was
+    invisible config, and its consequences kept reading as code bugs.
+    More than one feeder can be legitimate (CSV plus API of one real
+    account) - many usually is not, so several feeders render as a
+    warning."""
+    refs = feeders.get(account_id, [])
+    if not refs:
+        return ""
+    shown = ", ".join(html.escape(_short_ref(ref)) for ref in refs)
+    css = "warn" if len(refs) > 1 else "muted"
+    note = " - several sources feed this one account" if len(refs) > 1 else ""
+    return f'<br><span class="{css} mono">bound from: {shown}{note}</span>'
+
+
 def _holdings_rows(
     holdings: Callable[[], list[SourceCoverage]] | None,
     display_labels: Callable[[], dict[str, str]] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
+    account_feeders: Callable[[], dict[str, list[str]]] | None = None,
 ) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
@@ -769,6 +791,12 @@ def _holdings_rows(
         return ""
     if not rows:
         return ""
+    feeders_map: dict[str, list[str]] = {}
+    if account_feeders is not None:
+        try:
+            feeders_map = account_feeders()
+        except Exception:
+            feeders_map = {}
     labels: dict[str, str] = {}
     if display_labels is not None:
         try:
@@ -840,6 +868,9 @@ def _holdings_rows(
             )
         )
         row_style = ' style="opacity:.62"' if dormant else ""
+        feeder_note = ""
+        if ":" not in row.account_id and feeders_map:
+            feeder_note = _feeder_line(row.account_id, feeders_map)
         bind_form = ""
         if ":" in row.account_id:
             # A source-qualified id is an account nobody has NAMED - and
@@ -863,7 +894,7 @@ def _holdings_rows(
             f"{title}</a></strong>"
             f" via {html.escape(row.source)}{quiet}{sub}<br>"
             f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
-            f"{bind_form}{strip}</div>"
+            f"{feeder_note}{bind_form}{strip}</div>"
         )
     # Accounts the store KNOWS about but holds nothing for must not vanish:
     # "this account exists, we asked back to 2020, nothing there" is a
@@ -1526,6 +1557,7 @@ def render_index(
     starling_status: Callable[[], dict[str, object] | None] | None = None,
     display_labels: Callable[[], dict[str, str]] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
+    account_feeders: Callable[[], dict[str, list[str]]] | None = None,
     push_actual: Callable[[], str] | None = None,
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
@@ -1542,7 +1574,7 @@ def render_index(
 {_rebuild_running_banner(rebuild_status)}
 {_connection_rows(store)}
 {_starling_row(starling_status)}
-{_holdings_rows(holdings, display_labels, account_timelines)}
+{_holdings_rows(holdings, display_labels, account_timelines, account_feeders)}
 {_knowledge_rows(provider_knowledge)}
 {_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
@@ -1649,6 +1681,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     starling_status=self.bound_config.starling_status,
                     display_labels=self.bound_config.display_labels,
                     account_timelines=self.bound_config.account_timelines,
+                    account_feeders=self.bound_config.account_feeders,
                     push_actual=self.bound_config.push_actual,
                     actual_status=self.bound_config.actual_status,
                     actual_roster=self.bound_config.actual_roster,
