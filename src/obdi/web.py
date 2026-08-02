@@ -846,7 +846,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f'{html.escape(_short_ref(str(r.get("account_ref", ""))))} - '
             f'{html.escape(str(r.get("source", "")).removeprefix("truelayer-"))} - '
             f"{html.escape(_trigger_of(r.get('request_meta')))}</span>"
-            f'<br><span class="mono">{html.escape(str(r.get("asked", "")))}</span></div>'
+            f'<br><span class="mono">{html.escape(str(r.get("asked", "")))}</span>'
+            + (
+                '<details><summary class="muted">provider detail</summary>'
+                f'<span class="mono">{html.escape(str(r.get("detail", "")))}</span>'
+                "</details>"
+                if r.get("outcome") == "refused" and r.get("detail")
+                else ""
+            )
+            + "</div>"
             for r in (raw_rows if isinstance(raw_rows, list) else [])
             if isinstance(r, dict)
         )

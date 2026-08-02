@@ -1101,6 +1101,10 @@ class TestBrowsingTheAttemptLedger:
 
         assert "sca_exceeded" in page
         assert "refused" in page and "landed" in page
+        # The recorded detail is one fold away on refused rows - the page is
+        # where a 429's body excerpt gets read, not the database.
+        assert "provider detail" in page
+        assert "Transaction fetch failed (HTTP 403)" in page
         assert "web-extend" in page and "scheduled" in page
         # The quota view: per-account calls over the last 24 hours.
         assert "halifax-current" in page and ">5<" in page

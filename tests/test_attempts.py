@@ -285,3 +285,50 @@ class TestStarlingInstrumentationParity:
             row["asked"] == "changesSince=2016-08-04T00:00:00Z" for row in attempts
         )
         assert all("scheduled" in str(row["request_meta"]) for row in attempts)
+
+
+class TestOneRefusedCategoryDoesNotStarveTheRest:
+    def test_Pull_ContinuesPastARefusedFeed_AndNotesIt(self, tmp_path, monkeypatch):
+        from obdi.providers.starling import Category, StarlingError
+        from obdi.pull import pull_starling
+
+        def fake_accounts(_token, **_kwargs):
+            return (
+                [{"accountUid": "acc-1", "defaultCategory": "cat-main", "name": "main"}],
+                b'{"accounts": []}',
+            )
+
+        def fake_categories(_token, _account_uid, **_kwargs):
+            return (
+                [
+                    Category(uid="cat-main", name="main", is_space=False),
+                    Category(uid="space-1", name="holiday", is_space=True),
+                ],
+                b'{"savingsGoals": []}',
+            )
+
+        calls = []
+
+        def fake_feed(_token, _account_uid, category_uid, **_kwargs):
+            calls.append(category_uid)
+            if category_uid == "cat-main":
+                raise StarlingError("Starling call failed (HTTP 429): slow down", status=429)
+            return [], b'{"feedItems": []}', "changesSince=2016-08-04T00:00:00Z"
+
+        monkeypatch.setattr("obdi.pull.starling.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.pull.starling.fetch_categories", fake_categories)
+        monkeypatch.setattr(
+            "obdi.pull.starling.fetch_balance", lambda *_a, **_k: b"{}"
+        )
+        monkeypatch.setattr("obdi.pull.starling.fetch_feed", fake_feed)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            result = pull_starling(store, "token", account_map=AccountMap())
+            attempts = store.attempts()
+
+        # Observed live: the first scheduled pull's second call drew a 429 and
+        # the old behaviour starved every remaining category. Both categories
+        # must be ASKED, the refusal noted and ledgered, the pull completing.
+        assert calls == ["cat-main", "space-1"]
+        assert any(row["outcome"] == "refused" for row in attempts)
+        assert any("429" in note for note in result.notes)

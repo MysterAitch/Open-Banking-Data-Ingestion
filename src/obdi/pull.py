@@ -393,7 +393,15 @@ def pull_starling(
                     http_status=getattr(exc, "status", None),
                     detail=str(exc),
                 )
-                raise
+                # Observed live on the very first scheduled pull: category one
+                # landed, category two drew a 429 seven seconds later - and
+                # aborting here silently starved every remaining category and
+                # account. One refused category is that category's problem;
+                # the pull is idempotent, so the next cycle simply retries.
+                result.notes.append(
+                    f"feed for category {category.uid} refused: {exc}"
+                )
+                continue
             store.record_attempt(
                 source="starling-feed",
                 connection_id="starling",
