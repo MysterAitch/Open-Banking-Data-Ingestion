@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 
 from obdi.actual_push import (
+    applier_heartbeat,
     build_audit_envelope,
     build_envelope,
     drop_conflicting_bindings,
+    forget_actual_bindings,
     latest_results,
     merge_pending_bindings,
     queue_push,
@@ -235,6 +237,53 @@ class TestBindingsRoundTrip:
         assert len(queued) == 1
         assert queued[0]["name"] == "push-20260802T112545430836.json"
         assert queued[0]["queued_at"] == "2026-08-02T11:25:45"
+
+    def test_ForgetActualBindings_ClearsLinksButKeepsSourceBindings(self, tmp_path):
+        """The recovery step after deleting accounts in Actual: the stale
+        links go, the source bindings (which name accounts) stay, and the
+        next push re-provisions by name."""
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            json.dumps(
+                {
+                    "bindings": [
+                        {
+                            "source": "starling",
+                            "provider_account_id": "uid-1",
+                            "canonical_id": "starling-personal",
+                        }
+                    ],
+                    "actual": [
+                        {"canonical_id": "halifax-current", "actual_account_id": "X"},
+                        {"canonical_id": "halifax-saver", "actual_account_id": "Y"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        forgotten = forget_actual_bindings(map_path)
+
+        assert forgotten == 2
+        stored = json.loads(map_path.read_text(encoding="utf-8"))
+        assert stored["actual"] == []
+        assert stored["bindings"][0]["canonical_id"] == "starling-personal"
+
+    def test_ForgetActualBindings_NothingToForget_IsANoOp(self, tmp_path):
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(json.dumps({"bindings": [], "actual": []}), encoding="utf-8")
+
+        assert forget_actual_bindings(map_path) == 0
+
+    def test_ApplierHeartbeat_ReadsTheStamp_EmptyWhenNeverSeen(self, tmp_path):
+        actual_dir = tmp_path / "actual"
+        assert applier_heartbeat(actual_dir) == ""
+
+        actual_dir.mkdir()
+        (actual_dir / "heartbeat.json").write_text(
+            json.dumps({"at": "2026-08-02T13:38:00.000Z"}), encoding="utf-8"
+        )
+        assert applier_heartbeat(actual_dir) == "2026-08-02T13:38:00.000Z"
 
     def test_LatestResults_NewestFirst(self, tmp_path):
         results = tmp_path / "actual" / "results"

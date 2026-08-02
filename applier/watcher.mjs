@@ -24,6 +24,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 import { auditAccounts } from './audit.mjs';
 import { mergeBindings, parseEnvelope } from './envelope.mjs';
@@ -36,6 +37,7 @@ const REQUESTS = join(BASE, 'requests');
 const RESULTS = join(BASE, 'results');
 const PROCESSED = join(BASE, 'processed');
 const BINDINGS = join(BASE, 'bindings-pending.json');
+const HEARTBEAT = join(BASE, 'heartbeat.json');
 
 async function readJsonOr(path, fallback) {
   try {
@@ -86,6 +88,10 @@ async function processRequest(name) {
 }
 
 async function tick() {
+  // Stamped every poll, whether or not there is work: the page compares
+  // this with the clock, so "queued and nobody is coming" diagnoses
+  // itself instead of reading as an eight-minute mystery.
+  await writeFile(HEARTBEAT, JSON.stringify({ at: new Date().toISOString() }));
   const entries = (await readdir(REQUESTS)).filter((f) => f.endsWith('.json')).sort();
   for (const name of entries) {
     let result;
@@ -128,4 +134,9 @@ async function main() {
   }
 }
 
-main();
+// Guarded so the image build can import this module to prove the whole
+// dependency graph resolves - a COPY list that misses a file otherwise
+// ships an image that only fails at runtime, as a crash loop.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main();
+}

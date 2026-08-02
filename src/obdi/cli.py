@@ -953,6 +953,26 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         return queued_requests(_actual_dir(db_path))
 
+    def actual_heartbeat() -> str:
+        from .actual_push import applier_heartbeat
+
+        return applier_heartbeat(_actual_dir(db_path))
+
+    def rebuild_derived() -> str:
+        from .rebuild import rebuild_from_raw
+
+        with Store(db_path) as store:
+            report = rebuild_from_raw(store)
+        return report.describe()
+
+    def forget_actual() -> int:
+        from .actual_push import forget_actual_bindings
+
+        map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+        if not map_path:
+            raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
+        return forget_actual_bindings(Path(map_path))
+
     def attempts_index() -> dict[str, object]:
         with Store(db_path) as store:
             rows = store.attempts()
@@ -1094,6 +1114,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_roster=actual_roster,
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
+        actual_heartbeat=actual_heartbeat,
+        rebuild_derived=rebuild_derived,
+        forget_actual=forget_actual,
         account_timelines=account_timelines,
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,

@@ -26,6 +26,7 @@
 
 import { readFile } from 'node:fs/promises';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 import { parseEnvelope } from './envelope.mjs';
 import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
@@ -81,12 +82,16 @@ async function main() {
   console.log('Re-running this is safe: matching imported ids are never added twice.');
 }
 
-main().catch((error) => {
-  console.error(`Failed: ${error.message}`);
-  if (/encrypt/i.test(error.message)) {
-    console.error(
-      'If the budget file is end-to-end encrypted, set ACTUAL_ENCRYPTION_PASSWORD.',
-    );
-  }
-  process.exit(1);
-});
+// Guarded like the watcher: the image build imports this module to prove
+// the dependency graph resolves, and must not trigger a one-shot apply.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((error) => {
+    console.error(`Failed: ${error.message}`);
+    if (/encrypt/i.test(error.message)) {
+      console.error(
+        'If the budget file is end-to-end encrypted, set ACTUAL_ENCRYPTION_PASSWORD.',
+      );
+    }
+    process.exit(1);
+  });
+}

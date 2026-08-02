@@ -867,6 +867,148 @@ class TestProbingGuidanceOnThePage:
         assert "<br>" in page
 
 
+class TestApplierLiveness:
+    """A queued push that nobody consumes must diagnose itself: the
+    applier stamps a heartbeat every poll, and the page compares it with
+    the clock instead of leaving "queued 8 minutes" a mystery."""
+
+    def test_FreshHeartbeat_ReadsAsAQuietFact(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _applier_liveness
+
+        line = _applier_liveness(
+            "2026-08-02T13:38:00.000Z",
+            queued_count=1,
+            now=datetime(2026, 8, 2, 13, 38, 30, tzinfo=UTC),
+        )
+
+        assert "13:38:00" in line
+        assert "warn" not in line
+
+    def test_StaleHeartbeat_WithWorkQueued_WarnsAndNamesTheContainer(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _applier_liveness
+
+        line = _applier_liveness(
+            "2026-08-02T13:30:00.000Z",
+            queued_count=1,
+            now=datetime(2026, 8, 2, 13, 38, 30, tzinfo=UTC),
+        )
+
+        assert "warn" in line
+        assert "obdi-applier" in line
+
+    def test_NoHeartbeatEver_WithWorkQueued_Warns(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _applier_liveness
+
+        line = _applier_liveness(
+            "", queued_count=1, now=datetime(2026, 8, 2, 13, 38, 30, tzinfo=UTC)
+        )
+
+        assert "warn" in line
+        assert "never" in line
+
+    def test_NoHeartbeat_NothingQueued_SaysNothing(self):
+        from datetime import UTC, datetime
+
+        from obdi.web import _applier_liveness
+
+        assert (
+            _applier_liveness(
+                "", queued_count=0, now=datetime(2026, 8, 2, 13, 38, 30, tzinfo=UTC)
+            )
+            == ""
+        )
+
+
+class TestDangerZone:
+    """Administrative repairs belong on the page, not in a shell - behind
+    an explicit confirmation, with the consequences stated where the
+    button is."""
+
+    def _server(self, tmp_path, rebuild=None, forget=None):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            rebuild_derived=rebuild,
+            forget_actual=forget,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_DangerZone_RendersWithConfirmCheckboxes_OnlyWhenWired(self, tmp_path):
+        httpd, base = self._server(
+            tmp_path, rebuild=lambda: "replayed", forget=lambda: 0
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "Danger zone" in page
+        assert 'action="/rebuild-derived"' in page
+        assert 'action="/forget-actual-bindings"' in page
+        assert page.count('name="confirm"') == 2
+
+        httpd, base = self._server(tmp_path)
+        try:
+            bare = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+        assert "Danger zone" not in bare
+
+    def test_Rebuild_WithoutConfirmation_IsRefused(self, tmp_path):
+        calls = []
+        httpd, base = self._server(
+            tmp_path, rebuild=lambda: calls.append(1) or "done"
+        )
+        try:
+            response = httpx.post(f"{base}/rebuild-derived", data={})
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 400
+        assert calls == []
+
+    def test_Rebuild_Confirmed_RunsAndReportsTheSummary(self, tmp_path):
+        httpd, base = self._server(
+            tmp_path,
+            rebuild=lambda: "replayed 42 artefact(s), 999 transaction(s) resolved",
+        )
+        try:
+            response = httpx.post(
+                f"{base}/rebuild-derived", data={"confirm": "yes"}
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 200
+        assert "999 transaction(s) resolved" in response.text
+
+    def test_ForgetActual_Confirmed_ReportsTheCount(self, tmp_path):
+        httpd, base = self._server(tmp_path, forget=lambda: 3)
+        try:
+            response = httpx.post(
+                f"{base}/forget-actual-bindings", data={"confirm": "yes"}
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 200
+        assert "3" in response.text
+        assert "re-provision" in response.text
+
+
 class TestActualRoster:
     """The sync plan, readable on the page.
 

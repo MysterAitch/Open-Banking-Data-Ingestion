@@ -101,6 +101,45 @@ def drop_conflicting_bindings(map_path: Path) -> list[str]:
     return dropped
 
 
+def forget_actual_bindings(map_path: Path) -> int:
+    """Drop every canonical-to-Actual link, keeping the source bindings.
+
+    The recovery step after deleting accounts on the Actual side: stale
+    links would make the next push import into accounts that no longer
+    exist. Safe to run at any time - provisioning is idempotent by name
+    (an existing same-named account is reused, never duplicated) and
+    imports dedupe by imported id, so the worst case of forgetting too
+    much is one re-provisioning push.
+    """
+    if not map_path.is_file():
+        return 0
+    try:
+        payload = json.loads(map_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    raw = payload.get("actual", [])
+    count = len(raw) if isinstance(raw, list) else 0
+    if not count:
+        return 0
+    payload["actual"] = []
+    map_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return count
+
+
+def applier_heartbeat(actual_dir: Path) -> str:
+    """When the applier last checked the queue, empty if never seen."""
+    path = actual_dir / "heartbeat.json"
+    if not path.is_file():
+        return ""
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return ""
+    return str(decoded.get("at", "")) if isinstance(decoded, dict) else ""
+
+
 def build_envelope(
     store: Store,
     bindings: list[ActualAccountBinding],

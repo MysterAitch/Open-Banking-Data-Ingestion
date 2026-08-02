@@ -24,6 +24,7 @@ on return so that a code cannot be replayed into an unexpected connection.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import itertools
 import json
@@ -289,6 +290,12 @@ class WebConfig:
     actual_queue: Callable[[], list[dict[str, object]]] | None = None
     #: Queue a read-only audit: the applier reads Actual back and reports.
     audit_actual: Callable[[], str] | None = None
+    #: When the applier last checked the queue (ISO stamp, empty if never).
+    actual_heartbeat: Callable[[], str] | None = None
+    #: Danger zone: wipe and replay the derived layers from raw artefacts.
+    rebuild_derived: Callable[[], str] | None = None
+    #: Danger zone: drop the canonical-to-Actual links (source names kept).
+    forget_actual: Callable[[], int] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -971,6 +978,78 @@ def _roster_row(entry: dict[str, object]) -> str:
     )
 
 
+def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
+    """The queue's counterparty, made visible.
+
+    Quiet fact when the applier is checking in; a warning naming the
+    container when work is queued and nobody has looked at it - which
+    otherwise reads as a silent, minutes-long mystery."""
+    stamp = ""
+    age_seconds: float | None = None
+    if heartbeat:
+        with contextlib.suppress(ValueError):
+            seen = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
+            stamp = seen.strftime("%H:%M:%S")
+            age_seconds = (now - seen).total_seconds()
+    if not stamp:
+        if queued_count:
+            return (
+                '<p class="warn">the applier has never checked this queue - '
+                "look at the obdi-applier container</p>"
+            )
+        return ""
+    if queued_count and age_seconds is not None and age_seconds > 120:
+        minutes = int(age_seconds // 60)
+        return (
+            f'<p class="warn">work is queued but the applier last checked '
+            f"the queue at {stamp} ({minutes} min ago) - look at the "
+            "obdi-applier container</p>"
+        )
+    return f'<p class="muted">applier last checked the queue at {stamp}</p>'
+
+
+def _danger_zone(rebuild_available: bool, forget_available: bool) -> str:
+    if not (rebuild_available or forget_available):
+        return ""
+    parts = [
+        "<h2>Danger zone</h2>",
+        '<p class="muted">Administrative repairs. Each asks for '
+        "confirmation; none touches the raw artefacts in layer 0.</p>",
+    ]
+    checkbox = (
+        '<label style="display:block;margin:.35rem 0">'
+        '<input type="checkbox" name="confirm" value="yes" required> '
+        "I understand</label>"
+    )
+    button_style = (
+        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
+        'background:#dc262622;color:#b91c1c"'
+    )
+    if rebuild_available:
+        parts.append(
+            '<form method="post" action="/rebuild-derived">'
+            "<p>Wipe the derived transaction layer and replay every raw "
+            "artefact through the current account map and rules. Fixes "
+            "duplicated or misfiled rows; identities are content-keyed, so "
+            "downstream imports dedupe cleanly.</p>"
+            + checkbox
+            + f'<p><button class="button" type="submit" {button_style}>'
+            "Rebuild from raw</button></p></form>"
+        )
+    if forget_available:
+        parts.append(
+            '<form method="post" action="/forget-actual-bindings">'
+            "<p>Forget which Actual account each canonical account maps to "
+            "(names are kept). Use after deleting accounts on the Actual "
+            "side: the next push re-provisions by name, reusing any "
+            "same-named accounts that still exist.</p>"
+            + checkbox
+            + f'<p><button class="button" type="submit" {button_style}>'
+            "Forget Actual account links</button></p></form>"
+        )
+    return "".join(parts)
+
+
 def _audit_result_row(result: dict[str, object]) -> str:
     """One audit outcome: a verdict pill, then a line per account.
 
@@ -1033,6 +1112,7 @@ def _actual_rows(
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_available: bool = False,
+    actual_heartbeat: Callable[[], str] | None = None,
 ) -> str:
     """The budget sync, visible and pressable: the per-account plan first
     (what a push would do and why), then the button, then results newest
@@ -1066,6 +1146,15 @@ def _actual_rows(
                 "</span></div>"
             )
         queued_html = "".join(parts)
+        heartbeat = ""
+        if actual_heartbeat is not None:
+            try:
+                heartbeat = actual_heartbeat()
+            except Exception:
+                heartbeat = ""
+        queued_html += _applier_liveness(
+            heartbeat, len(queued), datetime.now(UTC)
+        )
     results = []
     if actual_status is not None:
         try:
@@ -1303,6 +1392,9 @@ def render_index(
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_actual: Callable[[], str] | None = None,
+    actual_heartbeat: Callable[[], str] | None = None,
+    rebuild_available: bool = False,
+    forget_available: bool = False,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
@@ -1311,7 +1403,8 @@ def render_index(
 {_holdings_rows(holdings, display_labels, account_timelines)}
 {_knowledge_rows(provider_knowledge)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
-              audit_available=audit_actual is not None)}
+              audit_available=audit_actual is not None,
+              actual_heartbeat=actual_heartbeat)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -1331,6 +1424,7 @@ reconciled through the same identity rules as the API pulls.</p>
 </form>
 <p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>
+{_danger_zone(rebuild_available, forget_available)}
 """
     return render_page("Bank connections", body)
 
@@ -1414,6 +1508,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_roster=self.bound_config.actual_roster,
                     actual_queue=self.bound_config.actual_queue,
                     audit_actual=self.bound_config.audit_actual,
+                    actual_heartbeat=self.bound_config.actual_heartbeat,
+                    rebuild_available=self.bound_config.rebuild_derived is not None,
+                    forget_available=self.bound_config.forget_actual is not None,
                 ),
             )
         elif route == "/connect":
@@ -1677,6 +1774,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self.send_header("Location", link)
         self.end_headers()
 
+    def _read_form(self) -> dict[str, list[str]]:
+        length = int(self.headers.get("Content-Length") or 0)
+        return parse_qs(self.rfile.read(length).decode("utf-8"))
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
@@ -1693,6 +1794,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/audit-actual":
             self._audit_actual()
+            return
+        if route == "/rebuild-derived":
+            self._rebuild_derived(self._read_form())
+            return
+        if route == "/forget-actual-bindings":
+            self._forget_actual(self._read_form())
             return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(
@@ -1915,6 +2022,74 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 "<p>Read-only: the applier reads each bound account back "
                 "from Actual and reports differences in the Actual sync "
                 "section - nothing is changed on either side.</p>" + HOME_LINK,
+            ),
+        )
+
+    def _rebuild_derived(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.rebuild_derived
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Rebuild is not wired.</p>"))
+            return
+        if form.get("confirm") != ["yes"]:
+            self._respond(
+                400,
+                error_page(
+                    "Not confirmed",
+                    "<p>Rebuilding wipes the derived transaction layer. Tick "
+                    "the confirmation box to proceed.</p>",
+                ),
+            )
+            return
+        try:
+            summary = hook()
+        except Exception as exc:
+            message = str(exc)
+            if "database is locked" in message:
+                message = (
+                    "the store is busy (a scheduled pull is writing) - "
+                    "try again in a moment"
+                )
+            self._respond(500, error_page("Rebuild failed", f"<p>{html.escape(message)}</p>"))
+            return
+        print(f"rebuild via page: {summary}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Rebuild complete",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>Raw artefacts were untouched; every derived row was "
+                "replayed through the current account map and rules.</p>" + HOME_LINK,
+            ),
+        )
+
+    def _forget_actual(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.forget_actual
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        if form.get("confirm") != ["yes"]:
+            self._respond(
+                400,
+                error_page(
+                    "Not confirmed",
+                    "<p>Tick the confirmation box to drop the Actual account "
+                    "links.</p>",
+                ),
+            )
+            return
+        try:
+            count = hook()
+        except Exception as exc:
+            self._respond(500, error_page("Could not forget", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        self._respond(
+            200,
+            render_page(
+                "Actual links forgotten",
+                f"<p>Dropped {count} link(s). The account names are kept; "
+                "the next push will re-provision by name - existing "
+                "same-named accounts in Actual are reused, and imports "
+                "dedupe by imported id.</p>" + HOME_LINK,
             ),
         )
 

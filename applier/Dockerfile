@@ -10,7 +10,13 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY envelope.mjs lib.mjs watcher.mjs apply.mjs ./
+COPY audit.mjs envelope.mjs lib.mjs watcher.mjs apply.mjs ./
+
+# Prove the whole import graph resolves at BUILD time. A file missing from
+# the COPY list above otherwise surfaces only as a crash loop on the host -
+# which is exactly how audit.mjs's absence was discovered. The watcher's
+# entry point is guarded, so importing it starts nothing.
+RUN node -e "await import('./watcher.mjs'); await import('./apply.mjs');"
 
 RUN mkdir -p /data /secrets && chown -R obdi:obdi /data
 USER obdi
