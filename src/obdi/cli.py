@@ -7,12 +7,14 @@ lab's convention is explicit commands over wrappers that hide moving parts.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
 import threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
@@ -137,6 +139,32 @@ def _value(args: argparse.Namespace, db_path: Path) -> int:
     return 0
 
 
+def _earliest_asked(store: Store, canonical: str) -> date | None:
+    """How far back any landed window has ALREADY reached for this account.
+
+    Read from the artefacts' recorded ranges, not from held transactions -
+    the difference matters exactly when a window lands empty: the account has
+    no data there, but the ask happened, and the next press should walk
+    further back rather than re-asking the same span forever (observed live
+    on an empty account whose +730 button never moved).
+    """
+    rows = store.connection.execute(
+        "SELECT origin FROM raw_artefacts "
+        "WHERE account_ref = ? AND source = 'truelayer-booked' "
+        "AND origin LIKE '%from=%'",
+        (canonical,),
+    ).fetchall()
+    asked: list[date] = []
+    for row in rows:
+        query = parse_qs(urlparse(str(row["origin"])).query)
+        for value in query.get("from", []):
+            try:
+                asked.append(date.fromisoformat(value[:10]))
+            except ValueError:
+                continue
+    return min(asked) if asked else None
+
+
 def extend_bounds(
     earliest: date | None, days: int, *, today: date
 ) -> tuple[date, date]:
@@ -258,6 +286,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             display=f"{account['display_name']} "
                             f"({account['account_type'] or 'account'})",
                             earliest=min(dates) if dates else None,
+                            probed_back_to=_earliest_asked(store, canonical),
                         )
                     )
         return found
@@ -278,32 +307,46 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         if target is None:
             raise RuntimeError(f"no connection named {connection!r}")
 
+        canonical = _account_map().resolve("truelayer", provider_ref)
         with Store(db_path) as store:
             held = store.transactions_by_sighting()
-        canonical = _account_map().resolve("truelayer", provider_ref)
+            probed = _earliest_asked(store, canonical)
         dates = [
             t.value_date
             for t in held
             if t.account_id == canonical and t.source == "truelayer"
         ]
+        # The anchor is the further-back of held data and already-asked
+        # windows, so an empty account still walks backward press by press.
+        candidates = [d for d in (min(dates) if dates else None, probed) if d]
         window_since, window_until = extend_bounds(
-            min(dates) if dates else None, days, today=datetime.now(UTC).date()
+            min(candidates) if candidates else None, days, today=datetime.now(UTC).date()
         )
 
-        with Store(db_path) as store:
-            result = pull_truelayer(
-                store,
-                target,
-                client_id=client_id,
-                client_secret=current_secret(),
-                connection_store=ConnectionStore(store_path),
-                account_map=_account_map(),
-                since=window_since,
-                until=window_until,
-                only_account=provider_ref,
-                psu_ip=psu_ip,
-                trigger="web-extend",
-            )
+        try:
+            with Store(db_path) as store:
+                result = pull_truelayer(
+                    store,
+                    target,
+                    client_id=client_id,
+                    client_secret=current_secret(),
+                    connection_store=ConnectionStore(store_path),
+                    account_map=_account_map(),
+                    since=window_since,
+                    until=window_until,
+                    only_account=provider_ref,
+                    psu_ip=psu_ip,
+                    trigger="web-extend",
+                )
+        except Exception as exc:
+            # Half the diagnosis is what was asked: a refused "since
+            # 2011-04-12" locates the boundary, a bare refusal locates
+            # nothing. Attach it for the error page to state.
+            with contextlib.suppress(Exception):
+                exc.asked_window = (  # type: ignore[attr-defined]
+                    f"since {window_since} until {window_until} ({days} day step)"
+                )
+            raise
         return (
             f"asked {window_since} .. {window_until}: {result.describe()}. "
             f"History for this account now reaches back to at least {window_since} "

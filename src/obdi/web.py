@@ -106,6 +106,10 @@ class ExtendableAccount:
     provider_ref: str
     display: str
     earliest: date | None
+    #: How far back a window has ALREADY been asked for, held data or not.
+    #: This is what lets repeated presses on an empty account keep walking
+    #: back instead of re-asking the same span forever.
+    probed_back_to: date | None = None
 
 
 @dataclass
@@ -326,6 +330,12 @@ def refusal_html(exc: Exception) -> str:
         + (f" - <code>{html.escape(code)}</code>" if code else "")
         + "</p>"
     ]
+    asked = str(getattr(exc, "asked_window", "") or "")
+    if asked:
+        # What was asked is half the diagnosis - a refusal of "since
+        # 2011-04-12 until 2013-04-12" locates the boundary; a bare refusal
+        # locates nothing.
+        parts.append(f"<p>This press asked for {html.escape(asked)}.</p>")
     if description:
         parts.append(f"<p>{html.escape(description)}</p>")
     if details:
@@ -387,6 +397,11 @@ _REMEDIES = {
         "History beyond the routine window is only reachable shortly after "
         "authenticating with the bank. Re-authorise this connection from the "
         "home page, then press extend again straight away."
+    ),
+    "invalid_date_range": (
+        "The provider rejected the window itself. When this happens while "
+        "walking history back, the refusal boundary is a fixed DATE, not a "
+        "span - step down (+90, +7, +1) to find it to the day."
     ),
     "invalid_grant": (
         "The authorisation code was already used or has expired. Start a "
@@ -467,7 +482,9 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
     return "<h2>Held so far</h2>" + "".join(items)
 
 
-EXTEND_CHOICES = (7, 30, 90, 365, 730)
+# 1 exists for the endgame: once +7 fails, the boundary is within a week,
+# and finding it to the day takes single steps.
+EXTEND_CHOICES = (1, 7, 30, 90, 365, 730)
 
 
 def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> str:
@@ -493,7 +510,14 @@ def _extend_rows(extendables: Callable[[], list[ExtendableAccount]] | None) -> s
         )
         rows.append(
             f'<div class="row"><strong>{html.escape(account.display)}</strong> '
-            f"({html.escape(account.connection)})<br>history reaches {reach}<br>{buttons}</div>"
+            f"({html.escape(account.connection)})<br>history reaches {reach}"
+            + (
+                f" - probed back to {account.probed_back_to.isoformat()}"
+                if account.probed_back_to
+                and (account.earliest is None or account.probed_back_to < account.earliest)
+                else ""
+            )
+            + f"<br>{buttons}</div>"
         )
     return (
         "<h2>Extend history</h2>"
@@ -826,13 +850,24 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
         except Exception as exc:
             print(f"extend failed: {exc}", file=sys.stderr)
-            self._respond(502, error_page("Could not extend", refusal_html(exc)))
+            # The buttons stay on the refusal page: probing is press, read,
+            # press again - the five-minute window after authentication is
+            # too short to spend round-tripping through the home page.
+            self._respond(
+                502,
+                error_page(
+                    "Could not extend",
+                    refusal_html(exc) + _extend_rows(self.bound_config.extendables),
+                ),
+            )
             return
         self._respond(
             200,
             render_page(
                 "Window extended",
-                f"<p>{html.escape(summary)}</p>{HOME_LINK}",
+                f"<p>{html.escape(summary)}</p>"
+                + _extend_rows(self.bound_config.extendables)
+                + HOME_LINK,
             ),
         )
 

@@ -497,7 +497,7 @@ class TestExtendingHistoryFromThePage:
 
         assert "Current Account" in page
         assert "2024-08-02" in page
-        for days in (7, 30, 90, 365, 730):
+        for days in (1, 7, 30, 90, 365, 730):
             assert f'name="days" value="{days}"' in page
 
     def test_Extend_CallsTheHookWithTheForwardedAddress(self, tmp_path):
@@ -542,6 +542,96 @@ class TestExtendingHistoryFromThePage:
         assert "invalid_date_range" in response.text
         assert "Back to connections" in response.text
 
+
+    def test_Extend_ResultPages_KeepTheButtons_ForRepeatedPressing(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        accounts = lambda: [  # noqa: E731
+            ExtendableAccount(
+                connection="halifax",
+                provider_ref="e9f8",
+                display="Current Account",
+                earliest=date(2022, 8, 3),
+            )
+        ]
+
+        httpd, base = self._server(tmp_path, accounts, lambda **_: "landed 3")
+        try:
+            success = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        def refuse(**_):
+            raise RuntimeError("Transaction fetch failed (HTTP 400): invalid_date_range")
+
+        httpd, base = self._server(tmp_path, accounts, refuse)
+        try:
+            failure = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "365"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        # Press, read, press again - on both outcomes, without a round trip.
+        for page in (success, failure):
+            assert 'name="days" value="365"' in page
+            assert 'name="days" value="1"' in page
+
+    def test_Extend_Refusal_StatesTheWindowThatWasAsked(self, tmp_path):
+        from obdi.providers.truelayer import TrueLayerError
+
+        def refuse(**_):
+            exc = TrueLayerError(
+                "Transaction fetch failed (HTTP 400): invalid_date_range",
+                status=400,
+                code="invalid_date_range",
+                description="Date range not permitted.",
+            )
+            exc.asked_window = "since 2011-04-12 until 2013-04-12 (730 day step)"
+            raise exc
+
+        httpd, base = self._server(tmp_path, lambda: [], refuse)
+        try:
+            page = httpx.post(
+                f"{base}/extend",
+                data={"connection": "halifax", "account": "e9f8", "days": "730"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        prominent = page.split("<details", 1)[0]
+        assert "since 2011-04-12 until 2013-04-12" in prominent
+        # The boundary-shaped remedy for a walking-back refusal.
+        assert "fixed DATE" in prominent
+
+    def test_ExtendRow_ForAnEmptyAccount_ShowsHowFarProbing_HasAlreadyReached(
+        self, tmp_path
+    ):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="spare",
+                    display="Spare Account",
+                    earliest=None,
+                    probed_back_to=date(2020, 8, 5),
+                )
+            ],
+            lambda **_: "",
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        assert "probed back to 2020-08-05" in page
 
     def test_Extend_ProviderErrorParts_AreRenderedSeparately_NotAsOneJsonBlob(self, tmp_path):
         from obdi.providers.truelayer import TrueLayerError
