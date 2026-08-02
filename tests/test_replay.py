@@ -27,6 +27,7 @@ def txn(**overrides) -> Transaction:
         "counterparty": "Tesco",
         "source": "starling",
         "entity_id": "ent-1",
+        "content_key": "ck-abc123",
     }
     base.update(overrides)
     return Transaction(**base)
@@ -36,15 +37,19 @@ class TestIdempotency:
     def test_Transaction_WhenReplayed_CanonicalIdBecomesTheIdempotencyKey(self):
         # Actual never adds two transactions sharing an imported_id, so this is
         # what makes replaying safe to repeat.
-        assert to_actual_transaction(txn())["imported_id"] == "ent-1"
+        # Content identity, NOT the entity id: entity ids re-mint on a
+        # store rebuild, and a rebuild-then-replay must be a no-op in
+        # Actual, not a wholesale duplication.
+        assert to_actual_transaction(txn())["imported_id"] == "ck-abc123:0"
 
     def test_Transaction_WhenReplayedTwice_ProducesIdenticalPayload(self):
         assert to_actual_transaction(txn()) == to_actual_transaction(txn())
 
-    def test_Transaction_WhenLackingEntityId_RefusedRatherThanDuplicated(self):
-        # Without a stable key every replay would add another copy.
+    def test_Transaction_WhenLackingContentKey_RefusedRatherThanDuplicated(self):
+        # Without a stable key every replay would add another copy. The key
+        # is the CONTENT identity: entity ids re-mint on a store rebuild.
         with pytest.raises(ReplayError, match="duplicate"):
-            to_actual_transaction(txn(entity_id=""))
+            to_actual_transaction(txn(content_key=""))
 
 
 class TestFieldMapping:

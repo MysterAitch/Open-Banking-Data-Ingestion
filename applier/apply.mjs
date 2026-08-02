@@ -13,9 +13,11 @@
  * reconciliation entirely and silently duplicates on any re-run - and re-runs
  * are the normal case, since replay is meant to be repeatable.
  *
- * imported_id is the idempotency key. Ours is the canonical entity id, so a
- * payment maps to the same row on every replay however many sources observed
- * it, and re-running is a no-op rather than a mess.
+ * imported_id is the idempotency key. Ours is the content identity (content
+ * key + occurrence), deliberately not the internal entity id: entity ids
+ * re-mint on a store rebuild, while the content key is deterministic over
+ * the payment itself. A payment therefore maps to the same Actual row on
+ * every replay - across re-runs, across sources, and across rebuilds.
  *
  * On a match, existing values win. Actual keeps a payee, category or note set
  * by hand and never touches a reconciled transaction, which is what makes

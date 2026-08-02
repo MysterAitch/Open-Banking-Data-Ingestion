@@ -265,9 +265,11 @@ The applier must use Actual's **import** path, never the raw insert: the raw one
 skips reconciliation and silently duplicates on any re-run. Three things then
 fall out for free:
 
-- **`imported_id` is the idempotency key**, and ours is the canonical entity id.
-  The same payment maps to the same row on every replay, however many sources
-  observed it.
+- **`imported_id` is the idempotency key**, and ours is the content identity
+  (content key + occurrence) rather than the internal entity id - entity ids
+  re-mint on a store rebuild, while the content key is deterministic over the
+  payment itself. The same payment maps to the same row on every replay,
+  across re-runs, sources and rebuilds alike.
 - **On a match, existing values win.** Actual keeps a payee, category or note
   you set by hand rather than overwriting it, and never touches a reconciled
   transaction. Re-importing does not undo your categorisation.

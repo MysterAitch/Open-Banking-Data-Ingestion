@@ -17,8 +17,10 @@ artefacts too, so replayed rows land under the bound name.
 One honest caveat: entity ids are minted at first sighting, so a rebuild
 RE-MINTS them. Everything observable about each payment - account, amount,
 date, description, sightings - reproduces exactly; the opaque identity does
-not. Downstream consumers (the budgeting-app replay in particular) must
-therefore key on content, never on stored entity ids.
+not. Downstream consumers therefore key on content, never on stored entity
+ids - the Actual replay's imported_id is the content key plus occurrence
+for exactly this reason, making rebuild-then-replay a no-op rather than a
+duplication.
 """
 
 from __future__ import annotations

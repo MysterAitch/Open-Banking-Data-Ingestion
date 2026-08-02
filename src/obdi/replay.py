@@ -53,9 +53,9 @@ def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
     Amounts pass through unchanged: Actual also stores integer minor units with
     a negative outflow, so there is no conversion to get wrong.
     """
-    if not transaction.entity_id:
+    if not transaction.content_key:
         raise ReplayError(
-            "transaction has no entity id, so it has no stable imported_id. "
+            "transaction has no content key, so it has no stable imported_id. "
             "Replaying it would create a duplicate on every run."
         )
 
@@ -72,10 +72,14 @@ def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
     payee = transaction.counterparty or transaction.description
 
     return {
-        # Actual's idempotency key. Ours is the canonical identity, so the same
-        # payment maps to the same row on every replay, however many sources
-        # observed it.
-        "imported_id": transaction.entity_id,
+        # Actual's idempotency key. Ours is the CONTENT identity plus its
+        # occurrence index, deliberately not the entity id: entity ids are
+        # minted at first sighting and a rebuild re-mints them, which would
+        # duplicate every transaction in Actual on the next replay. The
+        # content key is deterministic over the payment itself, so it
+        # survives rebuilds and is identical however many sources observed
+        # the payment.
+        "imported_id": f"{transaction.content_key}:{transaction.occurrence}",
         "date": transaction.value_date.isoformat(),
         "amount": transaction.amount_minor,
         "payee_name": payee,

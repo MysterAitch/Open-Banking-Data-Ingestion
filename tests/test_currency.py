@@ -119,6 +119,7 @@ class TestReplayRefusesForeignAmounts:
             description="TESCO",
             source="test",
             entity_id="ent-1",
+            content_key="ck-cur-1",
         )
 
     def test_Transaction_WhenSterling_Replayed(self):
