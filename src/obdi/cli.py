@@ -137,6 +137,23 @@ def _value(args: argparse.Namespace, db_path: Path) -> int:
     return 0
 
 
+def extend_bounds(
+    earliest: date | None, days: int, *, today: date
+) -> tuple[date, date]:
+    """The window one extend press asks for.
+
+    Walks back `days` from the earliest held transaction (or from today on a
+    first press), with a one-day overlap so the boundary transaction merges
+    rather than duplicates. The overlap must never push past today: proven
+    live on an account holding nothing, where anchor-plus-one meant tomorrow
+    and the provider refused the whole request as invalid_date_range.
+    """
+    anchor = earliest or today
+    since = anchor - timedelta(days=days)
+    until = min(anchor + timedelta(days=1), today)
+    return since, until
+
+
 def _serve(host: str, port: int, db_path: Path) -> int:
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if not store_path:
@@ -269,9 +286,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             for t in held
             if t.account_id == canonical and t.source == "truelayer"
         ]
-        anchor = min(dates) if dates else datetime.now(UTC).date()
-        window_since = anchor - timedelta(days=days)
-        window_until = anchor + timedelta(days=1)
+        window_since, window_until = extend_bounds(
+            min(dates) if dates else None, days, today=datetime.now(UTC).date()
+        )
 
         with Store(db_path) as store:
             result = pull_truelayer(
