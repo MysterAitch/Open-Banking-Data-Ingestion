@@ -785,3 +785,103 @@ class TestCardReplay:
 
         assert len(report.problems) == 1
         assert "convention" in report.problems[0]
+
+
+class TestSingleArtefactReplay:
+    '''Absent rows need no wipe: one landed artefact parses through the
+    shared reading path and reconciles like a live fetch - seconds, and
+    idempotent by identity.'''
+
+    def _land_card(self, store):
+        import json as _json
+
+        from obdi.providers.truelayer import artefact_for
+
+        record = {
+            "amount": 9.99,
+            "currency": "GBP",
+            "description": "COFFEE",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "transaction_type": "DEBIT",
+            "transaction_id": "c-1",
+            "normalised_provider_transaction_id": "txn-c-1",
+            "provider_transaction_id": "c-1",
+        }
+        store.land_artefact(
+            artefact_for(
+                _json.dumps({"results": [record]}).encode("utf-8"),
+                account_id="d000b07d",
+                kind="card-booked",
+                requested="from=2026-05-04&to=2026-08-02",
+            )
+        )
+        return store.connection.execute(
+            "SELECT rowid FROM raw_artefacts WHERE source = "
+            "'truelayer-card-booked'"
+        ).fetchone()[0]
+
+    def test_Replay_LandsRows_AndIsIdempotent(self, tmp_path, monkeypatch):
+        from obdi.cli import replay_single_artefact
+        from obdi.store import Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            rowid = self._land_card(store)
+
+        first = replay_single_artefact(db, rowid)
+        second = replay_single_artefact(db, rowid)
+
+        assert "1 parsed, 1 new" in first
+        assert "1 parsed, 0 new" in second
+        with Store(db) as store:
+            amount = store.connection.execute(
+                "SELECT amount_minor FROM transactions"
+            ).fetchone()[0]
+        assert amount == -999
+
+    def test_NonTransactionalArtefact_IsRefusedPlainly(
+        self, tmp_path, monkeypatch
+    ):
+        import json as _json
+
+        import pytest
+
+        from obdi.cli import replay_single_artefact
+        from obdi.providers.truelayer import artefact_for
+        from obdi.store import Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.land_artefact(
+                artefact_for(
+                    _json.dumps({"results": []}).encode("utf-8"),
+                    account_id="halifax",
+                    kind="accounts",
+                    account_ref="halifax",
+                )
+            )
+            rowid = store.connection.execute(
+                "SELECT rowid FROM raw_artefacts"
+            ).fetchone()[0]
+
+        with pytest.raises(ValueError, match="no transactions to replay"):
+            replay_single_artefact(db, rowid)
+
+    def test_Replay_DefersToARunningRebuild(self, tmp_path, monkeypatch):
+        import pytest
+
+        from obdi.cli import replay_single_artefact
+        from obdi.leases import acquire
+        from obdi.store import Store
+
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            rowid = self._land_card(store)
+        acquire(locks, "rebuild-derived", "obdi-web", ttl_seconds=3600)
+
+        with pytest.raises(ValueError, match="rebuild is replaying"):
+            replay_single_artefact(db, rowid)

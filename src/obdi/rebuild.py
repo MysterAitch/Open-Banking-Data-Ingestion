@@ -36,6 +36,7 @@ from .accounts import AccountMap
 from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
+from .models import Transaction
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
@@ -166,6 +167,60 @@ def _resolve_ref(account_ref: str, account_map: AccountMap | None) -> str:
     return account_map.resolve(source, provider_ref)
 
 
+def parse_artefact_transactions(
+    source: str, payload: bytes, account_ref: str, digest: str
+) -> list[Transaction]:
+    """Parse one artefact's payload into transactions - the shared
+    reading path for full rebuilds and single-artefact replays. Raises
+    provider and data errors for the caller to record or surface."""
+    if source in ("truelayer-booked", "truelayer-pending"):
+        decoded = json.loads(payload)
+        return [
+            replace(
+                truelayer.to_transaction(
+                    record,
+                    account_id=account_ref,
+                    pending=source.endswith("pending"),
+                ),
+                artefact_digest=digest,
+            )
+            for record in json_rows(decoded, "results")
+        ]
+    if source == "truelayer-card-booked":
+        decoded = json.loads(payload)
+        return [
+            replace(
+                truelayer.to_card_transaction(record, account_id=account_ref),
+                artefact_digest=digest,
+            )
+            for record in json_rows(decoded, "results")
+        ]
+    if source == "starling-feed":
+        decoded = json.loads(payload)
+        transactions = []
+        for item in json_rows(decoded, "feedItems"):
+            transaction = starling.to_transaction(item, account_id=account_ref)
+            if transaction is not None:
+                transactions.append(replace(transaction, artefact_digest=digest))
+        return transactions
+    # File imports: source is the suffix (csv, qif, ...). The parser
+    # registry re-detects from the bytes, exactly as the original import.
+    parser = detect(payload)
+    return list(parser.parse(payload, account_id=account_ref))
+
+
+def resolve_artefact_ref(
+    row: Any, account_map: AccountMap | None, starling_defaults: dict[str, str]
+) -> str:
+    """The identity half of the shared reading path."""
+    source = str(row["source"])
+    if source == "starling-feed":
+        return _starling_feed_ref(
+            str(row["origin"]), str(row["account_ref"]), starling_defaults, account_map
+        )
+    return _resolve_ref(str(row["account_ref"]), account_map)
+
+
 def rebuild_from_raw(
     store: Store,
     progress: Callable[[int, int, RebuildReport], None] | None = None,
@@ -221,15 +276,7 @@ def rebuild_from_raw(
             with contextlib.suppress(Exception):
                 progress(index, total, report)
         source = str(row["source"])
-        if source == "starling-feed":
-            account_ref = _starling_feed_ref(
-                str(row["origin"]),
-                str(row["account_ref"]),
-                starling_defaults,
-                account_map,
-            )
-        else:
-            account_ref = _resolve_ref(str(row["account_ref"]), account_map)
+        account_ref = resolve_artefact_ref(row, account_map, starling_defaults)
         digest = str(row["digest"])
         payload = row["payload"]
 
@@ -239,46 +286,9 @@ def rebuild_from_raw(
 
         summary = ImportSummary(artefact_new=False)
         try:
-            if source in ("truelayer-booked", "truelayer-pending"):
-                decoded = json.loads(payload)
-                records = json_rows(decoded, "results")
-                transactions = [
-                    replace(
-                        truelayer.to_transaction(
-                            record,
-                            account_id=account_ref,
-                            pending=source.endswith("pending"),
-                        ),
-                        artefact_digest=digest,
-                    )
-                    for record in records
-                ]
-            elif source == "truelayer-card-booked":
-                decoded = json.loads(payload)
-                transactions = [
-                    replace(
-                        truelayer.to_card_transaction(
-                            record, account_id=account_ref
-                        ),
-                        artefact_digest=digest,
-                    )
-                    for record in json_rows(decoded, "results")
-                ]
-            elif source == "starling-feed":
-                decoded = json.loads(payload)
-                transactions = []
-                for item in json_rows(decoded, "feedItems"):
-                    transaction = starling.to_transaction(item, account_id=account_ref)
-                    if transaction is not None:
-                        transactions.append(
-                            replace(transaction, artefact_digest=digest)
-                        )
-            else:
-                # File imports: source is the suffix (csv, qif, ...). The
-                # parser registry re-detects from the bytes, exactly as the
-                # original import did.
-                parser = detect(payload)
-                transactions = list(parser.parse(payload, account_id=account_ref))
+            transactions = parse_artefact_transactions(
+                source, payload, account_ref, digest
+            )
         except (
             DataError,
             ValueError,

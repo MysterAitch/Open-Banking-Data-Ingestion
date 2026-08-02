@@ -294,6 +294,8 @@ class WebConfig:
     actual_history: Callable[[], list[dict[str, object]]] | None = None
     #: The review queue decomposed: reasons, clusters, declaration matches.
     review_report_text: Callable[[], str] | None = None
+    #: Additively replay one landed artefact into the store (see the cli).
+    replay_artefact: Callable[[int], str] | None = None
     #: When the applier last checked the queue (ISO stamp, empty if never).
     actual_heartbeat: Callable[[], str] | None = None
     #: Danger zone: wipe and replay the derived layers from raw artefacts.
@@ -1954,6 +1956,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
             "<h2>Computed shape</h2>"
             + _shape_html(summary)
+            + (
+                '<form method="post" action="/replay-artefact">'
+                f'<input type="hidden" name="id" value="{artefact_id}">'
+                '<p><button class="button" type="submit" '
+                'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+                "Replay into store</button></p></form>"
+            )
             + f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
             "View payload</a></p>" + HOME_LINK
         )
@@ -2111,6 +2120,36 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, render_page("Actual sync history", body))
 
+    def _replay_artefact(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.replay_artefact
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        try:
+            artefact_id = int((form.get("id", [""])[0] or "").strip())
+        except ValueError:
+            self._respond(400, error_page("Bad request", "<p>Artefact id required.</p>"))
+            return
+        try:
+            summary = hook(artefact_id)
+        except Exception as exc:
+            self._respond(
+                400, error_page("Could not replay", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Artefact replayed",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>Additive and idempotent: replaying again matches "
+                "instead of duplicating. A full rebuild is only for rows "
+                "that are wrong, not merely absent.</p>"
+                f'<p><a class="button" href="/artefact?id={artefact_id}">'
+                "Back to the artefact</a></p>" + HOME_LINK,
+            ),
+        )
+
     def _review_report(self) -> None:
         hook = self.bound_config.review_report_text
         if hook is None:
@@ -2159,6 +2198,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/forget-actual-bindings":
             self._forget_actual(self._read_form())
+            return
+        if route == "/replay-artefact":
+            self._replay_artefact(self._read_form())
             return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(

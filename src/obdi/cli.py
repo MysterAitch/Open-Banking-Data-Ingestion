@@ -314,6 +314,64 @@ def rebuild_status_for(db_path: Path) -> dict[str, object]:
     return {}
 
 
+def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
+    """Additively replay ONE landed artefact into the live store.
+
+    The tool for a new source whose evidence predates its parser (the
+    card): the rows are absent, not wrong, so nothing is wiped - the
+    artefact parses through the shared reading path and reconciles like
+    a live fetch, idempotent by identity. The full rebuild remains the
+    tool for rows that are WRONG.
+    """
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        raise ValueError(busy)
+    from .ingest import ImportSummary, reconcile_batch
+    from .rebuild import (
+        _NON_TRANSACTIONAL,
+        _starling_defaults,
+        parse_artefact_transactions,
+        resolve_artefact_ref,
+    )
+
+    with Store(db_path) as store:
+        row = store.connection.execute(
+            "SELECT rowid, source, account_ref, digest, payload, origin "
+            "FROM raw_artefacts WHERE rowid = ?",
+            (artefact_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no artefact with id {artefact_id}")
+        source = str(row["source"])
+        if source in _NON_TRANSACTIONAL:
+            raise ValueError(
+                f"{source} artefacts carry no transactions to replay"
+            )
+        defaults = _starling_defaults(
+            store.connection.execute(
+                "SELECT source, payload FROM raw_artefacts "
+                "WHERE source = 'starling-accounts'"
+            ).fetchall()
+        )
+        account_ref = resolve_artefact_ref(row, _account_map(), defaults)
+        transactions = parse_artefact_transactions(
+            source, row["payload"], account_ref, str(row["digest"])
+        )
+        before = store.counts().get("transactions", 0)
+        if transactions:
+            reconcile_batch(
+                store,
+                transactions,
+                digest=str(row["digest"]),
+                summary=ImportSummary(artefact_new=False),
+            )
+        after = store.counts().get("transactions", 0)
+    return (
+        f"replayed {source} for {account_ref}: {len(transactions)} parsed, "
+        f"{after - before} new row(s) - the matcher absorbed the rest"
+    )
+
+
 def queue_actual_audit(db_path: Path) -> str:
     """Ask the applier to read Actual back and report differences.
 
@@ -1198,6 +1256,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)
 
+    def replay_artefact(artefact_id: int) -> str:
+        return replay_single_artefact(db_path, artefact_id)
+
     def review_report_text() -> str:
         from .review_report import review_report
 
@@ -1411,6 +1472,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
+        replay_artefact=replay_artefact,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
         forget_actual=forget_actual,
