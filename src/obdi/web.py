@@ -154,6 +154,11 @@ class WebConfig:
     #: so the analysis lives beside the store, not in the HTML.
     artefact_index: Callable[[], list[dict[str, object]]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
+    #: The fetch-attempt ledger: every ask made of a provider, refused or
+    #: landed, plus per-account call counts over the last day. The probing
+    #: workflow is press, read, decide - and deciding needs this without a
+    #: shell.
+    attempts_index: Callable[[], dict[str, object]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -188,6 +193,14 @@ def _connection_rows(store: ConnectionStore) -> str:
 
 
 HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
+
+
+def _trigger_of(request_meta: object) -> str:
+    try:
+        meta = json.loads(str(request_meta or ""))
+    except ValueError:
+        return ""
+    return str(meta.get("trigger", "")) if isinstance(meta, dict) else ""
 
 
 def _shape_detail(field: dict[str, object]) -> str:
@@ -500,6 +513,7 @@ def render_index(
 {_holdings_rows(holdings)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
+<p><a class="button" href="/attempts">Fetch attempts</a></p>
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
   <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
@@ -563,6 +577,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         route = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
 
+        if route == "/attempts":
+            self._attempts()
+            return
         if route == "/artefacts":
             self._artefacts()
             return
@@ -584,6 +601,64 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._callback(params)
         else:
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
+
+    def _attempts(self) -> None:
+        hook = self.bound_config.attempts_index
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No ledger wired.</p>"))
+            return
+        ledger = hook()
+        raw_day = ledger.get("last_day")
+        day_rows = "".join(
+            f'<tr><td>{html.escape(str(r.get("connection_id")))}</td>'
+            f'<td>{html.escape(str(r.get("account_ref")))}</td>'
+            f'<td>{r.get("count")}</td></tr>'
+            for r in (raw_day if isinstance(raw_day, list) else [])
+            if isinstance(r, dict)
+        )
+        raw_rows = ledger.get("rows")
+        rows = "".join(
+            f'<tr><td>{html.escape(str(r.get("attempted_at", ""))[:19])}</td>'
+            f'<td>{html.escape(str(r.get("connection_id")))} / '
+            f'{html.escape(str(r.get("account_ref")))}</td>'
+            f'<td>{html.escape(str(r.get("source", "")).removeprefix("truelayer-"))}</td>'
+            f'<td style="word-break:break-all">{html.escape(str(r.get("asked", "")))}</td>'
+            f'<td>{html.escape(_trigger_of(r.get("request_meta")))}</td>'
+            + (
+                f'<td class="bad">{r.get("http_status")} '
+                f'<code>{html.escape(str(r.get("error_code", "")))}</code></td>'
+                if r.get("outcome") == "refused"
+                else f'<td class="ok">{html.escape(str(r.get("outcome", "")))}</td>'
+            )
+            + "</tr>"
+            for r in (raw_rows if isinstance(raw_rows, list) else [])
+            if isinstance(r, dict)
+        )
+        body = (
+            "<p>Every ask made of a provider, newest first - refused or "
+            "landed. Refusals are the valuable rows: what was asked and what "
+            "the provider answered is the raw material of the quota model "
+            "and the ceiling probes.</p>"
+            "<p>A deep-ladder row may cover several provider calls, so deep "
+            "rows are a known under-count of quota spend.</p>"
+            + (
+                "<h2>Calls in the last 24 hours</h2>"
+                "<table><tr><th>connection</th><th>account</th><th>calls</th>"
+                f"</tr>{day_rows}</table>"
+                if day_rows
+                else ""
+            )
+            + "<h2>Attempts</h2>"
+            + (
+                "<table><tr><th>when (UTC)</th><th>account</th><th>kind</th>"
+                f"<th>asked</th><th>trigger</th><th>answer</th></tr>{rows}</table>"
+                if rows
+                else "<p>No attempts recorded yet - the ledger began at 0.4.5, "
+                "so only fetches after that deployment appear.</p>"
+            )
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Fetch attempts", body))
 
     def _artefacts(self) -> None:
         hook = self.bound_config.artefact_index

@@ -310,6 +310,17 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "if the provider granted the window - press again to walk further."
         )
 
+    def attempts_index() -> dict[str, object]:
+        with Store(db_path) as store:
+            rows = store.attempts()
+            last_day = store.connection.execute(
+                "SELECT connection_id, account_ref, COUNT(*) AS count "
+                "FROM fetch_attempts "
+                "WHERE attempted_at >= datetime('now', '-1 day') "
+                "GROUP BY connection_id, account_ref ORDER BY count DESC"
+            ).fetchall()
+        return {"rows": rows, "last_day": [dict(r) for r in last_day]}
+
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
 
@@ -385,6 +396,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         extend_window=extend_window,
         artefact_index=artefact_index,
         artefact_detail=artefact_detail,
+        attempts_index=attempts_index,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
@@ -400,6 +412,40 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
 
 _MEDIA_EXTENSIONS = {"application/json": ".json", "text/csv": ".csv"}
+
+
+def _attempts(db_path: Path) -> int:
+    """Print the fetch-attempt ledger, newest first, one line per ask.
+
+    The terminal view of the same ledger the web page shows: what was asked,
+    under which circumstances, and what the provider answered - refusals
+    included, because those are the rows the quota model and the ceiling
+    probes are built from.
+    """
+    import json as _json
+
+    with Store(db_path) as store:
+        rows = store.attempts()
+    if not rows:
+        print("no attempts recorded yet (the ledger began at 0.4.5)")
+        return 0
+    for row in rows:
+        try:
+            meta = _json.loads(str(row["request_meta"] or ""))
+        except ValueError:
+            meta = {}
+        trigger = meta.get("trigger", "?") if isinstance(meta, dict) else "?"
+        if row["outcome"] == "refused":
+            answer = f"REFUSED {row['http_status']} {row['error_code']}"
+        else:
+            answer = str(row["outcome"])
+        print(
+            f"{str(row['attempted_at'])[:19]}  "
+            f"{row['connection_id']}/{row['account_ref']}  "
+            f"{str(row['source']).removeprefix('truelayer-')}  "
+            f"[{trigger}]  {row['asked']}  ->  {answer}"
+        )
+    return 0
 
 
 def _export_raw(db_path: Path, out_dir: Path) -> int:
@@ -744,6 +790,10 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
     )
 
+    subcommands.add_parser(
+        "attempts",
+        help="show the fetch-attempt ledger: every ask made of a provider",
+    )
     subcommands.add_parser("status", help="show row counts per layer")
     subcommands.add_parser(
         "coverage",
@@ -860,6 +910,8 @@ def main(argv: list[str] | None = None) -> int:
             print("connection to the same bank. Full procedure: docs/REAUTHORISE.md")
         return 0
 
+    if args.command == "attempts":
+        return _attempts(db_path)
     if args.command == "export-raw":
         return _export_raw(db_path, args.export_dir)
 

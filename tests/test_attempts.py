@@ -109,3 +109,34 @@ class TestAttemptsAreRecorded:
             "truelayer-booked",
             "truelayer-pending",
         }
+
+
+class TestAttemptsCommand:
+    def test_Attempts_PrintsRefusalsWithTheirCodes(self, tmp_path, capsys):
+        from obdi.cli import _attempts
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.record_attempt(
+                source="truelayer-booked",
+                connection_id="halifax",
+                account_ref="halifax-current",
+                asked="since=2022-08-03 until=2024-08-03",
+                request_meta='{"trigger": "web-extend"}',
+                outcome="refused",
+                http_status=403,
+                error_code="sca_exceeded",
+                detail="Transaction fetch failed",
+            )
+
+        assert _attempts(db) == 0
+        out = capsys.readouterr().out
+        assert "REFUSED 403 sca_exceeded" in out
+        assert "[web-extend]" in out
+        assert "halifax/halifax-current" in out
+
+    def test_Attempts_WhenLedgerEmpty_SaysSo(self, tmp_path, capsys):
+        from obdi.cli import _attempts
+
+        assert _attempts(tmp_path / "s.sqlite3") == 0
+        assert "no attempts recorded yet" in capsys.readouterr().out

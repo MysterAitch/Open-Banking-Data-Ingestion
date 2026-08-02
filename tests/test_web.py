@@ -607,6 +607,87 @@ class TestExtendingHistoryFromThePage:
         assert "Re-authorise" in page
 
 
+class TestBrowsingTheAttemptLedger:
+    """Every ask made of a provider, on a page: the quota ledger readable.
+
+    The probing workflow is press, read, decide - and the deciding needs
+    "what has already been asked in the last day, and what got refused with
+    which code?" answered without a shell.
+    """
+
+    def _server(self, tmp_path, attempts_index):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            attempts_index=attempts_index,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Ledger_ShowsAttemptsWithOutcomeAndDayCounts(self, tmp_path):
+        httpd, base = self._server(
+            tmp_path,
+            lambda: {
+                "rows": [
+                    {
+                        "attempted_at": "2026-08-02T01:10:00+00:00",
+                        "source": "truelayer-booked",
+                        "connection_id": "halifax",
+                        "account_ref": "halifax-current",
+                        "asked": "since=2022-08-03 until=2024-08-03",
+                        "request_meta": '{"trigger": "web-extend"}',
+                        "outcome": "refused",
+                        "http_status": 403,
+                        "error_code": "sca_exceeded",
+                        "detail": "Transaction fetch failed (HTTP 403): sca_exceeded",
+                    },
+                    {
+                        "attempted_at": "2026-08-02T00:00:00+00:00",
+                        "source": "truelayer-booked",
+                        "connection_id": "halifax",
+                        "account_ref": "halifax-current",
+                        "asked": "from=2026-05-04&to=2026-08-02",
+                        "request_meta": '{"trigger": "scheduled"}',
+                        "outcome": "landed",
+                        "http_status": 200,
+                        "error_code": "",
+                        "detail": "",
+                    },
+                ],
+                "last_day": [
+                    {"connection_id": "halifax", "account_ref": "halifax-current", "count": 5}
+                ],
+            },
+        )
+        try:
+            page = httpx.get(f"{base}/attempts").text
+        finally:
+            httpd.shutdown()
+
+        assert "sca_exceeded" in page
+        assert "refused" in page and "landed" in page
+        assert "web-extend" in page and "scheduled" in page
+        # The quota view: per-account calls over the last 24 hours.
+        assert "halifax-current" in page and ">5<" in page
+        # The known under-count is stated, not hidden.
+        assert "under-count" in page
+
+    def test_Ledger_WhenNothingRecorded_SaysSoPlainly(self, tmp_path):
+        httpd, base = self._server(tmp_path, lambda: {"rows": [], "last_day": []})
+        try:
+            page = httpx.get(f"{base}/attempts").text
+        finally:
+            httpd.shutdown()
+
+        assert "No attempts recorded yet" in page
+
+
 class TestBrowsingRawArtefactsFromThePage:
     """The store's evidence, browsable where the person already is.
 
