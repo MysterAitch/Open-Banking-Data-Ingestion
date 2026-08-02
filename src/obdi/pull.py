@@ -195,6 +195,51 @@ def pull_truelayer(
         except truelayer.TrueLayerError as exc:
             result.notes.append(f"balance for {provider_account_id}: {exc}")
 
+        # Recurring-payment declarations, deep pulls only: they change
+        # rarely, and the unattended quota is precious - each re-auth
+        # refreshes them inside the attended window instead. A failure is
+        # noted, never fatal: declarations must not stop transactions.
+        if deep:
+            for regular_kind in ("standing_orders", "direct_debits"):
+                try:
+                    regular_body = truelayer.fetch_regulars(
+                        connection.access_token,
+                        provider_account_id,
+                        regular_kind,
+                        psu_ip=psu_ip,
+                    )
+                except truelayer.TrueLayerError as exc:
+                    store.record_attempt(
+                        source=f"truelayer-{regular_kind}",
+                        connection_id=connection.connection_id,
+                        account_ref=canonical,
+                        asked=regular_kind,
+                        request_meta=request_meta,
+                        outcome="refused",
+                        http_status=getattr(exc, "status", None),
+                        error_code=str(getattr(exc, "code", "") or ""),
+                        detail=_refusal_detail(exc),
+                    )
+                    result.notes.append(f"{regular_kind} for {provider_account_id}: {exc}")
+                    continue
+                regular_artefact = truelayer.artefact_for(
+                    regular_body,
+                    account_id=canonical,
+                    kind=regular_kind,
+                    request_meta=request_meta,
+                )
+                store.record_attempt(
+                    source=f"truelayer-{regular_kind}",
+                    connection_id=connection.connection_id,
+                    account_ref=canonical,
+                    asked=regular_kind,
+                    request_meta=request_meta,
+                    outcome="landed",
+                    http_status=200,
+                    artefact_digest=regular_artefact.digest,
+                )
+                store.land_artefact(regular_artefact)
+
         known_ceiling = store.provider_fact(
             "truelayer", connection.connection_id, "accepted_backfill_days"
         )

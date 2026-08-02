@@ -473,6 +473,33 @@ def to_transaction(
     )
 
 
+def fetch_regulars(
+    access_token: str,
+    account_id: str,
+    kind: str,
+    *,
+    psu_ip: str | None = None,
+    client: httpx.Client | None = None,
+) -> bytes:
+    """Standing orders or direct debits, raw, for landing as evidence.
+
+    `kind` is the endpoint path segment: standing_orders or direct_debits.
+    These are the recurring-payment DECLARATIONS - the raw material for
+    calming the review queue, since a transaction matching a standing order
+    is expected by definition. They change rarely, so they are fetched only
+    on deep (post-authorisation) pulls: refreshed each re-authorisation at
+    zero unattended-quota cost.
+    """
+    http = client or httpx.Client(timeout=30.0)
+    response = http.get(
+        f"{API_HOST}/data/v1/accounts/{account_id}/{kind}",
+        headers=_headers(access_token, psu_ip),
+    )
+    if response.status_code != 200:
+        raise _refusal(f"{kind} fetch failed", response)
+    return response.content
+
+
 def fetch_balance(
     access_token: str,
     account_id: str,
@@ -524,6 +551,8 @@ def artefact_for(
         origin = f"{API_HOST}/data/v1/accounts"
     elif kind == "balance":
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/balance"
+    elif kind in ("standing_orders", "direct_debits"):
+        origin = f"{API_HOST}/data/v1/accounts/{account_id}/{kind}"
     else:
         suffix = "/pending" if kind == "pending" else ""
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"

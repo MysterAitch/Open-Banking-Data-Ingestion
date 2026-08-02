@@ -404,3 +404,69 @@ class TestReconnectDriftIsDetected:
     def test_FirstEverAuthorisation_HasNothingToCompare(self, tmp_path):
         with Store(tmp_path / "s.sqlite3") as store:
             assert store.detect_reconnect_drift("halifax") == []
+
+
+class TestRecurringDeclarationsLandOnDeepPulls:
+    """Standing orders and direct debits: fetched inside the attended
+    window only, landed as evidence, ledgered like everything else - and
+    NOT fetched on routine pulls, where the unattended quota is precious."""
+
+    def _fakes(self, monkeypatch, regular_calls):
+        def fake_accounts(_token, **_kwargs):
+            return (
+                [{"account_id": "acc-1", "display_name": "Current", "account_type": "T"}],
+                b"{}",
+            )
+
+        def fake_transactions(_token, _account_id, **kwargs):
+            return [], b'{"results": [], "status": "Succeeded"}', "from=2024-08-02&to=2026-08-02"
+
+        def fake_regulars(_token, _account_id, kind, **_kwargs):
+            regular_calls.append(kind)
+            return b'{"results": []}'
+
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", fake_transactions)
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}"))
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_regulars", fake_regulars)
+
+    def test_DeepPull_LandsBothDeclarationKinds(self, tmp_path, monkeypatch):
+        calls: list[str] = []
+        self._fakes(monkeypatch, calls)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            pull_truelayer(
+                store,
+                _connection(),
+                client_id="i",
+                client_secret="s",
+                connection_store=ConnectionStore(tmp_path / "c.json"),
+                account_map=AccountMap(),
+                deep=True,
+            )
+            sources = {
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT DISTINCT source FROM raw_artefacts"
+                ).fetchall()
+            }
+
+        assert calls == ["standing_orders", "direct_debits"]
+        assert "truelayer-standing_orders" in sources
+        assert "truelayer-direct_debits" in sources
+
+    def test_RoutinePull_NeverSpendsQuotaOnDeclarations(self, tmp_path, monkeypatch):
+        calls: list[str] = []
+        self._fakes(monkeypatch, calls)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            pull_truelayer(
+                store,
+                _connection(),
+                client_id="i",
+                client_secret="s",
+                connection_store=ConnectionStore(tmp_path / "c.json"),
+                account_map=AccountMap(),
+            )
+
+        assert calls == []
