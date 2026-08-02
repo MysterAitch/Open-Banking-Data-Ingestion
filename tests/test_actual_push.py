@@ -272,17 +272,31 @@ class TestBindingsRoundTrip:
 
     def test_QueuedRequests_ListedWithTheirTimes_TmpFilesIgnored(self, tmp_path):
         """A pressed button must be visible as in-flight, not vanish until
-        the applier answers."""
+        the applier answers. New filenames carry a Z (they are UTC and say
+        so); files queued before the Z existed parse identically."""
         requests = tmp_path / "actual" / "requests"
         requests.mkdir(parents=True)
         (requests / "push-20260802T112545430836.json").write_text("{}")
+        (requests / "audit-20260802T135454703196Z.json").write_text("{}")
         (requests / ".push-x.json.tmp").write_text("{}")
 
         queued = queued_requests(tmp_path / "actual")
 
-        assert len(queued) == 1
-        assert queued[0]["name"] == "push-20260802T112545430836.json"
-        assert queued[0]["queued_at"] == "2026-08-02T11:25:45"
+        assert len(queued) == 2
+        by_name = {str(entry["name"]): entry for entry in queued}
+        assert (
+            by_name["push-20260802T112545430836.json"]["queued_at"]
+            == "2026-08-02T11:25:45"
+        )
+        assert (
+            by_name["audit-20260802T135454703196Z.json"]["queued_at"]
+            == "2026-08-02T13:54:54"
+        )
+
+    def test_QueuedName_CarriesTheZ(self, tmp_path):
+        queued = queue_push({"version": 2}, tmp_path / "actual")
+
+        assert queued.stem.endswith("Z")
 
     def test_ForgetActualBindings_ClearsLinksButKeepsSourceBindings(self, tmp_path):
         """The recovery step after deleting accounts in Actual: the stale

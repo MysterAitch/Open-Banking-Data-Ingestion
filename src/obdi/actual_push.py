@@ -218,7 +218,7 @@ def queue_push(
     """Write the envelope atomically into the request directory."""
     requests = actual_dir / "requests"
     requests.mkdir(parents=True, exist_ok=True)
-    name = f"{prefix}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.json"
+    name = f"{prefix}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}Z.json"
     tmp = requests / f".{name}.tmp"
     tmp.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
     final = requests / name
@@ -244,7 +244,9 @@ def queued_requests(actual_dir: Path) -> list[dict[str, object]]:
         queued_at = ""
         with contextlib.suppress(ValueError):
             queued_at = (
-                datetime.strptime(stamp, "%Y%m%dT%H%M%S%f")
+                # The Z is cosmetic-but-explicit on new files; files queued
+                # before it existed parse the same.
+                datetime.strptime(stamp.removesuffix("Z"), "%Y%m%dT%H%M%S%f")
                 .replace(tzinfo=UTC)
                 .strftime("%Y-%m-%dT%H:%M:%S")
             )
