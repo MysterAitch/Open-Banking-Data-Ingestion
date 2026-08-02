@@ -99,6 +99,66 @@ class AuthorisationSession:
         return len(self._pending)
 
 
+class UploadSession:
+    """Uploaded bytes held between preview and confirm, keyed by token.
+
+    Same shape as AuthorisationSession and for the same reason: the walk
+    from preview to confirm crosses two requests, and abandoned uploads
+    must not accumulate for as long as the process lives.
+    """
+
+    LIFETIME = timedelta(minutes=15)
+
+    def __init__(self) -> None:
+        self._pending: dict[str, tuple[bytes, str, datetime]] = {}
+
+    def stash(self, payload: bytes, filename: str) -> str:
+        now = datetime.now(UTC)
+        expired = [
+            token
+            for token, (_, _, created) in self._pending.items()
+            if now - created > self.LIFETIME
+        ]
+        for token in expired:
+            del self._pending[token]
+        token = token_urlsafe(16)
+        self._pending[token] = (payload, filename, now)
+        return token
+
+    def claim(self, token: str) -> tuple[bytes, str]:
+        payload, filename, created = self._pending.pop(token)
+        if datetime.now(UTC) - created > self.LIFETIME:
+            raise KeyError("upload expired - upload the file again")
+        return payload, filename
+
+
+def _parse_multipart(content_type: str, body: bytes) -> tuple[bytes, str]:
+    """The one file out of a multipart form, without the removed cgi module.
+
+    Minimal on purpose: a single file field from our own form, not a general
+    parser. The boundary comes from the content type; the first part with a
+    filename wins; payload runs from the blank line to the closing boundary.
+    """
+    marker = "boundary="
+    if marker not in content_type:
+        raise ValueError("not a multipart upload")
+    boundary = content_type.split(marker, 1)[1].split(";")[0].strip().strip('"')
+    delimiter = b"--" + boundary.encode()
+    for part in body.split(delimiter):
+        header_end = part.find(b"\r\n\r\n")
+        if header_end == -1:
+            continue
+        headers = part[:header_end].decode("utf-8", "replace")
+        if "filename=" not in headers:
+            continue
+        filename = headers.split("filename=", 1)[1].split("\r\n")[0].strip().strip('"')
+        payload = part[header_end + 4 :]
+        if payload.endswith(b"\r\n"):
+            payload = payload[:-2]
+        return payload, filename or "upload.csv"
+    raise ValueError("no file found in the upload")
+
+
 @dataclass(frozen=True)
 class ExtendableAccount:
     """One provider account whose history window can be pushed further back."""
@@ -209,6 +269,11 @@ class WebConfig:
     #: the holdings strips - the axis and segments render in the page, the
     #: dates come from the store.
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None
+    #: File imports from the page: preview parses WITHOUT landing (a wrong
+    #: file inspected costs nothing); confirm lands through the same
+    #: import_file as the CLI, so the two routes cannot drift.
+    preview_upload: Callable[..., dict[str, object]] | None = None
+    confirm_upload: Callable[..., str] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -746,6 +811,44 @@ def _holdings_rows(
             f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
             f"{strip}</div>"
         )
+    # Accounts the store KNOWS about but holds nothing for must not vanish:
+    # "this account exists, we asked back to 2020, nothing there" is a
+    # finding, and silence would erase it. They render after the live rows,
+    # strip and all - the strip is entirely faint/dotted, which is the point.
+    held_refs = {row.account_id for row in rows}
+    for ref, _entry in sorted(marks.items()):
+        if ref in held_refs:
+            continue
+        label = labels.get(ref)
+        title = html.escape(label) if label else html.escape(ref)
+        sub = (
+            f'<br><span class="muted mono">{html.escape(ref)}</span>'
+            if label
+            else ""
+        )
+        probed = _mark(ref, "probed")
+        covered = _mark(ref, "covered")
+        strip = _timeline_strip(
+            timeline_segments(
+                axis_start,
+                axis_end,
+                earliest=None,
+                latest=None,
+                today=today,
+                boundary=_mark(ref, "boundary"),
+                probed=probed,
+                covered=covered,
+            )
+        )
+        reach = (
+            f"asked back to {probed.isoformat()}" if probed else "never asked"
+        ) + (f", covered to {covered.isoformat()}" if covered else "")
+        items.append(
+            f'<div class="row" style="opacity:.62"><strong>{title}</strong>'
+            f'{sub}<br><span class="muted">known account, nothing held yet - '
+            f"{reach}</span>{strip}</div>"
+        )
+
     legend = (
         '<p class="muted" style="font-size:.85em">timeline: solid = held, '
         "faint = asked and empty, dotted = truncated by the provider, "
@@ -955,6 +1058,14 @@ def render_index(
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
+<h2>Import a file</h2>
+<p>Bank CSV or QIF exports - previewed before anything is stored, then
+reconciled through the same identity rules as the API pulls.</p>
+<form action="/upload" method="post" enctype="multipart/form-data">
+  <p><input type="file" name="statement" required></p>
+  <p><button class="button" type="submit"
+     style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
+</form>
 <h2>Add a bank</h2>
 <form action="/connect" method="get">
   <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
@@ -1290,6 +1401,14 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
+        if route == "/upload":
+            self._upload()
+            return
+        if route == "/upload-confirm":
+            self._upload_confirm(parse_qs(self.rfile.read(
+                int(self.headers.get("Content-Length") or 0)
+            ).decode("utf-8")))
+            return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(
                 int(self.headers.get("Content-Length") or 0)
@@ -1363,6 +1482,111 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 + _extend_rows(self.bound_config.extendables, only_ref=account)
                 + HOME_LINK,
             ),
+        )
+
+    uploads: UploadSession = UploadSession()
+
+    def _upload(self) -> None:
+        """Receive a file, preview it, commit NOTHING yet."""
+        hook = self.bound_config.preview_upload
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 5 * 1024 * 1024:
+            self._respond(
+                413,
+                error_page("Too large", "<p>Bank exports are small; this is not one.</p>"),
+            )
+            return
+        try:
+            payload, filename = _parse_multipart(
+                self.headers.get("Content-Type") or "", self.rfile.read(length)
+            )
+            preview = hook(payload, filename)
+        except Exception as exc:
+            self._respond(
+                400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        token = self.uploads.stash(payload, filename)
+        labels: dict[str, str] = {}
+        if self.bound_config.display_labels is not None:
+            try:
+                labels = self.bound_config.display_labels()
+            except Exception:
+                labels = {}
+        options = "".join(
+            f'<option value="{html.escape(ref)}">{html.escape(name)}</option>'
+            for ref, name in sorted(labels.items(), key=lambda kv: kv[1])
+        )
+        raw_sample = preview.get("sample")
+        sample_rows = "".join(
+            f'<tr><td>{html.escape(str(r.get("date")))}</td>'
+            f'<td style="text-align:right">{html.escape(str(r.get("amount")))}</td>'
+            f'<td>{html.escape(str(r.get("description")))}</td></tr>'
+            for r in (raw_sample if isinstance(raw_sample, list) else [])
+            if isinstance(r, dict)
+        )
+        warning = (
+            '<p class="warn">Every date in this file falls on the 12th or '
+            "earlier, so nothing rules out the opposite day/month reading. "
+            "Cross-check against another source after importing.</p>"
+            if preview.get("date_ambiguous")
+            else ""
+        )
+        body = (
+            f"<p><strong>{html.escape(filename)}</strong> parsed as "
+            f"{html.escape(str(preview.get('parser')))} "
+            f"(dates {html.escape(str(preview.get('date_format')))}): "
+            f"{preview.get('rows')} row(s), "
+            f"{preview.get('earliest')} .. {preview.get('latest')}</p>"
+            + warning
+            + '<div class="scroll"><table><tr><th>date</th><th>amount</th>'
+            f"<th>description</th></tr>{sample_rows}</table></div>"
+            "<p>Nothing has been stored yet. Choose the account these "
+            "transactions belong to, then confirm.</p>"
+            '<form method="post" action="/upload-confirm">'
+            f'<input type="hidden" name="token" value="{token}">'
+            f'<p><select name="account" style="width:100%;padding:.6rem" required>'
+            f'<option value="">choose an account...</option>{options}</select></p>'
+            '<p><input name="account_other" placeholder="or type a canonical '
+            'name, e.g. hsbc-old-current"></p>'
+            '<p><button class="button" type="submit" '
+            'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+            "Import into the chosen account</button></p></form>" + HOME_LINK
+        )
+        self._respond(200, render_page("Preview import", body))
+
+    def _upload_confirm(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.confirm_upload
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            return
+        token = (form.get("token", [""])[0] or "").strip()
+        account = (
+            (form.get("account_other", [""])[0] or "").strip()
+            or (form.get("account", [""])[0] or "").strip()
+        )
+        if not token or not account:
+            self._respond(400, error_page("Bad request", "<p>Token and account required.</p>"))
+            return
+        try:
+            payload, filename = self.uploads.claim(token)
+        except KeyError as exc:
+            self._respond(410, error_page("Upload expired", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        try:
+            summary = hook(payload, filename, account)
+        except Exception as exc:
+            self._respond(
+                500, error_page("Import failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        print(f"web import: {filename} -> {account}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page("Imported", f"<p>{html.escape(summary)}</p>" + HOME_LINK),
         )
 
     def _bind(self, form: dict[str, list[str]]) -> None:

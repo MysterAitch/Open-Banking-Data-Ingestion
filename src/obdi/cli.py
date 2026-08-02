@@ -609,6 +609,49 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             ] = f"{name} (starling space)"
         return labels
 
+    def preview_upload(payload: bytes, filename: str) -> dict[str, object]:
+        """Parse without landing: what IS this file, before anything commits.
+
+        The preview must not write - a wrong file inspected costs nothing.
+        Landing and reconciliation happen only on confirm, through the same
+        import_file the CLI uses, so file-vs-web imports cannot drift.
+        """
+        from .ingest import dates_cannot_confirm_format
+        from .parsers.uk_banks import detect
+
+        parser = detect(payload)
+        rows = list(parser.parse(payload, account_id="preview"))
+        sample = [
+            {
+                "date": r.value_date.isoformat(),
+                "amount": f"{r.amount_minor / 100:.2f}",
+                "description": r.description[:60],
+            }
+            for r in rows[:5]
+        ]
+        ambiguous = dates_cannot_confirm_format([r.value_date for r in rows])
+        return {
+            "parser": type(parser).__name__,
+            "date_format": getattr(parser, "date_format", ""),
+            "rows": len(rows),
+            "sample": sample,
+            "date_ambiguous": ambiguous,
+            "earliest": min((r.value_date for r in rows), default=None),
+            "latest": max((r.value_date for r in rows), default=None),
+        }
+
+    def confirm_upload(payload: bytes, filename: str, account: str) -> str:
+        """Land and reconcile a previewed file against a chosen account."""
+        import tempfile
+
+        safe_name = Path(filename).name or "upload.csv"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / safe_name
+            path.write_bytes(payload)
+            with Store(db_path) as store:
+                summary = import_file(store, path, account_id=account)
+        return f"{safe_name} -> {account}: {summary.describe()}"
+
     def account_timelines() -> dict[str, dict[str, str]]:
         """Timeline marks per canonical ref, from the store alone: how far
         was probed, how recently covered, and any known provider boundary."""
@@ -804,6 +847,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         starling_status=starling_status,
         display_labels=display_labels,
         account_timelines=account_timelines,
+        preview_upload=preview_upload,
+        confirm_upload=confirm_upload,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):

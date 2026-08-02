@@ -1166,6 +1166,124 @@ class TestTimelineSegments:
         assert segments[-1][0] == "future"
 
 
+class TestUploadingAFileFromThePage:
+    """Preview commits nothing; confirm lands through the CLI's machinery.
+
+    A wrong file inspected costs nothing - the parse happens in memory,
+    the bytes wait in a stash, and only the confirm click stores anything.
+    """
+
+    def _server(self, tmp_path, preview_upload, confirm_upload, labels=None):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            preview_upload=preview_upload,
+            confirm_upload=confirm_upload,
+            display_labels=(lambda: labels or {}),
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Upload_ShowsAPreview_AndStoresNothingUntilConfirmed(self, tmp_path):
+        previews = []
+        confirms = []
+
+        def preview(payload, filename):
+            previews.append((payload, filename))
+            return {
+                "parser": "StarlingCsvParser",
+                "date_format": "%d/%m/%Y",
+                "rows": 42,
+                "sample": [
+                    {"date": "2026-07-01", "amount": "-12.34", "description": "COFFEE"}
+                ],
+                "date_ambiguous": False,
+                "earliest": "2026-01-01",
+                "latest": "2026-07-01",
+            }
+
+        httpd, base = self._server(
+            tmp_path,
+            preview,
+            lambda *a: confirms.append(a) or "done",
+            labels={"halifax-current": "Current (halifax)"},
+        )
+        try:
+            page = httpx.post(
+                f"{base}/upload",
+                files={"statement": ("statement.csv", b"Date,Amount\n", "text/csv")},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert previews == [(b"Date,Amount\n", "statement.csv")]
+        assert confirms == []  # nothing landed from a preview
+        assert "StarlingCsvParser" in page
+        assert "42 row(s)" in page
+        assert "COFFEE" in page
+        assert "Current (halifax)" in page  # the account picker is populated
+        assert 'name="token"' in page
+
+    def test_Confirm_LandsThePreviewedBytesAgainstTheChosenAccount(self, tmp_path):
+        confirms = []
+
+        def confirm(payload, filename, account):
+            confirms.append((payload, filename, account))
+            return "statement.csv -> halifax-current: 42 parsed"
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda payload, filename: {
+                "parser": "QifParser",
+                "date_format": "",
+                "rows": 1,
+                "sample": [],
+                "date_ambiguous": False,
+                "earliest": None,
+                "latest": None,
+            },
+            confirm,
+        )
+        try:
+            with httpx.Client() as client:
+                preview_page = client.post(
+                    f"{base}/upload",
+                    files={"statement": ("mine.qif", b"!Type:Bank\n", "text/plain")},
+                ).text
+                token = preview_page.split('name="token" value="')[1].split('"')[0]
+                result = client.post(
+                    f"{base}/upload-confirm",
+                    data={"token": token, "account": "halifax-current"},
+                ).text
+        finally:
+            httpd.shutdown()
+
+        assert confirms == [(b"!Type:Bank\n", "mine.qif", "halifax-current")]
+        assert "42 parsed" in result
+
+    def test_Upload_UnrecognisedFile_IsRefusedWithTheParserVerdict(self, tmp_path):
+        def preview(payload, filename):
+            raise ValueError("No parser recognised this file's header row.")
+
+        httpd, base = self._server(tmp_path, preview, lambda *a: "")
+        try:
+            response = httpx.post(
+                f"{base}/upload",
+                files={"statement": ("junk.bin", b"\x00\x01", "application/octet-stream")},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 400
+        assert "No parser recognised" in response.text
+
+
 class TestBrowsingTheAttemptLedger:
     """Every ask made of a provider, on a page: the quota ledger readable.
 
