@@ -42,16 +42,39 @@ class TestProbedAnchorFromAskedWindows:
     so the anchor walks on asked windows, not only on held data.
     """
 
-    def test_EarliestAsked_ReadsTheLandedWindowRanges(self, tmp_path):
+    def test_EarliestAsked_ReadsTheLandedWindowRanges_AcrossLabelVintages(
+        self, tmp_path, monkeypatch
+    ):
+        """Artefacts are labelled provider-qualified since the
+        normalisation; older ones carry the canonical the map held at
+        landing. The anchor must see BOTH vintages through the map."""
+        import json as _json
+
         from obdi.cli import _earliest_asked
         from obdi.providers.truelayer import artefact_for
         from obdi.store import Store
 
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            _json.dumps(
+                {
+                    "bindings": [
+                        {
+                            "canonical_id": "halifax-spare",
+                            "source": "truelayer",
+                            "provider_account_id": "acc-9",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_path))
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
                 artefact_for(
                     b'{"results": [], "status": "Succeeded"}',
-                    account_id="halifax-spare",
+                    account_id="acc-9",
                     kind="booked",
                     requested="from=2024-08-02&to=2026-08-02",
                 )
@@ -59,13 +82,15 @@ class TestProbedAnchorFromAskedWindows:
             store.land_artefact(
                 artefact_for(
                     b'{"results": [], "status": "Succeeded"} ',
-                    account_id="halifax-spare",
+                    account_id="acc-9",
                     kind="booked",
                     requested="from=2022-08-03&to=2024-08-03",
+                    account_ref="halifax-spare",
                 )
             )
 
             assert _earliest_asked(store, "halifax-spare") == date(2022, 8, 3)
+            assert _earliest_asked(store, "truelayer:acc-9") == date(2022, 8, 3)
 
     def test_EarliestAsked_WhenNothingLanded_IsNone(self, tmp_path):
         from obdi.cli import _earliest_asked
@@ -88,7 +113,7 @@ class TestFreshnessFromAskedWindows:
             store.land_artefact(
                 artefact_for(
                     b'{"results": [], "status": "Succeeded"}',
-                    account_id="halifax-current",
+                    account_id="acc-1",
                     kind="booked",
                     requested="from=2026-02-01&to=2026-05-01",
                 )
@@ -96,13 +121,13 @@ class TestFreshnessFromAskedWindows:
             store.land_artefact(
                 artefact_for(
                     b'{"results": [{"x": 1}], "status": "Succeeded"}',
-                    account_id="halifax-current",
+                    account_id="acc-1",
                     kind="booked",
                     requested="from=2026-05-04&to=2026-08-02",
                 )
             )
 
-            covered, landed = _latest_asked(store, "halifax-current")
+            covered, landed = _latest_asked(store, "truelayer:acc-1")
 
         assert covered == date(2026, 8, 2)
         assert landed  # a timestamp, present

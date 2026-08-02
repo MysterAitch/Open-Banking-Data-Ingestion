@@ -181,44 +181,68 @@ class TestScaWindowLengthIsLearnt:
 class TestRebindCarriesEveryLayer:
     """A bind must not orphan the artefacts or the quota ledger.
 
-    Observed risk: the probed-back-to anchor and the 24-hour call counts
-    both query by canonical ref - a bind that moved only transactions would
-    silently reset the first and split the second across two names.
+    Under the label normalisation evidence keeps its provider-qualified
+    label FOREVER - a bind edits the map, and the anchors see the evidence
+    through the alias set. What the old contract achieved by moving labels
+    (the probed-back-to anchor surviving a rename) is now achieved by
+    translation, and this test asserts the outcome, not the mechanism.
     """
 
-    def test_Rebind_MovesArtefactAndAttemptLabels(self, tmp_path):
+    def test_AfterBinding_TheAnchorSeesQualifiedEvidence(
+        self, tmp_path, monkeypatch
+    ):
+        import json as _json
+        from datetime import date
+
+        from obdi.cli import _earliest_asked
         from obdi.providers.truelayer import artefact_for
 
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            _json.dumps(
+                {
+                    "bindings": [
+                        {
+                            "canonical_id": "halifax-current",
+                            "source": "truelayer",
+                            "provider_account_id": "e9f8",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_path))
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
                 artefact_for(
                     b'{"results": [], "status": "Succeeded"}',
-                    account_id="truelayer:e9f8",
+                    account_id="e9f8",
                     kind="booked",
                     requested="from=2020-08-01&to=2020-08-03",
                 )
             )
+
+            assert _earliest_asked(store, "halifax-current") == date(2020, 8, 1)
+
+    def test_Rebind_StillMovesLegacyCanonicalLabels(self, tmp_path):
+        """Evidence from before the normalisation carries canonical labels;
+        a rename moves those the old way so no vintage is orphaned."""
+        with Store(tmp_path / "s.sqlite3") as store:
             store.record_attempt(
                 source="truelayer-booked",
                 connection_id="halifax",
-                account_ref="truelayer:e9f8",
+                account_ref="halifax-old-name",
                 asked="from=2020-08-01&to=2020-08-03",
                 request_meta="{}",
                 outcome="landed",
                 http_status=200,
             )
 
-            store.rebind_account("truelayer:e9f8", "halifax-current")
+            store.rebind_account("halifax-old-name", "halifax-current")
 
-            artefact_refs = [
-                row[0]
-                for row in store.connection.execute(
-                    "SELECT account_ref FROM raw_artefacts"
-                ).fetchall()
-            ]
             attempt_refs = [row["account_ref"] for row in store.attempts()]
 
-        assert artefact_refs == ["halifax-current"]
         assert attempt_refs == ["halifax-current"]
 
 
@@ -347,7 +371,12 @@ class TestReconnectDriftIsDetected:
         from obdi.providers.truelayer import artefact_for
 
         store.land_artefact(
-            artefact_for(payload_bytes, account_id="halifax", kind="accounts")
+            artefact_for(
+                payload_bytes,
+                account_id="halifax",
+                kind="accounts",
+                account_ref="halifax",
+            )
         )
 
     def test_SameAccountsSameProvider_NoFindings(self, tmp_path):

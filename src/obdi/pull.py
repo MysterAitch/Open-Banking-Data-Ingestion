@@ -147,6 +147,7 @@ def pull_truelayer(
             account_id=connection.connection_id,
             kind="accounts",
             request_meta=request_meta,
+            account_ref=connection.connection_id,
         )
     )
 
@@ -186,7 +187,7 @@ def pull_truelayer(
             store.land_artefact(
                 truelayer.artefact_for(
                     balance_body,
-                    account_id=canonical,
+                    account_id=provider_account_id,
                     kind="balance",
                     request_meta=request_meta,
                 )
@@ -213,7 +214,7 @@ def pull_truelayer(
                     store.record_attempt(
                         source=f"truelayer-{regular_kind}",
                         connection_id=connection.connection_id,
-                        account_ref=canonical,
+                        account_ref=f"truelayer:{provider_account_id}",
                         asked=regular_kind,
                         request_meta=request_meta,
                         outcome="refused",
@@ -225,14 +226,14 @@ def pull_truelayer(
                     continue
                 regular_artefact = truelayer.artefact_for(
                     regular_body,
-                    account_id=canonical,
+                    account_id=provider_account_id,
                     kind=regular_kind,
                     request_meta=request_meta,
                 )
                 store.record_attempt(
                     source=f"truelayer-{regular_kind}",
                     connection_id=connection.connection_id,
-                    account_ref=canonical,
+                    account_ref=f"truelayer:{provider_account_id}",
                     asked=regular_kind,
                     request_meta=request_meta,
                     outcome="landed",
@@ -268,7 +269,7 @@ def pull_truelayer(
                 store.record_attempt(
                     source="truelayer-pending" if pending else "truelayer-booked",
                     connection_id=connection.connection_id,
-                    account_ref=canonical,
+                    account_ref=f"truelayer:{provider_account_id}",
                     asked=asked_spec,
                     request_meta=request_meta,
                     outcome="refused",
@@ -294,7 +295,7 @@ def pull_truelayer(
                 raise
             landed_artefact = truelayer.artefact_for(
                 body,
-                account_id=canonical,
+                account_id=provider_account_id,
                 kind="pending" if pending else "booked",
                 requested=asked,
                 request_meta=request_meta,
@@ -302,7 +303,7 @@ def pull_truelayer(
             store.record_attempt(
                 source="truelayer-pending" if pending else "truelayer-booked",
                 connection_id=connection.connection_id,
-                account_ref=canonical,
+                account_ref=f"truelayer:{provider_account_id}",
                 asked=asked or asked_spec,
                 request_meta=request_meta,
                 outcome="landed",
@@ -384,13 +385,13 @@ def pull_truelayer(
                     account_id=connection.connection_id,
                     kind="cards",
                     request_meta=request_meta,
+                    account_ref=connection.connection_id,
                 )
             )
         for card in cards:
             card_id = text(card, "account_id")
             if not card_id:
                 continue
-            card_ref = account_map.resolve("truelayer", card_id)
             try:
                 card_body, card_asked = truelayer.fetch_card_transactions(
                     connection.access_token,
@@ -402,7 +403,7 @@ def pull_truelayer(
                 store.record_attempt(
                     source="truelayer-card-booked",
                     connection_id=connection.connection_id,
-                    account_ref=card_ref,
+                    account_ref=f"truelayer:{card_id}",
                     asked="routine",
                     request_meta=request_meta,
                     outcome="refused",
@@ -414,7 +415,7 @@ def pull_truelayer(
                 continue
             card_artefact = truelayer.artefact_for(
                 card_body,
-                account_id=card_ref,
+                account_id=card_id,
                 kind="card-booked",
                 requested=card_asked,
                 request_meta=request_meta,
@@ -422,7 +423,7 @@ def pull_truelayer(
             store.record_attempt(
                 source="truelayer-card-booked",
                 connection_id=connection.connection_id,
-                account_ref=card_ref,
+                account_ref=f"truelayer:{card_id}",
                 asked=card_asked,
                 request_meta=request_meta,
                 outcome="landed",
@@ -483,7 +484,7 @@ def pull_starling(
         store.land_artefact(
             starling.artefact_for(
                 spaces_body,
-                account_id=canonical,
+                account_id=f"starling:{account_uid}",
                 kind="spaces",
                 origin=f"{starling.API_HOST}/api/v2/account/{account_uid}/spaces",
                 request_meta=request_meta,
@@ -498,7 +499,7 @@ def pull_starling(
                 store.land_artefact(
                     starling.artefact_for(
                         balance_body,
-                        account_id=canonical,
+                        account_id=f"starling:{account_uid}",
                         kind="balance",
                         origin=f"{starling.API_HOST}/api/v2/accounts/{account_uid}/balance",
                         request_meta=request_meta,
@@ -522,6 +523,8 @@ def pull_starling(
             else:
                 target = canonical
 
+            identity_key = category.uid if category.is_space else account_uid
+            qualified_ref = f"starling:{identity_key}"
             asked_spec = f"since={since}" if since else "routine"
             try:
                 items, body, asked = starling.fetch_feed(
@@ -531,7 +534,7 @@ def pull_starling(
                 store.record_attempt(
                     source="starling-feed",
                     connection_id="starling",
-                    account_ref=target,
+                    account_ref=qualified_ref,
                     asked=asked_spec,
                     request_meta=request_meta,
                     outcome="refused",
@@ -553,7 +556,7 @@ def pull_starling(
             # the ask and its evidence stay joined.
             artefact = starling.artefact_for(
                 body,
-                account_id=target,
+                account_id=qualified_ref,
                 kind="feed",
                 origin=(
                     f"{starling.API_HOST}/api/v2/feed/account/{account_uid}"
@@ -564,7 +567,7 @@ def pull_starling(
             store.record_attempt(
                 source="starling-feed",
                 connection_id="starling",
-                account_ref=target,
+                account_ref=qualified_ref,
                 asked=asked,
                 request_meta=request_meta,
                 outcome="landed",

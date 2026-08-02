@@ -445,6 +445,32 @@ def _value(args: argparse.Namespace, db_path: Path) -> int:
     return 0
 
 
+def _evidence_aliases(ref: str) -> list[str]:
+    """Every label this account's evidence may carry across vintages.
+
+    Evidence used to be labelled with whatever the map said at landing
+    time; since the normalisation it is born provider-qualified. Rather
+    than rewriting history, every ref-filtered query accepts the whole
+    alias set - the given key plus its counterpart(s) from the map - so
+    both vintages stay queryable forever."""
+    aliases = {ref}
+    path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if path and Path(path).is_file():
+        with contextlib.suppress(OSError, ValueError):
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            for binding in raw.get("bindings", []) if isinstance(raw, dict) else []:
+                if not isinstance(binding, dict):
+                    continue
+                canonical = str(binding.get("canonical_id", ""))
+                qualified = (
+                    f"{binding.get('source', '')}:"
+                    f"{binding.get('provider_account_id', '')}"
+                )
+                if ref in (canonical, qualified):
+                    aliases.update({canonical, qualified})
+    return sorted(alias for alias in aliases if alias and alias != ":")
+
+
 def _earliest_asked(store: Store, canonical: str) -> date | None:
     """How far back any landed window has ALREADY reached for this account.
 
@@ -454,10 +480,14 @@ def _earliest_asked(store: Store, canonical: str) -> date | None:
     further back rather than re-asking the same span forever (observed live
     on an empty account whose +730 button never moved).
     """
+    aliases = _evidence_aliases(canonical)
+    placeholders = ", ".join("?" for _ in aliases)
     rows = store.connection.execute(
-        "SELECT origin FROM raw_artefacts "
-        "WHERE account_ref = ? AND source IN ('truelayer-booked', 'starling-feed')",
-        (canonical,),
+        # Only "?" placeholders are interpolated; the values themselves are
+        # parameterised.
+        f"SELECT origin FROM raw_artefacts WHERE account_ref IN ({placeholders}) "  # noqa: S608
+        "AND source IN ('truelayer-booked', 'starling-feed')",
+        aliases,
     ).fetchall()
     asked: list[date] = []
     for row in rows:
@@ -480,10 +510,13 @@ def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
     covered - the difference is exactly what goes invisible if the scheduler
     quietly stops for a week.
     """
+    aliases = _evidence_aliases(canonical)
+    placeholders = ", ".join("?" for _ in aliases)
     rows = store.connection.execute(
-        "SELECT origin, fetched_at, source FROM raw_artefacts "
-        "WHERE account_ref = ? AND source IN ('truelayer-booked', 'starling-feed')",
-        (canonical,),
+        "SELECT origin, fetched_at, source FROM raw_artefacts "  # noqa: S608
+        f"WHERE account_ref IN ({placeholders}) "
+        "AND source IN ('truelayer-booked', 'starling-feed')",
+        aliases,
     ).fetchall()
     covered: date | None = None
     landed = ""
@@ -1043,18 +1076,32 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     "WHERE source IN ('truelayer-booked', 'starling-feed')"
                 ).fetchall()
             ]
+            # Both vintages of a label group under one display key - the
+            # canonical when the map knows one - so an account never shows
+            # as two timeline rows just because its evidence spans eras.
+            grouped: dict[str, list[str]] = {}
             for ref in refs:
+                aliases = _evidence_aliases(ref)
+                display = next((a for a in aliases if ":" not in a), ref)
+                grouped.setdefault(display, aliases)
+            for display, aliases in grouped.items():
                 entry: dict[str, str] = {}
-                probed = _earliest_asked(store, ref)
+                probed = _earliest_asked(store, display)
                 if probed:
                     entry["probed"] = probed.isoformat()
-                covered, _ = _latest_asked(store, ref)
+                covered, _ = _latest_asked(store, display)
                 if covered:
                     entry["covered"] = covered.isoformat()
-                if ref in boundaries:
-                    entry["boundary"] = boundaries[ref]
+                for alias in aliases:
+                    bare = alias.split(":", 1)[1] if ":" in alias else alias
+                    if alias in boundaries:
+                        entry["boundary"] = boundaries[alias]
+                        break
+                    if bare in boundaries:
+                        entry["boundary"] = boundaries[bare]
+                        break
                 if entry:
-                    out[ref] = entry
+                    out[display] = entry
         return out
 
     def starling_status() -> dict[str, object] | None:

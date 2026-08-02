@@ -584,6 +584,7 @@ def artefact_for(
     kind: str,
     requested: str = "",
     request_meta: str = "",
+    account_ref: str = "",
 ) -> RawArtefact:
     """Land a payload together with the request that produced it.
 
@@ -595,6 +596,12 @@ def artefact_for(
     no rebuild can tell them apart afterwards.
 
     So the range asked for is part of the evidence, not part of the fetch.
+
+    `account_id` is the PROVIDER's identifier and builds the origin - for a
+    while callers passed the canonical name here, so layer 0 recorded URLs
+    that were never requested, exactly the provenance lie the paragraph
+    above forbids. The stored label defaults to the provider-qualified
+    form; the map translates at derive and display time, never here.
     """
     # The URL actually requested, including the pending suffix. Recording a
     # query-string form of the pending flag wrote a URL that was never fetched
@@ -615,7 +622,7 @@ def artefact_for(
         origin = f"{API_HOST}/data/v1/accounts/{account_id}/transactions{suffix}"
     return RawArtefact(
         source=f"truelayer-{kind}",
-        account_ref=account_id,
+        account_ref=account_ref or f"truelayer:{account_id}",
         fetched_at=datetime.now(UTC),
         media_type="application/json",
         digest=artefact_digest(body),
