@@ -72,3 +72,27 @@ test('summary carries counts in full and caps the samples', () => {
   assert.equal(summary.missing_sample.length, 10);
   assert.equal(summary.human, 2);
 });
+
+test('accounts existing in Actual but bound to nothing are named as strays', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const client = {
+    getAccounts: async () => [
+      { id: 'act-1', name: 'halifax-current-account' },
+      { id: 'act-stray', name: 'Mr Roger Howell (halifax)' },
+    ],
+    getTransactions: async (id) =>
+      id === 'act-stray'
+        ? [
+            { imported_id: 'ck-1:0', date: '2026-07-01', amount: -100 },
+            { imported_id: null, date: '2026-07-01', amount: -60, is_child: true },
+          ]
+        : [],
+  };
+
+  const report = await auditAccounts(client, { 'act-1': [] });
+
+  const stray = report.find((entry) => entry.unbound_in_actual);
+  assert.equal(stray.name, 'Mr Roger Howell (halifax)');
+  assert.equal(stray.rows, 1);
+  assert.ok(report.find((entry) => entry.account_id === 'act-1' && !entry.unbound_in_actual));
+});

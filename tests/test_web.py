@@ -1413,8 +1413,30 @@ class TestActualRoster:
             True,
         )
 
+        rendered_with_stray = _actual_rows(
+            lambda: [
+                {
+                    "ok": True,
+                    "kind": "audit",
+                    "finished_at": "2026-08-02T13:00:00Z",
+                    "accounts": [
+                        {
+                            "account_id": "act-stray",
+                            "name": "Mr Roger Howell (halifax)",
+                            "unbound_in_actual": True,
+                            "rows": 953,
+                        }
+                    ],
+                }
+            ],
+            True,
+        )
+        assert "audit: differences" in rendered_with_stray
+        assert "953" in rendered_with_stray
+
         assert "audit: differences" in rendered
         assert "yours 2" in rendered
+        assert "exists in Actual but no" in rendered_with_stray
         assert "orphaned 3" in rendered
         assert 'class="warn">halifax-instant-saver' in rendered
         assert 'class="muted">halifax-current-account' in rendered

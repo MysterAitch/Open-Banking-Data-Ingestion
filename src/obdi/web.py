@@ -1307,6 +1307,7 @@ def _audit_result_row(result: dict[str, object]) -> str:
     def _dirty(account: dict[str, object]) -> bool:
         return bool(
             account.get("missing_account")
+            or account.get("unbound_in_actual")
             or account.get("missing")
             or account.get("orphaned")
             or account.get("diverged")
@@ -1324,6 +1325,13 @@ def _audit_result_row(result: dict[str, object]) -> str:
             lines.append(
                 f'<span class="warn">{name}: account missing from Actual '
                 f"({account.get('expected', 0)} expected row(s))</span>"
+            )
+            continue
+        if account.get("unbound_in_actual"):
+            lines.append(
+                f'<span class="warn">{name}: exists in Actual but no '
+                f"canonical account maps to it ({account.get('rows', 0)} "
+                "row(s)) - delete it there, or bind something to it</span>"
             )
             continue
         detail = (

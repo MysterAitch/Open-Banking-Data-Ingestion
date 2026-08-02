@@ -86,6 +86,21 @@ export async function auditAccounts(client, accounts) {
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
   const report = [];
+  // The blind spot the first live audit proved: an account that EXISTS in
+  // Actual but is bound to nothing was invisible - audits read only bound
+  // accounts, so the abandoned collision-era account escaped every clean
+  // verdict. Strays are named with their row counts; deleting or binding
+  // them is the human's call.
+  for (const account of known) {
+    if (Object.prototype.hasOwnProperty.call(accounts, account.id)) continue;
+    const rows = await client.getTransactions(account.id, '1900-01-01', '2999-12-31');
+    report.push({
+      account_id: account.id,
+      name: account.name,
+      unbound_in_actual: true,
+      rows: rows.filter((row) => !row.is_child).length,
+    });
+  }
   for (const [accountId, expectedRows] of Object.entries(accounts)) {
     if (!nameOf.has(accountId)) {
       report.push({
