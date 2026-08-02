@@ -27,8 +27,10 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from .accounts import AccountMap
 from .errors import DataError
@@ -105,6 +107,55 @@ _NON_TRANSACTIONAL = {
 _SOURCES = ("starling", "truelayer")
 
 
+#: The provider-true identity of a feed fetch, recorded at landing time:
+#: /api/v2/feed/account/{accountUid}/category/{categoryUid}?...
+_FEED_ORIGIN = re.compile(r"/feed/account/([^/?]+)/category/([^/?]+)")
+
+
+def _starling_defaults(artefact_rows: Sequence[Any]) -> dict[str, str]:
+    """defaultCategory -> accountUid, from the starling-accounts artefacts.
+
+    A main account's feed is fetched via its default category, but its
+    identity key is the ACCOUNT uid (that is what binds it); a Space's
+    identity key is its category uid. This mapping is what tells the two
+    apart when reading an origin."""
+    defaults: dict[str, str] = {}
+    for row in artefact_rows:
+        if str(row["source"]) != "starling-accounts":
+            continue
+        with contextlib.suppress(ValueError, KeyError, TypeError, AttributeError):
+            decoded = json.loads(row["payload"])
+            for account in decoded.get("accounts", []) or []:
+                uid = str(account.get("accountUid", ""))
+                default = str(account.get("defaultCategory", ""))
+                if uid and default:
+                    defaults[default] = uid
+    return defaults
+
+
+def _starling_feed_ref(
+    origin: str,
+    stored_ref: str,
+    defaults: dict[str, str],
+    account_map: AccountMap | None,
+) -> str:
+    """Identity from the origin, never the stored label.
+
+    Labels froze whatever the map said at landing time - and during the
+    mis-bind era that meant three accounts' history landed under one
+    name. The origin records the request that actually happened; the
+    stored label is used only when the origin is unreadable (imports
+    from before origins were recorded)."""
+    match = _FEED_ORIGIN.search(origin)
+    if not match:
+        return _resolve_ref(stored_ref, account_map)
+    account_uid, category_uid = match.group(1), match.group(2)
+    key = account_uid if defaults.get(category_uid) == account_uid else category_uid
+    if account_map is not None:
+        return account_map.resolve("starling", key)
+    return f"starling:{key}"
+
+
 def _resolve_ref(account_ref: str, account_map: AccountMap | None) -> str:
     if account_map is None or ":" not in account_ref:
         return account_ref
@@ -151,9 +202,10 @@ def rebuild_from_raw(
     store.connection.commit()
 
     artefact_rows = store.connection.execute(
-        "SELECT source, account_ref, digest, payload FROM raw_artefacts "
+        "SELECT source, account_ref, digest, payload, origin FROM raw_artefacts "
         "ORDER BY fetched_at ASC, rowid ASC"
     ).fetchall()
+    starling_defaults = _starling_defaults(artefact_rows)
 
     total = len(artefact_rows)
     for index, row in enumerate(artefact_rows, start=1):
@@ -161,7 +213,15 @@ def rebuild_from_raw(
             with contextlib.suppress(Exception):
                 progress(index, total, report)
         source = str(row["source"])
-        account_ref = _resolve_ref(str(row["account_ref"]), account_map)
+        if source == "starling-feed":
+            account_ref = _starling_feed_ref(
+                str(row["origin"]),
+                str(row["account_ref"]),
+                starling_defaults,
+                account_map,
+            )
+        else:
+            account_ref = _resolve_ref(str(row["account_ref"]), account_map)
         digest = str(row["digest"])
         payload = row["payload"]
 

@@ -496,3 +496,164 @@ class TestRebuildAppliesTheMap:
                 "SELECT DISTINCT account_id FROM transactions"
             ).fetchall()
         assert [r[0] for r in rows] == ["starling:uid-9"]
+
+
+class TestStarlingFeedIdentityFromOrigin:
+    '''The blob: three accounts' history landed under one canonical label
+    because the then-map said so. The origin URL records the request that
+    actually happened, so replay identity comes from there - the stored
+    label never decides.'''
+
+    def _feed(self, store, *, label, account_uid, category_uid, item_uid, minor):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+
+        body = _json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": item_uid,
+                        "amount": {"currency": "GBP", "minorUnits": minor},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-14T09:15:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": "Tesco",
+                        "reference": "TESCO",
+                    }
+                ]
+            }
+        ).encode("utf-8")
+        store.land_artefact(
+            artefact_for(
+                body,
+                account_id=label,
+                kind="feed",
+                origin=(
+                    "https://api.example.com/api/v2/feed/account/"
+                    f"{account_uid}/category/{category_uid}?changesSince=x"
+                ),
+            )
+        )
+
+    def _accounts_artefact(self, store, account_uid, default_category):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+
+        body = _json.dumps(
+            {
+                "accounts": [
+                    {"accountUid": account_uid, "defaultCategory": default_category}
+                ]
+            }
+        ).encode("utf-8")
+        store.land_artefact(
+            artefact_for(
+                body,
+                account_id="starling",
+                kind="accounts",
+                origin="https://api.example.com/api/v2/accounts",
+            )
+        )
+
+    def test_MislabelledBlobArtefact_ReplaysUnderItsTrueAccounts(self, tmp_path):
+        '''Two feeds for two different Spaces, both landed under ONE lying
+        label. Identity from origin splits them back apart.'''
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._feed(
+                store,
+                label="starling-space-bills",
+                account_uid="acct-1",
+                category_uid="cat-bills",
+                item_uid="f-1",
+                minor=900,
+            )
+            self._feed(
+                store,
+                label="starling-space-bills",
+                account_uid="acct-1",
+                category_uid="cat-money",
+                item_uid="f-2",
+                minor=202,
+            )
+
+            rebuild_from_raw(store)
+
+            rows = store.connection.execute(
+                "SELECT account_id, COUNT(*) FROM transactions "
+                "GROUP BY account_id ORDER BY account_id"
+            ).fetchall()
+        assert [tuple(r) for r in rows] == [
+            ("starling:cat-bills", 1),
+            ("starling:cat-money", 1),
+        ]
+
+    def test_MainAccountFeed_KeysByAccountUid_ViaDefaultCategory(self, tmp_path):
+        from obdi.accounts import AccountBinding, AccountMap
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        bound = AccountMap(
+            [
+                AccountBinding(
+                    canonical_id="starling-personal",
+                    source="starling",
+                    provider_account_id="acct-1",
+                )
+            ]
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._accounts_artefact(store, "acct-1", "cat-default")
+            self._feed(
+                store,
+                label="starling:acct-1",
+                account_uid="acct-1",
+                category_uid="cat-default",
+                item_uid="f-1",
+                minor=1499,
+            )
+
+            rebuild_from_raw(store, account_map=bound)
+
+            rows = store.connection.execute(
+                "SELECT DISTINCT account_id FROM transactions"
+            ).fetchall()
+        assert [r[0] for r in rows] == ["starling-personal"]
+
+    def test_DuplicateEvidence_CollapsesOncePerTrueAccount(self, tmp_path):
+        '''The raw-ref artefact and the blob-labelled artefact carry the
+        same feed item; origin identity puts both under one account and
+        tier-1 identity keeps one row.'''
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._feed(
+                store,
+                label="starling:cat-bills",
+                account_uid="acct-1",
+                category_uid="cat-bills",
+                item_uid="f-1",
+                minor=900,
+            )
+            self._feed(
+                store,
+                label="starling-space-bills",
+                account_uid="acct-1",
+                category_uid="cat-bills",
+                item_uid="f-1",
+                minor=900,
+            )
+
+            report = rebuild_from_raw(store)
+
+            rows = store.connection.execute(
+                "SELECT account_id, COUNT(*) FROM transactions GROUP BY account_id"
+            ).fetchall()
+        assert [tuple(r) for r in rows] == [("starling:cat-bills", 1)]
+        assert report.problems == []
