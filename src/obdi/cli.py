@@ -319,6 +319,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                                 if boundary_fact
                                 else None
                             ),
+                            canonical=canonical,
+                            unbound=canonical.startswith("truelayer:"),
                         )
                     )
         return found
@@ -402,6 +404,47 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "if the provider granted the window - press again to walk further."
         )
 
+    def bind_account(provider_ref: str, canonical: str) -> str:
+        """The CLI bind, callable from the page: map entry plus label moves.
+
+        Validation here rather than in the page: the canonical id becomes a
+        query key across every layer, so it stays lowercase-slug shaped.
+        """
+        import re as _re
+
+        canonical = canonical.strip().lower()
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,39}", canonical):
+            raise ValueError(
+                "canonical name must be 2-40 characters of lowercase "
+                "letters, digits and hyphens, e.g. halifax-current"
+            )
+        map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+        if not map_path:
+            raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
+        old_canonical = _account_map().resolve("truelayer", provider_ref)
+        _persist_binding(Path(map_path), "truelayer", provider_ref, canonical)
+        with Store(db_path) as store:
+            moved = store.rebind_account(old_canonical, canonical)
+        return (
+            f"bound {_short(provider_ref)} -> {canonical}: {moved} stored "
+            "row(s) moved; artefacts and the attempt ledger follow the new name"
+        )
+
+    def _short(ref: str) -> str:
+        return f"{ref[:8]}..." if len(ref) > 12 else ref
+
+    def provider_knowledge() -> list[dict[str, object]]:
+        """Everything the pulls have LEARNT, per connection - the empirical
+        record that makes a stricter bank visible as different numbers
+        rather than a surprise."""
+        with Store(db_path) as store:
+            rows = store.connection.execute(
+                "SELECT connection_id, fact, value, observed_at "
+                "FROM provider_facts WHERE source = 'truelayer' "
+                "ORDER BY connection_id, fact"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def account_shape(ref: str) -> dict[str, object] | None:
         """The merged layer summarised the same way an artefact payload is.
 
@@ -436,11 +479,26 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     item[f"provider.{key}"] = value
             items.append(item)
         payload = json.dumps({"results": items}).encode()
+        details: dict[str, object] = {}
+        with Store(db_path) as store:
+            for connection_id in sorted(ConnectionStore(store_path).load()):
+                for account in store.accounts_for_connection(connection_id):
+                    canonical = _account_map().resolve(
+                        "truelayer", account["account_id"]
+                    )
+                    if canonical == ref:
+                        details = {
+                            "display_name": account["display_name"],
+                            "account_type": account["account_type"],
+                            "connection": connection_id,
+                            "provider_ref": account["account_id"],
+                        }
         return {
             "ref": ref,
             "count": len(rows),
             "sources": sorted({t.source for t in rows}),
             "summary": summarise(payload, "application/json"),
+            "details": details,
         }
 
     def attempts_index() -> dict[str, object]:
@@ -575,6 +633,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,
+        bind_account=bind_account,
+        provider_knowledge=provider_knowledge,
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
@@ -667,22 +727,8 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
     return 0
 
 
-def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
-    """Bind a provider account to a canonical name - an operation, not a fate.
-
-    Two halves, both required. The account map entry makes FUTURE pulls resolve
-    to the canonical name. The row update brings the PAST along: rows landed
-    before the binding sit under the source-qualified fallback id, and content
-    keys deliberately exclude the account so this is a rename, not a rebuild -
-    entity ids survive, nothing is refetched, no quota is spent changing a
-    label.
-    """
-    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
-    if not map_path:
-        print("Set OBDI_ACCOUNT_MAP to the account map path.", file=sys.stderr)
-        return 2
-
-    map_file = Path(map_path)
+def _persist_binding(map_file: Path, source: str, provider_ref: str, canonical: str) -> bool:
+    """Write one binding into the account map file; True if it replaced."""
     payload: dict[str, object] = {"bindings": [], "actual": []}
     if map_file.is_file():
         payload = json.loads(map_file.read_text(encoding="utf-8"))
@@ -707,6 +753,26 @@ def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
     payload["bindings"] = bindings
     map_file.parent.mkdir(parents=True, exist_ok=True)
     map_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return replaced
+
+
+def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
+    """Bind a provider account to a canonical name - an operation, not a fate.
+
+    Two halves, both required. The account map entry makes FUTURE pulls resolve
+    to the canonical name. The row update brings the PAST along: rows landed
+    before the binding sit under the source-qualified fallback id, and content
+    keys deliberately exclude the account so this is a rename, not a rebuild -
+    entity ids survive, nothing is refetched, no quota is spent changing a
+    label.
+    """
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path:
+        print("Set OBDI_ACCOUNT_MAP to the account map path.", file=sys.stderr)
+        return 2
+
+    map_file = Path(map_path)
+    replaced = _persist_binding(map_file, source, provider_ref, canonical)
 
     with Store(db_path) as store:
         moved = store.rebind_account(f"{source}:{provider_ref}", canonical)

@@ -397,16 +397,32 @@ class Store:
         self.connection.commit()
 
     def rebind_account(self, old_account_id: str, new_account_id: str) -> int:
-        """Move every transaction from one account identity to another.
+        """Move an account identity across every layer's LABEL column.
 
         Cheap by DESIGN, not by luck: content keys deliberately exclude the
         account, precisely so that the one revisable fact in the system - which
-        canonical account a payment belongs to - can be revised as a column
-        update. Entity ids survive, sightings survive, raw artefacts are
-        untouched, and nothing needs refetching from anyone.
+        canonical account a payment belongs to - can be revised as column
+        updates. Entity ids survive, sightings survive, payload BYTES and
+        digests are untouched, and nothing needs refetching from anyone.
+
+        Artefact and attempt rows move too: account_ref on those tables is
+        our labelling, not provider evidence - and leaving them behind was a
+        real fault (the probed-back-to anchor and the 24-hour quota counts
+        query by canonical ref, so a bind would silently orphan both).
+        OR IGNORE on artefacts because account_ref is part of that primary
+        key: in the rare case the same bytes landed under both names, the
+        old-named duplicate is retained rather than erred on.
         """
         cursor = self.connection.execute(
             "UPDATE transactions SET account_id = ? WHERE account_id = ?",
+            (new_account_id, old_account_id),
+        )
+        self.connection.execute(
+            "UPDATE OR IGNORE raw_artefacts SET account_ref = ? WHERE account_ref = ?",
+            (new_account_id, old_account_id),
+        )
+        self.connection.execute(
+            "UPDATE fetch_attempts SET account_ref = ? WHERE account_ref = ?",
             (new_account_id, old_account_id),
         )
         self.connection.commit()

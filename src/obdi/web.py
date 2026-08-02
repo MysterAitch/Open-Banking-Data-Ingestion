@@ -118,6 +118,11 @@ class ExtendableAccount:
     #: probing is DE-EMPHASISED (folded away), not prohibited - the boundary
     #: was observed, and observations can be re-tested.
     boundary: date | None = None
+    #: The canonical id this account currently resolves to, and whether that
+    #: is still the source-qualified fallback - unbound accounts get a bind
+    #: form right in their row, because naming things should not need a shell.
+    canonical: str = ""
+    unbound: bool = False
 
 
 @dataclass
@@ -178,6 +183,13 @@ class WebConfig:
     #: The merged layer summarised per account - the same computed-shape
     #: analysis as an artefact, over what the store believes after matching.
     account_shape: Callable[..., dict[str, object] | None] | None = None
+    #: Bind a provider account to a canonical name from the page: the map
+    #: entry plus label moves across every layer. Returns a summary line.
+    bind_account: Callable[..., str] | None = None
+    #: Facts the pulls have LEARNT per connection (accepted windows, SCA
+    #: window length, history boundaries) - a stricter bank shows up here as
+    #: different numbers, not as a surprise.
+    provider_knowledge: Callable[[], list[dict[str, object]]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -541,6 +553,48 @@ def _holdings_rows(holdings: Callable[[], list[SourceCoverage]] | None) -> str:
 EXTEND_CHOICES = (1, 7, 30, 90, 365, 730)
 
 
+def _knowledge_rows(
+    provider_knowledge: Callable[[], list[dict[str, object]]] | None,
+) -> str:
+    """What the pulls have learnt, per connection - shown where decisions
+    get made. Fact keys are translated for reading; unknown keys pass
+    through raw rather than being hidden."""
+    if provider_knowledge is None:
+        return ""
+    try:
+        facts = provider_knowledge()
+    except Exception:
+        return ""
+    if not facts:
+        return ""
+    lines = []
+    for row in facts:
+        fact = str(row.get("fact", ""))
+        value = html.escape(str(row.get("value", "")))
+        connection = html.escape(str(row.get("connection_id", "")))
+        if fact == "accepted_backfill_days":
+            text = f"accepted backfill window: {value} days"
+        elif fact == "sca_window_minutes":
+            text = f"deep-history window after authentication: {value} min"
+        elif fact.startswith("history_boundary:"):
+            ref = fact.split(":", 1)[1]
+            short = f"{ref.removeprefix('truelayer:')[:8]}..."
+            text = f"history boundary ({html.escape(short)}): {value}"
+        else:
+            text = f"{html.escape(fact)}: {value}"
+        lines.append(
+            f'<li><strong>{connection}</strong> - {text} '
+            f'<span class="muted">'
+            f'({html.escape(str(row.get("observed_at", ""))[:10])})</span></li>'
+        )
+    return (
+        "<h2>What the pulls have learnt</h2>"
+        "<p>Per connection, from real refusals and grants - a stricter bank "
+        "shows up here as different numbers.</p>"
+        f"<ul>{''.join(lines)}</ul>"
+    )
+
+
 def _extend_rows(
     extendables: Callable[[], list[ExtendableAccount]] | None,
     only_ref: str | None = None,
@@ -594,6 +648,19 @@ def _extend_rows(
             if account.auth_note
             else ""
         )
+        bind_form = ""
+        if account.unbound:
+            bind_form = (
+                '<form method="post" action="/bind" '
+                'style="display:flex;gap:.4rem;margin:.4rem 0">'
+                f'<input type="hidden" name="account" '
+                f'value="{html.escape(account.provider_ref)}">'
+                '<input name="canonical" placeholder="name this account, '
+                'e.g. halifax-current" style="flex:1">'
+                '<button class="button" style="display:inline-block;'
+                'padding:.5rem .8rem;border:0;cursor:pointer" '
+                "type=\"submit\">Bind</button></form>"
+            )
         rows.append(
             f'<div class="row"><strong>{html.escape(account.display)}</strong> '
             f"({html.escape(account.connection)})<br>history reaches {reach}"
@@ -603,7 +670,7 @@ def _extend_rows(
                 and (account.earliest is None or account.probed_back_to < account.earliest)
                 else ""
             )
-            + f"{note}<br>{controls}</div>"
+            + f"{note}{bind_form}<br>{controls}</div>"
         )
     return (
         "<h2>Extend history</h2>"
@@ -615,12 +682,14 @@ def _extend_rows(
 def render_index(
     store: ConnectionStore,
     holdings: Callable[[], list[SourceCoverage]] | None = None,
+    provider_knowledge: Callable[[], list[dict[str, object]]] | None = None,
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
 ) -> bytes:
     body = f"""
 {_credential_banner()}
 {_connection_rows(store)}
 {_holdings_rows(holdings)}
+{_knowledge_rows(provider_knowledge)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a></p>
@@ -705,6 +774,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 render_index(
                     self.bound_config.connection_store,
                     holdings=self.bound_config.holdings,
+                    provider_knowledge=self.bound_config.provider_knowledge,
                     extendables=self.bound_config.extendables,
                 ),
             )
@@ -869,8 +939,18 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         source_list = ", ".join(
             html.escape(str(s)) for s in (sources if isinstance(sources, list) else [])
         )
+        raw_details = shape.get("details")
+        details = raw_details if isinstance(raw_details, dict) else {}
+        details_html = ""
+        if details:
+            details_html = (
+                f'<br><span class="muted">'
+                f'{html.escape(str(details.get("display_name", "")))} '
+                f'({html.escape(str(details.get("account_type", "")))}) '
+                f'via {html.escape(str(details.get("connection", "")))}</span>'
+            )
         body = (
-            f"<p><strong>{html.escape(ref)}</strong><br>"
+            f"<p><strong>{html.escape(ref)}</strong>{details_html}<br>"
             f"{shape.get('count', 0):,} merged transaction(s) "
             f"from {source_list or 'unknown sources'}</p>"
             "<p>This is the MERGED layer - what the store believes after "
@@ -922,6 +1002,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
+        if route == "/bind":
+            self._bind(parse_qs(self.rfile.read(
+                int(self.headers.get("Content-Length") or 0)
+            ).decode("utf-8")))
+            return
         if route not in ("/extend", "/extend-max"):
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
             return
@@ -988,6 +1073,42 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 "Window extended",
                 f"<p>{rendered}</p>"
                 + _extend_rows(self.bound_config.extendables, only_ref=account)
+                + HOME_LINK,
+            ),
+        )
+
+    def _bind(self, form: dict[str, list[str]]) -> None:
+        """Name an account from the page: the map entry plus label moves.
+
+        Mutating, so POST only - and the result page repeats the extend rows
+        so the newly named account is immediately visible under its name.
+        """
+        hook = self.bound_config.bind_account
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Binding is not wired.</p>"))
+            return
+        account = (form.get("account", [""])[0] or "").strip()
+        canonical = (form.get("canonical", [""])[0] or "").strip()
+        if not account or not canonical:
+            self._respond(
+                400, error_page("Bad request", "<p>Account and name required.</p>")
+            )
+            return
+        try:
+            summary = hook(account, canonical)
+        except Exception as exc:
+            self._respond(
+                400,
+                error_page("Could not bind", f"<p>{html.escape(str(exc))}</p>"),
+            )
+            return
+        print(f"bound via page: {account} -> {canonical}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Account bound",
+                f"<p>{html.escape(summary)}</p>"
+                + _extend_rows(self.bound_config.extendables)
                 + HOME_LINK,
             ),
         )

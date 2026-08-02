@@ -828,6 +828,100 @@ class TestProbingGuidanceOnThePage:
         assert "<br>" in page
 
 
+class TestBindingFromThePage:
+    """Naming an account should not need a shell.
+
+    The bind form appears exactly where the unnamed account is listed, and a
+    successful bind moves the label across every layer - the hook's job -
+    then shows the extend rows again so the new name is immediately visible.
+    """
+
+    def _server(self, tmp_path, extendables, bind_account):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            extendables=extendables,
+            bind_account=bind_account,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_UnboundAccount_GetsABindFormInItsRow(self, tmp_path):
+        from obdi.web import ExtendableAccount
+
+        httpd, base = self._server(
+            tmp_path,
+            lambda: [
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="e9f8",
+                    display="CURRENT ACCOUNT (TRANSACTION)",
+                    earliest=date(2020, 8, 7),
+                    canonical="truelayer:e9f8",
+                    unbound=True,
+                ),
+                ExtendableAccount(
+                    connection="halifax",
+                    provider_ref="b532",
+                    display="Instant Saver",
+                    earliest=date(2021, 7, 7),
+                    canonical="halifax-saver",
+                    unbound=False,
+                ),
+            ],
+            lambda *_: "",
+        )
+        try:
+            page = httpx.get(base).text
+        finally:
+            httpd.shutdown()
+
+        # One form, on the unbound row only.
+        assert page.count('action="/bind"') == 1
+        assert 'name="account" value="e9f8"' in page
+
+    def test_Bind_CallsTheHook_AndShowsTheResult(self, tmp_path):
+        calls = []
+
+        def bind(account, canonical):
+            calls.append((account, canonical))
+            return "bound e9f8... -> halifax-current: 947 stored row(s) moved"
+
+        httpd, base = self._server(tmp_path, lambda: [], bind)
+        try:
+            page = httpx.post(
+                f"{base}/bind",
+                data={"account": "e9f8", "canonical": "halifax-current"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert calls == [("e9f8", "halifax-current")]
+        assert "947 stored row(s) moved" in page
+
+    def test_Bind_RejectionsFromTheHook_AreShownNotSwallowed(self, tmp_path):
+        def bind(account, canonical):
+            raise ValueError("canonical name must be 2-40 characters")
+
+        httpd, base = self._server(tmp_path, lambda: [], bind)
+        try:
+            response = httpx.post(
+                f"{base}/bind",
+                data={"account": "e9f8", "canonical": "Not A Slug!"},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 400
+        assert "2-40 characters" in response.text
+
+
 class TestAccountLevelShape:
     """The merged layer, summarised like an artefact payload.
 
