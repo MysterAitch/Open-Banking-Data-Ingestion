@@ -172,6 +172,77 @@ def queue_actual_push(db_path: Path) -> str:
     return "; ".join(lines)
 
 
+def start_background_rebuild(db_path: Path) -> str:
+    """Kick off rebuild-from-raw in a background thread, immediately.
+
+    A rebuild replays every artefact through matching and can take longer
+    than a phone keeps a request open - and a browser timeout reads as
+    failure while the work quietly completes. The thread records its
+    state in rebuild-status.json (running -> done, with the summary), the
+    danger zone renders it, and the thread holds a lease so a deploy
+    defers rather than recreating the container mid-replay.
+    """
+    import threading
+
+    from . import leases
+
+    status_path = db_path.parent / "rebuild-status.json"
+    with contextlib.suppress(OSError, ValueError):
+        current = json.loads(status_path.read_text(encoding="utf-8"))
+        if isinstance(current, dict) and current.get("state") == "running":
+            started = str(current.get("started_at", ""))
+            with contextlib.suppress(ValueError):
+                began = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                if (datetime.now(UTC) - began).total_seconds() < 3600:
+                    return (
+                        f"a rebuild is already running (started {started}) - "
+                        "its result will appear in the danger zone"
+                    )
+
+    def _stamp() -> str:
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    started_at = _stamp()
+    status_path.write_text(
+        json.dumps({"state": "running", "started_at": started_at}),
+        encoding="utf-8",
+    )
+
+    def run() -> None:
+        from .rebuild import rebuild_from_raw
+
+        payload: dict[str, object]
+        try:
+            with leases.lease(
+                leases.locks_dir(db_path), "rebuild-derived", "obdi-web", 3600
+            ), Store(db_path) as store:
+                report = rebuild_from_raw(store)
+            payload = {"ok": True, "summary": report.describe()}
+        except Exception as exc:
+            payload = {"ok": False, "summary": str(exc)}
+        payload.update(
+            {"state": "done", "started_at": started_at, "finished_at": _stamp()}
+        )
+        status_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    threading.Thread(target=run, daemon=True, name="rebuild-derived").start()
+    return (
+        "rebuild started in the background - the store stays usable and the "
+        "result appears in the danger zone (refresh to follow it)"
+    )
+
+
+def rebuild_status_for(db_path: Path) -> dict[str, object]:
+    status_path = db_path.parent / "rebuild-status.json"
+    if not status_path.is_file():
+        return {}
+    with contextlib.suppress(OSError, ValueError):
+        decoded = json.loads(status_path.read_text(encoding="utf-8"))
+        if isinstance(decoded, dict):
+            return decoded
+    return {}
+
+
 def queue_actual_audit(db_path: Path) -> str:
     """Ask the applier to read Actual back and report differences.
 
@@ -1026,11 +1097,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         return {}
 
     def rebuild_derived() -> str:
-        from .rebuild import rebuild_from_raw
+        return start_background_rebuild(db_path)
 
-        with Store(db_path) as store:
-            report = rebuild_from_raw(store)
-        return report.describe()
+    def rebuild_status() -> dict[str, object]:
+        return rebuild_status_for(db_path)
 
     def forget_actual() -> int:
         from .actual_push import forget_actual_bindings
@@ -1184,6 +1254,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         rebuild_derived=rebuild_derived,
+        rebuild_status=rebuild_status,
         forget_actual=forget_actual,
         update_in_progress=update_in_progress,
         auth_lease_take=auth_lease_take,

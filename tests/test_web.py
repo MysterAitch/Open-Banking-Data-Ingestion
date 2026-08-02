@@ -1059,6 +1059,71 @@ class TestDangerZone:
         assert response.status_code == 400
         assert calls == []
 
+    def test_BackgroundRebuild_RunsToDone_AndTheStatusFollows(self, tmp_path):
+        """The browser timing out on a long rebuild read as failure while
+        the work completed silently. The button now returns at once and
+        the status file carries running -> done with the summary."""
+        import time
+
+        from obdi.cli import rebuild_status_for, start_background_rebuild
+        from obdi.store import Store as _Store
+
+        db = tmp_path / "s.sqlite3"
+        with _Store(db):
+            pass
+
+        message = start_background_rebuild(db)
+
+        assert "background" in message
+        for _ in range(100):
+            status = rebuild_status_for(db)
+            if status.get("state") == "done":
+                break
+            time.sleep(0.05)
+        assert status.get("state") == "done"
+        assert status.get("ok") is True
+        assert "replayed" in str(status.get("summary", ""))
+
+    def test_RunningRebuild_RefusesASecondStart(self, tmp_path):
+        import json as _json
+
+        from obdi.cli import start_background_rebuild
+        from obdi.store import Store as _Store
+
+        db = tmp_path / "s.sqlite3"
+        with _Store(db):
+            pass
+        (tmp_path / "rebuild-status.json").write_text(
+            _json.dumps(
+                {"state": "running", "started_at": "2100-01-01T00:00:00Z"}
+            ),
+            encoding="utf-8",
+        )
+
+        message = start_background_rebuild(db)
+
+        assert "already running" in message
+
+    def test_DangerZone_ShowsRebuildState(self):
+        from obdi.web import _rebuild_status_line
+
+        running = _rebuild_status_line(
+            lambda: {"state": "running", "started_at": "2026-08-02T15:00:00Z"}
+        )
+        assert "warn" in running
+        assert "15:00:00" in running
+
+        done = _rebuild_status_line(
+            lambda: {
+                "state": "done",
+                "ok": True,
+                "finished_at": "2026-08-02T15:02:00Z",
+                "summary": "replayed 42 artefact(s)",
+            }
+        )
+        assert "last rebuild" in done
+        assert "replayed 42" in done
+
     def test_Rebuild_Confirmed_RunsAndReportsTheSummary(self, tmp_path):
         httpd, base = self._server(
             tmp_path,

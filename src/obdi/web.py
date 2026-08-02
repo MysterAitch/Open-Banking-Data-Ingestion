@@ -295,7 +295,10 @@ class WebConfig:
     #: When the applier last checked the queue (ISO stamp, empty if never).
     actual_heartbeat: Callable[[], str] | None = None
     #: Danger zone: wipe and replay the derived layers from raw artefacts.
+    #: Returns immediately - the work runs in the background and its state
+    #: is read back via rebuild_status.
     rebuild_derived: Callable[[], str] | None = None
+    rebuild_status: Callable[[], dict[str, object]] | None = None
     #: Danger zone: drop the canonical-to-Actual links (source names kept).
     forget_actual: Callable[[], int] | None = None
     #: True while a stack update holds its lease - new bank authorisations
@@ -1065,7 +1068,40 @@ def _scheduler_row(
     )
 
 
-def _danger_zone(rebuild_available: bool, forget_available: bool) -> str:
+def _rebuild_status_line(
+    rebuild_status: Callable[[], dict[str, object]] | None,
+) -> str:
+    if rebuild_status is None:
+        return ""
+    status: dict[str, object] = {}
+    try:
+        status = rebuild_status() or {}
+    except Exception:
+        return ""
+    state = str(status.get("state", ""))
+    if state == "running":
+        started = html.escape(str(status.get("started_at", "")))
+        return (
+            f'<p class="warn">a rebuild is running (started {started}) - '
+            "refresh to follow it; deploys defer while it holds its "
+            "lease</p>"
+        )
+    if state == "done":
+        badge = "ok" if status.get("ok") else "bad"
+        finished = html.escape(str(status.get("finished_at", "")))
+        summary = html.escape(str(status.get("summary", "")))
+        return (
+            f'<p><span class="pill pill-{badge}">last rebuild</span> '
+            f'<span class="muted">{finished}: {summary}</span></p>'
+        )
+    return ""
+
+
+def _danger_zone(
+    rebuild_available: bool,
+    forget_available: bool,
+    rebuild_status: Callable[[], dict[str, object]] | None = None,
+) -> str:
     if not (rebuild_available or forget_available):
         return ""
     parts = [
@@ -1083,12 +1119,14 @@ def _danger_zone(rebuild_available: bool, forget_available: bool) -> str:
         'background:#dc262622;color:#b91c1c"'
     )
     if rebuild_available:
+        parts.append(_rebuild_status_line(rebuild_status))
         parts.append(
             '<form method="post" action="/rebuild-derived">'
             "<p>Wipe the derived transaction layer and replay every raw "
             "artefact through the current account map and rules. Fixes "
             "duplicated or misfiled rows; identities are content-keyed, so "
-            "downstream imports dedupe cleanly.</p>"
+            "downstream imports dedupe cleanly. Runs in the background - "
+            "the result appears here.</p>"
             + checkbox
             + f'<p><button class="button" type="submit" {button_style}>'
             "Rebuild from raw</button></p></form>"
@@ -1465,6 +1503,7 @@ def render_index(
     actual_heartbeat: Callable[[], str] | None = None,
     rebuild_available: bool = False,
     forget_available: bool = False,
+    rebuild_status: Callable[[], dict[str, object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
     body = f"""
@@ -1496,7 +1535,7 @@ reconciled through the same identity rules as the API pulls.</p>
 </form>
 <p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>
-{_danger_zone(rebuild_available, forget_available)}
+{_danger_zone(rebuild_available, forget_available, rebuild_status)}
 """
     return render_page("Bank connections", body)
 
@@ -1586,6 +1625,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_heartbeat=self.bound_config.actual_heartbeat,
                     rebuild_available=self.bound_config.rebuild_derived is not None,
                     forget_available=self.bound_config.forget_actual is not None,
+                    rebuild_status=self.bound_config.rebuild_status,
                     scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
                 ),
             )
@@ -2174,9 +2214,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(
             200,
             render_page(
-                "Rebuild complete",
+                "Rebuild",
                 f"<p>{html.escape(summary)}</p>"
-                "<p>Raw artefacts were untouched; every derived row was "
+                "<p>Raw artefacts are untouched; every derived row is "
                 "replayed through the current account map and rules.</p>" + HOME_LINK,
             ),
         )
