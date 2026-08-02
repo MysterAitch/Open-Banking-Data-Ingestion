@@ -946,6 +946,26 @@ class TestUpdateAwareness:
         assert _scheduler_row(None) == ""
 
 
+class TestRebuildBanner:
+    def test_RunningRebuild_BannersTheWholePage(self):
+        from obdi.web import _rebuild_running_banner
+
+        banner = _rebuild_running_banner(
+            lambda: {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 12,
+                "total": 120,
+            }
+        )
+        assert "artefact 12 of 120" in banner
+
+        assert (
+            _rebuild_running_banner(lambda: {"state": "done", "ok": True}) == ""
+        )
+        assert _rebuild_running_banner(None) == ""
+
+
 class TestApplierLiveness:
     """A queued push that nobody consumes must diagnose itself: the
     applier stamps a heartbeat every poll, and the page compares it with

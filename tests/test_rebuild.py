@@ -277,3 +277,95 @@ class TestRebuildProgress:
             report = rebuild_from_raw(store, progress=explode)
 
         assert report.problems == []
+
+
+class TestRebuildReconciliation:
+    '''"Rebuild finished" must come with "and here is what changed": the
+    aborted live rebuild silently dropped every Starling row, and a
+    before/after diff would have announced it instead.'''
+
+    def test_VanishedAndNewAccounts_AreNamedInTheReport(self, tmp_path):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.connection.execute(
+                "INSERT INTO transactions (entity_id, account_id, amount_minor, "
+                "value_date, booking_date, description, source, currency, tier, "
+                "status, content_key, occurrence, first_seen_at, last_seen_at) "
+                "VALUES ('e-old', 'orphan-account', -100, '2026-07-01', "
+                "'2026-07-01', 'X', 'truelayer', 'GBP', 'authoritative', "
+                "'booked', 'ck-old', 0, '2026-07-01T00:00:00', "
+                "'2026-07-01T00:00:00')"
+            )
+            store.connection.commit()
+            body = _json.dumps(
+                {
+                    "feedItems": [
+                        {
+                            "feedItemUid": "f-1",
+                            "amount": {"currency": "GBP", "minorUnits": 1499},
+                            "direction": "OUT",
+                            "transactionTime": "2026-03-14T09:15:00.000Z",
+                            "source": "MASTER_CARD",
+                            "status": "SETTLED",
+                            "counterPartyName": "Tesco",
+                            "reference": "TESCO",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+            store.land_artefact(
+                artefact_for(
+                    body,
+                    account_id="starling:uid-1",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=1",
+                )
+            )
+
+            report = rebuild_from_raw(store)
+
+        described = report.describe()
+        assert "orphan-account: 1 -> 0 (VANISHED" in described
+        assert "starling:uid-1: 0 -> 1 (new)" in described
+
+    def test_FaithfulReplay_SaysSo(self, tmp_path):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            body = _json.dumps(
+                {
+                    "feedItems": [
+                        {
+                            "feedItemUid": "f-1",
+                            "amount": {"currency": "GBP", "minorUnits": 1499},
+                            "direction": "OUT",
+                            "transactionTime": "2026-03-14T09:15:00.000Z",
+                            "source": "MASTER_CARD",
+                            "status": "SETTLED",
+                            "counterPartyName": "Tesco",
+                            "reference": "TESCO",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+            store.land_artefact(
+                artefact_for(
+                    body,
+                    account_id="starling:uid-1",
+                    kind="feed",
+                    origin="https://api.example.com/feed?x=1",
+                )
+            )
+            rebuild_from_raw(store)
+            report = rebuild_from_raw(store)
+
+        assert "unchanged" in report.describe()

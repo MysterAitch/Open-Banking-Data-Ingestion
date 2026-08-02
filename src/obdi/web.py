@@ -1068,6 +1068,24 @@ def _scheduler_row(
     )
 
 
+def _rebuild_running_banner(
+    rebuild_status: Callable[[], dict[str, object]] | None,
+) -> str:
+    """Shown at the TOP of the page while a rebuild runs: the account
+    listing below is a store mid-replay, and without a banner it
+    masquerades as the truth."""
+    if rebuild_status is None:
+        return ""
+    status: dict[str, object] = {}
+    try:
+        status = rebuild_status() or {}
+    except Exception:
+        return ""
+    if str(status.get("state", "")) != "running":
+        return ""
+    return _rebuild_status_line(lambda: status)
+
+
 def _rebuild_status_line(
     rebuild_status: Callable[[], dict[str, object]] | None,
 ) -> str:
@@ -1098,7 +1116,9 @@ def _rebuild_status_line(
     if state == "done":
         badge = "ok" if status.get("ok") else "bad"
         finished = html.escape(str(status.get("finished_at", "")))
-        summary = html.escape(str(status.get("summary", "")))
+        summary = html.escape(str(status.get("summary", ""))).replace(
+            chr(10), "<br>"
+        )
         return (
             f'<p><span class="pill pill-{badge}">last rebuild</span> '
             f'<span class="muted">{finished}: {summary}</span></p>'
@@ -1517,6 +1537,7 @@ def render_index(
 ) -> bytes:
     body = f"""
 {_credential_banner()}
+{_rebuild_running_banner(rebuild_status)}
 {_connection_rows(store)}
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines)}

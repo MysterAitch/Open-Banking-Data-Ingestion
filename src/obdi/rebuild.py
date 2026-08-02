@@ -46,6 +46,12 @@ class RebuildReport:
     transactions: int = 0
     transfers_paired: int = 0
     problems: list[str] = field(default_factory=list)
+    #: Per-account row counts before the wipe and after the replay - the
+    #: reconciliation that turns "rebuild finished" into "and here is
+    #: what changed". An aborted or lossy rebuild announces itself here
+    #: as "account: N -> 0 (VANISHED)" instead of hiding behind a page
+    #: that quietly shows fewer rows.
+    account_changes: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     def describe(self) -> str:
         lines = [
@@ -54,6 +60,22 @@ class RebuildReport:
             f"{self.transactions} transaction(s) resolved, "
             f"{self.transfers_paired} transfer pair(s) confirmed"
         ]
+        changed = {
+            account: (before, after)
+            for account, (before, after) in sorted(self.account_changes.items())
+            if before != after
+        }
+        if self.account_changes and not changed:
+            lines.append(
+                "  account totals unchanged - the replay reproduced the store"
+            )
+        for account, (before, after) in changed.items():
+            marker = ""
+            if after == 0 and before > 0:
+                marker = " (VANISHED - check problems and layer 0)"
+            elif before == 0 and after > 0:
+                marker = " (new)"
+            lines.append(f"  {account}: {before} -> {after}{marker}")
         for problem in self.problems:
             lines.append(f"  problem: {problem}")
         return "\n".join(lines)
@@ -92,6 +114,13 @@ def rebuild_from_raw(
     progress callback is ignored: reporting must never break the work.
     """
     report = RebuildReport()
+
+    before_counts = {
+        str(row[0]): int(row[1])
+        for row in store.connection.execute(
+            "SELECT account_id, COUNT(*) FROM transactions GROUP BY account_id"
+        )
+    }
 
     store.connection.execute("DELETE FROM transactions")
     store.connection.execute("DELETE FROM transaction_sources")
@@ -187,6 +216,16 @@ def rebuild_from_raw(
             )
 
     report.transfers_paired = pair_transfers_across_store(store)
+    after_counts = {
+        str(row[0]): int(row[1])
+        for row in store.connection.execute(
+            "SELECT account_id, COUNT(*) FROM transactions GROUP BY account_id"
+        )
+    }
+    report.account_changes = {
+        account: (before_counts.get(account, 0), after_counts.get(account, 0))
+        for account in sorted(set(before_counts) | set(after_counts))
+    }
     if progress is not None:
         with contextlib.suppress(Exception):
             progress(total, total, report)
