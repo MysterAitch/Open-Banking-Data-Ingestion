@@ -101,16 +101,6 @@ def _apply_bind(
     return moved
 
 
-#: Names a person types and later has to recognise on a phone. Same shape
-#: as canonical account names, so one convention covers both.
-CONNECTION_NAME = r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]"
-
-#: Names the first-party paths already own. A connection taking one would
-#: put two providers' rows under one id in the ledger, which is the
-#: collision this release exists to end.
-RESERVED_CONNECTION_NAMES = frozenset({"starling-api", "starling"})
-
-
 def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
     """Move a connection's name everywhere obdi wrote it.
 
@@ -119,30 +109,20 @@ def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
     reported rather than assumed - a rename that moved no ledger rows is
     worth seeing, because it means the name was never used for a pull.
     """
-    import re as _re
-
     from .connections import ConnectionStore
+    from .namespaces import validate_connection_name
 
     old_name = (old_name or "").strip()
     new_name = (new_name or "").strip().lower()
-    if not _re.fullmatch(CONNECTION_NAME, new_name):
-        raise ValueError(
-            "connection name must be 2-64 characters of lowercase letters, "
-            "digits and hyphens, starting and ending with a letter or digit"
-        )
-    if new_name in RESERVED_CONNECTION_NAMES:
-        raise ValueError(
-            f"'{new_name}' is reserved for a first-party path - pick a name "
-            "that says which pipe this connection uses, e.g. "
-            "'starling-truelayer'"
-        )
     if new_name == old_name:
         return f"'{old_name}' already has that name - nothing to do."
 
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if not store_path:
         raise ValueError("OBDI_CONNECTION_STORE is not set - nowhere to rename.")
-    ConnectionStore(store_path).rename(old_name, new_name)
+    connections = ConnectionStore(store_path)
+    validate_connection_name(new_name, existing=connections.load())
+    connections.rename(old_name, new_name)
     with Store(db_path) as store:
         moved = store.rename_connection(old_name, new_name)
     return (
@@ -1136,6 +1116,13 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             f"History for this account now reaches back to at least {window_since} "
             "if the provider granted the window - press again to walk further."
         )
+
+    def _guard_canonical(canonical: str) -> None:
+        """One rule for account names, shared with the registry - the bind
+        form was previously the only place that knew it."""
+        from .namespaces import validate_canonical_name
+
+        validate_canonical_name(canonical)
 
     def bind_account(provider_ref: str, canonical: str) -> str:
         """The CLI bind, callable from the page: map entry plus label moves.
@@ -2634,6 +2621,17 @@ def main(argv: list[str] | None = None) -> int:
         # not only what broke - "nothing printed" is indistinguishable from
         # "never ran", which is the failure mode this command exists to end.
         results = run_checks()
+        # Configuration checks say whether the machine COULD work; these
+        # say whether what it has already recorded is coherent. Both
+        # belong in the same report - a person running doctor wants one
+        # answer, not two commands.
+        with contextlib.suppress(Exception):
+            from .doctor import collision_checks
+
+            store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+            known = list(ConnectionStore(store_path).load()) if store_path else []
+            with Store(db_path) as store:
+                results = results + collision_checks(store, known)
         if getattr(args, "live", False):
             results += live_checks()
         print(report(results))

@@ -283,3 +283,61 @@ class TestAskingTheProviderDirectly:
 
         assert results[0].ok, "a network failure must not condemn a valid secret"
         assert "inconclusive" in results[0].detail.casefold()
+
+
+class TestCollisionChecksReadTheLiveStore:
+    """Validators refuse new mistakes; they cannot un-write old ones."""
+
+    def _store(self, tmp_path):
+        from obdi.store import Store
+
+        return Store(tmp_path / "s.sqlite3")
+
+    def test_UndeclaredSourceInEvidence_IsReported(self, tmp_path):
+        from obdi.doctor import collision_checks
+
+        with self._store(tmp_path) as store:
+            store.record_attempt(
+                source="monzo-openbanking",
+                connection_id="monzo",
+                account_ref="monzo:acc-1",
+                asked="90d",
+                request_meta="{}",
+                outcome="ok",
+            )
+
+            results = {c.name: c for c in collision_checks(store, ["monzo"])}
+
+        assert results["sources are registered"].ok is False
+        assert "monzo-openbanking" in results["sources are registered"].detail
+
+    def test_AConnectionSharingAFirstPartyId_IsReportedWithItsCure(self, tmp_path):
+        from obdi.doctor import collision_checks
+
+        with self._store(tmp_path) as store:
+            results = {
+                c.name: c for c in collision_checks(store, ["halifax", "starling-api"])
+            }
+
+        check = results["connection ids are unshared"]
+        assert check.ok is False
+        assert "starling-api" in check.detail
+        assert "rename-connection" in check.detail
+
+    def test_ACoherentStore_PassesEveryCollisionCheck(self, tmp_path):
+        from obdi.doctor import collision_checks
+
+        with self._store(tmp_path) as store:
+            store.record_attempt(
+                source="truelayer-booked",
+                connection_id="halifax",
+                account_ref="truelayer:acc-1",
+                asked="90d",
+                request_meta="{}",
+                outcome="ok",
+            )
+
+            results = collision_checks(store, ["halifax", "starling-truelayer"])
+
+        assert all(check.ok for check in results)
+        assert len(results) == 3

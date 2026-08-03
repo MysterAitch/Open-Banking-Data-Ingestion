@@ -41,6 +41,7 @@ from .callback import render_page
 from .connections import ConnectionStore, build_connection
 from .coverage import SourceCoverage
 from .doctor import shape_problems
+from .namespaces import validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 
@@ -2265,8 +2266,16 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             with contextlib.suppress(Exception):
                 take()
         name = (params.get("name", [""])[0] or "").strip()
-        if not name:
-            self._respond(400, error_page("Name required", "<p>Give the connection a name.</p>"))
+        # Validated HERE as well as on rename: a namespace policed at one
+        # entrance is not policed. Reconnects legitimately reuse an
+        # existing name, so the already-taken rule is not applied - only
+        # the shape, and the names no connection may ever have.
+        try:
+            validate_connection_name(name)
+        except ValueError as exc:
+            self._respond(
+                400, error_page("Name required", f"<p>{html.escape(str(exc))}</p>")
+            )
             return
 
         forced = params.get("force", ["0"])[0] == "1"

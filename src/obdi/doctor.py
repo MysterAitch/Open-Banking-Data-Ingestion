@@ -19,7 +19,9 @@ the output is safe to paste into a bug report.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -245,3 +247,83 @@ def report(results: list[CheckResult]) -> str:
         "All checks passed." if not failures else f"{failures} check(s) failed - see above."
     )
     return "\n".join(lines)
+
+
+def collision_checks(
+    store: object, connection_ids: Iterable[str] = ()
+) -> list[CheckResult]:
+    """Look for namespace collisions in the data that is already there.
+
+    Validators refuse new mistakes; they cannot un-write old ones. These
+    read the live store for the same classes the registry prevents, so a
+    collision that predates the rule is visible rather than assumed
+    absent - and so is drift, where evidence carries a source name no
+    part of the code declares any more.
+    """
+    from .namespaces import FIRST_PARTY_CONNECTION_IDS, PROVIDERS, SOURCES
+
+    results: list[CheckResult] = []
+    connection = getattr(store, "connection", None)
+    if connection is None:
+        return results
+
+    unknown: set[str] = set()
+    for table in ("raw_artefacts", "fetch_attempts"):
+        with contextlib.suppress(Exception):
+            unknown |= {
+                str(row[0])
+                for row in connection.execute(f"SELECT DISTINCT source FROM {table}")  # noqa: S608
+                if str(row[0]) not in SOURCES
+            }
+    results.append(
+        CheckResult(
+            name="sources are registered",
+            ok=not unknown,
+            detail=(
+                "every source in the store is declared in namespaces.SOURCES"
+                if not unknown
+                else f"evidence carries undeclared source(s): {sorted(unknown)} - "
+                "either the registry is stale or a typo shipped"
+            ),
+        )
+    )
+
+    names = set(connection_ids)
+    shared = names & set(FIRST_PARTY_CONNECTION_IDS)
+    results.append(
+        CheckResult(
+            name="connection ids are unshared",
+            ok=not shared,
+            detail=(
+                "no connection carries a first-party ledger id"
+                if not shared
+                else f"connection(s) {sorted(shared)} share an id with a "
+                "first-party path - their ledger rows and quota arithmetic "
+                "are mixed. Rename with 'obdi rename-connection'"
+            ),
+        )
+    )
+
+    suspicious: set[str] = set()
+    with contextlib.suppress(Exception):
+        suspicious = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT account_id FROM transactions"
+            )
+            if ":" in str(row[0]) and str(row[0]).split(":")[0] in PROVIDERS
+        }
+    results.append(
+        CheckResult(
+            name="accounts are named, not referenced",
+            ok=True,
+            detail=(
+                "every account resolves to a canonical name"
+                if not suspicious
+                else f"{len(suspicious)} account(s) still hold a provider "
+                "reference rather than a name - bind them so the map, not "
+                "the provider, decides what they are called"
+            ),
+        )
+    )
+    return results
