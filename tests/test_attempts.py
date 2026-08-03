@@ -704,3 +704,93 @@ class TestCardsFromLayerZero:
                 "partial_card_number": "5501",
             }
         ]
+
+
+class TestCardSignVerification:
+    def _record(self, **overrides):
+        record = {
+            "transaction_id": "txn-1",
+            "amount": 12.5,
+            "currency": "GBP",
+            "transaction_type": "DEBIT",
+            "timestamp": "2026-08-01T00:00:00Z",
+            "description": "COFFEE",
+        }
+        record.update(overrides)
+        return record
+
+    def test_MissingTransactionType_RefusesInsteadOfNegatingOnTrust(self):
+        import pytest
+
+        from obdi.providers.truelayer import TrueLayerError, to_card_transaction
+
+        with pytest.raises(TrueLayerError, match="refusing to guess"):
+            to_card_transaction(self._record(transaction_type=""), account_id="c")
+
+    def test_UnrecognisedTransactionType_RefusesToo(self):
+        import pytest
+
+        from obdi.providers.truelayer import TrueLayerError, to_card_transaction
+
+        with pytest.raises(TrueLayerError, match="FEE"):
+            to_card_transaction(self._record(transaction_type="FEE"), account_id="c")
+
+    def test_VerifiedDebit_StillNegatesToOutflow(self):
+        from obdi.providers.truelayer import to_card_transaction
+
+        transaction = to_card_transaction(self._record(), account_id="c")
+
+        assert transaction.amount_minor == -1250
+
+
+class TestCardPayloadStatusGuard:
+    class _Response:
+        def __init__(self, payload) -> None:
+            import json as _json
+
+            self.status_code = 200
+            self.content = _json.dumps(payload).encode()
+
+    def test_NonFinalCardWindow_RaisesInsteadOfLandingEmptiness(self):
+        import pytest
+
+        from obdi.providers import truelayer
+
+        class Client:
+            def get(self, url, headers=None, params=None):
+                return TestCardPayloadStatusGuard._Response(
+                    {"results": [], "status": "Running"}
+                )
+
+        with pytest.raises(truelayer.TrueLayerError, match="not final"):
+            truelayer.fetch_card_transactions("tok", "card-1", days=90, client=Client())
+
+    def test_NonFinalCardList_RaisesToo(self):
+        import pytest
+
+        from obdi.providers import truelayer
+
+        class Client:
+            def get(self, url, headers=None, params=None):
+                return TestCardPayloadStatusGuard._Response(
+                    {"results": [], "status": "Queued"}
+                )
+
+        with pytest.raises(truelayer.TrueLayerError, match="no cards"):
+            truelayer.fetch_cards("tok", client=Client())
+
+    def test_SucceededWindow_ReturnsTheBody(self):
+        from obdi.providers import truelayer
+
+        class Client:
+            def get(self, url, headers=None, params=None):
+                return TestCardPayloadStatusGuard._Response(
+                    {"results": [{"amount": 1}], "status": "Succeeded"}
+                )
+
+        body, asked = truelayer.fetch_card_transactions(
+            "tok", "card-1", days=90, client=Client()
+        )
+
+        assert b"Succeeded" in body
+        assert "from=" in asked

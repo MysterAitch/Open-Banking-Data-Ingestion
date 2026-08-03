@@ -491,6 +491,13 @@ def to_card_transaction(record: JsonObject, *, account_id: str) -> Transaction:
     provider_minor = parse_amount(str(raw_amount), currency=currency)
 
     transaction_type = text(record, "transaction_type").upper()
+    if transaction_type not in ("DEBIT", "CREDIT"):
+        raise TrueLayerError(
+            f"card transaction {text(record, 'transaction_id')} has "
+            f"transaction_type '{transaction_type or '(absent)'}' - the sign "
+            "convention is verified through DEBIT/CREDIT and this row cannot "
+            "be verified at all; refusing to guess with money"
+        )
     if transaction_type == "DEBIT" and provider_minor < 0:
         raise TrueLayerError(
             f"card transaction {text(record, 'transaction_id')} is typed DEBIT "
@@ -585,6 +592,13 @@ def fetch_cards(
     if response.status_code != 200:
         raise _refusal("Card list fetch failed", response)
     body = response.content
+    payload_status = text(decode(body), "status")
+    if payload_status and payload_status.casefold() not in ("succeeded", "ok"):
+        raise TrueLayerError(
+            f"Card list fetch returned status '{payload_status}': the results "
+            "are not final and were NOT stored. Retry rather than treating "
+            "this as no cards."
+        )
     return rows(decode(body), "results"), body
 
 
@@ -623,6 +637,17 @@ def fetch_card_transactions(
     )
     if response.status_code != 200:
         raise _refusal("Card transaction fetch failed", response)
+    # Same guard the account path has carried since the second review: the
+    # payload states its own finality, and non-final results recorded as
+    # truth would be indistinguishable from a dormant card - wrong in the
+    # one direction that cannot be corrected later.
+    payload_status = text(decode(response.content), "status")
+    if payload_status and payload_status.casefold() not in ("succeeded", "ok"):
+        raise TrueLayerError(
+            f"Card transaction fetch returned status '{payload_status}' for "
+            f"card {card_id}: the results are not final and were NOT stored. "
+            "Retry rather than treating this as an empty card."
+        )
     return response.content, urlencode(sorted(params.items()))
 
 

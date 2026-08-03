@@ -315,8 +315,18 @@ class Store:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
-        self.connection.commit()
-        self.close()
+        # Commit is for blocks that finished; an exception means the block
+        # stopped part-way, and committing its debris would persist exactly
+        # the half-done states every "nothing half-bound" promise forbids.
+        # Rows that must survive a raise (the refusal ledger) are committed
+        # by their own methods before the raise reaches here.
+        try:
+            if exc_info and exc_info[0] is not None:
+                self.connection.rollback()
+            else:
+                self.connection.commit()
+        finally:
+            self.close()
 
     def land_artefact(self, artefact: RawArtefact) -> bool:
         """Store a raw payload. Returns False if it was already held.

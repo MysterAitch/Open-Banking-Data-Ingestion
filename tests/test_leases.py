@@ -384,3 +384,40 @@ class TestAbortedRebuildMarker:
         )
 
         assert rebuild_in_progress_note(db) is None
+
+
+class TestStoreExitDiscipline:
+    def test_ExceptionInsideStoreBlock_RollsBackUncommittedWork(self, tmp_path):
+        import pytest
+
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with pytest.raises(RuntimeError, match="mid-block failure"), Store(db) as store:
+            store.connection.execute(
+                "INSERT INTO review_queue (entity_id, reason, created_at) "
+                "VALUES ('e-1', 'test', '2026-08-03T00:00:00')"
+            )
+            raise RuntimeError("mid-block failure")
+
+        with Store(db) as store:
+            rows = store.connection.execute(
+                "SELECT COUNT(*) FROM review_queue"
+            ).fetchone()
+        assert rows[0] == 0
+
+    def test_CleanExit_StillCommits(self, tmp_path):
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.connection.execute(
+                "INSERT INTO review_queue (entity_id, reason, created_at) "
+                "VALUES ('e-1', 'test', '2026-08-03T00:00:00')"
+            )
+
+        with Store(db) as store:
+            rows = store.connection.execute(
+                "SELECT COUNT(*) FROM review_queue"
+            ).fetchone()
+        assert rows[0] == 1
