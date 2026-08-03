@@ -145,3 +145,57 @@ class TestPersistence:
         connections = store.load()
         assert len(connections) == 1
         assert connections["nationwide"].refresh_token == "refresh-new"
+
+
+class TestRenamingAConnection:
+    def _store(self, tmp_path):
+        from obdi.connections import Connection, ConnectionStore
+
+        store = ConnectionStore(tmp_path / "connections.json")
+        store.put(
+            Connection(
+                connection_id="starling",
+                provider="starling",
+                refresh_token="rt-1",
+            )
+        )
+        return store
+
+    def test_Rename_MovesTheKeyAndTheEmbeddedId_Together(self, tmp_path):
+        """A record whose key and embedded id disagree would be written
+        back a THIRD time under the embedded name on the next put()."""
+        store = self._store(tmp_path)
+
+        store.rename("starling", "starling-truelayer")
+
+        loaded = store.load()
+        assert set(loaded) == {"starling-truelayer"}
+        assert loaded["starling-truelayer"].connection_id == "starling-truelayer"
+        assert loaded["starling-truelayer"].refresh_token == "rt-1"
+
+    def test_RenameOntoAnExistingName_RefusesInsteadOfReplacingCredentials(
+        self, tmp_path
+    ):
+        import pytest
+
+        from obdi.connections import Connection
+
+        store = self._store(tmp_path)
+        store.put(
+            Connection(
+                connection_id="halifax", provider="halifax", refresh_token="rt-2"
+            )
+        )
+
+        with pytest.raises(ValueError, match="already exists"):
+            store.rename("starling", "halifax")
+
+        assert store.load()["halifax"].refresh_token == "rt-2"
+
+    def test_RenameOfAnUnknownConnection_SaysSo(self, tmp_path):
+        import pytest
+
+        store = self._store(tmp_path)
+
+        with pytest.raises(KeyError):
+            store.rename("nobody", "somebody")

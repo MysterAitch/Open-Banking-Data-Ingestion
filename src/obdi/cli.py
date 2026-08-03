@@ -101,6 +101,79 @@ def _apply_bind(
     return moved
 
 
+#: Names a person types and later has to recognise on a phone. Same shape
+#: as canonical account names, so one convention covers both.
+CONNECTION_NAME = r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]"
+
+#: Names the first-party paths already own. A connection taking one would
+#: put two providers' rows under one id in the ledger, which is the
+#: collision this release exists to end.
+RESERVED_CONNECTION_NAMES = frozenset({"starling-api", "starling"})
+
+
+def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
+    """Move a connection's name everywhere obdi wrote it.
+
+    The credential store first: if that fails nothing else has moved, and
+    a retry is clean. The store's labels follow, and the counts are
+    reported rather than assumed - a rename that moved no ledger rows is
+    worth seeing, because it means the name was never used for a pull.
+    """
+    import re as _re
+
+    from .connections import ConnectionStore
+
+    old_name = (old_name or "").strip()
+    new_name = (new_name or "").strip().lower()
+    if not _re.fullmatch(CONNECTION_NAME, new_name):
+        raise ValueError(
+            "connection name must be 2-64 characters of lowercase letters, "
+            "digits and hyphens, starting and ending with a letter or digit"
+        )
+    if new_name in RESERVED_CONNECTION_NAMES:
+        raise ValueError(
+            f"'{new_name}' is reserved for a first-party path - pick a name "
+            "that says which pipe this connection uses, e.g. "
+            "'starling-truelayer'"
+        )
+    if new_name == old_name:
+        return f"'{old_name}' already has that name - nothing to do."
+
+    store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if not store_path:
+        raise ValueError("OBDI_CONNECTION_STORE is not set - nowhere to rename.")
+    ConnectionStore(store_path).rename(old_name, new_name)
+    with Store(db_path) as store:
+        moved = store.rename_connection(old_name, new_name)
+    return (
+        f"renamed '{old_name}' to '{new_name}': credentials moved, plus "
+        f"{moved['artefacts']} artefact(s), {moved['attempts']} ledger row(s) "
+        f"and {moved['facts']} provider fact(s). Payload bytes and account "
+        "references are untouched."
+    )
+
+
+def record_auth_failure(db_path: Path, name: str, code: str, detail: str) -> None:
+    """Land a refused authorisation in the attempt ledger.
+
+    The one step of the journey that used to leave nothing behind: the
+    provider refuses before any code is exchanged, so no fetch happens and
+    no artefact lands. Without a row here, "I tried that bank and it said
+    something unhelpful" is unanswerable an hour later.
+    """
+    with contextlib.suppress(Exception), Store(db_path) as store:
+        store.record_attempt(
+            source="truelayer-auth",
+            connection_id=name or "(unnamed)",
+            account_ref=name or "(unnamed)",
+            asked="authorisation",
+            request_meta=json.dumps({"trigger": "web-connect"}),
+            outcome="refused",
+            error_code=code or "(none given)",
+            detail=detail or "(the provider sent no description)",
+        )
+
+
 def _split_bind_ref(ref: str) -> tuple[str, str]:
     """A bind posted from the page is either a bare TrueLayer provider ref
     (the extend rows) or a source-qualified id like "starling:uid" (the
@@ -1839,6 +1912,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         preview_upload=preview_upload,
         confirm_upload=confirm_upload,
         pinned_providers=pinned_providers,
+        rename_connection=lambda old, new: rename_connection(db_path, old, new),
+        record_auth_failure=lambda name, code, detail: record_auth_failure(
+            db_path, name, code, detail
+        ),
     )
     print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
@@ -2328,6 +2405,13 @@ def main(argv: list[str] | None = None) -> int:
     subcommands.add_parser(
         "connections", help="show bank connections and how long consent has left"
     )
+    rename_command = subcommands.add_parser(
+        "rename-connection",
+        help="rename a bank connection everywhere obdi recorded it",
+    )
+    rename_command.add_argument("old_name")
+    rename_command.add_argument("new_name")
+
     bind_command = subcommands.add_parser(
         "bind",
         help="bind a provider account to a canonical name, past rows included",
@@ -2521,6 +2605,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "bind":
         return _bind(args.source, args.provider_ref, args.canonical, db_path)
+
+    if args.command == "rename-connection":
+        try:
+            print(rename_connection(db_path, args.old_name, args.new_name))
+        except (ValueError, KeyError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
 
     if args.command == "coverage":
         with Store(db_path) as store:

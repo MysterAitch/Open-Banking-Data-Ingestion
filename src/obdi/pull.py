@@ -34,6 +34,12 @@ from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .store import Store
 
+#: The first-party Starling path is not an aggregator connection, but it
+#: writes to the same ledger - so it needs a name no TrueLayer connection
+#: can be given. Bare "starling" was available to both, which is exactly
+#: how one provider's quota arithmetic ended up counting another's calls.
+STARLING_CONNECTION = "starling-api"
+
 
 def _refusal_detail(exc: Exception) -> str:
     """The exception plus any harvested headers - Retry-After is the provider
@@ -533,7 +539,7 @@ def pull_starling(
     request_meta = json.dumps(
         {
             "trigger": trigger,
-            "connection_id": "starling",
+            "connection_id": STARLING_CONNECTION,
             "app_version": _app_version(),
         },
         sort_keys=True,
@@ -617,7 +623,7 @@ def pull_starling(
             except starling.StarlingError as exc:
                 store.record_attempt(
                     source="starling-feed",
-                    connection_id="starling",
+                    connection_id=STARLING_CONNECTION,
                     account_ref=qualified_ref,
                     asked=asked_spec,
                     request_meta=request_meta,
@@ -650,7 +656,7 @@ def pull_starling(
             )
             store.record_attempt(
                 source="starling-feed",
-                connection_id="starling",
+                connection_id=STARLING_CONNECTION,
                 account_ref=qualified_ref,
                 asked=asked,
                 request_meta=request_meta,

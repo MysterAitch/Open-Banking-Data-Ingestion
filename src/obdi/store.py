@@ -18,6 +18,7 @@ beyond the autoincrement rowid.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from dataclasses import replace
@@ -202,6 +203,7 @@ class Store:
         self._migrate_request_meta_column()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
+        self._migrate_starling_connection_id()
 
     def _migrate_content_keys(self) -> None:
         """Re-key any row whose stored key no longer matches its own content.
@@ -496,6 +498,55 @@ class Store:
         )
         self.connection.commit()
         return cursor.rowcount
+
+    def rename_connection(self, old_id: str, new_id: str) -> dict[str, int]:
+        """Move a connection's name across every table that records it.
+
+        The same reasoning as rebind_account: connection_id and the
+        account_ref on a connection-level artefact are OUR labelling, not
+        the provider's evidence, so they are revisable by column update.
+        Payload bytes, digests and every account-level ref are untouched -
+        nothing the provider said about itself is rewritten.
+
+        Returns the row counts moved, per table, so the caller can say what
+        happened rather than claiming success.
+        """
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        artefacts = self.connection.execute(
+            "UPDATE OR IGNORE raw_artefacts SET account_ref = ? WHERE account_ref = ?",
+            (new_id, old_id),
+        ).rowcount
+        attempts = self.connection.execute(
+            "UPDATE fetch_attempts SET connection_id = ? WHERE connection_id = ?",
+            (new_id, old_id),
+        ).rowcount
+        facts = self.connection.execute(
+            "UPDATE OR IGNORE provider_facts SET connection_id = ? "
+            "WHERE connection_id = ?",
+            (new_id, old_id),
+        ).rowcount
+        self.connection.commit()
+        return {"artefacts": artefacts, "attempts": attempts, "facts": facts}
+
+    def _migrate_starling_connection_id(self) -> None:
+        """Historical first-party rows carried the bare id "starling".
+
+        Scoped to starling sources on purpose: a TrueLayer connection that
+        a person happened to name "starling" must NOT be swept up by a
+        migration meant for the first-party path. Idempotent - after the
+        first run there is nothing left matching.
+        """
+        with contextlib.suppress(sqlite3.OperationalError):
+            self.connection.execute(
+                "UPDATE fetch_attempts SET connection_id = 'starling-api' "
+                "WHERE connection_id = 'starling' AND source LIKE 'starling%'"
+            )
+            self.connection.execute(
+                "UPDATE OR IGNORE provider_facts SET connection_id = 'starling-api' "
+                "WHERE connection_id = 'starling' AND source = 'starling'"
+            )
+            self.connection.commit()
 
     def sources_for(self, entity_id: str) -> list[str]:
         """Every source that has observed this transaction.

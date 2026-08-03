@@ -794,3 +794,122 @@ class TestCardPayloadStatusGuard:
 
         assert b"Succeeded" in body
         assert "from=" in asked
+
+
+class TestConnectionRenameAcrossTheStore:
+    def _seed(self, store, connection_id):
+        from datetime import UTC, datetime
+
+        from obdi.models import RawArtefact
+
+        store.land_artefact(
+            RawArtefact(
+                source="truelayer-accounts",
+                account_ref=connection_id,
+                fetched_at=datetime(2026, 8, 3, 9, 0, tzinfo=UTC),
+                payload=b'{"results": []}',
+                media_type="application/json",
+                digest=f"digest-{connection_id}",
+            )
+        )
+        store.record_attempt(
+            source="truelayer-booked",
+            connection_id=connection_id,
+            account_ref="truelayer:acc-1",
+            asked="90d",
+            request_meta="{}",
+            outcome="ok",
+        )
+        store.record_provider_fact(
+            "truelayer", connection_id, "sca_window_minutes", "5"
+        )
+
+    def test_Rename_MovesOurLabels_AndLeavesProviderEvidenceAlone(self, tmp_path):
+        """The connection name is obdi's labelling, so it moves; the
+        account-level refs are the provider's own identifiers and must not."""
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._seed(store, "starling")
+
+            moved = store.rename_connection("starling", "starling-truelayer")
+
+            assert moved == {"artefacts": 1, "attempts": 1, "facts": 1}
+            assert (
+                store.provider_fact(
+                    "truelayer", "starling-truelayer", "sca_window_minutes"
+                )
+                == "5"
+            )
+            rows = store.connection.execute(
+                "SELECT connection_id, account_ref FROM fetch_attempts"
+            ).fetchall()
+            assert rows[0]["connection_id"] == "starling-truelayer"
+            # The account-level ref is the provider's identifier, untouched.
+            assert rows[0]["account_ref"] == "truelayer:acc-1"
+
+    def test_RenameOfAnUnusedName_ReportsZeroesRatherThanClaimingSuccess(
+        self, tmp_path
+    ):
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            moved = store.rename_connection("never-used", "still-unused")
+
+        assert moved == {"artefacts": 0, "attempts": 0, "facts": 0}
+
+
+class TestStarlingConnectionIdMigration:
+    def test_HistoricalStarlingRows_MoveToTheFirstPartyId(self, tmp_path):
+        """The bare id was available to any TrueLayer connection name;
+        the first-party path takes an id nothing else can be given."""
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.record_attempt(
+                source="starling-feed",
+                connection_id="starling",
+                account_ref="starling:uid-1",
+                asked="routine",
+                request_meta="{}",
+                outcome="ok",
+            )
+
+        # Re-opening runs the migration.
+        with Store(db) as store:
+            ids = [
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT connection_id FROM fetch_attempts"
+                )
+            ]
+
+        assert ids == ["starling-api"]
+
+    def test_ATrueLayerConnectionNamedStarling_IsNotSweptUp(self, tmp_path):
+        """The migration is scoped to starling SOURCES on purpose: a
+        person's TrueLayer connection that happens to carry the old name
+        is a different actor and must keep its rows."""
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.record_attempt(
+                source="truelayer-booked",
+                connection_id="starling",
+                account_ref="truelayer:acc-9",
+                asked="90d",
+                request_meta="{}",
+                outcome="ok",
+            )
+
+        with Store(db) as store:
+            ids = [
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT connection_id FROM fetch_attempts"
+                )
+            ]
+
+        assert ids == ["starling"]

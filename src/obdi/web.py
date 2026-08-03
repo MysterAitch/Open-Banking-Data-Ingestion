@@ -84,6 +84,17 @@ class AuthorisationSession:
         for state in expired:
             del self._pending[state]
 
+    def peek(self, state: str) -> str:
+        """The connection name behind a state, WITHOUT consuming it.
+
+        A refused authorisation should still be attributable to the
+        connection it was for, but reading that name must not spend the
+        state: the person may retry the same link, and a consumed state
+        would then be refused as forgery.
+        """
+        pending = self._pending.get(state)
+        return pending.connection_name if pending is not None else ""
+
     def claim(self, state: str, *, now: datetime | None = None) -> str:
         """Consume a state and return its connection name.
 
@@ -300,6 +311,10 @@ class WebConfig:
     date_lag_text: Callable[[], str] | None = None
     #: Balance-walk integrity: bank running balances vs held transactions.
     balance_walk_text: Callable[[], str] | None = None
+    #: Move a connection's name everywhere it was recorded.
+    rename_connection: Callable[[str, str], str] | None = None
+    #: Land a refused authorisation in the attempt ledger.
+    record_auth_failure: Callable[[str, str, str], None] | None = None
     #: Additively replay one landed artefact into the store (see the cli).
     replay_artefact: Callable[[int], str] | None = None
     #: When the applier last checked the queue (ISO stamp, empty if never).
@@ -331,7 +346,7 @@ class WebConfig:
         return value() if callable(value) else value
 
 
-def _connection_rows(store: ConnectionStore) -> str:
+def _connection_rows(store: ConnectionStore, rename_available: bool = False) -> str:
     connections = sorted(store, key=lambda c: c.connection_id)
     if not connections:
         return "<p>No banks connected yet.</p>"
@@ -351,14 +366,101 @@ def _connection_rows(store: ConnectionStore) -> str:
         # would target a DIFFERENT connection - and using a name that does not
         # already exist silently creates a second connection to one bank.
         target = quote(connection.connection_id, safe="")
+        rename = (
+            '<form method="post" action="/rename-connection" '
+            'style="margin:.4rem 0 0">'
+            f'<input type="hidden" name="old_name" value="{display}">'
+            '<label style="display:block;font-size:.85rem" class="muted">'
+            "Rename this connection (the name is obdi's label, not the "
+            "bank's - it moves everywhere at once)"
+            f'<input name="new_name" value="{display}" '
+            'style="width:100%;font-size:1rem;min-height:44px;box-sizing:border-box">'
+            "</label>"
+            '<button class="button" type="submit" style="border:0;width:100%;'
+            'min-height:44px;font-size:inherit;cursor:pointer;'
+            'background:#8882;color:inherit">Rename</button></form>'
+            if rename_available
+            else ""
+        )
         rows.append(
             f'<div class="row"><strong>{display}</strong><br>{state}'
-            f'<br><a class="button" href="/connect?name={target}">Reconnect {display}</a></div>'
+            f'<br><a class="button" href="/connect?name={target}">Reconnect {display}</a>'
+            f"{rename}</div>"
         )
     return "".join(rows)
 
 
 HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
+
+#: What the provider's own OAuth codes mean, in words. Deliberately
+#: describes the CLASS of cause rather than asserting which one occurred -
+#: the provider sent a code, not a diagnosis, and inventing certainty here
+#: would be the same fault as a bare code, dressed better.
+_AUTH_ERROR_READINGS = {
+    "access_denied": (
+        "The request was declined at the bank - either by you, or by the bank "
+        "on your behalf. Nothing was created."
+    ),
+    "provider_error": (
+        "The bank refused the request itself. The usual causes are a bank "
+        "relationship with nothing it is willing to share through an "
+        "aggregator (a mortgage-only or product-only login is the common "
+        "one), or a fault on the bank's side. Nothing was created."
+    ),
+    "temporarily_unavailable": (
+        "The bank or the aggregator was temporarily unavailable. Trying again "
+        "later is reasonable; nothing was created."
+    ),
+    "server_error": (
+        "The aggregator reported an internal error. Nothing was created."
+    ),
+    "invalid_request": (
+        "The request obdi built was rejected as malformed. That points at "
+        "obdi's configuration rather than at the bank."
+    ),
+    "invalid_scope": (
+        "The permissions obdi asked for were rejected. That points at obdi's "
+        "configuration rather than at the bank."
+    ),
+    "unauthorized_client": (
+        "The aggregator did not accept obdi's client credentials. Check the "
+        "client id and secret before retrying."
+    ),
+}
+
+
+def _auth_failure_body(name: str, code: str, described: str) -> str:
+    """The refusal in parts: who it was for, what the provider said, what
+    that class of code means, and what state now exists (none)."""
+    lines = []
+    if name:
+        lines.append(
+            f"<p>The authorisation for <strong>{html.escape(name)}</strong> "
+            "did not complete.</p>"
+        )
+    else:
+        lines.append("<p>An authorisation did not complete.</p>")
+    lines.append(
+        f'<p class="muted">provider code: <code>{html.escape(code)}</code></p>'
+    )
+    if described:
+        lines.append(
+            f'<p class="muted">provider said: {html.escape(described)}</p>'
+        )
+    else:
+        lines.append(
+            '<p class="muted">The provider sent no description with it.</p>'
+        )
+    reading = _AUTH_ERROR_READINGS.get(code.strip().lower())
+    if reading:
+        lines.append(f"<p>{reading}</p>")
+    lines.append(
+        "<p>No connection was created and no data was fetched - the refusal "
+        "came before any account list was seen. The attempt is recorded in "
+        'the <a href="/attempts">fetch attempts</a> ledger, so this answer '
+        "survives the page.</p>"
+    )
+    return "".join(lines) + HOME_LINK
 
 
 def _short_ref(ref: str) -> str:
@@ -1779,6 +1881,7 @@ def render_index(
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_actual: Callable[[], str] | None = None,
     prune_actual: Callable[[], str] | None = None,
+    rename_connection: Callable[[str, str], str] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     rebuild_available: bool = False,
     forget_available: bool = False,
@@ -1790,7 +1893,7 @@ def render_index(
 {_credential_banner()}
 {_rebuild_running_banner(rebuild_status)}
 {_backfill_running_banner(backfill_status)}
-{_connection_rows(store)}
+{_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines, account_feeders)}
 {_knowledge_rows(provider_knowledge)}
@@ -1919,6 +2022,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     actual_queue=self.bound_config.actual_queue,
                     audit_actual=self.bound_config.audit_actual,
                     prune_actual=self.bound_config.prune_actual,
+                    rename_connection=self.bound_config.rename_connection,
                     actual_heartbeat=self.bound_config.actual_heartbeat,
                     rebuild_available=self.bound_config.rebuild_derived is not None,
                     forget_available=self.bound_config.forget_actual is not None,
@@ -2362,6 +2466,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if route == "/prune-actual":
             self._prune_actual(self._read_form())
             return
+        if route == "/rename-connection":
+            self._rename_connection(self._read_form())
+            return
         if route == "/rebuild-derived":
             self._rebuild_derived(self._read_form())
             return
@@ -2595,6 +2702,38 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             ),
         )
 
+    def _rename_connection(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.rename_connection
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        old_name = (form.get("old_name", [""])[0] or "").strip()
+        new_name = (form.get("new_name", [""])[0] or "").strip()
+        if not old_name or not new_name:
+            self._respond(
+                400,
+                error_page("Name required", "<p>Both names are needed.</p>"),
+            )
+            return
+        try:
+            summary = hook(old_name, new_name)
+        except Exception as exc:
+            self._respond(
+                400, error_page("Could not rename", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Connection renamed",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>The bank was not contacted: a name is obdi's label for a "
+                "connection, so renaming moves the label and leaves every "
+                "payload, digest and account reference exactly as landed.</p>"
+                + HOME_LINK,
+            ),
+        )
+
     def _prune_actual(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.prune_actual
         if hook is None:
@@ -2747,8 +2886,24 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 release()
         error = params.get("error", [""])[0]
         if error:
-            detail = html.escape(params.get("error_description", [""])[0] or error)
-            self._respond(400, error_page("Authorisation failed", f"<p>{detail}</p>"))
+            described = params.get("error_description", [""])[0]
+            # The name is only knowable through the state we minted, and a
+            # failed journey may not carry it back - peek without consuming,
+            # so a retry with the same state still works.
+            name = ""
+            with contextlib.suppress(Exception):
+                name = self.bound_session.peek(params.get("state", [""])[0])
+            recorder = self.bound_config.record_auth_failure
+            if recorder is not None:
+                with contextlib.suppress(Exception):
+                    recorder(name, error, described)
+            self._respond(
+                400,
+                error_page(
+                    "Authorisation failed",
+                    _auth_failure_body(name, error, described),
+                ),
+            )
             return
 
         code = params.get("code", [""])[0]

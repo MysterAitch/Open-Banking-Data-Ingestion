@@ -207,6 +207,25 @@ class ConnectionStore:
         connections[connection.connection_id] = connection
         self.save(connections)
 
+    def rename(self, old_id: str, new_id: str) -> None:
+        """Move one connection to a new name, refusing to overwrite.
+
+        The connection_id is embedded in the record as well as being the
+        key, so both move together - a mismatch between them would make
+        the next put() write a THIRD entry under the embedded name.
+        """
+        connections = self.load()
+        if old_id not in connections:
+            raise KeyError(f"no connection named {old_id!r}")
+        if new_id in connections:
+            raise ValueError(
+                f"a connection named {new_id!r} already exists - renaming onto "
+                "it would replace its credentials"
+            )
+        moved = replace(connections.pop(old_id), connection_id=new_id)
+        connections[new_id] = moved
+        self.save(connections)
+
     def __iter__(self) -> Iterator[Connection]:
         return iter(self.load().values())
 

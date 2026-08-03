@@ -2564,3 +2564,45 @@ class TestBrowsingRawArtefactsFromThePage:
 
         assert response.status_code == 404
         assert "Back to connections" in response.text
+
+
+class TestAuthorisationFailureIsEvidence:
+    def test_RefusedAuthorisation_NamesTheConnection_AndReadsTheCode(self):
+        """The provider sends a code, not a diagnosis - the page says what
+        the code means as a CLASS without asserting which cause applied."""
+        from obdi.web import _auth_failure_body
+
+        body = _auth_failure_body("hsbc", "provider_error", "")
+
+        assert "hsbc" in body
+        assert "provider_error" in body
+        assert "aggregator" in body
+        assert "no description" in body
+        assert "No connection was created" in body
+        assert "/attempts" in body
+
+    def test_UnknownCode_StillSaysWhatHappened_WithoutInventingAReading(self):
+        from obdi.web import _auth_failure_body
+
+        body = _auth_failure_body("", "wat_is_this", "the bank exploded")
+
+        assert "wat_is_this" in body
+        assert "the bank exploded" in body
+        assert "No connection was created" in body
+
+    def test_PeekingAtAState_DoesNotConsumeIt_SoARetryStillWorks(self):
+        """A refused journey must stay attributable without spending the
+        state - the person may retry the same link."""
+        from obdi.web import AuthorisationSession
+
+        session = AuthorisationSession()
+        state = session.begin("hsbc")
+
+        assert session.peek(state) == "hsbc"
+        assert session.peek(state) == "hsbc"
+        assert session.claim(state) == "hsbc"
+
+    def test_PeekingAtAnUnknownState_IsEmptyRatherThanAnError(self):
+        from obdi.web import AuthorisationSession
+
+        assert AuthorisationSession().peek("not-a-state") == ""
