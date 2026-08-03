@@ -164,3 +164,17 @@ test('an empty expected set is refused, never pruned blind', async () => {
   const report = await pruneAccounts(client, { 'act-1': [] });
   assert.ok(report[0].skipped);
 });
+
+
+test('a duplicate row sharing one imported id is counted, not collapsed', async () => {
+  const { partitionAccount, summariseAudit } = await import('./audit.mjs');
+  const expected = [{ imported_id: 'ck-1:0', date: '2026-07-01', amount: -1200 }];
+  const rows = [
+    { imported_id: 'ck-1:0', date: '2026-07-01', amount: -1200 },
+    { imported_id: 'ck-1:0', date: '2026-07-01', amount: -1200 },
+  ];
+  const summary = summariseAudit(partitionAccount(expected, rows));
+  assert.equal(summary.duplicated, 1);
+  assert.deepEqual(summary.duplicated_sample, [{ imported_id: 'ck-1:0', copies: 2 }]);
+  assert.equal(summary.present, 1);
+});

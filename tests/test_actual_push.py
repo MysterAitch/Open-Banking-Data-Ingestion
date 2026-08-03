@@ -430,3 +430,60 @@ class TestDuplicateIdentityGuard:
             ]
             with pytest.raises(ValueError, match="duplicate imported id"):
                 build_envelope(store, bindings, {})
+
+
+class TestMergeClaimsBeforeReading:
+    def test_BindingWrittenDuringMerge_LandsInAFreshFile_NeverArchivedUnread(
+        self, tmp_path
+    ):
+        """The pending file is claimed before it is read, so a binding the
+        applier writes mid-merge creates a new pending file that the NEXT
+        merge folds in - nothing is archived unread."""
+        import json as _json
+
+        from obdi.actual_push import merge_pending_bindings
+
+        actual_dir = tmp_path / "actual"
+        actual_dir.mkdir()
+        map_path = tmp_path / "map.json"
+        (actual_dir / "bindings-pending.json").write_text(
+            _json.dumps(
+                [{"canonical_id": "a", "actual_account_id": "act-1"}]
+            ),
+            encoding="utf-8",
+        )
+
+        assert merge_pending_bindings(map_path, actual_dir) == 1
+        # The applier writes a NEW binding after the first merge consumed
+        # its claim - exactly the mid-merge write, one tick later.
+        (actual_dir / "bindings-pending.json").write_text(
+            _json.dumps(
+                [{"canonical_id": "b", "actual_account_id": "act-2"}]
+            ),
+            encoding="utf-8",
+        )
+        assert merge_pending_bindings(map_path, actual_dir) == 1
+
+        merged = _json.loads(map_path.read_text(encoding="utf-8"))
+        canonicals = sorted(e["canonical_id"] for e in merged["actual"])
+        assert canonicals == ["a", "b"]
+
+    def test_CrashedClaim_IsSweptAndMergedByTheNextCall(self, tmp_path):
+        import json as _json
+
+        from obdi.actual_push import merge_pending_bindings
+
+        actual_dir = tmp_path / "actual"
+        actual_dir.mkdir()
+        map_path = tmp_path / "map.json"
+        # A claim a crashed merge left behind: claimed, never merged.
+        (actual_dir / "bindings-pending.merging-20260803T000000000000").write_text(
+            _json.dumps(
+                [{"canonical_id": "c", "actual_account_id": "act-3"}]
+            ),
+            encoding="utf-8",
+        )
+
+        assert merge_pending_bindings(map_path, actual_dir) == 1
+        merged = _json.loads(map_path.read_text(encoding="utf-8"))
+        assert merged["actual"][0]["canonical_id"] == "c"

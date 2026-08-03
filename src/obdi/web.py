@@ -1412,6 +1412,7 @@ def _audit_result_row(result: dict[str, object]) -> str:
             or account.get("missing")
             or account.get("orphaned")
             or account.get("diverged")
+            or account.get("duplicated")
         )
 
     badge = (
@@ -1441,7 +1442,8 @@ def _audit_result_row(result: dict[str, object]) -> str:
             f"missing {account.get('missing', 0)}, "
             f"orphaned {account.get('orphaned', 0)}, "
             f"yours {account.get('human', 0)}, "
-            f"diverged {account.get('diverged', 0)}"
+            f"diverged {account.get('diverged', 0)}, "
+            f"duplicated {account.get('duplicated', 0)}"
         )
         css = "warn" if _dirty(account) else "muted"
         lines.append(f'<span class="{css}">{name}: {detail}</span>')

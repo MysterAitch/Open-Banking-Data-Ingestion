@@ -28,6 +28,7 @@ export function partitionAccount(expectedRows, actualRows) {
   const orphaned = [];
   const diverged = [];
   let human = 0;
+  const copies = new Map();
   for (const row of actualRows) {
     // Split children belong to their parent, which keeps the imported_id
     // and the total amount.
@@ -42,6 +43,9 @@ export function partitionAccount(expectedRows, actualRows) {
       orphaned.push({ imported_id: id, date: row.date, amount: row.amount });
       continue;
     }
+    // A second Actual row carrying the same imported id is a duplicate:
+    // it inflates the balance while set-based comparison stays blind.
+    copies.set(id, (copies.get(id) ?? 0) + 1);
     seen.add(id);
     if (row.amount !== expected.amount || row.date !== expected.date) {
       diverged.push({
@@ -54,6 +58,9 @@ export function partitionAccount(expectedRows, actualRows) {
   const missing = expectedRows
     .filter((row) => !seen.has(row.imported_id))
     .map((row) => row.imported_id);
+  const duplicated = [...copies.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([imported_id, n]) => ({ imported_id, copies: n }));
   return {
     expected: expectedRows.length,
     present: seen.size,
@@ -61,6 +68,7 @@ export function partitionAccount(expectedRows, actualRows) {
     orphaned,
     human,
     diverged,
+    duplicated,
   };
 }
 
@@ -76,6 +84,8 @@ export function summariseAudit(partition) {
     missing: partition.missing.length,
     orphaned: partition.orphaned.length,
     diverged: partition.diverged.length,
+    duplicated: (partition.duplicated ?? []).length,
+    duplicated_sample: cap(partition.duplicated ?? []),
     missing_sample: cap(partition.missing),
     orphaned_sample: cap(partition.orphaned),
     diverged_sample: cap(partition.diverged),

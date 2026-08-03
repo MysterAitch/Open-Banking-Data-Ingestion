@@ -1956,7 +1956,9 @@ def _persist_binding(map_file: Path, source: str, provider_ref: str, canonical: 
         )
     payload["bindings"] = bindings
     map_file.parent.mkdir(parents=True, exist_ok=True)
-    map_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    from .actual_push import write_map
+
+    write_map(map_file, payload)
     return replaced
 
 

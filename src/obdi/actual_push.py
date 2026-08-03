@@ -24,21 +24,37 @@ from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .store import Store
 
 
+def write_map(map_path: Path, payload: dict[str, object]) -> None:
+    """Temp-then-rename, the same discipline the queue files follow: a
+    reader (or a crash) must never see a torn account map - it is the
+    single home of every binding."""
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = map_path.with_name(f".{map_path.name}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(map_path)
+
+
 def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     """Fold applier-minted bindings into the account map, consuming the file.
 
-    The map file is the single home of bindings; the pending file is a
-    hand-off, renamed once merged so a crash between read and rename can
-    only re-merge (idempotent), never lose.
+    The pending file is CLAIMED (renamed) before it is read: a binding the
+    applier writes after the claim lands in a fresh pending file and is
+    merged next call, instead of being archived unread behind our back.
+    Claims from crashed merges (claimed, never marked merged) are swept
+    and re-merged here too - re-merging is idempotent, losing is not.
     """
     pending_path = actual_dir / "bindings-pending.json"
-    if not pending_path.is_file():
-        return 0
-    try:
-        pending = json.loads(pending_path.read_text(encoding="utf-8"))
-    except ValueError:
-        return 0
-    if not isinstance(pending, list):
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    claims = sorted(actual_dir.glob("bindings-pending.merging-*"))
+    if pending_path.is_file():
+        claim = actual_dir / f"bindings-pending.merging-{stamp}"
+        try:
+            pending_path.rename(claim)
+        except OSError:
+            pass
+        else:
+            claims.append(claim)
+    if not claims:
         return 0
 
     payload: dict[str, object] = {"bindings": [], "actual": []}
@@ -49,23 +65,33 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     by_canonical = {str(e.get("canonical_id")): e for e in entries}
 
     merged = 0
-    for entry in pending:
-        if not isinstance(entry, dict):
+    for claim in claims:
+        try:
+            pending = json.loads(claim.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
-        canonical = str(entry.get("canonical_id") or "")
-        actual_id = str(entry.get("actual_account_id") or "")
-        if canonical and actual_id:
-            by_canonical[canonical] = {
-                "canonical_id": canonical,
-                "actual_account_id": actual_id,
-            }
-            merged += 1
+        if not isinstance(pending, list):
+            continue
+        for entry in pending:
+            if not isinstance(entry, dict):
+                continue
+            canonical = str(entry.get("canonical_id") or "")
+            actual_id = str(entry.get("actual_account_id") or "")
+            if canonical and actual_id:
+                by_canonical[canonical] = {
+                    "canonical_id": canonical,
+                    "actual_account_id": actual_id,
+                }
+                merged += 1
     payload["actual"] = sorted(by_canonical.values(), key=lambda e: str(e["canonical_id"]))
-    map_path.parent.mkdir(parents=True, exist_ok=True)
-    map_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    pending_path.rename(
-        pending_path.with_suffix(f".merged-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}")
-    )
+    write_map(map_path, payload)
+    # Mark claims consumed only AFTER the map is safely on disk: a crash
+    # before this line re-merges them; after it, they are history.
+    for claim in claims:
+        with contextlib.suppress(OSError):
+            claim.rename(
+                claim.with_name(claim.name.replace(".merging-", ".merged-"))
+            )
     return merged
 
 
@@ -97,7 +123,7 @@ def drop_conflicting_bindings(map_path: Path) -> list[str]:
     payload["actual"] = [
         e for e in entries if uses[str(e.get("actual_account_id"))] == 1
     ]
-    map_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    write_map(map_path, payload)
     return dropped
 
 
@@ -124,7 +150,7 @@ def forget_actual_bindings(map_path: Path) -> int:
     if not count:
         return 0
     payload["actual"] = []
-    map_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    write_map(map_path, payload)
     return count
 
 

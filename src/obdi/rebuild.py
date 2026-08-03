@@ -293,9 +293,16 @@ def rebuild_from_raw(
             DataError,
             ValueError,
             KeyError,
+            TypeError,
+            AttributeError,
             starling.StarlingError,
             truelayer.TrueLayerError,
         ) as exc:
+            # TypeError/AttributeError cover shape poison: a body that IS
+            # valid JSON but the wrong shape (a string where an object
+            # should be) fails on .get/.items, and must be recorded and
+            # skipped like every other poison - the store is already
+            # wiped by the time this loop runs.
             # Provider errors subclass RuntimeError, and before they were
             # listed here ONE problem item aborted the whole rebuild
             # mid-loop - after the wipe, with everything later in arrival
