@@ -102,10 +102,29 @@ async function processRequest(name) {
   };
 }
 
+//: How often a running request renews its heartbeat and its lease.
+const KEEPALIVE_MS = 60_000;
+
+export function startKeepalive(beat, intervalMs = KEEPALIVE_MS) {
+  // Returns its own stop function so the caller cannot forget which timer
+  // belongs to which request. Unref'd: a pending beat must never be the
+  // reason the process stays up.
+  const timer = setInterval(() => {
+    // A missed renewal is retried on the next beat. The rejection is
+    // swallowed deliberately: an unhandled one would take the container
+    // down mid-import, which is the outcome the lease and the heartbeat
+    // exist to prevent.
+    Promise.resolve(beat()).catch(() => {});
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 async function tick() {
-  // Stamped every poll, whether or not there is work: the page compares
-  // this with the clock, so "queued and nobody is coming" diagnoses
-  // itself instead of reading as an eight-minute mystery.
+  // Stamped every poll, and again on a keepalive while a request runs -
+  // the page compares this with the clock, so "queued and nobody is
+  // coming" diagnoses itself, and a long import is never mistaken for a
+  // dead applier.
   await writeFile(HEARTBEAT, JSON.stringify({ at: new Date().toISOString() }));
   // An update about to recreate this container takes the stack-update
   // lease; starting an import underneath it would be killed half-done.
@@ -125,7 +144,21 @@ async function tick() {
         PROCESSING,
         JSON.stringify({ name, started_at: new Date().toISOString() }),
       );
-      result = await processRequest(name);
+      // The lease and the heartbeat are both stamped once, above; work
+      // longer than their horizon must renew them or it silently loses
+      // the protection it is relying on.
+      const stopKeepalive = startKeepalive(async () => {
+        await writeFile(
+          HEARTBEAT,
+          JSON.stringify({ at: new Date().toISOString(), working_on: name }),
+        );
+        await takeLease(LOCKS, 'actual-apply', 'obdi-applier', 900);
+      });
+      try {
+        result = await processRequest(name);
+      } finally {
+        stopKeepalive();
+      }
     } catch (error) {
       result = {
         ok: false,
