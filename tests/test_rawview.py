@@ -249,7 +249,7 @@ class TestBalanceWalk:
         assert account["breaks"] == 0
         assert account["checks"] == 2
         assert report["rows_with_balance"] == 3
-        assert "reversed" in next(iter(account["conventions"]))
+        assert "reversed" in str(account["convention"])
 
     def test_MissingTransaction_SurfacesAsOneLocalisedBreak(self):
         """A transaction the bank counted but the store never held: the
@@ -286,3 +286,37 @@ class TestBalanceWalk:
 
         assert report["accounts"] == {}
         assert report["rows_with_balance"] == 0
+
+
+class TestBalanceWalkConventionMajority:
+    def test_SmallArtefact_CannotHideABreak_BehindItsOwnCleanHypothesis(self):
+        """One large artefact fixes the account's convention; a small
+        artefact that only reconciles under a DIFFERENT sign is walked
+        under the majority anyway, so its genuine break surfaces instead
+        of being scored away."""
+        from obdi.rawview import balance_walk_report
+
+        big = [
+            {"amount": -20.0, "running_balance": {"amount": 100.0}},
+            {"amount": 10.0, "running_balance": {"amount": 110.0}},
+            {"amount": -30.0, "running_balance": {"amount": 80.0}},
+            {"amount": 5.0, "running_balance": {"amount": 85.0}},
+        ]
+        small = [
+            {"amount": 10.0, "running_balance": {"amount": 100.0}},
+            {"amount": 10.0, "running_balance": {"amount": 90.0}},
+        ]
+
+        report = balance_walk_report(
+            [
+                {"ref": "truelayer:acc-1", "label": "big", "rows": big},
+                {"ref": "truelayer:acc-1", "label": "small", "rows": small},
+            ]
+        )
+
+        account = report["accounts"]["truelayer:acc-1"]
+        assert "as-returned" in str(account["convention"])
+        assert "as-is" in str(account["convention"])
+        assert account["breaks"] == 1
+        assert account["artefacts_disagreeing"] == 1
+        assert account["examples"][0]["artefact"] == "small"

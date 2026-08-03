@@ -397,3 +397,36 @@ class TestBindingsRoundTrip:
 
         assert latest[0]["finished_at"] == "2026-08-02T13:00:00Z"
         assert latest[1]["kind"] == "audit"
+
+
+class TestDuplicateIdentityGuard:
+    def test_PushEnvelope_RefusesDuplicateImportedIds(self, tmp_path):
+        """Two store rows sharing one identity would reach Actual as one
+        row - the push refuses loudly instead of letting a real payment
+        silently vanish."""
+        import pytest
+
+        from obdi.actual_push import ActualAccountBinding, build_envelope
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            for entity, source_id in (("e-1", "sid-1"), ("e-2", "sid-2")):
+                store.connection.execute(
+                    "INSERT INTO transactions (entity_id, account_id, "
+                    "amount_minor, value_date, booking_date, description, "
+                    "source, currency, tier, status, content_key, occurrence, "
+                    "source_id, first_seen_at, last_seen_at, raw) "
+                    "VALUES (?, 'halifax-current', -1200, '2026-07-01', "
+                    "'2026-07-01', 'COFFEE', 'truelayer', 'GBP', "
+                    "'authoritative', 'booked', 'ck-same', 0, ?, "
+                    "'2026-07-01T00:00:00', '2026-07-01T00:00:00', '{}')",
+                    (entity, source_id),
+                )
+            store.connection.commit()
+            bindings = [
+                ActualAccountBinding(
+                    canonical_id="halifax-current", actual_account_id="act-1"
+                )
+            ]
+            with pytest.raises(ValueError, match="duplicate imported id"):
+                build_envelope(store, bindings, {})

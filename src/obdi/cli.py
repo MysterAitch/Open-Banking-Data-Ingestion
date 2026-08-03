@@ -368,6 +368,17 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
             raise ValueError(
                 f"{source} artefacts carry no transactions to replay"
             )
+        if source == "truelayer-pending":
+            # Complete-set snapshots are order-sensitive in both directions:
+            # replaying an old one without the resolution pass resurrects
+            # VOIDed pendings, and running the pass against an old set would
+            # void newer pendings that are still live. The full rebuild
+            # replays every snapshot in arrival order, which is the only
+            # honest way to re-derive pending state.
+            raise ValueError(
+                "pending artefacts are complete-set snapshots and only replay "
+                "correctly in arrival order - run 'Rebuild from raw' instead"
+            )
         defaults = _starling_defaults(
             store.connection.execute(
                 "SELECT source, payload FROM raw_artefacts "
@@ -732,6 +743,26 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 )
 
         def run() -> None:
+            from . import leases
+
+            locks = leases.locks_dir(db_path)
+            # A scheduled pull mid-cycle writes the same accounts; colliding
+            # loses one of them to the unique index. Wait briefly - cycles
+            # are short next to the SCA window - then take our own lease so
+            # the scheduler, a second backfill and a stack update all defer.
+            waited = 0
+            while leases.held(locks, "pull-cycle") and waited < 60:
+                time.sleep(5)
+                waited += 5
+            if not leases.acquire_exclusive(
+                locks, "post-auth-backfill", "obdi-web", 900
+            ):
+                _status(
+                    state="done",
+                    outcome="skipped: another post-auth backfill holds the "
+                    "lease - not starting a second",
+                )
+                return
             try:
                 _status(state="running", stage="backfill")
                 # Carries the authoriser's address: they completed strong
@@ -778,6 +809,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     targets=len(ladder_targets),
                 )
                 for position, provider_ref in enumerate(ladder_targets, start=1):
+                    # Renew per target: the lease must outlive the slowest
+                    # rung while never surviving a crashed ladder for long.
+                    leases.acquire(locks, "post-auth-backfill", "obdi-web", 900)
                     _status(
                         state="running",
                         stage="ladder",
@@ -819,6 +853,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             except Exception as exc:  # nothing may escape a thread
                 print(f"backfill for {name} failed: {exc}", file=sys.stderr)
                 _status(state="done", outcome=f"failed: {exc}")
+            finally:
+                leases.release(locks, "post-auth-backfill")
 
         threading.Thread(target=run, name=f"backfill-{name}", daemon=True).start()
         return True
@@ -1481,12 +1517,18 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 total_breaks += breaks
                 verdict = "clean" if not breaks else f"{breaks} BREAK(S)"
                 lines.append(f"  {ref}: {checks} chain check(s), {verdict}")
-                conventions = entry.get("conventions")
-                if isinstance(conventions, dict) and conventions:
-                    winner = max(conventions.items(), key=lambda kv: kv[1])
+                convention = entry.get("convention")
+                if convention:
                     lines.append(
-                        f"    convention: {winner[0]} "
-                        f"({winner[1]} artefact(s) agree)"
+                        f"    convention: {convention} (chosen by chain-check "
+                        "majority across this account's artefacts)"
+                    )
+                disagreeing = int(str(entry.get("artefacts_disagreeing", 0) or 0))
+                if disagreeing:
+                    lines.append(
+                        f"    {disagreeing} artefact(s) fit a different "
+                        "convention alone - walked under the majority anyway, "
+                        "so any break they hide is listed above"
                     )
                 examples = entry.get("examples")
                 for item in examples if isinstance(examples, list) else []:
@@ -1969,6 +2011,10 @@ def scheduled_pull_skip_reason(
         # collision is the observed cause of a rebuild aborting after the
         # wipe. The pull loses nothing by waiting one interval.
         return "a rebuild is in progress - skipping this cycle"
+    if leases.held(directory, "post-auth-backfill"):
+        # The ladder is spending an attended SCA window on the same
+        # accounts; its work is unrepeatable, a scheduled pull is not.
+        return "a post-auth backfill is running - skipping this cycle"
     interval = int(os.getenv("OBDI_PULL_INTERVAL_SECONDS", "21600") or "21600")
     default_min = int(interval * 0.9)
     raw_min = os.getenv("OBDI_PULL_MIN_INTERVAL_SECONDS", "").strip()

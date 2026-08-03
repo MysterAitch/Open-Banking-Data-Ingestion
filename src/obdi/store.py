@@ -732,6 +732,16 @@ class Store:
                 tier = excluded.tier,
                 source_id = excluded.source_id,
                 content_key = excluded.content_key,
+                -- occurrence rides with content_key: sticky while the content
+                -- is unchanged (a narrower window re-parse numbers from zero
+                -- and must not mint a colliding identity), renumbered only
+                -- when supersession changes the content itself. Right-hand
+                -- sides see pre-update values, so the comparison is safe.
+                occurrence = CASE
+                    WHEN transactions.content_key = excluded.content_key
+                    THEN transactions.occurrence
+                    ELSE excluded.occurrence
+                END,
                 artefact_digest = excluded.artefact_digest,
                 is_internal_transfer = excluded.is_internal_transfer,
                 match_tier = excluded.match_tier,

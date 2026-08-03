@@ -376,12 +376,25 @@ def balance_walk_report(artefacts: list[dict[str, object]]) -> dict[str, object]
     Each artefact's rows are walked in the order the provider returned
     them. A break means money moved that no held transaction explains (a
     completeness fault) or moved by a different amount (a value fault).
-    Row order and amount sign are never assumed: both directions and both
-    sign conventions are scored per artefact and the hypothesis with the
-    fewest breaks wins, so the report doubles as an empirical proof of the
-    provider's conventions - the same posture as the card sign check.
+    Row order and amount sign are never assumed, but they are chosen ONCE
+    PER ACCOUNT: every artefact votes (weighted by its chain checks) for
+    the hypothesis that fits it best, the majority wins, and every
+    artefact is then walked under the winner. A small artefact can no
+    longer hide a genuine break behind a wrong-but-clean solo hypothesis
+    - it is walked under the account's convention and its disagreement
+    is reported.
     """
-    accounts: dict[str, dict[str, object]] = {}
+    hypotheses = [
+        ("as-returned", 1),
+        ("as-returned", -1),
+        ("reversed", 1),
+        ("reversed", -1),
+    ]
+
+    def _label(direction: str, sign: int) -> str:
+        return f"{direction} order, amounts {'as-is' if sign == 1 else 'negated'}"
+
+    per_ref: dict[str, list[tuple[str, list[tuple[int, int | None]]]]] = {}
     rows_total = 0
     rows_with_balance = 0
     for artefact in artefacts:
@@ -406,37 +419,55 @@ def balance_walk_report(artefacts: list[dict[str, object]]) -> dict[str, object]
             seq.append((amount, balance))
         rows_total += len(seq)
         rows_with_balance += sum(1 for _, b in seq if b is not None)
-        hypotheses = []
-        for direction, ordered in (
-            ("as-returned", seq),
-            ("reversed", list(reversed(seq))),
-        ):
-            for sign in (1, -1):
+        per_ref.setdefault(ref, []).append((label, seq))
+
+    accounts: dict[str, dict[str, object]] = {}
+    for ref, artefact_seqs in per_ref.items():
+        walked: dict[
+            tuple[str, tuple[str, int]], tuple[int, list[dict[str, object]]]
+        ] = {}
+        votes: dict[tuple[str, int], int] = {}
+        solo_best: dict[str, tuple[str, int]] = {}
+        for label, seq in artefact_seqs:
+            scored = []
+            for direction, sign in hypotheses:
+                ordered = seq if direction == "as-returned" else list(reversed(seq))
                 checks, breaks = _chain_breaks(ordered, sign)
-                hypotheses.append(
-                    (len(breaks), -checks, direction, sign, checks, breaks)
-                )
-        hypotheses.sort(key=lambda h: (h[0], h[1]))
-        break_count, _, direction, sign, checks, breaks = hypotheses[0]
-        if not checks:
+                walked[(label, (direction, sign))] = (checks, breaks)
+                scored.append((len(breaks), -checks, (direction, sign)))
+            scored.sort()
+            best = scored[0][2]
+            best_checks = walked[(label, best)][0]
+            if best_checks:
+                solo_best[label] = best
+                votes[best] = votes.get(best, 0) + best_checks
+        if not votes:
             continue
-        entry = accounts.setdefault(
-            ref, {"checks": 0, "breaks": 0, "examples": [], "conventions": {}}
-        )
-        entry["checks"] = int(str(entry["checks"])) + checks
-        entry["breaks"] = int(str(entry["breaks"])) + break_count
-        convention = (
-            f"{direction} order, amounts {'as-is' if sign == 1 else 'negated'}"
-        )
-        conventions = entry["conventions"]
-        if isinstance(conventions, dict):
-            conventions[convention] = conventions.get(convention, 0) + 1
-        examples = entry["examples"]
-        if isinstance(examples, list):
+        chosen = max(votes.items(), key=lambda kv: kv[1])[0]
+        checks_total = 0
+        breaks_total = 0
+        examples: list[dict[str, object]] = []
+        disagreeing = 0
+        for label, _seq in artefact_seqs:
+            checks, breaks = walked[(label, chosen)]
+            checks_total += checks
+            breaks_total += len(breaks)
+            if label in solo_best and solo_best[label] != chosen:
+                disagreeing += 1
             for item in breaks[:3]:
                 if len(examples) >= 5:
                     break
                 examples.append({**item, "artefact": label})
+        accounts[ref] = {
+            "checks": checks_total,
+            "breaks": breaks_total,
+            "examples": examples,
+            "convention": _label(*chosen),
+            "convention_votes": {
+                _label(*key): weight for key, weight in sorted(votes.items())
+            },
+            "artefacts_disagreeing": disagreeing,
+        }
     return {
         "rows": rows_total,
         "rows_with_balance": rows_with_balance,

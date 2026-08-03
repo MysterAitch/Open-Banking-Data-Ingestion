@@ -166,6 +166,25 @@ def build_envelope(
 ) -> dict[str, object]:
     transactions = store.all_transactions()
     payload = build_payload(transactions, bindings)
+    # Two store rows sharing one imported id would reach Actual as one row:
+    # importTransactions treats the id as THE identity, so the second row is
+    # silently absorbed and a real payment vanishes from the budget. Refuse
+    # loudly instead - the store has an identity fault a rebuild collapses.
+    for account_id, account_rows in payload.items():
+        counted = Counter(
+            str(row.get("imported_id"))
+            for row in account_rows
+            if isinstance(row, dict) and row.get("imported_id")
+        )
+        duplicates = sorted(key for key, n in counted.items() if n > 1)
+        if duplicates:
+            shown = ", ".join(d[:24] + "..." for d in duplicates[:3])
+            raise ValueError(
+                f"account {account_id} holds {len(duplicates)} duplicate "
+                "imported id(s) - two store rows share an identity, and "
+                "Actual would keep one and silently drop the other. Run "
+                f"'Rebuild from raw' to collapse them. First: {shown}"
+            )
     # Everything a person has NAMED deserves an Actual account - including
     # accounts holding nothing yet (bound means wanted; an empty account
     # standing ready in the budget beats one that appears only once money
