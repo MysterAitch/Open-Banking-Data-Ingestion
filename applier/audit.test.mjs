@@ -97,17 +97,57 @@ test('accounts existing in Actual but bound to nothing are named as strays', asy
   assert.ok(report.find((entry) => entry.account_id === 'act-1' && !entry.unbound_in_actual));
 });
 
+const hex = (seed) => seed.repeat(64).slice(0, 64);
+
 test('prunable rows are ours-and-unexpected only; yours are untouchable', async () => {
   const { choosePrunable } = await import('./audit.mjs');
-  const expected = new Set(['ck-1:0', 'ck-2:0']);
+  const expected = new Set([`${hex('1')}:0`, `${hex('2')}:0`]);
   const rows = [
-    { id: 'a', imported_id: 'ck-1:0' },
-    { id: 'b', imported_id: 'ck-stale:0' },
+    { id: 'a', imported_id: `${hex('1')}:0` },
+    { id: 'b', imported_id: `${hex('e')}:0` },
     { id: 'c', imported_id: null },
-    { id: 'd', imported_id: 'ck-stale:1', is_child: true },
+    { id: 'd', imported_id: `${hex('e')}:1`, is_child: true },
   ];
   const prunable = choosePrunable(expected, rows);
-  assert.deepEqual(prunable, [{ id: 'b', imported_id: 'ck-stale:0' }]);
+  assert.deepEqual(prunable, [{ id: 'b', imported_id: `${hex('e')}:0` }]);
+});
+
+test('an imported id that is not obdi-shaped is untouchable, like no id at all', async () => {
+  const { choosePrunable, isObdiImportedId } = await import('./audit.mjs');
+  const expected = new Set([`${hex('1')}:0`]);
+  const rows = [
+    { id: 'a', imported_id: 'FITID-20260803-0001' },
+    { id: 'b', imported_id: 'ck-stale:0' },
+    { id: 'c', imported_id: `${hex('a')}:0`.toUpperCase() },
+    { id: 'd', imported_id: `${hex('e')}:2` },
+  ];
+  const prunable = choosePrunable(expected, rows);
+  assert.deepEqual(prunable, [{ id: 'd', imported_id: `${hex('e')}:2` }]);
+  assert.equal(isObdiImportedId(`${hex('e')}:2`), true);
+  assert.equal(isObdiImportedId('FITID-20260803-0001'), false);
+});
+
+test('prune reports the foreign-id rows it deliberately left alone', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const deleted = [];
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => [
+      { id: 'a', imported_id: `${hex('1')}:0` },
+      { id: 'b', imported_id: `${hex('e')}:0` },
+      { id: 'c', imported_id: 'FITID-20260803-0001' },
+      { id: 'd', imported_id: null },
+    ],
+    deleteTransaction: async (id) => deleted.push(id),
+  };
+
+  const report = await pruneAccounts(client, {
+    'act-1': [{ imported_id: `${hex('1')}:0` }],
+  });
+
+  assert.deepEqual(deleted, ['b']);
+  assert.equal(report[0].removed, 1);
+  assert.equal(report[0].foreign_ids, 1);
 });
 
 test('an empty expected set is refused, never pruned blind', async () => {

@@ -2620,10 +2620,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             render_page(
                 "Prune queued",
                 f"<p>{html.escape(summary)}</p>"
-                "<p>Rows without an imported id are yours and are never "
-                "touched; an account with an empty expected set is skipped "
-                "rather than pruned blind. Results appear in the Actual "
-                "sync section.</p>" + HOME_LINK,
+                "<p>Only rows whose imported id has obdi's own shape are "
+                "ever considered - rows without an imported id, and rows "
+                "imported by Actual itself (file imports, bank sync), are "
+                "never touched. An account with an empty expected set is "
+                "skipped rather than pruned blind. Results appear in the "
+                "Actual sync section.</p>" + HOME_LINK,
             ),
         )
 

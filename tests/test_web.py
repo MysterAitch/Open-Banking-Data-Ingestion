@@ -1233,25 +1233,45 @@ class TestDangerZone:
         assert status.get("ok") is True
         assert "replayed" in str(status.get("summary", ""))
 
-    def test_RunningRebuild_RefusesASecondStart(self, tmp_path):
+    def test_RunningRebuild_RefusesASecondStart(self, tmp_path, monkeypatch):
+        from obdi import leases
+        from obdi.cli import start_background_rebuild
+        from obdi.store import Store as _Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "s.sqlite3"
+        with _Store(db):
+            pass
+        # The live lease is the mutex - a running rebuild holds it.
+        leases.acquire(tmp_path / "locks", "rebuild-derived", "obdi-web", 3600)
+
+        message = start_background_rebuild(db)
+
+        assert "already running" in message
+
+    def test_AbortedRebuild_AllowsTheRestartThatRepairsIt(self, tmp_path, monkeypatch):
         import json as _json
 
         from obdi.cli import start_background_rebuild
         from obdi.store import Store as _Store
 
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
         with _Store(db):
             pass
+        # Status stuck at "running" with no live lease = a rebuild that
+        # died mid-replay. Restarting is the recovery path; refusing it
+        # would wedge the store behind its own abort marker.
         (tmp_path / "rebuild-status.json").write_text(
             _json.dumps(
-                {"state": "running", "started_at": "2100-01-01T00:00:00Z"}
+                {"state": "running", "started_at": "2026-08-03T10:00:00Z"}
             ),
             encoding="utf-8",
         )
 
         message = start_background_rebuild(db)
 
-        assert "already running" in message
+        assert "started in the background" in message
 
     def test_DangerZone_ShowsRebuildState(self):
         from obdi.web import _rebuild_status_line

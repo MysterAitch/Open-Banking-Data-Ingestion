@@ -123,13 +123,25 @@ export async function auditAccounts(client, accounts) {
   return report;
 }
 
+// obdi's imported ids have exactly one shape: the 64-hex sha256 content
+// key, a colon, and the occurrence counter. Actual's own importers (OFX/
+// QIF/CSV file import, its bank sync) also populate imported_id - from
+// FITIDs and the like - so "has an imported id" is NOT "is ours".
+const OBDI_IMPORTED_ID = /^[0-9a-f]{64}:\d+$/;
+
+export function isObdiImportedId(value) {
+  return typeof value === 'string' && OBDI_IMPORTED_ID.test(value);
+}
+
 export function choosePrunable(expectedIds, rows) {
   // Only rows carrying one of OUR imported ids that the expected set no
-  // longer contains. No imported id = the person's own entry, untouchable.
+  // longer contains. An id that is not obdi-shaped is somebody else's
+  // bookkeeping and is treated exactly like no id at all: untouchable.
   // Split children ride with their parent.
   return rows
     .filter((row) => !row.is_child)
-    .filter((row) => row.imported_id && !expectedIds.has(row.imported_id))
+    .filter((row) => isObdiImportedId(row.imported_id))
+    .filter((row) => !expectedIds.has(row.imported_id))
     .map((row) => ({ id: row.id, imported_id: row.imported_id }));
 }
 
@@ -156,11 +168,20 @@ export async function pruneAccounts(client, accounts) {
     for (const target of prunable) {
       await client.deleteTransaction(target.id);
     }
-    report.push({
+    const foreign = rows.filter(
+      (row) => !row.is_child && row.imported_id && !isObdiImportedId(row.imported_id)
+    ).length;
+    const entry = {
       account_id: accountId,
       name: nameOf.get(accountId),
       removed: prunable.length,
-    });
+    };
+    if (foreign > 0) {
+      // Say what was deliberately left alone - silence would read as
+      // "nothing else was there".
+      entry.foreign_ids = foreign;
+    }
+    report.push(entry);
   }
   return report;
 }

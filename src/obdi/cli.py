@@ -207,6 +207,22 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
             "a rebuild is replaying the store - try again when the danger "
             "zone shows it finished (nothing is lost by waiting)"
         )
+    # A status file stuck at "running" with no live lease means a rebuild
+    # started and never finished - the process died mid-replay. The store
+    # was wiped first and replayed partially, so every per-account view of
+    # it is incomplete. Nothing that reads or moves rows (and especially
+    # nothing that DELETES in Actual from an expected set) may proceed
+    # until a rebuild completes and rewrites this marker.
+    status_path = db_path.parent / "rebuild-status.json"
+    with contextlib.suppress(OSError, ValueError):
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        if isinstance(status, dict) and status.get("state") == "running":
+            started = str(status.get("started_at", "unknown time"))
+            return (
+                f"a rebuild started at {started} but did not finish - the "
+                "store may be half-populated. Run 'Rebuild from raw' again "
+                "before pushing, auditing, pruning or binding."
+            )
     return None
 
 
@@ -230,18 +246,17 @@ def start_background_rebuild(db_path: Path) -> str:
             "in a few minutes (the cycle's lease expires by itself if it "
             "crashed)"
         )
+    # The lease itself is the mutex: exclusive acquisition here, in the
+    # request thread, means there is no window between "checked" and
+    # "started" for a second press or a pull cycle to slip through, and
+    # no moment where a rebuild is running without its lease on disk.
+    locks = leases.locks_dir(db_path)
+    if not leases.acquire_exclusive(locks, "rebuild-derived", "obdi-web", 3600):
+        return (
+            "a rebuild is already running (its lease is live) - its result "
+            "will appear in the danger zone"
+        )
     status_path = db_path.parent / "rebuild-status.json"
-    with contextlib.suppress(OSError, ValueError):
-        current = json.loads(status_path.read_text(encoding="utf-8"))
-        if isinstance(current, dict) and current.get("state") == "running":
-            started = str(current.get("started_at", ""))
-            with contextlib.suppress(ValueError):
-                began = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                if (datetime.now(UTC) - began).total_seconds() < 3600:
-                    return (
-                        f"a rebuild is already running (started {started}) - "
-                        "its result will appear in the danger zone"
-                    )
 
     def _stamp() -> str:
         return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -279,18 +294,24 @@ def start_background_rebuild(db_path: Path) -> str:
                 ),
                 encoding="utf-8",
             )
+            # Renew the lease while work is provably progressing: a long
+            # rebuild must never outlive its own TTL and read as absent
+            # to the guards while still replaying.
+            leases.acquire(locks, "rebuild-derived", "obdi-web", 3600)
 
         payload: dict[str, object]
         try:
-            with leases.lease(
-                leases.locks_dir(db_path), "rebuild-derived", "obdi-web", 3600
-            ), Store(db_path) as store:
+            # The lease was taken exclusively before this thread started;
+            # here it is only renewed (on_progress) and released.
+            with Store(db_path) as store:
                 report = rebuild_from_raw(
                     store, progress=on_progress, account_map=_account_map()
                 )
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
             payload = {"ok": False, "summary": str(exc)}
+        finally:
+            leases.release(locks, "rebuild-derived")
         payload.update(
             {"state": "done", "started_at": started_at, "finished_at": _stamp()}
         )

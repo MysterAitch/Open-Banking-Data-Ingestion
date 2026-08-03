@@ -55,6 +55,46 @@ def acquire(directory: Path, name: str, holder: str, ttl_seconds: int) -> Path:
     return path
 
 
+def acquire_exclusive(
+    directory: Path, name: str, holder: str, ttl_seconds: int
+) -> bool:
+    """Take the lease only if nobody live holds it; True on success.
+
+    acquire() is a plain overwrite (fine for renewal by the holder), so it
+    cannot arbitrate two actors racing for the same lease. This variant
+    uses O_EXCL creation as the arbiter: exactly one creator wins. An
+    existing-but-expired lease is removed and contested again - if two
+    actors race the removal, the O_EXCL retry still picks one winner.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.json"
+    payload = json.dumps(
+        {
+            "name": name,
+            "holder": holder,
+            "taken_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ttl_seconds": ttl_seconds,
+        }
+    )
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                entry = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                entry = None
+            if isinstance(entry, dict) and not _expired(entry, datetime.now(UTC)):
+                return False
+            with contextlib.suppress(OSError):
+                path.unlink()
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        return True
+    return False
+
+
 def release(directory: Path, name: str) -> None:
     with contextlib.suppress(OSError):
         (directory / f"{name}.json").unlink()

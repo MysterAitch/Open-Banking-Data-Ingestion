@@ -330,3 +330,57 @@ class TestTransientBlocksAreWaitedOut:
         assert outcome is not None
         assert "rebuild" in outcome
         assert len(sleeps) == 4
+
+
+class TestExclusiveAcquisition:
+    def test_SecondActor_CannotTakeALiveLease(self, tmp_path):
+        from obdi import leases
+
+        assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
+        assert not leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
+
+    def test_ExpiredLease_IsContestedAndRetaken(self, tmp_path):
+        from obdi import leases
+
+        assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", -1)
+        assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
+
+    def test_ReleasedLease_CanBeRetaken(self, tmp_path):
+        from obdi import leases
+
+        assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
+        leases.release(tmp_path, "rebuild-derived")
+        assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
+
+
+class TestAbortedRebuildMarker:
+    def test_RunningStatusWithNoLease_BlocksStoreActions(self, tmp_path, monkeypatch):
+        import json as _json
+
+        from obdi.cli import rebuild_in_progress_note
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "store.sqlite3"
+        (tmp_path / "rebuild-status.json").write_text(
+            _json.dumps({"state": "running", "started_at": "2026-08-03T10:00:00Z"}),
+            encoding="utf-8",
+        )
+
+        note = rebuild_in_progress_note(db)
+
+        assert note is not None
+        assert "did not finish" in note
+        assert "2026-08-03T10:00:00Z" in note
+
+    def test_CompletedStatus_DoesNotBlock(self, tmp_path, monkeypatch):
+        import json as _json
+
+        from obdi.cli import rebuild_in_progress_note
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        db = tmp_path / "store.sqlite3"
+        (tmp_path / "rebuild-status.json").write_text(
+            _json.dumps({"state": "done", "ok": True}), encoding="utf-8"
+        )
+
+        assert rebuild_in_progress_note(db) is None
