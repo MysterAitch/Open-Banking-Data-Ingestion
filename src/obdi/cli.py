@@ -2485,6 +2485,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     subcommands.add_parser("status", help="show row counts per layer")
     subcommands.add_parser(
+        "duplication",
+        help=(
+            "how much of layer 0 is the same information arriving again, "
+            "measured by bytes, canonical form and durable identity"
+        ),
+    )
+    subcommands.add_parser(
         "coverage",
         help="what the store holds per account and source, and whether sources agree",
     )
@@ -2673,6 +2680,15 @@ def main(argv: list[str] | None = None) -> int:
             results += live_checks()
         print(report(results))
         return 1 if any(not r.ok for r in results) else 0
+
+    if args.command == "duplication":
+        from .duplication import analyse
+
+        # Read-only, so it runs safely alongside a scheduled pull rather
+        # than needing the store to itself.
+        with Store(db_path) as store:
+            print(analyse(store).describe())
+        return 0
 
     if args.command == "status":
         with Store(db_path) as store:
