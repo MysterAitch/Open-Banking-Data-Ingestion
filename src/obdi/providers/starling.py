@@ -137,6 +137,23 @@ def fetch_balance(
     return body
 
 
+def fetch_identifiers(
+    token: str, account_uid: str, *, client: httpx.Client | None = None
+) -> bytes:
+    """The account's sort code, number and IBAN, as raw evidence.
+
+    Starling's accounts call carries none of these - they live on their
+    own endpoint - which is why the first-party side of an account could
+    not be matched against any other source until this was fetched. One
+    first-party call, so it costs nothing against an aggregator's daily
+    cap and never touches an SCA window.
+    """
+    _, body = _get(
+        f"/api/v2/accounts/{account_uid}/identifiers", token, client=client
+    )
+    return body
+
+
 @dataclass(frozen=True)
 class Category:
     """A feed partition: either the account itself or one of its Spaces."""

@@ -65,6 +65,7 @@ API_SOURCES = frozenset(
         "starling-feed",
         "starling-spaces",
         "starling-balance",
+        "starling-identifiers",
     }
 )
 

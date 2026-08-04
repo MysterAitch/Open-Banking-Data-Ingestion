@@ -598,6 +598,27 @@ def pull_starling(
             except starling.StarlingError as exc:
                 result.notes.append(f"balance for {account_uid}: {exc}")
 
+            # The sort code and account number, which the accounts call
+            # does not carry. Without them the first-party view of an
+            # account cannot be matched to any other source's view of the
+            # same account - which is the whole point of holding several.
+            try:
+                identifiers_body = starling.fetch_identifiers(token, account_uid)
+                store.land_artefact(
+                    starling.artefact_for(
+                        identifiers_body,
+                        account_id=f"starling:{account_uid}",
+                        kind="identifiers",
+                        origin=(
+                            f"{starling.API_HOST}/api/v2/accounts/"
+                            f"{account_uid}/identifiers"
+                        ),
+                        request_meta=request_meta,
+                    )
+                )
+            except starling.StarlingError as exc:
+                result.notes.append(f"identifiers for {account_uid}: {exc}")
+
         for category in categories:
             if category.is_space:
                 # A Space is bound by its own id, so it can be given a
