@@ -2469,9 +2469,16 @@ class TestBrowsingRawArtefactsFromThePage:
         finally:
             httpd.shutdown()
 
-        # Categories are tallied, identifiers described by shape not range.
+        # Categories are tallied in full - they describe the record.
         assert "2 distinct: DEBIT x2, CREDIT x1" in page
-        assert "3 distinct, length 20-20, prefix txn-, hex" in page
+        # A field nobody has classified keeps its SHAPE and loses its
+        # values - fail-closed, so a field a provider adds tomorrow cannot
+        # render itself in full because nobody thought about it. The
+        # common prefix goes too: over a single-account payload a common
+        # prefix IS the identifier.
+        assert "withheld - this field is not yet classified" in page
+        assert "length 20-20" in page
+        assert "prefix txn-" not in page
         # Cross-field evidence sections.
         assert "Amount sign by category" in page
         assert "Presence patterns" in page

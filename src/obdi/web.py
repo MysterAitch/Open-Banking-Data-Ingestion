@@ -38,6 +38,7 @@ from secrets import token_urlsafe
 from urllib.parse import parse_qs, quote, urlparse
 
 from .callback import render_page
+from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import SourceCoverage
 from .doctor import shape_problems
@@ -492,7 +493,24 @@ def _shape_detail(field: dict[str, object]) -> str:
     (cardinality, length, prefix, format), ordered things keep their range.
     Escaped here because the values are provider data, not our markup.
     """
+    note = field.get("note")
     values = field.get("values")
+    if note and not values:
+        # "no value" and "withheld" are different facts about a payload,
+        # and a reader deserves to be told which one they are looking at.
+        shape = []
+        length = field.get("length")
+        if isinstance(length, dict):
+            shape.append(f"length {length.get('min')}-{length.get('max')}")
+        if field.get("format"):
+            shape.append(html.escape(str(field.get("format"))))
+        if field.get("distinct"):
+            shape.append(f"{field.get('distinct')} distinct")
+        rendered = ", ".join(shape)
+        return (
+            f'<span class="muted">{html.escape(str(note))}</span>'
+            + (f"<br>{rendered}" if rendered else "")
+        )
     if isinstance(values, list) and values:
         listed = ", ".join(
             f"{html.escape(str(v.get('value')))} x{v.get('count')}"
@@ -575,7 +593,15 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
 
 
 def _shape_html(summary: dict[str, object]) -> str:
-    """The computed-shape block, shared by the artefact and account pages."""
+    """The computed-shape block, shared by the artefact and account pages.
+
+    Every field passes the disclosure allowlist on the way out. The shape
+    - nesting, types, presence, formats, cardinality - is untouched,
+    because that is what this block is FOR; only example values are
+    gated, and a field nobody has classified is withheld rather than
+    shown.
+    """
+    summary = redact_summary(summary)
     raw_fields = summary.get("fields")
     fields = raw_fields if isinstance(raw_fields, list) else []
     field_rows = "".join(
@@ -586,8 +612,23 @@ def _shape_html(summary: dict[str, object]) -> str:
         for field in fields
         if isinstance(field, dict)
     )
+    withheld = int(str(summary.get("withheld_fields", 0) or 0))
+    unclassified = int(str(summary.get("unclassified_fields", 0) or 0))
+    disclosure = ""
+    if withheld:
+        disclosure = (
+            f'<p class="muted">{withheld} field(s) show shape without values'
+            + (
+                f", {unclassified} because nothing has classified them yet"
+                if unclassified
+                else ""
+            )
+            + ". The payload itself is unchanged - this is what the page "
+            "chooses to render, not what was stored.</p>"
+        )
     return (
         f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
+        f"{disclosure}"
         '<div class="scroll"><table><tr><th>field</th><th>present</th><th>types</th>'
         f"<th>values / shape</th></tr>{field_rows}</table></div>"
         f"{_insight_sections(summary)}"
