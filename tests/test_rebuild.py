@@ -973,7 +973,8 @@ class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
         seen: list[dict[str, int]] = []
         self._rebuild(tmp_path, [3, 5, 2], seen)
 
-        sizes = [row["current_records"] for row in seen]
+        boundaries = [row for row in seen if row["records_in_flight"] == 0]
+        sizes = [row["current_records"] for row in boundaries]
         # Three artefacts, then a completion report that correctly claims
         # nothing is in flight.
         assert sizes == [3, 5, 2, 0], f"in-flight sizes not reported in order: {sizes}"
@@ -990,9 +991,10 @@ class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
         seen: list[dict[str, int]] = []
         report = self._rebuild(tmp_path, [3, 5, 2], seen)
 
-        done = [row["records_done"] for row in seen]
+        boundaries = [row for row in seen if row["records_in_flight"] == 0]
+        done = [row["records_done"] for row in boundaries]
         assert done == [0, 3, 8, 10], f"progress did not track finished work: {done}"
-        assert all(row <= 10 for row in done)
+        assert all(row <= 10 for row in [d["records_done"] for d in seen])
         assert report.records_done == 10
 
 
@@ -1002,4 +1004,96 @@ def capture_of(report) -> dict[str, int]:
         "records_done": report.records_done,
         "current_records": report.current_records,
         "current_index": report.current_index,
+        "records_in_flight": report.records_in_flight,
     }
+
+
+class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
+    """A big batch must not look like a hang.
+
+    Counts once advanced only at artefact boundaries, so one 4,000-record
+    file held them still for minutes with nothing to distinguish slow
+    from stuck. The per-record loop lives one layer down, in
+    reconcile_batch, and now reports up.
+    """
+
+    def _feed(self, store, uid, items):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+
+        body = _json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": f"{uid}-{n}",
+                        "amount": {"currency": "GBP", "minorUnits": 100 + n},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-14T09:15:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": "Tesco",
+                        "reference": "TESCO",
+                    }
+                    for n in range(items)
+                ]
+            }
+        ).encode("utf-8")
+        store.land_artefact(
+            artefact_for(
+                body,
+                account_id=f"starling:{uid}",
+                kind="feed",
+                origin=f"https://api.example.com/feed/account/a/category/{uid}?x=1",
+            )
+        )
+
+    def test_ProgressAdvancesRecordByRecord_WhileOneArtefactIsReplaying(
+        self, tmp_path
+    ):
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        seen = []
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._feed(store, "uid-1", 6)
+            rebuild_from_raw(
+                store,
+                progress=lambda _d, _t, r: seen.append(r.records_in_flight),
+            )
+
+        # One artefact of six records: a boundary tick, then a tick per
+        # record, then completion. Without the inner hook this is [0, 0].
+        assert seen == [0, 1, 2, 3, 4, 5, 6, 0], f"progress within the batch: {seen}"
+
+    def test_InFlightProgressIsNotAddedToTheBankedTotal_BecauseItIsUncommitted(
+        self, tmp_path
+    ):
+        """The two counts answer different questions.
+
+        reconcile_batch commits once, at its end. Records resolved before
+        that point are real work but not durable work, so folding them
+        into the completed total would report progress that a crash takes
+        back. records_done moves only when an artefact is finished.
+        """
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        pairs = []
+        with Store(tmp_path / "s.sqlite3") as store:
+            self._feed(store, "uid-1", 4)
+            self._feed(store, "uid-2", 3)
+            rebuild_from_raw(
+                store,
+                progress=lambda _d, _t, r: pairs.append(
+                    (r.records_done, r.records_in_flight)
+                ),
+            )
+
+        mid_first = [done for done, flight in pairs if flight > 0 and done == 0]
+        assert mid_first, "no ticks observed inside the first artefact"
+
+        # Nothing is banked until an artefact completes, and the banked
+        # figure never counts the same record twice.
+        assert [done for done, _ in pairs] == sorted(done for done, _ in pairs)
+        assert max(done for done, _ in pairs) == 7

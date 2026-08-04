@@ -1429,9 +1429,18 @@ def _rebuild_status_line(
             # through an artefact holding 4,087 records" is an answer,
             # and the difference is one number.
             current = status.get("current_records")
+            in_flight = status.get("records_in_flight")
             extra = f" - artefact {done} of {total}"
             if isinstance(current, int) and current > 0:
-                extra += f" ({current:,} records)"
+                # Position within the artefact, kept separate from the
+                # banked total below and deliberately so: the batch
+                # commits once at its end, so this much is resolved but
+                # not yet durable. One combined number would promise
+                # progress that a crash could take back.
+                if isinstance(in_flight, int) and in_flight > 0:
+                    extra += f" ({in_flight:,} of {current:,} records)"
+                else:
+                    extra += f" ({current:,} records)"
 
             records_done = status.get("records_done")
             records_total = status.get("records_total")

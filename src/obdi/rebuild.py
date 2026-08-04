@@ -56,9 +56,6 @@ class RebuildReport:
     #: as "account: N -> 0 (VANISHED)" instead of hiding behind a page
     #: that quietly shows fewer rows.
     account_changes: dict[str, tuple[int, int]] = field(default_factory=dict)
-    #: Sum of stored record counts over transactional artefacts - the
-    #: denominator for record-level progress. Uncounted artefacts (landed
-    #: before counts existed) make it a floor, stated as such.
     #: Records the replay must process, counted up front from the payloads
     #: themselves - exact, rather than a floor that grows as it discovers.
     records_total: int = 0
@@ -70,6 +67,11 @@ class RebuildReport:
     current_records: int = 0
     #: Which artefact that is, for the same reason.
     current_index: int = 0
+    #: How far INTO the current artefact the replay has resolved. Kept
+    #: apart from records_done because this work is not committed yet -
+    #: the batch commits once, at its end - so adding it to the banked
+    #: figure would report progress a crash could take back.
+    records_in_flight: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -308,6 +310,7 @@ def rebuild_from_raw(
     for index, row in enumerate(artefact_rows, start=1):
         report.current_index = index
         report.current_records = sizes.get(int(row["rowid"]), 0)
+        report.records_in_flight = 0
         if progress is not None:
             with contextlib.suppress(Exception):
                 progress(index, total, report)
@@ -359,10 +362,34 @@ def rebuild_from_raw(
                 (len(transactions), int(row["rowid"])),
             )
         report.artefacts_replayed += 1
-        report.records_done += sizes.get(int(row["rowid"]), 0)
         if transactions:
-            reconcile_batch(store, transactions, digest=digest, summary=summary)
+            # Both the report and the artefact number are bound here
+            # rather than closed over: the callback only ever runs during
+            # this iteration, but a late-bound loop variable is the kind
+            # of thing that becomes wrong the moment anything defers.
+            def tick(
+                position: int,
+                _report: RebuildReport = report,
+                _index: int = index,
+            ) -> None:
+                _report.records_in_flight = position
+                if progress is not None:
+                    progress(_index, total, _report)
+
+            reconcile_batch(
+                store,
+                transactions,
+                digest=digest,
+                summary=summary,
+                on_record=tick if progress is not None else None,
+            )
             report.transactions += len(transactions)
+        # Banked only once the batch has committed. Counting the artefact
+        # as done before resolving it would have the total include work
+        # still in progress, which is precisely the overstatement the
+        # in-flight figure exists to avoid.
+        report.records_done += sizes.get(int(row["rowid"]), 0)
+        report.records_in_flight = 0
         if source == "truelayer-pending":
             # Complete-set semantics replayed in order: the same resolution
             # the live pull runs, but WITHOUT re-emitting events - the
@@ -398,6 +425,7 @@ def rebuild_from_raw(
         # as being worked on - exactly the claim a reader checks when
         # deciding whether the rebuild has actually stopped.
         report.current_records = 0
+        report.records_in_flight = 0
         with contextlib.suppress(Exception):
             progress(total, total, report)
     return report

@@ -1317,6 +1317,32 @@ class TestDangerZone:
         assert "24,658 of 37,101 records" in line
         assert "8,032 transaction(s)" in line
 
+    def test_RebuildLine_PartWayThroughAnArtefact_ShowsPositionWithinIt(self):
+        """The number that distinguishes a slow batch from a hung one.
+
+        Shown apart from the banked total on purpose: a batch commits
+        once, at its end, so this much is resolved but not yet durable.
+        Presenting one combined figure would promise progress that a
+        crash could take back.
+        """
+        line = self._line(
+            {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 118,
+                "total": 137,
+                "current_records": 4087,
+                "records_in_flight": 1203,
+                "records_done": 24658,
+                "records_total": 37101,
+                "transactions": 8032,
+            },
+            (15, 5, 0),
+        )
+
+        assert "artefact 118 of 137 (1,203 of 4,087 records)" in line
+        assert "24,658 of 37,101 records" in line
+
     def test_RebuildLine_RatesProgressByRecordsConsumed_NotTransactionsProduced(self):
         """The two counts are not interchangeable and must not be mixed.
 

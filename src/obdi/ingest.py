@@ -7,9 +7,10 @@ closes.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
@@ -142,12 +143,20 @@ def reconcile_batch(
     *,
     digest: str,
     summary: ImportSummary | None = None,
+    on_record: Callable[[int], None] | None = None,
 ) -> ImportSummary:
     """Resolve a batch against what is already stored, and persist the outcome.
 
     Shared by file import and API pulls deliberately: identity resolution must
     behave identically whichever route data arrives by, or the same payment
     seen twice through different doors would be stored twice.
+
+    on_record is called with the number resolved so far, once per record.
+    A batch of several thousand is minutes of work with nothing to show
+    for it from outside, and this is the only place that knows the loop
+    is still turning. What it reports is NOT yet committed - the commit
+    happens once, below - so a caller must present it as position within
+    the batch rather than as progress banked.
     """
     result = summary or ImportSummary(artefact_new=True)
     result.parsed += len(transactions)
@@ -164,11 +173,16 @@ def reconcile_batch(
         seen[key] = seen.get(key, 0) + 1
 
     by_account: dict[str, list[Transaction]] = {}
-    for transaction in numbered:
+    for position, transaction in enumerate(numbered, start=1):
         existing = by_account.setdefault(
             transaction.account_id, store.transactions_for_account(transaction.account_id)
         )
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
+
+        if on_record is not None:
+            # Never let reporting break the work it reports on.
+            with contextlib.suppress(Exception):
+                on_record(position)
 
         if matched_entity_id is None:
             existing.append(merged)

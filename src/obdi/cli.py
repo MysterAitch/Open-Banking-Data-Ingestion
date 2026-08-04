@@ -323,10 +323,23 @@ def start_background_rebuild(db_path: Path) -> str:
     def run() -> None:
         from .rebuild import RebuildReport, rebuild_from_raw
 
+        # Progress now ticks once per RECORD, tens of thousands of times a
+        # run, so publishing is rate-limited while counting is not. The
+        # throttle belongs here rather than in the replay: the replay
+        # should report everything it knows and let each consumer decide
+        # what it can afford to write down.
+        published = [0.0, 0.0]
+
         def on_progress(done: int, total: int, report: RebuildReport) -> None:
+            boundary = report.records_in_flight == 0
+            now = time.monotonic()
+            if not boundary and now - published[0] < 1.0:
+                return
+            published[0] = now
+
             # Every 25th artefact into the container log too - dockge and
             # docker logs are where people look when a page seems quiet.
-            if done % 25 == 0 or done == total:
+            if boundary and (done % 25 == 0 or done == total):
                 print(
                     f"rebuild: artefact {done} of {total} "
                     f"({report.current_records:,} records), "
@@ -346,6 +359,7 @@ def start_background_rebuild(db_path: Path) -> str:
                         "records_total": report.records_total,
                         "records_done": report.records_done,
                         "current_records": report.current_records,
+                        "records_in_flight": report.records_in_flight,
                         "updated_at": _stamp(),
                     }
                 ),
@@ -353,8 +367,12 @@ def start_background_rebuild(db_path: Path) -> str:
             )
             # Renew the lease while work is provably progressing: a long
             # rebuild must never outlive its own TTL and read as absent
-            # to the guards while still replaying.
-            leases.acquire(locks, "rebuild-derived", "obdi-web", 3600)
+            # to the guards while still replaying. Renewed on its own,
+            # slower clock - the TTL is an hour, so writing the lease file
+            # every second would be pure noise.
+            if now - published[1] >= 60.0:
+                published[1] = now
+                leases.acquire(locks, "rebuild-derived", "obdi-web", 3600)
 
         payload: dict[str, object]
         try:
