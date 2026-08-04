@@ -30,7 +30,7 @@ class TestSourcesClaimWhatTheyKnow:
         claims = claims_from_truelayer_card({"partial_card_number": "8484"})
 
         assert len(claims) == 1
-        assert claims[0].kind == "last-4"
+        assert claims[0].kind == "card-last-4"
         assert claims[0].value == "8484"
         assert claims[0].strength == WEAK
 
@@ -61,7 +61,7 @@ class TestStrongerClaimsContainWeakerOnes:
             {"account_number": {"number": "12345678", "sort_code": "200000"}}
         )
 
-        assert any(c.kind == "last-4" and c.value == "5678" for c in claims)
+        assert any(c.kind == "account-last-4" and c.value == "5678" for c in claims)
 
     def test_DerivationIsIdempotent_AndOrdersStrongestFirst(self):
         claims = derive(
@@ -98,16 +98,15 @@ class TestMatchingAcrossSources:
         assert matched.kind == "uk-account"
         assert matched.strength == STRONG
 
-    def test_AnExportKnowingOnlyFourDigits_StillMatches_ButOnlyWeakly(self):
-        """A credit-card CSV usually carries four digits and nothing
-        else. It should still find its account - and the match must
-        report itself as the weak thing it is."""
-        export = claims_from_file_hints({"card_last_four": "5678"})
+    def test_AnExportKnowingOnlyFourDigitsOfTheAccount_StillMatches_ButWeakly(self):
+        """A bank export that names four digits of the ACCOUNT should
+        still find it - and must report itself as the weak thing it is."""
+        export = claims_from_file_hints({"account_number": "5678"})
 
         matched = best_match(self._truelayer(), export)
 
         assert matched is not None
-        assert matched.kind == "last-4"
+        assert matched.kind == "account-last-4"
         assert matched.strength == WEAK
 
     def test_DifferentAccounts_DoNotMatch(self):
@@ -149,3 +148,45 @@ class TestNumbersAreNeverRendered:
 
         assert iban.masked() == "IBAN ending 5678"
         assert "STRL" not in iban.masked()
+
+
+class TestCardAndAccountDigitsAreDifferentNamespaces:
+    """A credit card ending 5678 and a current account ending 5678 are
+    unrelated numbers. Open Banking makes this concrete: only CREDIT card
+    accounts appear on the cards endpoint, and a debit card is not an
+    account at all - so the two kinds of "last four" can never describe
+    the same identifier and must never match.
+    """
+
+    def test_ACardEndingTheSameFourDigitsAsAnAccount_DoesNotMatchIt(self):
+        account = claims_from_truelayer_account(
+            {"account_number": {"number": "12345678", "sort_code": "608371"}}
+        )
+        card = claims_from_truelayer_card({"partial_card_number": "5678"})
+
+        assert best_match(account, card) is None
+
+    def test_TwoCardsSharingFourDigits_StillMatchWeakly(self):
+        """The genuine weak case survives: a credit-card export naming
+        four digits still finds its card."""
+        card = claims_from_truelayer_card({"partial_card_number": "8484"})
+        export = claims_from_file_hints({"card_last_four": "8484"})
+
+        matched = best_match(card, export)
+
+        assert matched is not None
+        assert matched.kind == "card-last-4"
+        assert matched.strength == WEAK
+
+    def test_EachKindSaysWhichNumberItMeans_WhenRendered(self):
+        card = claims_from_truelayer_card({"partial_card_number": "8484"})[0]
+        account = next(
+            c
+            for c in claims_from_truelayer_account(
+                {"account_number": {"number": "12345678", "sort_code": "608371"}}
+            )
+            if c.kind == "account-last-4"
+        )
+
+        assert card.masked() == "card ending 8484"
+        assert account.masked() == "account ending 5678"

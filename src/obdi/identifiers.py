@@ -58,13 +58,26 @@ class Claim:
             return f"UK account ending {self.value[-4:]}"
         if self.kind == "account-number":
             return f"account ending {self.value[-4:]}"
+        if self.kind == CARD_LAST_4:
+            return f"card ending {self.value[-4:]}"
+        if self.kind == ACCOUNT_LAST_4:
+            return f"account ending {self.value[-4:]}"
         return f"ending {self.value[-4:]}"
 
 
-def _last_four(digits: str) -> Claim | None:
+#: Four digits off an ACCOUNT number and four digits off a CARD number are
+#: unrelated numbers in unrelated namespaces. A credit card ending 5678
+#: and a current account ending 5678 are not the same thing, and a single
+#: "last four" kind would have matched them - a false identity, which is
+#: the one failure this module exists to prevent.
+ACCOUNT_LAST_4 = "account-last-4"
+CARD_LAST_4 = "card-last-4"
+
+
+def _last_four(digits: str, kind: str) -> Claim | None:
     if len(digits) < 4:
         return None
-    return Claim("last-4", digits[-4:], WEAK)
+    return Claim(kind, digits[-4:], WEAK)
 
 
 def derive(claims: list[Claim]) -> list[Claim]:
@@ -80,7 +93,7 @@ def derive(claims: list[Claim]) -> list[Claim]:
         if claim.kind in ("uk-account", "account-number"):
             # The account number is the tail of a uk-account claim.
             number = claim.value.split(":")[-1]
-            implied = _last_four(number)
+            implied = _last_four(number, ACCOUNT_LAST_4)
             if implied is not None:
                 out.setdefault((implied.kind, implied.value), implied)
     return sorted(
@@ -114,7 +127,7 @@ def claims_from_truelayer_card(item: dict[str, object]) -> list[Claim]:
     has to be confirmed rather than applied.
     """
     partial = _digits(item.get("partial_card_number"))
-    claim = _last_four(partial)
+    claim = _last_four(partial, CARD_LAST_4)
     return [claim] if claim is not None else []
 
 
@@ -153,9 +166,9 @@ def claims_from_file_hints(hints: dict[str, object]) -> list[Claim]:
     elif number and len(number) > 4:
         claims.append(Claim("account-number", number, STRONG))
     elif number:
-        claims.append(Claim("last-4", number, WEAK))
+        claims.append(Claim(ACCOUNT_LAST_4, number, WEAK))
     partial = _digits(hints.get("card_last_four"))
-    weak = _last_four(partial)
+    weak = _last_four(partial, CARD_LAST_4)
     if weak is not None:
         claims.append(weak)
     return derive(claims)
