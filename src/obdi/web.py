@@ -2562,9 +2562,39 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return parse_qs(self.rfile.read(length).decode("utf-8"))
 
+    def _is_cross_site(self) -> bool:
+        """Is this POST being driven by a page on somebody else's site?
+
+        Origin is the header browsers attach to cross-site form
+        submissions, so a value that disagrees with the Host we were
+        asked on is a forgery attempt by definition. ABSENCE is treated
+        as trustworthy on purpose: only a browser can be tricked into
+        submitting somebody else's form, and a client that sends no
+        Origin is not one - so the CLI and deliberate automation keep
+        working, as a decision rather than an oversight.
+        """
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return False
+        host = (self.headers.get("Host") or "").strip().casefold()
+        return urlparse(origin).netloc.casefold() != host
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
+        if self._is_cross_site():
+            # Refused before the body is read, so a forged request cannot
+            # even consume the request stream.
+            self._respond(
+                403,
+                error_page(
+                    "Refused",
+                    "<p>This request came from a page on another site. "
+                    "Actions that change anything are accepted only from "
+                    "obdi's own pages.</p>",
+                ),
+            )
+            return
         if route == "/upload":
             self._upload()
             return

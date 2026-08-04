@@ -139,3 +139,73 @@ class TestServerConstruction:
         # indefinitely.
         assert ConnectionHandler.timeout is not None
         assert ConnectionHandler.timeout > 0
+
+
+class TestMutatingRoutesRequireTheirOwnOrigin:
+    """A page the owner merely visits must not be able to act for them.
+
+    obdi has no login - the tailnet is the perimeter - which is exactly
+    why the boundary belongs on the server rather than being implied by
+    which forms a page happens to render. "Only reachable by devices I
+    trust" does not cover a trusted device loading an untrusted page.
+    """
+
+    def _server(self, tmp_path):
+        from http.server import HTTPServer
+
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            rebuild_derived=lambda: "rebuild started",
+        )
+        handler = type(
+            "H",
+            (ConnectionHandler,),
+            {"config": config, "session": AuthorisationSession()},
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def _post(self, base, origin=None):
+        headers = {"Origin": origin} if origin else {}
+        return httpx.post(
+            f"{base}/rebuild-derived",
+            data={"confirm": "yes"},
+            headers=headers,
+            follow_redirects=False,
+        )
+
+    def test_APostDrivenByAnotherSite_IsRefused(self, tmp_path):
+        httpd, base = self._server(tmp_path)
+        try:
+            response = self._post(base, origin="https://evil.example")
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 403
+        assert "another site" in response.text
+
+    def test_APostFromObdisOwnPage_IsAccepted(self, tmp_path):
+        httpd, base = self._server(tmp_path)
+        try:
+            response = self._post(base, origin=base)
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code != 403
+
+    def test_APostWithNoOrigin_IsAccepted_BecauseItCannotBeForged(self, tmp_path):
+        """Deliberate rather than an oversight: only a browser can be
+        induced to submit somebody else's form, so a client sending no
+        Origin is not the attack this defends against - and the CLI and
+        deliberate automation keep working."""
+        httpd, base = self._server(tmp_path)
+        try:
+            response = self._post(base)
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code != 403
