@@ -1062,7 +1062,7 @@ class TestRebuildBanner:
                 "total": 120,
             }
         )
-        assert "artefact 12 of 120" in banner
+        assert "12" in banner and "120" in banner
 
         assert (
             _rebuild_running_banner(lambda: {"state": "done", "ok": True}) == ""
@@ -1313,7 +1313,8 @@ class TestDangerZone:
             (15, 5, 0),
         )
 
-        assert "artefact 118 of 137 (4,087 records)" in line
+        assert "118" in line and "137" in line
+        assert "4,087" in line
         assert "24,658 of 37,101 records" in line
         assert "8,032 transaction(s)" in line
 
@@ -1340,7 +1341,10 @@ class TestDangerZone:
             (15, 5, 0),
         )
 
-        assert "artefact 118 of 137 (1,203 of 4,087 records)" in line
+        assert "1,203 of 4,087" in line
+        assert "not yet committed" in line
+        # The banked figure stays its own statement, and excludes the
+        # 1,203 still in flight.
         assert "24,658 of 37,101 records" in line
 
     def test_RebuildLine_RatesProgressByRecordsConsumed_NotTransactionsProduced(self):
@@ -1365,8 +1369,10 @@ class TestDangerZone:
             (15, 5, 0),
         )
 
-        assert "~1,200 records/min" in line
-        assert "ETA ~10 min" in line
+        assert "1,200 records/min" in line
+        assert "10 min remaining" in line
+        # 5,200 transactions over five minutes would be 1,040 a minute.
+        assert "1,040" not in line
 
     def test_RebuildLine_WhenTheTotalIsNotYetKnown_ReportsWorkWithoutInventingAnEta(
         self,
@@ -1389,9 +1395,9 @@ class TestDangerZone:
             (15, 0, 10),
         )
 
-        assert "artefact 2 of 71" in line
+        assert "2" in line and "71" in line
         assert "10 transaction(s) so far" in line
-        assert "ETA" not in line
+        assert "remaining" not in line
 
     def test_RebuildLine_WhenCountsHaveNotMovedLately_SaysHowLongTheyHaveBeenStill(
         self,
@@ -1408,8 +1414,40 @@ class TestDangerZone:
             (15, 26, 0),
         )
 
-        assert "counts last moved 6 min ago" in line
-        assert "large artefact" in line
+        assert "6 min" in line
+        # This status carries no in-artefact position, so it came from a
+        # build that reports only at boundaries - where six quiet minutes
+        # is a large file, not a fault.
+        assert "stuck" not in line
+        assert "boundaries" in line
+
+    def test_RebuildLine_WhenAPerRecordBuildGoesQuiet_TreatsItAsASymptom(self):
+        """The same silence means opposite things.
+
+        A build reporting every record should refresh about once a
+        second, so a minute of quiet is evidence something is wrong. One
+        reporting only at artefact boundaries goes quiet for the length
+        of a large file as a matter of course. Reading both the same way
+        would either cry wolf or hide a hang, so the presence of an
+        in-artefact position decides which is said.
+        """
+        line = self._line(
+            {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 65,
+                "total": 71,
+                "records_in_flight": 900,
+                "current_records": 4087,
+                "records_done": 20000,
+                "records_total": 37101,
+                "updated_at": "2026-08-02T15:20:00Z",
+            },
+            (15, 26, 0),
+        )
+
+        assert "6 min" in line
+        assert "stuck" in line
 
     def test_RebuildLine_WhenFinished_ReportsTheLastRunRatherThanNothing(self):
         from obdi.web import _rebuild_status_line

@@ -1404,6 +1404,205 @@ def _rebuild_running_banner(
     return _rebuild_status_line(lambda: status)
 
 
+@dataclass(frozen=True)
+class _RebuildProgress:
+    """What is known about a running rebuild, derived once.
+
+    Deriving and rendering in one pass is what turned this display into a
+    seven-clause sentence: each new fact was appended to whatever string
+    existed, so the reading order followed the computation order and
+    every addition needed another conditional fragment. Facts are worked
+    out here and given a fixed home by the renderer, so adding one is a
+    new row rather than another clause.
+
+    Every field is optional because a status file may be written by an
+    older build, and a missing fact must read as unknown rather than as
+    zero.
+    """
+
+    started: str = ""
+    artefacts: tuple[int, int] | None = None
+    #: How big the artefact in flight is, and how far into it the replay
+    #: has reached. Separate fields because the size is worth stating on
+    #: its own - it explains a pause even when nothing reports position.
+    artefact_size: int | None = None
+    artefact_position: int | None = None
+    records: tuple[int, int] | None = None
+    transactions: int | None = None
+    per_minute: float | None = None
+    eta_minutes: float | None = None
+    still_for: float | None = None
+    #: Whether this status came from a build that reports within an
+    #: artefact. It decides what a gap in updates MEANS: builds that tick
+    #: per record should never go quiet, while older ones fall silent for
+    #: the length of a big artefact as a matter of course.
+    ticks_per_record: bool = False
+
+    @property
+    def fraction(self) -> float | None:
+        if self.records is None or self.records[1] <= 0:
+            return None
+        return min(self.records[0] / self.records[1], 1.0)
+
+
+def _parse_stamp(raw: str) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _pair(status: dict[str, object], first: str, second: str) -> tuple[int, int] | None:
+    """Two counts that only mean anything together."""
+    left = status.get(first)
+    right = status.get(second)
+    if isinstance(left, int) and isinstance(right, int) and right > 0:
+        return (left, right)
+    return None
+
+
+def _read_progress(status: dict[str, object], now: datetime) -> _RebuildProgress:
+    started_raw = str(status.get("started_at", ""))
+    began = _parse_stamp(started_raw)
+    records = _pair(status, "records_done", "records_total")
+    transactions = status.get("transactions")
+
+    per_minute: float | None = None
+    eta_minutes: float | None = None
+    if began is not None and records is not None:
+        elapsed = (now - began).total_seconds()
+        # Below half a minute the rate says more about start-up than
+        # about throughput, and an ETA drawn from it would be fiction.
+        if elapsed > 30 and records[0] > 0:
+            per_minute = records[0] / (elapsed / 60)
+            remaining = max(records[1] - records[0], 0)
+            if per_minute > 0 and remaining > 0:
+                eta_minutes = max(remaining / per_minute, 1)
+
+    still_for: float | None = None
+    updated = _parse_stamp(str(status.get("updated_at", "")))
+    if updated is not None:
+        still_for = max((now - updated).total_seconds(), 0)
+
+    size = status.get("current_records")
+    position = status.get("records_in_flight")
+    return _RebuildProgress(
+        started=started_raw,
+        artefacts=_pair(status, "done", "total"),
+        artefact_size=size if isinstance(size, int) and size > 0 else None,
+        artefact_position=position if isinstance(position, int) and position > 0 else None,
+        records=records,
+        transactions=transactions if isinstance(transactions, int) else None,
+        per_minute=per_minute,
+        eta_minutes=eta_minutes,
+        still_for=still_for,
+        ticks_per_record="records_in_flight" in status,
+    )
+
+
+def _stillness_note(progress: _RebuildProgress) -> str:
+    """How long since the numbers moved, and whether that is worrying.
+
+    The same silence means opposite things depending on what is
+    reporting. A build that ticks per record should refresh every second,
+    so a minute of quiet is a symptom; one that reports only at artefact
+    boundaries goes quiet for the length of a large file as a matter of
+    course. Saying "stuck" in the second case would be wrong, and saying
+    "this is normal" in the first would hide a fault.
+    """
+    if progress.still_for is None:
+        return ""
+    seconds = progress.still_for
+    if seconds < 10:
+        return ""
+    minutes = int(seconds // 60)
+    if progress.ticks_per_record:
+        if minutes < 1:
+            return f"Last update {int(seconds)}s ago."
+        return (
+            f'<strong>No update for {minutes} min</strong> - this build '
+            "reports every record, so it may be stuck."
+        )
+    if minutes < 1:
+        return f"Last update {int(seconds)}s ago."
+    return (
+        f"Counts last moved {minutes} min ago; this build reports only at "
+        "artefact boundaries, so a large one holds them still."
+    )
+
+
+def _rebuild_running_html(progress: _RebuildProgress) -> str:
+    """One row per fact, each with a fixed home.
+
+    Ordered by what a reader needs and in what order they need it: how
+    far along, what has been banked, what is happening right now, how
+    long it will take, whether it is healthy, and what it stops them
+    doing. Anything unknown omits its row rather than collapsing the
+    others together.
+    """
+    rows: list[str] = []
+
+    heading = "Rebuilding derived data"
+    fraction = progress.fraction
+    if fraction is not None:
+        rows.append(
+            f'<p><strong>{heading}</strong> <span class="muted">'
+            f"{fraction * 100:.0f}%</span></p>"
+            f'<progress value="{progress.records[0]}" '
+            f'max="{progress.records[1]}" style="width:100%"></progress>'
+        )
+    else:
+        rows.append(f"<p><strong>{heading}</strong></p>")
+
+    if progress.records is not None:
+        banked = f"{progress.records[0]:,} of {progress.records[1]:,} records"
+        if progress.transactions is not None:
+            banked += f" replayed into {progress.transactions:,} transaction(s)"
+        rows.append(f"<p>{banked}.</p>")
+    elif progress.transactions is not None:
+        rows.append(f"<p>{progress.transactions:,} transaction(s) so far.</p>")
+
+    if progress.artefacts is not None:
+        where = f"Artefact {progress.artefacts[0]:,} of {progress.artefacts[1]:,}"
+        if progress.artefact_size is not None:
+            if progress.artefact_position is not None:
+                # Position within the batch is stated as resolved-not-banked
+                # on purpose: a batch commits once, at its end, so this
+                # much is real work that a crash would still take back.
+                where += (
+                    f", {progress.artefact_position:,} of "
+                    f"{progress.artefact_size:,} records into it "
+                    "(not yet committed)"
+                )
+            else:
+                where += f", which holds {progress.artefact_size:,} records"
+        rows.append(f'<p class="muted">{where}.</p>')
+
+    pace: list[str] = []
+    if progress.per_minute is not None:
+        pace.append(f"~{progress.per_minute:,.0f} records/min")
+    if progress.eta_minutes is not None:
+        pace.append(f"about {progress.eta_minutes:.0f} min remaining")
+    note = _stillness_note(progress)
+    if pace or note:
+        # Only the first character is raised. str.capitalize() would
+        # lower-case everything after it, quietly mangling any term that
+        # is capitalised for a reason.
+        sentence = ", ".join(pace)
+        sentence = sentence[:1].upper() + sentence[1:]
+        tail = ". ".join(part for part in [sentence, note] if part)
+        rows.append(f'<p class="muted">{tail}</p>')
+
+    rows.append(
+        '<p class="muted">Started '
+        f"{html.escape(progress.started)}. Refresh to follow it; deploys "
+        "defer while it holds its lease.</p>"
+    )
+    return '<div class="warn">' + "".join(rows) + "</div>"
+
+
 def _rebuild_status_line(
     rebuild_status: Callable[[], dict[str, object]] | None,
     now: datetime | None = None,
@@ -1417,79 +1616,7 @@ def _rebuild_status_line(
         return ""
     state = str(status.get("state", ""))
     if state == "running":
-        started_raw = str(status.get("started_at", ""))
-        started = html.escape(started_raw)
-        extra = ""
-        done = status.get("done")
-        total = status.get("total")
-        txns = status.get("transactions")
-        if isinstance(done, int) and isinstance(total, int) and total > 0:
-            # Name the artefact in flight and its size. "The counts have
-            # not moved for nine minutes" is a mystery; "it is working
-            # through an artefact holding 4,087 records" is an answer,
-            # and the difference is one number.
-            current = status.get("current_records")
-            in_flight = status.get("records_in_flight")
-            extra = f" - artefact {done} of {total}"
-            if isinstance(current, int) and current > 0:
-                # Position within the artefact, kept separate from the
-                # banked total below and deliberately so: the batch
-                # commits once at its end, so this much is resolved but
-                # not yet durable. One combined number would promise
-                # progress that a crash could take back.
-                if isinstance(in_flight, int) and in_flight > 0:
-                    extra += f" ({in_flight:,} of {current:,} records)"
-                else:
-                    extra += f" ({current:,} records)"
-
-            records_done = status.get("records_done")
-            records_total = status.get("records_total")
-            counted = isinstance(records_done, int) and isinstance(
-                records_total, int
-            )
-            if counted and records_total > 0:
-                extra += f"; {records_done:,} of {records_total:,} records"
-                if isinstance(txns, int):
-                    extra += f" replayed into {txns:,} transaction(s)"
-                with contextlib.suppress(ValueError):
-                    began = datetime.fromisoformat(
-                        started_raw.replace("Z", "+00:00")
-                    )
-                    elapsed = ((now or datetime.now(UTC)) - began).total_seconds()
-                    if elapsed > 30 and records_done > 0:
-                        # Rate and ETA in records, matching what the
-                        # denominator counts. Rating transactions against
-                        # a record total silently overstates progress
-                        # wherever an artefact folds down.
-                        per_minute = records_done / (elapsed / 60)
-                        remaining = max(records_total - records_done, 0)
-                        extra += f", ~{per_minute:,.0f} records/min"
-                        if per_minute > 0 and remaining > 0:
-                            eta_min = remaining / per_minute
-                            extra += f", ETA ~{max(eta_min, 1):.0f} min"
-            elif isinstance(txns, int):
-                extra += f", {txns:,} transaction(s) so far"
-        updated_raw = str(status.get("updated_at", ""))
-        freshness = ""
-        if updated_raw:
-            with contextlib.suppress(ValueError):
-                updated = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
-                age = ((now or datetime.now(UTC)) - updated).total_seconds()
-                # Counts move only at artefact boundaries, so a single big
-                # file freezes the numbers for minutes - the age of the
-                # freeze is what tells slow from stuck.
-                if age >= 60:
-                    freshness = (
-                        f" (counts last moved {int(age // 60)} min ago - a "
-                        "large artefact holds them still while it processes)"
-                    )
-                else:
-                    freshness = f" (counts moved {int(age)}s ago)"
-        return (
-            f'<p class="warn">a rebuild is running (started {started})'
-            f"{extra}{freshness} - refresh to follow it; deploys defer "
-            "while it holds its lease</p>"
-        )
+        return _rebuild_running_html(_read_progress(status, now or datetime.now(UTC)))
     if state == "done":
         badge = "ok" if status.get("ok") else "bad"
         finished = html.escape(str(status.get("finished_at", "")))
