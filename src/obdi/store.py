@@ -28,6 +28,12 @@ from typing import ClassVar
 
 from .models import RawArtefact, SourceTier, Transaction, Valuation
 
+#: Bumped whenever SCHEMA changes or a migration must run again. It is
+#: the ONLY thing that makes an open do work, so a store at this version
+#: opens without writing - which is what lets the page render while a
+#: fetch holds the write lock.
+SCHEMA_VERSION = 1
+
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
 -- from a different request are different EVIDENCE: every empty API body is
@@ -46,6 +52,11 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     payload       BLOB NOT NULL,
     request_meta  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (digest, account_ref, origin)
+);
+
+CREATE TABLE IF NOT EXISTS obdi_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -198,12 +209,44 @@ class Store:
         # one host and one real filesystem, which is the case WAL supports.
         self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.execute("PRAGMA busy_timeout = 30000")
+        self._prepare()
+
+    def _schema_is_current(self) -> bool:
+        """Read-only test for "this store needs no work".
+
+        Deliberately the FIRST thing an open does, and deliberately a
+        SELECT: a store that is already current must be openable while
+        another process holds the write lock, because the web page opens
+        the store to render and a pull cycle writes for minutes at a
+        time. Anything that takes a write lock here makes reading the
+        page wait for the fetch to finish.
+        """
+        try:
+            row = self.connection.execute(
+                "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # No meta table: a store from before this mechanism, or a new
+            # one. Either way there is work to do.
+            return False
+        return bool(row) and str(row[0]) == str(SCHEMA_VERSION)
+
+    def _prepare(self) -> None:
+        """Bring the store up to date, exactly once per version."""
+        if self._schema_is_current():
+            return
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
         self._migrate_request_meta_column()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
         self._migrate_starling_connection_id()
+        self.connection.execute(
+            "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
+        self.connection.commit()
 
     def _migrate_content_keys(self) -> None:
         """Re-key any row whose stored key no longer matches its own content.
@@ -538,6 +581,16 @@ class Store:
         first run there is nothing left matching.
         """
         with contextlib.suppress(sqlite3.OperationalError):
+            # Look before writing. Even inside the once-only path this
+            # matters: a migration that takes the write lock to change
+            # nothing is a migration that can block a reader for the
+            # busy timeout, and the cost of knowing is one SELECT.
+            pending = self.connection.execute(
+                "SELECT 1 FROM fetch_attempts WHERE connection_id = 'starling' "
+                "AND source LIKE 'starling%' LIMIT 1"
+            ).fetchone()
+            if pending is None:
+                return
             self.connection.execute(
                 "UPDATE fetch_attempts SET connection_id = 'starling-api' "
                 "WHERE connection_id = 'starling' AND source LIKE 'starling%'"

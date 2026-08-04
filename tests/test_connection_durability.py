@@ -108,3 +108,90 @@ class TestConcurrentUpdates:
         ConnectionStore(path).put(refreshed)
 
         assert ConnectionStore(path).load()["halifax"].refresh_token == "rotated"
+
+
+class TestOpeningAStoreDoesNotNeedTheWriteLock:
+    """The page must render while a fetch is writing.
+
+    Opening a store used to run migrations, and migrations write. A pull
+    cycle holds its write transaction for minutes, so every page load
+    waited on the busy timeout and the browser gave up - which is exactly
+    what ERR_CONNECTION_ABORTED looked like from the phone.
+    """
+
+    def test_AnUpToDateStore_OpensWhileAnotherWriterHoldsItsTransaction(
+        self, tmp_path
+    ):
+        import sqlite3
+        import time
+
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass  # first open does the work and stamps the version
+
+        writer = sqlite3.connect(db, timeout=30.0)
+        writer.execute("PRAGMA journal_mode = WAL")
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "INSERT INTO fetch_attempts (attempted_at, source, connection_id, "
+            "account_ref, asked, request_meta, outcome) VALUES "
+            "('2026-08-04T16:45:00Z','truelayer-booked','halifax',"
+            "'truelayer:a','90d','{}','ok')"
+        )
+        try:
+            started = time.perf_counter()
+            with Store(db) as store:
+                store.counts()
+            elapsed = time.perf_counter() - started
+        finally:
+            writer.rollback()
+            writer.close()
+
+        assert elapsed < 2.0, (
+            f"opening the store took {elapsed:.1f}s while a writer held the "
+            "lock - it is taking the write lock on open again"
+        )
+
+    def test_AFreshStore_StampsItsVersion_SoTheNextOpenIsReadOnly(self, tmp_path):
+        from obdi.store import SCHEMA_VERSION, Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            stamped = store.connection.execute(
+                "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
+            ).fetchone()
+
+        assert stamped[0] == str(SCHEMA_VERSION)
+
+    def test_AStoreFromBeforeTheMechanism_IsStillMigrated(self, tmp_path):
+        """An existing store has no meta table, so the first open after
+        the upgrade must still do the work rather than assume it done."""
+        import sqlite3
+
+        from obdi.store import Store
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db):
+            pass
+        legacy = sqlite3.connect(db)
+        legacy.execute("DROP TABLE obdi_meta")
+        legacy.execute(
+            "INSERT INTO fetch_attempts (attempted_at, source, connection_id, "
+            "account_ref, asked, request_meta, outcome) VALUES "
+            "('2026-08-01T00:00:00Z','starling-feed','starling',"
+            "'starling:uid-1','routine','{}','ok')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        with Store(db) as store:
+            ids = [
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT connection_id FROM fetch_attempts"
+                )
+            ]
+
+        assert ids == ["starling-api"]

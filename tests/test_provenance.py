@@ -259,7 +259,12 @@ class TestOldFormatKeysAreMigrated:
     tier-two matching would silently stop working for pre-change data.
     """
 
-    def test_Open_RecomputesAnyKeyThatNoLongerMatchesItsOwnContent(self, tmp_path):
+    def test_OpeningAStoreFromBeforeTheChange_RecomputesMismatchedKeys(self, tmp_path):
+        """The migration runs when the store's recorded schema version is
+        behind, which is the real upgrade path: an old store, then the
+        first open on new code. It deliberately does NOT re-run on every
+        open - opening must stay read-only so a page can render while a
+        fetch holds the write lock."""
         from obdi.identity import content_key as compute
 
         db = tmp_path / "s.sqlite3"
@@ -270,6 +275,9 @@ class TestOldFormatKeysAreMigrated:
                 "UPDATE transactions SET content_key = 'old-format-key' WHERE entity_id = ?",
                 (entity,),
             )
+            # A store written by a version before this mechanism carries no
+            # version stamp, so the next open does the work.
+            store.connection.execute("DELETE FROM obdi_meta")
             store.connection.commit()
 
         with Store(db) as store:

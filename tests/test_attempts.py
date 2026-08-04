@@ -875,8 +875,11 @@ class TestStarlingConnectionIdMigration:
                 request_meta="{}",
                 outcome="ok",
             )
+            # Rows written before this mechanism existed carry no version
+            # stamp; the next open is the upgrade that repairs them.
+            store.connection.execute("DELETE FROM obdi_meta")
+            store.connection.commit()
 
-        # Re-opening runs the migration.
         with Store(db) as store:
             ids = [
                 row[0]
@@ -903,6 +906,8 @@ class TestStarlingConnectionIdMigration:
                 request_meta="{}",
                 outcome="ok",
             )
+            store.connection.execute("DELETE FROM obdi_meta")
+            store.connection.commit()
 
         with Store(db) as store:
             ids = [
