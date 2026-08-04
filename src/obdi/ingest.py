@@ -172,11 +172,20 @@ def reconcile_batch(
         numbered.append(replace(transaction, occurrence=seen.get(key, 0)))
         seen[key] = seen.get(key, 0) + 1
 
+    # Each account's history is read ONCE and then kept up to date in
+    # memory as the batch resolves against it. dict.setdefault cannot be
+    # used here: it evaluates its default eagerly, so every record ran a
+    # full query and rebuilt every stored row of the account into a
+    # Transaction before discarding the lot because the key was already
+    # present. The work was invisible - correctness was unaffected - and
+    # it scaled with the batch AND the account, so a merged account
+    # holding two pipes' history paid it twice over.
     by_account: dict[str, list[Transaction]] = {}
     for position, transaction in enumerate(numbered, start=1):
-        existing = by_account.setdefault(
-            transaction.account_id, store.transactions_for_account(transaction.account_id)
-        )
+        existing = by_account.get(transaction.account_id)
+        if existing is None:
+            existing = store.transactions_for_account(transaction.account_id)
+            by_account[transaction.account_id] = existing
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
 
         if on_record is not None:

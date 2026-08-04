@@ -196,3 +196,121 @@ class TestInternalTransfers:
         result = pair_internal_transfers([out_a, out_b, in_a, in_b])
 
         assert sum(1 for t in result if t.is_internal_transfer) == 4
+
+
+class TestABatchReadsEachAccountOnceNotOncePerRecord:
+    """What made a 37,000-record rebuild take 54 minutes.
+
+    Reconciling needs the account's existing rows to match against, and
+    it needs them once. Re-reading them for every incoming record is
+    invisible in a unit test, survives every correctness check, and costs
+    a full SQL query plus the reconstruction of every stored row each
+    time - so the price grows with both the batch and the account, and a
+    merged account that holds two pipes' history pays it twice over.
+    """
+
+    def _batch(self, store, account, count, prefix):
+        from datetime import date
+
+        from obdi.ingest import reconcile_batch
+        from obdi.models import SourceTier, Transaction, TransactionStatus
+
+        transactions = [
+            Transaction(
+                entity_id=f"{prefix}-{n}",
+                account_id=account,
+                amount_minor=-(100 + n),
+                currency="GBP",
+                description=f"SHOP {n}",
+                value_date=date(2026, 1, 1),
+                booking_date=date(2026, 1, 1),
+                source="truelayer",
+                source_id=f"{prefix}-{n}",
+                content_key=f"ck-{prefix}-{n}",
+                tier=SourceTier.AUTHORITATIVE,
+                status=TransactionStatus.BOOKED,
+            )
+            for n in range(count)
+        ]
+        return reconcile_batch(store, transactions, digest=f"d-{prefix}")
+
+    def test_ReconcilingABatch_ReadsEachAccountsHistoryOnce(self, tmp_path):
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            reads: list[str] = []
+            original = store.transactions_for_account
+
+            def counted(account_id):
+                reads.append(account_id)
+                return original(account_id)
+
+            store.transactions_for_account = counted  # type: ignore[method-assign]
+
+            self._batch(store, "acc-1", 40, "a")
+            assert reads == ["acc-1"], (
+                f"{len(reads)} reads of the store for a 40-record batch "
+                "touching one account"
+            )
+
+            reads.clear()
+            from datetime import date
+
+            from obdi.ingest import reconcile_batch
+            from obdi.models import SourceTier, Transaction, TransactionStatus
+
+            mixed = [
+                Transaction(
+                    entity_id=f"m-{n}",
+                    account_id=f"acc-{n % 3}",
+                    amount_minor=-(500 + n),
+                    currency="GBP",
+                    description=f"MIXED {n}",
+                    value_date=date(2026, 2, 1),
+                    booking_date=date(2026, 2, 1),
+                    source="truelayer",
+                    source_id=f"m-{n}",
+                    content_key=f"ck-m-{n}",
+                    tier=SourceTier.AUTHORITATIVE,
+                    status=TransactionStatus.BOOKED,
+                )
+                for n in range(30)
+            ]
+            reconcile_batch(store, mixed, digest="d-mixed")
+
+            assert sorted(reads) == ["acc-0", "acc-1", "acc-2"], (
+                f"expected one read per account touched, got {len(reads)}"
+            )
+
+    def test_ABatchIntoAWellPopulatedAccount_DoesNotSlowDownWithItsSize(
+        self, tmp_path
+    ):
+        """The cost of adding rows must not scale with what is already held.
+
+        Stated as a ratio rather than a wall-clock budget so it means the
+        same on any machine: a batch landing into an account holding four
+        times as much must not take dramatically longer, which is exactly
+        what re-reading the account per record produced.
+        """
+        import time
+
+        from obdi.store import Store
+
+        def timed(path, seed_count):
+            with Store(path) as store:
+                if seed_count:
+                    self._batch(store, "acc-1", seed_count, "seed")
+                start = time.perf_counter()
+                self._batch(store, "acc-1", 200, "new")
+                return time.perf_counter() - start
+
+        small = timed(tmp_path / "small.sqlite3", 200)
+        large = timed(tmp_path / "large.sqlite3", 800)
+
+        # Matching itself is linear in what is held, so some growth is
+        # expected and legitimate; re-reading the account per record made
+        # it grossly superlinear instead.
+        assert large < small * 6, (
+            f"a 4x larger account made the same batch {large / small:.1f}x "
+            "slower - the per-record cost is scaling with account size"
+        )
