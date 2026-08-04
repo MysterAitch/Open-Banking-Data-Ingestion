@@ -406,9 +406,14 @@ SPEC_SOURCE = {
         "url": "https://docs.truelayer.com/openapi/data-api-v1.json",
         "retrieved": "2026-08-04",
         "note": (
-            "Quoted verbatim. TrueLayer steers new integrations to Data API "
-            "v3, whose schema is not published at a comparable URL, so these "
-            "descriptions may not hold for v3."
+            "Quoted verbatim. A v3 schema is published alongside this one at "
+            "docs.truelayer.com/openapi/data-api-v3.json and both were "
+            "compared before v1 was chosen: v3 is asynchronous, paginates "
+            "where v1 does not, drops merchant_name, documents no stable "
+            "transaction identifier, and has no balance, direct-debit, "
+            "standing-order or card endpoints at all. These descriptions "
+            "therefore describe the version in use, not the newer one. "
+            "There is no Data API v2 - that numbering belongs to Payments."
         ),
     },
     "starling": {
