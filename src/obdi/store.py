@@ -601,6 +601,75 @@ class Store:
             )
             self.connection.commit()
 
+    def source_breakdown(self, account_id: str) -> dict[str, object]:
+        """Which feeders this account is made of, and how much each gave.
+
+        Counts DISTINCT transactions per source and per feeder, never
+        sightings: a payment seen by two pipes is one payment, and saying
+        otherwise would make corroboration look like growth. The feeder is
+        recovered from the artefact each sighting came from, so it is the
+        provider reference that actually delivered the row rather than
+        whatever the account is called now.
+        """
+        rows = self.connection.execute(
+            """
+            SELECT t.entity_id AS entity_id,
+                   COALESCE(ts.source, t.source) AS source,
+                   (SELECT account_ref FROM raw_artefacts
+                     WHERE digest = ts.artefact_digest LIMIT 1) AS feeder
+              FROM transactions t
+              LEFT JOIN transaction_sources ts ON ts.entity_id = t.entity_id
+             WHERE t.account_id = ?
+            """,
+            (account_id,),
+        ).fetchall()
+
+        by_source: dict[str, set[str]] = {}
+        by_feeder: dict[tuple[str, str], set[str]] = {}
+        seen_sources: dict[str, set[str]] = {}
+        sightings = 0
+        for row in rows:
+            entity = str(row["entity_id"])
+            source = str(row["source"] or "")
+            feeder = str(row["feeder"] or "")
+            sightings += 1
+            by_source.setdefault(source, set()).add(entity)
+            by_feeder.setdefault((source, feeder), set()).add(entity)
+            seen_sources.setdefault(entity, set()).add(source)
+
+        corroborated = sum(1 for sources in seen_sources.values() if len(sources) > 1)
+        return {
+            "transactions": len(seen_sources),
+            "sightings": sightings,
+            "sources": sorted(by_source),
+            "by_source": {
+                source: len(entities) for source, entities in sorted(by_source.items())
+            },
+            "by_feeder": [
+                {"source": source, "feeder": feeder, "transactions": len(entities)}
+                for (source, feeder), entities in sorted(by_feeder.items())
+            ],
+            "corroborated": corroborated,
+            "single_source": len(seen_sources) - corroborated,
+        }
+
+    def source_counts_by_account(self) -> dict[str, int]:
+        """How many distinct sources feed each account, in one query.
+
+        Rendered on the roster, so it must cost one statement rather than
+        one per account - the home page is the hot path.
+        """
+        rows = self.connection.execute(
+            """
+            SELECT t.account_id AS account_id,
+                   COUNT(DISTINCT COALESCE(ts.source, t.source)) AS sources
+              FROM transactions t
+              LEFT JOIN transaction_sources ts ON ts.entity_id = t.entity_id
+             GROUP BY t.account_id
+            """
+        ).fetchall()
+        return {str(row["account_id"]): int(row["sources"]) for row in rows}
+
     def sources_for(self, entity_id: str) -> list[str]:
         """Every source that has observed this transaction.
 

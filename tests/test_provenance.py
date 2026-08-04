@@ -288,3 +288,96 @@ class TestOldFormatKeysAreMigrated:
                 description=row.description,
             )
             assert row.content_key == expected
+
+
+class TestAccountSourceBreakdown:
+    """Which feeders an account is made of, and how much each gave.
+
+    The question the multi-pipe plan exists to answer: a payment seen by
+    the Starling API and by TrueLayer is ONE payment corroborated twice,
+    and a page that counts it twice turns agreement into apparent growth.
+    """
+
+    def _seen_by(self, store, entity_id, source, digest):
+        store.connection.execute(
+            "INSERT OR IGNORE INTO transaction_sources (entity_id, source, "
+            "artefact_digest, first_seen_at) VALUES (?, ?, ?, ?)",
+            (entity_id, source, digest, "2026-08-04T00:00:00"),
+        )
+
+    def test_APaymentSeenByTwoPipes_CountsOnce_AndIsMarkedCorroborated(
+        self, tmp_path
+    ):
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, [txn("starling", source_id="s-1")], digest="d-star")
+            entity = store.all_transactions()[0].entity_id
+            self._seen_by(store, entity, "truelayer", "d-tl")
+            store.connection.commit()
+
+            breakdown = store.source_breakdown(
+                store.all_transactions()[0].account_id
+            )
+
+        assert breakdown["transactions"] == 1
+        assert breakdown["sightings"] == 2
+        assert breakdown["corroborated"] == 1
+        assert breakdown["single_source"] == 0
+        assert breakdown["sources"] == ["starling", "truelayer"]
+
+    def test_ASingleSourcedAccount_ReportsNothingCorroborated(self, tmp_path):
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, [txn("starling", source_id="s-1")], digest="d-star")
+            breakdown = store.source_breakdown(
+                store.all_transactions()[0].account_id
+            )
+
+        assert breakdown["transactions"] == breakdown["sightings"] == 1
+        assert breakdown["corroborated"] == 0
+        assert breakdown["single_source"] == 1
+
+    def test_TheFeederIsRecoveredFromTheArtefactThatDeliveredTheRow(self, tmp_path):
+        """Not the account's current name - the reference that actually
+        delivered it, so a Starling SPACE is named as the feeder it is."""
+        from datetime import UTC, datetime
+
+        from obdi.models import RawArtefact
+
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.land_artefact(
+                RawArtefact(
+                    source="starling-feed",
+                    account_ref="starling:space-bills-uid",
+                    fetched_at=datetime(2026, 8, 4, tzinfo=UTC),
+                    media_type="application/json",
+                    digest="d-star",
+                    payload=b"{}",
+                )
+            )
+            reconcile_batch(store, [txn("starling", source_id="s-1")], digest="d-star")
+            breakdown = store.source_breakdown(
+                store.all_transactions()[0].account_id
+            )
+
+        assert breakdown["by_feeder"] == [
+            {
+                "source": "starling",
+                "feeder": "starling:space-bills-uid",
+                "transactions": 1,
+            }
+        ]
+
+    def test_SourceCountsForEveryAccount_ComeFromOneQuery(self, tmp_path):
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, [txn("starling", source_id="s-1")], digest="d-1")
+            entity = store.all_transactions()[0].entity_id
+            account = store.all_transactions()[0].account_id
+            self._seen_by(store, entity, "truelayer", "d-2")
+            store.connection.commit()
+
+            counts = store.source_counts_by_account()
+
+        assert counts[account] == 2

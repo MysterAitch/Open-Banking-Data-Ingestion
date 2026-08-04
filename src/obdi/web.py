@@ -521,6 +521,59 @@ def _shape_detail(field: dict[str, object]) -> str:
     return "-"
 
 
+def _breakdown_html(breakdown: dict[str, object]) -> str:
+    """Which feeders made this account, and how much each contributed.
+
+    Transactions and sightings are stated separately and always: they are
+    equal until a payment is seen twice, and the moment they diverge is
+    exactly the moment the difference matters. Corroboration is the point
+    of running more than one pipe, so it gets its own line rather than
+    being inferred from the arithmetic.
+    """
+    feeders = breakdown.get("by_feeder")
+    rows = [f for f in feeders if isinstance(f, dict)] if isinstance(feeders, list) else []
+    if not rows:
+        return ""
+    transactions = int(str(breakdown.get("transactions", 0) or 0))
+    sightings = int(str(breakdown.get("sightings", 0) or 0))
+    corroborated = int(str(breakdown.get("corroborated", 0) or 0))
+    single = int(str(breakdown.get("single_source", 0) or 0))
+    sources = breakdown.get("sources")
+    source_count = len(sources) if isinstance(sources, list) else 0
+
+    lines = [
+        "<h2>Where these rows came from</h2>",
+        f"<p>{transactions:,} transaction(s), {sightings:,} sighting(s), "
+        f"{source_count} source(s). A transaction seen by two pipes is one "
+        "transaction and two sightings.</p>",
+        '<div class="row">',
+    ]
+    for entry in sorted(
+        rows, key=lambda e: -int(str(e.get("transactions", 0) or 0))
+    ):
+        label = html.escape(str(entry.get("label") or entry.get("feeder") or ""))
+        source = html.escape(str(entry.get("source", "")))
+        count = int(str(entry.get("transactions", 0) or 0))
+        lines.append(
+            f'<span class="muted">{source}</span> {label}: '
+            f"<strong>{count:,}</strong> transaction(s)<br>"
+        )
+    lines.append("</div>")
+    if source_count > 1:
+        lines.append(
+            f'<p><span class="ok">{corroborated:,} transaction(s) corroborated '
+            f"by two or more sources</span>; {single:,} seen by one source only. "
+            "A row only one pipe has seen is either a gap in the others or a "
+            "disagreement worth reading.</p>"
+        )
+    else:
+        lines.append(
+            '<p class="muted">One source, so nothing is corroborated yet - '
+            "every row here rests on a single pipe's word.</p>"
+        )
+    return "".join(lines)
+
+
 def _shape_html(summary: dict[str, object]) -> str:
     """The computed-shape block, shared by the artefact and account pages."""
     raw_fields = summary.get("fields")
@@ -2233,6 +2286,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         id_line = (
             f'<br><span class="muted mono">{html.escape(ref)}</span>' if label else ""
         )
+        raw_breakdown = shape.get("breakdown")
+        breakdown = raw_breakdown if isinstance(raw_breakdown, dict) else {}
         body = (
             f"<p><strong>{heading}</strong>{id_line}{details_html}<br>"
             f"{shape.get('count', 0):,} merged transaction(s) "
@@ -2240,7 +2295,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "<p>This is the MERGED layer - what the store believes after "
             "matching - not one payload. The raw artefacts remain the "
             "evidence underneath.</p>"
-            "<h2>Computed shape</h2>" + _shape_html(summary) + HOME_LINK
+            + _breakdown_html(breakdown)
+            + "<h2>Computed shape</h2>"
+            + _shape_html(summary)
+            + HOME_LINK
         )
         self._respond(200, render_page("Account", body))
 

@@ -1224,10 +1224,25 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             "connection": connection_id,
                             "provider_ref": account["account_id"],
                         }
+        from .labels import collect_feeder_labels
+
+        with Store(db_path) as store:
+            breakdown = store.source_breakdown(ref)
+            feeder_labels = collect_feeder_labels(
+                store, sorted(ConnectionStore(store_path).load())
+            )
+        feeders = breakdown.get("by_feeder")
+        for entry in feeders if isinstance(feeders, list) else []:
+            if isinstance(entry, dict):
+                raw_ref = str(entry.get("feeder", ""))
+                entry["label"] = feeder_labels.get(raw_ref, raw_ref or "(not recorded)")
         return {
             "ref": ref,
-            "count": len(rows),
+            # The headline is transactions, never sightings - a payment
+            # seen by two pipes is one payment.
+            "count": breakdown.get("transactions", len(rows)),
             "sources": sorted({t.source for t in rows}),
+            "breakdown": breakdown,
             "summary": summarise(payload, "application/json"),
             "details": details,
         }
