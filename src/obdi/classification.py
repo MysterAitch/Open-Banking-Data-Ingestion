@@ -70,11 +70,288 @@ PROVIDER_PARTIAL = "provider-partial"
 #: Nobody has classified this yet, so it is withheld and says so loudly.
 UNCLASSIFIED = "unclassified"
 
+#: Credentials. These belong in the credential store and must never reach
+#: a landed payload; if one appears in evidence that is an incident, not a
+#: display question, so it is withheld AND said loudly.
+CREDENTIAL = "credential"
+
+#: Every field path either provider DOCUMENTS or has actually sent.
+#: Enumeration only - being listed here is not a judgement about
+#: sensitivity, it is a statement that the field exists. Classifying
+#: one is separate work, done when somebody cares about that field
+#: rather than as a precondition for the page rendering at all.
+#:
+#: The distinction this buys: a field listed here but unclassified is
+#: KNOWN AND UNJUDGED, while a field in neither list is something the
+#: provider has started sending that no spec we hold describes - a much
+#: louder signal, and one worth reading as news rather than as a gap.
+#: Generated from docs.truelayer.com/openapi/data-api-v1.json plus the
+#: Starling payloads actually landed.
+KNOWN_FIELDS: frozenset[str] = frozenset(
+    {
+        "access_token",
+        "account_id",
+        "account_ids_whitelist",
+        "account_number",
+        "account_number.bsb",
+        "account_number.iban",
+        "account_number.number",
+        "account_number.routing_number",
+        "account_number.sort_code",
+        "account_number.swift_bic",
+        "account_type",
+        "accounts",
+        "action_needed",
+        "address",
+        "amount",
+        "available",
+        "balance",
+        "bank_transaction_id",
+        "branch_id",
+        "bsb",
+        "card_network",
+        "card_type",
+        "cards",
+        "client_id",
+        "client_secret",
+        "code_challenge",
+        "consent_created_at",
+        "consent_expires_at",
+        "consent_status",
+        "consent_status_updated_at",
+        "counter_party_iban",
+        "counter_party_preferred_name",
+        "credentials_id",
+        "credit_limit",
+        "currency",
+        "current",
+        "debtor_account_name",
+        "description",
+        "detail",
+        "direct_debit_id",
+        "display_name",
+        "email",
+        "emails",
+        "error",
+        "error_description",
+        "error_details",
+        "errors",
+        "expires_in",
+        "final_payment_amount",
+        "final_payment_date",
+        "first_payment_amount",
+        "first_payment_date",
+        "frequency",
+        "from",
+        "full_name",
+        "iban",
+        "id",
+        "instance",
+        "last_statement_balance",
+        "last_statement_date",
+        "logo_uri",
+        "merchant_name",
+        "meta",
+        "meta.address",
+        "meta.bank_transaction_id",
+        "meta.counter_party_iban",
+        "meta.counter_party_preferred_name",
+        "meta.debtor_account_name",
+        "meta.provider_account_id",
+        "meta.provider_category",
+        "meta.provider_direct_debit_id",
+        "meta.provider_id",
+        "meta.provider_mandate_identification",
+        "meta.provider_merchant_name",
+        "meta.provider_reference",
+        "meta.provider_source",
+        "meta.provider_transaction_category",
+        "meta.provider_transaction_id",
+        "meta.transaction_type",
+        "meta.user_comments",
+        "name",
+        "name_on_card",
+        "next_payment_amount",
+        "next_payment_date",
+        "normalised_provider_transaction_id",
+        "number",
+        "overdraft",
+        "partial_card_number",
+        "payee",
+        "payment_due",
+        "payment_due_date",
+        "pending",
+        "pending_transactions",
+        "phone",
+        "phones",
+        "previous_payment_amount",
+        "previous_payment_timestamp",
+        "privacy_policy",
+        "provider",
+        "provider.display_name",
+        "provider.logo_uri",
+        "provider.provider_id",
+        "provider_account_id",
+        "provider_category",
+        "provider_direct_debit_id",
+        "provider_id",
+        "provider_mandate_identification",
+        "provider_merchant_name",
+        "provider_reference",
+        "provider_source",
+        "provider_transaction_category",
+        "provider_transaction_id",
+        "redirect_uri",
+        "reference",
+        "refresh_token",
+        "request",
+        "request.from",
+        "request.to",
+        "response_mode",
+        "results",
+        "results.accounts",
+        "results.accounts.account_id",
+        "results.accounts.balance",
+        "results.accounts.balance.available",
+        "results.accounts.balance.currency",
+        "results.accounts.balance.current",
+        "results.accounts.balance.overdraft",
+        "results.accounts.balance.update_timestamp",
+        "results.accounts.pending_transactions",
+        "results.accounts.pending_transactions.amount",
+        "results.accounts.pending_transactions.currency",
+        "results.accounts.pending_transactions.description",
+        "results.accounts.pending_transactions.merchant_name",
+        "results.accounts.pending_transactions.meta",
+        "results.accounts.pending_transactions.normalised_provider_transaction_id",
+        "results.accounts.pending_transactions.provider_transaction_id",
+        "results.accounts.pending_transactions.running_balance",
+        "results.accounts.pending_transactions.timestamp",
+        "results.accounts.pending_transactions.transaction_category",
+        "results.accounts.pending_transactions.transaction_classification",
+        "results.accounts.pending_transactions.transaction_id",
+        "results.accounts.pending_transactions.transaction_type",
+        "results.accounts.transactions",
+        "results.accounts.transactions.amount",
+        "results.accounts.transactions.currency",
+        "results.accounts.transactions.description",
+        "results.accounts.transactions.merchant_name",
+        "results.accounts.transactions.meta",
+        "results.accounts.transactions.normalised_provider_transaction_id",
+        "results.accounts.transactions.provider_transaction_id",
+        "results.accounts.transactions.running_balance",
+        "results.accounts.transactions.timestamp",
+        "results.accounts.transactions.transaction_category",
+        "results.accounts.transactions.transaction_classification",
+        "results.accounts.transactions.transaction_id",
+        "results.accounts.transactions.transaction_type",
+        "results.cards",
+        "results.cards.account_id",
+        "results.cards.balance",
+        "results.cards.balance.available",
+        "results.cards.balance.credit_limit",
+        "results.cards.balance.currency",
+        "results.cards.balance.current",
+        "results.cards.balance.last_statement_balance",
+        "results.cards.balance.last_statement_date",
+        "results.cards.balance.payment_due",
+        "results.cards.balance.payment_due_date",
+        "results.cards.balance.update_timestamp",
+        "results.cards.pending_transactions",
+        "results.cards.transactions",
+        "results_uri",
+        "routing_number",
+        "running_balance",
+        "running_balance.amount",
+        "running_balance.currency",
+        "scopes",
+        "sort_code",
+        "state",
+        "status",
+        "swift_bic",
+        "task_id",
+        "timestamp",
+        "title",
+        "to",
+        "token_type",
+        "trace_id",
+        "transaction_category",
+        "transaction_classification",
+        "transaction_id",
+        "transaction_type",
+        "transactions",
+        "type",
+        "update_timestamp",
+        "user",
+        "user.email",
+        "user.id",
+        "user.name",
+        "user.phone",
+        "user_comments",
+        "user_has_reconfirmed_consent",
+        "user_input_link",
+        "valid_from",
+        "valid_to",
+        "webhook_uri",
+        # --- starling, from landed evidence ---
+        "acceptedOverdraft",
+        "accountIdentifier",
+        "accountType",
+        "accountUid",
+        "amount.currency",
+        "amount.minorUnits",
+        "bankIdentifier",
+        "batchPaymentDetails",
+        "bic",
+        "categoryUid",
+        "clearedBalance",
+        "counterPartyName",
+        "counterPartySubEntityIdentifier",
+        "counterPartySubEntityName",
+        "counterPartySubEntitySubIdentifier",
+        "counterPartySubEntityUid",
+        "counterPartyType",
+        "counterPartyUid",
+        "country",
+        "createdAt",
+        "defaultCategory",
+        "direction",
+        "effectiveBalance",
+        "feedItemUid",
+        "feedItems",
+        "hasAttachment",
+        "hasReceipt",
+        "pendingTransactions",
+        "retryAllocationUntilTime",
+        "savedPercentage",
+        "savingsGoalUid",
+        "savingsGoals",
+        "settlementTime",
+        "source",
+        "sourceAmount",
+        "sourceAmount.currency",
+        "sourceAmount.minorUnits",
+        "sourceSubType",
+        "spendingCategory",
+        "target",
+        "totalFeeAmount",
+        "totalFeeAmount.currency",
+        "totalFeeAmount.minorUnits",
+        "totalSaved",
+        "transactingApplicationUserUid",
+        "transactionTime",
+        "updatedAt",
+        "userNote",
+    }
+)
+
 #: Field paths, by the last segment unless a full path is given. Patterns
 #: are matched against the whole dotted path first, then the leaf, so a
 #: nested "account_number.number" can be classified without also claiming
 #: every field called "number" everywhere.
 _RULES: list[tuple[str, str]] = [
+    # --- credentials: never legitimately present in evidence ---
+    (r"^(access_token|refresh_token|client_secret|code_challenge)$", CREDENTIAL),
     # --- permanent: rotation means closing the account ---
     (r"^account_number\.(number|sort_code|iban|swift_bic)$", PERMANENT_ID),
     (r"^(iban|bic|swift_bic)$", PERMANENT_ID),
@@ -119,6 +396,328 @@ _RULES: list[tuple[str, str]] = [
 _COMPILED = [(re.compile(pattern), level) for pattern, level in _RULES]
 
 
+#: Where the quoted prose came from, so a reader can go and check it and
+#: a later session can tell whether it has gone stale. Recorded rather
+#: than remembered: an undated quotation from a living document is a
+#: claim about the present that was true at some unknown point.
+SPEC_SOURCE = {
+    "truelayer": {
+        "title": "TrueLayer Data API v1",
+        "url": "https://docs.truelayer.com/openapi/data-api-v1.json",
+        "retrieved": "2026-08-04",
+        "note": (
+            "Quoted verbatim. TrueLayer steers new integrations to Data API "
+            "v3, whose schema is not published at a comparable URL, so these "
+            "descriptions may not hold for v3."
+        ),
+    },
+    "starling": {
+        "title": "Starling API",
+        "url": "https://developer.starlingbank.com/docs",
+        "retrieved": "not fetched - Starling paths below are from landed "
+        "evidence, not from their spec",
+        "note": (
+            "Field names observed in payloads obdi actually received. Their "
+            "presence is evidence; their MEANING is inferred by us and is "
+            "not the provider speaking."
+        ),
+    },
+}
+
+#: What the PROVIDER says each field is, in their words, taken from
+#: their spec. A paraphrase would be our claim about their field;
+#: this is theirs, and it updates when they do.
+FIELD_DESCRIPTIONS: dict[str, str] = {
+        'access_token': 'A short-lived JWT token used to access data on behalf of the End user',
+        'account_ids_whitelist': (
+            'if included, only accounts matching the provided IDs will be included in response'
+        ),
+        'account_number.bsb': (
+            'BSB (Bank State Branch) number of the account. Only returned for AU accounts'
+        ),
+        'account_number.iban': 'ISO 13616-1:2007 international bank number',
+        'account_number.number': 'Only returned for UK accounts',
+        'account_number.routing_number': 'Routing transit number. Only returned for US accounts',
+        'account_number.sort_code': 'Only returned for UK accounts',
+        'account_number.swift_bic': (
+            'ISO 9362:2009 Business Identifier Codes. If swift_bic is not supported, one of the '
+            'below values will be returned: `NOT_SUPPORTED_BY_GEO` or `NOT_SUPPORTED_BY_PROVIDER`'
+        ),
+        'available': (
+            'The amount of funds available to the account holder. This takes into account any '
+            'pending transactions and includes any overdraft facility.'
+        ),
+        'balance': 'set to true to include balances in response',
+        'bank_transaction_id': (
+            'This field is deprecated. Please use the top level provider_transaction_id.'
+        ),
+        'bsb': 'BSB (Bank State Branch) number of the account. Only returned for AU accounts',
+        'client_secret': "Your application's client secret, found in TrueLayer Console",
+        'code_challenge': 'PKCE code challenge',
+        'current': (
+            'The amount of funds within the account. This does not include any pending '
+            'transactions.'
+        ),
+        'debtor_account_name': 'Monzo only.',
+        'description': 'Original description of the transaction as reported by the provider.',
+        'detail': 'More verbose explanation of the error.',
+        'direct_debit_id': (
+            'Unique identifier of the direct debit in a request. It may change between requests.'
+        ),
+        'display_name': 'Use the providers endpoint for accurate provider data',
+        'email': 'If the client is not regulated, they must provide one of `email`/`phone`.',
+        'emails': '⚠️ This field is very rarely populated by providers',
+        'errors': 'Errors',
+        'expires_in': (
+            '`access_token` validity in seconds. Default is 1 hour or specified by provider '
+            'whichever is lower.'
+        ),
+        'final_payment_amount': 'Amount of the last payment for the standing order.',
+        'final_payment_date': (
+            'The date on which the next payment for a Standing Order schedule will be made.'
+        ),
+        'first_payment_amount': 'Amount of the first payment for the standing order.',
+        'first_payment_date': (
+            'The date on which the first payment for the standing order schedule will be or was '
+            'made.'
+        ),
+        'frequency': (
+            'Frequency of the standing order. Possible values:<br/> `EvryDay` - every day<br/> '
+            '`EvryWorkgDay` - every working day<br/> `IntrvlDay:XX` - every XX calendar day<br/> '
+            '`IntrvlMnthDay:XX:YY` - every XXth month on the YYth day of the month<b...'
+        ),
+        'iban': 'ISO 13616-1:2007 international bank number',
+        'id': 'Unique ID for the user',
+        'instance': 'The endpoint from where the error occured.',
+        'logo_uri': 'Use the providers endpoint for accurate provider data',
+        'merchant_name': 'The merchant name identified in the transaction description.',
+        'meta.bank_transaction_id': (
+            'This field is deprecated. Please use the top level provider_transaction_id.'
+        ),
+        'meta.debtor_account_name': 'Monzo only.',
+        'meta.provider_account_id': (
+            'An account id set by the provider. It is unique and immutable identifier used to '
+            'identify the account resource. This identifier has no meaning to the user.'
+        ),
+        'meta.provider_direct_debit_id': (
+            'This is a unique and immutable identifier used to identify the direct debit '
+            'resource. This identifier has no meaning to the user and it is not always provided'
+        ),
+        'meta.provider_mandate_identification': (
+            'This is the direct debit reference. For AUDDIS (Automated Direct Debit Instruction '
+            'Service), the merchant provides Core Reference. For non AUDDIS merchants provide '
+            'Core reference if possible or last used reference'
+        ),
+        'meta.provider_source': 'Starling only.',
+        'meta.provider_transaction_id': (
+            'Starling only. This field is deprecated. Please use the top level '
+            'provider_transaction_id.'
+        ),
+        'meta.transaction_type': 'Amex only.',
+        'meta.user_comments': 'Revolut only.',
+        'name': (
+            'This is the name of merchant collecting funds via the direct debit. This is often a '
+            'brand the end user would recognise eg. their utilities provider.'
+        ),
+        'next_payment_amount': 'Amount of the next payment for the standing order',
+        'next_payment_date': (
+            'The date on which the next payment for the standing order schedule will be made.'
+        ),
+        'normalised_provider_transaction_id': (
+            "TrueLayer's recommended identifier of the transaction in a request. It will not "
+            'change between requests.'
+        ),
+        'number': 'Only returned for UK accounts',
+        'overdraft': (
+            'Pre-arranged overdraft limit. Available for all “TRANSACTION” and '
+            '“BUSINESS_TRANSACTION” account types.'
+        ),
+        'payee': 'Payee of the standing order set by the user.',
+        'pending': 'set to true to include pending transactions in response',
+        'phone': 'If the client is not regulated, they must provide one of `email`/`phone`.',
+        'phones': '⚠️ This field is very rarely populated by providers',
+        'previous_payment_amount': 'Amount of the latest payment',
+        'previous_payment_timestamp': 'Date of the latest payment',
+        'provider.display_name': 'Use the providers endpoint for accurate provider data',
+        'provider.logo_uri': 'Use the providers endpoint for accurate provider data',
+        'provider.provider_id': 'Unique identifier for the provider',
+        'provider_account_id': (
+            'An account id set by the provider. It is unique and immutable identifier used to '
+            'identify the account resource. This identifier has no meaning to the user.'
+        ),
+        'provider_direct_debit_id': (
+            'This is a unique and immutable identifier used to identify the direct debit '
+            'resource. This identifier has no meaning to the user and it is not always provided'
+        ),
+        'provider_id': 'Unique identifier for the provider',
+        'provider_mandate_identification': (
+            'This is the direct debit reference. For AUDDIS (Automated Direct Debit Instruction '
+            'Service), the merchant provides Core Reference. For non AUDDIS merchants provide '
+            'Core reference if possible or last used reference'
+        ),
+        'provider_source': 'Starling only.',
+        'provider_transaction_id': (
+            "Provider's identifier of the transaction in a request. The format of this string "
+            'will vary across providers.'
+        ),
+        'redirect_uri': 'A valid redirect_uri for your TrueLayer client_id (set in your Console)',
+        'reference': 'Reference of the standing order set by the user.',
+        'refresh_token': 'A long-lived code used to obtain a new `access_token` when expired.',
+        'response_mode': (
+            'If set to "form_post", when we call your redirect_uri, we\'ll include the `code` in a '
+            "form POST request. If left unset, we'll make a GET request with the code set as a "
+            'query parameter'
+        ),
+        'results.accounts.balance.available': (
+            'The amount of funds available to the account holder. This takes into account any '
+            'pending transactions and includes any overdraft facility.'
+        ),
+        'results.accounts.balance.current': (
+            'The amount of funds within the account. This does not include any pending '
+            'transactions.'
+        ),
+        'results.accounts.balance.overdraft': (
+            'Pre-arranged overdraft limit. Available for all “TRANSACTION” and '
+            '“BUSINESS_TRANSACTION” account types.'
+        ),
+        'results.accounts.pending_transactions.description': (
+            'Original description of the transaction as reported by the provider.'
+        ),
+        'results.accounts.pending_transactions.merchant_name': (
+            'The merchant name identified in the transaction description.'
+        ),
+        'results.accounts.pending_transactions.normalised_provider_transaction_id': (
+            "TrueLayer's recommended identifier of the transaction in a request. It will not "
+            'change between requests.'
+        ),
+        'results.accounts.pending_transactions.provider_transaction_id': (
+            "Provider's identifier of the transaction in a request. The format of this string "
+            'will vary across providers.'
+        ),
+        'results.accounts.pending_transactions.timestamp': (
+            'Date the transaction was posted on the account.'
+        ),
+        'results.accounts.pending_transactions.transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+        'results.accounts.pending_transactions.transaction_type': 'Type of the transaction.',
+        'results.accounts.transactions.description': (
+            'Original description of the transaction as reported by the provider.'
+        ),
+        'results.accounts.transactions.merchant_name': (
+            'The merchant name identified in the transaction description.'
+        ),
+        'results.accounts.transactions.normalised_provider_transaction_id': (
+            "TrueLayer's recommended identifier of the transaction in a request. It will not "
+            'change between requests.'
+        ),
+        'results.accounts.transactions.provider_transaction_id': (
+            "Provider's identifier of the transaction in a request. The format of this string "
+            'will vary across providers.'
+        ),
+        'results.accounts.transactions.timestamp': (
+            'Date the transaction was posted on the account.'
+        ),
+        'results.accounts.transactions.transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+        'results.accounts.transactions.transaction_type': 'Type of the transaction.',
+        'routing_number': 'Routing transit number. Only returned for US accounts',
+        'sort_code': 'Only returned for UK accounts',
+        'state': (
+            'An opaque value used by the client to maintain state between the request and '
+            'callback'
+        ),
+        'status': 'Possible values are `Active` and `Inactive`',
+        'swift_bic': (
+            'ISO 9362:2009 Business Identifier Codes. If swift_bic is not supported, one of the '
+            'below values will be returned: `NOT_SUPPORTED_BY_GEO` or `NOT_SUPPORTED_BY_PROVIDER`'
+        ),
+        'task_id': 'A unique ID associated with the task',
+        'timestamp': 'Date the transaction was posted on the account.',
+        'title': 'Title of the error',
+        'token_type': 'Type of token returned. Must be `Bearer`',
+        'trace_id': 'A unique GUID for the request.',
+        'transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+        'transaction_type': 'Type of the transaction.',
+        'type': 'Link that describes http status codes',
+        'user.email': 'If the client is not regulated, they must provide one of `email`/`phone`.',
+        'user.id': 'Unique ID for the user',
+        'user.name': 'If the client is not regulated, they must provide this value.',
+        'user.phone': 'If the client is not regulated, they must provide one of `email`/`phone`.',
+        'user_comments': 'Revolut only.',
+        'user_has_reconfirmed_consent': (
+            'Set to `true` if the user has re-confirmed consent in your application. We must '
+            'review your consent screen and enable your client_id before you can set this field '
+            "to `true` in production. Set to `false` if you'd like the user to re-confi..."
+        ),
+        'user_input_link': (
+            'A link to direct the end user to confirm additional information. This could be a '
+            'direct link to a bank authentication, or to TrueLayer if consent has not been re- '
+            'confirmed.'
+        ),
+        'webhook_uri': 'a webhook will be POSTed to the URI if provided',
+}
+
+#: Descriptions carrying a WARNING, detected by language rather than
+#: curated - so a caveat a future spec adds is caught by the same rule
+#: that caught this one. Surfaced prominently, because the cost of an
+#: unread caveat here is a defect: transaction_id "may change between
+#: requests" was documented all along, and using it as an identity key
+#: duplicated money on re-fetch.
+FIELD_CAVEATS: dict[str, str] = {
+        'bank_transaction_id': (
+            'This field is deprecated. Please use the top level provider_transaction_id.'
+        ),
+        'direct_debit_id': (
+            'Unique identifier of the direct debit in a request. It may change between requests.'
+        ),
+        'meta.bank_transaction_id': (
+            'This field is deprecated. Please use the top level provider_transaction_id.'
+        ),
+        'meta.provider_transaction_id': (
+            'Starling only. This field is deprecated. Please use the top level '
+            'provider_transaction_id.'
+        ),
+        'results.accounts.pending_transactions.transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+        'results.accounts.transactions.transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+        'transaction_id': (
+            "TrueLayer's identifier of the transaction in a request. It may change between "
+            'requests.'
+        ),
+}
+
+
+def caveat_for(path: str) -> str:
+    """The provider's warning about this field, if they gave one."""
+    return FIELD_CAVEATS.get(path) or FIELD_CAVEATS.get(
+        path.rsplit(".", 1)[-1], ""
+    )
+
+
+def description_for(path: str) -> str:
+    """The provider's own account of what this field is."""
+    return FIELD_DESCRIPTIONS.get(path) or FIELD_DESCRIPTIONS.get(
+        path.rsplit(".", 1)[-1], ""
+    )
+
+
+def _is_known(path: str) -> bool:
+    """Has any spec, or any payload we have landed, mentioned this field?"""
+    return path in KNOWN_FIELDS or path.rsplit(".", 1)[-1] in KNOWN_FIELDS
+
+
 def classify(path: str) -> str:
     """How much of this field may be shown. Withholds by default."""
     leaf = path.rsplit(".", 1)[-1]
@@ -131,18 +730,35 @@ def classify(path: str) -> str:
 #: What each level says about itself on the page. Written for a reader who
 #: wants to know WHY a value is missing, since "no value" and "withheld"
 #: are different facts about the payload.
+#: Prefix on every note obdi wrote, so a reader can tell OUR judgement
+#: from the provider's statement of fact. Ours can be wrong; theirs can
+#: be out of date. Those are different doubts and deserve different words.
+OURS = "obdi withheld this"
+
 NOTES = {
-    SHAPE_ONLY: "values withheld - identifying or personal",
+    SHAPE_ONLY: f"{OURS}: identifying or personal",
     PERMANENT_ID: (
-        "withheld - a permanent identifier; it cannot be rotated, only "
+        f"{OURS}: a permanent identifier - it cannot be rotated, only "
         "outlived by closing the account"
     ),
-    PERSONAL: "withheld - identifies a person",
-    NARRATIVE: "withheld - free text, so nothing constrains what it may say",
-    RANGE_ONLY: "range shown, individual amounts withheld",
+    PERSONAL: f"{OURS}: it identifies a person",
+    NARRATIVE: f"{OURS}: free text, so nothing constrains what it may say",
+    RANGE_ONLY: f"{OURS}: individual amounts, though the range is shown",
     PROVIDER_PARTIAL: "partial as sent by the provider, not redacted by obdi",
-    UNCLASSIFIED: "withheld - this field is not yet classified",
+    UNCLASSIFIED: f"{OURS}: nobody has classified this field yet",
+    CREDENTIAL: (
+        f"{OURS}: it is a credential and should never appear in stored "
+        "evidence at all - if it is here, something upstream is wrong"
+    ),
 }
+
+#: Said instead of the plain unclassified note when the field is one we
+#: know exists but have not judged - a different fact from a field nobody
+#: has ever seen.
+UNKNOWN_NOTE = (
+    f"{OURS}: no spec obdi holds describes this field, so the provider may "
+    "have started sending something new"
+)
 
 #: Above this, a field claiming to be a closed set is not behaving like
 #: one. Chosen to sit above any real enumeration seen so far (transaction
@@ -193,7 +809,14 @@ def redact_summary(summary: dict[str, object]) -> dict[str, object]:
                 unclassified += 1
                 fields.append(field)
                 continue
-        if level in (SHAPE_ONLY, PERMANENT_ID, PERSONAL, NARRATIVE, UNCLASSIFIED):
+        if level in (
+            SHAPE_ONLY,
+            PERMANENT_ID,
+            PERSONAL,
+            NARRATIVE,
+            UNCLASSIFIED,
+            CREDENTIAL,
+        ):
             for key in _VALUE_KEYS:
                 field.pop(key, None)
             withheld += 1
@@ -206,6 +829,14 @@ def redact_summary(summary: dict[str, object]) -> dict[str, object]:
             field.pop("prefix", None)
         if level in NOTES:
             field["note"] = NOTES[level]
+        caveat = caveat_for(str(field.get("path", "")))
+        if caveat:
+            # The provider's own warning, carried to where the field is
+            # looked at - so the question is pre-empted rather than
+            # answered after somebody has relied on the field.
+            field["caveat"] = caveat
+        if level == UNCLASSIFIED and not _is_known(str(field.get("path", ""))):
+            field["note"] = UNKNOWN_NOTE
         fields.append(field)
 
     result = dict(summary)

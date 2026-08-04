@@ -493,6 +493,13 @@ def _shape_detail(field: dict[str, object]) -> str:
     (cardinality, length, prefix, format), ordered things keep their range.
     Escaped here because the values are provider data, not our markup.
     """
+    caveat = field.get("caveat")
+    warning = (
+        f'<br><span class="warn">the provider documents this field as: '
+        f"{html.escape(str(caveat))}</span>"
+        if caveat
+        else ""
+    )
     note = field.get("note")
     values = field.get("values")
     if note and not values:
@@ -510,6 +517,7 @@ def _shape_detail(field: dict[str, object]) -> str:
         return (
             f'<span class="muted">{html.escape(str(note))}</span>'
             + (f"<br>{rendered}" if rendered else "")
+            + warning
         )
     if isinstance(values, list) and values:
         listed = ", ".join(
@@ -517,7 +525,7 @@ def _shape_detail(field: dict[str, object]) -> str:
             for v in values
             if isinstance(v, dict)
         )
-        return f"{field.get('distinct')} distinct: {listed}"
+        return f"{field.get('distinct')} distinct: {listed}{warning}"
     length = field.get("length")
     if isinstance(length, dict):
         bits = [

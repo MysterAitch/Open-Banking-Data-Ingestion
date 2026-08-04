@@ -2476,7 +2476,7 @@ class TestBrowsingRawArtefactsFromThePage:
         # render itself in full because nobody thought about it. The
         # common prefix goes too: over a single-account payload a common
         # prefix IS the identifier.
-        assert "withheld - this field is not yet classified" in page
+        assert "may have started sending something new" in page
         assert "length 20-20" in page
         assert "prefix txn-" not in page
         # Cross-field evidence sections.
