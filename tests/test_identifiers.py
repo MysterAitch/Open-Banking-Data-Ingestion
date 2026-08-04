@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import pathlib
+import re
+
+import pytest
+
 from obdi.identifiers import (
     STRONG,
     WEAK,
+    AccountLastFour,
+    AccountNumber,
+    CardLastFour,
+    Claim,
+    Iban,
+    UkAccount,
     best_match,
     claims_from_file_hints,
     claims_from_starling_identifiers,
@@ -21,17 +32,14 @@ class TestSourcesClaimWhatTheyKnow:
         )
 
         strong = [c for c in claims if c.strength == STRONG]
-        assert strong[0].kind == "uk-account"
-        assert strong[0].value == "200000:12345678"
+        assert isinstance(strong[0].identifier, UkAccount)
+        assert strong[0].identifier.reveal() == "200000:12345678"
 
     def test_ATrueLayerCard_ProvesOnlyItsLastFour_AndSaysSoWeakly(self):
-        """The provider never returns a full card number, so a card match
-        can never be more than a proposal."""
         claims = claims_from_truelayer_card({"partial_card_number": "8484"})
 
         assert len(claims) == 1
-        assert claims[0].kind == "card-last-4"
-        assert claims[0].value == "8484"
+        assert isinstance(claims[0].identifier, CardLastFour)
         assert claims[0].strength == WEAK
 
     def test_StarlingIdentifiers_ProveTheSameThingsAsTrueLayer(self):
@@ -43,9 +51,9 @@ class TestSourcesClaimWhatTheyKnow:
             }
         )
 
-        kinds = {c.kind for c in claims}
-        assert "uk-account" in kinds
-        assert "iban" in kinds
+        kinds = {type(c.identifier) for c in claims}
+        assert UkAccount in kinds
+        assert Iban in kinds
 
     def test_ASourceThatKnowsNothing_ClaimsNothing(self):
         assert claims_from_truelayer_account({"account_number": {}}) == []
@@ -55,13 +63,15 @@ class TestSourcesClaimWhatTheyKnow:
 
 class TestStrongerClaimsContainWeakerOnes:
     def test_AFullNumber_AlsoProvesItsLastFour(self):
-        """Why a source that knows everything can still meet one that
-        knows almost nothing."""
         claims = claims_from_truelayer_account(
             {"account_number": {"number": "12345678", "sort_code": "200000"}}
         )
 
-        assert any(c.kind == "account-last-4" and c.value == "5678" for c in claims)
+        assert any(
+            isinstance(c.identifier, AccountLastFour)
+            and c.identifier.reveal() == "5678"
+            for c in claims
+        )
 
     def test_DerivationIsIdempotent_AndOrdersStrongestFirst(self):
         claims = derive(
@@ -69,25 +79,51 @@ class TestStrongerClaimsContainWeakerOnes:
                 {"account_number": {"number": "12345678", "sort_code": "200000"}}
             )
         )
-        again = derive(claims)
 
-        assert claims == again
+        assert derive(claims) == claims
         assert claims[0].strength == STRONG
         assert claims[-1].strength == WEAK
+
+
+class TestTheTypesPreventConflation:
+    """The bug this design exists to make unsayable.
+
+    Four digits off a card and four off an account are unrelated numbers.
+    Open Banking makes it concrete: only card ACCOUNTS appear on the
+    cards endpoint and a debit card is not an account, so the two can
+    never describe the same identifier.
+    """
+
+    def test_CardDigitsAndAccountDigits_AreNotEqual_EvenWhenIdentical(self):
+        assert AccountLastFour("5678") != CardLastFour("5678")
+        assert Claim(AccountLastFour("5678")) != Claim(CardLastFour("5678"))
+
+    def test_ACardEndingTheSameDigitsAsAnAccount_DoesNotMatchIt(self):
+        account = claims_from_truelayer_account(
+            {"account_number": {"number": "12345678", "sort_code": "608371"}}
+        )
+        card = claims_from_truelayer_card({"partial_card_number": "5678"})
+
+        assert best_match(account, card) is None
+
+    def test_TwoViewsOfOneCard_StillMatchWeakly(self):
+        card = claims_from_truelayer_card({"partial_card_number": "8484"})
+        export = claims_from_file_hints({"card_last_four": "8484"})
+
+        matched = best_match(card, export)
+
+        assert matched is not None
+        assert isinstance(matched.identifier, CardLastFour)
+        assert matched.strength == WEAK
 
 
 class TestMatchingAcrossSources:
     def _truelayer(self):
         return claims_from_truelayer_account(
-            {
-                "account_number": {"number": "12345678", "sort_code": "608371"},
-                "display_name": "Personal",
-            }
+            {"account_number": {"number": "12345678", "sort_code": "608371"}}
         )
 
     def test_TheSameAccountThroughTwoApis_MatchesOnSortCodeAndNumber(self):
-        """The case the whole exercise exists for: Starling's own API and
-        TrueLayer's view of the same account."""
         starling = claims_from_starling_identifiers(
             {"accountIdentifier": "12345678", "bankIdentifier": "60-83-71"}
         )
@@ -95,18 +131,16 @@ class TestMatchingAcrossSources:
         matched = best_match(self._truelayer(), starling)
 
         assert matched is not None
-        assert matched.kind == "uk-account"
+        assert isinstance(matched.identifier, UkAccount)
         assert matched.strength == STRONG
 
-    def test_AnExportKnowingOnlyFourDigitsOfTheAccount_StillMatches_ButWeakly(self):
-        """A bank export that names four digits of the ACCOUNT should
-        still find it - and must report itself as the weak thing it is."""
+    def test_AnExportKnowingOnlyFourAccountDigits_MatchesWeakly(self):
         export = claims_from_file_hints({"account_number": "5678"})
 
         matched = best_match(self._truelayer(), export)
 
         assert matched is not None
-        assert matched.kind == "account-last-4"
+        assert isinstance(matched.identifier, AccountLastFour)
         assert matched.strength == WEAK
 
     def test_DifferentAccounts_DoNotMatch(self):
@@ -116,9 +150,7 @@ class TestMatchingAcrossSources:
 
         assert best_match(self._truelayer(), other) is None
 
-    def test_WhenBothAStrongAndAWeakClaimAgree_TheStrongOneIsReported(self):
-        """Two accounts at one bank could share four digits by accident;
-        the reader needs to know the match rests on more than that."""
+    def test_WhenAStrongAndAWeakClaimBothAgree_TheStrongOneIsReported(self):
         twin = claims_from_starling_identifiers(
             {"accountIdentifier": "12345678", "bankIdentifier": "608371"}
         )
@@ -128,65 +160,65 @@ class TestMatchingAcrossSources:
         assert matched is not None and matched.strength == STRONG
 
 
-class TestNumbersAreNeverRendered:
-    def test_AClaimMasksItselfToFourDigits(self):
-        claims = claims_from_truelayer_account(
-            {"account_number": {"number": "12345678", "sort_code": "608371"}}
-        )
+class TestAnIdentifierHasNoReadableForm:
+    """Masking is not politeness here - it is the only rendering there is,
+    so a log line or a traceback cannot leak a number by accident."""
 
-        rendered = [c.masked() for c in claims]
+    @pytest.mark.parametrize(
+        "identifier",
+        [
+            AccountNumber("12345678"),
+            UkAccount("608371:12345678"),
+            Iban("GB33STRL60837112345678"),
+            AccountLastFour("5678"),
+            CardLastFour("8484"),
+        ],
+    )
+    def test_NoRenderingEverShowsMoreThanFourDigits(self, identifier):
+        """The invariant, stated as the thing that actually matters: four
+        digits is the agreed disclosure, so a rendering that carries five
+        consecutive digits has leaked whatever it was masking. For the
+        last-four types the value IS the mask, which is the point."""
+        rendered = [
+            str(identifier),
+            repr(identifier),
+            f"{identifier}",
+            format(identifier),
+        ]
 
-        assert all("12345678" not in text for text in rendered)
-        assert all("608371" not in text for text in rendered)
-        assert any(text.endswith("5678") for text in rendered)
-
-    def test_AnIbanMasksToItsTail(self):
-        claims = claims_from_starling_identifiers(
-            {"iban": "GB33 STRL 6083 7112 3456 78"}
-        )
-        iban = next(c for c in claims if c.kind == "iban")
-
-        assert iban.masked() == "IBAN ending 5678"
-        assert "STRL" not in iban.masked()
-
-
-class TestCardAndAccountDigitsAreDifferentNamespaces:
-    """A credit card ending 5678 and a current account ending 5678 are
-    unrelated numbers. Open Banking makes this concrete: only CREDIT card
-    accounts appear on the cards endpoint, and a debit card is not an
-    account at all - so the two kinds of "last four" can never describe
-    the same identifier and must never match.
-    """
-
-    def test_ACardEndingTheSameFourDigitsAsAnAccount_DoesNotMatchIt(self):
-        account = claims_from_truelayer_account(
-            {"account_number": {"number": "12345678", "sort_code": "608371"}}
-        )
-        card = claims_from_truelayer_card({"partial_card_number": "5678"})
-
-        assert best_match(account, card) is None
-
-    def test_TwoCardsSharingFourDigits_StillMatchWeakly(self):
-        """The genuine weak case survives: a credit-card export naming
-        four digits still finds its card."""
-        card = claims_from_truelayer_card({"partial_card_number": "8484"})
-        export = claims_from_file_hints({"card_last_four": "8484"})
-
-        matched = best_match(card, export)
-
-        assert matched is not None
-        assert matched.kind == "card-last-4"
-        assert matched.strength == WEAK
-
-    def test_EachKindSaysWhichNumberItMeans_WhenRendered(self):
-        card = claims_from_truelayer_card({"partial_card_number": "8484"})[0]
-        account = next(
-            c
-            for c in claims_from_truelayer_account(
-                {"account_number": {"number": "12345678", "sort_code": "608371"}}
+        for text in rendered:
+            assert not re.search(r"\d{5,}", text), (
+                f"{type(identifier).__name__} leaked via {text!r}"
             )
-            if c.kind == "account-last-4"
-        )
 
-        assert card.masked() == "card ending 8484"
-        assert account.masked() == "account ending 5678"
+    def test_TheMaskNamesWhichNumberItMeans(self):
+        assert CardLastFour("8484").masked() == "card ending 8484"
+        assert AccountLastFour("5678").masked() == "account ending 5678"
+
+    def test_ATracebackCannotCarryTheNumber(self):
+        """The realistic leak: a value formatted into a log or an error."""
+        number = AccountNumber("12345678")
+
+        message = f"could not resolve {number!r} while binding"
+
+        assert "12345678" not in message
+        assert "ending 5678" in message
+
+
+class TestRevealIsTheOnlyDoorAndItIsGreppable:
+    def test_TheRenderingLayerNeverReachesForTheRawValue(self):
+        """reveal() is deliberately the single escape hatch, so "who reads
+        the real number" is one grep. The web layer must never be an
+        answer to that grep."""
+        src = pathlib.Path(__file__).resolve().parent.parent / "src" / "obdi"
+        offenders = {}
+        for path in src.rglob("*.py"):
+            if path.name == "identifiers.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            if re.search(r"\.reveal\(\)", text):
+                offenders[path.name] = text.count(".reveal()")
+
+        assert "web.py" not in offenders, (
+            f"the web layer called reveal() - rendering must use masked(): {offenders}"
+        )
