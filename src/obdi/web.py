@@ -1422,27 +1422,39 @@ def _rebuild_status_line(
         extra = ""
         done = status.get("done")
         total = status.get("total")
+        txns = status.get("transactions")
         if isinstance(done, int) and isinstance(total, int) and total > 0:
+            # Name the artefact in flight and its size. "The counts have
+            # not moved for nine minutes" is a mystery; "it is working
+            # through an artefact holding 4,087 records" is an answer,
+            # and the difference is one number.
+            current = status.get("current_records")
             extra = f" - artefact {done} of {total}"
-            txns = status.get("transactions")
+            if isinstance(current, int) and current > 0:
+                extra += f" ({current:,} records)"
+
+            records_done = status.get("records_done")
             records_total = status.get("records_total")
-            uncounted = status.get("artefacts_uncounted")
-            if isinstance(txns, int) and isinstance(records_total, int):
-                floor = (
-                    " (at least)"
-                    if isinstance(uncounted, int) and uncounted > 0
-                    else ""
-                )
-                extra += f", {txns:,} of {records_total:,}{floor} record(s)"
+            counted = isinstance(records_done, int) and isinstance(
+                records_total, int
+            )
+            if counted and records_total > 0:
+                extra += f"; {records_done:,} of {records_total:,} records"
+                if isinstance(txns, int):
+                    extra += f" replayed into {txns:,} transaction(s)"
                 with contextlib.suppress(ValueError):
                     began = datetime.fromisoformat(
                         started_raw.replace("Z", "+00:00")
                     )
                     elapsed = ((now or datetime.now(UTC)) - began).total_seconds()
-                    if elapsed > 30 and txns > 0:
-                        per_minute = txns / (elapsed / 60)
-                        remaining = max(records_total - txns, 0)
-                        extra += f", ~{per_minute:,.0f}/min"
+                    if elapsed > 30 and records_done > 0:
+                        # Rate and ETA in records, matching what the
+                        # denominator counts. Rating transactions against
+                        # a record total silently overstates progress
+                        # wherever an artefact folds down.
+                        per_minute = records_done / (elapsed / 60)
+                        remaining = max(records_total - records_done, 0)
+                        extra += f", ~{per_minute:,.0f} records/min"
                         if per_minute > 0 and remaining > 0:
                             eta_min = remaining / per_minute
                             extra += f", ETA ~{max(eta_min, 1):.0f} min"

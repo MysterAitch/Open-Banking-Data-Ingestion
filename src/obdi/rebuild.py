@@ -59,8 +59,17 @@ class RebuildReport:
     #: Sum of stored record counts over transactional artefacts - the
     #: denominator for record-level progress. Uncounted artefacts (landed
     #: before counts existed) make it a floor, stated as such.
-    records_total_known: int = 0
-    artefacts_uncounted: int = 0
+    #: Records the replay must process, counted up front from the payloads
+    #: themselves - exact, rather than a floor that grows as it discovers.
+    records_total: int = 0
+    #: Records processed by artefacts already FINISHED. Deliberately not
+    #: including the one in flight, so the pair reads honestly: work done,
+    #: then the size of what is currently holding things up.
+    records_done: int = 0
+    #: How many records the artefact being processed right now contains.
+    current_records: int = 0
+    #: Which artefact that is, for the same reason.
+    current_index: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -112,6 +121,27 @@ _SOURCES = ("starling", "truelayer")
 #: The provider-true identity of a feed fetch, recorded at landing time:
 #: /api/v2/feed/account/{accountUid}/category/{categoryUid}?...
 _FEED_ORIGIN = re.compile(r"/feed/account/([^/?]+)/category/([^/?]+)")
+
+
+def _record_count(payload: object) -> int:
+    """How many records a landed payload carries.
+
+    RECORDS, not transactions: this counts what goes in, so it stays
+    comparable with progress through the file. What comes out is a
+    different and equally interesting number, and conflating them makes
+    a total that is wrong while looking reasonable.
+    """
+    try:
+        decoded = json.loads(payload)
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(decoded, dict):
+        return 0
+    for key in ("results", "feedItems", "booked", "pending", "accounts"):
+        rows = decoded.get(key)
+        if isinstance(rows, list):
+            return len(rows)
+    return 0
 
 
 def _starling_defaults(artefact_rows: Sequence[Any]) -> dict[str, str]:
@@ -262,16 +292,22 @@ def rebuild_from_raw(
         "record_count FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
     ).fetchall()
     starling_defaults = _starling_defaults(artefact_rows)
+
+    # Count the whole job before starting it. Parsing every payload costs
+    # under a second across the entire store, which is cheaper than the
+    # bookkeeping needed to avoid doing so - and it makes the total exact
+    # instead of a floor that rises as the replay learns.
+    sizes: dict[int, int] = {}
     for row in artefact_rows:
         if str(row["source"]) in _NON_TRANSACTIONAL:
             continue
-        if row["record_count"] is None:
-            report.artefacts_uncounted += 1
-        else:
-            report.records_total_known += int(row["record_count"])
+        sizes[int(row["rowid"])] = _record_count(row["payload"])
+    report.records_total = sum(sizes.values())
 
     total = len(artefact_rows)
     for index, row in enumerate(artefact_rows, start=1):
+        report.current_index = index
+        report.current_records = sizes.get(int(row["rowid"]), 0)
         if progress is not None:
             with contextlib.suppress(Exception):
                 progress(index, total, report)
@@ -313,14 +349,17 @@ def rebuild_from_raw(
             continue
 
         if row["record_count"] is None:
-            # Backfill exactly once: the count becomes landed metadata and
-            # is never recalculated again.
+            # Landed metadata, recorded once: how many transactions this
+            # artefact yielded. Deliberately NOT the progress denominator -
+            # that counts records going in, and the two are different
+            # numbers whose blending produced a total that chased its own
+            # numerator.
             store.connection.execute(
                 "UPDATE raw_artefacts SET record_count = ? WHERE rowid = ?",
                 (len(transactions), int(row["rowid"])),
             )
-            report.records_total_known += len(transactions)
         report.artefacts_replayed += 1
+        report.records_done += sizes.get(int(row["rowid"]), 0)
         if transactions:
             reconcile_batch(store, transactions, digest=digest, summary=summary)
             report.transactions += len(transactions)
@@ -354,6 +393,11 @@ def rebuild_from_raw(
         for account in sorted(set(before_counts) | set(after_counts))
     }
     if progress is not None:
+        # Nothing is in flight any more. Leaving the last artefact's size
+        # in place would have the finished report still naming something
+        # as being worked on - exactly the claim a reader checks when
+        # deciding whether the rebuild has actually stopped.
+        report.current_records = 0
         with contextlib.suppress(Exception):
             progress(total, total, report)
     return report

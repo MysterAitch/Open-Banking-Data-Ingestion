@@ -696,7 +696,18 @@ class TestRecordCountMetadata:
             )
         )
 
-    def test_FirstRebuild_BackfillsCounts_SecondKnowsTotalsUpFront(self, tmp_path):
+    def test_EveryRebuildKnowsTheTotalUpFront_AndLandsPerArtefactYields(
+        self, tmp_path
+    ):
+        """The total no longer waits for a previous rebuild to teach it.
+
+        It once did: counts were learnt by parsing, so the first rebuild
+        of any artefact could only report a floor. Counting the payloads
+        at the start costs under a second and removes the distinction -
+        the first rebuild of a fresh store is as well informed as the
+        tenth. The per-artefact yield is still landed, as metadata about
+        what came OUT rather than as the measure of what went in.
+        """
         from obdi.rebuild import rebuild_from_raw
         from obdi.store import Store
 
@@ -705,11 +716,11 @@ class TestRecordCountMetadata:
             self._feed(store, "uid-2", 2)
 
             first = rebuild_from_raw(store)
-            assert first.artefacts_uncounted == 2
+            assert first.records_total == 5
+            assert first.records_done == 5
 
             second = rebuild_from_raw(store)
-            assert second.artefacts_uncounted == 0
-            assert second.records_total_known == 5
+            assert second.records_total == 5
             counts = store.connection.execute(
                 "SELECT record_count FROM raw_artefacts WHERE source = "
                 "'starling-feed' ORDER BY record_count"
@@ -885,3 +896,110 @@ class TestSingleArtefactReplay:
 
         with pytest.raises(ValueError, match="rebuild is replaying"):
             replay_single_artefact(db, rowid)
+
+
+class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
+    """Progress that can be trusted while it is still running.
+
+    A total assembled as the replay goes along rises in step with the
+    work done, so it reads "24,658 of 24,658" throughout and says nothing
+    about how much is left. Counting every payload up front is cheap
+    enough - under a second across a real store - to buy a denominator
+    that is fixed and exact.
+    """
+
+    def _feed(self, store, uid, items):
+        import json as _json
+
+        from obdi.providers.starling import artefact_for
+
+        body = _json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": f"{uid}-{n}",
+                        "amount": {"currency": "GBP", "minorUnits": 100 + n},
+                        "direction": "OUT",
+                        "transactionTime": "2026-03-14T09:15:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": "Tesco",
+                        "reference": "TESCO",
+                    }
+                    for n in range(items)
+                ]
+            }
+        ).encode("utf-8")
+        store.land_artefact(
+            artefact_for(
+                body,
+                account_id=f"starling:{uid}",
+                kind="feed",
+                origin=f"https://api.example.com/feed/account/a/category/{uid}?x=1",
+            )
+        )
+
+    def _rebuild(self, tmp_path, sizes, capture):
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            for index, count in enumerate(sizes):
+                self._feed(store, f"uid-{index}", count)
+            return rebuild_from_raw(
+                store, progress=lambda _d, _t, report: capture.append(capture_of(report))
+            )
+
+    def test_TheTotalIsExactFromTheFirstUpdate_RatherThanGrowingAsItGoes(
+        self, tmp_path
+    ):
+        seen: list[dict[str, int]] = []
+        self._rebuild(tmp_path, [3, 5, 2], seen)
+
+        totals = [row["records_total"] for row in seen]
+        assert totals, "the rebuild reported no progress at all"
+        assert set(totals) == {10}, f"the total moved while running: {totals}"
+
+    def test_ProgressNamesTheArtefactInFlightAndHowManyRecordsItHolds(
+        self, tmp_path
+    ):
+        """The number that turns a stall into an explanation.
+
+        Counts move only at artefact boundaries, so a large file freezes
+        them for minutes. Knowing the size of the one being worked on is
+        the difference between "stuck" and "busy", and it costs one
+        integer that has already been computed.
+        """
+        seen: list[dict[str, int]] = []
+        self._rebuild(tmp_path, [3, 5, 2], seen)
+
+        sizes = [row["current_records"] for row in seen]
+        # Three artefacts, then a completion report that correctly claims
+        # nothing is in flight.
+        assert sizes == [3, 5, 2, 0], f"in-flight sizes not reported in order: {sizes}"
+
+    def test_RecordsDoneCountsFinishedWorkOnly_AndNeverOvertakesTheTotal(
+        self, tmp_path
+    ):
+        """Reported progress excludes the artefact still being worked on.
+
+        Counting it as done the moment it starts would show completion
+        before the work happens, which is precisely the moment somebody
+        looks to decide whether to keep waiting.
+        """
+        seen: list[dict[str, int]] = []
+        report = self._rebuild(tmp_path, [3, 5, 2], seen)
+
+        done = [row["records_done"] for row in seen]
+        assert done == [0, 3, 8, 10], f"progress did not track finished work: {done}"
+        assert all(row <= 10 for row in done)
+        assert report.records_done == 10
+
+
+def capture_of(report) -> dict[str, int]:
+    return {
+        "records_total": report.records_total,
+        "records_done": report.records_done,
+        "current_records": report.current_records,
+        "current_index": report.current_index,
+    }

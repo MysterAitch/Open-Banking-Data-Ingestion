@@ -328,8 +328,11 @@ def start_background_rebuild(db_path: Path) -> str:
             # docker logs are where people look when a page seems quiet.
             if done % 25 == 0 or done == total:
                 print(
-                    f"rebuild: artefact {done} of {total}, "
-                    f"{report.transactions} transaction(s) so far",
+                    f"rebuild: artefact {done} of {total} "
+                    f"({report.current_records:,} records), "
+                    f"{report.records_done:,} of {report.records_total:,} "
+                    f"records replayed into "
+                    f"{report.transactions:,} transaction(s)",
                     flush=True,
                 )
             status_path.write_text(
@@ -340,8 +343,9 @@ def start_background_rebuild(db_path: Path) -> str:
                         "done": done,
                         "total": total,
                         "transactions": report.transactions,
-                        "records_total": report.records_total_known,
-                        "artefacts_uncounted": report.artefacts_uncounted,
+                        "records_total": report.records_total,
+                        "records_done": report.records_done,
+                        "current_records": report.current_records,
                         "updated_at": _stamp(),
                     }
                 ),

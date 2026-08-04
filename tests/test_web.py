@@ -1273,7 +1273,16 @@ class TestDangerZone:
 
         assert "started in the background" in message
 
-    def test_DangerZone_ShowsRebuildState(self):
+    def _line(self, status, at):
+        from datetime import UTC, datetime
+
+        from obdi.web import _rebuild_status_line
+
+        return _rebuild_status_line(
+            lambda: status, now=datetime(2026, 8, 2, *at, tzinfo=UTC)
+        )
+
+    def test_RebuildLine_WhenRunning_SaysSoAndWhenItStarted(self):
         from obdi.web import _rebuild_status_line
 
         running = _rebuild_status_line(
@@ -1282,45 +1291,87 @@ class TestDangerZone:
         assert "warn" in running
         assert "15:00:00" in running
 
-        with_eta = _rebuild_status_line(
-            lambda: {
+    def test_RebuildLine_WhileWorkingThroughAnArtefact_SaysWhichOneAndHowBig(self):
+        """A frozen count is only alarming until you know what it is doing.
+
+        Progress moves at artefact boundaries, so a single large file
+        holds the numbers still for minutes. Naming the artefact in
+        flight and its size turns an apparent stall into a wait with a
+        known end.
+        """
+        line = self._line(
+            {
+                "state": "running",
+                "started_at": "2026-08-02T15:00:00Z",
+                "done": 118,
+                "total": 137,
+                "current_records": 4087,
+                "records_done": 24658,
+                "records_total": 37101,
+                "transactions": 8032,
+            },
+            (15, 5, 0),
+        )
+
+        assert "artefact 118 of 137 (4,087 records)" in line
+        assert "24,658 of 37,101 records" in line
+        assert "8,032 transaction(s)" in line
+
+    def test_RebuildLine_RatesProgressByRecordsConsumed_NotTransactionsProduced(self):
+        """The two counts are not interchangeable and must not be mixed.
+
+        Records go in; transactions come out, fewer of them wherever
+        sources overlap. Dividing produced-by-expected once made the rate
+        and the ETA quietly wrong in the optimistic direction - here
+        6,000 records in five minutes is 1,200 a minute regardless of the
+        5,200 transactions they folded into.
+        """
+        line = self._line(
+            {
                 "state": "running",
                 "started_at": "2026-08-02T15:00:00Z",
                 "done": 60,
                 "total": 71,
-                "transactions": 6000,
+                "transactions": 5200,
+                "records_done": 6000,
                 "records_total": 18000,
-                "artefacts_uncounted": 0,
             },
-            now=__import__("datetime").datetime(
-                2026, 8, 2, 15, 5, 0,
-                tzinfo=__import__("datetime").timezone.utc,
-            ),
+            (15, 5, 0),
         )
-        assert "6,000 of 18,000 record(s)" in with_eta
-        assert "~1,200/min" in with_eta
-        assert "ETA ~10 min" in with_eta
 
-        floor = _rebuild_status_line(
-            lambda: {
+        assert "~1,200 records/min" in line
+        assert "ETA ~10 min" in line
+
+    def test_RebuildLine_WhenTheTotalIsNotYetKnown_ReportsWorkWithoutInventingAnEta(
+        self,
+    ):
+        """An honest silence rather than a guess.
+
+        A status file written by an older build carries no record totals.
+        Reporting what is known and omitting the ETA is correct; a rate
+        derived from a missing denominator would look authoritative and
+        be meaningless.
+        """
+        line = self._line(
+            {
                 "state": "running",
                 "started_at": "2026-08-02T15:00:00Z",
                 "done": 2,
                 "total": 71,
                 "transactions": 10,
-                "records_total": 500,
-                "artefacts_uncounted": 40,
             },
-            now=__import__("datetime").datetime(
-                2026, 8, 2, 15, 0, 10,
-                tzinfo=__import__("datetime").timezone.utc,
-            ),
+            (15, 0, 10),
         )
-        assert "(at least)" in floor
-        assert "ETA" not in floor
 
-        stale_counts = _rebuild_status_line(
-            lambda: {
+        assert "artefact 2 of 71" in line
+        assert "10 transaction(s) so far" in line
+        assert "ETA" not in line
+
+    def test_RebuildLine_WhenCountsHaveNotMovedLately_SaysHowLongTheyHaveBeenStill(
+        self,
+    ):
+        line = self._line(
+            {
                 "state": "running",
                 "started_at": "2026-08-02T15:00:00Z",
                 "done": 65,
@@ -1328,25 +1379,14 @@ class TestDangerZone:
                 "transactions": 12834,
                 "updated_at": "2026-08-02T15:20:00Z",
             },
-            now=__import__("datetime").datetime(
-                2026, 8, 2, 15, 26, 0,
-                tzinfo=__import__("datetime").timezone.utc,
-            ),
+            (15, 26, 0),
         )
-        assert "counts last moved 6 min ago" in stale_counts
-        assert "large artefact" in stale_counts
 
-        mid_run = _rebuild_status_line(
-            lambda: {
-                "state": "running",
-                "started_at": "2026-08-02T15:00:00Z",
-                "done": 34,
-                "total": 120,
-                "transactions": 5210,
-            }
-        )
-        assert "artefact 34 of 120" in mid_run
-        assert "5,210 transaction(s) so far" in mid_run
+        assert "counts last moved 6 min ago" in line
+        assert "large artefact" in line
+
+    def test_RebuildLine_WhenFinished_ReportsTheLastRunRatherThanNothing(self):
+        from obdi.web import _rebuild_status_line
 
         done = _rebuild_status_line(
             lambda: {
@@ -1356,6 +1396,7 @@ class TestDangerZone:
                 "summary": "replayed 42 artefact(s)",
             }
         )
+
         assert "last rebuild" in done
         assert "replayed 42" in done
 
