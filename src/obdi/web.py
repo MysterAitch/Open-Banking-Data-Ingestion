@@ -1545,13 +1545,15 @@ def _rebuild_running_html(progress: _RebuildProgress) -> str:
     rows: list[str] = []
 
     heading = "Rebuilding derived data"
+    records = progress.records
     fraction = progress.fraction
-    if fraction is not None:
+    if records is not None and fraction is not None:
+        done, expected = records
         rows.append(
             f'<p><strong>{heading}</strong> <span class="muted">'
             f"{fraction * 100:.0f}%</span></p>"
-            f'<progress value="{progress.records[0]}" '
-            f'max="{progress.records[1]}" style="width:100%"></progress>'
+            f'<progress value="{done}" max="{expected}" '
+            'style="width:100%"></progress>'
         )
     else:
         rows.append(f"<p><strong>{heading}</strong></p>")

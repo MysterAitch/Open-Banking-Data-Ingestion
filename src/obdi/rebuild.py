@@ -133,9 +133,11 @@ def _record_count(payload: object) -> int:
     different and equally interesting number, and conflating them makes
     a total that is wrong while looking reasonable.
     """
+    if not isinstance(payload, str | bytes | bytearray):
+        return 0
     try:
         decoded = json.loads(payload)
-    except (TypeError, ValueError):
+    except ValueError:
         return 0
     if not isinstance(decoded, dict):
         return 0

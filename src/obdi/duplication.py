@@ -183,9 +183,11 @@ def _identity(record: dict[str, object]) -> str | None:
 
 
 def _records(payload: object) -> list[dict[str, object]]:
+    if not isinstance(payload, str | bytes | bytearray):
+        return []
     try:
         decoded = json.loads(payload)
-    except (TypeError, ValueError):
+    except ValueError:
         return []
     if not isinstance(decoded, dict):
         return []
