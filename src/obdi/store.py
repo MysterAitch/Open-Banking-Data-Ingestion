@@ -913,6 +913,27 @@ class Store:
             )
             self.connection.commit()
 
+    def source_connections(self) -> dict[tuple[str, str], list[str]]:
+        """Per (account, source): every connection whose evidence fed it.
+
+        From SIGHTINGS, not the transaction row - the row's digest is
+        last-writer-wins, and the roster label must name every witness
+        that ever delivered, not whichever wrote most recently.
+        """
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT t.account_id, ts.source, a.connection_id
+              FROM transaction_sources ts
+              JOIN transactions t ON t.entity_id = ts.entity_id
+              JOIN raw_artefacts a ON a.digest = ts.artefact_digest
+             WHERE a.connection_id != ''
+            """
+        ).fetchall()
+        out: dict[tuple[str, str], list[str]] = {}
+        for row in rows:
+            out.setdefault((str(row[0]), str(row[1])), []).append(str(row[2]))
+        return {key: sorted(values) for key, values in out.items()}
+
     def source_breakdown(self, account_id: str) -> dict[str, object]:
         """Which feeders this account is made of, and how much each gave.
 
@@ -928,7 +949,10 @@ class Store:
             SELECT t.entity_id AS entity_id,
                    COALESCE(ts.source, t.source) AS source,
                    (SELECT account_ref FROM raw_artefacts
-                     WHERE digest = ts.artefact_digest LIMIT 1) AS feeder
+                     WHERE digest = ts.artefact_digest LIMIT 1) AS feeder,
+                   (SELECT connection_id FROM raw_artefacts
+                     WHERE digest = ts.artefact_digest
+                       AND connection_id != '' LIMIT 1) AS connection
               FROM transactions t
               LEFT JOIN transaction_sources ts ON ts.entity_id = t.entity_id
              WHERE t.account_id = ?
@@ -938,6 +962,7 @@ class Store:
 
         by_source: dict[str, set[str]] = {}
         by_feeder: dict[tuple[str, str], set[str]] = {}
+        feeder_connections: dict[tuple[str, str], set[str]] = {}
         seen_sources: dict[str, set[str]] = {}
         sightings = 0
         for row in rows:
@@ -947,6 +972,9 @@ class Store:
             sightings += 1
             by_source.setdefault(source, set()).add(entity)
             by_feeder.setdefault((source, feeder), set()).add(entity)
+            connection = str(row["connection"] or "")
+            if connection:
+                feeder_connections.setdefault((source, feeder), set()).add(connection)
             seen_sources.setdefault(entity, set()).add(source)
 
         corroborated = sum(1 for sources in seen_sources.values() if len(sources) > 1)
@@ -958,7 +986,18 @@ class Store:
                 source: len(entities) for source, entities in sorted(by_source.items())
             },
             "by_feeder": [
-                {"source": source, "feeder": feeder, "transactions": len(entities)}
+                {
+                    "source": source,
+                    "feeder": feeder,
+                    "transactions": len(entities),
+                    # The witness INSTANCES behind this feeder. Distinct
+                    # from corroboration, which counts witness CLASSES: two
+                    # connections of one aggregator are two instances of
+                    # the same class, and must never manufacture confidence.
+                    "connections": sorted(
+                        feeder_connections.get((source, feeder), set())
+                    ),
+                }
                 for (source, feeder), entities in sorted(by_feeder.items())
             ],
             "corroborated": corroborated,

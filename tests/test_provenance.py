@@ -366,6 +366,9 @@ class TestAccountSourceBreakdown:
                 "source": "starling",
                 "feeder": "starling:space-bills-uid",
                 "transactions": 1,
+                # No connection recorded in this fixture's artefacts -
+                # honestly empty, exactly like pre-attribution history.
+                "connections": [],
             }
         ]
 

@@ -144,3 +144,103 @@ class TestTheMigrationLadder:
                 "SELECT COUNT(*) FROM raw_artefacts WHERE connection_id = 'halifax'"
             ).fetchone()[0]
         assert count == 3
+
+
+class TestTheDisplayHalf:
+    """The roster names witnesses; corroboration still counts classes."""
+
+    def _seeded(self, tmp_path):
+        """One account fed by two witnesses over different pipes."""
+        from datetime import date
+
+        from obdi.ingest import reconcile_batch
+        from obdi.models import SourceTier, Transaction, TransactionStatus
+
+        store = Store(tmp_path / "s.sqlite3")
+        for source, connection, digest in (
+            ("starling", "starling-api", "d-s"),
+            ("truelayer", "starling-truelayer", "d-t"),
+        ):
+            meta = json.dumps({"connection_id": connection})
+            artefact = (
+                starling.artefact_for(
+                    b'{"feedItems": []}',
+                    account_id="starling-personal",
+                    kind="feed",
+                    origin=f"https://x/{connection}",
+                    request_meta=meta,
+                )
+                if source == "starling"
+                else truelayer.artefact_for(
+                    b'{"results": []}',
+                    account_id="starling-personal",
+                    kind="booked",
+                    requested="from=x&to=y",
+                    request_meta=meta,
+                )
+            )
+            artefact = type(artefact)(**{**artefact.__dict__, "digest": digest})
+            store.land_artefact(artefact)
+            reconcile_batch(
+                store,
+                [
+                    Transaction(
+                        entity_id=f"e-{source}",
+                        account_id="starling-personal",
+                        amount_minor=-1234,
+                        currency="GBP",
+                        description="COFFEE",
+                        value_date=date(2026, 8, 1),
+                        booking_date=date(2026, 8, 1),
+                        source=source,
+                        source_id=f"id-{source}",
+                        content_key="ck-1",
+                        tier=SourceTier.AUTHORITATIVE,
+                        status=TransactionStatus.BOOKED,
+                        artefact_digest=digest,
+                    )
+                ],
+                digest=digest,
+            )
+        return store
+
+    def test_TheWitnessMap_NamesEveryConnectionThatFedAnAccount(self, tmp_path):
+        store = self._seeded(tmp_path)
+        mapping = store.source_connections()
+        store.close()
+
+        assert mapping[("starling-personal", "starling")] == ["starling-api"]
+        assert mapping[("starling-personal", "truelayer")] == ["starling-truelayer"]
+
+    def test_TheBreakdown_CarriesConnectionsPerFeeder(self, tmp_path):
+        store = self._seeded(tmp_path)
+        breakdown = store.source_breakdown("starling-personal")
+        store.close()
+
+        by_feeder = {
+            (entry["source"]): entry["connections"]
+            for entry in breakdown["by_feeder"]
+        }
+        assert by_feeder["starling"] == ["starling-api"]
+        assert by_feeder["truelayer"] == ["starling-truelayer"]
+
+    def test_TheViaLabel_PrefersTheWitnessName_FallsBackToThePipe(self):
+        from obdi.web import _via_label
+
+        assert _via_label("truelayer", ["halifax"]) == "halifax"
+        assert _via_label("truelayer", ["halifax", "tink-halifax"]) == (
+            "halifax, tink-halifax"
+        )
+        assert _via_label("truelayer", None) == "truelayer"
+        assert _via_label("truelayer", []) == "truelayer"
+
+    def test_CorroborationStillCountsClasses_NotInstances(self, tmp_path):
+        """Two witnesses of the SAME payment via different pipes = one
+        corroborated transaction. The witness names must not change what
+        corroboration means."""
+        store = self._seeded(tmp_path)
+        breakdown = store.source_breakdown("starling-personal")
+        store.close()
+
+        assert breakdown["transactions"] == 1
+        assert breakdown["corroborated"] == 1

@@ -327,6 +327,8 @@ class WebConfig:
     rebuild_derived: Callable[[], str] | None = None
     rebuild_status: Callable[[], dict[str, object]] | None = None
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None
+    #: (account, source) -> connection names, for the roster's via-labels.
+    source_connections: Callable[[], dict[tuple[str, str], list[str]]] | None = None
     #: Raw attempt rows for the fetch timeline - more history than the
     #: ledger page shows, projected into bars by obdi.timeline.
     recent_attempts: Callable[[], list[dict[str, object]]] | None = None
@@ -589,9 +591,20 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
         label = html.escape(str(entry.get("label") or entry.get("feeder") or ""))
         source = html.escape(str(entry.get("source", "")))
         count = int(str(entry.get("transactions", 0) or 0))
+        raw_connections = entry.get("connections")
+        connections = (
+            [str(c) for c in raw_connections]
+            if isinstance(raw_connections, list) and raw_connections
+            else []
+        )
+        via = (
+            f' <span class="muted">via {html.escape(", ".join(connections))}</span>'
+            if connections
+            else ""
+        )
         lines.append(
             f'<span class="muted">{source}</span> {label}: '
-            f"<strong>{count:,}</strong> transaction(s)<br>"
+            f"<strong>{count:,}</strong> transaction(s){via}<br>"
         )
     lines.append("</div>")
     if source_count > 1:
@@ -997,6 +1010,7 @@ def _holdings_rows(
     display_labels: Callable[[], dict[str, str]] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
     account_feeders: Callable[[], dict[str, list[str]]] | None = None,
+    source_connections: dict[tuple[str, str], list[str]] | None = None,
 ) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
@@ -1122,7 +1136,14 @@ def _holdings_rows(
             f'<div class="row"{row_style}><strong>'
             f'<a href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong>"
-            f" via {html.escape(row.source)}{quiet}{sub}<br>"
+            " via "
+            + html.escape(
+                _via_label(
+                    row.source,
+                    (source_connections or {}).get((row.account_id, row.source)),
+                )
+            )
+            + f"{quiet}{sub}<br>"
             f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
             f"{feeder_note}{bind_form}{strip}</div>"
         )
@@ -1639,6 +1660,19 @@ def _rebuild_status_line(
             f'<span class="muted">{finished}: {summary}</span></p>'
         )
     return ""
+
+
+def _via_label(source: str, connections: list[str] | None) -> str:
+    """What an account row was fed BY: the witness, as specifically as known.
+
+    The connection name when attribution knows it ("via halifax"), the
+    bare pipe when it does not ("via truelayer") - never a guess dressed
+    as a name. Several connections on one pipe all get named, because
+    that is exactly the situation the label exists to disambiguate.
+    """
+    if connections:
+        return ", ".join(connections)
+    return source
 
 
 def _rebuild_history_html(
@@ -2339,6 +2373,7 @@ def render_index(
     forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
+    source_connections: dict[tuple[str, str], list[str]] | None = None,
     starling_probe_available: bool = False,
     probe_suggestions: Callable[[], list[object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
@@ -2350,7 +2385,7 @@ def render_index(
 {_backfill_running_banner(backfill_status)}
 {_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
-{_holdings_rows(holdings, display_labels, account_timelines, account_feeders)}
+{_holdings_rows(holdings, display_labels, account_timelines, account_feeders, source_connections)}
 {_knowledge_rows(provider_knowledge)}
 {_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
@@ -2488,6 +2523,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     forget_available=self.bound_config.forget_actual is not None,
                     rebuild_status=self.bound_config.rebuild_status,
                     recent_rebuilds=self.bound_config.recent_rebuilds,
+                    source_connections=(
+                        self.bound_config.source_connections()
+                        if self.bound_config.source_connections is not None
+                        else None
+                    ),
                     starling_probe_available=self.bound_config.starling_probe is not None,
                     probe_suggestions=self.bound_config.probe_suggestions,
                     scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
