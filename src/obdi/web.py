@@ -327,6 +327,9 @@ class WebConfig:
     rebuild_derived: Callable[[], str] | None = None
     rebuild_status: Callable[[], dict[str, object]] | None = None
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None
+    #: Raw attempt rows for the fetch timeline - more history than the
+    #: ledger page shows, projected into bars by obdi.timeline.
+    recent_attempts: Callable[[], list[dict[str, object]]] | None = None
     #: Run the Starling changesSince probe at a cutoff; None when the web
     #: process has no Starling token. Returns the rendered-ready report.
     starling_probe: Callable[[str], object] | None = None
@@ -2356,7 +2359,8 @@ def render_index(
               prune_available=prune_actual is not None)}
 {_extend_rows(extendables)}
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
-<p><a class="button" href="/attempts">Fetch attempts</a></p>
+<p><a class="button" href="/attempts">Fetch attempts</a>
+<a class="button" href="/fetch-timeline">Fetch timeline</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
@@ -2436,6 +2440,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if route == "/account":
             self._account(params)
             return
+        if route == "/fetch-timeline":
+            self._fetch_timeline(parse_qs(parsed.query))
+            return
         if route == "/attempts":
             self._attempts()
             return
@@ -2493,6 +2500,37 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._callback(params)
         else:
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
+
+    def _fetch_timeline(self, params: dict[str, list[str]]) -> None:
+        """Every ask as a bar over the history it asked about."""
+        hook = self.bound_config.recent_attempts
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No ledger wired.</p>"))
+            return
+        try:
+            days = max(1, min(int((params.get("days") or ["7"])[0]), 365))
+        except ValueError:
+            days = 7
+        from .timeline import timeline_svg
+
+        ranges = " | ".join(
+            f'<a href="/fetch-timeline?days={n}">{label}</a>'
+            if n != days
+            else f"<strong>{label}</strong>"
+            for n, label in ((1, "24 hours"), (7, "7 days"), (30, "30 days"))
+        )
+        body = (
+            "<h1>Fetch timeline</h1>"
+            '<p class="muted">Each row is one ask from the attempt ledger, '
+            "newest at the top; the bar spans the history it asked about. "
+            "The fetch strategy reads straight off the shapes: tier steps, "
+            "cursor slivers hugging now, ladder bursts, probe cuts.</p>"
+            f"<p>Asks made in the last: {ranges}</p>"
+            + timeline_svg(hook(), days=days)
+            + '<p><a class="button" href="/attempts">Fetch attempts ledger</a></p>'
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Fetch timeline", body))
 
     def _attempts(self) -> None:
         hook = self.bound_config.attempts_index

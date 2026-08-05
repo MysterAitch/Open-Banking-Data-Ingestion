@@ -502,6 +502,11 @@ def _probe_suggestions(db_path: Path) -> list[object]:
         return list(amendment_cutoff_suggestions(store))
 
 
+def _recent_attempts(db_path: Path) -> list[dict[str, object]]:
+    with Store(db_path) as store:
+        return store.attempts(1500)
+
+
 def _recent_rebuilds(db_path: Path) -> list[dict[str, object]]:
     with Store(db_path) as store:
         return store.recent_rebuild_runs(8)
@@ -2064,6 +2069,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
         recent_rebuilds=lambda: _recent_rebuilds(db_path),
+        recent_attempts=lambda: _recent_attempts(db_path),
         starling_probe=(
             _starling_probe_runner(db_path) if _starling_token_present() else None
         ),
