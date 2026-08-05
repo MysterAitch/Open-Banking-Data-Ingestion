@@ -152,20 +152,41 @@ def probe_starling_changes(
                 token, account_uid, category, since_at=cutoff
             )
         except starling.StarlingError as exc:
+            # The refused ask goes in the ledger like any other: the
+            # probe is an ask, and asks are part of the record.
+            store.record_attempt(
+                source="starling-feed",
+                connection_id="starling-api",
+                account_ref=f"starling:{account_uid}",
+                asked=f"changes-probe cutoff={report.cutoff}",
+                request_meta=request_meta,
+                outcome="refused",
+                http_status=getattr(exc, "status", None),
+                detail=str(exc)[:300],
+            )
             report.problems.append(f"{label}: {exc}")
             continue
-        store.land_artefact(
-            starling.artefact_for(
-                body,
-                account_id=f"starling:{category}",
-                kind="feed",
-                origin=(
-                    f"{starling.API_HOST}/api/v2/feed/account/{account_uid}"
-                    f"/category/{category}?{asked}"
-                ),
-                request_meta=request_meta,
-            )
+        artefact = starling.artefact_for(
+            body,
+            account_id=f"starling:{category}",
+            kind="feed",
+            origin=(
+                f"{starling.API_HOST}/api/v2/feed/account/{account_uid}"
+                f"/category/{category}?{asked}"
+            ),
+            request_meta=request_meta,
         )
+        store.record_attempt(
+            source="starling-feed",
+            connection_id="starling-api",
+            account_ref=f"starling:{account_uid}",
+            asked=asked,
+            request_meta=request_meta,
+            outcome="landed",
+            http_status=200,
+            artefact_digest=artefact.digest,
+        )
+        store.land_artefact(artefact)
 
         result = ProbeAccount(label=label)
         for item in items:

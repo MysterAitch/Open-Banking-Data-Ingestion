@@ -22,10 +22,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import parse_qs
 
-from . import cursor
+from . import cursor, tiers
 from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
@@ -134,6 +134,20 @@ def pull_truelayer(
     result = PullResult(provider=f"truelayer/{connection.connection_id}")
     summary = ImportSummary(artefact_new=True)
 
+    # Tiered windows for routine pulls. TrueLayer filters on TRANSACTION
+    # date, so amendments to old records arrive only through windows that
+    # cover their dates - the tiers keep that coverage while cutting the
+    # always-90-days volume roughly tenfold. Explicit windows and deep
+    # ladders are deliberate asks and bypass tiering entirely.
+    routine = since is None and not deep
+    tier_choice = None
+    if routine:
+        tier_choice = tiers.select(store, "truelayer", connection.connection_id)
+        since = datetime.now(UTC).date() - timedelta(days=tier_choice.days)
+        result.notes.append(
+            f"tier {tier_choice.label}: asking {tier_choice.days}d window"
+        )
+
     request_meta = json.dumps(
         {
             "trigger": trigger,
@@ -187,7 +201,7 @@ def pull_truelayer(
         # else. Balance and pending ride along only on routine pulls - a probe
         # that also fetched them would spend three calls to measure one, and
         # nine across a three-account connection, against a quota of four.
-        probing = since is not None
+        probing = since is not None and tier_choice is None
         try:
             if probing:
                 raise _SkipBalance
@@ -468,7 +482,11 @@ def pull_truelayer(
                 card_body, card_asked = truelayer.fetch_card_transactions(
                     connection.access_token,
                     card_id,
-                    days=truelayer.ROUTINE_WINDOW_DAYS,
+                    days=(
+                        tier_choice.days
+                        if tier_choice is not None
+                        else truelayer.ROUTINE_WINDOW_DAYS
+                    ),
                     psu_ip=psu_ip,
                 )
             except truelayer.TrueLayerError as exc:
@@ -522,6 +540,11 @@ def pull_truelayer(
                     digest=card_artefact.digest,
                     summary=summary,
                 )
+
+    if tier_choice is not None:
+        # Stamped on COMPLETION: a refused cycle does not burn its tier,
+        # so the same window is simply offered again next cycle.
+        tiers.stamp(store, "truelayer", connection.connection_id, tier_choice)
 
     result.summary = summary
     return result
