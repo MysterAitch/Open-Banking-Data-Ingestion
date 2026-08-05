@@ -327,6 +327,11 @@ class WebConfig:
     rebuild_derived: Callable[[], str] | None = None
     rebuild_status: Callable[[], dict[str, object]] | None = None
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None
+    #: Run the Starling changesSince probe at a cutoff; None when the web
+    #: process has no Starling token. Returns the rendered-ready report.
+    starling_probe: Callable[[str], object] | None = None
+    #: Cutoff suggestions derived from the store's known amendments.
+    probe_suggestions: Callable[[], list[object]] | None = None
     #: Danger zone: drop the canonical-to-Actual links (source names kept).
     forget_actual: Callable[[], int] | None = None
     #: True while a stack update holds its lease - new bank authorisations
@@ -1696,6 +1701,131 @@ def _rebuild_history_html(
     )
 
 
+def _probe_result_html(report: object) -> str:
+    """The verdict first, then exactly the numbers behind it.
+
+    The wording comes from the report itself, which states no more than
+    the single response proved - a probe page that editorialised beyond
+    its evidence would poison the decision it exists to inform.
+    """
+    verdict = ""
+    with contextlib.suppress(Exception):
+        verdict = str(report.verdict())  # type: ignore[attr-defined]
+    cutoff = html.escape(str(getattr(report, "cutoff", "")))
+    decisive = bool(getattr(report, "before_cutoff", 0))
+
+    rows_html = ""
+    for account in getattr(report, "accounts", []) or []:
+        rows_html += (
+            "<tr>"
+            f"<td>{html.escape(str(getattr(account, 'label', '')))}</td>"
+            f"<td>{getattr(account, 'items', 0):,}</td>"
+            f"<td>{getattr(account, 'before_cutoff', 0):,}</td>"
+            "<td class=muted>"
+            + html.escape(str(getattr(account, "oldest_transaction_time", ""))[:19])
+            + "</td><td class=muted>"
+            + html.escape(str(getattr(account, "newest_transaction_time", ""))[:19])
+            + "</td>"
+            "</tr>"
+        )
+    problems = "".join(
+        f"<p class=warn>{html.escape(str(problem))}</p>"
+        for problem in getattr(report, "problems", []) or []
+    )
+
+    pill = "ok" if decisive else "warn"
+    return (
+        f'<h1>changesSince probe</h1>'
+        f'<p class="muted">cutoff {cutoff}</p>'
+        f'<p><span class="pill pill-{pill}">'
+        f'{"decisive" if decisive else "not decisive"}</span> '
+        f"{html.escape(verdict)}</p>"
+        '<div style="overflow-x:auto"><table>'
+        "<tr><th>account</th><th>items</th><th>transactionTime before cutoff</th>"
+        "<th>oldest txn</th><th>newest txn</th></tr>"
+        f"{rows_html}</table></div>"
+        f"{problems}"
+        '<p class="muted">Every response above was landed in layer 0 with its '
+        "asked-for cutoff recorded, so this experiment is replayable "
+        "evidence, not a screenshot.</p>"
+        + HOME_LINK
+    )
+
+
+def _probe_section_html(
+    available: bool,
+    probe_suggestions: Callable[[], list[object]] | None,
+) -> str:
+    """The changesSince experiment as buttons.
+
+    The naive probe is ambiguous - an empty answer is what BOTH possible
+    semantics produce on a quiet account - so the suggestions row is the
+    heart of this section: cutoffs derived from amendments the store has
+    already witnessed, each placed between a transaction's own time and
+    the moment its record changed. Only update-time filtering can return
+    that item, so one tap gives a decisive answer.
+    """
+    if not available:
+        return ""
+    suggestions = []
+    if probe_suggestions is not None:
+        with contextlib.suppress(Exception):
+            suggestions = probe_suggestions()
+
+    def form(cutoff: str, label: str, note: str = "") -> str:
+        return (
+            '<form method="post" action="/starling-probe" '
+            'style="display:inline-block;margin:.2rem .3rem .2rem 0">'
+            f'<input type="hidden" name="cutoff" value="{html.escape(cutoff)}">'
+            '<button class="button" type="submit" '
+            'style="border:0;cursor:pointer;padding:.4rem .7rem">'
+            f"{html.escape(label)}</button>"
+            f'{f"<span class=muted> {html.escape(note)}</span>" if note else ""}'
+            "</form>"
+        )
+
+    now = datetime.now(UTC)
+    presets = "".join(
+        form((now - timedelta(days=days)).isoformat().replace("+00:00", "Z"), label)
+        for days, label in ((7, "7 days ago"), (28, "28 days ago"), (90, "90 days ago"))
+    )
+    straddles = "".join(
+        form(
+            str(getattr(s, "cutoff", "")),
+            f"straddle amendment {getattr(s, 'item_hint', '')}",
+            f"txn {str(getattr(s, 'transaction_time', ''))[:10]}, "
+            f"changed {str(getattr(s, 'changed_at', ''))[:10]}",
+        )
+        + "<br>"
+        for s in suggestions
+    )
+    if not straddles:
+        straddles = (
+            '<p class="muted">No amendment straddles available yet - the store '
+            "has not witnessed a feed item change. Presets still answer the "
+            '"anything new since" question; the semantics question needs an '
+            "amendment to straddle.</p>"
+        )
+
+    return (
+        "<h3>Starling changesSince probe</h3>"
+        '<p class="muted">One read-only ask that decides the sync design: '
+        "does changesSince return items by when they HAPPENED or by when "
+        "their record last CHANGED? A cutoff placed between a known "
+        "amendment's two timestamps distinguishes the two - only "
+        "update-time filtering can return that item. Every response lands "
+        "in layer 0 as evidence.</p>"
+        f"<p>{presets}</p>"
+        f"<p>Decisive cutoffs, from amendments the store has seen:<br>{straddles}</p>"
+        '<form method="post" action="/starling-probe" '
+        'style="display:flex;gap:.4rem;margin:.35rem 0">'
+        '<input name="cutoff" placeholder="or any cutoff: 2026-08-03T09:00:00Z" '
+        'style="flex:1">'
+        '<button class="button" type="submit" '
+        'style="border:0;cursor:pointer">Probe</button></form>'
+    )
+
+
 def _danger_zone(
     rebuild_available: bool,
     forget_available: bool,
@@ -2206,6 +2336,8 @@ def render_index(
     forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
+    starling_probe_available: bool = False,
+    probe_suggestions: Callable[[], list[object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
@@ -2244,6 +2376,7 @@ reconciled through the same identity rules as the API pulls.</p>
 </form>
 <p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>
+{_probe_section_html(starling_probe_available, probe_suggestions)}
 {_danger_zone(rebuild_available, forget_available, rebuild_status, recent_rebuilds)}
 """
     return render_page("Bank connections", body)
@@ -2348,6 +2481,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     forget_available=self.bound_config.forget_actual is not None,
                     rebuild_status=self.bound_config.rebuild_status,
                     recent_rebuilds=self.bound_config.recent_rebuilds,
+                    starling_probe_available=self.bound_config.starling_probe is not None,
+                    probe_suggestions=self.bound_config.probe_suggestions,
                     scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
                     backfill_status=self.bound_config.backfill_status,
                 ),
@@ -2821,6 +2956,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 int(self.headers.get("Content-Length") or 0)
             ).decode("utf-8")))
             return
+        if route == "/starling-probe":
+            self._starling_probe(parse_qs(self.rfile.read(
+                int(self.headers.get("Content-Length") or 0)
+            ).decode("utf-8")))
+            return
         if route == "/push-actual":
             self._push_actual()
             return
@@ -3021,6 +3161,43 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             200,
             render_page("Imported", f"<p>{html.escape(summary)}</p>" + HOME_LINK),
         )
+
+    def _starling_probe(self, params: dict[str, list[str]]) -> None:
+        """Run the changesSince experiment and say what one response proves."""
+        probe = self.bound_config.starling_probe
+        if probe is None:
+            self._respond(
+                503,
+                error_page(
+                    "Probe unavailable",
+                    "<p>The web process has no Starling token configured.</p>",
+                ),
+            )
+            return
+        cutoff = (params.get("cutoff") or [""])[0].strip()
+        if not cutoff:
+            self._respond(
+                400,
+                error_page("Missing cutoff", "<p>Choose or enter a cutoff.</p>"),
+            )
+            return
+        try:
+            report = probe(cutoff)
+        except ValueError as exc:
+            self._respond(
+                400, error_page("Bad cutoff", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        except Exception as exc:
+            self._respond(
+                502,
+                error_page(
+                    "Probe failed", f"<p>{html.escape(str(exc))}</p>"
+                ),
+            )
+            return
+        print(f"starling probe via page: cutoff={cutoff}", file=sys.stderr)
+        self._respond(200, render_page("changesSince probe", _probe_result_html(report)))
 
     def _push_actual(self) -> None:
         hook = self.bound_config.push_actual

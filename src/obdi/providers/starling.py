@@ -206,14 +206,25 @@ def fetch_feed(
     category_uid: str,
     *,
     since: date | None = None,
+    since_at: datetime | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[list[JsonObject], bytes, str]:
-    """Feed items, the raw body for landing, and the range actually asked."""
+    """Feed items, the raw body for landing, and the range actually asked.
+
+    since_at asks to the minute rather than the midnight - the
+    changes-probe needs a cutoff BETWEEN a transaction's own time and
+    the moment its record changed, and days are too blunt for that.
+    """
     # Explicitly UTC: date.today() reads the process timezone, so a
     # container and a workstation can disagree about which day it is and
     # silently shift the window boundary.
-    start = since or (datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS))
-    stamp = datetime.combine(start, datetime.min.time()).isoformat() + "Z"
+    if since_at is not None:
+        stamp = since_at.astimezone(UTC).replace(tzinfo=None).isoformat() + "Z"
+    else:
+        start = since or (
+            datetime.now(UTC).date() - timedelta(days=DEFAULT_BACKFILL_DAYS)
+        )
+        stamp = datetime.combine(start, datetime.min.time()).isoformat() + "Z"
     payload, body = _get(
         f"/api/v2/feed/account/{account_uid}/category/{category_uid}",
         token,

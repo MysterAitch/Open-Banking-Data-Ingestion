@@ -458,6 +458,50 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
 
+def _starling_token_present() -> bool:
+    from .secrets import SecretError, read_secret
+
+    try:
+        return bool(read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=False))
+    except SecretError:
+        return False
+
+
+def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
+    """The changesSince experiment, one cutoff in, one verdict out.
+
+    First-party API: no SCA window, no attended/unattended distinction,
+    so the page can run it any time. Raises ValueError for a cutoff the
+    person mistyped (a 400, their fix) and lets provider errors surface
+    as the 502 they are.
+    """
+
+    def run(raw_cutoff: str) -> object:
+        from .probe import parse_cutoff, probe_starling_changes
+        from .secrets import read_secret
+
+        cutoff = parse_cutoff(raw_cutoff)
+        if cutoff is None:
+            raise ValueError(
+                f"could not read {raw_cutoff!r} as a moment in time - "
+                "use ISO format, e.g. 2026-08-03T09:00:00Z"
+            )
+        token = read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=True)
+        with Store(db_path) as store:
+            return probe_starling_changes(
+                store, token, cutoff, account_map=_account_map()
+            )
+
+    return run
+
+
+def _probe_suggestions(db_path: Path) -> list[object]:
+    from .probe import amendment_cutoff_suggestions
+
+    with Store(db_path) as store:
+        return list(amendment_cutoff_suggestions(store))
+
+
 def _recent_rebuilds(db_path: Path) -> list[dict[str, object]]:
     with Store(db_path) as store:
         return store.recent_rebuild_runs(8)
@@ -2020,6 +2064,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
         recent_rebuilds=lambda: _recent_rebuilds(db_path),
+        starling_probe=(
+            _starling_probe_runner(db_path) if _starling_token_present() else None
+        ),
+        probe_suggestions=lambda: _probe_suggestions(db_path),
         forget_actual=forget_actual,
         update_in_progress=update_in_progress,
         auth_lease_take=auth_lease_take,
