@@ -39,7 +39,7 @@ def _item(uid: str, txn: str, updated: str | None = None, minor: int = 100) -> d
 class _FakeStarling:
     """A provider whose responses depend on the ask, like the real one."""
 
-    def __init__(self, monkeypatch, full: list[dict]):
+    def __init__(self, monkeypatch, full: list[dict]) -> None:
         self.full = full
         self.asks: list[object] = []
         monkeypatch.setattr(
