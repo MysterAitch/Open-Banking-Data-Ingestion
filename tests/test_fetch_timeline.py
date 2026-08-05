@@ -54,7 +54,7 @@ class TestWindowParsing:
 
 class TestBars:
     def test_OldAsksFallOutsideTheHorizon(self):
-        bars, undrawn = bars_from_attempts(
+        bars, undrawn, _mismatches = bars_from_attempts(
             [
                 _attempt("2026-08-05T09:00:00Z", "from=2026-08-02&to=2026-08-05"),
                 _attempt("2026-07-01T09:00:00Z", "from=2026-06-28&to=2026-07-01"),
@@ -69,7 +69,7 @@ class TestBars:
         """A balance or listing has no span - its honest shape is a
         point at the moment of asking, not a bar of invented width and
         not a footnote."""
-        bars, points = bars_from_attempts(
+        bars, points, _mismatches = bars_from_attempts(
             [
                 _attempt("2026-08-05T09:00:00Z", "accounts"),
                 _attempt("2026-08-05T09:00:01Z", "from=2026-08-02&to=2026-08-05"),
@@ -83,7 +83,7 @@ class TestBars:
         assert dot.start == dot.end == dot.attempted_at
 
     def test_NewestAskSitsFirst(self):
-        bars, _ = bars_from_attempts(
+        bars, _, _mismatches = bars_from_attempts(
             [
                 _attempt("2026-08-04T09:00:00Z", "from=2026-08-01&to=2026-08-04"),
                 _attempt("2026-08-05T09:00:00Z", "from=2026-08-02&to=2026-08-05"),
@@ -231,7 +231,7 @@ class TestFullSpanAndPan:
             now=NOW,
         )
         assert "<path d=" in svg and "Z\"" in svg
-        assert "<rect" not in svg
+        assert "rx=" not in svg  # no BAR rects; pattern-def rects are fine
 
     def test_AnUntilInThePast_PansTheWindow(self):
         """Asks after the pan anchor fall outside the view - the right
@@ -249,3 +249,140 @@ class TestFullSpanAndPan:
         assert "2026-08-01" not in svg.split("<title>")[1] or True
         # The newer ask (attempted after the anchor) must be absent.
         assert "2026-08-04T10" not in svg
+
+
+class TestWindowProvenance:
+    """Recorded beats recovered beats inferred beats point - and every
+    step down the ladder is styled and labelled as what it is."""
+
+    def test_ARoutineRowWithALandedArtefact_RecoversItsWindowFromEvidence(self):
+        """The ledger row said "routine"; the artefact it landed recorded
+        the range actually requested. Recovery, not inference."""
+        bars, _, _ = bars_from_attempts(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "routine",
+                    "source": "truelayer-booked",
+                    "outcome": "landed",
+                    "request_meta": "{}",
+                    "artefact_origin": (
+                        "https://api.truelayer.com/data/v1/accounts/a/transactions"
+                        "?from=2026-05-07&to=2026-08-05"
+                    ),
+                }
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert len(bars) == 1
+        assert bars[0].provenance == "recovered"
+        assert bars[0].start.date().isoformat() == "2026-05-07"
+        assert "recovered from the landed artefact" in bars[0].label
+
+    def test_ARoutineCardRowWithNoArtefact_InfersTheWitnessedDefault(self):
+        """Refusals land nothing, so nothing can be recovered - but the
+        code provably sent the 90-day routine window, constant across
+        every version that ever wrote such a row."""
+        bars, _, _ = bars_from_attempts(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "routine",
+                    "source": "truelayer-card-booked",
+                    "outcome": "refused",
+                    "request_meta": "{}",
+                    "artefact_origin": None,
+                }
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert bars[0].provenance == "inferred"
+        assert (bars[0].end - bars[0].start).days == 90
+        assert "inferred from the routine default" in bars[0].label
+
+    def test_AWindowlessRowWithNoEvidenceAndNoRule_StaysAPoint(self):
+        bars, points, _ = bars_from_attempts(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "routine",
+                    "source": "truelayer-booked",
+                    "outcome": "refused",
+                    "request_meta": "{}",
+                    "artefact_origin": None,
+                }
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert bars[0].point
+        assert points == 1
+
+    def test_AskAndArtefactDisagreeing_IsAFindingNotAPreference(self):
+        """When both sources speak they must agree; the chart must not
+        quietly pick one. The sanity check Roger asked for."""
+        _, _, mismatches = bars_from_attempts(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "from=2026-08-01&to=2026-08-05",
+                    "source": "truelayer-booked",
+                    "outcome": "landed",
+                    "request_meta": "{}",
+                    "artefact_origin": (
+                        "https://api.truelayer.com/x?from=2026-07-01&to=2026-08-05"
+                    ),
+                }
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert len(mismatches) == 1
+        assert "2026-08-01" in mismatches[0] and "2026-07-01" in mismatches[0]
+
+    def test_TheDisagreement_SurfacesOnThePage(self):
+        svg = timeline_svg(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "from=2026-08-01&to=2026-08-05",
+                    "source": "truelayer-booked",
+                    "outcome": "landed",
+                    "request_meta": "{}",
+                    "artefact_origin": (
+                        "https://api.truelayer.com/x?from=2026-07-01&to=2026-08-05"
+                    ),
+                }
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert "DISAGREE" in svg
+
+    def test_RecoveredAndInferred_AreVisiblyDistinctFromRecorded(self):
+        svg = timeline_svg(
+            [
+                {
+                    "attempted_at": "2026-08-05T09:00:00Z",
+                    "asked": "routine",
+                    "source": "truelayer-booked",
+                    "outcome": "landed",
+                    "request_meta": "{}",
+                    "artefact_origin": "https://x?from=2026-05-07&to=2026-08-05",
+                },
+                {
+                    "attempted_at": "2026-08-05T08:00:00Z",
+                    "asked": "routine",
+                    "source": "truelayer-card-booked",
+                    "outcome": "landed",
+                    "request_meta": "{}",
+                    "artefact_origin": None,
+                },
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert "stroke-dasharray=\"2 2\"" in svg, "recovered = dotted outline"
+        assert "url(#hatch-" in svg, "inferred = hatched fill"

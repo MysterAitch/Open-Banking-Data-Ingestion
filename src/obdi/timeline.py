@@ -33,6 +33,14 @@ _FROM_TO = re.compile(r"from=(\d{4}-\d{2}-\d{2})&to=(\d{4}-\d{2}-\d{2})")
 _CHANGES = re.compile(r"changes[Ss]ince=([0-9T:.+Z-]+)")
 _SINCE = re.compile(r"since=(\d{4}-\d{2}-\d{2})")
 
+#: The routine window in force for every code version that ever wrote a
+#: windowless card ask - verified constant across the repository history
+#: (one addition, no changes), which is what licenses the inference.
+_WITNESSED_ROUTINE_DAYS = 90
+
+#: Sources whose windowless "routine" asks provably used that default.
+_INFERABLE_SOURCES = frozenset({"truelayer-card-booked"})
+
 #: Colour per source - the vocabulary of the chart. Plain and few.
 _PALETTE = {
     "starling-feed": "#2b6cb0",
@@ -59,10 +67,19 @@ class AskBar:
     source: str
     outcome: str
     label: str
-    #: True for asks whose question has no span - balances, account
-    #: enumerations, listings - and for legacy rows whose window went
-    #: unrecorded. Their honest shape is a point at the moment of asking.
-    point: bool = False
+    #: Where the window came from, and therefore how it is drawn:
+    #:   recorded   the ask row itself named the range - solid bar
+    #:   recovered  the range came from the LINKED ARTEFACT's origin
+    #:              (the ledger row said only "routine") - dotted outline
+    #:   inferred   no artefact, but the code provably sent the routine
+    #:              default at the time - hatched
+    #:   point      the ask has no span (a snapshot), or nothing at all
+    #:              is known - diamond
+    provenance: str = "recorded"
+
+    @property
+    def point(self) -> bool:
+        return self.provenance == "point"
 
 
 def parse_window(asked: str, attempted_at: datetime) -> tuple[datetime, datetime] | None:
@@ -99,8 +116,8 @@ def bars_from_attempts(
     *,
     days: int | None,
     now: datetime | None = None,
-) -> tuple[list[AskBar], int]:
-    """(drawable rows, count of point-in-time asks among them).
+) -> tuple[list[AskBar], int, list[str]]:
+    """(drawable rows, count of point asks, recorded-vs-evidence mismatches).
 
     days=None means EVERYTHING the ledger holds - the full-span view,
     where a decade-old epoch ask is a bar like any other and this
@@ -111,19 +128,49 @@ def bars_from_attempts(
     horizon = right - timedelta(days=days) if days is not None else None
     bars: list[AskBar] = []
     undrawn = 0
+    mismatches: list[str] = []
     for attempt in attempts:
         attempted = _parse_stamp(str(attempt.get("attempted_at", "")))
         if attempted is None or attempted > right:
             continue
         if horizon is not None and attempted < horizon:
             continue
-        window = parse_window(str(attempt.get("asked", "")), attempted)
+        source_name = str(attempt.get("source", ""))
+        asked = str(attempt.get("asked", ""))
+        window = parse_window(asked, attempted)
+        artefact_window = parse_window(
+            str(attempt.get("artefact_origin") or ""), attempted
+        )
+        provenance = "recorded"
+        if window is not None and artefact_window is not None:
+            # Both sources speak: they must agree, and disagreement is a
+            # finding, not a preference for whichever was read first.
+            if (
+                window[0].date() != artefact_window[0].date()
+                or window[1].date() != artefact_window[1].date()
+            ):
+                mismatches.append(
+                    f"{attempted.isoformat()[:19]}Z {source_name}: ask row "
+                    f"says {window[0].date()}..{window[1].date()} but its "
+                    f"artefact says {artefact_window[0].date()}.."
+                    f"{artefact_window[1].date()}"
+                )
+        elif window is None and artefact_window is not None:
+            # The ledger row said "routine"; the evidence knows better.
+            window = artefact_window
+            provenance = "recovered"
+        elif window is None and source_name in _INFERABLE_SOURCES and "routine" in asked:
+            window = (
+                attempted - timedelta(days=_WITNESSED_ROUTINE_DAYS),
+                attempted,
+            )
+            provenance = "inferred"
         if window is None:
-            # A state-snapshot ask (or a legacy row whose window went
-            # unrecorded): drawn as a point at its moment, because that
-            # is its true shape - only invented WIDTH would be a lie.
+            # A state-snapshot ask, or nothing known at all: a point at
+            # its moment, because only invented WIDTH would be a lie.
             undrawn += 1
             window = (attempted, attempted)
+            provenance = "point"
         trigger = ""
         try:
             meta = json.loads(str(attempt.get("request_meta") or "{}"))
@@ -132,10 +179,20 @@ def bars_from_attempts(
             pass
         source = str(attempt.get("source", ""))
         outcome = str(attempt.get("outcome", ""))
+        note = {
+            "recorded": "",
+            "recovered": " (window recovered from the landed artefact)",
+            "inferred": (
+                " (window inferred from the routine default in force - "
+                "not recorded)"
+            ),
+            "point": "",
+        }[provenance]
         label = (
             f"{attempted.isoformat()[:19]}Z {source} "
             f"[{outcome}]{f' trigger={trigger}' if trigger else ''} "
-            f"window {window[0].isoformat()[:19]} .. {window[1].isoformat()[:19]}"
+            f"window {window[0].isoformat()[:19]} .. "
+            f"{window[1].isoformat()[:19]}{note}"
         )
         bars.append(
             AskBar(
@@ -145,11 +202,11 @@ def bars_from_attempts(
                 source=source,
                 outcome=outcome,
                 label=label,
-                point=window[0] == window[1] == attempted,
+                provenance=provenance,
             )
         )
     bars.sort(key=lambda bar: bar.attempted_at, reverse=True)
-    return bars, undrawn
+    return bars, undrawn, mismatches
 
 
 def timeline_svg(
@@ -162,7 +219,7 @@ def timeline_svg(
 ) -> str:
     """The chart, or an honest sentence when there is nothing to draw."""
     at = now or datetime.now(UTC)
-    bars, undrawn = bars_from_attempts(attempts, days=days, now=at)
+    bars, undrawn, mismatches = bars_from_attempts(attempts, days=days, now=at)
     clipped_rows = len(bars) > max_rows
     bars = bars[:max_rows]
     if not bars:
@@ -195,6 +252,18 @@ def timeline_svg(
         'xmlns="http://www.w3.org/2000/svg" '
         'style="width:100%;height:auto;font:10px sans-serif">'
     ]
+    # One hatch pattern per palette colour, for inferred windows.
+    parts.append("<defs>")
+    for key, colour in {**_PALETTE, "other": _OTHER_COLOUR}.items():
+        safe = key.replace(".", "-")
+        parts.append(
+            f'<pattern id="hatch-{safe}" width="5" height="5" '
+            'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+            f'<rect width="5" height="5" fill="{colour}" fill-opacity="0.2"/>'
+            f'<line x1="0" y1="0" x2="0" y2="5" stroke="{colour}" '
+            'stroke-width="2"/></pattern>'
+        )
+    parts.append("</defs>")
 
     # Date ticks: six across the domain, labelled month-day.
     for i in range(7):
@@ -218,12 +287,21 @@ def timeline_svg(
         bar_w = max(x2 - x1, 3.0)
         clipped = bar.start < domain_left
         refused = bar.outcome != "landed"
-        style = (
-            f'fill="none" stroke="{colour}" stroke-width="2" '
-            'stroke-dasharray="3 2"'
-            if refused
-            else f'fill="{colour}" fill-opacity="0.75"'
-        )
+        if refused:
+            style = (
+                f'fill="none" stroke="{colour}" stroke-width="2" '
+                'stroke-dasharray="3 2"'
+            )
+        elif bar.provenance == "inferred":
+            key = (bar.source if bar.source in _PALETTE else "other").replace(".", "-")
+            style = f'fill="url(#hatch-{key})" stroke="{colour}" stroke-width="1"'
+        elif bar.provenance == "recovered":
+            style = (
+                f'fill="{colour}" fill-opacity="0.55" stroke="{colour}" '
+                'stroke-width="1.5" stroke-dasharray="2 2"'
+            )
+        else:
+            style = f'fill="{colour}" fill-opacity="0.75"'
         parts.append(
             f'<g><title>{html.escape(bar.label)}'
             f'{" (window extends left of chart)" if clipped else ""}</title>'
@@ -261,6 +339,12 @@ def timeline_svg(
         for name, colour in _PALETTE.items()
     )
     notes = []
+    if mismatches:
+        notes.append(
+            f"{len(mismatches)} ask(s) DISAGREE with their own landed "
+            "artefact about the window asked - investigate: "
+            + " | ".join(html.escape(m) for m in mismatches[:3])
+        )
     if undrawn:
         notes.append(f"{undrawn} point-in-time ask(s) drawn as diamonds")
     if clipped_rows:
@@ -271,6 +355,8 @@ def timeline_svg(
     return (
         f'<p class="muted">{legend} &nbsp; '
         "dashed = refused; diamond = point-in-time ask (no window); "
+        "dotted outline = window recovered from the landed artefact; "
+        "hatched = window inferred from the routine default; "
         "left notch = window extends beyond the chart; "
         "hover a bar for the full ask.</p>"
         f'<div style="overflow-x:auto">{"".join(parts)}</div>'

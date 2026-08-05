@@ -709,7 +709,14 @@ class Store:
             "f.detail, f.artefact_digest, "
             "(SELECT MIN(a.rowid) FROM raw_artefacts a "
             " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
-            " AND f.artefact_digest != '') AS artefact_id "
+            " AND f.artefact_digest != '') AS artefact_id, "
+            # The landed artefact's origin carries the range actually
+            # requested even where the ledger row recorded only "routine" -
+            # early rows can have their windows RECOVERED from evidence
+            # rather than inferred.
+            "(SELECT a.origin FROM raw_artefacts a "
+            " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
+            " AND f.artefact_digest != '' LIMIT 1) AS artefact_origin "
             "FROM fetch_attempts f "
             "ORDER BY f.attempted_at DESC, f.rowid DESC LIMIT ?",
             (limit,),
