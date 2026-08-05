@@ -720,8 +720,10 @@ def pull_starling(
             )
 
             fetched: tuple[list[JsonObject], str] | None = None
+            used_cutoff: datetime | None = None
             if since is None and feed_cursor is not None and not sweeping:
-                fetched = fetch_and_land(feed_cursor.since_at())
+                used_cutoff = feed_cursor.since_at()
+                fetched = fetch_and_land(used_cutoff)
                 if fetched is not None and not cursor.canary_present(
                     fetched[0], feed_cursor
                 ):
@@ -739,7 +741,8 @@ def pull_starling(
                     fetched = None
                     for prior_uid, prior_stamp in feed_cursor.history:
                         prior = cursor.FeedCursor(prior_uid, prior_stamp)
-                        fetched = fetch_and_land(prior.since_at())
+                        used_cutoff = prior.since_at()
+                        fetched = fetch_and_land(used_cutoff)
                         if fetched is not None and cursor.canary_present(
                             fetched[0], prior
                         ):
@@ -752,23 +755,60 @@ def pull_starling(
                         )
                         sweeping = True
             if fetched is None and (sweeping or since is not None or feed_cursor is None):
+                used_cutoff = None
                 fetched = fetch_and_land(None)
 
             if fetched is None:
                 continue
             items, digest = fetched
 
-            if since is None and sweeping and feed_cursor is not None:
-                known = {
-                    str(row[0])
+            # What the store already believes about these items, read once
+            # and serving three checks: the sweep's miss detection, the
+            # moved-transaction-time anomaly, and nothing else - the
+            # reconcile that follows builds its own candidate view.
+            stored_dates: dict[str, str] = {}
+            if items:
+                stored_dates = {
+                    str(row[0]): str(row[1])
                     for row in store.connection.execute(
-                        "SELECT source_id FROM transactions "
+                        "SELECT source_id, value_date FROM transactions "
                         "WHERE account_id = ? AND source = 'starling' "
                         "AND source_id IS NOT NULL",
                         (target,),
                     )
                 }
-                missed = cursor.sweep_misses(items, known, feed_cursor)
+
+            # Anomaly checks - each one a fact the probe demonstrated,
+            # re-verified on every routine cycle and reported loudly when
+            # reality stops agreeing with it.
+            if used_cutoff is not None:
+                for uid, stamp in cursor.filter_leaks(items, used_cutoff):
+                    result.notes.append(
+                        f"ANOMALY FILTER LEAK for {qualified_ref}: item "
+                        f"{uid[:8]} returned with update stamp {stamp} "
+                        f"before the asked cutoff - either the provider's "
+                        "filter regressed or a record was inserted "
+                        "retroactively with a stale stamp"
+                    )
+            for uid in cursor.offsetless_stamps(items):
+                result.notes.append(
+                    f"ANOMALY NAKED TIMESTAMP for {qualified_ref}: item "
+                    f"{uid[:8]} carries a stamp with no timezone marking - "
+                    "the UTC assumption is no longer self-evident, check "
+                    "before trusting cursor arithmetic"
+                )
+            for uid, was, now_date in cursor.moved_transaction_times(
+                items, stored_dates
+            ):
+                result.notes.append(
+                    f"ANOMALY TRANSACTION TIME MOVED for {qualified_ref}: "
+                    f"item {uid[:8]} was dated {was}, now {now_date} - "
+                    "amendments change amounts and statuses routinely, but "
+                    "a moved economic date reshuffles which day money left"
+                )
+
+            if since is None and sweeping and feed_cursor is not None:
+                missed = cursor.sweep_misses(items, set(stored_dates), feed_cursor)
                 if missed:
                     result.notes.append(
                         f"SWEEP CAUGHT {len(missed)} item(s) for "

@@ -83,7 +83,9 @@ class _FakeStarling:
     @staticmethod
     def _update_of(item: dict) -> datetime:
         stamp = item.get("updatedAt") or item["transactionTime"]
-        return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        # Mirror production: a naked stamp is treated as UTC (and flagged).
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _pull(store: Store) -> list[str]:
@@ -278,3 +280,107 @@ class TestExplicitWindowsBypassTheCursor:
 
         assert fake.asks[-1] is None, "explicit windows go through the date path"
         assert before == after, "a deliberate ask must not move the cursor"
+
+
+class TestAnomalyInstrumentation:
+    """Each check re-verifies a demonstrated fact on every routine cycle.
+
+    The probe proved the semantics once; these turn "proved once" into
+    "watched always", and each fires loudly rather than adapting
+    silently - an anomaly absorbed is an anomaly institutionalised.
+    """
+
+    def _planted(self, tmp_path, monkeypatch, items):
+        fake = _FakeStarling(monkeypatch, items)
+        store = Store(tmp_path / "s.sqlite3")
+        _pull(store)  # full fetch plants the cursor
+        return fake, store
+
+    def test_AFilterLeak_IsReportedNotAbsorbed(self, tmp_path, monkeypatch):
+        """An item with an update stamp before the asked cutoff violates
+        the demonstrated semantics - the retro-insertion case: a 5pm
+        transaction materialising in a slot checked four times before."""
+        items = [
+            _item("u-1", "2026-08-02T12:00:00.000Z", "2026-08-02T12:00:00.000Z"),
+        ]
+        fake, store = self._planted(tmp_path, monkeypatch, items)
+
+        original_feed = fake.full
+
+        def leaky_feed(token, account_uid, category_uid, since=None, since_at=None):
+            fake.asks.append(since_at)
+            got = [
+                item
+                for item in original_feed
+                if since_at is None or fake._update_of(item) >= since_at
+            ]
+            # The provider returns something it should have excluded: a
+            # stale-stamped record from long before the cutoff.
+            got.append(
+                _item("u-ghost", "2026-08-01T17:00:00.000Z", "2026-08-01T17:00:00.000Z")
+            )
+            body = json.dumps({"feedItems": got}).encode()
+            return got, body, "changesSince=leaky"
+
+        monkeypatch.setattr("obdi.providers.starling.fetch_feed", leaky_feed)
+        notes = _pull(store)
+        store.close()
+
+        assert any(
+            "ANOMALY FILTER LEAK" in note and "u-ghost"[:8] in note
+            for note in notes
+        ), notes
+
+    def test_ANakedTimestamp_IsReported(self, tmp_path, monkeypatch):
+        """The UTC assumption made monitorable: the day a stamp arrives
+        without an offset, the pull says so instead of guessing."""
+        items = [
+            _item("u-1", "2026-08-02T12:00:00.000Z", "2026-08-02T12:00:00.000Z"),
+        ]
+        fake, store = self._planted(tmp_path, monkeypatch, items)
+        fake.full.append(
+            _item("u-naked", "2026-08-02T13:00:00", "2026-08-02T13:00:00")
+        )
+        notes = _pull(store)
+        store.close()
+
+        assert any(
+            "ANOMALY NAKED TIMESTAMP" in note and "u-naked"[:8] in note
+            for note in notes
+        ), notes
+
+    def test_AMovedTransactionTime_IsReported(self, tmp_path, monkeypatch):
+        """Amounts and statuses amend routinely; the economic date moving
+        is the rare beast that reshuffles which day money left."""
+        items = [
+            _item("u-1", "2026-08-02T12:00:00.000Z", "2026-08-02T12:00:00.000Z"),
+        ]
+        fake, store = self._planted(tmp_path, monkeypatch, items)
+        # Same item, same uid - but its transactionTime moves a day.
+        fake.full[0] = _item(
+            "u-1", "2026-08-01T12:00:00.000Z", "2026-08-03T02:00:00.000Z"
+        )
+        notes = _pull(store)
+        store.close()
+
+        assert any(
+            "ANOMALY TRANSACTION TIME MOVED" in note
+            and "2026-08-02" in note
+            and "2026-08-01" in note
+            for note in notes
+        ), notes
+
+    def test_AWellBehavedCycle_RaisesNoAnomalies(self, tmp_path, monkeypatch):
+        """The checks must be quiet when reality agrees - alarms that cry
+        wolf teach the reader to skim past the one that matters."""
+        items = [
+            _item("u-1", "2026-08-02T12:00:00.000Z", "2026-08-02T12:00:00.000Z"),
+        ]
+        fake, store = self._planted(tmp_path, monkeypatch, items)
+        fake.full.append(
+            _item("u-2", "2026-08-03T09:00:00.000Z", "2026-08-03T09:00:00.000Z")
+        )
+        notes = _pull(store)
+        store.close()
+
+        assert not any("ANOMALY" in note for note in notes), notes

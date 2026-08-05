@@ -192,6 +192,80 @@ def stamp_sweep(store: Store, identity_key: str, connection_id: str) -> None:
     )
 
 
+def filter_leaks(
+    items: list[JsonObject], cutoff: datetime
+) -> list[tuple[str, str]]:
+    """Items a response contained that its own ask should have excluded.
+
+    Update-time semantics with an inclusive boundary were DEMONSTRATED,
+    so every returned item's update stamp must be >= the asked cutoff.
+    One that is not means either the provider's filter regressed or an
+    item was inserted retroactively wearing a stale stamp - the "a 5pm
+    transaction suddenly appears in a slot we had already checked four
+    times" case. Both are worth an alarm; with this check the semantics
+    are effectively RE-VERIFIED on every routine cycle, from the
+    opposite direction to the canary (which proves inclusion; this
+    proves exclusion).
+    """
+    leaked = []
+    for item in items:
+        uid = text(item, "feedItemUid")
+        stamp = item_update_stamp(item)
+        if not uid or not stamp:
+            continue
+        try:
+            if _parse(stamp) < cutoff:
+                leaked.append((uid, stamp))
+        except ValueError:
+            continue
+    return leaked
+
+
+def offsetless_stamps(items: list[JsonObject]) -> list[str]:
+    """Uids of items whose stamps carry no timezone marking.
+
+    Every stamp ever observed is Z-suffixed - UTC self-declared in-band.
+    The cursor arithmetic ASSUMES a naked stamp is UTC; a provider that
+    starts sending local time unmarked would make that assumption an
+    hour wrong twice a year. This turns the assumption into a monitored
+    invariant: the day a stamp arrives without an offset, the pull says
+    so instead of silently guessing.
+    """
+    naked = []
+    for item in items:
+        uid = text(item, "feedItemUid")
+        for stamp in (text(item, "updatedAt"), text(item, "transactionTime")):
+            if stamp and not (
+                stamp.endswith("Z") or "+" in stamp[10:] or "-" in stamp[10:]
+            ):
+                naked.append(uid)
+                break
+    return naked
+
+
+def moved_transaction_times(
+    items: list[JsonObject], stored_dates: dict[str, str]
+) -> list[tuple[str, str, str]]:
+    """(uid, stored_date, incoming_date) where the ECONOMIC time moved.
+
+    Amendments legitimately change amounts and statuses; a transaction
+    whose transactionTime itself moves is a different and rarer beast
+    (the fuel-pump amendment kept its time; a moved time reshuffles
+    which day money left). Not necessarily wrong - but always worth a
+    line in the log.
+    """
+    moved = []
+    for item in items:
+        uid = text(item, "feedItemUid")
+        stamp = text(item, "transactionTime")
+        if not uid or not stamp or uid not in stored_dates:
+            continue
+        incoming_date = stamp[:10]
+        if stored_dates[uid] != incoming_date:
+            moved.append((uid, stored_dates[uid], incoming_date))
+    return moved
+
+
 def sweep_misses(
     items: list[JsonObject],
     known_source_ids: set[str],
