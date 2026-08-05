@@ -138,27 +138,41 @@ def bars_from_attempts(
         source_name = str(attempt.get("source", ""))
         asked = str(attempt.get("asked", ""))
         window = parse_window(asked, attempted)
-        artefact_window = parse_window(
-            str(attempt.get("artefact_origin") or ""), attempted
-        )
+        # Every origin this digest landed under. Identical payloads land
+        # under SIBLING origins (rolling-epoch fetches differ only by
+        # their computed date), so the ask must be compared against all
+        # of them - an arbitrary sibling once made this check cry wolf
+        # 58 times against asks that agreed with their own fetch.
+        origin_windows = []
+        for origin in str(attempt.get("artefact_origins") or "").split(","):
+            parsed = parse_window(origin, attempted)
+            if parsed is not None:
+                origin_windows.append(parsed)
         provenance = "recorded"
-        if window is not None and artefact_window is not None:
-            # Both sources speak: they must agree, and disagreement is a
-            # finding, not a preference for whichever was read first.
-            if (
-                window[0].date() != artefact_window[0].date()
-                or window[1].date() != artefact_window[1].date()
-            ):
+        if window is not None and origin_windows:
+            agreed = any(
+                window[0].date() == candidate[0].date()
+                and window[1].date() == candidate[1].date()
+                for candidate in origin_windows
+            )
+            if not agreed:
+                shown = origin_windows[0]
                 mismatches.append(
                     f"{attempted.isoformat()[:19]}Z {source_name}: ask row "
-                    f"says {window[0].date()}..{window[1].date()} but its "
-                    f"artefact says {artefact_window[0].date()}.."
-                    f"{artefact_window[1].date()}"
+                    f"says {window[0].date()}..{window[1].date()} but no "
+                    f"origin of its artefact agrees (nearest: "
+                    f"{shown[0].date()}..{shown[1].date()})"
                 )
-        elif window is None and artefact_window is not None:
-            # The ledger row said "routine"; the evidence knows better.
-            window = artefact_window
-            provenance = "recovered"
+        elif window is None and origin_windows:
+            distinct = {
+                (candidate[0].date(), candidate[1].date())
+                for candidate in origin_windows
+            }
+            if len(distinct) == 1:
+                # Unambiguous: every fetch of these bytes asked the same
+                # window, so the recovery cannot name a sibling's.
+                window = origin_windows[0]
+                provenance = "recovered"
         elif window is None and source_name in _INFERABLE_SOURCES and "routine" in asked:
             window = (
                 attempted - timedelta(days=_WITNESSED_ROUTINE_DAYS),
@@ -205,7 +219,12 @@ def bars_from_attempts(
                 provenance=provenance,
             )
         )
-    bars.sort(key=lambda bar: bar.attempted_at, reverse=True)
+    # Oldest at the top, reading DOWN moves forward in time - the
+    # waterfall convention from network inspectors. Newest-first read as
+    # "older fetches happened after newer ones" until the labels were
+    # studied, and a chart that needs studying to avoid a double take
+    # has the rows the wrong way up.
+    bars.sort(key=lambda bar: bar.attempted_at)
     return bars, undrawn, mismatches
 
 
@@ -276,6 +295,7 @@ def timeline_svg(
             f'fill="currentColor" opacity="0.7">{tick.date().isoformat()[5:]}</text>'
         )
 
+    previous_day = None
     for index, bar in enumerate(bars):
         y = top_pad + index * row_h
         colour = _PALETTE.get(bar.source, _OTHER_COLOUR)
@@ -326,10 +346,19 @@ def timeline_svg(
                 f'<path d="M {left_pad - 8} {y + (row_h - 4) / 2} '
                 f'l 7 -{(row_h - 4) / 2} l 0 {row_h - 4} z" fill="{colour}"/>'
             )
-        stamp = bar.attempted_at.isoformat()[5:16].replace("T", " ")
+        # The date labels each DAY once; same-day rows carry only their
+        # time. Fifty identical date labels are noise wearing ink.
+        day = bar.attempted_at.date()
+        if day != previous_day:
+            stamp = bar.attempted_at.strftime("%a %d-%b")
+            opacity = "0.85"
+            previous_day = day
+        else:
+            stamp = bar.attempted_at.strftime("%H:%M")
+            opacity = "0.55"
         parts.append(
             f'<text x="{left_pad - 12}" y="{y + row_h - 5}" text-anchor="end" '
-            f'fill="currentColor" opacity="0.8">{stamp}</text></g>'
+            f'fill="currentColor" opacity="{opacity}">{stamp}</text></g>'
         )
 
     parts.append("</svg>")

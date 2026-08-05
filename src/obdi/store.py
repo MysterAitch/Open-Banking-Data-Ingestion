@@ -714,13 +714,14 @@ class Store:
             "(SELECT MIN(a.rowid) FROM raw_artefacts a "
             " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
             " AND f.artefact_digest != '') AS artefact_id, "
-            # The landed artefact's origin carries the range actually
-            # requested even where the ledger row recorded only "routine" -
-            # early rows can have their windows RECOVERED from evidence
-            # rather than inferred.
-            "(SELECT a.origin FROM raw_artefacts a "
+            # ALL origins the digest landed under, not LIMIT 1: identical
+            # payloads land under sibling origins (the rolling-epoch
+            # Starling fetches differ only by their computed date), and an
+            # arbitrary sibling made the timeline's sanity check cry wolf
+            # 58 times against asks that agreed with their own fetch.
+            "(SELECT GROUP_CONCAT(DISTINCT a.origin) FROM raw_artefacts a "
             " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
-            " AND f.artefact_digest != '' LIMIT 1) AS artefact_origin "
+            " AND f.artefact_digest != '') AS artefact_origins "
             "FROM fetch_attempts f "
             "ORDER BY f.attempted_at DESC, f.rowid DESC LIMIT ?",
             (limit,),
