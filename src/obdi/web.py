@@ -2507,18 +2507,65 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No ledger wired.</p>"))
             return
-        try:
-            days = max(1, min(int((params.get("days") or ["7"])[0]), 365))
-        except ValueError:
-            days = 7
+        raw_days = (params.get("days") or ["7"])[0]
+        days: int | None
+        if raw_days == "all":
+            days = None
+        else:
+            try:
+                days = max(1, min(int(raw_days), 730))
+            except ValueError:
+                days = 7
+
+        # Pan: `until` moves the right edge; zoom is the range presets.
+        # Server-side on purpose - the page stays script-free until the
+        # redesign decides about client scripting once, deliberately.
+        from datetime import UTC as _UTC
+
+        until: datetime | None = None
+        raw_until = (params.get("until") or [""])[0].strip()
+        if raw_until:
+            with contextlib.suppress(ValueError):
+                parsed = datetime.fromisoformat(raw_until.replace("Z", "+00:00"))
+                until = (
+                    parsed if parsed.tzinfo else parsed.replace(tzinfo=_UTC)
+                ).astimezone(_UTC)
+
         from .timeline import timeline_svg
 
+        def link(query: str, label: str, current: bool = False) -> str:
+            if current:
+                return f"<strong>{label}</strong>"
+            return f'<a href="/fetch-timeline?{query}">{label}</a>'
+
+        until_query = f"&until={raw_until}" if until else ""
         ranges = " | ".join(
-            f'<a href="/fetch-timeline?days={n}">{label}</a>'
-            if n != days
-            else f"<strong>{label}</strong>"
-            for n, label in ((1, "24 hours"), (7, "7 days"), (30, "30 days"))
+            [
+                link(f"days={n}{until_query}", label, current=days == n)
+                for n, label in (
+                    (1, "24 hours"),
+                    (7, "7 days"),
+                    (30, "30 days"),
+                    (56, "56 days"),
+                    (72, "72 days"),
+                    (365, "1 year"),
+                    (730, "2 years"),
+                )
+            ]
+            + [link(f"days=all{until_query}", "everything", current=days is None)]
         )
+
+        pan = ""
+        if days is not None:
+            anchor = until or datetime.now(_UTC)
+            older = (anchor - timedelta(days=days / 2)).isoformat().replace("+00:00", "Z")
+            newer = (anchor + timedelta(days=days / 2)).isoformat().replace("+00:00", "Z")
+            pan_links = [link(f"days={days}&until={older}", "&larr; older")]
+            if until is not None:
+                pan_links.append(link(f"days={days}&until={newer}", "newer &rarr;"))
+                pan_links.append(link(f"days={days}", "now"))
+            pan = "<p>Pan: " + " | ".join(pan_links) + "</p>"
+
         body = (
             "<h1>Fetch timeline</h1>"
             '<p class="muted">Each row is one ask from the attempt ledger, '
@@ -2526,7 +2573,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "The fetch strategy reads straight off the shapes: tier steps, "
             "cursor slivers hugging now, ladder bursts, probe cuts.</p>"
             f"<p>Asks made in the last: {ranges}</p>"
-            + timeline_svg(hook(), days=days)
+            f"{pan}"
+            + timeline_svg(hook(), days=days, now=until)
             + '<p><a class="button" href="/attempts">Fetch attempts ledger</a></p>'
             + HOME_LINK
         )

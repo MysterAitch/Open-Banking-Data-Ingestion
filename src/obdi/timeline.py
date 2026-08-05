@@ -59,6 +59,10 @@ class AskBar:
     source: str
     outcome: str
     label: str
+    #: True for asks whose question has no span - balances, account
+    #: enumerations, listings - and for legacy rows whose window went
+    #: unrecorded. Their honest shape is a point at the moment of asking.
+    point: bool = False
 
 
 def parse_window(asked: str, attempted_at: datetime) -> tuple[datetime, datetime] | None:
@@ -93,21 +97,33 @@ def parse_window(asked: str, attempted_at: datetime) -> tuple[datetime, datetime
 def bars_from_attempts(
     attempts: list[dict[str, object]],
     *,
-    days: int,
+    days: int | None,
     now: datetime | None = None,
 ) -> tuple[list[AskBar], int]:
-    """(drawable bars, count of windowless asks left undrawn)."""
-    horizon = (now or datetime.now(UTC)) - timedelta(days=days)
+    """(drawable rows, count of point-in-time asks among them).
+
+    days=None means EVERYTHING the ledger holds - the full-span view,
+    where a decade-old epoch ask is a bar like any other and this
+    morning's cursor sliver survives only because of the minimum width.
+    `now` is the right edge: panning is just asking for a different now.
+    """
+    right = now or datetime.now(UTC)
+    horizon = right - timedelta(days=days) if days is not None else None
     bars: list[AskBar] = []
     undrawn = 0
     for attempt in attempts:
         attempted = _parse_stamp(str(attempt.get("attempted_at", "")))
-        if attempted is None or attempted < horizon:
+        if attempted is None or attempted > right:
+            continue
+        if horizon is not None and attempted < horizon:
             continue
         window = parse_window(str(attempt.get("asked", "")), attempted)
         if window is None:
+            # A state-snapshot ask (or a legacy row whose window went
+            # unrecorded): drawn as a point at its moment, because that
+            # is its true shape - only invented WIDTH would be a lie.
             undrawn += 1
-            continue
+            window = (attempted, attempted)
         trigger = ""
         try:
             meta = json.loads(str(attempt.get("request_meta") or "{}"))
@@ -129,6 +145,7 @@ def bars_from_attempts(
                 source=source,
                 outcome=outcome,
                 label=label,
+                point=window[0] == window[1] == attempted,
             )
         )
     bars.sort(key=lambda bar: bar.attempted_at, reverse=True)
@@ -138,7 +155,7 @@ def bars_from_attempts(
 def timeline_svg(
     attempts: list[dict[str, object]],
     *,
-    days: int = 7,
+    days: int | None = 7,
     clamp_days: int = 120,
     now: datetime | None = None,
     max_rows: int = 250,
@@ -149,16 +166,16 @@ def timeline_svg(
     clipped_rows = len(bars) > max_rows
     bars = bars[:max_rows]
     if not bars:
-        return (
-            '<p class="muted">No window-bearing asks in this range'
-            + (f" ({undrawn} windowless ask(s) not drawn)" if undrawn else "")
-            + ".</p>"
-        )
+        return '<p class="muted">No asks in this range.</p>'
 
     domain_right = at
     wanted_left = min(bar.start for bar in bars)
-    clamp_left = at - timedelta(days=clamp_days)
-    domain_left = max(wanted_left, clamp_left)
+    if days is None:
+        # The full-span view: no clamp, the domain IS the data.
+        domain_left = wanted_left
+    else:
+        clamp_left = at - timedelta(days=max(clamp_days, days))
+        domain_left = max(wanted_left, clamp_left)
     span = (domain_right - domain_left).total_seconds() or 1.0
 
     width = 960
@@ -194,7 +211,11 @@ def timeline_svg(
         y = top_pad + index * row_h
         colour = _PALETTE.get(bar.source, _OTHER_COLOUR)
         x1, x2 = x_of(bar.start), x_of(bar.end)
-        bar_w = max(x2 - x1, 2.0)
+        # Minimum width: at full-span zoom a 30-minute cursor ask is
+        # thousandths of a pixel, and an invisible slice can be neither
+        # seen nor hovered. Three pixels keeps every ask drillable; the
+        # hover title carries the true span the width cannot.
+        bar_w = max(x2 - x1, 3.0)
         clipped = bar.start < domain_left
         refused = bar.outcome != "landed"
         style = (
@@ -206,9 +227,21 @@ def timeline_svg(
         parts.append(
             f'<g><title>{html.escape(bar.label)}'
             f'{" (window extends left of chart)" if clipped else ""}</title>'
-            f'<rect x="{x1:.1f}" y="{y}" width="{bar_w:.1f}" '
-            f'height="{row_h - 4}" rx="1.5" {style}/>'
         )
+        if bar.point:
+            # A rhombus at the moment of asking: visibly not a bar, so a
+            # snapshot can never be misread as a covered span.
+            cy = y + (row_h - 4) / 2
+            half = 4.5
+            parts.append(
+                f'<path d="M {x2:.1f} {cy - half:.1f} L {x2 + half:.1f} {cy:.1f} '
+                f'L {x2:.1f} {cy + half:.1f} L {x2 - half:.1f} {cy:.1f} Z" {style}/>'
+            )
+        else:
+            parts.append(
+                f'<rect x="{x1:.1f}" y="{y}" width="{bar_w:.1f}" '
+                f'height="{row_h - 4}" rx="1.5" {style}/>'
+            )
         if clipped:
             # The notch: this window reaches further back than the chart.
             parts.append(
@@ -229,7 +262,7 @@ def timeline_svg(
     )
     notes = []
     if undrawn:
-        notes.append(f"{undrawn} windowless ask(s) not drawn")
+        notes.append(f"{undrawn} point-in-time ask(s) drawn as diamonds")
     if clipped_rows:
         notes.append(f"showing newest {max_rows} asks")
     note_html = (
@@ -237,7 +270,8 @@ def timeline_svg(
     )
     return (
         f'<p class="muted">{legend} &nbsp; '
-        "dashed = refused; left notch = window extends beyond the chart; "
+        "dashed = refused; diamond = point-in-time ask (no window); "
+        "left notch = window extends beyond the chart; "
         "hover a bar for the full ask.</p>"
         f'<div style="overflow-x:auto">{"".join(parts)}</div>'
         f"{note_html}"

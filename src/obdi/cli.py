@@ -504,7 +504,7 @@ def _probe_suggestions(db_path: Path) -> list[object]:
 
 def _recent_attempts(db_path: Path) -> list[dict[str, object]]:
     with Store(db_path) as store:
-        return store.attempts(1500)
+        return store.attempts(6000)
 
 
 def _recent_rebuilds(db_path: Path) -> list[dict[str, object]]:
