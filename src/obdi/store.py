@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -191,6 +191,104 @@ CREATE TABLE IF NOT EXISTS review_queue (
 """
 
 
+@dataclass
+class _WriteBatch:
+    """One reconcile batch's pending writes, stamped once."""
+
+    now: str
+    upserts: list[tuple[object, ...]] = field(default_factory=list)
+    sightings: list[tuple[object, ...]] = field(default_factory=list)
+    reviews: list[tuple[object, ...]] = field(default_factory=list)
+
+
+def _stamp_now() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+_UPSERT_TRANSACTION_SQL = """
+    INSERT INTO transactions (
+        entity_id, account_id, amount_minor, currency, value_date, booking_date,
+        description, counterparty, status, source, tier, source_id, content_key,
+        occurrence, artefact_digest, is_internal_transfer, match_tier,
+        matched_entity_id, raw, first_seen_at, last_seen_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(entity_id) DO UPDATE SET
+        amount_minor = excluded.amount_minor,
+        value_date = excluded.value_date,
+        booking_date = excluded.booking_date,
+        description = excluded.description,
+        counterparty = excluded.counterparty,
+        currency = excluded.currency,
+        status = excluded.status,
+        -- source and source_id MUST move together. Updating the id
+        -- alone leaves a row carrying one provider's identifier under
+        -- another provider's name, which breaks the tier-one lookup
+        -- and duplicates the transaction on the next pull.
+        source = excluded.source,
+        tier = excluded.tier,
+        source_id = excluded.source_id,
+        content_key = excluded.content_key,
+        -- occurrence rides with content_key: sticky while the content
+        -- is unchanged (a narrower window re-parse numbers from zero
+        -- and must not mint a colliding identity), renumbered only
+        -- when supersession changes the content itself. Right-hand
+        -- sides see pre-update values, so the comparison is safe.
+        occurrence = CASE
+            WHEN transactions.content_key = excluded.content_key
+            THEN transactions.occurrence
+            ELSE excluded.occurrence
+        END,
+        artefact_digest = excluded.artefact_digest,
+        is_internal_transfer = excluded.is_internal_transfer,
+        match_tier = excluded.match_tier,
+        matched_entity_id = excluded.matched_entity_id,
+        last_seen_at = excluded.last_seen_at
+"""
+
+_RECORD_SOURCE_SQL = """
+    INSERT INTO transaction_sources
+        (entity_id, source, source_id, artefact_digest, first_seen_at)
+    VALUES (?,?,?,?,?)
+    ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
+"""
+
+_QUEUE_REVIEW_SQL = (
+    "INSERT OR IGNORE INTO review_queue (entity_id, reason, created_at) "
+    "VALUES (?, ?, ?)"
+)
+
+
+def _upsert_params(
+    transaction: Transaction,
+    match_tier: str,
+    matched_entity_id: str | None,
+    now: str,
+) -> tuple[object, ...]:
+    return (
+        transaction.entity_id,
+        transaction.account_id,
+        transaction.amount_minor,
+        transaction.currency,
+        transaction.value_date.isoformat(),
+        transaction.booking_date.isoformat(),
+        transaction.description,
+        transaction.counterparty,
+        transaction.status.value,
+        transaction.source,
+        transaction.tier.value,
+        transaction.source_id,
+        transaction.content_key,
+        transaction.occurrence,
+        transaction.artefact_digest,
+        int(transaction.is_internal_transfer),
+        match_tier,
+        matched_entity_id,
+        json.dumps(transaction.raw),
+        now,
+        now,
+    )
+
+
 class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -209,6 +307,7 @@ class Store:
         # one host and one real filesystem, which is the case WAL supports.
         self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.execute("PRAGMA busy_timeout = 30000")
+        self._batch: _WriteBatch | None = None
         self._prepare()
 
     def _schema_is_current(self) -> bool:
@@ -372,6 +471,46 @@ class Store:
                 self.connection.commit()
         finally:
             self.close()
+
+    def begin_batch(self) -> None:
+        """Collect derived-row writes for one flush instead of executing each.
+
+        Opened by reconcile_batch for the duration of one artefact batch.
+        Nothing is sent to SQLite until flush_batch, so an exception
+        mid-batch discards the buffers and the failed batch leaves no
+        trace - strictly safer than the per-record path it replaces,
+        where executed-but-uncommitted rows sat on the shared connection
+        waiting for whichever commit came next.
+
+        Only the three fold-path writes participate (transactions,
+        sightings, review queue). Reads during a batch see the
+        pre-batch state; the fold reads only its in-memory index, which
+        is why this is safe.
+        """
+        self._batch = _WriteBatch(now=_stamp_now())
+
+    def flush_batch(self) -> None:
+        """Execute the collected writes, in collection order, then clear.
+
+        Order matters for the upserts: a same-entity re-upsert within a
+        batch must resolve last-wins with the occurrence CASE seeing
+        pre-update values, exactly as sequential execution did -
+        executemany preserves that. Sightings and review rows are
+        conflict-tolerant and order-free.
+        """
+        batch = self._batch
+        if batch is None:
+            return
+        self._batch = None
+        if batch.upserts:
+            self.connection.executemany(_UPSERT_TRANSACTION_SQL, batch.upserts)
+        if batch.sightings:
+            self.connection.executemany(_RECORD_SOURCE_SQL, batch.sightings)
+        if batch.reviews:
+            self.connection.executemany(_QUEUE_REVIEW_SQL, batch.reviews)
+
+    def abort_batch(self) -> None:
+        self._batch = None
 
     def land_artefact(self, artefact: RawArtefact) -> bool:
         """Store a raw payload. Returns False if it was already held.
@@ -707,21 +846,18 @@ class Store:
         DISTINCT, so sighting rows must never be counted as corroborating
         sources.
         """
-        self.connection.execute(
-            """
-            INSERT INTO transaction_sources
-                (entity_id, source, source_id, artefact_digest, first_seen_at)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
-            """,
-            (
-                transaction.entity_id,
-                transaction.source,
-                transaction.source_id,
-                transaction.artefact_digest,
-                datetime.now().astimezone().isoformat(),
-            ),
+        now = self._batch.now if self._batch is not None else _stamp_now()
+        params = (
+            transaction.entity_id,
+            transaction.source,
+            transaction.source_id,
+            transaction.artefact_digest,
+            now,
         )
+        if self._batch is not None:
+            self._batch.sightings.append(params)
+            return
+        self.connection.execute(_RECORD_SOURCE_SQL, params)
 
     def accounts_for_connection(self, connection_id: str) -> list[dict[str, str]]:
         """The provider's own account list, from the landed accounts artefact.
@@ -880,71 +1016,12 @@ class Store:
     def upsert_transaction(
         self, transaction: Transaction, *, match_tier: str, matched_entity_id: str | None = None
     ) -> None:
-        now = datetime.now().astimezone().isoformat()
-        self.connection.execute(
-            """
-            INSERT INTO transactions (
-                entity_id, account_id, amount_minor, currency, value_date, booking_date,
-                description, counterparty, status, source, tier, source_id, content_key,
-                occurrence, artefact_digest, is_internal_transfer, match_tier,
-                matched_entity_id, raw, first_seen_at, last_seen_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(entity_id) DO UPDATE SET
-                amount_minor = excluded.amount_minor,
-                value_date = excluded.value_date,
-                booking_date = excluded.booking_date,
-                description = excluded.description,
-                counterparty = excluded.counterparty,
-                currency = excluded.currency,
-                status = excluded.status,
-                -- source and source_id MUST move together. Updating the id
-                -- alone leaves a row carrying one provider's identifier under
-                -- another provider's name, which breaks the tier-one lookup
-                -- and duplicates the transaction on the next pull.
-                source = excluded.source,
-                tier = excluded.tier,
-                source_id = excluded.source_id,
-                content_key = excluded.content_key,
-                -- occurrence rides with content_key: sticky while the content
-                -- is unchanged (a narrower window re-parse numbers from zero
-                -- and must not mint a colliding identity), renumbered only
-                -- when supersession changes the content itself. Right-hand
-                -- sides see pre-update values, so the comparison is safe.
-                occurrence = CASE
-                    WHEN transactions.content_key = excluded.content_key
-                    THEN transactions.occurrence
-                    ELSE excluded.occurrence
-                END,
-                artefact_digest = excluded.artefact_digest,
-                is_internal_transfer = excluded.is_internal_transfer,
-                match_tier = excluded.match_tier,
-                matched_entity_id = excluded.matched_entity_id,
-                last_seen_at = excluded.last_seen_at
-            """,
-            (
-                transaction.entity_id,
-                transaction.account_id,
-                transaction.amount_minor,
-                transaction.currency,
-                transaction.value_date.isoformat(),
-                transaction.booking_date.isoformat(),
-                transaction.description,
-                transaction.counterparty,
-                transaction.status.value,
-                transaction.source,
-                transaction.tier.value,
-                transaction.source_id,
-                transaction.content_key,
-                transaction.occurrence,
-                transaction.artefact_digest,
-                int(transaction.is_internal_transfer),
-                match_tier,
-                matched_entity_id,
-                json.dumps(transaction.raw),
-                now,
-                now,
-            ),
-        )
+        now = self._batch.now if self._batch is not None else _stamp_now()
+        params = _upsert_params(transaction, match_tier, matched_entity_id, now)
+        if self._batch is not None:
+            self._batch.upserts.append(params)
+            return
+        self.connection.execute(_UPSERT_TRANSACTION_SQL, params)
 
     def review_queue(self, *, include_resolved: bool = False) -> list[dict[str, object]]:
         """Transactions awaiting a human decision.
@@ -976,10 +1053,12 @@ class Store:
         self.connection.commit()
 
     def queue_for_review(self, entity_id: str, reason: str) -> None:
-        self.connection.execute(
-            "INSERT OR IGNORE INTO review_queue (entity_id, reason, created_at) VALUES (?, ?, ?)",
-            (entity_id, reason, datetime.now().astimezone().isoformat()),
-        )
+        now = self._batch.now if self._batch is not None else _stamp_now()
+        params = (entity_id, reason, now)
+        if self._batch is not None:
+            self._batch.reviews.append(params)
+            return
+        self.connection.execute(_QUEUE_REVIEW_SQL, params)
 
     def valuations_for(self, asset_id: str) -> list[dict[str, object]]:
         """Every observation of one asset, oldest first.

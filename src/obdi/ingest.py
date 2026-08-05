@@ -182,6 +182,31 @@ def reconcile_batch(
     # it scaled with the batch AND the account, so a merged account
     # holding two pipes' history paid it twice over.
     by_account: dict[str, CandidateIndex] = {}
+    store.begin_batch()
+    try:
+        _reconcile_all(
+            store, numbered, by_account, digest, result, on_record
+        )
+    except BaseException:
+        # Discard the failed batch's buffers: nothing of it may reach
+        # disk, and a stale buffer would silently swallow the NEXT
+        # caller's direct-mode writes.
+        store.abort_batch()
+        raise
+    with instrumentation.phase("write-flush"):
+        store.flush_batch()
+    store.connection.commit()
+    return result
+
+
+def _reconcile_all(
+    store: Store,
+    numbered: list[Transaction],
+    by_account: dict[str, CandidateIndex],
+    digest: str,
+    result: ImportSummary,
+    on_record: Callable[[int], None] | None,
+) -> None:
     for position, transaction in enumerate(numbered, start=1):
         existing = by_account.get(transaction.account_id)
         if existing is None:
@@ -206,9 +231,6 @@ def reconcile_batch(
         # claim the same stored transaction a second time - which swallows
         # repeated payments and reports them as matched.
         existing.replace(merged)
-
-    store.connection.commit()
-    return result
 
 
 def _reconcile(
