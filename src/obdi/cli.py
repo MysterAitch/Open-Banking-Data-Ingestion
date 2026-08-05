@@ -1340,6 +1340,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 "status": str(t.status),
                 "tier": str(t.tier),
                 "internal_transfer": t.is_internal_transfer,
+                "transfer_confirmed": t.transfer_confirmed,
             }
             # The provider's verbatim record rides on every merged row for
             # provenance - surfacing it here (prefixed) is what keeps
@@ -2682,7 +2683,7 @@ def main(argv: list[str] | None = None) -> int:
         with Store(db_path) as store:
             confirmed = pair_transfers_across_store(store)
             unconfirmed = unconfirmed_transfers(store)
-        print(f"confirmed {confirmed} transaction(s) as internal transfers")
+        print(f"confirmed {confirmed} internal transfer pair(s)")
         if unconfirmed:
             # An unpaired claim means the opposite side is missing, so the
             # transfer is being excluded from spending on the provider's word

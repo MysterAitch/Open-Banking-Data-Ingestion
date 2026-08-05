@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import instrumentation
 from .identity import artefact_digest, entity_id_for
-from .matching import CandidateIndex, pair_internal_transfers, resolve, supersede
+from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
 from .models import RawArtefact, Transaction
 from .parsers.uk_banks import detect
 from .store import Store
@@ -98,30 +98,22 @@ def pair_transfers_across_store(store: Store) -> int:
     accounts and so arrive in different files, usually on different days.
     Pairing within a single import batch would never fire.
 
-    Two distinct signals are at play and are deliberately not conflated:
+    Two distinct signals are at play and are kept as separate facts:
 
-      the provider's claim  some feeds mark a movement as internal themselves
-      confirmation          the other side was actually found in the store
+      the provider's claim  some feeds mark a movement as internal themselves;
+                            that stays on the transaction row, untouched here
+      confirmation          the other side was actually found in the store;
+                            recorded in the pairing table, owned by this pass
 
     A claim without confirmation means the opposite side is missing - the
-    account it belongs to has not been ingested yet. The flag is kept either
-    way, since excluding a genuine transfer from spending is right even
-    unconfirmed, but only confirmations are counted, so the number means
-    "pairs found" rather than "flags written".
+    account it belongs to has not been ingested yet. Both kinds of evidence
+    exclude a movement from spending; only this pass's findings are counted
+    here, so the number means "pairs found" rather than "flags written".
     """
-    stored = store.all_transactions()
-
-    # Detect on a flag-stripped copy so the result reflects what pairing
-    # actually found, rather than echoing the claims that arrived with it.
-    stripped = [replace(t, is_internal_transfer=False) for t in stored]
-    confirmed = {t.entity_id for t in pair_internal_transfers(stripped) if t.is_internal_transfer}
-
-    for transaction in stored:
-        if transaction.entity_id in confirmed and not transaction.is_internal_transfer:
-            store.mark_internal_transfer(transaction.entity_id)
-
+    pairs = pair_transfer_entities(store.all_transactions())
+    store.replace_transfer_pairs(pairs)
     store.connection.commit()
-    return len(confirmed)
+    return len(pairs)
 
 
 def unconfirmed_transfers(store: Store) -> list[Transaction]:
@@ -131,10 +123,11 @@ def unconfirmed_transfers(store: Store) -> list[Transaction]:
     space that has not been ingested. Worth surfacing: an unpaired claim is
     excluded from spending on the provider's word alone.
     """
-    stored = store.all_transactions()
-    stripped = [replace(t, is_internal_transfer=False) for t in stored]
-    confirmed = {t.entity_id for t in pair_internal_transfers(stripped) if t.is_internal_transfer}
-    return [t for t in stored if t.is_internal_transfer and t.entity_id not in confirmed]
+    return [
+        t
+        for t in store.all_transactions()
+        if t.is_internal_transfer and not t.transfer_confirmed
+    ]
 
 
 def reconcile_batch(

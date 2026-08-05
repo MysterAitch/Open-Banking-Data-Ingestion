@@ -133,7 +133,18 @@ class Transaction:
     # only in how MANY times the content occurs. Matching the nth occurrence
     # against the nth settles both cases, and is stable across re-parses.
     occurrence: int = 0
+    # The PROVIDER'S claim that this is a movement between your own accounts,
+    # exactly as the feed stated it. The other piece of evidence - the pairing
+    # pass actually finding the opposite side - is transfer_confirmed below,
+    # and the two are never folded together: a claim is the provider's word, a
+    # confirmation is the store's own proof, and each can exist without the
+    # other.
     is_internal_transfer: bool = False
+    # True when the pairing pass found this row's opposite side in another
+    # account. Derived, not owned: consumer-facing loaders fill it from the
+    # pairing table; the fold neither reads nor writes it, and upserting a
+    # transaction never persists it.
+    transfer_confirmed: bool = False
     counterparty: str = ""
     # The provider's own record, kept verbatim for provenance. Typed as
     # unnarrowed on purpose: nothing here should read a field out of it

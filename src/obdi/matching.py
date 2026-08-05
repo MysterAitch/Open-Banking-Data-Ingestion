@@ -393,17 +393,46 @@ def pair_internal_transfers(
     standing order of the same value does not chain-match.
     """
     items = sorted(transactions, key=lambda t: (t.value_date, t.account_id))
-    window = timedelta(days=window_days)
-    paired: set[int] = set()
     result = list(items)
+    for i, j in _pair_indices(items, timedelta(days=window_days)):
+        result[i] = replace(items[i], is_internal_transfer=True)
+        result[j] = replace(items[j], is_internal_transfer=True)
+    return result
 
-    # The original scanned every credit for every debit - a full-store
-    # O(n^2) pass costing ~2.6s of the measured rebuild. Only credits of
-    # the exact opposite amount can ever pair, so credits are bucketed by
-    # amount, each bucket in the SAME global (value_date, account_id)
-    # order the scan used - which is what preserves the greedy choice
-    # exactly: for each debit, the first eligible credit in that order
-    # wins, each side consumed once.
+
+def pair_transfer_entities(
+    transactions: Iterable[Transaction],
+    *,
+    window_days: int = INTERNAL_TRANSFER_WINDOW_DAYS,
+) -> list[tuple[str, str]]:
+    """The pairs themselves, as (debit entity, credit entity).
+
+    Same detection as `pair_internal_transfers`, but reporting WHICH rows
+    paired with which rather than flagging them - the shape a store needs
+    to record a confirmation as its own fact instead of overwriting the
+    provider's claim.
+    """
+    items = sorted(transactions, key=lambda t: (t.value_date, t.account_id))
+    return [
+        (items[i].entity_id, items[j].entity_id)
+        for i, j in _pair_indices(items, timedelta(days=window_days))
+    ]
+
+
+def _pair_indices(items: list[Transaction], window: timedelta) -> list[tuple[int, int]]:
+    """Greedy debit-to-credit pairing over the canonically sorted list.
+
+    The original scanned every credit for every debit - a full-store
+    O(n^2) pass costing ~2.6s of the measured rebuild. Only credits of
+    the exact opposite amount can ever pair, so credits are bucketed by
+    amount, each bucket in the SAME global (value_date, account_id)
+    order the scan used - which is what preserves the greedy choice
+    exactly: for each debit, the first eligible credit in that order
+    wins, each side consumed once.
+    """
+    paired: set[int] = set()
+    pairs: list[tuple[int, int]] = []
+
     credits_by_amount: dict[int, list[int]] = {}
     for j, item in enumerate(items):
         if item.amount_minor > 0:
@@ -432,11 +461,10 @@ def pair_internal_transfers(
             if j in paired or credit.account_id == debit.account_id:
                 continue
             paired.update({i, j})
-            result[i] = replace(debit, is_internal_transfer=True)
-            result[j] = replace(credit, is_internal_transfer=True)
+            pairs.append((i, j))
             break
 
-    return result
+    return pairs
 
 
 def settled(transaction: Transaction) -> bool:

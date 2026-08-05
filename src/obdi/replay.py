@@ -106,8 +106,13 @@ def _notes_for(transaction: Transaction) -> str:
     parts = []
     if transaction.description and transaction.description != payee:
         parts.append(transaction.description)
-    if transaction.is_internal_transfer:
+    if transaction.transfer_confirmed:
         parts.append("internal transfer")
+    elif transaction.is_internal_transfer:
+        # Claimed by the provider but the opposite side was never found in
+        # the store - worth a distinct label, because the reader is exactly
+        # the person who can tell whether an account is missing.
+        parts.append("internal transfer (unpaired claim)")
     if transaction.status is TransactionStatus.PENDING:
         parts.append("pending")
     return " | ".join(parts)
@@ -121,10 +126,11 @@ def build_payload(
 ) -> dict[str, list[dict[str, object]]]:
     """Group transactions by Actual account, ready to import.
 
-    Internal transfers are excluded by default. They are real movements between
-    your own accounts, but counting both sides inflates spending and income
-    alike; Actual models them as its own transfer type, which a flat import
-    cannot express.
+    Internal transfers are excluded by default - whether the provider claimed
+    it or the pairing pass proved it; either kind of evidence suffices. They
+    are real movements between your own accounts, but counting both sides
+    inflates spending and income alike; Actual models them as its own transfer
+    type, which a flat import cannot express.
 
     Accounts with no binding are skipped rather than guessed at, because
     inventing a destination would scatter transactions into the wrong budget.
@@ -137,7 +143,8 @@ def build_payload(
         # a different row (already in the payload) or never happened.
         if transaction.status is TransactionStatus.VOID:
             continue
-        if transaction.is_internal_transfer and not include_internal_transfers:
+        internal = transaction.is_internal_transfer or transaction.transfer_confirmed
+        if internal and not include_internal_transfers:
             continue
         actual_account = by_canonical.get(transaction.account_id)
         if actual_account is None:

@@ -32,7 +32,7 @@ from .models import RawArtefact, SourceTier, Transaction, Valuation
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
@@ -117,6 +117,20 @@ CREATE INDEX IF NOT EXISTS ix_txn_content_key
 CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_source_id
     ON transactions(account_id, source, source_id)
     WHERE source_id IS NOT NULL;
+
+-- Pairing CONFIRMATIONS, kept apart from the provider's claim on purpose.
+-- transactions.is_internal_transfer records what the FEED said; a row here
+-- records that the pairing pass actually found the opposite side in another
+-- account. Folding both into the flag destroyed the distinction the moment it
+-- was written - a flag reading 1 could not say whether anyone ever found the
+-- other side. Rewritten wholesale by each pairing pass: confirmations are
+-- derived facts about what the store can prove now, and a stale one for a
+-- vanished row would exclude real spending on evidence that no longer exists.
+-- A transaction's sign never changes, so no entity can sit on both sides.
+CREATE TABLE IF NOT EXISTS transfer_pairs (
+    debit_entity_id  TEXT NOT NULL PRIMARY KEY,
+    credit_entity_id TEXT NOT NULL UNIQUE
+);
 
 CREATE TABLE IF NOT EXISTS valuations (
     asset_id         TEXT NOT NULL,
@@ -634,14 +648,40 @@ class Store:
         return [_row_to_transaction(row) for row in rows]
 
     def all_transactions(self) -> list[Transaction]:
-        rows = self.connection.execute("SELECT * FROM transactions").fetchall()
-        return [_row_to_transaction(row) for row in rows]
+        """Every stored transaction, with pairing confirmations applied.
 
-    def mark_internal_transfer(self, entity_id: str) -> None:
-        self.connection.execute(
-            "UPDATE transactions SET is_internal_transfer = 1 WHERE entity_id = ?",
-            (entity_id,),
+        The consumer-facing read: transfer_confirmed is filled in from the
+        pairing table here so replay, reports and the CLI all see both kinds
+        of transfer evidence without each re-deriving the pairing.
+        """
+        rows = self.connection.execute("SELECT * FROM transactions").fetchall()
+        confirmed = self.confirmed_transfer_entities()
+        return [
+            replace(t, transfer_confirmed=t.entity_id in confirmed)
+            for t in (_row_to_transaction(row) for row in rows)
+        ]
+
+    def replace_transfer_pairs(self, pairs: list[tuple[str, str]]) -> None:
+        """Record the pairing pass's findings, replacing any previous pass's.
+
+        Delete-and-rewrite rather than accumulate: a confirmation is a derived
+        fact about what the store can prove now, and this is what keeps re-runs
+        idempotent and lets a confirmation vanish with its evidence.
+        """
+        self.connection.execute("DELETE FROM transfer_pairs")
+        self.connection.executemany(
+            "INSERT INTO transfer_pairs (debit_entity_id, credit_entity_id) VALUES (?, ?)",
+            pairs,
         )
+
+    def confirmed_transfer_entities(self) -> set[str]:
+        return {
+            str(value)
+            for row in self.connection.execute(
+                "SELECT debit_entity_id, credit_entity_id FROM transfer_pairs"
+            )
+            for value in row
+        }
 
     def provider_fact(self, source: str, connection_id: str, fact: str) -> str | None:
         row = self.connection.execute(
