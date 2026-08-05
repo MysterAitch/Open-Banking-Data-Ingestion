@@ -25,11 +25,12 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from urllib.parse import parse_qs
 
+from . import cursor
 from .accounts import AccountMap
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
+from .jsontypes import JsonObject, text
 from .jsontypes import rows as json_rows
-from .jsontypes import text
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .store import Store
@@ -636,56 +637,158 @@ def pull_starling(
 
             identity_key = category.uid if category.is_space else account_uid
             qualified_ref = f"starling:{identity_key}"
-            asked_spec = f"since={since}" if since else "routine"
-            try:
-                items, body, asked = starling.fetch_feed(
-                    token, account_uid, category.uid, since=since
+
+            def fetch_and_land(
+                since_at: datetime | None,
+                _account_uid: str = account_uid,
+                _category_uid: str = category.uid,
+                _ref: str = qualified_ref,
+            ) -> tuple[list[JsonObject], str] | None:
+                """One ask, landed with its ledger row; None on refusal.
+
+                Observed live on the very first scheduled pull: category
+                one landed, category two drew a 429 seven seconds later -
+                and aborting silently starved every remaining category.
+                One refused ask is that ask's problem; the pull is
+                idempotent, so the next cycle simply retries.
+                """
+                asked_spec = (
+                    f"changesSince={since_at.isoformat()}"
+                    if since_at
+                    else (f"since={since}" if since else "routine-full")
                 )
-            except starling.StarlingError as exc:
+                try:
+                    got_items, got_body, got_asked = starling.fetch_feed(
+                        token,
+                        _account_uid,
+                        _category_uid,
+                        since=since,
+                        since_at=since_at,
+                    )
+                except starling.StarlingError as exc:
+                    store.record_attempt(
+                        source="starling-feed",
+                        connection_id=STARLING_CONNECTION,
+                        account_ref=_ref,
+                        asked=asked_spec,
+                        request_meta=request_meta,
+                        outcome="refused",
+                        http_status=getattr(exc, "status", None),
+                        detail=_refusal_detail(exc),
+                    )
+                    result.notes.append(
+                        f"feed for category {_category_uid} refused: {exc}"
+                    )
+                    return None
+                # The empty feed of a quiet Space is evidence, and it must
+                # land before the emptiness is acted on - the ledger row
+                # carries the digest so ask and evidence stay joined.
+                got = starling.artefact_for(
+                    got_body,
+                    account_id=_ref,
+                    kind="feed",
+                    origin=(
+                        f"{starling.API_HOST}/api/v2/feed/account/{_account_uid}"
+                        f"/category/{_category_uid}?{got_asked}"
+                    ),
+                    request_meta=request_meta,
+                )
                 store.record_attempt(
                     source="starling-feed",
                     connection_id=STARLING_CONNECTION,
-                    account_ref=qualified_ref,
-                    asked=asked_spec,
+                    account_ref=_ref,
+                    asked=got_asked,
                     request_meta=request_meta,
-                    outcome="refused",
-                    http_status=getattr(exc, "status", None),
-                    detail=_refusal_detail(exc),
+                    outcome="landed",
+                    http_status=200,
+                    artefact_digest=got.digest,
                 )
-                # Observed live on the very first scheduled pull: category one
-                # landed, category two drew a 429 seven seconds later - and
-                # aborting here silently starved every remaining category and
-                # account. One refused category is that category's problem;
-                # the pull is idempotent, so the next cycle simply retries.
-                result.notes.append(
-                    f"feed for category {category.uid} refused: {exc}"
-                )
+                store.land_artefact(got)
+                return got_items, got.digest
+
+            # The rolling cursor applies only to ROUTINE pulls: an explicit
+            # window (backfills, probes) is a deliberate ask that must not
+            # move the cursor or be narrowed by it.
+            feed_cursor = (
+                cursor.load(store, identity_key, STARLING_CONNECTION)
+                if since is None
+                else None
+            )
+            sweeping = since is None and (
+                feed_cursor is None
+                or cursor.sweep_due(store, identity_key, STARLING_CONNECTION)
+            )
+
+            fetched: tuple[list[JsonObject], str] | None = None
+            if since is None and feed_cursor is not None and not sweeping:
+                fetched = fetch_and_land(feed_cursor.since_at())
+                if fetched is not None and not cursor.canary_present(
+                    fetched[0], feed_cursor
+                ):
+                    # The overlap deliberately reaches past the anchor, so
+                    # the anchor item MUST be in every response. Its absence
+                    # means the provider changed the filter semantics or the
+                    # item itself was removed - both demand attention,
+                    # neither may pass silently. Recent anchors first: a
+                    # removed item resolves there.
+                    result.notes.append(
+                        f"CANARY MISS for {qualified_ref}: anchor item "
+                        f"{feed_cursor.anchor_uid[:8]} absent from its own "
+                        "overlap - stepping back through prior anchors"
+                    )
+                    fetched = None
+                    for prior_uid, prior_stamp in feed_cursor.history:
+                        prior = cursor.FeedCursor(prior_uid, prior_stamp)
+                        fetched = fetch_and_land(prior.since_at())
+                        if fetched is not None and cursor.canary_present(
+                            fetched[0], prior
+                        ):
+                            break
+                        fetched = None
+                    if fetched is None:
+                        result.notes.append(
+                            f"CANARY LADDER EXHAUSTED for {qualified_ref}: "
+                            "falling back to a full-history fetch"
+                        )
+                        sweeping = True
+            if fetched is None and (sweeping or since is not None or feed_cursor is None):
+                fetched = fetch_and_land(None)
+
+            if fetched is None:
                 continue
-            # Same ordering as the TrueLayer path: the empty feed of a quiet
-            # Space is evidence, and it must land before the emptiness is
-            # acted on - and the ledger row carries the artefact's digest so
-            # the ask and its evidence stay joined.
-            artefact = starling.artefact_for(
-                body,
-                account_id=qualified_ref,
-                kind="feed",
-                origin=(
-                    f"{starling.API_HOST}/api/v2/feed/account/{account_uid}"
-                    f"/category/{category.uid}?{asked}"
-                ),
-                request_meta=request_meta,
-            )
-            store.record_attempt(
-                source="starling-feed",
-                connection_id=STARLING_CONNECTION,
-                account_ref=qualified_ref,
-                asked=asked,
-                request_meta=request_meta,
-                outcome="landed",
-                http_status=200,
-                artefact_digest=artefact.digest,
-            )
-            store.land_artefact(artefact)
+            items, digest = fetched
+
+            if since is None and sweeping and feed_cursor is not None:
+                known = {
+                    str(row[0])
+                    for row in store.connection.execute(
+                        "SELECT source_id FROM transactions "
+                        "WHERE account_id = ? AND source = 'starling' "
+                        "AND source_id IS NOT NULL",
+                        (target,),
+                    )
+                }
+                missed = cursor.sweep_misses(items, known, feed_cursor)
+                if missed:
+                    result.notes.append(
+                        f"SWEEP CAUGHT {len(missed)} item(s) for "
+                        f"{qualified_ref} that the incremental path missed "
+                        f"({', '.join(uid[:8] for uid in missed[:5])}) - "
+                        "the rolling cursor may be unsound, investigate"
+                    )
+
+            if since is None:
+                advanced = cursor.newest(items)
+                if advanced is not None:
+                    moved = (
+                        feed_cursor.advanced(*advanced)
+                        if feed_cursor is not None
+                        else cursor.FeedCursor(*advanced)
+                    )
+                    cursor.save(store, identity_key, STARLING_CONNECTION, moved)
+                if sweeping:
+                    cursor.stamp_sweep(store, identity_key, STARLING_CONNECTION)
+
             if not items:
                 continue
 
@@ -693,8 +796,10 @@ def pull_starling(
             for item in items:
                 transaction = starling.to_transaction(item, account_id=target)
                 if transaction is not None:
-                    transactions.append(replace(transaction, artefact_digest=artefact.digest))
-            reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
+                    transactions.append(
+                        replace(transaction, artefact_digest=digest)
+                    )
+            reconcile_batch(store, transactions, digest=digest, summary=summary)
 
     result.summary = summary
     return result
