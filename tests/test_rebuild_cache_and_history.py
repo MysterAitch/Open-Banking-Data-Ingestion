@@ -80,7 +80,7 @@ class TestTheCachedRebuildIsIndistinguishableFromReloading:
         plus a pending set that VANISHES - exercising the invalidation."""
         base = [_item(f"u-{n}", 100 + n) for n in range(30)]
         _feed(store, "cat-1", base, cycle=0)
-        _feed(store, "cat-1", base + [_item("u-new", 999)], cycle=1)
+        _feed(store, "cat-1", [*base, _item("u-new", 999)], cycle=1)
         _feed(store, "cat-2", [_item(f"v-{n}", 300 + n) for n in range(10)], cycle=0)
         # Pending snapshot, then the next snapshot WITHOUT one of them:
         # the vanished pending must resolve to VOID, cached or not.
@@ -88,7 +88,7 @@ class TestTheCachedRebuildIsIndistinguishableFromReloading:
         _pending(store, [_pending_record("p-2", -56.78)], 1)
         # A later batch touching the same account AFTER the void: this is
         # the read that a stale cache would poison.
-        _feed(store, "cat-1", base + [_item("u-new", 999), _item("u-late", 555)], cycle=2)
+        _feed(store, "cat-1", [*base, _item("u-new", 999), _item("u-late", 555)], cycle=2)
 
     def test_FullRebuild_WithAndWithoutTheCache_ProduceIdenticalStores(
         self, tmp_path, monkeypatch
@@ -103,9 +103,9 @@ class TestTheCachedRebuildIsIndistinguishableFromReloading:
 
                     original = rebuild_mod.reconcile_batch
 
-                    def per_batch(store_, transactions, **kwargs):
+                    def per_batch(store_, transactions, _original=original, **kwargs):
                         kwargs.pop("candidate_cache", None)
-                        return original(store_, transactions, **kwargs)
+                        return _original(store_, transactions, **kwargs)
 
                     monkeypatch.setattr(
                         rebuild_mod, "reconcile_batch", per_batch
