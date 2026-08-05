@@ -1097,3 +1097,52 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
         # figure never counts the same record twice.
         assert [done for done, _ in pairs] == sorted(done for done, _ in pairs)
         assert max(done for done, _ in pairs) == 7
+
+
+class TestEveryApiSourceHasExactlyOneReplayRole:
+    """The registry decides; nothing gets to be in neither set.
+
+    The two-list version of this drifted within a week: a source declared
+    in the namespace but absent from the skip set fell through to the CSV
+    detector and every rebuild reported a spurious problem for it. Now
+    the skip set is derived, and this test is the tripwire for the next
+    source someone adds.
+    """
+
+    def test_TheTransactionalAndSkipSets_PartitionTheApiNamespace(self):
+        from obdi.namespaces import API_SOURCES
+        from obdi.rebuild import _NON_TRANSACTIONAL, _TRANSACTIONAL
+
+        assert _TRANSACTIONAL <= API_SOURCES
+        assert _TRANSACTIONAL | _NON_TRANSACTIONAL == API_SOURCES
+        assert not (_TRANSACTIONAL & _NON_TRANSACTIONAL)
+
+    def test_AnIdentifiersArtefact_IsSkippedSilently_NotReportedAsAProblem(
+        self, tmp_path
+    ):
+        """The live case: identity evidence is kept, never replayed.
+
+        Before the fix this artefact reached the file-format detector,
+        failed to parse, and left "No parser recognised this file" in
+        every rebuild report - noise wearing the clothes of a fault.
+        """
+        import json
+
+        from obdi.providers import starling
+        from obdi.rebuild import rebuild_from_raw
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            store.land_artefact(
+                starling.artefact_for(
+                    json.dumps({"accountIdentifiers": []}).encode(),
+                    account_id="starling:acc-1",
+                    kind="identifiers",
+                    origin="https://api.example.com/accounts/acc-1/identifiers",
+                )
+            )
+            report = rebuild_from_raw(store)
+
+        assert report.problems == []
+        assert report.artefacts_skipped == 1
+        assert report.artefacts_replayed == 0

@@ -38,6 +38,7 @@ from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
 from .models import Transaction
+from .namespaces import API_SOURCES
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
@@ -106,17 +107,24 @@ class RebuildReport:
         return "\n".join(lines)
 
 
+#: API sources whose payloads parse into transactions. Everything else the
+#: API namespace declares is evidence kept but not replayed - DERIVED from
+#: the registry rather than listed twice, because the two lists drifted
+#: within a week of each other's creation: starling-identifiers was
+#: declared in the namespace, missed here, and every rebuild fed it to the
+#: CSV detector and reported a spurious problem. A source can be a member
+#: of exactly one of these sets, and only one is written by hand.
+_TRANSACTIONAL = frozenset(
+    {
+        "truelayer-booked",
+        "truelayer-pending",
+        "truelayer-card-booked",
+        "starling-feed",
+    }
+)
+
 #: Artefact sources that carry no transactions - evidence kept, not replayed.
-_NON_TRANSACTIONAL = {
-    "truelayer-accounts",
-    "truelayer-balance",
-    "truelayer-standing_orders",
-    "truelayer-direct_debits",
-    "starling-accounts",
-    "starling-spaces",
-    "starling-balance",
-    "truelayer-cards",
-}
+_NON_TRANSACTIONAL = frozenset(API_SOURCES - _TRANSACTIONAL)
 
 
 #: Artefact refs beginning with these are provider-qualified fallbacks
