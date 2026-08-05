@@ -73,6 +73,12 @@ await_run() { # $1 = branch/ref name shown by gh
       say "$ref build: success"
       return 0
     fi
+    # Heartbeat: a background shell that is silent for minutes is
+    # indistinguishable from a hung one, and supervisors reap what looks
+    # hung. One line per poll is liveness the environment can see and
+    # progress a person can read - learned from six kills in one night,
+    # none of which this script deserved.
+    say "  waiting on $ref build (${state:-not yet listed}, $((i * POLL_SECONDS))s)"
     i=$((i + 1)); sleep $POLL_SECONDS
   done
   fail "$ref build for ${SHA:0:9} did not complete within $((POLL_LIMIT * POLL_SECONDS))s"
