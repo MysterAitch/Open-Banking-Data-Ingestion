@@ -128,7 +128,10 @@ def probe_starling_changes(
 ) -> ProbeReport:
     """One changesSince ask per account category, landed and analysed."""
     report = ProbeReport(cutoff=cutoff.isoformat().replace("+00:00", "Z"))
-    request_meta = json.dumps({"trigger": "changes-probe"}, sort_keys=True)
+    request_meta = json.dumps(
+        {"trigger": "changes-probe", "connection_id": "starling-api"},
+        sort_keys=True,
+    )
 
     accounts, accounts_body = starling.fetch_accounts(token)
     store.land_artefact(

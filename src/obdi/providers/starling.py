@@ -313,6 +313,18 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     )
 
 
+def _connection_of(request_meta: str) -> str:
+    """The fetching connection, read from the request circumstances.
+
+    Extracted here, at the single point every landing passes through,
+    rather than threaded as one more parameter through every call site -
+    the value already travels in the metadata the pull builds."""
+    try:
+        return str(json.loads(request_meta or "{}").get("connection_id", ""))
+    except ValueError:
+        return ""
+
+
 def artefact_for(
     body: bytes,
     *,
@@ -337,4 +349,5 @@ def artefact_for(
         payload=body,
         origin=origin or f"{API_HOST}/api/v2/feed/.../category/{category_uid}",
         request_meta=request_meta,
+        connection_id=_connection_of(request_meta),
     )

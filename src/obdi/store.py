@@ -32,7 +32,7 @@ from .models import RawArtefact, SourceTier, Transaction, Valuation
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     fetched_at    TEXT NOT NULL,
     payload       BLOB NOT NULL,
     request_meta  TEXT NOT NULL DEFAULT '',
+    connection_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (digest, account_ref, origin)
 );
 
@@ -361,6 +362,7 @@ class Store:
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
         self._migrate_starling_connection_id()
+        self._migrate_artefact_connection_attribution()
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -607,7 +609,8 @@ class Store:
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO raw_artefacts "
             "(digest, source, account_ref, media_type, origin, fetched_at, "
-            "payload, request_meta, record_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "payload, request_meta, record_count, connection_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 artefact.digest,
                 artefact.source,
@@ -618,6 +621,7 @@ class Store:
                 artefact.payload,
                 artefact.request_meta,
                 artefact.record_count,
+                artefact.connection_id,
             ),
         )
         self.connection.commit()
@@ -803,6 +807,82 @@ class Store:
         ).rowcount
         self.connection.commit()
         return {"artefacts": artefacts, "attempts": attempts, "facts": facts}
+
+    def _migrate_artefact_connection_attribution(self) -> None:
+        """Every artefact learns which CONNECTION fetched it.
+
+        Done now, while it is unambiguous: no bank has two connections
+        yet, so history can be attributed with certainty - the moment a
+        second connection to one bank exists, this becomes archaeology.
+
+        The ladder, best evidence first:
+          recorded   request_meta already names the connection (every
+                     artefact since request circumstances were added)
+          recovered  the provider account id in the artefact's origin,
+                     mapped through each connection's own landed
+                     accounts enumeration
+          defaulted  starling sources: exactly one first-party
+                     connection has ever existed
+          unknown    stays empty - file imports have no connection, and
+                     an empty value is honest where nothing is known.
+        """
+        columns = [
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
+        ]
+        if "connection_id" in columns:
+            return
+        self.connection.execute(
+            "ALTER TABLE raw_artefacts ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''"
+        )
+
+        # Rung one: recorded in the request circumstances.
+        self.connection.execute(
+            """UPDATE raw_artefacts
+               SET connection_id = COALESCE(json_extract(request_meta, '$.connection_id'), '')
+               WHERE request_meta != '' AND json_valid(request_meta)"""
+        )
+
+        # Rung one-and-a-half: a connection's own accounts enumeration is
+        # landed UNDER the connection's name - its account_ref IS the
+        # connection, by construction in the pull.
+        self.connection.execute(
+            "UPDATE raw_artefacts SET connection_id = account_ref "
+            "WHERE connection_id = '' AND source = 'truelayer-accounts'"
+        )
+
+        # Rung two: recovered via each connection's accounts enumeration.
+        account_to_connection: dict[str, str] = {}
+        for row in self.connection.execute(
+            "SELECT account_ref, payload FROM raw_artefacts "
+            "WHERE source = 'truelayer-accounts'"
+        ):
+            with contextlib.suppress(ValueError, TypeError, KeyError):
+                for account in json.loads(row["payload"]).get("results", []) or []:
+                    account_id = str(account.get("account_id", ""))
+                    if account_id:
+                        account_to_connection[account_id] = str(row["account_ref"])
+        remaining = self.connection.execute(
+            "SELECT rowid, origin FROM raw_artefacts "
+            "WHERE connection_id = '' AND source LIKE 'truelayer%'"
+        ).fetchall()
+        for row in remaining:
+            origin = str(row["origin"])
+            for account_id, connection_id in account_to_connection.items():
+                if account_id and account_id in origin:
+                    self.connection.execute(
+                        "UPDATE raw_artefacts SET connection_id = ? WHERE rowid = ?",
+                        (connection_id, int(row["rowid"])),
+                    )
+                    break
+
+        # Rung three: only one first-party Starling connection has ever
+        # existed, and its artefacts say so by their source alone.
+        self.connection.execute(
+            "UPDATE raw_artefacts SET connection_id = 'starling-api' "
+            "WHERE connection_id = '' AND source LIKE 'starling%'"
+        )
+        self.connection.commit()
 
     def _migrate_starling_connection_id(self) -> None:
         """Historical first-party rows carried the bare id "starling".

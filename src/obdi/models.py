@@ -85,6 +85,13 @@ class RawArtefact:
     digest: str
     payload: bytes
     origin: str = ""
+    #: Which CONNECTION fetched this - the witness instance, distinct
+    #: from the source pipe. "starling-api" and a TrueLayer connection to
+    #: the same bank are different witnesses; once a second connection to
+    #: one bank exists, this column is the only thing that tells their
+    #: evidence apart. Empty for file imports (no connection exists) and
+    #: for early rows whose migration could not recover one.
+    connection_id: str = ""
     #: How many records the payload parses into, when the lander knew.
     #: Progress metadata, not evidence: None means "count it on the next
     #: rebuild" and transactional artefacts get backfilled exactly once.
