@@ -28,11 +28,15 @@ credit. Unpaired, it inflates both spending and income.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import contextlib
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from typing import TypeVar
 
 from .models import MatchTier, SourceTier, Transaction, TransactionStatus
+
+_K = TypeVar("_K")
 
 FUZZY_WINDOW_DAYS = 7
 
@@ -186,27 +190,130 @@ class MatchResult:
         return self.existing is None and bool(self.near_misses) and not self.recurring
 
 
-def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResult:
+class CandidateIndex:
+    """The account's stored candidates, arrival-ordered, with hash lookups.
+
+    resolve() asks three shapes of question and each has a natural index:
+    tier 1 is an exact (account, source, source_id) probe, tier 2 an exact
+    (account, content_key) probe, and everything fuzzy - tier 3, the
+    near-miss ledger, the recurring-series check - only ever considers
+    candidates of one exact amount. Scanning the whole account for each
+    was what made replay quadratic.
+
+    Buckets hold entity ids and every lookup returns candidates sorted by
+    ARRIVAL position. That ordering is load-bearing twice over: tier 2
+    returns the first match in arrival order, and the near-miss tuple
+    preserves it. A superseded entity KEEPS its original position - the
+    stored row it replaces was mutated, not re-appended - which is why
+    replacement is by entity id into the same slot.
+
+    Supersession can change an entity's source_id and content_key (a
+    pending settling under a new identity does exactly that), so replace()
+    removes the entity from every old bucket before filing the new keys.
+    A stale key here would let a record match a rendering the store no
+    longer holds - invisible in output until it merges the wrong payment.
+    """
+
+    def __init__(self, transactions: Iterable[Transaction] = ()) -> None:
+        self._order: list[Transaction] = []
+        self._position: dict[str, int] = {}
+        self._by_source_id: dict[tuple[str, str, str], list[str]] = {}
+        self._by_content: dict[tuple[str, str], list[str]] = {}
+        self._by_amount: dict[tuple[str, int], list[str]] = {}
+        for transaction in transactions:
+            self.append(transaction)
+
+    def __len__(self) -> int:
+        return len(self._order)
+
+    def __iter__(self) -> Iterator[Transaction]:
+        return iter(self._order)
+
+    def _file(self, transaction: Transaction) -> None:
+        if transaction.source_id:
+            key = (transaction.account_id, transaction.source, transaction.source_id)
+            self._by_source_id.setdefault(key, []).append(transaction.entity_id)
+        if transaction.content_key:
+            ckey = (transaction.account_id, transaction.content_key)
+            self._by_content.setdefault(ckey, []).append(transaction.entity_id)
+        akey = (transaction.account_id, transaction.amount_minor)
+        self._by_amount.setdefault(akey, []).append(transaction.entity_id)
+
+    def _unfile(self, transaction: Transaction) -> None:
+        def drop(bucket: dict[_K, list[str]], key: _K) -> None:
+            ids = bucket.get(key)
+            if ids is not None:
+                with contextlib.suppress(ValueError):
+                    ids.remove(transaction.entity_id)
+                if not ids:
+                    del bucket[key]
+
+        if transaction.source_id:
+            drop(
+                self._by_source_id,
+                (transaction.account_id, transaction.source, transaction.source_id),
+            )
+        if transaction.content_key:
+            drop(self._by_content, (transaction.account_id, transaction.content_key))
+        drop(self._by_amount, (transaction.account_id, transaction.amount_minor))
+
+    def append(self, transaction: Transaction) -> None:
+        self._position[transaction.entity_id] = len(self._order)
+        self._order.append(transaction)
+        self._file(transaction)
+
+    def replace(self, merged: Transaction) -> None:
+        """Supersede in place: same entity, same arrival slot, fresh keys."""
+        position = self._position[merged.entity_id]
+        self._unfile(self._order[position])
+        self._order[position] = merged
+        self._file(merged)
+
+    def _in_arrival_order(self, entity_ids: list[str]) -> list[Transaction]:
+        return [
+            self._order[self._position[entity_id]]
+            for entity_id in sorted(
+                entity_ids, key=lambda entity_id: self._position[entity_id]
+            )
+        ]
+
+    def by_source_id(
+        self, account_id: str, source: str, source_id: str
+    ) -> list[Transaction]:
+        return self._in_arrival_order(
+            self._by_source_id.get((account_id, source, source_id), [])
+        )
+
+    def by_content_key(self, account_id: str, content_key: str) -> list[Transaction]:
+        return self._in_arrival_order(
+            self._by_content.get((account_id, content_key), [])
+        )
+
+    def by_amount(self, account_id: str, amount_minor: int) -> list[Transaction]:
+        return self._in_arrival_order(
+            self._by_amount.get((account_id, amount_minor), [])
+        )
+
+
+def resolve(
+    incoming: Transaction, existing: Sequence[Transaction] | CandidateIndex
+) -> MatchResult:
     """Decide whether `incoming` is already represented in `existing`."""
-    same_account = [t for t in existing if t.account_id == incoming.account_id]
+    index = (
+        existing if isinstance(existing, CandidateIndex) else CandidateIndex(existing)
+    )
+    account = incoming.account_id
 
     # Provider ids are only unique within a provider's own namespace, so tier 1
     # matches on (source, source_id) rather than the id alone. Two sources
     # reporting the same payment are SUPPOSED to disagree here.
     if incoming.source_id:
-        for candidate in same_account:
-            if (
-                candidate.source_id
-                and candidate.source == incoming.source
-                and candidate.source_id == incoming.source_id
-            ):
-                return MatchResult(MatchTier.SOURCE_ID, candidate)
+        for candidate in index.by_source_id(account, incoming.source, incoming.source_id):
+            return MatchResult(MatchTier.SOURCE_ID, candidate)
 
     if incoming.content_key:
-        for candidate in same_account:
-            if candidate.content_key == incoming.content_key and could_be_one_payment(
-                incoming, candidate, same_content=True
-            ):
+        for candidate in index.by_content_key(account, incoming.content_key):
+            if could_be_one_payment(incoming, candidate, same_content=True):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
     # A hand-entered date is remembered rather than observed, so the window
@@ -217,11 +324,11 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
             return timedelta(days=MANUAL_WINDOW_DAYS)
         return timedelta(days=FUZZY_WINDOW_DAYS)
 
+    same_amount = index.by_amount(account, incoming.amount_minor)
     similar = [
         t
-        for t in same_account
-        if t.amount_minor == incoming.amount_minor
-        and abs(t.value_date - incoming.value_date) <= window_for(t)
+        for t in same_amount
+        if abs(t.value_date - incoming.value_date) <= window_for(t)
     ]
 
     # Applies whether or not the source numbers its rows: two rows of one file
@@ -234,11 +341,13 @@ def resolve(incoming: Transaction, existing: Sequence[Transaction]) -> MatchResu
     rejected = tuple(t for t in similar if t not in near)
 
     if not near:
+        # The series check filters on exact amount itself, so the amount
+        # bucket is a complete candidate set for it.
         return MatchResult(
             MatchTier.UNRESOLVED,
             None,
             near_misses=rejected,
-            recurring=belongs_to_established_series(incoming, same_account),
+            recurring=belongs_to_established_series(incoming, same_amount),
         )
 
     near.sort(key=lambda t: abs(t.value_date - incoming.value_date))
@@ -288,17 +397,39 @@ def pair_internal_transfers(
     paired: set[int] = set()
     result = list(items)
 
+    # The original scanned every credit for every debit - a full-store
+    # O(n^2) pass costing ~2.6s of the measured rebuild. Only credits of
+    # the exact opposite amount can ever pair, so credits are bucketed by
+    # amount, each bucket in the SAME global (value_date, account_id)
+    # order the scan used - which is what preserves the greedy choice
+    # exactly: for each debit, the first eligible credit in that order
+    # wins, each side consumed once.
+    credits_by_amount: dict[int, list[int]] = {}
+    for j, item in enumerate(items):
+        if item.amount_minor > 0:
+            credits_by_amount.setdefault(item.amount_minor, []).append(j)
+    # Debits are visited in non-decreasing date order, so a credit that
+    # has fallen behind one debit's window can never re-enter a later
+    # one's - the bucket start index only ever advances.
+    bucket_start: dict[int, int] = {}
+
     for i, debit in enumerate(items):
         if i in paired or debit.amount_minor >= 0:
             continue
-        for j, credit in enumerate(items):
-            if j in paired or j == i or credit.amount_minor <= 0:
-                continue
-            if credit.account_id == debit.account_id:
-                continue
-            if credit.amount_minor != -debit.amount_minor:
-                continue
-            if abs(credit.value_date - debit.value_date) > window:
+        bucket = credits_by_amount.get(-debit.amount_minor)
+        if not bucket:
+            continue
+        start = bucket_start.get(-debit.amount_minor, 0)
+        while start < len(bucket) and (
+            debit.value_date - items[bucket[start]].value_date > window
+        ):
+            start += 1
+        bucket_start[-debit.amount_minor] = start
+        for j in bucket[start:]:
+            credit = items[j]
+            if credit.value_date - debit.value_date > window:
+                break
+            if j in paired or credit.account_id == debit.account_id:
                 continue
             paired.update({i, j})
             result[i] = replace(debit, is_internal_transfer=True)

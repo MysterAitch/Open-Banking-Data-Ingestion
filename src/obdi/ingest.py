@@ -15,8 +15,9 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
+from . import instrumentation
 from .identity import artefact_digest
-from .matching import pair_internal_transfers, resolve, supersede
+from .matching import CandidateIndex, pair_internal_transfers, resolve, supersede
 from .models import RawArtefact, Transaction
 from .parsers.uk_banks import detect
 from .store import Store
@@ -180,11 +181,14 @@ def reconcile_batch(
     # present. The work was invisible - correctness was unaffected - and
     # it scaled with the batch AND the account, so a merged account
     # holding two pipes' history paid it twice over.
-    by_account: dict[str, list[Transaction]] = {}
+    by_account: dict[str, CandidateIndex] = {}
     for position, transaction in enumerate(numbered, start=1):
         existing = by_account.get(transaction.account_id)
         if existing is None:
-            existing = store.transactions_for_account(transaction.account_id)
+            with instrumentation.phase("load-candidates"):
+                existing = CandidateIndex(
+                    store.transactions_for_account(transaction.account_id)
+                )
             by_account[transaction.account_id] = existing
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
 
@@ -198,13 +202,10 @@ def reconcile_batch(
             continue
 
         # REPLACE the candidate rather than appending alongside it. Appending
-        # would leave the pre-merge row in the list, letting a later incoming
-        # record claim the same stored transaction a second time - which
-        # swallows repeated payments and reports them as matched.
-        for index, candidate in enumerate(existing):
-            if candidate.entity_id == matched_entity_id:
-                existing[index] = merged
-                break
+        # would leave the pre-merge row live, letting a later incoming record
+        # claim the same stored transaction a second time - which swallows
+        # repeated payments and reports them as matched.
+        existing.replace(merged)
 
     store.connection.commit()
     return result
@@ -213,7 +214,7 @@ def reconcile_batch(
 def _reconcile(
     store: Store,
     transaction: Transaction,
-    existing: list[Transaction],
+    existing: CandidateIndex,
     digest: str,
     summary: ImportSummary,
 ) -> tuple[Transaction, str | None]:
@@ -223,7 +224,8 @@ def _reconcile(
     matched, rather than leaving the pre-merge row available to be claimed
     again by the next record.
     """
-    result = resolve(transaction, existing)
+    with instrumentation.phase("resolve"):
+        result = resolve(transaction, existing)
 
     if result.existing is not None:
         merged = supersede(result.existing, transaction)

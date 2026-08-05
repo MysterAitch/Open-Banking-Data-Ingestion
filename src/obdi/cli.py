@@ -374,6 +374,16 @@ def start_background_rebuild(db_path: Path) -> str:
                 published[1] = now
                 leases.acquire(locks, "rebuild-derived", "obdi-web", 3600)
 
+        def print_timings(report: RebuildReport) -> None:
+            # One line per phase into the container log, biggest first -
+            # docker logs is where these numbers get read from a phone.
+            for name, figures in report.timings.items():
+                print(
+                    f"rebuild timing: {name} {figures['seconds']}s "
+                    f"across {figures['calls']} call(s)",
+                    flush=True,
+                )
+
         payload: dict[str, object]
         try:
             # The lease was taken exclusively before this thread started;
@@ -382,6 +392,7 @@ def start_background_rebuild(db_path: Path) -> str:
                 report = rebuild_from_raw(
                     store, progress=on_progress, account_map=_account_map()
                 )
+            print_timings(report)
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
             payload = {"ok": False, "summary": str(exc)}
@@ -2627,7 +2638,10 @@ def main(argv: list[str] | None = None) -> int:
         from .rebuild import rebuild_from_raw
 
         with Store(db_path) as store:
-            print(rebuild_from_raw(store, account_map=_account_map()).describe())
+            cli_report = rebuild_from_raw(store, account_map=_account_map())
+        print(cli_report.describe())
+        for name, figures in cli_report.timings.items():
+            print(f"timing: {name} {figures['seconds']}s across {figures['calls']} call(s)")
         return 0
     if args.command == "attempts":
         return _attempts(db_path)

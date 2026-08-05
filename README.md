@@ -27,6 +27,11 @@ than the mechanism:
 | Raw artefacts + derived store | `OBDI_RAW_DIR` / `OBDI_DB_PATH`, outside the repo | private data |
 | Statement PDFs | Paperless | already indexed, searchable and backed up |
 
+Set `OBDI_TIMINGS=1` to have rebuilds report a per-phase timing breakdown
+(parse, reconcile, resolve, transfer pairing) in the container log and on the
+CLI. Off by default and free when off - it exists so performance questions
+about the real deployment get measured answers rather than extrapolations.
+
 A private Forgejo repo is the intended long-term home for the raw text exports:
 CSV and QIF are text, so version control gives an append-only, provenance-stamped
 archive for free — and shows you the diff when a bank silently changes its export

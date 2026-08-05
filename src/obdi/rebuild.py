@@ -32,6 +32,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from . import instrumentation
 from .accounts import AccountMap
 from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
@@ -67,6 +68,10 @@ class RebuildReport:
     current_records: int = 0
     #: Which artefact that is, for the same reason.
     current_index: int = 0
+    #: Phase timings when OBDI_TIMINGS is set; empty otherwise. Opt-in
+    #: because per-record clocks are only worth paying for while a
+    #: performance question is actually open.
+    timings: dict[str, dict[str, float | int]] = field(default_factory=dict)
     #: How far INTO the current artefact the replay has resolved. Kept
     #: apart from records_done because this work is not committed yet -
     #: the batch commits once, at its end - so adding it to the banked
@@ -297,6 +302,11 @@ def rebuild_from_raw(
     ).fetchall()
     starling_defaults = _starling_defaults(artefact_rows)
 
+    if instrumentation.enabled():
+        # Each rebuild reports its own numbers, not the residue of the
+        # last one - or of a scheduled pull that ran in between.
+        instrumentation.reset()
+
     # Count the whole job before starting it. Parsing every payload costs
     # under a second across the entire store, which is cheaper than the
     # bookkeeping needed to avoid doing so - and it makes the total exact
@@ -327,9 +337,10 @@ def rebuild_from_raw(
 
         summary = ImportSummary(artefact_new=False)
         try:
-            transactions = parse_artefact_transactions(
-                source, payload, account_ref, digest
-            )
+            with instrumentation.phase("parse"):
+                transactions = parse_artefact_transactions(
+                    source, payload, account_ref, digest
+                )
         except (
             DataError,
             ValueError,
@@ -378,13 +389,14 @@ def rebuild_from_raw(
                 if progress is not None:
                     progress(_index, total, _report)
 
-            reconcile_batch(
-                store,
-                transactions,
-                digest=digest,
-                summary=summary,
-                on_record=tick if progress is not None else None,
-            )
+            with instrumentation.phase("reconcile"):
+                reconcile_batch(
+                    store,
+                    transactions,
+                    digest=digest,
+                    summary=summary,
+                    on_record=tick if progress is not None else None,
+                )
             report.transactions += len(transactions)
         # Banked only once the batch has committed. Counting the artefact
         # as done before resolving it would have the total include work
@@ -397,20 +409,22 @@ def rebuild_from_raw(
             # the live pull runs, but WITHOUT re-emitting events - the
             # outbox records what was announced at the time, and a rebuild
             # re-derives state, not history.
-            resolve_vanished_pending(
-                store,
-                account_ref,
-                present_source_ids={
-                    t.source_id for t in transactions if t.source_id
-                },
-                present_amount_dates={
-                    (t.amount_minor, t.value_date.isoformat())
-                    for t in transactions
-                },
-                emit_events=False,
-            )
+            with instrumentation.phase("pending-lifecycle"):
+                resolve_vanished_pending(
+                    store,
+                    account_ref,
+                    present_source_ids={
+                        t.source_id for t in transactions if t.source_id
+                    },
+                    present_amount_dates={
+                        (t.amount_minor, t.value_date.isoformat())
+                        for t in transactions
+                    },
+                    emit_events=False,
+                )
 
-    report.transfers_paired = pair_transfers_across_store(store)
+    with instrumentation.phase("transfer-pairing"):
+        report.transfers_paired = pair_transfers_across_store(store)
     after_counts = {
         str(row[0]): int(row[1])
         for row in store.connection.execute(
@@ -421,6 +435,9 @@ def rebuild_from_raw(
         account: (before_counts.get(account, 0), after_counts.get(account, 0))
         for account in sorted(set(before_counts) | set(after_counts))
     }
+    if instrumentation.enabled():
+        report.timings = instrumentation.snapshot()
+
     if progress is not None:
         # Nothing is in flight any more. Leaving the last artefact's size
         # in place would have the finished report still naming something
