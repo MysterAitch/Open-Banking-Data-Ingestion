@@ -82,3 +82,45 @@ def content_key(
 def artefact_digest(payload: bytes) -> str:
     """Content hash of a raw artefact, for integrity and idempotent landing."""
     return hashlib.sha256(payload).hexdigest()
+
+
+def entity_id_for(
+    *,
+    account_id: str,
+    source: str,
+    source_id: str | None,
+    content_key_value: str,
+    occurrence: int,
+    first_artefact_digest: str,
+) -> str:
+    """Mint an entity id as a pure function of its first sighting.
+
+    Replacing uuid4 minting, whose randomness made every rebuild re-mint
+    every id - the one thing about a replayed store that did NOT
+    reproduce. Determinism buys three properties at once: two cold
+    replays of the same layer 0 are bit-comparable row for row; live
+    ingest and a later rebuild agree on ids, so the retained events
+    outbox stops dangling after rebuilds; and any future consumer can
+    replay the corpus and arrive at the same identities.
+
+    The inputs are exactly what makes a first sighting unique: WITHIN
+    one artefact, two records with the same (source, source_id) merge at
+    tier one before a second mint can happen, and id-less records are
+    separated by occurrence - so the tuple cannot legally recur. The
+    digest pins the id to the evidence: the same payment first seen via
+    a different artefact IS a different first sighting, and says so.
+
+    Deterministic is conditional, and honestly so: on (stream, rules).
+    A rule change that alters merge chains can move which sighting is
+    first, and with it the id - which is why content_key + occurrence
+    remains the only key exported downstream, and ids stay internal.
+    """
+    material = "".join(
+        (
+            account_id,
+            source,
+            source_id if source_id is not None else f"{content_key_value}#{occurrence}",
+            first_artefact_digest,
+        )
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]

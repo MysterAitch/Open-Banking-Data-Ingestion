@@ -14,13 +14,14 @@ facts about the past do not un-happen).
 Account bindings survive by construction: a bind moves the label on the
 artefacts too, so replayed rows land under the bound name.
 
-One honest caveat: entity ids are minted at first sighting, so a rebuild
-RE-MINTS them. Everything observable about each payment - account, amount,
-date, description, sightings - reproduces exactly; the opaque identity does
-not. Downstream consumers therefore key on content, never on stored entity
-ids - the Actual replay's imported_id is the content key plus occurrence
-for exactly this reason, making rebuild-then-replay a no-op rather than a
-duplication.
+Entity ids are minted deterministically from the first sighting (account,
+source identity, artefact digest), so a rebuild REPRODUCES them - two
+replays of the same layer 0 agree row for row, ids included, and live
+ingest agrees with a later rebuild. The determinism is conditional on
+(stream, rules): a rule change can move which sighting is first and with
+it the id, which is why downstream consumers still key on content - the
+Actual replay's imported_id is the content key plus occurrence - rather
+than on ids, keeping rebuild-then-replay a no-op under rule changes too.
 """
 
 from __future__ import annotations

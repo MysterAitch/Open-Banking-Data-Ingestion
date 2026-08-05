@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import sys
-import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
 from . import instrumentation
-from .identity import artefact_digest
+from .identity import artefact_digest, entity_id_for
 from .matching import CandidateIndex, pair_internal_transfers, resolve, supersede
 from .models import RawArtefact, Transaction
 from .parsers.uk_banks import detect
@@ -279,7 +278,18 @@ def _reconcile(
             summary.matched += 1
         return merged, result.existing.entity_id
 
-    fresh = replace(transaction, entity_id=str(uuid.uuid4()), artefact_digest=digest)
+    fresh = replace(
+        transaction,
+        entity_id=entity_id_for(
+            account_id=transaction.account_id,
+            source=transaction.source,
+            source_id=transaction.source_id,
+            content_key_value=transaction.content_key,
+            occurrence=transaction.occurrence,
+            first_artefact_digest=digest,
+        ),
+        artefact_digest=digest,
+    )
     store.upsert_transaction(fresh, match_tier=result.tier.value)
     store.record_source(fresh)
     summary.inserted += 1
