@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
+from . import fingerprint
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
 from .coverage import SourceCoverage, agreements, coverage, gaps, transpositions
@@ -392,6 +393,10 @@ def start_background_rebuild(db_path: Path) -> str:
                 report = rebuild_from_raw(
                     store, progress=on_progress, account_map=_account_map()
                 )
+                # The stamp says "this data was derived by this code".
+                # Success-only, inside the same Store: a failed rebuild
+                # keeps the old stamp so the next startup tries again.
+                fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
             print_timings(report)
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
@@ -1775,6 +1780,27 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def rebuild_derived() -> str:
         return start_background_rebuild(db_path)
 
+    # Rebuild-on-deploy: rebuild triggers are code changes, and code
+    # changes arrive by deploy - so the check belongs at startup, not in
+    # anyone's memory. A mismatch starts the ordinary background rebuild
+    # behind the ordinary banner; the lease protocol already arbitrates
+    # against pulls and second presses; web start is never blocked. A
+    # plain restart of unchanged code matches the stamp and does nothing.
+    try:
+        with Store(db_path) as _fp_store:
+            stale = fingerprint.rebuild_needed(_fp_store)
+        if stale:
+            print(
+                "startup: derived data was built by different code - "
+                f"rebuilding: {start_background_rebuild(db_path)}",
+                flush=True,
+            )
+    except Exception as exc:
+        # Never let the freshness check keep the service down: serving
+        # stale-derived data with the banner absent is bad; not serving
+        # at all is worse.
+        print(f"startup: rebuild-on-deploy check failed: {exc}", flush=True)
+
     def rebuild_status() -> dict[str, object]:
         return rebuild_status_for(db_path)
 
@@ -2639,6 +2665,7 @@ def main(argv: list[str] | None = None) -> int:
 
         with Store(db_path) as store:
             cli_report = rebuild_from_raw(store, account_map=_account_map())
+            fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
         print(cli_report.describe())
         for name, figures in cli_report.timings.items():
             print(f"timing: {name} {figures['seconds']}s across {figures['calls']} call(s)")
