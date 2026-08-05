@@ -326,6 +326,7 @@ class WebConfig:
     #: is read back via rebuild_status.
     rebuild_derived: Callable[[], str] | None = None
     rebuild_status: Callable[[], dict[str, object]] | None = None
+    recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None
     #: Danger zone: drop the canonical-to-Actual links (source names kept).
     forget_actual: Callable[[], int] | None = None
     #: True while a stack update holds its lease - new bank authorisations
@@ -1632,10 +1633,74 @@ def _rebuild_status_line(
     return ""
 
 
+def _rebuild_history_html(
+    recent_rebuilds: Callable[[], list[dict[str, object]]] | None,
+) -> str:
+    """The cost record over time, from rows rather than log-greps.
+
+    Each run stores what the timings flag prints, so "is it getting
+    slower as the corpus grows" is answered by this table - which is
+    exactly the question the journal decision is parked on.
+    """
+    if recent_rebuilds is None:
+        return ""
+    try:
+        runs = recent_rebuilds()
+    except Exception:
+        return ""
+    if not runs:
+        return ""
+
+    rows = []
+    for run in runs:
+        ok = bool(run.get("ok"))
+        badge = "ok" if ok else "bad"
+        started = str(run.get("started_at", ""))
+        finished = str(run.get("finished_at", ""))
+        duration = ""
+        with contextlib.suppress(ValueError):
+            span = datetime.fromisoformat(
+                finished.replace("Z", "+00:00")
+            ) - datetime.fromisoformat(started.replace("Z", "+00:00"))
+            duration = f"{span.total_seconds():,.0f}s"
+        records = run.get("records_total")
+        transactions = run.get("transactions")
+        volume = ""
+        if isinstance(records, int):
+            volume = f"{records:,} records"
+            if isinstance(transactions, int):
+                volume += f" -> {transactions:,}"
+        timings = run.get("timings")
+        slowest = ""
+        if isinstance(timings, dict) and timings:
+            name, figures = next(iter(timings.items()))
+            if isinstance(figures, dict):
+                slowest = f"{html.escape(str(name))} {figures.get('seconds')}s"
+        rows.append(
+            "<tr>"
+            f'<td><span class="pill pill-{badge}">{"ok" if ok else "failed"}</span></td>'
+            f"<td>{html.escape(finished)}</td>"
+            f"<td>{duration}</td>"
+            f"<td>{volume}</td>"
+            f'<td class="muted">{slowest}</td>'
+            f'<td class="muted">{html.escape(str(run.get("build", "")))}</td>'
+            "</tr>"
+        )
+    return (
+        "<h3>Recent rebuilds</h3>"
+        '<div style="overflow-x:auto"><table>'
+        "<tr><th></th><th>finished</th><th>took</th><th>volume</th>"
+        "<th>slowest phase</th><th>build</th></tr>"
+        + "".join(rows)
+        + "</table></div>"
+    )
+
+
 def _danger_zone(
     rebuild_available: bool,
     forget_available: bool,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
+    recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
 ) -> str:
     if not (rebuild_available or forget_available):
         return ""
@@ -1655,6 +1720,7 @@ def _danger_zone(
     )
     if rebuild_available:
         parts.append(_rebuild_status_line(rebuild_status))
+        parts.append(_rebuild_history_html(recent_rebuilds))
         parts.append(
             '<form method="post" action="/rebuild-derived">'
             "<p>Wipe the derived transaction layer and replay every raw "
@@ -2139,6 +2205,7 @@ def render_index(
     rebuild_available: bool = False,
     forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
+    recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
@@ -2177,7 +2244,7 @@ reconciled through the same identity rules as the API pulls.</p>
 </form>
 <p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>
-{_danger_zone(rebuild_available, forget_available, rebuild_status)}
+{_danger_zone(rebuild_available, forget_available, rebuild_status, recent_rebuilds)}
 """
     return render_page("Bank connections", body)
 
@@ -2280,6 +2347,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     rebuild_available=self.bound_config.rebuild_derived is not None,
                     forget_available=self.bound_config.forget_actual is not None,
                     rebuild_status=self.bound_config.rebuild_status,
+                    recent_rebuilds=self.bound_config.recent_rebuilds,
                     scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
                     backfill_status=self.bound_config.backfill_status,
                 ),

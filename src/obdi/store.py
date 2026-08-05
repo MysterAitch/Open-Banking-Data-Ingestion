@@ -32,7 +32,7 @@ from .models import RawArtefact, SourceTier, Transaction, Valuation
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
@@ -52,6 +52,27 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     payload       BLOB NOT NULL,
     request_meta  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (digest, account_ref, origin)
+);
+
+-- One row per derivation run: the cost record the timings flag prints to
+-- the container log, kept where it can be queried instead of grepped.
+-- Scalar columns for what trends (duration, volume, outcome); the phase
+-- breakdown rides as JSON because its keys change as instrumentation
+-- does, and a schema migration per phase rename would be absurd.
+CREATE TABLE IF NOT EXISTS rebuild_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind          TEXT NOT NULL DEFAULT 'rebuild',
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT NOT NULL,
+    ok            INTEGER NOT NULL,
+    summary       TEXT NOT NULL DEFAULT '',
+    records_total INTEGER,
+    transactions  INTEGER,
+    artefacts_replayed INTEGER,
+    artefacts_skipped  INTEGER,
+    transfers_paired   INTEGER,
+    timings       TEXT NOT NULL DEFAULT '{}',
+    build         TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS obdi_meta (
@@ -471,6 +492,71 @@ class Store:
                 self.connection.commit()
         finally:
             self.close()
+
+    def record_rebuild_run(
+        self,
+        *,
+        kind: str,
+        started_at: str,
+        finished_at: str,
+        ok: bool,
+        summary: str,
+        records_total: int | None = None,
+        transactions: int | None = None,
+        artefacts_replayed: int | None = None,
+        artefacts_skipped: int | None = None,
+        transfers_paired: int | None = None,
+        timings: dict[str, dict[str, float | int]] | dict[str, object] | None = None,
+        build: str = "",
+    ) -> None:
+        """One run, one row - success and failure alike.
+
+        Failures especially: a run that died is precisely the one whose
+        absence from the history would mislead, because the page would
+        show only the last run that managed to finish.
+        """
+        self.connection.execute(
+            """
+            INSERT INTO rebuild_runs (
+                kind, started_at, finished_at, ok, summary, records_total,
+                transactions, artefacts_replayed, artefacts_skipped,
+                transfers_paired, timings, build
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                kind,
+                started_at,
+                finished_at,
+                int(ok),
+                summary,
+                records_total,
+                transactions,
+                artefacts_replayed,
+                artefacts_skipped,
+                transfers_paired,
+                json.dumps(timings or {}),
+                build,
+            ),
+        )
+        self.connection.commit()
+
+    def recent_rebuild_runs(self, limit: int = 10) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            "SELECT kind, started_at, finished_at, ok, summary, records_total, "
+            "transactions, artefacts_replayed, artefacts_skipped, "
+            "transfers_paired, timings, build "
+            "FROM rebuild_runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        out: list[dict[str, object]] = []
+        for row in rows:
+            entry = dict(row)
+            try:
+                entry["timings"] = json.loads(str(entry.get("timings") or "{}"))
+            except ValueError:
+                entry["timings"] = {}
+            out.append(entry)
+        return out
 
     def begin_batch(self) -> None:
         """Collect derived-row writes for one flush instead of executing each.

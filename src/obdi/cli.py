@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
@@ -280,6 +281,42 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
     return None
 
 
+if TYPE_CHECKING:
+    from .rebuild import RebuildReport
+
+
+def _record_run(
+    store: Store,
+    report: RebuildReport | None,
+    *,
+    ok: bool,
+    started_at: str,
+    error: str = "",
+) -> None:
+    """One row per rebuild in rebuild_runs, structured rather than logged.
+
+    The same numbers the timings flag prints, kept where a trend is a
+    SELECT instead of a docker-logs grep. Never allowed to fail the
+    rebuild it describes."""
+    from .buildinfo import describe as build_describe
+
+    with contextlib.suppress(Exception):
+        store.record_rebuild_run(
+            kind="rebuild",
+            started_at=started_at,
+            finished_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            ok=ok,
+            summary=(report.describe().splitlines()[0] if report else error)[:300],
+            records_total=report.records_total if report else None,
+            transactions=report.transactions if report else None,
+            artefacts_replayed=report.artefacts_replayed if report else None,
+            artefacts_skipped=report.artefacts_skipped if report else None,
+            transfers_paired=report.transfers_paired if report else None,
+            timings=report.timings if report else {},
+            build=build_describe(),
+        )
+
+
 def start_background_rebuild(db_path: Path) -> str:
     """Kick off rebuild-from-raw in a background thread, immediately.
 
@@ -322,7 +359,7 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
     def run() -> None:
-        from .rebuild import RebuildReport, rebuild_from_raw
+        from .rebuild import rebuild_from_raw
 
         # Progress now ticks once per RECORD, tens of thousands of times a
         # run, so publishing is rate-limited while counting is not. The
@@ -397,10 +434,16 @@ def start_background_rebuild(db_path: Path) -> str:
                 # Success-only, inside the same Store: a failed rebuild
                 # keeps the old stamp so the next startup tries again.
                 fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
+                _record_run(store, report, ok=True, started_at=started_at)
             print_timings(report)
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
             payload = {"ok": False, "summary": str(exc)}
+            # The failed run goes in the history too - a run that died is
+            # exactly the one whose absence would mislead, because the
+            # page would show only the last run that managed to finish.
+            with contextlib.suppress(Exception), Store(db_path) as store:
+                _record_run(store, None, ok=False, started_at=started_at, error=str(exc))
         finally:
             leases.release(locks, "rebuild-derived")
         payload.update(
@@ -413,6 +456,11 @@ def start_background_rebuild(db_path: Path) -> str:
         "rebuild started in the background - the store stays usable and the "
         "result appears in the danger zone (refresh to follow it)"
     )
+
+
+def _recent_rebuilds(db_path: Path) -> list[dict[str, object]]:
+    with Store(db_path) as store:
+        return store.recent_rebuild_runs(8)
 
 
 def rebuild_status_for(db_path: Path) -> dict[str, object]:
@@ -1795,6 +1843,14 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 f"rebuilding: {start_background_rebuild(db_path)}",
                 flush=True,
             )
+        else:
+            # Said out loud on purpose: a silent match is
+            # indistinguishable in the logs from the check never having
+            # run, and this check exists to kill exactly that ambiguity.
+            print(
+                "startup: derived data current (code fingerprint match)",
+                flush=True,
+            )
     except Exception as exc:
         # Never let the freshness check keep the service down: serving
         # stale-derived data with the banner absent is bad; not serving
@@ -1963,6 +2019,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         replay_artefact=replay_artefact,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
+        recent_rebuilds=lambda: _recent_rebuilds(db_path),
         forget_actual=forget_actual,
         update_in_progress=update_in_progress,
         auth_lease_take=auth_lease_take,
@@ -2663,9 +2720,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from .rebuild import rebuild_from_raw
 
+        cli_started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with Store(db_path) as store:
             cli_report = rebuild_from_raw(store, account_map=_account_map())
             fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
+            _record_run(store, cli_report, ok=True, started_at=cli_started)
         print(cli_report.describe())
         for name, figures in cli_report.timings.items():
             print(f"timing: {name} {figures['seconds']}s across {figures['calls']} call(s)")

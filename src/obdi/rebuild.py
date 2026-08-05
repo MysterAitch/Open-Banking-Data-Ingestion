@@ -37,6 +37,7 @@ from .accounts import AccountMap
 from .errors import DataError
 from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
+from .matching import CandidateIndex
 from .models import Transaction
 from .namespaces import API_SOURCES
 from .parsers.uk_banks import detect
@@ -327,6 +328,12 @@ def rebuild_from_raw(
     report.records_total = sum(sizes.values())
 
     total = len(artefact_rows)
+    # One CandidateIndex per account for the WHOLE replay: the fold is
+    # per-account and this run is the store's only writer (the lease
+    # guarantees it), so the in-memory index and the committed rows
+    # cannot diverge - except where this loop itself mutates rows
+    # outside reconcile_batch, which is handled at that site below.
+    candidate_cache: dict[str, CandidateIndex] = {}
     for index, row in enumerate(artefact_rows, start=1):
         report.current_index = index
         report.current_records = sizes.get(int(row["rowid"]), 0)
@@ -404,6 +411,7 @@ def rebuild_from_raw(
                     digest=digest,
                     summary=summary,
                     on_record=tick if progress is not None else None,
+                    candidate_cache=candidate_cache,
                 )
             report.transactions += len(transactions)
         # Banked only once the batch has committed. Counting the artefact
@@ -418,6 +426,12 @@ def rebuild_from_raw(
             # outbox records what was announced at the time, and a rebuild
             # re-derives state, not history.
             with instrumentation.phase("pending-lifecycle"):
+                # This mutates stored rows (voiding vanished pendings)
+                # OUTSIDE the fold, so the account's cached index is now
+                # stale - a voided row cached as pending could wrongly
+                # claim a settlement pair. Drop it; the next batch that
+                # touches the account reloads the committed truth.
+                candidate_cache.pop(account_ref, None)
                 resolve_vanished_pending(
                     store,
                     account_ref,

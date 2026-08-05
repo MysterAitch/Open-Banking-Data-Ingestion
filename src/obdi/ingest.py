@@ -145,12 +145,23 @@ def reconcile_batch(
     digest: str,
     summary: ImportSummary | None = None,
     on_record: Callable[[int], None] | None = None,
+    candidate_cache: dict[str, CandidateIndex] | None = None,
 ) -> ImportSummary:
     """Resolve a batch against what is already stored, and persist the outcome.
 
     Shared by file import and API pulls deliberately: identity resolution must
     behave identically whichever route data arrives by, or the same payment
     seen twice through different doors would be stored twice.
+
+    candidate_cache, when given, carries each account's CandidateIndex
+    ACROSS calls - the rebuild passes one for its whole run, because
+    reloading the merged account's history once per artefact batch was
+    a fifth of the rebuild and the one cost that grew with corpus times
+    account size. Sound only while the caller is the sole writer (the
+    rebuild holds its lease) and while the caller drops an account's
+    entry whenever it mutates that account's rows outside the fold
+    (vanished-pending resolution does exactly that). Live pulls pass
+    nothing and keep the load-per-batch behaviour.
 
     on_record is called with the number resolved so far, once per record.
     A batch of several thousand is minutes of work with nothing to show
@@ -181,7 +192,7 @@ def reconcile_batch(
     # present. The work was invisible - correctness was unaffected - and
     # it scaled with the batch AND the account, so a merged account
     # holding two pipes' history paid it twice over.
-    by_account: dict[str, CandidateIndex] = {}
+    by_account = candidate_cache if candidate_cache is not None else {}
     store.begin_batch()
     try:
         _reconcile_all(
