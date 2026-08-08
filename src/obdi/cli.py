@@ -375,9 +375,11 @@ def start_background_rebuild(db_path: Path) -> str:
                 return
             published[0] = now
 
-            # Every 25th artefact into the container log too - dockge and
-            # docker logs are where people look when a page seems quiet.
-            if boundary and (done % 25 == 0 or done == total):
+            # The first, every 25th and the last artefact into the
+            # container log too - dockge and docker logs are where people
+            # look when a page seems quiet, and the first line proves the
+            # replay started at all.
+            if boundary and (done % 25 == 0 or done == total or done == 1):
                 print(
                     f"rebuild: artefact {done} of {total} "
                     f"({report.current_records:,} records), "
@@ -423,6 +425,7 @@ def start_background_rebuild(db_path: Path) -> str:
                 )
 
         payload: dict[str, object]
+        run_began = time.monotonic()
         try:
             # The lease was taken exclusively before this thread started;
             # here it is only renewed (on_progress) and released.
@@ -436,8 +439,24 @@ def start_background_rebuild(db_path: Path) -> str:
                 fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
                 _record_run(store, report, ok=True, started_at=started_at)
             print_timings(report)
+            # The outcome STATED in the log, not only in the status file
+            # and the danger zone - docker logs is where a quiet page gets
+            # diagnosed from, and a rebuild that ends silently reads as a
+            # rebuild that stalled (it did, live, 2026-08-08).
+            print(
+                f"rebuild complete: {report.describe()} "
+                f"(in {time.monotonic() - run_began:.1f}s; fingerprint stamped)",
+                flush=True,
+            )
             payload = {"ok": True, "summary": report.describe()}
         except Exception as exc:
+            # Shout in the log FIRST: a rebuild that dies with its reason
+            # visible only in a JSON file is silently no rebuild at all.
+            print(
+                f"rebuild FAILED after {time.monotonic() - run_began:.1f}s: {exc} "
+                "(old fingerprint kept - the next startup retries)",
+                flush=True,
+            )
             payload = {"ok": False, "summary": str(exc)}
             # The failed run goes in the history too - a run that died is
             # exactly the one whose absence would mislead, because the

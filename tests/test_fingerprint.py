@@ -141,3 +141,62 @@ class TestOnlySuccessfulRebuildsStamp:
             with pytest.raises(RuntimeError):
                 rebuild_from_raw(store)
             assert fingerprint.stored_fingerprint(store) is None
+
+
+class TestTheRebuildStatesItsOutcomeWherePeopleLook:
+    """The background rebuild's outcome must reach the container log, not
+    only the status JSON and the danger zone - docker logs is where the
+    3am diagnosis happens, and a silent outcome reads as a stall (it
+    did, live, 2026-08-08)."""
+
+    def _wait_done(self, db):
+        import time
+
+        from obdi.cli import rebuild_status_for
+
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            status = rebuild_status_for(db)
+            if status.get("state") == "done":
+                return status
+            time.sleep(0.1)
+        raise AssertionError(f"rebuild never finished: {status}")
+
+    def test_ACompletedRebuild_SaysSoInTheLog_WithItsSummary(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from obdi.cli import start_background_rebuild
+
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "s.sqlite3"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            _land_one(store)
+
+        start_background_rebuild(db)
+        status = self._wait_done(db)
+        assert status.get("ok") is True, status
+
+        out = capsys.readouterr().out
+        assert "rebuild complete:" in out
+
+    def test_AFailedRebuild_ShoutsInTheLog_NotOnlyInTheStatusFile(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from obdi.cli import start_background_rebuild
+
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "s.sqlite3"))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            _land_one(store)
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("deliberate rebuild failure")
+
+        monkeypatch.setattr("obdi.rebuild.reconcile_batch", explode)
+        start_background_rebuild(db)
+        status = self._wait_done(db)
+        assert status.get("ok") is False, status
+
+        out = capsys.readouterr().out
+        assert "rebuild FAILED" in out
+        assert "deliberate rebuild failure" in out
