@@ -244,3 +244,54 @@ class TestTheDisplayHalf:
 
         assert breakdown["transactions"] == 1
         assert breakdown["corroborated"] == 1
+
+
+class TestSiblingHeavyDigests_DoNotExplodeTheWitnessMap:
+    """raw_artefacts is deliberately keyed (digest, account_ref, origin):
+    byte-identical payloads - empty responses, rolling redeliveries -
+    share one digest across hundreds of rows. The witness map must
+    collapse digest -> connection BEFORE joining the sightings, or the
+    join materialises sightings x siblings (measured live: 38.7s of a
+    40.4s index render at 42k transactions)."""
+
+    def test_ADigestWithManySiblings_YieldsEachConnectionOnce(self, tmp_path):
+        from datetime import UTC, datetime
+
+        from obdi.models import RawArtefact, Transaction
+        from obdi.store import Store
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            payload = b"{}"
+            from obdi.identity import artefact_digest
+
+            digest = artefact_digest(payload)
+            # One digest, many sibling rows - differing only by origin -
+            # all fetched by the same connection.
+            for i in range(300):
+                store.land_artefact(
+                    RawArtefact(
+                        source="starling-feed",
+                        account_ref="acct-1",
+                        fetched_at=datetime(2026, 8, 1, tzinfo=UTC),
+                        media_type="application/json",
+                        digest=digest,
+                        payload=payload,
+                        origin=f"https://x?changesSince=2026-08-{(i % 28) + 1:02d}&n={i}",
+                        request_meta='{"connection_id": "starling-api"}',
+                        connection_id="starling-api",
+                    )
+                )
+            from datetime import date
+
+            t = Transaction(
+                account_id="acct-1", amount_minor=-100, value_date=date(2026, 8, 1),
+                booking_date=date(2026, 8, 1), description="x", source="starling-feed",
+                entity_id="e1", content_key="ck1", artefact_digest=digest,
+            )
+            store.upsert_transaction(t, match_tier="exact")
+            store.record_source(t)
+            store.connection.commit()
+
+            witnesses = store.source_connections()
+
+            assert witnesses == {("acct-1", "starling-feed"): ["starling-api"]}

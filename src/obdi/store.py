@@ -963,13 +963,25 @@ class Store:
         """
         rows = self.connection.execute(
             """
-            SELECT DISTINCT t.account_id, ts.source, a.connection_id
+            SELECT DISTINCT t.account_id, ts.source, ac.connection_id
               FROM transaction_sources ts
               JOIN transactions t ON t.entity_id = ts.entity_id
-              JOIN raw_artefacts a ON a.digest = ts.artefact_digest
-             WHERE a.connection_id != ''
+              JOIN (
+                    SELECT DISTINCT digest, connection_id
+                      FROM raw_artefacts
+                     WHERE connection_id != ''
+                   ) ac ON ac.digest = ts.artefact_digest
             """
         ).fetchall()
+        # digest -> connection is collapsed BEFORE the sightings join, and
+        # that ordering is load-bearing: raw_artefacts is deliberately
+        # keyed (digest, account_ref, origin), so byte-identical payloads
+        # - every empty response, every rolling redelivery - share one
+        # digest across hundreds of sibling rows. Joined directly, every
+        # sighting fanned out against every sibling of its digest before
+        # DISTINCT collapsed the wreckage: 38.7s of a 40.4s index render
+        # at 42k transactions, measured live. Third bite from the same
+        # fact - the timeline's 58 false alarms were siblings too.
         out: dict[tuple[str, str], list[str]] = {}
         for row in rows:
             out.setdefault((str(row[0]), str(row[1])), []).append(str(row[2]))
