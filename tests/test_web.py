@@ -2783,3 +2783,73 @@ class TestFetchTimelineControls:
 
         assert page.status_code == 200
         assert "bananas" not in page.text
+
+
+class TestHealthzAndRenderTiming:
+    """The healthcheck must ride a liveness endpoint, not the heaviest
+    page in the app - a 40s index against a 10s probe timeout kept a
+    container 'unhealthy' for its entire 3-day life. And a slow index
+    must publish its own per-hook cost breakdown, because three refuted
+    theories proved nobody can guess where 40 seconds lives."""
+
+    def _server(self, tmp_path, **hooks):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            **hooks,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Healthz_AnswersFast_WithNoHeavyHooks(self, tmp_path):
+        calls = []
+
+        def slow_holdings():
+            calls.append(1)
+            return []
+
+        httpd, base = self._server(tmp_path, holdings=slow_holdings)
+        try:
+            response = httpx.get(f"{base}/healthz", timeout=5)
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 200
+        assert response.text == "ok"
+        assert calls == [], "healthz must not invoke page hooks"
+
+    def test_ASlowIndexRender_PublishesItsPerHookCosts(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import time as _time
+
+        monkeypatch.setenv("OBDI_WEB_SLOW_RENDER_SECS", "0.01")
+
+        def slow_holdings():
+            _time.sleep(0.05)
+            return []
+
+        httpd, base = self._server(tmp_path, holdings=slow_holdings)
+        try:
+            assert httpx.get(f"{base}/", timeout=10).status_code == 200
+        finally:
+            httpd.shutdown()
+
+        out = capsys.readouterr().out
+        assert "web timing: / rendered in" in out
+        assert "holdings" in out
+
+    def test_AFastIndexRender_StaysQuiet(self, tmp_path, capsys):
+        httpd, base = self._server(tmp_path)
+        try:
+            assert httpx.get(f"{base}/", timeout=10).status_code == 200
+        finally:
+            httpd.shutdown()
+
+        assert "web timing:" not in capsys.readouterr().out

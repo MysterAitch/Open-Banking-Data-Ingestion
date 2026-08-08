@@ -28,13 +28,16 @@ import contextlib
 import html
 import itertools
 import json
+import os
 import re
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from secrets import token_urlsafe
+from typing import ParamSpec, TypeVar
 from urllib.parse import parse_qs, quote, urlparse
 
 from .callback import render_page
@@ -45,6 +48,9 @@ from .doctor import shape_problems
 from .namespaces import validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
+
+_HookParams = ParamSpec("_HookParams")
+_HookReturn = TypeVar("_HookReturn")
 
 # A person walking to another room mid-authorisation is normal; a state hanging
 # around for hours is not.
@@ -2499,41 +2505,119 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if route == "/artefact":
             self._artefact(params)
             return
+        if route == "/healthz":
+            # Liveness, nothing more: proves the serve loop answers. The
+            # container healthcheck rides THIS, never a content page - the
+            # index once grew past the probe's timeout and kept a working
+            # container 'unhealthy' for its entire 3-day life, invisibly.
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if route == "/":
-            self._respond(
-                200,
-                render_index(
-                    self.bound_config.connection_store,
-                    holdings=self.bound_config.holdings,
-                    provider_knowledge=self.bound_config.provider_knowledge,
-                    extendables=self.bound_config.extendables,
-                    starling_status=self.bound_config.starling_status,
-                    display_labels=self.bound_config.display_labels,
-                    account_timelines=self.bound_config.account_timelines,
-                    account_feeders=self.bound_config.account_feeders,
-                    push_actual=self.bound_config.push_actual,
-                    actual_status=self.bound_config.actual_status,
-                    actual_roster=self.bound_config.actual_roster,
-                    actual_queue=self.bound_config.actual_queue,
-                    audit_actual=self.bound_config.audit_actual,
-                    prune_actual=self.bound_config.prune_actual,
-                    rename_connection=self.bound_config.rename_connection,
-                    actual_heartbeat=self.bound_config.actual_heartbeat,
-                    rebuild_available=self.bound_config.rebuild_derived is not None,
-                    forget_available=self.bound_config.forget_actual is not None,
-                    rebuild_status=self.bound_config.rebuild_status,
-                    recent_rebuilds=self.bound_config.recent_rebuilds,
-                    source_connections=(
-                        self.bound_config.source_connections()
-                        if self.bound_config.source_connections is not None
-                        else None
-                    ),
-                    starling_probe_available=self.bound_config.starling_probe is not None,
-                    probe_suggestions=self.bound_config.probe_suggestions,
-                    scheduler_heartbeat=self.bound_config.scheduler_heartbeat,
-                    backfill_status=self.bound_config.backfill_status,
+            # Every hook individually timed, and a slow render publishes
+            # its own cost breakdown to the log. Three refuted theories
+            # (locks, raw-JSON parsing, provider calls) proved nobody can
+            # guess where 40 seconds lives - the page must say.
+            hook_seconds: dict[str, float] = {}
+
+            def timed(
+                name: str, hook: Callable[_HookParams, _HookReturn] | None
+            ) -> Callable[_HookParams, _HookReturn] | None:
+                if hook is None:
+                    return None
+                bound = hook
+
+                def call(
+                    *args: _HookParams.args, **kwargs: _HookParams.kwargs
+                ) -> _HookReturn:
+                    began = time.perf_counter()
+                    try:
+                        return bound(*args, **kwargs)
+                    finally:
+                        hook_seconds[name] = (
+                            hook_seconds.get(name, 0.0) + time.perf_counter() - began
+                        )
+
+                return call
+
+            render_began = time.perf_counter()
+            page = render_index(
+                self.bound_config.connection_store,
+                holdings=timed("holdings", self.bound_config.holdings),
+                provider_knowledge=timed(
+                    "provider_knowledge", self.bound_config.provider_knowledge
+                ),
+                extendables=timed("extendables", self.bound_config.extendables),
+                starling_status=timed(
+                    "starling_status", self.bound_config.starling_status
+                ),
+                display_labels=timed(
+                    "display_labels", self.bound_config.display_labels
+                ),
+                account_timelines=timed(
+                    "account_timelines", self.bound_config.account_timelines
+                ),
+                account_feeders=timed(
+                    "account_feeders", self.bound_config.account_feeders
+                ),
+                push_actual=self.bound_config.push_actual,
+                actual_status=timed("actual_status", self.bound_config.actual_status),
+                actual_roster=timed("actual_roster", self.bound_config.actual_roster),
+                actual_queue=timed("actual_queue", self.bound_config.actual_queue),
+                audit_actual=self.bound_config.audit_actual,
+                prune_actual=self.bound_config.prune_actual,
+                rename_connection=self.bound_config.rename_connection,
+                actual_heartbeat=timed(
+                    "actual_heartbeat", self.bound_config.actual_heartbeat
+                ),
+                rebuild_available=self.bound_config.rebuild_derived is not None,
+                forget_available=self.bound_config.forget_actual is not None,
+                rebuild_status=timed(
+                    "rebuild_status", self.bound_config.rebuild_status
+                ),
+                recent_rebuilds=timed(
+                    "recent_rebuilds", self.bound_config.recent_rebuilds
+                ),
+                source_connections=(
+                    connections_hook()
+                    if (
+                        connections_hook := timed(
+                            "source_connections", self.bound_config.source_connections
+                        )
+                    )
+                    is not None
+                    else None
+                ),
+                starling_probe_available=self.bound_config.starling_probe is not None,
+                probe_suggestions=timed(
+                    "probe_suggestions", self.bound_config.probe_suggestions
+                ),
+                scheduler_heartbeat=timed(
+                    "scheduler_heartbeat", self.bound_config.scheduler_heartbeat
+                ),
+                backfill_status=timed(
+                    "backfill_status", self.bound_config.backfill_status
                 ),
             )
+            render_seconds = time.perf_counter() - render_began
+            threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
+            if render_seconds >= threshold:
+                slowest = sorted(
+                    hook_seconds.items(), key=lambda kv: kv[1], reverse=True
+                )[:8]
+                accounted = sum(hook_seconds.values())
+                print(
+                    f"web timing: / rendered in {render_seconds:.2f}s - "
+                    + ", ".join(f"{name} {secs:.2f}s" for name, secs in slowest)
+                    + f" (hooks total {accounted:.2f}s; the remainder is "
+                    "templating and store-free work)",
+                    flush=True,
+                )
+            self._respond(200, page)
         elif route == "/connect":
             self._connect(params)
         elif route == "/callback":
