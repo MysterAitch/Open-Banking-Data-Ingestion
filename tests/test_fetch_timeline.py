@@ -485,3 +485,37 @@ class TestSiblingOrigins:
             now=NOW,
         )
         assert bars[0].provenance == "recovered"
+
+class TestHorizontalSpanControl:
+    """The horizontal axis is its own control, not a side effect of the
+    row filter. days=30 and days=56 once drew IDENTICAL horizontal axes
+    because both sat under the fixed 120-day clamp - the row filter
+    moved while the domain stood still."""
+
+    ASK = _attempt("2026-08-05T06:00:00Z", "from=2026-04-01&to=2026-08-05")
+
+    def test_SpanFit_DrawsTheWholeWindow_NoClipNoNotch(self):
+        # A year-long ask under the default clamp is notched; fit means
+        # the domain stretches to hold it instead.
+        year_wide = _attempt("2026-08-05T06:00:00Z", "from=2025-08-05&to=2026-08-05")
+        svg = timeline_svg([year_wide], days=7, clamp_days=None, now=NOW)
+        assert "window extends left of chart" not in svg
+
+    def test_SpanFit_TheAxisStartsAtTheOldestDrawnAsk(self):
+        # The tick labels are the visible truth of the domain: with fit,
+        # the left edge is the bar's own start, not now-minus-clamp.
+        svg = timeline_svg([self.ASK], days=7, clamp_days=None, now=NOW)
+        assert ">04-01<" in svg
+
+    def test_ANarrowerSpan_ClipsWhereTheDefaultDidNot(self):
+        # An explicit threshold is honoured even when it bites: the ask
+        # reaches 126 days back, a 60-day span notches it.
+        svg = timeline_svg([self.ASK], days=7, clamp_days=60, now=NOW)
+        assert "window extends left of chart" in svg
+
+    def test_DifferentSpans_ProduceDifferentAxes(self):
+        # The regression itself: two spans, two domains, visibly so.
+        at_60 = timeline_svg([self.ASK], days=7, clamp_days=60, now=NOW)
+        at_365 = timeline_svg([self.ASK], days=7, clamp_days=365, now=NOW)
+        assert ">06-06<" in at_60
+        assert ">08-05<" in at_365

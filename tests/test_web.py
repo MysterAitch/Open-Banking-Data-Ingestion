@@ -2718,3 +2718,68 @@ class TestAuthorisationFailureIsEvidence:
         from obdi.web import AuthorisationSession
 
         assert AuthorisationSession().peek("not-a-state") == ""
+
+
+class TestFetchTimelineControls:
+    """The two axes have two knobs: `days` picks which asks appear,
+    `span` picks how far back the chart reaches. They were once one
+    control, and every row filter narrower than the fixed clamp drew
+    the identical horizontal axis."""
+
+    @staticmethod
+    def _attempt() -> dict[str, object]:
+        return {
+            "attempted_at": "2026-08-05T06:00:00Z",
+            "asked": "from=2025-08-05&to=2026-08-05",
+            "source": "truelayer-booked",
+            "outcome": "landed",
+            "request_meta": "{}",
+        }
+
+    def _server(self, tmp_path):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            recent_attempts=lambda: [self._attempt()],
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_SpanFit_UnclipsTheYearWideAsk(self, tmp_path):
+        httpd, base = self._server(tmp_path)
+        try:
+            clamped = httpx.get(f"{base}/fetch-timeline?days=7")
+            fitted = httpx.get(f"{base}/fetch-timeline?days=7&span=fit")
+        finally:
+            httpd.shutdown()
+
+        assert "window extends left of chart" in clamped.text
+        assert "window extends left of chart" not in fitted.text
+
+    def test_SpanChoice_SurvivesTheRangeAndPanLinks(self, tmp_path):
+        # Picking a span then changing the row filter must not silently
+        # snap the axis back to the default.
+        httpd, base = self._server(tmp_path)
+        try:
+            page = httpx.get(f"{base}/fetch-timeline?days=7&span=fit")
+        finally:
+            httpd.shutdown()
+
+        assert 'href="/fetch-timeline?days=30&span=fit"' in page.text
+        assert "days=7&span=fit&until=" in page.text
+
+    def test_AnUnparseableSpan_FallsBackAndIsNotReflected(self, tmp_path):
+        httpd, base = self._server(tmp_path)
+        try:
+            page = httpx.get(f"{base}/fetch-timeline?days=7&span=bananas")
+        finally:
+            httpd.shutdown()
+
+        assert page.status_code == 200
+        assert "bananas" not in page.text

@@ -232,11 +232,20 @@ def timeline_svg(
     attempts: list[dict[str, object]],
     *,
     days: int | None = 7,
-    clamp_days: int = 120,
+    clamp_days: int | None = 120,
     now: datetime | None = None,
     max_rows: int = 250,
 ) -> str:
-    """The chart, or an honest sentence when there is nothing to draw."""
+    """The chart, or an honest sentence when there is nothing to draw.
+
+    Two independent axes, two independent controls: `days` filters WHICH
+    asks appear (the vertical axis), `clamp_days` bounds how far back
+    the chart reaches (the horizontal axis). Conflating them was tried
+    and read wrong - every row filter narrower than the clamp drew the
+    identical horizontal axis, so "zooming" moved nothing. clamp_days of
+    None means fit: the domain stretches to hold every drawn bar and
+    nothing is clipped.
+    """
     at = now or datetime.now(UTC)
     bars, undrawn, mismatches = bars_from_attempts(attempts, days=days, now=at)
     clipped_rows = len(bars) > max_rows
@@ -246,8 +255,8 @@ def timeline_svg(
 
     domain_right = at
     wanted_left = min(bar.start for bar in bars)
-    if days is None:
-        # The full-span view: no clamp, the domain IS the data.
+    if days is None or clamp_days is None:
+        # Fit: no clamp, the domain IS the data.
         domain_left = wanted_left
     else:
         clamp_left = at - timedelta(days=max(clamp_days, days))
