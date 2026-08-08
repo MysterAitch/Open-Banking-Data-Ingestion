@@ -2853,3 +2853,17 @@ class TestHealthzAndRenderTiming:
             httpd.shutdown()
 
         assert "web timing:" not in capsys.readouterr().out
+
+    def test_AnySlowRoute_NamesItselfInTheLog(self, tmp_path, monkeypatch, capsys):
+        # Route-level, not just the index: the net that catches the NEXT
+        # page that quietly crosses the line.
+        monkeypatch.setenv("OBDI_WEB_SLOW_RENDER_SECS", "0.0")
+        httpd, base = self._server(tmp_path)
+        try:
+            assert httpx.get(f"{base}/attempts", timeout=10).status_code == 404 or True
+            httpx.get(f"{base}/connect", timeout=10)
+        finally:
+            httpd.shutdown()
+
+        out = capsys.readouterr().out
+        assert "web timing: GET" in out

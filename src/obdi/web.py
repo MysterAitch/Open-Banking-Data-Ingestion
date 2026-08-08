@@ -38,7 +38,7 @@ from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from secrets import token_urlsafe
 from typing import ParamSpec, TypeVar
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .callback import render_page
 from .classification import redact_summary
@@ -48,6 +48,22 @@ from .doctor import shape_problems
 from .namespaces import validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
+
+
+def _report_slow_route(method: str, route: str, seconds: float) -> None:
+    """Any route slower than the threshold names itself in the log.
+
+    Route-level for EVERY page, hook-level only on the index: the 40s
+    index taught that a slow page invisible outside its own render is
+    diagnosed by guesswork, but blanket fine-grained instrumentation is
+    noise - one line per slow request is the proportionate net. The
+    index additionally prints its per-hook breakdown, so a slow / gets
+    two lines that agree.
+    """
+    threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
+    if seconds >= threshold:
+        print(f"web timing: {method} {route} took {seconds:.2f}s", flush=True)
+
 
 _HookParams = ParamSpec("_HookParams")
 _HookReturn = TypeVar("_HookReturn")
@@ -2476,6 +2492,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
+        began = time.perf_counter()
+        try:
+            self._dispatch_get(parsed, route)
+        finally:
+            _report_slow_route("GET", route, time.perf_counter() - began)
+
+    def _dispatch_get(self, parsed: ParseResult, route: str) -> None:
         params = parse_qs(parsed.query)
 
         if route == "/account":
@@ -3180,6 +3203,14 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         return urlparse(origin).netloc.casefold() != host
 
     def do_POST(self) -> None:
+        began = time.perf_counter()
+        route = urlparse(self.path).path.rstrip("/") or "/"
+        try:
+            self._dispatch_post()
+        finally:
+            _report_slow_route("POST", route, time.perf_counter() - began)
+
+    def _dispatch_post(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
         if self._is_cross_site():
