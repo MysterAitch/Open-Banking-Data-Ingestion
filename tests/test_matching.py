@@ -304,8 +304,14 @@ class TestABatchReadsEachAccountOnceNotOncePerRecord:
                 self._batch(store, "acc-1", 200, "new")
                 return time.perf_counter() - start
 
-        small = timed(tmp_path / "small.sqlite3", 200)
-        large = timed(tmp_path / "large.sqlite3", 800)
+        # Min of two fresh runs per size: the baseline is ~10ms, small
+        # enough for one scheduler stall on a busy CI runner to swing the
+        # ratio past its allowance (observed: 7.6x from noise alone, on a
+        # commit that changed no store code). The minimum is the standard
+        # noise-floor estimator - interference only ever ADDS time, so the
+        # smaller measurement is always the truer one.
+        small = min(timed(tmp_path / f"small{i}.sqlite3", 200) for i in range(2))
+        large = min(timed(tmp_path / f"large{i}.sqlite3", 800) for i in range(2))
 
         # Matching itself is linear in what is held, so some growth is
         # expected and legitimate; re-reading the account per record made
