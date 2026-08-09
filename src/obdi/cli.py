@@ -1519,18 +1519,23 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             return ids.pop()
         return None
 
-    def preview_upload(payload: bytes, filename: str) -> dict[str, object]:
+    def preview_upload(
+        payload: bytes, filename: str, account: str
+    ) -> dict[str, object]:
         """Parse without landing: what IS this file, before anything commits.
 
         The preview must not write - a wrong file inspected costs nothing.
-        Landing and reconciliation happen only on confirm, through the same
-        import_file the CLI uses, so file-vs-web imports cannot drift.
+        The destination is chosen BEFORE the upload, which is what makes
+        the strongest check possible at preview time: the file compared
+        against what that account already holds from OTHER sources, over
+        the period they share - the only external truth available to a
+        file with no balance column, now visible before anything lands.
         """
         from .ingest import dates_cannot_confirm_format
         from .parsers.uk_banks import detect
 
         parser = detect(payload)
-        rows = list(parser.parse(payload, account_id="preview"))
+        rows = list(parser.parse(payload, account_id=account))
         sample = [
             {
                 "date": r.value_date.isoformat(),
@@ -1540,7 +1545,27 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             for r in rows[:5]
         ]
         ambiguous = dates_cannot_confirm_format([r.value_date for r in rows])
+        from .coverage import agreements
         from .verification import verify_export
+
+        # This file versus every OTHER source of the same account - held
+        # rows of the file's own source are excluded, or a re-upload of a
+        # period already imported would be compared against itself.
+        with Store(db_path) as store:
+            held = [
+                t
+                for t in store.transactions_by_sighting()
+                if t.account_id == account and t.source != parser.source
+            ]
+        agreement_preview = [
+            agreement.describe()
+            for agreement in agreements(held + rows)
+            if agreement.account_id == account
+            and parser.source in (agreement.left, agreement.right)
+        ] or [
+            "no other source covers this account over this period yet - "
+            "the file stands alone, uncorroborated"
+        ]
 
         return {
             "parser": type(parser).__name__,
@@ -1557,6 +1582,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 {"name": v.name, "ok": v.ok, "detail": v.detail}
                 for v in verify_export(payload, rows, filename)
             ],
+            "agreement_preview": agreement_preview,
         }
 
     def confirm_upload(payload: bytes, filename: str, account: str) -> str:

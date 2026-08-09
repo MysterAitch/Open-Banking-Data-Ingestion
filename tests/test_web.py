@@ -2277,8 +2277,8 @@ class TestUploadingAFileFromThePage:
         previews = []
         confirms = []
 
-        def preview(payload, filename):
-            previews.append((payload, filename))
+        def preview(payload, filename, account):
+            previews.append((payload, filename, account))
             return {
                 "parser": "StarlingCsvParser",
                 "date_format": "%d/%m/%Y",
@@ -2289,6 +2289,9 @@ class TestUploadingAFileFromThePage:
                 "date_ambiguous": False,
                 "earliest": "2026-01-01",
                 "latest": "2026-07-01",
+                "agreement_preview": [
+                    "halifax-current: halifax-csv vs truelayer-booked agree"
+                ],
             }
 
         httpd, base = self._server(
@@ -2298,20 +2301,46 @@ class TestUploadingAFileFromThePage:
             labels={"halifax-current": "Current (halifax)"},
         )
         try:
+            index = httpx.get(f"{base}/").text
             page = httpx.post(
                 f"{base}/upload",
+                data={"account": "halifax-current"},
                 files={"statement": ("statement.csv", b"Date,Amount\n", "text/csv")},
             ).text
         finally:
             httpd.shutdown()
 
-        assert previews == [(b"Date,Amount\n", "statement.csv")]
+        # The destination is chosen FIRST, on the index form.
+        assert "Current (halifax)" in index
+        assert previews == [(b"Date,Amount\n", "statement.csv", "halifax-current")]
         assert confirms == []  # nothing landed from a preview
         assert "StarlingCsvParser" in page
         assert "42 row(s)" in page
         assert "COFFEE" in page
-        assert "Current (halifax)" in page  # the account picker is populated
+        # The preview shows the pre-import cross-source comparison, and a
+        # single confirm button carries the already-chosen account.
+        assert "halifax-csv vs truelayer-booked agree" in page
+        assert 'name="account" value="halifax-current"' in page
         assert 'name="token"' in page
+
+    def test_Upload_WithoutADestination_IsRefusedBeforeParsing(self, tmp_path):
+        previews = []
+        httpd, base = self._server(
+            tmp_path,
+            lambda *a: previews.append(a) or {},
+            lambda *a: "done",
+        )
+        try:
+            response = httpx.post(
+                f"{base}/upload",
+                files={"statement": ("statement.csv", b"Date,Amount\n", "text/csv")},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 400
+        assert "destination" in response.text.lower()
+        assert previews == []
 
     def test_Confirm_LandsThePreviewedBytesAgainstTheChosenAccount(self, tmp_path):
         confirms = []
@@ -2322,7 +2351,7 @@ class TestUploadingAFileFromThePage:
 
         httpd, base = self._server(
             tmp_path,
-            lambda payload, filename: {
+            lambda payload, filename, account: {
                 "parser": "QifParser",
                 "date_format": "",
                 "rows": 1,
@@ -2337,6 +2366,7 @@ class TestUploadingAFileFromThePage:
             with httpx.Client() as client:
                 preview_page = client.post(
                     f"{base}/upload",
+                    data={"account": "halifax-current"},
                     files={"statement": ("mine.qif", b"!Type:Bank\n", "text/plain")},
                 ).text
                 token = preview_page.split('name="token" value="')[1].split('"')[0]
@@ -2351,13 +2381,14 @@ class TestUploadingAFileFromThePage:
         assert "42 parsed" in result
 
     def test_Upload_UnrecognisedFile_IsRefusedWithTheParserVerdict(self, tmp_path):
-        def preview(payload, filename):
+        def preview(payload, filename, account):
             raise ValueError("No parser recognised this file's header row.")
 
         httpd, base = self._server(tmp_path, preview, lambda *a: "")
         try:
             response = httpx.post(
                 f"{base}/upload",
+                data={"account": "halifax-current"},
                 files={"statement": ("junk.bin", b"\x00\x01", "application/octet-stream")},
             )
         finally:

@@ -169,31 +169,45 @@ class UploadSession:
         return payload, filename
 
 
-def _parse_multipart(content_type: str, body: bytes) -> tuple[bytes, str]:
-    """The one file out of a multipart form, without the removed cgi module.
+def _parse_multipart(
+    content_type: str, body: bytes
+) -> tuple[bytes, str, dict[str, str]]:
+    """The file AND the text fields out of a multipart form.
 
-    Minimal on purpose: a single file field from our own form, not a general
-    parser. The boundary comes from the content type; the first part with a
-    filename wins; payload runs from the blank line to the closing boundary.
+    Minimal on purpose: our own form, not a general parser. The boundary
+    comes from the content type; the first part with a filename is the
+    file; parts with a plain name are collected as fields - the account
+    choice travels alongside the file, since the flow picks the
+    destination FIRST so the preview can verify against it.
     """
     marker = "boundary="
     if marker not in content_type:
         raise ValueError("not a multipart upload")
     boundary = content_type.split(marker, 1)[1].split(";")[0].strip().strip('"')
     delimiter = b"--" + boundary.encode()
+    payload: bytes | None = None
+    filename = ""
+    fields: dict[str, str] = {}
     for part in body.split(delimiter):
         header_end = part.find(b"\r\n\r\n")
         if header_end == -1:
             continue
         headers = part[:header_end].decode("utf-8", "replace")
-        if "filename=" not in headers:
-            continue
-        filename = headers.split("filename=", 1)[1].split("\r\n")[0].strip().strip('"')
-        payload = part[header_end + 4 :]
-        if payload.endswith(b"\r\n"):
-            payload = payload[:-2]
-        return payload, filename or "upload.csv"
-    raise ValueError("no file found in the upload")
+        content = part[header_end + 4 :]
+        if content.endswith(b"\r\n"):
+            content = content[:-2]
+        if "filename=" in headers:
+            if payload is None:
+                filename = (
+                    headers.split("filename=", 1)[1].split("\r\n")[0].strip().strip('"')
+                )
+                payload = content
+        elif 'name="' in headers:
+            name = headers.split('name="', 1)[1].split('"')[0]
+            fields[name] = content.decode("utf-8", "replace").strip()
+    if payload is None:
+        raise ValueError("no file found in the upload")
+    return payload, filename or "upload.csv", fields
 
 
 @dataclass(frozen=True)
@@ -2423,6 +2437,13 @@ def render_index(
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
+    # The import form picks its destination FIRST (the preview verifies
+    # the file against what that account already holds), so the picker's
+    # options are needed here rather than on the confirm page.
+    upload_options = ""
+    if display_labels is not None:
+        with contextlib.suppress(Exception):
+            upload_options = account_options(display_labels())
     body = f"""
 {_credential_banner()}
 {_rebuild_running_banner(rebuild_status)}
@@ -2444,9 +2465,13 @@ def render_index(
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
 <h2>Import a file</h2>
-<p>Bank CSV or QIF exports - previewed before anything is stored, then
-reconciled through the same identity rules as the API pulls.</p>
+<p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
+then verify the file against what that account already holds, before
+anything is stored.</p>
 <form action="/upload" method="post" enctype="multipart/form-data">
+  <p><select name="account" style="width:100%;padding:.6rem">
+  <option value="">choose an account...</option>{upload_options}</select></p>
+  <p><input name="account_other" placeholder="or type a canonical name, e.g. hsbc-old-current"></p>
   <p><input type="file" name="statement" required></p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
@@ -3373,23 +3398,37 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
             return
         try:
-            payload, filename = _parse_multipart(
+            payload, filename, fields = _parse_multipart(
                 self.headers.get("Content-Type") or "", self.rfile.read(length)
             )
-            preview = hook(payload, filename)
+        except Exception as exc:
+            self._respond(
+                400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        # Destination FIRST: the preview verifies the file against what
+        # this account already holds, which is impossible to do after the
+        # fact - and it makes the confirm page a single honest button.
+        account = (fields.get("account_other") or fields.get("account") or "").strip()
+        if not account:
+            self._respond(
+                400,
+                error_page(
+                    "Choose the destination first",
+                    "<p>Pick the account this statement belongs to (or type a "
+                    "canonical name) before uploading - the preview verifies "
+                    "the file against what that account already holds.</p>",
+                ),
+            )
+            return
+        try:
+            preview = hook(payload, filename, account)
         except Exception as exc:
             self._respond(
                 400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
             )
             return
         token = self.uploads.stash(payload, filename)
-        labels: dict[str, str] = {}
-        if self.bound_config.display_labels is not None:
-            try:
-                labels = self.bound_config.display_labels()
-            except Exception:
-                labels = {}
-        options = account_options(labels)
         raw_sample = preview.get("sample")
         sample_rows = "".join(
             f'<tr><td>{html.escape(str(r.get("date")))}</td>'
@@ -3428,6 +3467,16 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             if verdict_rows
             else ""
         )
+        raw_agreements = preview.get("agreement_preview")
+        agreement_html = ""
+        if isinstance(raw_agreements, list) and raw_agreements:
+            agreement_lines = "".join(
+                f"<p>{html.escape(str(line))}</p>" for line in raw_agreements
+            )
+            agreement_html = (
+                f"<h2>Against what {html.escape(account)} already holds</h2>"
+                + agreement_lines
+            )
         body = (
             f"<p><strong>{html.escape(filename)}</strong> parsed as "
             f"{html.escape(str(preview.get('parser')))} "
@@ -3436,19 +3485,17 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f"{preview.get('earliest')} .. {preview.get('latest')}</p>"
             + warning
             + verdicts_html
+            + agreement_html
             + '<div class="scroll"><table><tr><th>date</th><th>amount</th>'
             f"<th>description</th></tr>{sample_rows}</table></div>"
-            "<p>Nothing has been stored yet. Choose the account these "
-            "transactions belong to, then confirm.</p>"
+            f"<p>Nothing has been stored yet. Confirm to import into "
+            f"<strong>{html.escape(account)}</strong>.</p>"
             '<form method="post" action="/upload-confirm">'
             f'<input type="hidden" name="token" value="{token}">'
-            f'<p><select name="account" style="width:100%;padding:.6rem" required>'
-            f'<option value="">choose an account...</option>{options}</select></p>'
-            '<p><input name="account_other" placeholder="or type a canonical '
-            'name, e.g. hsbc-old-current"></p>'
+            f'<input type="hidden" name="account" value="{html.escape(account)}">'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            "Import into the chosen account</button></p></form>" + HOME_LINK
+            f"Import into {html.escape(account)}</button></p></form>" + HOME_LINK
         )
         self._respond(200, render_page("Preview import", body))
 
