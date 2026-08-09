@@ -3386,6 +3386,29 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             if preview.get("date_ambiguous")
             else ""
         )
+        raw_verdicts = preview.get("verdicts")
+        verdict_rows = ""
+        for v in raw_verdicts if isinstance(raw_verdicts, list) else []:
+            if not isinstance(v, dict):
+                continue
+            ok = v.get("ok")
+            mark, style = (
+                ("PASS", "") if ok is True
+                else ("FAIL", ' class="warn"') if ok is False
+                else ("n/a", ' class="muted"')
+            )
+            verdict_rows += (
+                f"<tr{style}><td>{html.escape(str(v.get('name')))}</td>"
+                f"<td>{mark}</td>"
+                f"<td>{html.escape(str(v.get('detail')))}</td></tr>"
+            )
+        verdicts_html = (
+            "<h2>Should this parse be believed?</h2>"
+            '<div class="scroll"><table><tr><th>check</th><th></th>'
+            f"<th>evidence</th></tr>{verdict_rows}</table></div>"
+            if verdict_rows
+            else ""
+        )
         body = (
             f"<p><strong>{html.escape(filename)}</strong> parsed as "
             f"{html.escape(str(preview.get('parser')))} "
@@ -3393,6 +3416,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f"{preview.get('rows')} row(s), "
             f"{preview.get('earliest')} .. {preview.get('latest')}</p>"
             + warning
+            + verdicts_html
             + '<div class="scroll"><table><tr><th>date</th><th>amount</th>'
             f"<th>description</th></tr>{sample_rows}</table></div>"
             "<p>Nothing has been stored yet. Choose the account these "
@@ -3435,9 +3459,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
             return
         print(f"web import: {filename} -> {account}", file=sys.stderr)
+        summary_html = "".join(
+            f"<p>{html.escape(line)}</p>" for line in summary.splitlines()
+        )
         self._respond(
             200,
-            render_page("Imported", f"<p>{html.escape(summary)}</p>" + HOME_LINK),
+            render_page("Imported", summary_html + HOME_LINK),
         )
 
     def _starling_probe(self, params: dict[str, list[str]]) -> None:

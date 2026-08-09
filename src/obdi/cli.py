@@ -1540,6 +1540,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             for r in rows[:5]
         ]
         ambiguous = dates_cannot_confirm_format([r.value_date for r in rows])
+        from .verification import verify_export
+
         return {
             "parser": type(parser).__name__,
             "date_format": getattr(parser, "date_format", ""),
@@ -1548,6 +1550,13 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "date_ambiguous": ambiguous,
             "earliest": min((r.value_date for r in rows), default=None),
             "latest": max((r.value_date for r in rows), default=None),
+            # Should the parse be BELIEVED: the file verified against its
+            # own running balances (structure, walk, sign, dates) - shown
+            # BEFORE the person decides to import.
+            "verdicts": [
+                {"name": v.name, "ok": v.ok, "detail": v.detail}
+                for v in verify_export(payload, rows, filename)
+            ],
         }
 
     def confirm_upload(payload: bytes, filename: str, account: str) -> str:
@@ -1560,7 +1569,19 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             path.write_bytes(payload)
             with Store(db_path) as store:
                 summary = import_file(store, path, account_id=account)
-        return f"{safe_name} -> {account}: {summary.describe()}"
+                # The cross-source verdict at the moment it becomes
+                # answerable: does this file agree with every other
+                # source of the same account over the period they share?
+                # This is the ONLY sign/completeness check available to
+                # a file with no balance column.
+                from .coverage import agreements
+
+                lines = [f"{safe_name} -> {account}: {summary.describe()}"]
+                held = store.transactions_by_sighting()
+                for agreement in agreements(held):
+                    if agreement.account_id == account:
+                        lines.append(agreement.describe())
+        return "\n".join(lines)
 
     def account_timelines() -> dict[str, dict[str, str]]:
         """Timeline marks per canonical ref, from the store alone: how far
