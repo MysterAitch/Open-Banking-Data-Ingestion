@@ -485,6 +485,19 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
 
+def _scheduled_sources() -> set[str]:
+    """Sources the scheduler actually pulls - the first-party token and the
+    aggregator pipe. Files are never scheduled, so their lag is the normal
+    state of manual uploads, not a fault to watch for."""
+    watched: set[str] = set()
+    if _starling_token_present():
+        watched.add("starling")
+    store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if store_path and Path(store_path).exists() and ConnectionStore(store_path).load():
+        watched.add("truelayer")
+    return watched
+
+
 def _starling_token_present() -> bool:
     from .secrets import SecretError, read_secret
 
@@ -2140,14 +2153,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
     def feed_warnings() -> list[str]:
         """Cross-witness staleness: a scheduled feed proven behind by another
-        witness's newer rows. Watched sources are the ones a scheduler pulls
-        - the first-party token and the aggregator pipe - never files, whose
-        lag is the normal state of manual uploads."""
-        watched: set[str] = set()
-        if _starling_token_present():
-            watched.add("starling")
-        if ConnectionStore(store_path).load():
-            watched.add("truelayer")
+        witness's newer rows for the same account."""
+        watched = _scheduled_sources()
         if not watched:
             return []
         return [stale.describe() for stale in stale_feeds(holdings(), watched=watched)]
@@ -2774,6 +2781,13 @@ def main(argv: list[str] | None = None) -> int:
         "network call; only an explicit invalid_client counts against them)",
     )
 
+    subcommands.add_parser(
+        "alert",
+        help="evaluate findings (refusal trends, stale feeds, consent expiry) "
+        "and notify on changes - announced when a finding appears or clears, "
+        "silent while it persists",
+    )
+
     args = parser.parse_args(argv)
     db_path = _store_path(args.db)
 
@@ -2876,6 +2890,54 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "push-actual":
         return _push_actual(db_path)
+    if args.command == "alert":
+        from .alerts import Finding, process, refusal_trends, send_ntfy
+
+        findings: list[Finding] = []
+        with Store(db_path) as store:
+            held = store.transactions_by_sighting()
+            attempts = store.attempts(limit=1000)
+        watched = _scheduled_sources()
+        if watched:
+            findings += [
+                Finding(f"stale-feed:{stale.account_id}:{stale.source}", stale.describe())
+                for stale in stale_feeds(coverage(held), watched=watched)
+            ]
+        findings += refusal_trends(attempts)
+        alert_store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+        if alert_store_path and Path(alert_store_path).exists():
+            for name, connection in ConnectionStore(alert_store_path).load().items():
+                if connection.consent_needs_attention():
+                    remaining = connection.consent_days_remaining()
+                    findings.append(
+                        Finding(
+                            f"consent:{name}",
+                            f"connection '{name}': consent needs reconfirming - "
+                            f"{remaining} day(s) before the bank link dies",
+                        )
+                    )
+        state_path = Path(
+            os.getenv("OBDI_ALERT_STATE", "").strip()
+            or Path(db_path).with_name("alert-state.json")
+        )
+        ntfy_url = read_secret("OBDI_NTFY_URL", required=False)
+        if ntfy_url:
+            def deliver(message: str) -> bool:
+                return send_ntfy(ntfy_url, message)
+        else:
+            # No channel configured: the edge protocol still runs so state
+            # stays truthful, and the "send" is the process log itself.
+            def deliver(message: str) -> bool:
+                print(f"alert (no OBDI_NTFY_URL configured): {message}")
+                return True
+        delivered = process(findings, state_path, deliver)
+        for finding in findings:
+            print(finding.message)
+        if not findings:
+            print("no findings")
+        if delivered:
+            print(f"{len(delivered)} notification(s) sent")
+        return 0
     if args.command == "review-report":
         from .review_report import review_report
 
