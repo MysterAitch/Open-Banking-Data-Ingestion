@@ -35,6 +35,12 @@ from .money import format_amount
 #: account tolerates that before anything is called missing.
 WITHIN_ACCOUNT_WINDOW_DAYS = 2
 
+#: The wider second-pass window for rows whose descriptions are IDENTICAL -
+#: 2019-era card settlement put the same purchase ~3 days apart in the two
+#: witnesses. Matches the identity layer's fuzzy window (Actual's prior art
+#: is +/-7), so the display matcher cannot disagree with its own import.
+SETTLEMENT_SKEW_WINDOW_DAYS = 7
+
 #: A row the other source filed under a SIBLING account with the same sign is
 #: the same movement seen through a door that disagrees about where it belongs
 #: - a bill paid directly from a savings space appears on the statement as the
@@ -381,18 +387,29 @@ def _leftovers(
     in_right: Sequence[Transaction],
     window_days: int,
 ) -> tuple[list[Transaction], list[Transaction]]:
-    """Each side's rows with no same-amount counterpart on the other.
+    """Each side's rows with no counterpart on the other.
 
-    Greedy nearest-date within the window, each row consumed once - the same
-    discipline as transfer pairing, so a repeated standing order of one value
-    does not chain-match.
+    Two passes, both greedy nearest-date with each row consumed once - the
+    same discipline as transfer pairing, so a repeated standing order of one
+    value does not chain-match.
+
+    Pass one matches on amount alone within the tight window. Pass two
+    exists because of the 2019 statement: that era's card rows land in the
+    two witnesses ~3 days apart (transaction time vs settlement), just
+    outside the tight window - the same WATERSTONES purchase fell into BOTH
+    sides' ONLY buckets. The identity layer already merges such rows at the
+    7-day fuzzy window on import, so the display matcher was disagreeing
+    with its own import layer. Pass two closes that gap conservatively:
+    the fuzzy window applies only when the descriptions are identical,
+    because amount-only matching at 7 days would false-match habitual
+    same-price purchases at different merchants.
     """
+    window = timedelta(days=window_days)
+    used: set[int] = set()
     by_amount: dict[int, list[int]] = {}
     for j, item in enumerate(in_right):
         by_amount.setdefault(item.amount_minor, []).append(j)
 
-    window = timedelta(days=window_days)
-    used: set[int] = set()
     left_over: list[Transaction] = []
     for item in sorted(in_left, key=lambda t: (t.value_date, t.amount_minor, t.description)):
         candidates = [
@@ -406,8 +423,31 @@ def _leftovers(
             )
         else:
             left_over.append(item)
+
+    fuzzy = timedelta(days=SETTLEMENT_SKEW_WINDOW_DAYS)
+    by_content: dict[tuple[int, str], list[int]] = {}
+    for j, item in enumerate(in_right):
+        if j not in used:
+            by_content.setdefault(
+                (item.amount_minor, item.description.strip().casefold()), []
+            ).append(j)
+    still_over: list[Transaction] = []
+    for item in left_over:
+        key = (item.amount_minor, item.description.strip().casefold())
+        candidates = [
+            j
+            for j in by_content.get(key, ())
+            if j not in used and abs(in_right[j].value_date - item.value_date) <= fuzzy
+        ]
+        if candidates:
+            used.add(
+                min(candidates, key=lambda j: (abs(in_right[j].value_date - item.value_date), j))
+            )
+        else:
+            still_over.append(item)
+
     right_over = [item for j, item in enumerate(in_right) if j not in used]
-    return left_over, right_over
+    return still_over, right_over
 
 
 def _attribute(

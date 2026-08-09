@@ -856,3 +856,93 @@ class TestExportDrift:
         incoming = [txn("starling-csv", 1, -500, account="starling-personal")]
 
         assert export_drift([], incoming, "starling-csv") == []
+
+
+class TestSettlementSkewMatching:
+    """The 2019 statement taught this: 2019-era card rows land in the two
+    witnesses ~3 days apart (transaction time vs settlement), just outside
+    the +/-2 day amount-only window - so the same WATERSTONES purchase fell
+    into BOTH sides' ONLY buckets. The identity layer already matches
+    cross-source at the 7-day fuzzy window, so the display matcher was
+    disagreeing with its own import layer. The second pass closes that gap
+    conservatively: the fuzzy window applies only when the descriptions are
+    identical - amount-only matching at 7 days would false-match habitual
+    same-price purchases.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {"starling": ["starling-personal"]}
+
+    def test_Agreement_SameMerchantSameAmountThreeDaysApart_Matches(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                txn("starling", 25, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        # Counts and nets agree, so the pair never reaches the ledger - the
+        # aggregate view is unchanged. The skew case that matters is below.
+        assert agreement.agrees
+
+    def test_Agreement_SkewedPairPlusARealResidue_OnlyTheRealResidueRemains(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                # The skewed pair: same merchant, same amount, 3 days apart.
+                txn("starling", 25, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                # A genuine feed-only row that must stay visible.
+                txn("starling", 26, -450, account="starling-personal",
+                    desc="NETFLIX"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        assert not agreement.agrees
+        assert agreement.matched_count == 3
+        assert len(agreement.unexplained) == 1
+        assert agreement.unexplained[0].description == "NETFLIX"
+
+    def test_Agreement_SameAmountDifferentMerchantsThreeDaysApart_StaysApart(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                # Habitual same-price purchases at different merchants: the
+                # fuzzy window must NOT collapse these into one.
+                txn("starling", 25, -320, account="starling-personal",
+                    desc="TESCO STORES 5223 BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -320, account="starling-personal",
+                    desc="WEST MIDLANDS METRO UNITED KING GBR"),
+                # An extra one-sided row so the aggregate disagrees and the
+                # ledger actually runs (equal counts and nets never reach it).
+                txn("starling", 26, -450, account="starling-personal",
+                    desc="NETFLIX"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        assert agreement.matched_count == 2
+        descriptions = {row.description for row in agreement.unexplained}
+        assert descriptions == {
+            "TESCO STORES 5223 BIRMINGHAM GBR",
+            "WEST MIDLANDS METRO UNITED KING GBR",
+            "NETFLIX",
+        }
