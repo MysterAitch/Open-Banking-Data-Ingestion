@@ -2891,7 +2891,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "push-actual":
         return _push_actual(db_path)
     if args.command == "alert":
-        from .alerts import Finding, process, refusal_trends, send_ntfy
+        from .alerts import (
+            Finding,
+            consent_rung,
+            disk_finding,
+            process,
+            refusal_trends,
+            send_ntfy,
+        )
 
         findings: list[Finding] = []
         with Store(db_path) as store:
@@ -2907,15 +2914,22 @@ def main(argv: list[str] | None = None) -> int:
         alert_store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
         if alert_store_path and Path(alert_store_path).exists():
             for name, connection in ConnectionStore(alert_store_path).load().items():
-                if connection.consent_needs_attention():
-                    remaining = connection.consent_days_remaining()
+                remaining = connection.consent_days_remaining()
+                laddered = consent_rung(remaining)
+                if laddered is not None:
+                    rung, label = laddered
                     findings.append(
                         Finding(
                             f"consent:{name}",
-                            f"connection '{name}': consent needs reconfirming - "
-                            f"{remaining} day(s) before the bank link dies",
+                            f"connection '{name}': consent expires in "
+                            f"{remaining} day(s) - reconfirm at the bank "
+                            f"({label})",
+                            rung=rung,
                         )
                     )
+        volume = disk_finding(Path(db_path).parent)
+        if volume is not None:
+            findings.append(volume)
         state_path = Path(
             os.getenv("OBDI_ALERT_STATE", "").strip()
             or Path(db_path).with_name("alert-state.json")
