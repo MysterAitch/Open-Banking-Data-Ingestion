@@ -387,6 +387,38 @@ class TestTheHomepageShowsWhatIsHeld:
 
         assert "Held so far" not in page
 
+    def test_Index_AStaleFeedWarning_RendersAboveTheHoldings(self, tmp_path):
+        from obdi.coverage import SourceCoverage
+
+        holdings = [
+            SourceCoverage(
+                account_id="starling-personal",
+                source="starling",
+                count=4703,
+                earliest=date(2019, 1, 20),
+                latest=date(2026, 8, 5),
+                inflow_minor=100,
+                outflow_minor=200,
+                with_durable_id=4703,
+            )
+        ]
+        warning = (
+            "starling-personal: the starling feed last delivered a row dated "
+            "2026-08-05, but truelayer holds rows to 2026-08-09 - 4 days "
+            "behind a live witness; the feed may be stuck"
+        )
+
+        page = render_index(
+            ConnectionStore(tmp_path / "c.json"),
+            holdings=lambda: holdings,
+            feed_warnings=lambda: [warning],
+        ).decode()
+
+        # A stuck feed must not hide behind a quiet-looking coverage bar:
+        # the warning renders in the holdings section, evidence and all.
+        assert "the feed may be stuck" in page
+        assert "2026-08-05" in page and "2026-08-09" in page
+
     def test_Index_WhenTheHoldingsHookFails_ThePageStillRenders(self, tmp_path):
         def boom():
             raise RuntimeError("store locked")

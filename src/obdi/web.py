@@ -276,6 +276,11 @@ class WebConfig:
     #: work, and how far back?" is answered where the person already is instead
     #: of in a shell. Injected like the others; None hides the section.
     holdings: Callable[[], list[SourceCoverage]] | None = None
+    #: Cross-witness staleness warnings (already described, evidence and all):
+    #: a scheduled feed proven behind by another witness's newer rows for the
+    #: same account. Rendered above the holdings so a stuck feed cannot hide
+    #: behind a quiet-looking coverage bar.
+    feed_warnings: Callable[[], list[str]] | None = None
     #: Accounts whose history can be extended from the page, and the hook that
     #: performs one extension. Injected like everything else. Each extension is
     #: a real person pressing a real button - the forwarded address rides along
@@ -1108,6 +1113,7 @@ def _holdings_rows(
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
     account_feeders: Callable[[], dict[str, list[str]]] | None = None,
     source_connections: dict[tuple[str, str], list[str]] | None = None,
+    feed_warnings: Callable[[], list[str]] | None = None,
 ) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
@@ -1308,7 +1314,16 @@ def _holdings_rows(
         f"dashed = never asked; axis {axis_start.isoformat()} .. "
         f"{axis_end.isoformat()}</p>"
     )
-    return "<h2>Held so far</h2>" + legend + "".join(items)
+    warnings_html = ""
+    if feed_warnings is not None:
+        try:
+            warnings = feed_warnings()
+        except Exception:
+            warnings = []
+        warnings_html = "".join(
+            f'<p class="warn">{html.escape(str(line))}</p>' for line in warnings
+        )
+    return "<h2>Held so far</h2>" + warnings_html + legend + "".join(items)
 
 
 # 1 exists for the endgame: once +7 fails, the boundary is within a week,
@@ -2504,6 +2519,7 @@ def render_index(
     probe_suggestions: Callable[[], list[object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
+    feed_warnings: Callable[[], list[str]] | None = None,
 ) -> bytes:
     # The import form picks its destination FIRST (the preview verifies
     # the file against what that account already holds), so the picker's
@@ -2518,7 +2534,8 @@ def render_index(
 {_backfill_running_banner(backfill_status)}
 {_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
-{_holdings_rows(holdings, display_labels, account_timelines, account_feeders, source_connections)}
+{_holdings_rows(holdings, display_labels, account_timelines, account_feeders,
+                source_connections, feed_warnings)}
 {_knowledge_rows(provider_knowledge)}
 {_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
@@ -2733,6 +2750,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 starling_probe_available=self.bound_config.starling_probe is not None,
                 probe_suggestions=timed(
                     "probe_suggestions", self.bound_config.probe_suggestions
+                ),
+                feed_warnings=timed(
+                    "feed_warnings", self.bound_config.feed_warnings
                 ),
                 scheduler_heartbeat=timed(
                     "scheduler_heartbeat", self.bound_config.scheduler_heartbeat

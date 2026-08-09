@@ -632,6 +632,80 @@ def agreements(
     return found
 
 
+#: How many days a scheduled feed may trail another witness before it is
+#: called stuck. Settlement and pending drift account for a day or two;
+#: beyond three, the silence is the feed's, not the account's.
+STALE_FEED_LAG_DAYS = 3
+
+
+@dataclass(frozen=True)
+class StaleFeed:
+    """A scheduled feed proven behind by another witness's newer rows.
+
+    A quiet feed on a quiet account is normal and never reported - the
+    detector only fires when a DIFFERENT source demonstrates the account
+    was active after the feed's last delivery, and it carries both dates
+    and both source names so the claim is checkable on sight.
+    """
+
+    account_id: str
+    source: str
+    latest: date
+    fresher_source: str
+    fresher_latest: date
+
+    @property
+    def lag_days(self) -> int:
+        return (self.fresher_latest - self.latest).days
+
+    def describe(self) -> str:
+        return (
+            f"{self.account_id}: the {self.source} feed last delivered a row "
+            f"dated {self.latest}, but {self.fresher_source} holds rows to "
+            f"{self.fresher_latest} - {self.lag_days} days behind a live "
+            "witness; the feed may be stuck"
+        )
+
+
+def stale_feeds(
+    rows: Sequence[SourceCoverage],
+    *,
+    watched: Collection[str],
+    lag_days: int = STALE_FEED_LAG_DAYS,
+) -> list[StaleFeed]:
+    """Scheduled feeds whose newest row trails another witness's by days.
+
+    `watched` names the sources with a scheduled pull - a manually-uploaded
+    file lagging the feeds is the normal state of files, not a fault, so
+    unwatched sources are never reported (they still serve as the fresher
+    witness that convicts a watched one).
+    """
+    by_account: dict[str, list[SourceCoverage]] = {}
+    for row in rows:
+        by_account.setdefault(row.account_id, []).append(row)
+
+    found = []
+    for account_id, members in sorted(by_account.items()):
+        for row in members:
+            if row.source not in watched:
+                continue
+            fresher = [other for other in members if other.latest > row.latest]
+            if not fresher:
+                continue
+            best = max(fresher, key=lambda other: (other.latest, other.source))
+            if (best.latest - row.latest).days > lag_days:
+                found.append(
+                    StaleFeed(
+                        account_id=account_id,
+                        source=row.source,
+                        latest=row.latest,
+                        fresher_source=best.source,
+                        fresher_latest=best.latest,
+                    )
+                )
+    return found
+
+
 def export_drift(
     held: Sequence[Transaction],
     incoming: Sequence[Transaction],

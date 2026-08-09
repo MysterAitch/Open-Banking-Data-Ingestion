@@ -30,6 +30,7 @@ from .coverage import (
     coverage,
     export_drift,
     gaps,
+    stale_feeds,
     transpositions,
 )
 from .coverage import report as coverage_report
@@ -2137,6 +2138,20 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         with Store(db_path) as store:
             return list(coverage(store.transactions_by_sighting()))
 
+    def feed_warnings() -> list[str]:
+        """Cross-witness staleness: a scheduled feed proven behind by another
+        witness's newer rows. Watched sources are the ones a scheduler pulls
+        - the first-party token and the aggregator pipe - never files, whose
+        lag is the normal state of manual uploads."""
+        watched: set[str] = set()
+        if _starling_token_present():
+            watched.add("starling")
+        if ConnectionStore(store_path).load():
+            watched.add("truelayer")
+        if not watched:
+            return []
+        return [stale.describe() for stale in stale_feeds(holdings(), watched=watched)]
+
     config = WebConfig(
         client_id=client_id,
         client_secret=current_secret,
@@ -2145,6 +2160,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         start_backfill=start_backfill,
         preflight=preflight,
         holdings=holdings,
+        feed_warnings=feed_warnings,
         extendables=extendables,
         extend_window=extend_window,
         artefact_index=artefact_index,

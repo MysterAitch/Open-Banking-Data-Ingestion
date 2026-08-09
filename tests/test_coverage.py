@@ -22,6 +22,7 @@ from obdi.coverage import (
     coverage,
     export_drift,
     gaps,
+    stale_feeds,
     transpositions,
 )
 from obdi.models import SourceTier, Transaction
@@ -946,3 +947,69 @@ class TestSettlementSkewMatching:
             "WEST MIDLANDS METRO UNITED KING GBR",
             "NETFLIX",
         }
+
+
+class TestStaleFeeds:
+    """A scheduled feed that stops delivering looks exactly like a quiet
+    account - unless another witness proves the account is active. The
+    detector is deliberately cross-witness: a source whose newest row sits
+    days behind ANOTHER source's newest row for the same account is stuck
+    WITH EVIDENCE, and the warning names both dates and both sources. A
+    quiet feed on a genuinely quiet account never fires. Only sources with
+    a scheduled pull are watched - a manually-uploaded CSV lagging the
+    feeds is the normal state of files, not a fault.
+
+    The acceptance case is live: starling-api silent since 08-05 while
+    truelayer delivered to 08-09 went unnoticed for four days because
+    nothing watched for exactly this.
+    """
+
+    def test_StaleFeeds_AWatchedFeedDaysBehindALiveWitness_IsFlaggedWithEvidence(self):
+        rows = coverage(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 5, -700, account="starling-personal"),
+                txn("truelayer", 1, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        found = stale_feeds(rows, watched={"starling", "truelayer"})
+
+        assert len(found) == 1
+        stale = found[0]
+        assert stale.source == "starling"
+        assert stale.latest == date(2026, 1, 5)
+        assert stale.fresher_source == "truelayer"
+        assert stale.fresher_latest == date(2026, 1, 9)
+        assert stale.lag_days == 4
+        text = stale.describe()
+        assert "starling" in text
+        assert "truelayer" in text
+        assert "2026-01-05" in text
+        assert "2026-01-09" in text
+
+    def test_StaleFeeds_WithinTheSettlementTolerance_DoesNotFire(self):
+        rows = coverage(
+            [
+                txn("starling", 6, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        assert stale_feeds(rows, watched={"starling", "truelayer"}) == []
+
+    def test_StaleFeeds_AnUnwatchedFileSourceLagging_IsNotAFault(self):
+        rows = coverage(
+            [
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        assert stale_feeds(rows, watched={"starling", "truelayer"}) == []
+
+    def test_StaleFeeds_AQuietAccountWithOneWitness_NeverFires(self):
+        rows = coverage([txn("starling", 1, -500, account="starling-personal")])
+
+        assert stale_feeds(rows, watched={"starling"}) == []
