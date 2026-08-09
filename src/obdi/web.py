@@ -2404,6 +2404,13 @@ def account_options(labels: dict[str, str]) -> str:
     options = []
     for ref, name in sorted(labels.items(), key=lambda kv: (kv[1], kv[0])):
         shown = f"{name} [{ref}]" if counts[name] > 1 else name
+        if ":" in ref:
+            # A provider-qualified ref is an UNBOUND passthrough (resolve's
+            # deliberate fallback): importing into it lands rows in a
+            # separate, uncorroborated account. Legitimate for genuinely
+            # new accounts - but never as an innocent-looking twin of a
+            # bound canonical, so the option states the consequence.
+            shown += " (unbound - imports here land in a SEPARATE account)"
         options.append(
             f'<option value="{html.escape(ref)}">{html.escape(shown)}</option>'
         )

@@ -2919,7 +2919,13 @@ class TestAccountPickerOptions:
         )
 
         assert "Personal (starling) [starling-personal]" in html_out
-        assert "Personal (starling) [starling:0abc4567deadbeef]" in html_out
+        # The provider-qualified ref is UNBOUND - importing there creates
+        # a separate account, and the option must say so rather than
+        # standing as an innocent-looking twin.
+        assert (
+            "Personal (starling) [starling:0abc4567deadbeef]"
+            " (unbound - imports here land in a SEPARATE account)"
+        ) in html_out
         # A unique label stays clean - the ref is noise when nothing collides.
         assert "Current Account (halifax) [" not in html_out
         assert "Current Account (halifax)" in html_out
