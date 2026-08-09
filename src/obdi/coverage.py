@@ -23,7 +23,7 @@ under arithmetic that was never going to match.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from itertools import combinations
 
@@ -590,6 +590,33 @@ def agreements(
                 )
             )
     return found
+
+
+def export_drift(
+    held: Sequence[Transaction],
+    incoming: Sequence[Transaction],
+    source: str,
+) -> list[Agreement]:
+    """Compare a file against EARLIER IMPORTS OF ITS OWN SOURCE.
+
+    Asymmetric semantics on purpose. Self-agreement is not corroboration -
+    a file cannot witness itself, which is why the cross-source comparison
+    excludes own-source rows entirely. But self-DISAGREEMENT is real
+    signal: the same bank exporting the same account and period differently
+    means the EXPORT itself changed - the silent format or content drift
+    that corrupts a parser quietly, and exactly the failure mode worth
+    catching before anything imports.
+
+    The sides are relabelled so the verdict names what it compared, rather
+    than a source appearing to agree with itself. The empty sibling scope
+    still buys the ledger's row-level partition (matched, proven transfer
+    legs, only-in-one-side with direction) without any sibling search.
+    """
+    if not held or not incoming:
+        return []
+    relabelled = [replace(t, source=f"{source} (imported earlier)") for t in held]
+    fresh = [replace(t, source=f"{source} (this file)") for t in incoming]
+    return agreements(relabelled + fresh, sibling_accounts={})
 
 
 @dataclass(frozen=True)

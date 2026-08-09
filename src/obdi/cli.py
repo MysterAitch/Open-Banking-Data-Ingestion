@@ -24,7 +24,14 @@ from dotenv import load_dotenv
 from . import fingerprint
 from .accounts import AccountBinding, AccountMap
 from .connections import ConnectionStore
-from .coverage import SourceCoverage, agreements, coverage, gaps, transpositions
+from .coverage import (
+    SourceCoverage,
+    agreements,
+    coverage,
+    export_drift,
+    gaps,
+    transpositions,
+)
 from .coverage import report as coverage_report
 from .doctor import live_checks, report, run_checks, shape_problems
 from .errors import DataError
@@ -1555,11 +1562,17 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         # that lets a disagreement be attributed to a space the other
         # source filed the movement under.
         with Store(db_path) as store:
-            held = [
-                t
-                for t in store.transactions_by_sighting()
-                if not (t.account_id == account and t.source == parser.source)
-            ]
+            sightings = store.transactions_by_sighting()
+        own_held = [
+            t
+            for t in sightings
+            if t.account_id == account and t.source == parser.source
+        ]
+        held = [
+            t
+            for t in sightings
+            if not (t.account_id == account and t.source == parser.source)
+        ]
         agreement_preview: list[object] = [
             agreement.outline()
             for agreement in agreements(
@@ -1571,6 +1584,13 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "no other source covers this account over this period yet - "
             "the file stands alone, uncorroborated"
         ]
+        # The excluded own-source rows still get their own check, with the
+        # opposite emphasis: agreement here is NOT corroboration (a file
+        # cannot witness itself), but DISAGREEMENT is the export-drift
+        # signal - the same bank rendering the same period differently.
+        agreement_preview = [
+            drift.outline() for drift in export_drift(own_held, rows, parser.source)
+        ] + agreement_preview
 
         return {
             "parser": type(parser).__name__,

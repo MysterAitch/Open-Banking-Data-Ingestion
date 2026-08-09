@@ -16,7 +16,14 @@ from __future__ import annotations
 from datetime import date
 from typing import ClassVar
 
-from obdi.coverage import Agreement, agreements, coverage, gaps, transpositions
+from obdi.coverage import (
+    Agreement,
+    agreements,
+    coverage,
+    export_drift,
+    gaps,
+    transpositions,
+)
 from obdi.models import SourceTier, Transaction
 
 
@@ -783,3 +790,69 @@ class TestAgreementOutline:
         assert outline["verdict"] == "agree"
         assert outline["warn"] is False
         assert outline["sides"] == []
+
+
+class TestExportDrift:
+    """A file compared against EARLIER IMPORTS OF ITS OWN SOURCE, with
+    asymmetric semantics. Self-agreement is not corroboration - a file
+    cannot witness itself, which is why the cross-source comparison
+    excludes own-source rows. But self-DISAGREEMENT is real signal: the
+    same bank exporting the same account and period differently means the
+    export itself changed - the silent drift that corrupts parsers
+    quietly. The sides are relabelled so the verdict names what it
+    compared instead of a source appearing to agree with itself.
+    """
+
+    def test_ExportDrift_AnIdenticalReUpload_AgreesUnderSelfLabels(self):
+        held = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+        incoming = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+
+        found = export_drift(held, incoming, "starling-csv")
+
+        assert len(found) == 1
+        assert found[0].agrees
+        assert found[0].left == "starling-csv (imported earlier)"
+        assert found[0].right == "starling-csv (this file)"
+
+    def test_ExportDrift_AChangedExport_DisagreesWithDirectionalLedger(self):
+        held = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+        # The bank's fresh export of the same period renders one amount
+        # differently - the drift class worth catching before import.
+        incoming = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2050, account="starling-personal"),
+        ]
+
+        found = export_drift(held, incoming, "starling-csv")
+
+        assert len(found) == 1
+        agreement = found[0]
+        assert not agreement.agrees
+        outline = agreement.outline()
+        assert outline["warn"] is True
+        headings = [side["heading"] for side in outline["sides"]]
+        assert headings == [
+            "starling-csv (imported earlier): 2 rows in the window",
+            "starling-csv (this file): 2 rows in the window",
+        ]
+        labels = [
+            bucket["label"]
+            for side in outline["sides"]
+            for bucket in side["buckets"]
+        ]
+        assert any("in starling-csv (this file) ONLY" in label for label in labels)
+        assert any("in starling-csv (imported earlier) ONLY" in label for label in labels)
+
+    def test_ExportDrift_WithNoEarlierImports_ReportsNothing(self):
+        incoming = [txn("starling-csv", 1, -500, account="starling-personal")]
+
+        assert export_drift([], incoming, "starling-csv") == []
