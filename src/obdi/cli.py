@@ -2897,6 +2897,7 @@ def main(argv: list[str] | None = None) -> int:
             disk_finding,
             process,
             refusal_trends,
+            send_heartbeat,
             send_ntfy,
         )
 
@@ -2951,6 +2952,12 @@ def main(argv: list[str] | None = None) -> int:
             print("no findings")
         if delivered:
             print(f"{len(delivered)} notification(s) sent")
+        # The dead-man half: alert runs LAST in the scheduler cycle, so this
+        # ping means the whole cycle completed. Its absence is the one signal
+        # this process cannot send about itself.
+        heartbeat_url = read_secret("OBDI_HEARTBEAT_URL", required=False)
+        if heartbeat_url:
+            send_heartbeat(heartbeat_url)
         return 0
     if args.command == "review-report":
         from .review_report import review_report

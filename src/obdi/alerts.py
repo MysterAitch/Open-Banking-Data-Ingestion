@@ -282,6 +282,26 @@ def process(
     return delivered
 
 
+def send_heartbeat(url: str) -> bool:
+    """One ping to the dead-man check: 'the cycle completed end-to-end'.
+
+    The other half of the channel split: ntfy carries CONTENT, this carries
+    EXISTENCE. If the scheduler loop dies, `obdi alert` never runs and no
+    finding can announce its own death - only the absence of this ping,
+    noticed by the dead-man service, reaches a human. Failure is logged and
+    reported, never raised.
+    """
+    import httpx
+
+    try:
+        response = httpx.get(url, timeout=10, follow_redirects=True)
+        response.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"heartbeat ping failed: {exc}", file=sys.stderr)
+        return False
+
+
 def send_ntfy(url: str, message: str) -> bool:
     """One POST, failure logged locally and reported as False - alerting
     must never break the cycle that computes the findings."""
