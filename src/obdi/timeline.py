@@ -50,6 +50,13 @@ _PALETTE = {
 }
 _OTHER_COLOUR = "#718096"
 
+#: Refusals wear the alarm colour regardless of source. Observed live: a
+#: refused routine-full ask drew as a 9px hollow diamond in its source's
+#: colour - the chart's most important events were its least visible marks,
+#: buried among a hundred healthy diamonds. The hover title still names the
+#: source; the colour's job is to make failure findable at a glance.
+_REFUSED_COLOUR = "#b91c1c"
+
 
 def _parse_stamp(value: str) -> datetime | None:
     try:
@@ -305,6 +312,7 @@ def timeline_svg(
         )
 
     previous_day = None
+    refused_drawn = 0
     for index, bar in enumerate(bars):
         y = top_pad + index * row_h
         colour = _PALETTE.get(bar.source, _OTHER_COLOUR)
@@ -317,8 +325,9 @@ def timeline_svg(
         clipped = bar.start < domain_left
         refused = bar.outcome != "landed"
         if refused:
+            refused_drawn += 1
             style = (
-                f'fill="none" stroke="{colour}" stroke-width="2" '
+                f'fill="none" stroke="{_REFUSED_COLOUR}" stroke-width="2" '
                 'stroke-dasharray="3 2"'
             )
         elif bar.provenance == "inferred":
@@ -383,6 +392,9 @@ def timeline_svg(
             "artefact about the window asked - investigate: "
             + " | ".join(html.escape(m) for m in mismatches[:3])
         )
+    # Always stated, never implied: "0 of N refused" is a claim the reader
+    # can trust, where an absent count reads as "nobody looked".
+    notes.append(f"{refused_drawn} of {len(bars)} asks in range refused")
     if undrawn:
         notes.append(f"{undrawn} point-in-time ask(s) drawn as diamonds")
     if clipped_rows:
@@ -392,7 +404,9 @@ def timeline_svg(
     )
     return (
         f'<p class="muted">{legend} &nbsp; '
-        "dashed = refused; diamond = point-in-time ask (no window); "
+        '<span style="color:#b91c1c">dashed red = refused</span> '
+        "(bar or diamond - hover names the source); "
+        "diamond = point-in-time ask (no window); "
         "dotted outline = window recovered from the landed artefact; "
         "hatched = window inferred from the routine default; "
         "left notch = window extends beyond the chart; "

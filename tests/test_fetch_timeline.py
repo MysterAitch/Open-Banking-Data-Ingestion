@@ -150,6 +150,38 @@ class TestSvg:
         )
         assert "stroke-dasharray" in svg
 
+    def test_ARefusedAsk_WearsTheAlarmColour_NotItsSourceColour(self):
+        """Observed live: the chart's most important events were its least
+        visible marks. A refused routine-full ask is a 9px hollow diamond,
+        indistinguishable from a landed one on a phone - and hollow-vs-
+        filled in the SOURCE'S colour buried the failures among a hundred
+        healthy diamonds. Refusals wear the alarm red regardless of source
+        (the hover title still names the source), and the notes line counts
+        them with a denominator so zero-refusals is stated, not assumed."""
+        svg = timeline_svg(
+            [
+                _attempt(
+                    "2026-08-05T09:00:00Z",
+                    "routine-full",
+                    source="starling-feed",
+                    outcome="refused",
+                ),
+                _attempt("2026-08-05T10:00:00Z", "from=2026-08-02&to=2026-08-05"),
+            ],
+            days=7,
+            now=NOW,
+        )
+        assert '"#b91c1c"' in svg, "refused marks stroke in the alarm red"
+        assert "1 of 2 asks in range refused" in svg
+
+    def test_NoRefusals_TheCountStillStatesItself(self):
+        svg = timeline_svg(
+            [_attempt("2026-08-05T10:00:00Z", "from=2026-08-02&to=2026-08-05")],
+            days=7,
+            now=NOW,
+        )
+        assert "0 of 1 asks in range refused" in svg
+
     def test_SourcesKeepTheirColours(self):
         svg = timeline_svg(
             [
