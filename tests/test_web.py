@@ -3028,3 +3028,81 @@ class TestAccountPickerOptions:
 
         html_out = account_options({"starling-personal": "Personal (starling)"})
         assert 'value="starling-personal"' in html_out
+
+
+class TestTheStandingAgreementReport:
+    """The import-page verdicts, browsable ANY time. Built for the
+    bulk-import-then-review workflow: import every statement without
+    reading the transient results, then open one page that says where the
+    sources disagree, which months a file missed while another source has
+    data, and whether any dates transposed."""
+
+    def _server(self, tmp_path, agreement_report):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            agreement_report=agreement_report,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Agreements_RenderPerAccount_WithAlarmsLeading(self, tmp_path):
+        report = {
+            "accounts": [
+                {
+                    "account": "starling-personal",
+                    "entries": [
+                        {
+                            "sources": "starling vs starling-csv",
+                            "window": "2019-01-20 .. 2026-08-08",
+                            "verdict": "DISAGREE",
+                            "warn": True,
+                            "figures": "4705 vs 759 transactions; net £1555.51 vs -£1320.27",
+                            "sides": [
+                                {
+                                    "heading": "starling: 4705 rows in the window",
+                                    "buckets": [
+                                        {"label": "661 matched with starling-csv", "items": []},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "missing": [
+                "starling-personal / starling-csv: 2023-04 missing - "
+                "starling, truelayer has data for it"
+            ],
+            "transposed": [],
+        }
+
+        httpd, base = self._server(tmp_path, lambda: report)
+        try:
+            page = httpx.get(f"{base}/agreements").text
+        finally:
+            httpd.shutdown()
+
+        assert "Cross-source agreement" in page
+        assert "<h2>starling-personal</h2>" in page
+        assert "<li>661 matched with starling-csv</li>" in page
+        assert "Missing - another source has data" in page
+        assert "2023-04 missing" in page
+
+    def test_Agreements_WithNothingToCompare_SaysSoQuietly(self, tmp_path):
+        httpd, base = self._server(
+            tmp_path,
+            lambda: {"accounts": [], "missing": [], "transposed": []},
+        )
+        try:
+            page = httpx.get(f"{base}/agreements").text
+        finally:
+            httpd.shutdown()
+
+        assert "nothing to compare" in page

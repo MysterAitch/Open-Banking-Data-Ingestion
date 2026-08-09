@@ -299,6 +299,10 @@ class WebConfig:
     #: workflow is press, read, decide - and deciding needs this without a
     #: shell.
     attempts_index: Callable[[], dict[str, object]] | None = None
+    #: The standing cross-source review: per-account agreement outlines,
+    #: contradicted missing months, and transposition alarms - the
+    #: import-page verdicts, browsable after a bulk import session.
+    agreement_report: Callable[[], dict[str, object]] | None = None
     #: One press, walked as far as the provider allows: attended because the
     #: person is present and waiting, honest because it stops the moment the
     #: provider says stop and never replays unattended.
@@ -2546,6 +2550,7 @@ def render_index(
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a>
 <a class="button" href="/fetch-timeline">Fetch timeline</a></p>
+<p><a class="button" href="/agreements">Cross-source agreement report</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
@@ -2641,6 +2646,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/attempts":
             self._attempts()
+            return
+        if route == "/agreements":
+            self._agreements_page()
             return
         if route == "/actual-history":
             self._actual_history()
@@ -2898,6 +2906,52 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + HOME_LINK
         )
         self._respond(200, render_page("Fetch timeline", body))
+
+    def _agreements_page(self) -> None:
+        """The standing cross-source review: the import-page verdicts,
+        browsable any time - built for the bulk-import-then-review workflow,
+        where reading every transient import result is exactly what nobody
+        does."""
+        hook = self.bound_config.agreement_report
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        report = hook()
+        parts: list[str] = [
+            '<p class="muted">Every pair of sources that describes the same '
+            "account, compared over the period they share. Each side is a "
+            "ledger whose buckets sum to that side's own total. Alarms lead: "
+            "a transposed date passes every count, and a missing month that "
+            "another source contradicts is a file worth fetching.</p>"
+        ]
+        raw_transposed = report.get("transposed")
+        if isinstance(raw_transposed, list) and raw_transposed:
+            parts.append("<h2>Dates disagree - possible day/month transposition</h2>")
+            parts += [
+                f'<p class="warn">{html.escape(str(line))}</p>'
+                for line in raw_transposed
+            ]
+        raw_missing = report.get("missing")
+        if isinstance(raw_missing, list) and raw_missing:
+            parts.append("<h2>Missing - another source has data for these months</h2>")
+            parts += [
+                f'<p class="warn">{html.escape(str(line))}</p>' for line in raw_missing
+            ]
+        raw_accounts = report.get("accounts")
+        rendered_any = False
+        for group in raw_accounts if isinstance(raw_accounts, list) else []:
+            if not isinstance(group, dict):
+                continue
+            parts.append(f"<h2>{html.escape(str(group.get('account')))}</h2>")
+            parts.append(_agreements_html(group.get("entries")))
+            rendered_any = True
+        if not rendered_any:
+            parts.append(
+                "<p>No account is described by more than one overlapping "
+                "source yet - nothing to compare.</p>"
+            )
+        parts.append(HOME_LINK)
+        self._respond(200, render_page("Cross-source agreement", "".join(parts)))
 
     def _attempts(self) -> None:
         hook = self.bound_config.attempts_index

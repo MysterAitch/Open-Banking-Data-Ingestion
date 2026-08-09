@@ -2151,6 +2151,39 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         with Store(db_path) as store:
             return list(coverage(store.transactions_by_sighting()))
 
+    def agreement_report() -> dict[str, object]:
+        """The standing cross-source review, computed fresh on request.
+
+        Built for the bulk-import-then-review workflow: import every
+        statement without reading the transient results, then open one page
+        that says where the sources disagree, which months a file missed
+        while another source has data, and whether any dates transposed.
+        """
+        with Store(db_path) as store:
+            held = store.transactions_by_sighting()
+        by_account: dict[str, list[object]] = {}
+        for agreement in agreements(
+            held, sibling_accounts=_account_map().accounts_by_source()
+        ):
+            by_account.setdefault(agreement.account_id, []).append(
+                agreement.outline()
+            )
+        missing = [
+            f"{gap.account_id} / {gap.source}: {gap.month} missing - "
+            f"{', '.join(gap.seen_in)} has data for it"
+            for gap in gaps(held)
+            if gap.contradicted
+        ]
+        transposed = [item.describe() for item in transpositions(held)]
+        return {
+            "accounts": [
+                {"account": account, "entries": entries}
+                for account, entries in sorted(by_account.items())
+            ],
+            "missing": missing,
+            "transposed": transposed,
+        }
+
     def feed_warnings() -> list[str]:
         """Cross-witness staleness: a scheduled feed proven behind by another
         witness's newer rows for the same account."""
@@ -2168,6 +2201,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         preflight=preflight,
         holdings=holdings,
         feed_warnings=feed_warnings,
+        agreement_report=agreement_report,
         extendables=extendables,
         extend_window=extend_window,
         artefact_index=artefact_index,
