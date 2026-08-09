@@ -96,3 +96,101 @@ class TestFieldMapping:
         # Without this the Starling and aggregator views of one payment cannot
         # be reconciled.
         assert to_transaction(feed_item(), account_id="a").content_key
+
+
+class TestRateLimitedCalls_HonourTheProvidersOwnWords:
+    """Starling 429s arrived daily on the spaces' category feeds - once
+    even seven seconds after the previous call, which refutes blind
+    client-side spacing. The provider SAYS when to come back
+    (Retry-After); the single HTTP door now obeys it: wait (capped),
+    retry once, and only then refuse."""
+
+    def _client(self, responses):
+        import httpx
+
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            status, headers, body = responses[min(len(calls) - 1, len(responses) - 1)]
+            return httpx.Response(status, headers=headers, text=body)
+
+        return httpx.Client(transport=httpx.MockTransport(handler)), calls
+
+    def _feed_body(self):
+        return '{"feedItems": []}'
+
+    def test_A429WithRetryAfter_WaitsThatLong_AndTheRetryLands(self, monkeypatch):
+        from obdi.providers import starling
+
+        waits = []
+        monkeypatch.setattr(starling, "_retry_sleep", waits.append)
+        client, calls = self._client(
+            [(429, {"Retry-After": "3"}, "slow down"), (200, {}, self._feed_body())]
+        )
+
+        items, _body, _asked = starling.fetch_feed(
+            "tok", "acct-uid", "cat-uid", client=client
+        )
+
+        assert items == []
+        assert len(calls) == 2
+        assert waits == [3.0]
+
+    def test_A429WithoutRetryAfter_WaitsAModestDefault(self, monkeypatch):
+        from obdi.providers import starling
+
+        waits = []
+        monkeypatch.setattr(starling, "_retry_sleep", waits.append)
+        client, calls = self._client(
+            [(429, {}, "slow down"), (200, {}, self._feed_body())]
+        )
+
+        starling.fetch_feed("tok", "acct-uid", "cat-uid", client=client)
+
+        assert len(calls) == 2
+        assert waits == [2.0]
+
+    def test_AnAbsurdRetryAfter_IsCapped(self, monkeypatch):
+        from obdi.providers import starling
+
+        waits = []
+        monkeypatch.setattr(starling, "_retry_sleep", waits.append)
+        client, _ = self._client(
+            [(429, {"Retry-After": "3600"}, "later"), (200, {}, self._feed_body())]
+        )
+
+        starling.fetch_feed("tok", "acct-uid", "cat-uid", client=client)
+
+        assert waits == [30.0]
+
+    def test_APersistent429_RefusesAfterOneRetry_NotAnInfiniteLoop(self, monkeypatch):
+        from obdi.providers import starling
+
+        waits = []
+        monkeypatch.setattr(starling, "_retry_sleep", waits.append)
+        client, calls = self._client([(429, {"Retry-After": "1"}, "still no")])
+
+        import pytest
+
+        with pytest.raises(starling.StarlingError) as caught:
+            starling.fetch_feed("tok", "acct-uid", "cat-uid", client=client)
+
+        assert caught.value.status == 429
+        assert len(calls) == 2
+        assert waits == [1.0]
+
+    def test_A403_IsNotRetried_TheTokenWillNotImproveByWaiting(self, monkeypatch):
+        from obdi.providers import starling
+
+        waits = []
+        monkeypatch.setattr(starling, "_retry_sleep", waits.append)
+        client, calls = self._client([(403, {}, "no scope")])
+
+        import pytest
+
+        with pytest.raises(starling.StarlingError):
+            starling.fetch_feed("tok", "acct-uid", "cat-uid", client=client)
+
+        assert len(calls) == 1
+        assert waits == []

@@ -31,6 +31,8 @@ while preserving the fact that it happened.
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
@@ -86,15 +88,53 @@ class StarlingError(RuntimeError):
         self.headers = headers or {}
 
 
+#: Injectable so tests assert WHAT we waited without actually waiting.
+_retry_sleep: Callable[[float], None] = time.sleep
+
+#: One retry, waits capped: a provider asking for an hour is answered
+#: with patience the next CYCLE can afford, not this call.
+_RETRY_AFTER_DEFAULT_SECONDS = 2.0
+_RETRY_AFTER_CAP_SECONDS = 30.0
+
+
+def _retry_wait(retry_after: str | None) -> float:
+    """The provider's own words about when to come back, made safe.
+
+    Integer seconds honoured up to the cap; a missing or unparseable
+    header (some send an HTTP-date) gets a modest default rather than a
+    guess at date arithmetic.
+    """
+    try:
+        seconds = float(retry_after) if retry_after is not None else _RETRY_AFTER_DEFAULT_SECONDS
+    except ValueError:
+        seconds = _RETRY_AFTER_DEFAULT_SECONDS
+    return min(max(seconds, 0.0), _RETRY_AFTER_CAP_SECONDS)
+
+
 def _get(
     path: str, token: str, *, client: httpx.Client | None = None, **params: str
 ) -> tuple[JsonObject, bytes]:
     http = client or httpx.Client(timeout=30.0)
-    response = http.get(
-        f"{API_HOST}{path}",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        params=params or None,
-    )
+    for attempt in (1, 2):
+        response = http.get(
+            f"{API_HOST}{path}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            params=params or None,
+        )
+        if response.status_code == 429 and attempt == 1:
+            # The 429s arrived daily on the spaces' category feeds - once
+            # seven seconds after the previous call, which refutes blind
+            # client-side spacing. The provider SAYS when to come back;
+            # obey it once, visibly, then land or refuse honestly.
+            wait = _retry_wait(response.headers.get("retry-after"))
+            print(
+                f"starling: 429 on {path} - waiting {wait:g}s per the "
+                "provider's retry-after, then retrying once",
+                flush=True,
+            )
+            _retry_sleep(wait)
+            continue
+        break
     kept = {
         name: response.headers[name]
         for name in ("retry-after", "x-ratelimit-remaining", "date")
