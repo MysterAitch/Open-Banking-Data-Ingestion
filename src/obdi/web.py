@@ -324,7 +324,10 @@ class WebConfig:
     #: file inspected costs nothing); confirm lands through the same
     #: import_file as the CLI, so the two routes cannot drift.
     preview_upload: Callable[..., dict[str, object]] | None = None
-    confirm_upload: Callable[..., str] | None = None
+    #: Returns either a plain summary string, or a dict with "summary" and
+    #: structured "agreements" (Agreement.outline() entries) - the page
+    #: renders whichever shape it is handed.
+    confirm_upload: Callable[..., str | dict[str, object]] | None = None
     #: The provider id an existing connection goes through, for pinning the
     #: bank picker on reconnects - the wrong bank should not be one tap away.
     pinned_providers: Callable[[str], str | None] | None = None
@@ -769,6 +772,53 @@ def _insight_sections(summary: dict[str, object]) -> str:
             "<p>A month that should have data and shows no bar is a gap "
             "worth chasing.</p>" + bars
         )
+    return "".join(parts)
+
+
+def _agreements_html(entries: object) -> str:
+    """Render agreement outlines as headings with nested lists.
+
+    Accepts Agreement.outline() dicts, and falls back to a plain paragraph
+    for string entries (the no-other-source message, older callers). One
+    prose line carrying attribution, transfer legs AND residue at once
+    proved unreadable in live use - the groups exist so each kind of fact
+    reads on its own line.
+    """
+    if not isinstance(entries, list):
+        return ""
+    parts: list[str] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            parts.append(f"<p>{html.escape(entry)}</p>")
+            continue
+        if not isinstance(entry, dict):
+            continue
+        warn = ' class="warn"' if entry.get("warn") else ""
+        parts.append(
+            f"<p><strong>{html.escape(str(entry.get('sources')))}</strong> "
+            f"[{html.escape(str(entry.get('window')))}]: "
+            f"<strong{warn}>{html.escape(str(entry.get('verdict')))}</strong><br>"
+            f'<span class="muted">{html.escape(str(entry.get("figures")))}</span></p>'
+        )
+        raw_clauses = entry.get("clauses")
+        if isinstance(raw_clauses, list) and raw_clauses:
+            clause_items = ""
+            for clause in raw_clauses:
+                if not isinstance(clause, dict):
+                    continue
+                label = html.escape(str(clause.get("label")))
+                raw_items = clause.get("items")
+                inner = ""
+                if isinstance(raw_items, list) and raw_items:
+                    inner = (
+                        "<ul>"
+                        + "".join(
+                            f"<li>{html.escape(str(item))}</li>" for item in raw_items
+                        )
+                        + "</ul>"
+                    )
+                clause_items += f"<li>{label}{inner}</li>"
+            parts.append(f"<ul>{clause_items}</ul>")
     return "".join(parts)
 
 
@@ -3476,13 +3526,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         raw_agreements = preview.get("agreement_preview")
         agreement_html = ""
-        if isinstance(raw_agreements, list) and raw_agreements:
-            agreement_lines = "".join(
-                f"<p>{html.escape(str(line))}</p>" for line in raw_agreements
-            )
+        rendered_agreements = _agreements_html(raw_agreements)
+        if rendered_agreements:
             agreement_html = (
                 f"<h2>Against what {html.escape(account)} already holds</h2>"
-                + agreement_lines
+                + rendered_agreements
             )
         body = (
             f"<p><strong>{html.escape(filename)}</strong> parsed as "
@@ -3532,9 +3580,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
             return
         print(f"web import: {filename} -> {account}", file=sys.stderr)
-        summary_html = "".join(
-            f"<p>{html.escape(line)}</p>" for line in summary.splitlines()
-        )
+        if isinstance(summary, dict):
+            summary_html = (
+                f"<p>{html.escape(str(summary.get('summary')))}</p>"
+                + _agreements_html(summary.get("agreements"))
+            )
+        else:
+            summary_html = "".join(
+                f"<p>{html.escape(line)}</p>" for line in summary.splitlines()
+            )
         self._respond(
             200,
             render_page("Imported", summary_html + HOME_LINK),

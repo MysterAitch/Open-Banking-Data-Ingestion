@@ -674,3 +674,87 @@ class TestConfirmedTransferLegs:
         assert "DISAGREE" in text
         assert "confirmed internal-transfer" in text
         assert "NETFLIX" in text
+
+
+class TestAgreementOutline:
+    """The one-line describe() proved unreadable in live use once a real
+    disagreement carried four kinds of fact at once. outline() keeps each
+    kind in its own labelled group - plain data a page can render as
+    headings and nested lists - while describe() stays the flat form for
+    logs and terminals.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": ["starling-personal", "starling-space-bills"]
+    }
+
+    @staticmethod
+    def _found(extra) -> Agreement:
+        rows = [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+            *extra,
+        ]
+        found = agreements(rows, sibling_accounts=TestAgreementOutline.SIBLINGS)
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Outline_AReconciledDisagreement_GroupsEachExplanationUnderItsLabel(self):
+        agreement = self._found(
+            [
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+                txn(
+                    "starling", 3, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["sources"] == "starling vs starling-csv"
+        assert outline["window"] == "2026-01-01 .. 2026-01-06"
+        assert outline["verdict"] == "agree once sibling attribution is counted"
+        assert outline["warn"] is False
+        assert "transactions" in outline["figures"]
+        labels = [clause["label"] for clause in outline["clauses"]]
+        assert any("matched to sibling-account rows" in label for label in labels)
+        assert any("confirmed internal-transfer" in label for label in labels)
+        items = [item for clause in outline["clauses"] for item in clause["items"]]
+        assert any("starling-space-bills" in item for item in items)
+
+    def test_Outline_UnexplainedRows_AreListedIndividually_WithCurrency(self):
+        agreement = self._found(
+            [
+                txn(
+                    "starling-csv", 2, -450,
+                    account="starling-personal", desc="NETFLIX",
+                )
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "DISAGREE"
+        assert outline["warn"] is True
+        unexplained = next(
+            clause for clause in outline["clauses"] if "unexplained" in clause["label"]
+        )
+        assert any("NETFLIX" in item and "-£4.50" in item for item in unexplained["items"])
+
+    def test_Outline_PlainAgreement_CarriesNoClauses(self):
+        agreement = self._found([])
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "agree"
+        assert outline["warn"] is False
+        assert outline["clauses"] == []

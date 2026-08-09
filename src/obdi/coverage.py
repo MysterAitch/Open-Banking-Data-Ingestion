@@ -46,10 +46,14 @@ SIBLING_SAME_SIGN_WINDOW_DAYS = 2
 #: a distant opposite-signed row is coincidence, not evidence.
 SIBLING_OPPOSITE_SIGN_WINDOW_DAYS = 1
 
-#: How many unexplained rows the description prints before summarising. The
-#: residue is the finding, so some of it must always be visible - but a page
-#: is not a dump.
+#: How many unexplained rows the flat description prints before summarising.
+#: The residue is the finding, so some of it must always be visible - but a
+#: line is not a dump.
 _UNEXPLAINED_SHOWN = 3
+
+#: The structured outline can afford more before summarising - a nested list
+#: reads row by row where a prose line cannot.
+_UNEXPLAINED_SHOWN_OUTLINE = 10
 
 
 @dataclass(frozen=True)
@@ -164,12 +168,103 @@ class Agreement:
         if self.unexplained:
             clauses.append(_unexplained_clause(self.unexplained))
         detail = f" - {'; '.join(clauses)}" if clauses else ""
+        return f"{heading} {self._reconciled_verdict()} {figures}{detail}"
+
+    def _reconciled_verdict(self) -> str:
         explained = bool(self.attributed or self.confirmed_transfer_legs)
         if explained and not self.unexplained:
             # Not plain "agree": the aggregate figures still differ, and the
             # verdict says exactly on what grounds the difference is excused.
-            return f"{heading} agree once sibling attribution is counted {figures}{detail}"
-        return f"{heading} DISAGREE {figures}{detail}"
+            return "agree once sibling attribution is counted"
+        return "DISAGREE"
+
+    def outline(self) -> dict[str, object]:
+        """The same verdict as `describe`, shaped for structured rendering.
+
+        One prose line carrying four kinds of fact proved unreadable in live
+        use the day a real disagreement exercised them all. This keeps each
+        kind in its own labelled group so a page can render headings and
+        nested lists; `describe` stays the flat form for logs and terminals.
+        Plain data on purpose - it crosses the web boundary without types.
+        """
+        if self.agrees:
+            verdict, warn = "agree", False
+        elif not self.reconciled:
+            verdict, warn = "DISAGREE", True
+        else:
+            verdict = self._reconciled_verdict()
+            warn = verdict == "DISAGREE"
+
+        clauses: list[dict[str, object]] = []
+        if not self.agrees and self.reconciled:
+            if self.attributed:
+                counts: dict[tuple[str, str], int] = {}
+                for match in self.attributed:
+                    key = (match.sibling_account, match.matched_source)
+                    counts[key] = counts.get(key, 0) + 1
+                total = len(self.attributed)
+                clauses.append(
+                    {
+                        "label": (
+                            f"{total} {'row' if total == 1 else 'rows'} matched "
+                            "to sibling-account rows"
+                        ),
+                        "items": [
+                            f"{sibling}: {count} (via {source})"
+                            for (sibling, source), count in sorted(counts.items())
+                        ],
+                    }
+                )
+            if self.confirmed_transfer_legs:
+                by_source: dict[str, int] = {}
+                for leg in self.confirmed_transfer_legs:
+                    by_source[leg.source] = by_source.get(leg.source, 0) + 1
+                total = len(self.confirmed_transfer_legs)
+                clauses.append(
+                    {
+                        "label": (
+                            f"{total} confirmed internal-transfer "
+                            f"{'leg' if total == 1 else 'legs'} the other source "
+                            "does not carry"
+                        ),
+                        "items": [
+                            f"{source}: {count}"
+                            for source, count in sorted(by_source.items())
+                        ],
+                    }
+                )
+            if self.unexplained:
+                ordered = sorted(
+                    self.unexplained,
+                    key=lambda r: (r.row_date, r.amount_minor, r.description),
+                )
+                total = len(ordered)
+                items = [
+                    f"{row.row_date} {format_amount(row.amount_minor)} "
+                    f"'{row.description}' ({row.source})"
+                    for row in ordered[:_UNEXPLAINED_SHOWN_OUTLINE]
+                ]
+                if total > len(items):
+                    items.append(f"+{total - len(items)} more not shown")
+                clauses.append(
+                    {
+                        "label": f"unexplained: {total} {'row' if total == 1 else 'rows'}",
+                        "items": items,
+                    }
+                )
+
+        return {
+            "sources": f"{self.left} vs {self.right}",
+            "window": f"{self.overlap_from} .. {self.overlap_to}",
+            "verdict": verdict,
+            "warn": warn,
+            "figures": (
+                f"{self.left_count} vs {self.right_count} transactions; "
+                f"net {format_amount(self.left_net_minor)} vs "
+                f"{format_amount(self.right_net_minor)}"
+            ),
+            "clauses": clauses,
+        }
 
 
 def _attribution_clause(attributed: Sequence[SiblingAttribution]) -> str:

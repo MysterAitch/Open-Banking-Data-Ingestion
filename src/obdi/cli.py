@@ -1560,8 +1560,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 for t in store.transactions_by_sighting()
                 if not (t.account_id == account and t.source == parser.source)
             ]
-        agreement_preview = [
-            agreement.describe()
+        agreement_preview: list[object] = [
+            agreement.outline()
             for agreement in agreements(
                 held + rows, sibling_accounts=_account_map().accounts_by_source()
             )
@@ -1590,7 +1590,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "agreement_preview": agreement_preview,
         }
 
-    def confirm_upload(payload: bytes, filename: str, account: str) -> str:
+    def confirm_upload(payload: bytes, filename: str, account: str) -> dict[str, object]:
         """Land and reconcile a previewed file against a chosen account."""
         import tempfile
 
@@ -1607,14 +1607,18 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 # a file with no balance column.
                 from .coverage import agreements
 
-                lines = [f"{safe_name} -> {account}: {summary.describe()}"]
                 held = store.transactions_by_sighting()
-                for agreement in agreements(
-                    held, sibling_accounts=_account_map().accounts_by_source()
-                ):
-                    if agreement.account_id == account:
-                        lines.append(agreement.describe())
-        return "\n".join(lines)
+                outlines: list[object] = [
+                    agreement.outline()
+                    for agreement in agreements(
+                        held, sibling_accounts=_account_map().accounts_by_source()
+                    )
+                    if agreement.account_id == account
+                ]
+        return {
+            "summary": f"{safe_name} -> {account}: {summary.describe()}",
+            "agreements": outlines,
+        }
 
     def account_timelines() -> dict[str, dict[str, str]]:
         """Timeline marks per canonical ref, from the store alone: how far
