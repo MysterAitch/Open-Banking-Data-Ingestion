@@ -28,6 +28,7 @@ from datetime import date, timedelta
 from itertools import combinations
 
 from .models import Transaction
+from .money import format_amount
 
 #: Two sources describing the SAME account may date one movement a day or two
 #: apart (statement value date versus feed settlement). Row matching within the
@@ -123,7 +124,14 @@ class Agreement:
     #: in sibling accounts. Populated only when a sibling scope was supplied
     #: and the aggregate figures disagreed.
     attributed: tuple[SiblingAttribution, ...] = ()
-    #: What remains after within-account matching and sibling attribution.
+    #: Leftover rows the pairing pass has already PROVEN internal - their
+    #: opposite leg is held in another account - so the other source not
+    #: carrying them is expected, not a fault: a consolidated statement
+    #: cannot show a movement that is internal to what it consolidates.
+    #: A provider's bare claim does not qualify; only the store's own proof.
+    confirmed_transfer_legs: tuple[UnexplainedRow, ...] = ()
+    #: What remains after within-account matching, transfer proof, and
+    #: sibling attribution.
     unexplained: tuple[UnexplainedRow, ...] = ()
     #: Whether sibling reconciliation ran at all. An empty `attributed` from
     #: a run that never looked must not read as "nothing to attribute".
@@ -140,7 +148,8 @@ class Agreement:
         )
         figures = (
             f"({self.left_count} vs {self.right_count} transactions, "
-            f"net {self.left_net_minor} vs {self.right_net_minor})"
+            f"net {format_amount(self.left_net_minor)} vs "
+            f"{format_amount(self.right_net_minor)})"
         )
         if self.agrees:
             return f"{heading} agree {figures}"
@@ -150,10 +159,13 @@ class Agreement:
         clauses = []
         if self.attributed:
             clauses.append(_attribution_clause(self.attributed))
+        if self.confirmed_transfer_legs:
+            clauses.append(_transfer_legs_clause(self.confirmed_transfer_legs))
         if self.unexplained:
             clauses.append(_unexplained_clause(self.unexplained))
         detail = f" - {'; '.join(clauses)}" if clauses else ""
-        if self.attributed and not self.unexplained:
+        explained = bool(self.attributed or self.confirmed_transfer_legs)
+        if explained and not self.unexplained:
             # Not plain "agree": the aggregate figures still differ, and the
             # verdict says exactly on what grounds the difference is excused.
             return f"{heading} agree once sibling attribution is counted {figures}{detail}"
@@ -174,10 +186,23 @@ def _attribution_clause(attributed: Sequence[SiblingAttribution]) -> str:
     return f"{total} {rows} matched to sibling-account rows: {', '.join(parts)}"
 
 
+def _transfer_legs_clause(legs: Sequence[UnexplainedRow]) -> str:
+    counts: dict[str, int] = {}
+    for leg in legs:
+        counts[leg.source] = counts.get(leg.source, 0) + 1
+    parts = [f"{source} ({count})" for source, count in sorted(counts.items())]
+    total = len(legs)
+    plural = "leg" if total == 1 else "legs"
+    return (
+        f"{total} confirmed internal-transfer {plural} the other source "
+        f"does not carry: {', '.join(parts)}"
+    )
+
+
 def _unexplained_clause(unexplained: Sequence[UnexplainedRow]) -> str:
     ordered = sorted(unexplained, key=lambda r: (r.row_date, r.amount_minor, r.description))
     shown = [
-        f"{row.row_date} {row.amount_minor} '{row.description}' ({row.source})"
+        f"{row.row_date} {format_amount(row.amount_minor)} '{row.description}' ({row.source})"
         for row in ordered[:_UNEXPLAINED_SHOWN]
     ]
     more = len(ordered) - len(shown)
@@ -380,6 +405,7 @@ def agreements(
             right_net = sum(i.amount_minor for i in in_right)
 
             attributed: tuple[SiblingAttribution, ...] = ()
+            confirmed_legs: tuple[UnexplainedRow, ...] = ()
             unexplained: tuple[UnexplainedRow, ...] = ()
             reconciled = sibling_accounts is not None
             if sibling_accounts is not None and (
@@ -387,6 +413,24 @@ def agreements(
             ):
                 left_over, right_over = _leftovers(
                     in_left, in_right, WITHIN_ACCOUNT_WINDOW_DAYS
+                )
+                # Proven-internal legs come out first: the pairing pass has
+                # already matched them to their opposite side in another
+                # account, which is stronger and cheaper evidence than any
+                # fresh search here could produce.
+                proven = [t for t in left_over + right_over if t.transfer_confirmed]
+                left_over = [t for t in left_over if not t.transfer_confirmed]
+                right_over = [t for t in right_over if not t.transfer_confirmed]
+                confirmed_legs = tuple(
+                    UnexplainedRow(
+                        source=t.source,
+                        row_date=t.value_date,
+                        amount_minor=t.amount_minor,
+                        description=t.description,
+                    )
+                    for t in sorted(
+                        proven, key=lambda t: (t.value_date, t.amount_minor, t.description)
+                    )
                 )
                 left_found, left_residue = _attribute(
                     left_over,
@@ -413,6 +457,7 @@ def agreements(
                     left_net_minor=left_net,
                     right_net_minor=right_net,
                     attributed=attributed,
+                    confirmed_transfer_legs=confirmed_legs,
                     unexplained=unexplained,
                     reconciled=reconciled,
                 )

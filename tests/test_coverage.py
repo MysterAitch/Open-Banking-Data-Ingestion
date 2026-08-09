@@ -21,7 +21,7 @@ from obdi.models import SourceTier, Transaction
 
 
 def txn(source, day, amount, *, account="current", source_id=None, month=1, desc=None,
-        tier=SourceTier.SYNTHETIC):
+        tier=SourceTier.SYNTHETIC, confirmed=False, claimed=False):
     return Transaction(
         account_id=account,
         amount_minor=amount,
@@ -33,6 +33,8 @@ def txn(source, day, amount, *, account="current", source_id=None, month=1, desc
         source_id=source_id,
         tier=tier,
         content_key=f"k{month}{day}{amount}",
+        is_internal_transfer=claimed,
+        transfer_confirmed=confirmed,
     )
 
 
@@ -496,6 +498,10 @@ class TestSiblingAttribution:
         assert "DISAGREE" in text
         assert "unexplained" in text
         assert "NETFLIX" in text
+        # Amounts render as currency, never as raw minor units - a
+        # four-figure integer that means a few pounds misleads on sight.
+        assert "-£4.50" in text
+        assert "-450" not in text
 
     def test_Agreement_EachSiblingRowExplainsOnlyOneRow(self):
         found = agreements(
@@ -573,3 +579,98 @@ class TestSiblingAttribution:
         assert "DISAGREE" in text
         assert "sibling" not in text
         assert "unexplained" not in text
+
+
+class TestConfirmedTransferLegs:
+    """The live 6-month statement taught this: the statement is close to a
+    CONSOLIDATED whole-account view, so the monthly space top-up legs the
+    feed witnesses in the main account simply do not exist in the file -
+    they are internal to the consolidated picture. Those legs are already
+    proven internal by the pairing pass (their opposite legs sit in the
+    spaces, both sides held), so the comparison consults that proof: a
+    leftover row whose transfer is CONFIRMED is explained by its pairing.
+    A provider's bare claim is not proof and does not qualify.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": [
+            "starling-personal",
+            "starling-space-bills",
+        ]
+    }
+
+    @staticmethod
+    def _bracket() -> list[Transaction]:
+        return [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+        ]
+
+    @staticmethod
+    def _personal(found) -> Agreement:
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Agreement_AConfirmedTransferLeg_IsExplainedByItsPairing(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                # The feed's monthly top-up leg: confirmed paired with the
+                # space's opposite leg, invisible to a consolidated statement.
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert not agreement.agrees
+        assert len(agreement.confirmed_transfer_legs) == 1
+        assert agreement.unexplained == ()
+        text = agreement.describe()
+        assert "agree once sibling attribution is counted" in text
+        assert "confirmed internal-transfer" in text
+
+    def test_Agreement_AProviderClaimAlone_IsNotProof_TheRowStaysUnexplained(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", claimed=True,
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.confirmed_transfer_legs == ()
+        assert len(agreement.unexplained) == 1
+        assert "DISAGREE" in agreement.describe()
+
+    def test_Agreement_ConfirmedLegsAndRealResidue_AreReportedApart(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+                txn(
+                    "starling-csv", 3, -450,
+                    account="starling-personal", desc="NETFLIX",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.confirmed_transfer_legs) == 1
+        assert len(agreement.unexplained) == 1
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "confirmed internal-transfer" in text
+        assert "NETFLIX" in text
