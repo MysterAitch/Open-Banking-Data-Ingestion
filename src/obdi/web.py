@@ -776,13 +776,14 @@ def _insight_sections(summary: dict[str, object]) -> str:
 
 
 def _agreements_html(entries: object) -> str:
-    """Render agreement outlines as headings with nested lists.
+    """Render agreement outlines as per-source ledgers.
 
     Accepts Agreement.outline() dicts, and falls back to a plain paragraph
-    for string entries (the no-other-source message, older callers). One
-    prose line carrying attribution, transfer legs AND residue at once
-    proved unreadable in live use - the groups exist so each kind of fact
-    reads on its own line.
+    for string entries (the no-other-source message, older callers). Each
+    side renders as its own heading with one bucket per line, so the counts
+    visibly sum to the side's total and every line names whose rows it
+    counts - the two questions a flat prose line made the reader
+    reconstruct forensically.
     """
     if not isinstance(entries, list):
         return ""
@@ -800,25 +801,35 @@ def _agreements_html(entries: object) -> str:
             f"<strong{warn}>{html.escape(str(entry.get('verdict')))}</strong><br>"
             f'<span class="muted">{html.escape(str(entry.get("figures")))}</span></p>'
         )
-        raw_clauses = entry.get("clauses")
-        if isinstance(raw_clauses, list) and raw_clauses:
-            clause_items = ""
-            for clause in raw_clauses:
-                if not isinstance(clause, dict):
+        raw_sides = entry.get("sides")
+        if isinstance(raw_sides, list) and raw_sides:
+            side_html = ""
+            for side in raw_sides:
+                if not isinstance(side, dict):
                     continue
-                label = html.escape(str(clause.get("label")))
-                raw_items = clause.get("items")
-                inner = ""
-                if isinstance(raw_items, list) and raw_items:
-                    inner = (
-                        "<ul>"
-                        + "".join(
-                            f"<li>{html.escape(str(item))}</li>" for item in raw_items
+                bucket_html = ""
+                raw_buckets = side.get("buckets")
+                for bucket in raw_buckets if isinstance(raw_buckets, list) else []:
+                    if not isinstance(bucket, dict):
+                        continue
+                    label = html.escape(str(bucket.get("label")))
+                    raw_items = bucket.get("items")
+                    inner = ""
+                    if isinstance(raw_items, list) and raw_items:
+                        inner = (
+                            "<ul>"
+                            + "".join(
+                                f"<li>{html.escape(str(item))}</li>"
+                                for item in raw_items
+                            )
+                            + "</ul>"
                         )
-                        + "</ul>"
-                    )
-                clause_items += f"<li>{label}{inner}</li>"
-            parts.append(f"<ul>{clause_items}</ul>")
+                    bucket_html += f"<li>{label}{inner}</li>"
+                side_html += (
+                    f"<li><strong>{html.escape(str(side.get('heading')))}</strong>"
+                    f"<ul>{bucket_html}</ul></li>"
+                )
+            parts.append(f"<ul>{side_html}</ul>")
     return "".join(parts)
 
 

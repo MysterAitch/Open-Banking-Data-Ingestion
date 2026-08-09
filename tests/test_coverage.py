@@ -677,11 +677,12 @@ class TestConfirmedTransferLegs:
 
 
 class TestAgreementOutline:
-    """The one-line describe() proved unreadable in live use once a real
-    disagreement carried four kinds of fact at once. outline() keeps each
-    kind in its own labelled group - plain data a page can render as
-    headings and nested lists - while describe() stays the flat form for
-    logs and terminals.
+    """The one-line describe() proved unreadable in live use, and a first
+    structured cut still made the reader do forensic reconstruction: counts
+    with no denominator, "unexplained" with no direction. The outline is a
+    per-source ledger: every row of each side lands in exactly one bucket,
+    and the buckets sum to that side's own total - so the arithmetic is
+    checkable on sight and every line says WHICH side holds the rows.
     """
 
     SIBLINGS: ClassVar[dict[str, list[str]]] = {
@@ -700,7 +701,61 @@ class TestAgreementOutline:
         found = agreements(rows, sibling_accounts=TestAgreementOutline.SIBLINGS)
         return next(a for a in found if a.account_id == "starling-personal")
 
-    def test_Outline_AReconciledDisagreement_GroupsEachExplanationUnderItsLabel(self):
+    def test_Outline_EachSide_IsALedgerThatSumsToItsOwnTotal(self):
+        agreement = self._found(
+            [
+                # The statement's bill paid from the Bills space...
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # ...which the feed filed under the space itself.
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+                # A feed-side top-up leg, proven internal by pairing.
+                txn(
+                    "starling", 3, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+                # A feed-side row nothing accounts for.
+                txn(
+                    "starling", 4, -450,
+                    account="starling-personal", desc="NETFLIX",
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "DISAGREE"
+        assert outline["warn"] is True
+        sides = outline["sides"]
+        assert [side["heading"] for side in sides] == [
+            "starling: 4 rows in the window",
+            "starling-csv: 3 rows in the window",
+        ]
+        # starling's ledger: 4 = 2 matched + 1 confirmed leg + 1 unexplained.
+        starling_labels = [bucket["label"] for bucket in sides[0]["buckets"]]
+        assert starling_labels[0] == "2 matched with starling-csv"
+        assert any("1 confirmed internal-transfer leg" in label for label in starling_labels)
+        assert any("in starling ONLY" in label for label in starling_labels)
+        # The direction is explicit: the unexplained row names its rows.
+        unexplained = next(
+            bucket for bucket in sides[0]["buckets"] if "ONLY" in bucket["label"]
+        )
+        assert any("NETFLIX" in item and "-£4.50" in item for item in unexplained["items"])
+        # starling-csv's ledger: 3 = 2 matched + 1 attributed to a sibling.
+        csv_labels = [bucket["label"] for bucket in sides[1]["buckets"]]
+        assert csv_labels[0] == "2 matched with starling"
+        attributed = next(
+            bucket for bucket in sides[1]["buckets"] if "sibling" in bucket["label"]
+        )
+        assert "1 matched to rows starling filed under sibling accounts" in attributed["label"]
+        assert attributed["items"] == ["starling-space-bills: 1"]
+
+    def test_Outline_AFullyReconciledDisagreement_SaysSoInTheVerdict(self):
         agreement = self._found(
             [
                 txn(
@@ -711,50 +766,20 @@ class TestAgreementOutline:
                     "starling", 2, -7000,
                     account="starling-space-bills", desc="COUNCIL TAX",
                 ),
-                txn(
-                    "starling", 3, -150000,
-                    account="starling-personal", desc="Bills", confirmed=True,
-                ),
             ]
         )
 
         outline = agreement.outline()
 
-        assert outline["sources"] == "starling vs starling-csv"
-        assert outline["window"] == "2026-01-01 .. 2026-01-06"
         assert outline["verdict"] == "agree once sibling attribution is counted"
         assert outline["warn"] is False
         assert "transactions" in outline["figures"]
-        labels = [clause["label"] for clause in outline["clauses"]]
-        assert any("matched to sibling-account rows" in label for label in labels)
-        assert any("confirmed internal-transfer" in label for label in labels)
-        items = [item for clause in outline["clauses"] for item in clause["items"]]
-        assert any("starling-space-bills" in item for item in items)
 
-    def test_Outline_UnexplainedRows_AreListedIndividually_WithCurrency(self):
-        agreement = self._found(
-            [
-                txn(
-                    "starling-csv", 2, -450,
-                    account="starling-personal", desc="NETFLIX",
-                )
-            ]
-        )
-
-        outline = agreement.outline()
-
-        assert outline["verdict"] == "DISAGREE"
-        assert outline["warn"] is True
-        unexplained = next(
-            clause for clause in outline["clauses"] if "unexplained" in clause["label"]
-        )
-        assert any("NETFLIX" in item and "-£4.50" in item for item in unexplained["items"])
-
-    def test_Outline_PlainAgreement_CarriesNoClauses(self):
+    def test_Outline_PlainAgreement_CarriesNoSides(self):
         agreement = self._found([])
 
         outline = agreement.outline()
 
         assert outline["verdict"] == "agree"
         assert outline["warn"] is False
-        assert outline["clauses"] == []
+        assert outline["sides"] == []

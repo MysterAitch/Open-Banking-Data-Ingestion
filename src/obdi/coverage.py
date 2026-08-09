@@ -55,6 +55,23 @@ _UNEXPLAINED_SHOWN = 3
 #: reads row by row where a prose line cannot.
 _UNEXPLAINED_SHOWN_OUTLINE = 10
 
+#: Confirmed legs are repetitive by nature (the same standing top-up, month
+#: after month), so a shorter sample suffices to show what the count means.
+_LEGS_SHOWN_OUTLINE = 5
+
+
+def _row_items(rows: Sequence[UnexplainedRow], cap: int) -> list[str]:
+    """Row lines for a single side's bucket - no source suffix, the bucket's
+    label already names the side."""
+    ordered = sorted(rows, key=lambda r: (r.row_date, r.amount_minor, r.description))
+    items = [
+        f"{row.row_date} {format_amount(row.amount_minor)} '{row.description}'"
+        for row in ordered[:cap]
+    ]
+    if len(ordered) > len(items):
+        items.append(f"+{len(ordered) - len(items)} more not shown")
+    return items
+
 
 @dataclass(frozen=True)
 class SourceCoverage:
@@ -140,6 +157,10 @@ class Agreement:
     #: Whether sibling reconciliation ran at all. An empty `attributed` from
     #: a run that never looked must not read as "nothing to attribute".
     reconciled: bool = False
+    #: Rows matched between the two sources within this account during
+    #: reconciliation - the shared base every per-side ledger starts from.
+    #: Meaningful only when `reconciled` is true and the figures disagreed.
+    matched_count: int = 0
 
     @property
     def agrees(self) -> bool:
@@ -179,13 +200,17 @@ class Agreement:
         return "DISAGREE"
 
     def outline(self) -> dict[str, object]:
-        """The same verdict as `describe`, shaped for structured rendering.
+        """The same verdict as `describe`, shaped as a per-source ledger.
 
         One prose line carrying four kinds of fact proved unreadable in live
-        use the day a real disagreement exercised them all. This keeps each
-        kind in its own labelled group so a page can render headings and
-        nested lists; `describe` stays the flat form for logs and terminals.
-        Plain data on purpose - it crosses the web boundary without types.
+        use - and a first structured cut still demanded forensic
+        reconstruction: counts with no denominator, "unexplained" with no
+        direction. So each side gets a ledger in which every row lands in
+        exactly one bucket and the buckets sum to that side's own total -
+        the arithmetic is checkable on sight, and every line names WHICH
+        source holds the rows it counts. `describe` stays the flat form for
+        logs and terminals. Plain data on purpose - it crosses the web
+        boundary without types.
         """
         if self.agrees:
             verdict, warn = "agree", False
@@ -195,62 +220,66 @@ class Agreement:
             verdict = self._reconciled_verdict()
             warn = verdict == "DISAGREE"
 
-        clauses: list[dict[str, object]] = []
+        sides: list[dict[str, object]] = []
         if not self.agrees and self.reconciled:
-            if self.attributed:
-                counts: dict[tuple[str, str], int] = {}
-                for match in self.attributed:
-                    key = (match.sibling_account, match.matched_source)
-                    counts[key] = counts.get(key, 0) + 1
-                total = len(self.attributed)
-                clauses.append(
-                    {
-                        "label": (
-                            f"{total} {'row' if total == 1 else 'rows'} matched "
-                            "to sibling-account rows"
-                        ),
-                        "items": [
-                            f"{sibling}: {count} (via {source})"
-                            for (sibling, source), count in sorted(counts.items())
-                        ],
-                    }
-                )
-            if self.confirmed_transfer_legs:
-                by_source: dict[str, int] = {}
-                for leg in self.confirmed_transfer_legs:
-                    by_source[leg.source] = by_source.get(leg.source, 0) + 1
-                total = len(self.confirmed_transfer_legs)
-                clauses.append(
-                    {
-                        "label": (
-                            f"{total} confirmed internal-transfer "
-                            f"{'leg' if total == 1 else 'legs'} the other source "
-                            "does not carry"
-                        ),
-                        "items": [
-                            f"{source}: {count}"
-                            for source, count in sorted(by_source.items())
-                        ],
-                    }
-                )
-            if self.unexplained:
-                ordered = sorted(
-                    self.unexplained,
-                    key=lambda r: (r.row_date, r.amount_minor, r.description),
-                )
-                total = len(ordered)
-                items = [
-                    f"{row.row_date} {format_amount(row.amount_minor)} "
-                    f"'{row.description}' ({row.source})"
-                    for row in ordered[:_UNEXPLAINED_SHOWN_OUTLINE]
+            for name, other, total in (
+                (self.left, self.right, self.left_count),
+                (self.right, self.left, self.right_count),
+            ):
+                buckets: list[dict[str, object]] = [
+                    {"label": f"{self.matched_count} matched with {other}", "items": []}
                 ]
-                if total > len(items):
-                    items.append(f"+{total - len(items)} more not shown")
-                clauses.append(
-                    {
-                        "label": f"unexplained: {total} {'row' if total == 1 else 'rows'}",
-                        "items": items,
-                    }
+                attributed = [m for m in self.attributed if m.source == name]
+                if attributed:
+                    counts: dict[str, int] = {}
+                    for match in attributed:
+                        counts[match.sibling_account] = (
+                            counts.get(match.sibling_account, 0) + 1
+                        )
+                    buckets.append(
+                        {
+                            "label": (
+                                f"{len(attributed)} matched to rows {other} filed "
+                                "under sibling accounts"
+                            ),
+                            "items": [
+                                f"{sibling}: {count}"
+                                for sibling, count in sorted(counts.items())
+                            ],
+                        }
+                    )
+                legs = [
+                    leg for leg in self.confirmed_transfer_legs if leg.source == name
+                ]
+                if legs:
+                    count = len(legs)
+                    buckets.append(
+                        {
+                            "label": (
+                                f"{count} confirmed internal-transfer "
+                                f"{'leg' if count == 1 else 'legs'} "
+                                "(opposite leg held in another account)"
+                            ),
+                            "items": _row_items(legs, _LEGS_SHOWN_OUTLINE),
+                        }
+                    )
+                unexplained = [
+                    row for row in self.unexplained if row.source == name
+                ]
+                if unexplained:
+                    count = len(unexplained)
+                    buckets.append(
+                        {
+                            "label": (
+                                f"{count} in {name} ONLY - no counterpart in "
+                                f"{other}, its sibling accounts, or the "
+                                "pairing table"
+                            ),
+                            "items": _row_items(unexplained, _UNEXPLAINED_SHOWN_OUTLINE),
+                        }
+                    )
+                sides.append(
+                    {"heading": f"{name}: {total} rows in the window", "buckets": buckets}
                 )
 
         return {
@@ -263,7 +292,7 @@ class Agreement:
                 f"net {format_amount(self.left_net_minor)} vs "
                 f"{format_amount(self.right_net_minor)}"
             ),
-            "clauses": clauses,
+            "sides": sides,
         }
 
 
@@ -503,12 +532,14 @@ def agreements(
             confirmed_legs: tuple[UnexplainedRow, ...] = ()
             unexplained: tuple[UnexplainedRow, ...] = ()
             reconciled = sibling_accounts is not None
+            matched_count = 0
             if sibling_accounts is not None and (
                 left_count != right_count or left_net != right_net
             ):
                 left_over, right_over = _leftovers(
                     in_left, in_right, WITHIN_ACCOUNT_WINDOW_DAYS
                 )
+                matched_count = left_count - len(left_over)
                 # Proven-internal legs come out first: the pairing pass has
                 # already matched them to their opposite side in another
                 # account, which is stronger and cheaper evidence than any
@@ -555,6 +586,7 @@ def agreements(
                     confirmed_transfer_legs=confirmed_legs,
                     unexplained=unexplained,
                     reconciled=reconciled,
+                    matched_count=matched_count,
                 )
             )
     return found

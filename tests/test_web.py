@@ -2297,10 +2297,19 @@ class TestUploadingAFileFromThePage:
                         "verdict": "agree once sibling attribution is counted",
                         "warn": False,
                         "figures": "381 vs 411 transactions; net £1980.11 vs £2480.11",
-                        "clauses": [
+                        "sides": [
                             {
-                                "label": "87 rows matched to sibling-account rows",
-                                "items": ["starling-space-bills: 87 (via starling)"],
+                                "heading": "starling-csv: 411 rows in the window",
+                                "buckets": [
+                                    {"label": "324 matched with starling", "items": []},
+                                    {
+                                        "label": (
+                                            "87 matched to rows starling filed "
+                                            "under sibling accounts"
+                                        ),
+                                        "items": ["starling-space-bills: 87"],
+                                    },
+                                ],
                             }
                         ],
                     },
@@ -2337,8 +2346,10 @@ class TestUploadingAFileFromThePage:
         # carrying all of them proved unreadable in live use.
         assert "halifax-csv vs truelayer-booked agree" in page
         assert "agree once sibling attribution is counted" in page
-        assert "<li>87 rows matched to sibling-account rows" in page
-        assert "<li>starling-space-bills: 87 (via starling)</li>" in page
+        assert "<strong>starling-csv: 411 rows in the window</strong>" in page
+        assert "<li>324 matched with starling</li>" in page
+        assert "<li>87 matched to rows starling filed under sibling accounts" in page
+        assert "<li>starling-space-bills: 87</li>" in page
         assert 'name="account" value="halifax-current"' in page
         assert 'name="token"' in page
 
@@ -2375,10 +2386,20 @@ class TestUploadingAFileFromThePage:
                         "verdict": "DISAGREE",
                         "warn": True,
                         "figures": "3 vs 4 transactions; net £1.00 vs £2.00",
-                        "clauses": [
+                        "sides": [
                             {
-                                "label": "unexplained: 1 row",
-                                "items": ["2026-01-02 -£1.00 'COFFEE' (halifax-csv)"],
+                                "heading": "halifax-csv: 4 rows in the window",
+                                "buckets": [
+                                    {"label": "3 matched with halifax", "items": []},
+                                    {
+                                        "label": (
+                                            "1 in halifax-csv ONLY - no counterpart "
+                                            "in halifax, its sibling accounts, or "
+                                            "the pairing table"
+                                        ),
+                                        "items": ["2026-01-02 -£1.00 'COFFEE'"],
+                                    },
+                                ],
                             }
                         ],
                     }
@@ -2417,7 +2438,7 @@ class TestUploadingAFileFromThePage:
         assert "42 parsed" in result
         # The post-import comparison renders structured, same as the preview.
         assert "DISAGREE" in result
-        assert "<li>unexplained: 1 row" in result
+        assert "<li>1 in halifax-csv ONLY" in result
         assert "COFFEE" in result
 
     def test_Upload_UnrecognisedFile_IsRefusedWithTheParserVerdict(self, tmp_path):
