@@ -14,8 +14,9 @@ was never going to match.
 from __future__ import annotations
 
 from datetime import date
+from typing import ClassVar
 
-from obdi.coverage import agreements, coverage, gaps, transpositions
+from obdi.coverage import Agreement, agreements, coverage, gaps, transpositions
 from obdi.models import SourceTier, Transaction
 
 
@@ -384,3 +385,191 @@ class TestAgainstTheRealStore:
                 "every month is covered by both sources; a MISSING report here "
                 "would be the stored-source undercount, not a real gap"
             )
+
+
+class TestSiblingAttribution:
+    """A statement shows the MAIN account's view of the world: a bill paid
+    directly from a savings space appears on the statement while the API files
+    it under the space, and a space top-up appears as the main account's leg
+    while the API holds the space's opposite leg. Both are one movement seen
+    through two doors that disagree about WHERE it belongs.
+
+    So a disagreement those rows cause can be EXPLAINED - by matching them to
+    the other source's rows in SIBLING accounts - but never silently: every
+    attribution names the sibling it matched (a nonsense match must be visible
+    on sight), and whatever stays unmatched is shown, because the residue is
+    the finding.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": [
+            "starling-personal",
+            "starling-space-bills",
+            "starling-space-savings",
+        ]
+    }
+
+    @staticmethod
+    def _bracket() -> list[Transaction]:
+        # Rows both sources agree on, spanning days 1..6, so the overlap
+        # window encloses the interesting day and the comparison is about
+        # the case rows rather than about coverage.
+        return [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+        ]
+
+    @staticmethod
+    def _personal(found) -> Agreement:
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Agreement_BillPaidFromASpace_IsAttributedToTheSiblingNotLost(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                # The statement shows the council tax leaving the account...
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # ...the API filed the same payment under the Bills space.
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert not agreement.agrees
+        assert len(agreement.attributed) == 1
+        match = agreement.attributed[0]
+        assert match.sibling_account == "starling-space-bills"
+        assert match.opposite_sign is False
+        assert agreement.unexplained == ()
+        text = agreement.describe()
+        assert "agree once sibling attribution is counted" in text
+        assert "starling-space-bills" in text
+
+    def test_Agreement_SpaceTopUp_TheOppositeSpaceLegAccountsForTheMainLeg(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -5000,
+                    account="starling-personal", desc="TO SAVINGS SPACE",
+                ),
+                txn(
+                    "starling", 2, 5000,
+                    account="starling-space-savings", desc="FROM PERSONAL",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.attributed) == 1
+        assert agreement.attributed[0].opposite_sign is True
+        assert agreement.attributed[0].sibling_account == "starling-space-savings"
+        assert agreement.unexplained == ()
+
+    def test_Agreement_WhenNoSiblingHoldsAMatch_TheRowIsShownUnexplained(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -450,
+                    account="starling-personal", desc="NETFLIX",
+                )
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+        assert agreement.unexplained[0].description == "NETFLIX"
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "unexplained" in text
+        assert "NETFLIX" in text
+
+    def test_Agreement_EachSiblingRowExplainsOnlyOneRow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX A",
+                ),
+                txn(
+                    "starling-csv", 3, -7000,
+                    account="starling-personal", desc="COUNCIL TAX B",
+                ),
+                txn("starling", 2, -7000, account="starling-space-bills"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.attributed) == 1
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_SameSignSiblingMatch_RespectsTheTwoDayWindow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # Three days away: outside the same-sign window.
+                txn("starling", 5, -7000, account="starling-space-bills"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_OppositeSignSiblingMatch_RespectsTheTighterOneDayWindow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -5000,
+                    account="starling-personal", desc="TO SAVINGS SPACE",
+                ),
+                # Two days away: inside the same-sign window but outside the
+                # opposite-sign one - an internal move lands same-day, so a
+                # distant opposite row is NOT evidence of the same movement.
+                txn("starling", 4, 5000, account="starling-space-savings"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_WithoutSiblingScope_TheReportIsUnchanged(self):
+        rows = [
+            *self._bracket(),
+            txn(
+                "starling-csv", 2, -7000,
+                account="starling-personal", desc="COUNCIL TAX",
+            ),
+            txn("starling", 2, -7000, account="starling-space-bills"),
+        ]
+
+        agreement = self._personal(agreements(rows))
+
+        assert agreement.reconciled is False
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "sibling" not in text
+        assert "unexplained" not in text

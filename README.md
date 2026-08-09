@@ -211,6 +211,16 @@ first-party and through the aggregator. Running both calibrates how far two
 providers' descriptions of the same payment diverge in practice — which tells
 you how much to trust matching on the accounts you can only see one way.
 
+One consequence surfaces in the comparison reports: a bank statement shows the
+**main account's view** of movements the feed files under a space — a bill paid
+directly from a space appears on the statement as the account's own spending,
+and a space top-up appears as the main leg only. So when two sources disagree
+about an account, rows only one of them holds are searched for among the other
+source's **sibling accounts** (everything the same source feeds, per the
+account map). A match is reported as an attribution naming the sibling — never
+silently absorbed — and whatever stays unmatched is printed, because the
+residue is the finding.
+
 ## Assets that have no transaction stream
 
 A pension pot, a fund or a property is not a ledger you sum — it is a value you

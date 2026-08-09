@@ -54,6 +54,19 @@ class AccountMap:
             return self._bindings[key]
         return f"{source}:{provider_account_id}"
 
+    def accounts_by_source(self) -> dict[str, list[str]]:
+        """Every canonical account each source feeds.
+
+        This is the sibling scope for cross-account attribution in the
+        comparison reports: a statement shows the MAIN account's view of
+        movements the feed files under a space, so a row only the statement
+        holds is searched for among the other source's OTHER accounts.
+        """
+        grouped: dict[str, set[str]] = {}
+        for (source, _), canonical in self._bindings.items():
+            grouped.setdefault(source, set()).add(canonical)
+        return {source: sorted(members) for source, members in grouped.items()}
+
     def sources_for(self, canonical_id: str) -> list[str]:
         return sorted(
             source for (source, _), canonical in self._bindings.items() if canonical == canonical_id

@@ -22,12 +22,33 @@ under arithmetic that was never going to match.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from itertools import combinations
 
 from .models import Transaction
+
+#: Two sources describing the SAME account may date one movement a day or two
+#: apart (statement value date versus feed settlement). Row matching within the
+#: account tolerates that before anything is called missing.
+WITHIN_ACCOUNT_WINDOW_DAYS = 2
+
+#: A row the other source filed under a SIBLING account with the same sign is
+#: the same movement seen through a door that disagrees about where it belongs
+#: - a bill paid directly from a savings space appears on the statement as the
+#: main account's spending while the feed holds it in the space.
+SIBLING_SAME_SIGN_WINDOW_DAYS = 2
+
+#: The statement's main leg of a space top-up pairs with the space's OPPOSITE
+#: leg. Internal moves land same-day, so the window mirrors transfer pairing:
+#: a distant opposite-signed row is coincidence, not evidence.
+SIBLING_OPPOSITE_SIGN_WINDOW_DAYS = 1
+
+#: How many unexplained rows the description prints before summarising. The
+#: residue is the finding, so some of it must always be visible - but a page
+#: is not a dump.
+_UNEXPLAINED_SHOWN = 3
 
 
 @dataclass(frozen=True)
@@ -51,6 +72,41 @@ class SourceCoverage:
 
 
 @dataclass(frozen=True)
+class SiblingAttribution:
+    """One source's row in this account, matched to a row the other source
+    filed under a SIBLING account.
+
+    Evidence, not inference: the sibling and the matched date are carried so
+    the claim is checkable on sight - a nonsense match (a Starling row
+    "explained" by a different bank's account) announces itself instead of
+    hiding inside a count.
+    """
+
+    source: str
+    row_date: date
+    amount_minor: int
+    description: str
+    matched_source: str
+    sibling_account: str
+    sibling_date: date
+    #: True when the sibling row is the opposite leg of an internal move
+    #: (the statement's main leg of a space top-up); False when the sibling
+    #: holds the SAME-signed row (a payment made directly from a space).
+    opposite_sign: bool
+
+
+@dataclass(frozen=True)
+class UnexplainedRow:
+    """A row one source holds that neither the other source's rows here nor
+    its sibling accounts can account for - the residue that IS the finding."""
+
+    source: str
+    row_date: date
+    amount_minor: int
+    description: str
+
+
+@dataclass(frozen=True)
 class Agreement:
     """Two sources, one account, compared over the period they share."""
 
@@ -63,19 +119,70 @@ class Agreement:
     right_count: int
     left_net_minor: int
     right_net_minor: int
+    #: Rows one source holds only here that matched the other source's rows
+    #: in sibling accounts. Populated only when a sibling scope was supplied
+    #: and the aggregate figures disagreed.
+    attributed: tuple[SiblingAttribution, ...] = ()
+    #: What remains after within-account matching and sibling attribution.
+    unexplained: tuple[UnexplainedRow, ...] = ()
+    #: Whether sibling reconciliation ran at all. An empty `attributed` from
+    #: a run that never looked must not read as "nothing to attribute".
+    reconciled: bool = False
 
     @property
     def agrees(self) -> bool:
         return self.left_count == self.right_count and self.left_net_minor == self.right_net_minor
 
     def describe(self) -> str:
-        verdict = "agree" if self.agrees else "DISAGREE"
-        return (
+        heading = (
             f"{self.account_id}: {self.left} vs {self.right} "
-            f"[{self.overlap_from} .. {self.overlap_to}] {verdict} "
+            f"[{self.overlap_from} .. {self.overlap_to}]"
+        )
+        figures = (
             f"({self.left_count} vs {self.right_count} transactions, "
             f"net {self.left_net_minor} vs {self.right_net_minor})"
         )
+        if self.agrees:
+            return f"{heading} agree {figures}"
+        if not self.reconciled:
+            return f"{heading} DISAGREE {figures}"
+
+        clauses = []
+        if self.attributed:
+            clauses.append(_attribution_clause(self.attributed))
+        if self.unexplained:
+            clauses.append(_unexplained_clause(self.unexplained))
+        detail = f" - {'; '.join(clauses)}" if clauses else ""
+        if self.attributed and not self.unexplained:
+            # Not plain "agree": the aggregate figures still differ, and the
+            # verdict says exactly on what grounds the difference is excused.
+            return f"{heading} agree once sibling attribution is counted {figures}{detail}"
+        return f"{heading} DISAGREE {figures}{detail}"
+
+
+def _attribution_clause(attributed: Sequence[SiblingAttribution]) -> str:
+    counts: dict[tuple[str, str], int] = {}
+    for match in attributed:
+        key = (match.sibling_account, match.matched_source)
+        counts[key] = counts.get(key, 0) + 1
+    parts = [
+        f"{sibling} ({count} via {source})"
+        for (sibling, source), count in sorted(counts.items())
+    ]
+    total = len(attributed)
+    rows = "row" if total == 1 else "rows"
+    return f"{total} {rows} matched to sibling-account rows: {', '.join(parts)}"
+
+
+def _unexplained_clause(unexplained: Sequence[UnexplainedRow]) -> str:
+    ordered = sorted(unexplained, key=lambda r: (r.row_date, r.amount_minor, r.description))
+    shown = [
+        f"{row.row_date} {row.amount_minor} '{row.description}' ({row.source})"
+        for row in ordered[:_UNEXPLAINED_SHOWN]
+    ]
+    more = len(ordered) - len(shown)
+    suffix = f" (+{more} more)" if more else ""
+    return f"unexplained: {'; '.join(shown)}{suffix}"
 
 
 def coverage(transactions: Iterable[Transaction]) -> list[SourceCoverage]:
@@ -120,18 +227,142 @@ def _window(items: Sequence[Transaction]) -> tuple[date, date]:
     return min(dates), max(dates)
 
 
-def agreements(transactions: Iterable[Transaction]) -> list[Agreement]:
+def _leftovers(
+    in_left: Sequence[Transaction],
+    in_right: Sequence[Transaction],
+    window_days: int,
+) -> tuple[list[Transaction], list[Transaction]]:
+    """Each side's rows with no same-amount counterpart on the other.
+
+    Greedy nearest-date within the window, each row consumed once - the same
+    discipline as transfer pairing, so a repeated standing order of one value
+    does not chain-match.
+    """
+    by_amount: dict[int, list[int]] = {}
+    for j, item in enumerate(in_right):
+        by_amount.setdefault(item.amount_minor, []).append(j)
+
+    window = timedelta(days=window_days)
+    used: set[int] = set()
+    left_over: list[Transaction] = []
+    for item in sorted(in_left, key=lambda t: (t.value_date, t.amount_minor, t.description)):
+        candidates = [
+            j
+            for j in by_amount.get(item.amount_minor, ())
+            if j not in used and abs(in_right[j].value_date - item.value_date) <= window
+        ]
+        if candidates:
+            used.add(
+                min(candidates, key=lambda j: (abs(in_right[j].value_date - item.value_date), j))
+            )
+        else:
+            left_over.append(item)
+    right_over = [item for j, item in enumerate(in_right) if j not in used]
+    return left_over, right_over
+
+
+def _attribute(
+    rows: Sequence[Transaction],
+    other_source: str,
+    pool: Sequence[Transaction],
+) -> tuple[list[SiblingAttribution], list[UnexplainedRow]]:
+    """Match each row to an unconsumed row of `other_source` in a sibling
+    account: equal amount within the same-sign window, or the exact opposite
+    within the tighter internal-move window. Same-sign wins a tie because it
+    is the stronger claim (the same movement, not a counterpart leg)."""
+    by_amount: dict[int, list[int]] = {}
+    for j, item in enumerate(pool):
+        by_amount.setdefault(item.amount_minor, []).append(j)
+
+    used: set[int] = set()
+    matched: list[SiblingAttribution] = []
+    residue: list[UnexplainedRow] = []
+    for item in sorted(rows, key=lambda t: (t.value_date, t.amount_minor, t.description)):
+        candidates = []
+        for sign, window_days in (
+            (1, SIBLING_SAME_SIGN_WINDOW_DAYS),
+            (-1, SIBLING_OPPOSITE_SIGN_WINDOW_DAYS),
+        ):
+            window = timedelta(days=window_days)
+            for j in by_amount.get(sign * item.amount_minor, ()):
+                if j in used:
+                    continue
+                distance = abs(pool[j].value_date - item.value_date)
+                if distance <= window:
+                    candidates.append((distance, 0 if sign == 1 else 1, j))
+        if candidates:
+            _, flipped, j = min(candidates)
+            used.add(j)
+            matched.append(
+                SiblingAttribution(
+                    source=item.source,
+                    row_date=item.value_date,
+                    amount_minor=item.amount_minor,
+                    description=item.description,
+                    matched_source=other_source,
+                    sibling_account=pool[j].account_id,
+                    sibling_date=pool[j].value_date,
+                    opposite_sign=bool(flipped),
+                )
+            )
+        else:
+            residue.append(
+                UnexplainedRow(
+                    source=item.source,
+                    row_date=item.value_date,
+                    amount_minor=item.amount_minor,
+                    description=item.description,
+                )
+            )
+    return matched, residue
+
+
+def _sibling_pool(
+    by_source_account: Mapping[str, Mapping[str, Sequence[Transaction]]],
+    scope: Mapping[str, Collection[str]],
+    source: str,
+    account_id: str,
+) -> list[Transaction]:
+    """The rows `source` filed under its OTHER accounts - the places a
+    movement seen here by a different witness might actually live."""
+    rows: list[Transaction] = []
+    for sibling in scope.get(source, ()):
+        if sibling == account_id:
+            continue
+        rows.extend(by_source_account.get(source, {}).get(sibling, ()))
+    return rows
+
+
+def agreements(
+    transactions: Iterable[Transaction],
+    *,
+    sibling_accounts: Mapping[str, Collection[str]] | None = None,
+) -> list[Agreement]:
     """Compare every pair of sources that describes the same account.
 
     Pairs with no shared period are omitted entirely rather than reported as
     agreeing or disagreeing: having nothing to compare is a third outcome, and
     collapsing it into either of the other two would mislead.
+
+    `sibling_accounts` maps each source to every canonical account it feeds.
+    When supplied, a disagreeing pair is reconciled row by row and the rows
+    only one source holds are searched for in the OTHER source's sibling
+    accounts - because a statement shows the main account's view of movements
+    the feed files under a space. Attributions carry their evidence and the
+    residue is reported, never swallowed.
     """
     by_account: dict[str, dict[str, list[Transaction]]] = {}
     for transaction in transactions:
         by_account.setdefault(transaction.account_id, {}).setdefault(
             transaction.source, []
         ).append(transaction)
+
+    by_source_account: dict[str, dict[str, list[Transaction]]] = {}
+    if sibling_accounts is not None:
+        for transaction in transactions:
+            by_source_account.setdefault(transaction.source, {}).setdefault(
+                transaction.account_id, []
+            ).append(transaction)
 
     found = []
     for account_id, sources in sorted(by_account.items()):
@@ -144,6 +375,32 @@ def agreements(transactions: Iterable[Transaction]) -> list[Agreement]:
 
             in_left = _within(sources[left], start, end)
             in_right = _within(sources[right], start, end)
+            left_count, right_count = len(in_left), len(in_right)
+            left_net = sum(i.amount_minor for i in in_left)
+            right_net = sum(i.amount_minor for i in in_right)
+
+            attributed: tuple[SiblingAttribution, ...] = ()
+            unexplained: tuple[UnexplainedRow, ...] = ()
+            reconciled = sibling_accounts is not None
+            if sibling_accounts is not None and (
+                left_count != right_count or left_net != right_net
+            ):
+                left_over, right_over = _leftovers(
+                    in_left, in_right, WITHIN_ACCOUNT_WINDOW_DAYS
+                )
+                left_found, left_residue = _attribute(
+                    left_over,
+                    right,
+                    _sibling_pool(by_source_account, sibling_accounts, right, account_id),
+                )
+                right_found, right_residue = _attribute(
+                    right_over,
+                    left,
+                    _sibling_pool(by_source_account, sibling_accounts, left, account_id),
+                )
+                attributed = tuple(left_found + right_found)
+                unexplained = tuple(left_residue + right_residue)
+
             found.append(
                 Agreement(
                     account_id=account_id,
@@ -151,10 +408,13 @@ def agreements(transactions: Iterable[Transaction]) -> list[Agreement]:
                     right=right,
                     overlap_from=start,
                     overlap_to=end,
-                    left_count=len(in_left),
-                    right_count=len(in_right),
-                    left_net_minor=sum(i.amount_minor for i in in_left),
-                    right_net_minor=sum(i.amount_minor for i in in_right),
+                    left_count=left_count,
+                    right_count=right_count,
+                    left_net_minor=left_net,
+                    right_net_minor=right_net,
+                    attributed=attributed,
+                    unexplained=unexplained,
+                    reconciled=reconciled,
                 )
             )
     return found

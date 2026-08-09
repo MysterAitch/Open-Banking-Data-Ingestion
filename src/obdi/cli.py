@@ -1549,17 +1549,22 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         from .verification import verify_export
 
         # This file versus every OTHER source of the same account - held
-        # rows of the file's own source are excluded, or a re-upload of a
-        # period already imported would be compared against itself.
+        # rows of the file's own source in THIS account are excluded, or a
+        # re-upload of a period already imported would be compared against
+        # itself. Other accounts' rows stay in: they are the sibling pool
+        # that lets a disagreement be attributed to a space the other
+        # source filed the movement under.
         with Store(db_path) as store:
             held = [
                 t
                 for t in store.transactions_by_sighting()
-                if t.account_id == account and t.source != parser.source
+                if not (t.account_id == account and t.source == parser.source)
             ]
         agreement_preview = [
             agreement.describe()
-            for agreement in agreements(held + rows)
+            for agreement in agreements(
+                held + rows, sibling_accounts=_account_map().accounts_by_source()
+            )
             if agreement.account_id == account
             and parser.source in (agreement.left, agreement.right)
         ] or [
@@ -1604,7 +1609,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
                 lines = [f"{safe_name} -> {account}: {summary.describe()}"]
                 held = store.transactions_by_sighting()
-                for agreement in agreements(held):
+                for agreement in agreements(
+                    held, sibling_accounts=_account_map().accounts_by_source()
+                ):
                     if agreement.account_id == account:
                         lines.append(agreement.describe())
         return "\n".join(lines)
@@ -2881,7 +2888,10 @@ def main(argv: list[str] | None = None) -> int:
             held = store.transactions_by_sighting()
         print(
             coverage_report(
-                coverage(held), agreements(held), gaps(held), transpositions(held)
+                coverage(held),
+                agreements(held, sibling_accounts=_account_map().accounts_by_source()),
+                gaps(held),
+                transpositions(held),
             )
         )
         return 0
