@@ -41,6 +41,14 @@ from .store import Store
 #: how one provider's quota arithmetic ended up counting another's calls.
 STARLING_CONNECTION = "starling-api"
 
+#: Windows to try, widest first, when the provider refuses a cursorless full
+#: ask for exceeding its maximum queryable range. Empirically a ~70-day
+#: changesSince landed while the ten-year default was refused, so the true
+#: ceiling sits somewhere between - the ladder finds a working bound in at
+#: most four extra calls, once, and the re-planted cursor makes every later
+#: cycle incremental again.
+RANGE_LADDER_DAYS = (365, 180, 90, 30)
+
 
 def _refusal_detail(exc: Exception) -> str:
     """The exception plus any harvested headers - Retry-After is the provider
@@ -660,6 +668,7 @@ def pull_starling(
 
             identity_key = category.uid if category.is_space else account_uid
             qualified_ref = f"starling:{identity_key}"
+            last_refusal: str | None = None
 
             def fetch_and_land(
                 since_at: datetime | None,
@@ -675,6 +684,8 @@ def pull_starling(
                 One refused ask is that ask's problem; the pull is
                 idempotent, so the next cycle simply retries.
                 """
+                nonlocal last_refusal
+                last_refusal = None
                 asked_spec = (
                     f"changesSince={since_at.isoformat()}"
                     if since_at
@@ -689,6 +700,7 @@ def pull_starling(
                         since_at=since_at,
                     )
                 except starling.StarlingError as exc:
+                    last_refusal = str(exc)
                     store.record_attempt(
                         source="starling-feed",
                         connection_id=STARLING_CONNECTION,
@@ -780,6 +792,39 @@ def pull_starling(
             if fetched is None and (sweeping or since is not None or feed_cursor is None):
                 used_cutoff = None
                 fetched = fetch_and_land(None)
+                if (
+                    fetched is None
+                    and since is None
+                    and "QUERY_EXCEEDING_MAX_TIME_RANGE" in (last_refusal or "")
+                ):
+                    # Observed live (2026-08-05..09): the provider began
+                    # refusing the ten-year cursorless ask outright - and a
+                    # refusal never stamps a cursor, so the category asked the
+                    # same impossible window four times a day forever, reading
+                    # as a quietly dead feed. Narrow until the provider
+                    # accepts: the first landed window stamps a cursor and
+                    # returns the category to incremental cycling. Every rung
+                    # is its own recorded ask; deeper history than the
+                    # accepted bound needs attended backfill in bounded
+                    # windows. Only the range refusal ladders - a 429 is a
+                    # quota answer, and answering it with more calls is wrong.
+                    for days in RANGE_LADDER_DAYS:
+                        rung = datetime.now(UTC) - timedelta(days=days)
+                        fetched = fetch_and_land(rung)
+                        if fetched is not None:
+                            used_cutoff = rung
+                            result.notes.append(
+                                f"RANGE LADDER for {qualified_ref}: the full "
+                                "ask exceeds the provider's maximum range; a "
+                                f"{days}-day window landed and re-planted the "
+                                "cursor - history deeper than this bound "
+                                "needs attended backfill"
+                            )
+                            break
+                        if "QUERY_EXCEEDING_MAX_TIME_RANGE" not in (
+                            last_refusal or ""
+                        ):
+                            break
 
             if fetched is None:
                 continue

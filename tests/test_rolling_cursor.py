@@ -384,3 +384,79 @@ class TestAnomalyInstrumentation:
         store.close()
 
         assert not any("ANOMALY" in note for note in notes), notes
+
+
+class TestTheRangeCappedProvider:
+    """Observed live 2026-08-05..09: Starling began refusing the ten-year
+    cursorless ask with QUERY_EXCEEDING_MAX_TIME_RANGE - and because a
+    refusal never stamps a cursor, the category stayed cursorless and asked
+    the same impossible window four times a day forever, reading as a
+    quietly dead feed. The ladder narrows the window until the provider
+    accepts; the first landed window stamps a cursor and returns the
+    category to incremental cycling. Only the range refusal ladders - a
+    429 is a quota answer, and answering it with MORE calls is wrong.
+    """
+
+    @staticmethod
+    def _cap_feed(monkeypatch, fake, max_window_days) -> None:
+        from obdi.providers import starling
+
+        original_update_of = fake._update_of
+
+        def feed(token, account_uid, category_uid, since=None, since_at=None):
+            now = datetime.now(UTC)
+            start = since_at
+            if start is None and since is not None:
+                start = datetime.combine(since, datetime.min.time(), tzinfo=UTC)
+            if start is None or (now - start).days > max_window_days:
+                fake.asks.append(since_at)
+                raise starling.StarlingError(
+                    "Starling call failed (HTTP 400): "
+                    '{"errors":[{"message":"QUERY_EXCEEDING_MAX_TIME_RANGE"}]}',
+                    status=400,
+                )
+            fake.asks.append(since_at)
+            got = [
+                item for item in fake.full if original_update_of(item) >= start
+            ]
+            body = json.dumps({"feedItems": got}).encode()
+            return got, body, f"changesSince={since_at or since}"
+
+        monkeypatch.setattr("obdi.providers.starling.fetch_feed", feed)
+
+    def test_RangeRefusedFullAsk_NarrowsUntilAccepted_AndPlantsTheCursor(
+        self, tmp_path, monkeypatch
+    ):
+        recent = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        fake = _FakeStarling(monkeypatch, [_item("u-1", recent, recent)])
+        self._cap_feed(monkeypatch, fake, max_window_days=400)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            notes = _pull(store)
+            planted = cursor.load(store, "acc-1", STARLING_CONNECTION)
+
+        assert planted is not None, "a landed rung must stamp the cursor"
+        assert any("RANGE LADDER" in note for note in notes)
+        # The full ask was tried, refused, and the first in-range rung landed.
+        assert fake.asks[0] is None
+        assert len(fake.asks) >= 2
+
+    def test_AQuotaRefusal_DoesNotLadder(self, tmp_path, monkeypatch):
+        from obdi.providers import starling
+
+        _FakeStarling(monkeypatch, [])
+        calls = []
+
+        def refuse(token, account_uid, category_uid, since=None, since_at=None):
+            calls.append(since_at)
+            raise starling.StarlingError("too many requests", status=429)
+
+        monkeypatch.setattr("obdi.providers.starling.fetch_feed", refuse)
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            notes = _pull(store)
+            planted = cursor.load(store, "acc-1", STARLING_CONNECTION)
+
+        assert planted is None
+        assert calls == [None], "a 429 is answered by the NEXT cycle, not more calls"
+        assert not any("RANGE LADDER" in note for note in notes)
