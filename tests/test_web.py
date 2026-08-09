@@ -2867,3 +2867,34 @@ class TestHealthzAndRenderTiming:
 
         out = capsys.readouterr().out
         assert "web timing: GET" in out
+
+
+class TestAccountPickerOptions:
+    """Two accounts can share a provider display name (Starling labels a
+    main account's uid AND its defaultCategory identically) - and a
+    picker showing identical text for different destinations is a wrong
+    import waiting to happen. Colliding labels get their canonical ref
+    appended so every option says which destination it actually is."""
+
+    def test_CollidingLabels_ShowTheirRefs(self):
+        from obdi.web import account_options
+
+        html_out = account_options(
+            {
+                "starling-personal": "Personal (starling)",
+                "starling:0abc4567deadbeef": "Personal (starling)",
+                "halifax-current": "Current Account (halifax)",
+            }
+        )
+
+        assert "Personal (starling) [starling-personal]" in html_out
+        assert "Personal (starling) [starling:0abc4567deadbeef]" in html_out
+        # A unique label stays clean - the ref is noise when nothing collides.
+        assert "Current Account (halifax) [" not in html_out
+        assert "Current Account (halifax)" in html_out
+
+    def test_OptionValues_CarryTheRef_NotTheLabel(self):
+        from obdi.web import account_options
+
+        html_out = account_options({"starling-personal": "Personal (starling)"})
+        assert 'value="starling-personal"' in html_out

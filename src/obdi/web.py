@@ -2374,6 +2374,28 @@ def _starling_row(
     )
 
 
+def account_options(labels: dict[str, str]) -> str:
+    """The import destination picker's options, every one self-identifying.
+
+    Providers reuse display names (Starling labels a main account's uid
+    AND its defaultCategory identically), so two different destinations
+    can share a label - and a picker showing identical text for
+    different refs is a wrong import waiting to happen. Colliding labels
+    get their canonical ref appended; unique labels stay clean, because
+    the ref is noise when nothing collides.
+    """
+    from collections import Counter
+
+    counts = Counter(labels.values())
+    options = []
+    for ref, name in sorted(labels.items(), key=lambda kv: (kv[1], kv[0])):
+        shown = f"{name} [{ref}]" if counts[name] > 1 else name
+        options.append(
+            f'<option value="{html.escape(ref)}">{html.escape(shown)}</option>'
+        )
+    return "".join(options)
+
+
 def render_index(
     store: ConnectionStore,
     holdings: Callable[[], list[SourceCoverage]] | None = None,
@@ -3367,10 +3389,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 labels = self.bound_config.display_labels()
             except Exception:
                 labels = {}
-        options = "".join(
-            f'<option value="{html.escape(ref)}">{html.escape(name)}</option>'
-            for ref, name in sorted(labels.items(), key=lambda kv: kv[1])
-        )
+        options = account_options(labels)
         raw_sample = preview.get("sample")
         sample_rows = "".join(
             f'<tr><td>{html.escape(str(r.get("date")))}</td>'
