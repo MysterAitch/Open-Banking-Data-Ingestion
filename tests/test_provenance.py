@@ -397,7 +397,7 @@ class TestRefilingAMislandedArtefact:
     """
 
     @staticmethod
-    def _land(store, ref, payload=b"a,b\n1,2\n", origin="chunk.csv"):
+    def _land(store, ref, payload=b"a,b\n1,2\n", origin="chunk.csv") -> int:
         from datetime import datetime
 
         from obdi.identity import artefact_digest

@@ -3147,7 +3147,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             artefact_id = 0
         account = (form.get("account", [""])[0] or "").strip()
         if not artefact_id or not account:
-            self._respond(400, error_page("Bad request", "<p>Artefact id and account required.</p>"))
+            self._respond(
+                400,
+                error_page("Bad request", "<p>Artefact id and account required.</p>"),
+            )
             return
         old = hook(artefact_id, account)
         if old is None:
