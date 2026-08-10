@@ -384,3 +384,83 @@ class TestAccountSourceBreakdown:
             counts = store.source_counts_by_account()
 
         assert counts[account] == 2
+
+
+class TestRefilingAMislandedArtefact:
+    """An import sent to the wrong destination had no remedy: layer 0 is
+    append-only for EVIDENCE, but account_ref is our FILING of it - the
+    rebind doctrine, applied per artefact. Observed live: three statement
+    chunks landed under a Space by a phone mis-tap; the person noticed and
+    re-imported into the right account a minute later - and every rebuild
+    thereafter faithfully re-derived 1,571 rows into the wrong container,
+    because the misfiled artefacts stayed filed where they landed.
+    """
+
+    @staticmethod
+    def _land(store, ref, payload=b"a,b\n1,2\n", origin="chunk.csv"):
+        from datetime import datetime
+
+        from obdi.identity import artefact_digest
+        from obdi.models import RawArtefact
+
+        store.land_artefact(
+            RawArtefact(
+                source="csv",
+                account_ref=ref,
+                fetched_at=datetime.now().astimezone(),
+                media_type="text/csv",
+                digest=artefact_digest(payload),
+                payload=payload,
+                origin=origin,
+                request_meta="trigger=test",
+            )
+        )
+        return store.connection.execute(
+            "SELECT rowid FROM raw_artefacts WHERE account_ref=? AND origin=?",
+            (ref, origin),
+        ).fetchone()[0]
+
+    def test_Refile_MovesTheFiling_AndRecordsTheCorrection(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            misfiled = self._land(store, "starling-space-money")
+
+            old = store.refile_artefact(misfiled, "starling-personal")
+
+            assert old == "starling-space-money"
+            ref, meta = store.connection.execute(
+                "SELECT account_ref, request_meta FROM raw_artefacts WHERE rowid=?",
+                (misfiled,),
+            ).fetchone()
+            assert ref == "starling-personal"
+            # The correction is part of the artefact's own history: the
+            # payload is evidence, the filing is ours, and a changed filing
+            # says so rather than pretending it always was.
+            assert "refiled from starling-space-money" in meta
+
+    def test_Refile_WhenTheBytesAlreadyLandedCorrectly_CollapsesTheDuplicate(
+        self, tmp_path
+    ):
+        # The recovery-by-reimport case, exactly as observed live: the same
+        # file was imported again into the RIGHT account, so the bytes
+        # already exist under the correct filing. Refiling the misfiled
+        # copy must not create a duplicate - the misfiled row collapses
+        # into the survivor, which records what it absorbed.
+        with Store(tmp_path / "s.sqlite3") as store:
+            misfiled = self._land(store, "starling-space-money")
+            survivor = self._land(store, "starling-personal")
+
+            old = store.refile_artefact(misfiled, "starling-personal")
+
+            assert old == "starling-space-money"
+            gone = store.connection.execute(
+                "SELECT COUNT(*) FROM raw_artefacts WHERE rowid=?", (misfiled,)
+            ).fetchone()[0]
+            assert gone == 0
+            meta = store.connection.execute(
+                "SELECT request_meta FROM raw_artefacts WHERE rowid=?", (survivor,)
+            ).fetchone()[0]
+            assert "starling-space-money" in meta
+
+    def test_Refile_UnknownArtefact_ReturnsNone(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            assert store.refile_artefact(9999, "anywhere") is None

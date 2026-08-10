@@ -819,6 +819,65 @@ class Store:
         self.connection.commit()
         return cursor.rowcount
 
+    def refile_artefact(self, artefact_id: int, new_account_ref: str) -> str | None:
+        """Correct ONE artefact's landed account - rebind's per-artefact
+        sibling, for the import-went-to-the-wrong-destination case.
+
+        The payload bytes and digest are untouched: account_ref is our
+        FILING of the evidence, not the evidence itself. The correction is
+        appended to the artefact's request_meta so a changed filing says so
+        rather than pretending it always was. When the same bytes already
+        landed under the target (the recovery-by-reimport case, observed
+        live within a minute of the misfile), the misfiled row collapses
+        into the survivor - which records what it absorbed - instead of
+        violating the (digest, account_ref) key or duplicating derivation.
+
+        Returns the old account_ref, or None if no such artefact. Derived
+        rows are NOT touched here: a rebuild replays layer 0 through the
+        corrected filing, which is the whole point of having one.
+        """
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        row = self.connection.execute(
+            "SELECT digest, account_ref, request_meta FROM raw_artefacts "
+            "WHERE rowid = ?",
+            (artefact_id,),
+        ).fetchone()
+        if row is None:
+            self.connection.commit()
+            return None
+        old_ref = str(row["account_ref"])
+        stamp = datetime.now().astimezone().isoformat()
+        survivor = self.connection.execute(
+            "SELECT rowid, request_meta FROM raw_artefacts "
+            "WHERE digest = ? AND account_ref = ? AND rowid != ?",
+            (row["digest"], new_account_ref, artefact_id),
+        ).fetchone()
+        if survivor is not None:
+            self.connection.execute(
+                "UPDATE raw_artefacts SET request_meta = ? WHERE rowid = ?",
+                (
+                    f"{survivor['request_meta']} | absorbed a duplicate of these "
+                    f"bytes misfiled under {old_ref}, refiled {stamp}",
+                    survivor["rowid"],
+                ),
+            )
+            self.connection.execute(
+                "DELETE FROM raw_artefacts WHERE rowid = ?", (artefact_id,)
+            )
+        else:
+            self.connection.execute(
+                "UPDATE raw_artefacts SET account_ref = ?, request_meta = ? "
+                "WHERE rowid = ?",
+                (
+                    new_account_ref,
+                    f"{row['request_meta']} | refiled from {old_ref} at {stamp}",
+                    artefact_id,
+                ),
+            )
+        self.connection.commit()
+        return old_ref
+
     def rename_connection(self, old_id: str, new_id: str) -> dict[str, int]:
         """Move a connection's name across every table that records it.
 

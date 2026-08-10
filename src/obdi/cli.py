@@ -485,6 +485,11 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
 
+def _refile(db_path: Path, artefact_id: int, account: str) -> str | None:
+    with Store(db_path) as store:
+        return store.refile_artefact(artefact_id, account)
+
+
 def _scheduled_sources() -> set[str]:
     """Sources the scheduler actually pulls - the first-party token and the
     aggregator pipe. Files are never scheduled, so their lag is the normal
@@ -2206,6 +2211,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         extend_window=extend_window,
         artefact_index=artefact_index,
         artefact_detail=artefact_detail,
+        refile_artefact=(
+            lambda artefact_id, account: _refile(db_path, artefact_id, account)
+        ),
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,

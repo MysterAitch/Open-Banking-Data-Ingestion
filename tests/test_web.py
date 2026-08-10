@@ -3112,3 +3112,61 @@ class TestTheStandingAgreementReport:
             httpd.shutdown()
 
         assert "nothing to compare" in page
+
+
+class TestRefilingFromThePage:
+    """The mis-tapped destination remedy: the artefact page names the fix,
+    the POST requires confirmation, and the result says what moved where
+    and what to run next."""
+
+    def _server(self, tmp_path, refile_artefact):
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            refile_artefact=refile_artefact,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_Refile_Confirmed_MovesAndSaysWhatToRunNext(self, tmp_path):
+        calls = []
+
+        def refile(artefact_id, account):
+            calls.append((artefact_id, account))
+            return "starling-space-money"
+
+        httpd, base = self._server(tmp_path, refile)
+        try:
+            page = httpx.post(
+                f"{base}/refile-artefact",
+                data={"id": "42", "account": "starling-personal", "confirm": "yes"},
+            ).text
+        finally:
+            httpd.shutdown()
+
+        assert calls == [(42, "starling-personal")]
+        assert "starling-space-money" in page
+        assert "starling-personal" in page
+        assert "Rebuild from raw" in page
+
+    def test_Refile_WithoutConfirmation_IsRefused(self, tmp_path):
+        calls = []
+        httpd, base = self._server(
+            tmp_path, lambda *a: calls.append(a) or "x"
+        )
+        try:
+            response = httpx.post(
+                f"{base}/refile-artefact",
+                data={"id": "42", "account": "starling-personal"},
+            )
+        finally:
+            httpd.shutdown()
+
+        assert response.status_code == 400
+        assert calls == []

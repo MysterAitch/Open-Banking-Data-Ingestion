@@ -294,6 +294,10 @@ class WebConfig:
     #: so the analysis lives beside the store, not in the HTML.
     artefact_index: Callable[[], list[dict[str, object]]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
+    #: Correct one artefact's landed account (the mis-tapped destination
+    #: remedy). Takes (artefact_id, new_account_ref); returns the old ref,
+    #: or None for an unknown artefact.
+    refile_artefact: Callable[[int, str], str | None] | None = None
     #: The fetch-attempt ledger: every ask made of a provider, refused or
     #: landed, plus per-account call counts over the last day. The probing
     #: workflow is press, read, decide - and deciding needs this without a
@@ -3100,10 +3104,66 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
                 "Replay into store</button></p></form>"
             )
+            + (
+                # The wrong-destination remedy: the payload is evidence, the
+                # account_ref is our filing of it, and a mis-tapped picker
+                # needed no way back until three statement chunks spent a
+                # night deriving 1,571 rows into a Space.
+                "<h2>Landed under the wrong account?</h2>"
+                '<form method="post" action="/refile-artefact">'
+                f'<input type="hidden" name="id" value="{artefact_id}">'
+                '<p><input name="account" placeholder="correct canonical, '
+                'e.g. starling-personal" required></p>'
+                '<label style="display:block;margin:.35rem 0">'
+                '<input type="checkbox" name="confirm" value="yes" required> '
+                "I understand the filing changes and a rebuild re-derives</label>"
+                '<p><button class="button" type="submit" '
+                'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+                "Refile</button></p></form>"
+            )
             + f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
             "View payload</a></p>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
+
+    def _refile_artefact(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.refile_artefact
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Refiling is not wired.</p>"))
+            return
+        if form.get("confirm") != ["yes"]:
+            self._respond(
+                400,
+                error_page(
+                    "Not confirmed",
+                    "<p>Refiling changes which account the artefact's rows "
+                    "derive into. Tick the confirmation box to proceed.</p>",
+                ),
+            )
+            return
+        try:
+            artefact_id = int(form.get("id", ["0"])[0] or "0")
+        except ValueError:
+            artefact_id = 0
+        account = (form.get("account", [""])[0] or "").strip()
+        if not artefact_id or not account:
+            self._respond(400, error_page("Bad request", "<p>Artefact id and account required.</p>"))
+            return
+        old = hook(artefact_id, account)
+        if old is None:
+            self._respond(404, error_page("Not found", "<p>No such artefact.</p>"))
+            return
+        self._respond(
+            200,
+            render_page(
+                "Refiled",
+                f"<p>Refiled from <strong>{html.escape(old)}</strong> to "
+                f"<strong>{html.escape(account)}</strong>. The correction is "
+                "recorded in the artefact's provenance.</p>"
+                "<p>Now run <strong>Rebuild from raw</strong> (danger zone) so "
+                "the derived rows follow the corrected filing.</p>" + HOME_LINK,
+            ),
+        )
 
     def _account(self, params: dict[str, list[str]]) -> None:
         hook = self.bound_config.account_shape
@@ -3448,6 +3508,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/replay-artefact":
             self._replay_artefact(self._read_form())
+            return
+        if route == "/refile-artefact":
+            self._refile_artefact(self._read_form())
             return
         if route == "/bind":
             self._bind(parse_qs(self.rfile.read(
