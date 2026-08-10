@@ -54,13 +54,16 @@ class SweepSummary:
     categorised: int = 0
     payees_normalised: int = 0
     protected: int = 0
+    transfer_legs: int = 0
     samples: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
         return (
             f"considered {self.considered} transaction(s): "
             f"categorised {self.categorised}, normalised {self.payees_normalised} "
-            f"payee(s), left {self.protected} alone (higher provenance)"
+            f"payee(s), left {self.protected} alone (higher provenance), "
+            f"skipped {self.transfer_legs} confirmed transfer leg(s) "
+            "(transfers stay uncategorised)"
         )
 
 
@@ -97,6 +100,12 @@ def apply_rules(
 
     for transaction in store.all_transactions():
         summary.considered += 1
+        if transaction.transfer_confirmed:
+            # Money moving between your own accounts has not left the
+            # household; categorising a leg would count it against real
+            # spending. A human may still annotate a leg directly.
+            summary.transfer_legs += 1
+            continue
         entity = transaction.entity_id
         texts = [transaction.description, transaction.counterparty]
 
@@ -162,13 +171,16 @@ class PropagationReport:
     proposals: list[Proposal] = field(default_factory=list)
     seeds: int = 0
     contested: int = 0
+    transfer_legs: int = 0
 
     def describe(self) -> str:
         rows = sum(len(p.targets) for p in self.proposals)
         return (
             f"{len(self.proposals)} series from {self.seeds} human "
             f"seed(s): {rows} row(s) proposed, {self.contested} contested "
-            f"(compatible with more than one human value - left alone)"
+            f"(compatible with more than one human value - left alone), "
+            f"{self.transfer_legs} confirmed transfer leg(s) outside the "
+            "pool (transfers stay uncategorised)"
         )
 
 
@@ -203,11 +215,16 @@ def propagation_proposals(
         if provenance.split(":", 1)[0] == "human"
     }
 
+    report = PropagationReport()
     groups: dict[str, list[Transaction]] = {}
     for transaction in store.all_transactions():
+        if transaction.transfer_confirmed:
+            # Outside the pool entirely: a confirmed leg neither seeds
+            # (even if a human annotated it directly) nor receives.
+            report.transfer_legs += 1
+            continue
         groups.setdefault(_group_key(transaction.description), []).append(transaction)
-
-    report = PropagationReport(seeds=len(seed_values))
+    report.seeds = len(seed_values)
     for group, members in sorted(groups.items()):
         clusters: dict[str, list[Transaction]] = {}
         for member in members:
@@ -286,16 +303,34 @@ def _group_key(description: str) -> str:
     return re.sub(r"\s+", " ", _NOISE.sub("", description)).strip().upper()
 
 
-def uncategorised_summary(store: Store, *, limit: int = 20) -> list[tuple[str, int]]:
+@dataclass
+class Worklist:
+    """The uncategorised groups plus what was deliberately left out of
+    them, so the exclusions stay observable rather than silent."""
+
+    groups: list[tuple[str, int]] = field(default_factory=list)
+    transfer_legs: int = 0
+
+
+def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
     """The biggest uncategorised groups, largest first - the rule-writing
     worklist. Ten rules against the top ten groups is how a thousand-row
-    pile empties in an afternoon."""
+    pile empties in an afternoon. Confirmed transfer legs are not work:
+    transfers stay uncategorised by default, and their count rides along
+    so the default's cost is always visible."""
     categorised = set(store.annotations("category"))
     counts: dict[str, int] = {}
+    worklist = Worklist()
     for transaction in store.all_transactions():
+        if transaction.transfer_confirmed:
+            worklist.transfer_legs += 1
+            continue
         if transaction.entity_id in categorised:
             continue
         key = _group_key(transaction.description)
         if key:
             counts[key] = counts.get(key, 0) + 1
-    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    worklist.groups = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
+        :limit
+    ]
+    return worklist

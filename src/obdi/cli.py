@@ -3055,13 +3055,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(prefix + sweep.describe())
                 for sample in sweep.samples:
                     print(f"  {sample}")
-            groups = uncategorised_summary(store)
-        if groups:
+            worklist = uncategorised_summary(store)
+        if worklist.groups:
             print("Biggest uncategorised groups (rule-writing worklist):")
-            for name, count in groups:
+            for name, count in worklist.groups:
                 print(f"  {count:>5}  {name}")
         else:
             print("Nothing uncategorised.")
+        if worklist.transfer_legs:
+            print(
+                f"({worklist.transfer_legs} confirmed transfer leg(s) "
+                "excluded - transfers stay uncategorised)"
+            )
         return 0
 
     if args.command == "propagate":
