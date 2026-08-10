@@ -57,7 +57,10 @@ class SweepSummary:
     protected: int = 0
     transfer_legs: int = 0
     now_categorised: int = 0
+    orphans: int = 0
+    pruned: int = 0
     samples: list[str] = field(default_factory=list)
+    orphan_samples: list[str] = field(default_factory=list)
     hits: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -111,6 +114,7 @@ def apply_rules(
     rules: dict[str, list[dict[str, str]]],
     *,
     dry_run: bool = False,
+    prune: bool = False,
 ) -> SweepSummary:
     """One pass of the bottom rung over every stored transaction.
 
@@ -131,8 +135,12 @@ def apply_rules(
     held_categories = store.annotations("category")
     held_payees = store.annotations("payee")
 
+    present: set[str] = set()
+    claimed: dict[str, set[str]] = {"category": set(), "payee": set()}
+
     for transaction in store.all_transactions():
         summary.considered += 1
+        present.add(transaction.entity_id)
         if transaction.transfer_confirmed:
             # Money moving between your own accounts has not left the
             # household; categorising a leg would count it against real
@@ -144,6 +152,7 @@ def apply_rules(
 
         payee = _first_match(payee_rules, texts, "payee", summary.hits)
         if payee is not None:
+            claimed["payee"].add(entity)
             existing = held_payees.get(entity)
             revisable = existing is None or existing[1].startswith("rule")
             if revisable and (existing is None or existing[0] != payee):
@@ -155,6 +164,7 @@ def apply_rules(
         category = _first_match(category_rules, texts, "category", summary.hits)
         if category is None:
             continue
+        claimed["category"].add(entity)
         existing = held_categories.get(entity)
         if existing is not None and not existing[1].startswith("rule"):
             summary.protected += 1
@@ -173,6 +183,8 @@ def apply_rules(
                 f"{transaction.value_date} '{transaction.description[:40]}' "
                 f"-> {category}"
             )
+    _sweep_orphans(store, summary, present, claimed, dry_run=dry_run, prune=prune)
+
     # Coverage AFTER this sweep, predicted rather than read when nothing was
     # written, so a dry run answers the same question a real run does.
     summary.now_categorised = (
@@ -181,6 +193,37 @@ def apply_rules(
         else len(held_categories) + summary.categorised
     )
     return summary
+
+
+def _sweep_orphans(
+    store: Store,
+    summary: SweepSummary,
+    present: set[str],
+    claimed: dict[str, set[str]],
+    *,
+    dry_run: bool,
+    prune: bool,
+) -> None:
+    """Rule-made annotations that no CURRENT rule would produce.
+
+    Two ways a row lands here: the rule that made it was deleted from the
+    file, or the row has since been confirmed as an internal transfer leg
+    and is skipped by every sweep from now on. Either way nothing revisits
+    it, so it must be named - and only removed on an explicit ask.
+    """
+    for kind, claimed_entities in claimed.items():
+        for entity, (value, provenance) in store.annotations(kind).items():
+            if not provenance.startswith("rule"):
+                continue
+            if entity not in present or entity in claimed_entities:
+                continue
+            summary.orphans += 1
+            if len(summary.orphan_samples) < 5:
+                summary.orphan_samples.append(f"{kind} '{value}' ({provenance})")
+            if prune:
+                summary.pruned += 1
+                if not dry_run:
+                    store.forget_annotation(entity, kind, up_to_provenance="rule")
 
 
 #: How far a sibling's amount may drift from a seed's and still be the same

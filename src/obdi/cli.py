@@ -2896,6 +2896,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="rules file (default: OBDI_RULES, else rules.json beside the store)",
     )
+    categorise_command.add_argument(
+        "--prune",
+        action="store_true",
+        help="also RETRACT rule-made annotations no current rule would "
+        "produce (a deleted rule strands its work; emptying a rule cannot "
+        "undo it). Human and model annotations are never pruned",
+    )
 
     propagate_command = subcommands.add_parser(
         "propagate",
@@ -3062,11 +3069,24 @@ def main(argv: list[str] | None = None) -> int:
             )
         with Store(db_path) as store:
             if rules:
-                sweep = apply_rules(store, rules, dry_run=args.dry_run)
+                sweep = apply_rules(
+                    store, rules, dry_run=args.dry_run, prune=args.prune
+                )
                 prefix = "DRY RUN - " if args.dry_run else ""
                 print(prefix + sweep.describe())
                 for sample in sweep.samples:
                     print(f"  {sample}")
+                if sweep.orphans:
+                    verb = "pruned" if sweep.pruned else "left in place"
+                    print(
+                        f"  {sweep.orphans} rule-made annotation(s) no current "
+                        f"rule would produce - a retired rule, or a row since "
+                        f"confirmed as a transfer leg ({verb}; "
+                        "'--prune' retracts them, never touching human or "
+                        "model work):"
+                    )
+                    for sample in sweep.orphan_samples:
+                        print(f"    orphan: {sample}")
                 dead = sweep.dead_rules()
                 if dead:
                     print(

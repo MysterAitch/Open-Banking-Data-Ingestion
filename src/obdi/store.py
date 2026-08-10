@@ -880,6 +880,32 @@ class Store:
             )
         }
 
+    def forget_annotation(
+        self, entity_id: str, kind: str, *, up_to_provenance: str
+    ) -> bool:
+        """Retract an annotation, respecting the same ladder writes obey.
+
+        Deletion is how a rule takes back rule-made work whose rule no
+        longer exists - a write cannot undo a write, since a rule that
+        produces no value produces no write at all. The rank ceiling is
+        what keeps a rules-file edit from ever sweeping away a human's or a
+        model's decision. Returns whether anything was removed.
+        """
+        row = self.connection.execute(
+            "SELECT provenance FROM annotations WHERE entity_id = ? AND kind = ?",
+            (entity_id, kind),
+        ).fetchone()
+        if row is None:
+            return False
+        if _provenance_rank(str(row["provenance"])) > _provenance_rank(up_to_provenance):
+            return False
+        self.connection.execute(
+            "DELETE FROM annotations WHERE entity_id = ? AND kind = ?",
+            (entity_id, kind),
+        )
+        self.connection.commit()
+        return True
+
     def refile_artefact(self, artefact_id: int, new_account_ref: str) -> str | None:
         """Correct ONE artefact's landed account - rebind's per-artefact
         sibling, for the import-went-to-the-wrong-destination case.
