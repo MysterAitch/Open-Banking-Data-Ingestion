@@ -1,11 +1,11 @@
 """Real contents must be reached deliberately, never stumbled into.
 
-The web pages are read by agents as well as by people - the workstation
-curls this service over the tailnet routinely - so a surface that returns
-real statement contents to a single POST is a surface something can wander
-into while looking for something else. A checkbox is not enough: it is one
-field in one request, which is exactly the shape an automated request takes
-by accident.
+These pages are read programmatically as well as by a person - scripted
+requests against this service are routine - so a surface that returns real
+statement contents to a single POST is a surface something can wander into
+while looking for something else. A checkbox is not enough: it is one field
+in one request, which is exactly the shape an unattended request takes by
+accident.
 
 So disclosure takes two requests and a phrase typed by hand. The first
 request never returns values no matter what it asks for; it returns the

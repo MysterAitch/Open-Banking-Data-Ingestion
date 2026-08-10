@@ -3490,7 +3490,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # is a second request carrying a single-use token and a typed
         # phrase, because one request with one extra field is exactly the
         # shape an automated caller produces by accident - and these pages
-        # are read by agents as well as by people.
+        # are read programmatically as well as by a person.
         shape = self._read_shape(payload, filename, mask=True)
         body = (
             "<h2>Statement shape</h2>"
