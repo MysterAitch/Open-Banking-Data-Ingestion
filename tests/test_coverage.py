@@ -271,6 +271,24 @@ class TestDatesReadTheWrongWayRound:
         # Day equals month here, so a swap is undetectable AND harmless.
         assert found == []
 
+    def test_Transposition_ARecurringPaymentAtMirrorDates_IsNotASwap(self):
+        # Observed live on first firing: the Clean Air Zone charge paid on
+        # BOTH 01-04 and 04-01, witnessed by every source at both dates -
+        # two real payments whose dates happen to mirror, not a parser
+        # swapping day and month. When both sources hold BOTH dates, each
+        # source corroborates the other's reading and there is nothing to
+        # suspect.
+        found = transpositions(
+            [
+                txn("truelayer", 1, -800, month=4, desc="BCC CLEAN AIR ZONE"),
+                txn("truelayer", 4, -800, month=1, desc="BCC CLEAN AIR ZONE"),
+                txn("halifax-qif", 1, -800, month=4, desc="BCC CLEAN AIR ZONE"),
+                txn("halifax-qif", 4, -800, month=1, desc="BCC CLEAN AIR ZONE"),
+            ]
+        )
+
+        assert found == []
+
     def test_Transposition_CatchesTheMixedCase_WhereOnlyAmbiguousRowsMoved(self):
         found = transpositions(
             [

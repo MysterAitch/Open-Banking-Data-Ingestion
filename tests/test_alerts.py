@@ -17,7 +17,8 @@ from obdi.alerts import Finding, consent_rung, disk_finding, process, refusal_tr
 
 
 def _attempt(hours_ago: float, outcome: str, *, status: int | None = None,
-             connection: str = "starling-api", ref: str = "starling:acc-1") -> dict:
+             connection: str = "starling-api", ref: str = "starling:acc-1",
+             trigger: str = "scheduled") -> dict:
     stamp = datetime.now(UTC) - timedelta(hours=hours_ago)
     return {
         "attempted_at": stamp.isoformat(),
@@ -26,6 +27,7 @@ def _attempt(hours_ago: float, outcome: str, *, status: int | None = None,
         "asked": "routine-full",
         "outcome": outcome,
         "http_status": status,
+        "request_meta": f"trigger={trigger}" if trigger else "",
     }
 
 
@@ -87,6 +89,50 @@ class TestRefusalTrends:
         assert [finding.key for finding in found] == [
             "refusals:starling-api:starling:acc-1"
         ]
+
+
+class TestTheTrendSpeaksOnlyOfTheScheduledConversation:
+    """Attended asks land in the same ledger, and that was found to cut both
+    ways: an attended recovery probe broke a genuine refusal streak, and a
+    run of attended successes could in principle MASK a broken scheduled
+    path entirely. The trend now reads only trigger=scheduled attempts -
+    the scheduler's own conversation with the provider - while rows with
+    no recorded trigger (legacy) stay included rather than blinding old
+    stores."""
+
+    def test_AnAttendedLandedAsk_DoesNotBreakTheScheduledStreak(self):
+        attempts = [
+            _attempt(0, "landed", trigger="attended"),
+            _attempt(6, "refused", status=400),
+            _attempt(18, "refused", status=400),
+            _attempt(30, "refused", status=400),
+        ]
+
+        found = refusal_trends(attempts)
+
+        assert len(found) == 1
+        assert found[0].rung == 3
+
+    def test_AttendedRefusals_DoNotInflateTheRate(self):
+        attempts = []
+        for index in range(8):
+            attempts.append(_attempt(index * 8, "landed"))
+        for index in range(8):
+            attempts.append(
+                _attempt(index * 8 + 1, "refused", status=429, trigger="attended")
+            )
+
+        assert refusal_trends(attempts) == []
+
+    def test_LegacyRowsWithoutATrigger_StayIncluded(self):
+        attempts = [
+            _attempt(hours, "refused", status=400, trigger="")
+            for hours in (0, 12, 24)
+        ]
+
+        found = refusal_trends(attempts)
+
+        assert len(found) == 1
 
 
 class TestEdgeTriggeredAnnouncement:

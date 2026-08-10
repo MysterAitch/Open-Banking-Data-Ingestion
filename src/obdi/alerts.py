@@ -88,6 +88,14 @@ def refusal_trends(
     """
     by_key: dict[tuple[str, str], list[Mapping[str, object]]] = {}
     for row in attempts:
+        # Only the SCHEDULED conversation: attended asks land in the same
+        # ledger, and that cuts both ways - an attended recovery probe broke
+        # a genuine refusal streak, and attended successes could mask a
+        # broken scheduled path entirely. Rows with no recorded trigger
+        # (legacy) stay included rather than blinding old stores.
+        meta = str(row.get("request_meta") or "")
+        if meta and "scheduled" not in meta:
+            continue
         key = (str(row.get("connection_id") or ""), str(row.get("account_ref") or ""))
         by_key.setdefault(key, []).append(row)
 

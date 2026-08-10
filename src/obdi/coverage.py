@@ -930,6 +930,9 @@ def transpositions(transactions: Iterable[Transaction]) -> list[DateTranspositio
 
     found = []
     for (account_id, amount_minor, description), items in sorted(grouped.items()):
+        dates_by_source: dict[str, set[date]] = {}
+        for item in items:
+            dates_by_source.setdefault(item.source, set()).add(item.value_date)
         for left, right in combinations(items, 2):
             if left.source == right.source:
                 continue
@@ -937,6 +940,14 @@ def transpositions(transactions: Iterable[Transaction]) -> list[DateTranspositio
             if a == b:
                 continue
             if a.day == b.month and a.month == b.day and a.year == b.year:
+                # When BOTH sources hold BOTH mirror dates, these are two
+                # real recurring payments whose dates happen to mirror -
+                # each source corroborates the other's reading, and a swap
+                # would require both to have swapped identically. Observed
+                # live on first firing: a road charge paid on 01-04 AND
+                # 04-01, flooding the alarm with six lines of coincidence.
+                if b in dates_by_source[left.source] and a in dates_by_source[right.source]:
+                    continue
                 found.append(
                     DateTransposition(
                         account_id=account_id,
