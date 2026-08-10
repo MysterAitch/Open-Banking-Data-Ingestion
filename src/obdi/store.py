@@ -1143,21 +1143,44 @@ class Store:
         provider reference that actually delivered the row rather than
         whatever the account is called now.
         """
-        rows = self.connection.execute(
-            """
-            SELECT t.entity_id AS entity_id,
-                   COALESCE(ts.source, t.source) AS source,
-                   (SELECT account_ref FROM raw_artefacts
-                     WHERE digest = ts.artefact_digest LIMIT 1) AS feeder,
-                   (SELECT connection_id FROM raw_artefacts
-                     WHERE digest = ts.artefact_digest
-                       AND connection_id != '' LIMIT 1) AS connection
-              FROM transactions t
-              LEFT JOIN transaction_sources ts ON ts.entity_id = t.entity_id
-             WHERE t.account_id = ?
-            """,
-            (account_id,),
-        ).fetchall()
+        # Each artefact is read ONCE, not once per sighting. As correlated
+        # subqueries this cost 37 seconds on the live account page: an
+        # account corroborated by many overlapping imports has several
+        # sightings per transaction, and the connection lookup cannot be
+        # answered from an index, so every sighting fetched a row from a
+        # table whose rows carry whole statement payloads. Artefacts number
+        # in the hundreds while sightings number in the tens of thousands,
+        # so the lookup belongs on the small side.
+        feeders: dict[str, str] = {}
+        connections: dict[str, str] = {}
+        for artefact in self.connection.execute(
+            "SELECT digest, account_ref, connection_id FROM raw_artefacts"
+        ):
+            digest = str(artefact["digest"])
+            feeders.setdefault(digest, str(artefact["account_ref"] or ""))
+            connection = str(artefact["connection_id"] or "")
+            if connection:
+                connections.setdefault(digest, connection)
+
+        rows = [
+            {
+                "entity_id": row["entity_id"],
+                "source": row["source"],
+                "feeder": feeders.get(str(row["artefact_digest"] or ""), ""),
+                "connection": connections.get(str(row["artefact_digest"] or ""), ""),
+            }
+            for row in self.connection.execute(
+                """
+                SELECT t.entity_id AS entity_id,
+                       COALESCE(ts.source, t.source) AS source,
+                       COALESCE(ts.artefact_digest, '') AS artefact_digest
+                  FROM transactions t
+                  LEFT JOIN transaction_sources ts ON ts.entity_id = t.entity_id
+                 WHERE t.account_id = ?
+                """,
+                (account_id,),
+            )
+        ]
 
         by_source: dict[str, set[str]] = {}
         by_feeder: dict[tuple[str, str], set[str]] = {}
