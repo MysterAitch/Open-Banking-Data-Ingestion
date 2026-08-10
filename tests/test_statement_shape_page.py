@@ -77,12 +77,16 @@ class TestThePage:
         assert "9,999.99" in response.text
         assert "Opening balance" in response.text, "layout survives"
 
-    def test_RealValues_ComeBackOnlyWhenAsked_AndSayThatTheyDid(self, server):
+    def test_AskingForRealValues_OffersAConfirmation_ButDisclosesNothingYet(
+        self, server
+    ):
+        # Disclosure is a two-request walk - see test_disclosure_gate for
+        # the whole of it. Here: asking is not receiving.
         response = _post(server, show_values=True)
 
         assert response.status_code == 200
-        assert "1,234.56" in response.text
-        assert "Real values shown" in response.text
+        assert "1,234.56" not in response.text
+        assert 'name="disclose_token"' in response.text
 
     def test_ANonPdf_IsAnsweredNotCrashed(self, server):
         response = httpx.post(

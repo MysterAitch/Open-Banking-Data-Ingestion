@@ -50,6 +50,7 @@ from .doctor import shape_problems
 from .namespaces import validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
+from .statement_shape import ShapeReport
 
 
 def _report_slow_route(method: str, route: str, seconds: float) -> None:
@@ -2614,9 +2615,19 @@ a new name would create a second connection to the same bank.</p>
     return render_page("Bank connections", body)
 
 
+#: Typed by hand to disclose a statement's real contents. A phrase costs
+#: a deliberate keystroke sequence; a checkbox costs one field in one
+#: request, which is what an automated caller sends without meaning to.
+DISCLOSURE_PHRASE = "SHOW REAL VALUES"
+
+
 class ConnectionHandler(BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
+    #: Statements awaiting an explicit disclosure confirmation. Same
+    #: single-use, expiring shape as the upload stash, holding bytes only
+    #: for the walk between the two requests.
+    disclosures: UploadSession = UploadSession()
 
     @property
     def bound_config(self) -> WebConfig:
@@ -3454,7 +3465,6 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(200, render_page("Statement shape", body))
 
     def _statement_shape(self) -> None:
-        from .statement_shape import shape_report
 
         length = int(self.headers.get("Content-Length") or 0)
         if length > 25 * 1024 * 1024:
@@ -3476,30 +3486,96 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             )
             return
 
-        masked = not fields.get("show_values")
+        # This request NEVER discloses, whatever it asked for. Disclosure
+        # is a second request carrying a single-use token and a typed
+        # phrase, because one request with one extra field is exactly the
+        # shape an automated caller produces by accident - and these pages
+        # are read by agents as well as by people.
+        shape = self._read_shape(payload, filename, mask=True)
+        body = (
+            "<h2>Statement shape</h2>"
+            + f'<pre class="scroll" style="white-space:pre">'
+            f"{html.escape(shape.describe())}</pre>"
+        )
+        if fields.get("show_values") and shape.readable and shape.line_count:
+            token = self.disclosures.stash(payload, filename)
+            body += (
+                '<h3>Show the real contents?</h3><p class="alarm">This '
+                "names payees, amounts and balances. Type "
+                f"<strong>{DISCLOSURE_PHRASE}</strong> to confirm - the "
+                "phrase and this one-time token are both required, and the "
+                "token works once.</p>"
+                '<form action="/statement-shape-disclose" method="post">'
+                f'<input type="hidden" name="disclose_token" value="{token}">'
+                '<p><input type="text" name="confirm" size="24" '
+                'autocomplete="off" required></p>'
+                '<p><button type="submit">Disclose the real contents</button>'
+                "</p></form>"
+            )
+        body += (
+            '<p><a class="button" href="/statement-shape">Read another</a></p>'
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Statement shape", body))
+
+    def _read_shape(
+        self, payload: bytes, filename: str, *, mask: bool
+    ) -> ShapeReport:
+        from .statement_shape import shape_report
+
         with tempfile.TemporaryDirectory() as scratch:
             # Written to a temporary file because pypdf reads a path, and
             # removed on the way out: this page stores nothing.
             temporary = Path(scratch) / (filename or "statement.pdf")
             temporary.write_bytes(payload)
-            shape = shape_report(temporary, mask=masked, limit=400)
+            return shape_report(temporary, mask=mask, limit=400)
 
-        warning = (
-            ""
-            if masked
-            else '<p class="alarm"><strong>Real values shown.</strong> This '
-            "output names payees, amounts and balances - do not paste it "
-            "anywhere you would not paste the statement itself.</p>"
-        )
+    def _statement_shape_disclose(self) -> None:
+        """The second half of the deliberate walk to real contents."""
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        fields = {
+            key: values[0] for key, values in parse_qs(raw, keep_blank_values=True).items()
+        }
+        if fields.get("confirm", "").strip().upper() != DISCLOSURE_PHRASE:
+            self._respond(
+                400,
+                error_page(
+                    "Not disclosed",
+                    "<p>The confirmation phrase did not match, so nothing was "
+                    "shown. Read the shape again if you meant to disclose.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
+        try:
+            payload, filename, _ = self.disclosures.claim(
+                fields.get("disclose_token", "")
+            )
+        except KeyError:
+            self._respond(
+                400,
+                error_page(
+                    "Not disclosed",
+                    "<p>That confirmation is spent or expired - a token works "
+                    "once. Read the shape again if you meant to disclose.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
+
+        shape = self._read_shape(payload, filename, mask=False)
         body = (
-            "<h2>Statement shape</h2>"
-            + warning
-            + f'<pre class="scroll" style="white-space:pre">'
+            "<h2>Statement contents</h2>"
+            '<p class="alarm"><strong>Real values shown.</strong> This output '
+            "names payees, amounts and balances - do not paste it anywhere "
+            "you would not paste the statement itself.</p>"
+            f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
             '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
-        self._respond(200, render_page("Statement shape", body))
+        self._respond(200, render_page("Statement contents", body))
 
     def _review_report(self) -> None:
         hook = self.bound_config.review_report_text
@@ -3618,6 +3694,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/statement-shape":
             self._statement_shape()
+            return
+        if route == "/statement-shape-disclose":
+            self._statement_shape_disclose()
             return
 
         if route == "/upload":
