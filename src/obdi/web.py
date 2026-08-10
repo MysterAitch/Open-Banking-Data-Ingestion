@@ -368,6 +368,13 @@ class WebConfig:
     prune_actual: Callable[[], str] | None = None
     #: The review queue decomposed: reasons, clusters, declaration matches.
     review_report_text: Callable[[], str] | None = None
+    #: The uncategorised worklist as data: coverage, then groups with the
+    #: evidence needed to judge them (a real example, how many distinct
+    #: strings, whether it is a reference code rather than a payee).
+    categorise_overview: Callable[[], dict[str, object]] | None = None
+    #: Answer a whole group at human rank. Separate from the overview so a
+    #: read cannot write, and a test can exercise either alone.
+    categorise_apply: Callable[[str, str, str], int] | None = None
     #: Settlement-lag measurement from the starling truth set.
     date_lag_text: Callable[[], str] | None = None
     #: Balance-walk integrity: bank running balances vs held transactions.
@@ -2587,6 +2594,7 @@ def render_index(
 <p><a class="button" href="/attempts">Fetch attempts</a>
 <a class="button" href="/fetch-timeline">Fetch timeline</a></p>
 <p><a class="button" href="/agreements">Cross-source agreement report</a></p>
+<p><a class="button" href="/review">Categorise (uncategorised worklist)</a></p>
 <p><a class="button" href="/statement-shape">Statement shape (PDF layout, values masked)</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
@@ -2697,6 +2705,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/statement-shape":
             self._statement_shape_form()
+            return
+        if route == "/review":
+            self._review_page()
             return
         if route == "/actual-history":
             self._actual_history()
@@ -3577,6 +3588,123 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, render_page("Statement contents", body))
 
+    def _review_page(self, note: str = "") -> None:
+        """The worklist, with the evidence needed to judge each group.
+
+        Deliberately not a list of transactions: the fastest way to empty a
+        thousand-row pile is to answer the ten groups that dominate it, and
+        the fastest way to answer one wrongly is to be shown a stripped
+        label with no example behind it.
+        """
+        hook = self.bound_config.categorise_overview
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        try:
+            overview = hook()
+        except Exception as exc:
+            self._respond(
+                500, error_page("Worklist failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+
+        covered = int(str(overview.get("covered", 0) or 0))
+        eligible = int(str(overview.get("eligible", 0) or 0))
+        legs = int(str(overview.get("transfer_legs", 0) or 0))
+        share = f" ({covered / eligible:.0%})" if eligible else ""
+        rows = []
+        groups = overview.get("groups")
+        for group in groups if isinstance(groups, list) else []:
+            label = str(group.get("label", ""))
+            example = str(group.get("example", ""))
+            marks = []
+            distinct = int(group.get("distinct", 0) or 0)
+            if distinct > 1:
+                marks.append(f"{distinct} distinct strings")
+            if group.get("reference_coded") and group.get("repeating"):
+                marks.append(
+                    "opaque reference, but it repeats - identify it once, "
+                    "then it can be answered exactly"
+                )
+            elif group.get("reference_coded"):
+                marks.append(
+                    "reference codes rather than a payee - an answer here "
+                    "would be a guess"
+                )
+            rows.append(
+                "<tr><td class=\"mono\">"
+                + html.escape(label)
+                + (
+                    f'<br><span class="muted mono">{html.escape(example)}</span>'
+                    if example and example != label
+                    else ""
+                )
+                + (
+                    f'<br><span class="muted">{html.escape("; ".join(marks))}</span>'
+                    if marks
+                    else ""
+                )
+                + f"</td><td>{group.get('count', 0)}</td><td>"
+                + '<form action="/review-apply" method="post">'
+                + f'<input type="hidden" name="label" value="{html.escape(label)}">'
+                + '<input type="text" name="value" size="28" '
+                'placeholder="Group: Leaf" autocomplete="off" required>'
+                + '<button type="submit">Answer all</button>'
+                + "</form></td></tr>"
+            )
+
+        body = (
+            "<h2>Categorise</h2>"
+            + note
+            + f"<p>{covered} of {eligible} eligible transaction(s) carry a "
+            f"category{share}. {legs} confirmed transfer leg(s) are excluded - "
+            "money that stayed in the household is not spending.</p>"
+            "<p>Answering a group here writes at HUMAN rank: it outranks "
+            "every later rule sweep and survives every rebuild. Groups with "
+            "no obvious answer are better left alone than guessed - the "
+            "shape of a payment identifies it when the string does not.</p>"
+            + (
+                "<table><tr><th>Group</th><th>Rows</th><th>Answer</th></tr>"
+                + "".join(rows)
+                + "</table>"
+                if rows
+                else "<p>Nothing uncategorised.</p>"
+            )
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Categorise", body))
+
+    def _review_apply(self) -> None:
+        hook = self.bound_config.categorise_apply
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        fields = {
+            key: values[0]
+            for key, values in parse_qs(raw, keep_blank_values=True).items()
+        }
+        label = fields.get("label", "").strip()
+        value = fields.get("value", "").strip()
+        if not label or not value:
+            self._review_page(
+                '<p class="alarm">Nothing was answered - a group and a '
+                "category are both needed.</p>"
+            )
+            return
+        try:
+            written = hook(label, value, "category")
+        except Exception as exc:
+            self._respond(
+                500, error_page("Could not answer", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        self._review_page(
+            f'<p class="ok">Answered {written} row(s) in '
+            f"{html.escape(label)} as {html.escape(value)}.</p>"
+        )
+
     def _review_report(self) -> None:
         hook = self.bound_config.review_report_text
         if hook is None:
@@ -3697,6 +3825,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/statement-shape-disclose":
             self._statement_shape_disclose()
+            return
+        if route == "/review-apply":
+            self._review_apply()
             return
 
         if route == "/upload":

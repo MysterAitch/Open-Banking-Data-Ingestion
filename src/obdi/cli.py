@@ -1988,6 +1988,37 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         joiner = chr(10)
         return joiner.join(lines)
 
+    def categorise_overview() -> dict[str, object]:
+        """The worklist as data, with each group's evidence attached."""
+        from .categorise import uncategorised_summary
+
+        with Store(db_path) as store:
+            worklist = uncategorised_summary(store, limit=30)
+            held = len(store.annotations("category"))
+            total = len(store.all_transactions())
+        return {
+            "covered": held,
+            "eligible": total - worklist.transfer_legs,
+            "transfer_legs": worklist.transfer_legs,
+            "groups": [
+                {
+                    "label": group.label,
+                    "count": group.count,
+                    "example": group.example,
+                    "distinct": group.distinct,
+                    "reference_coded": group.reference_coded,
+                    "repeating": group.repeating,
+                }
+                for group in worklist.groups
+            ],
+        }
+
+    def categorise_apply(label: str, value: str, kind: str) -> int:
+        from .categorise import apply_to_group
+
+        with Store(db_path) as store:
+            return apply_to_group(store, label, value, kind=kind or "category")
+
     def review_report_text() -> str:
         from .review_report import review_report
 
@@ -2287,6 +2318,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
+        categorise_overview=categorise_overview,
+        categorise_apply=categorise_apply,
         date_lag_text=date_lag_text,
         balance_walk_text=balance_walk_text,
         replay_artefact=replay_artefact,

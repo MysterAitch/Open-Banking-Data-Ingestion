@@ -587,3 +587,43 @@ def explain(store: Store, needle: str) -> Explanation:
     dominant = [day for day, hits in days.items() if hits >= max(2, len(rows) // 3)]
     found.day_of_month = sorted(dominant)
     return found
+
+
+def group_members(store: Store, label: str, *, kind: str = "category") -> list[str]:
+    """Every row in a worklist group still awaiting an answer.
+
+    Membership is by the same digit-stripped label the worklist shows, so
+    what a person sees is what a confirmation acts on. Rows already
+    carrying an answer of this kind are excluded - a group shrinks as it is
+    worked - and confirmed transfer legs never belong to any group, since
+    money that stayed in the household is not spending to categorise.
+    """
+    wanted = _group_key(label)
+    held = store.annotations(kind)
+    return [
+        transaction.entity_id
+        for transaction in store.all_transactions()
+        if not transaction.transfer_confirmed
+        and transaction.entity_id not in held
+        and _group_key(transaction.description) == wanted
+    ]
+
+
+def apply_to_group(
+    store: Store, label: str, value: str, *, kind: str = "category"
+) -> int:
+    """Answer a whole group in one gesture, at HUMAN rank.
+
+    This is what separates the review surface from the rules file: a sweep
+    proposes, a person decides, and what is decided here outranks every
+    later sweep and survives every rebuild. Returns how many rows were
+    answered.
+    """
+    answer = value.strip()
+    if not answer:
+        return 0
+    written = 0
+    for entity in group_members(store, label, kind=kind):
+        if store.annotate(entity, kind, answer, provenance="human"):
+            written += 1
+    return written
