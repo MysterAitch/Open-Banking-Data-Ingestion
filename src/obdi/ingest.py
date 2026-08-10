@@ -156,6 +156,24 @@ def dates_cannot_confirm_format(dates: Sequence[date]) -> bool:
     return bool(dates) and all(value.day <= 12 for value in dates)
 
 
+def media_type_of(payload: bytes, path: Path) -> str:
+    """What the artefact actually holds.
+
+    Content first, filename second: the raw layer's promise is that it
+    keeps the evidence as it arrived, and a stamp that says CSV over a PDF
+    is the one kind of lie that layer must never tell.
+    """
+    from .parsers.uk_banks import PDF_MAGIC
+
+    if payload.startswith(PDF_MAGIC):
+        return "application/pdf"
+    if path.suffix.lower() == ".qif":
+        return "application/qif"
+    if path.suffix.lower() == ".json":
+        return "application/json"
+    return "text/csv"
+
+
 def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     payload = path.read_bytes()
     digest = artefact_digest(payload)
@@ -164,11 +182,14 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
         source=path.suffix.lstrip(".") or "unknown",
         account_ref=account_id,
         fetched_at=datetime.now().astimezone(),
-        media_type="text/csv",
+        media_type=media_type_of(payload, path),
         digest=digest,
         payload=payload,
         origin=path.name,
     )
+    # Landed BEFORE parsing, so evidence survives a file nothing can read
+    # yet - a statement whose parser is written next week replays from here
+    # rather than needing to be fetched from the bank again.
     is_new_artefact = store.land_artefact(artefact)
 
     parser = detect(payload)

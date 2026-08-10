@@ -166,12 +166,27 @@ PARSERS: tuple[type[StatementParser], ...] = (
 )
 
 
+#: A PDF announces itself in its first bytes. Worth recognising even with
+#: no parser to hand: "no parser for this bank's statement yet" is a
+#: different situation from "this export's layout changed", and only one of
+#: them is a fault.
+PDF_MAGIC = b"%PDF-"
+
+
 def detect(payload: bytes) -> StatementParser:
     """Pick a parser by header row, refusing to guess."""
     for parser_class in PARSERS:
         parser = parser_class()
         if parser.sniff(payload):
             return parser
+    if payload.startswith(PDF_MAGIC):
+        raise ParseError(
+            "This is a PDF statement, and no parser exists for this bank's "
+            "layout yet. Read the layout first (the statement-shape page, or "
+            "'obdi statement-shape') - a parser is written per format from "
+            "that shape. The file itself is kept either way, so a parser "
+            "written later replays it without a re-download."
+        )
     raise ParseError(
         "No parser recognised this file's header row. Either the source is new "
         "or an existing export changed layout - inspect it before widening."
