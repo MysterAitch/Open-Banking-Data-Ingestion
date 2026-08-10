@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from . import fingerprint
-from .accounts import AccountBinding, AccountMap
+from .accounts import AccountBinding, AccountMap, AccountRecord, lifecycle_breach
 from .connections import ConnectionStore
 from .coverage import (
     SourceCoverage,
@@ -67,7 +67,12 @@ def _account_map() -> AccountMap:
     if not path or not Path(path).is_file():
         return AccountMap()
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    return AccountMap([AccountBinding(**binding) for binding in raw.get("bindings", [])])
+    return AccountMap(
+        [AccountBinding(**binding) for binding in raw.get("bindings", [])],
+        records=[
+            AccountRecord.from_dict(entry) for entry in raw.get("accounts", [])
+        ],
+    )
 
 
 def _apply_bind(
@@ -1610,6 +1615,12 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         # OTHER accounts means the chosen destination is probably a
         # mis-tap - the class that put three statement chunks in a Space.
         doubt = destination_doubt(found, source=parser.source, account=account)
+        # The registry's lifecycle guard: rows outside the account's
+        # declared open window have to explain themselves. Only speaks
+        # where a human declared the dates it checks.
+        breach = lifecycle_breach(
+            [row.value_date for row in rows], _account_map().record(account)
+        )
         # The excluded own-source rows still get their own check, with the
         # opposite emphasis: agreement here is NOT corroboration (a file
         # cannot witness itself), but DISAGREEMENT is the export-drift
@@ -1637,6 +1648,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "destination_doubt": (
                 {"message": doubt.describe()} if doubt is not None else None
             ),
+            "lifecycle_doubt": ({"message": breach} if breach else None),
         }
 
     def confirm_upload(payload: bytes, filename: str, account: str) -> dict[str, object]:
@@ -1771,6 +1783,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 connection_ids = sorted(ConnectionStore(store_path_env).load())
         with Store(db_path) as store:
             labels = collect_display_labels(store, _account_map(), connection_ids)
+            # The registry's declared names win: a human named the account,
+            # and declared-but-feedless accounts appear at all only here.
+            labels.update(_account_map().registry_labels())
             counts = {
                 str(row[0]): int(row[1])
                 for row in store.connection.execute(

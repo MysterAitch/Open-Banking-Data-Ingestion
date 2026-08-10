@@ -3673,12 +3673,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
             )
             return
-        raw_doubt = preview.get("destination_doubt")
-        doubt_message = (
-            str(raw_doubt.get("message"))
-            if isinstance(raw_doubt, dict) and raw_doubt.get("message")
-            else ""
-        )
+        doubt_messages = []
+        for key in ("destination_doubt", "lifecycle_doubt"):
+            raw_doubt = preview.get(key)
+            if isinstance(raw_doubt, dict) and raw_doubt.get("message"):
+                doubt_messages.append(str(raw_doubt.get("message")))
+        doubt_message = " ALSO: ".join(doubt_messages)
         token = self.uploads.stash(payload, filename, doubted=bool(doubt_message))
         raw_sample = preview.get("sample")
         sample_rows = "".join(

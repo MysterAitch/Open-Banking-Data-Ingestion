@@ -17,7 +17,128 @@ Pulling one account from two independent sources is deliberate, not wasteful:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
+
+
+def _dict_items(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _parse_date(value: object) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(str(value))
+
+
+@dataclass(frozen=True)
+class LimitWindow:
+    """A credit or overdraft limit as it stood over a dated window.
+
+    Captured ahead of any consumer - the raw-retention discipline applied
+    to account facts. A future utilisation view or balance-exceeds-limit
+    warning is cheap once these exist and impossible retroactively.
+    """
+
+    kind: str
+    window_from: date | None
+    window_to: date | None
+    amount_minor: int
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> LimitWindow:
+        return cls(
+            kind=str(raw.get("kind", "")),
+            window_from=_parse_date(raw.get("from")),
+            window_to=_parse_date(raw.get("to")),
+            amount_minor=int(str(raw.get("amount_minor", 0) or 0)),
+        )
+
+
+@dataclass(frozen=True)
+class RateWindow:
+    """An interest rate over a dated window - including FUTURE windows,
+    which is the point: a promotional 0% carries the date it reverts, and
+    that future date is exactly the impending-danger ladder's shape."""
+
+    kind: str
+    window_from: date | None
+    window_to: date | None
+    annual_percent: float
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> RateWindow:
+        return cls(
+            kind=str(raw.get("kind", "")),
+            window_from=_parse_date(raw.get("from")),
+            window_to=_parse_date(raw.get("to")),
+            annual_percent=float(str(raw.get("annual_percent", 0) or 0)),
+        )
+
+
+@dataclass(frozen=True)
+class AccountRecord:
+    """A declared, first-class account - the registry entry that exists
+    independently of any data source. A mortgage without a feed and cash in
+    a tin are accounts; the pipes that populate other accounts are
+    incidental mechanisms that attach evidence to declared containers."""
+
+    id: str
+    kind: str = ""
+    label: str = ""
+    parent: str | None = None
+    opened: date | None = None
+    closed: date | None = None
+    limits: tuple[LimitWindow, ...] = field(default=())
+    rates: tuple[RateWindow, ...] = field(default=())
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> AccountRecord:
+        return cls(
+            id=str(raw.get("id", "")),
+            kind=str(raw.get("kind", "")),
+            label=str(raw.get("label", "")),
+            parent=str(raw["parent"]) if raw.get("parent") else None,
+            opened=_parse_date(raw.get("opened")),
+            closed=_parse_date(raw.get("closed")),
+            limits=tuple(
+                LimitWindow.from_dict(item)
+                for item in _dict_items(raw.get("limits"))
+            ),
+            rates=tuple(
+                RateWindow.from_dict(item)
+                for item in _dict_items(raw.get("rates"))
+            ),
+        )
+
+
+def lifecycle_breach(dates: list[date], record: AccountRecord | None) -> str | None:
+    """Rows outside the account's declared open window, named with their
+    denominator - or None where there is nothing declared to breach.
+
+    The guard only speaks where a human has stated the facts it checks:
+    an undeclared account carries no lifecycle claim.
+    """
+    if record is None or not dates:
+        return None
+    total = len(dates)
+    if record.opened is not None:
+        early = sum(1 for value in dates if value < record.opened)
+        if early:
+            return (
+                f"{early} of {total} rows fall before the account opened "
+                f"({record.opened.isoformat()}) - is this the right account?"
+            )
+    if record.closed is not None:
+        late = sum(1 for value in dates if value > record.closed)
+        if late:
+            return (
+                f"{late} of {total} rows fall after the account closed "
+                f"({record.closed.isoformat()}) - is this the right account?"
+            )
+    return None
 
 
 @dataclass(frozen=True)
@@ -33,10 +154,33 @@ class AccountBinding:
 class AccountMap:
     """Resolves (source, provider account id) to a canonical account id."""
 
-    def __init__(self, bindings: list[AccountBinding] | None = None) -> None:
+    def __init__(
+        self,
+        bindings: list[AccountBinding] | None = None,
+        *,
+        records: list[AccountRecord] | None = None,
+    ) -> None:
         self._bindings: dict[tuple[str, str], str] = {}
+        self._records: dict[str, AccountRecord] = {
+            record.id: record for record in (records or []) if record.id
+        }
         for binding in bindings or []:
             self.bind(binding)
+
+    def record(self, canonical_id: str) -> AccountRecord | None:
+        return self._records.get(canonical_id)
+
+    def declared_ids(self) -> list[str]:
+        return sorted(self._records)
+
+    def registry_labels(self) -> dict[str, str]:
+        """The declared display names - a human named the account, so the
+        human's name wins over anything derived from provider payloads."""
+        return {
+            record.id: record.label
+            for record in self._records.values()
+            if record.label
+        }
 
     def bind(self, binding: AccountBinding) -> None:
         self._bindings[(binding.source, binding.provider_account_id)] = binding.canonical_id

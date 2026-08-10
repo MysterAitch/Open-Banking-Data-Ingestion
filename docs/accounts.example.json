@@ -15,6 +15,47 @@
     "This file names accounts, not balances. It is still yours - keep it with",
     "your data, outside every repository."
   ],
+  "_accounts_comment": [
+    "DECLARED accounts - first-class registry entries that exist",
+    "independently of any data source. A mortgage without a feed and cash",
+    "in a tin are accounts; bindings below attach evidence to them, never",
+    "conjure them. The declared label wins the display name; opened/closed",
+    "drive the lifecycle import guard (rows outside the window must be",
+    "overridden); limits and rates are captured AHEAD of consumers - dated",
+    "windows with future dates welcome (a promotional rate carries the day",
+    "it reverts, which is what a future notification will hang from)."
+  ],
+  "accounts": [
+    {
+      "id": "starling-personal",
+      "kind": "current",
+      "label": "Personal (Starling)",
+      "opened": "2019-01-17"
+    },
+    {
+      "id": "halifax-clarity-credit-card",
+      "kind": "credit-card",
+      "label": "Halifax Clarity",
+      "opened": "2025-07-01",
+      "limits": [
+        { "kind": "credit", "from": "2025-07-01", "amount_minor": 500000 }
+      ],
+      "rates": [
+        {
+          "kind": "purchase",
+          "from": "2025-07-01",
+          "to": "2026-07-01",
+          "annual_percent": 0
+        }
+      ]
+    },
+    {
+      "id": "piggy-bank",
+      "kind": "cash",
+      "label": "Piggy bank (no feed exists; manual entries only)"
+    }
+  ],
+
   "bindings": [
     {
       "canonical_id": "starling-personal",
