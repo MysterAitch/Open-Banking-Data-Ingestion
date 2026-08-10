@@ -2930,6 +2930,26 @@ def main(argv: list[str] | None = None) -> int:
         help="report the detected families without writing anything",
     )
 
+    shape_command = subcommands.add_parser(
+        "statement-shape",
+        help="show a PDF statement's LAYOUT with its values masked - safe "
+        "to share when writing a parser for a bank's format",
+    )
+    shape_command.add_argument("path", type=Path, help="the PDF statement")
+    shape_command.add_argument(
+        "--show-values",
+        action="store_true",
+        help="print the real contents instead of the masked shape - this "
+        "discloses transactions, balances and names, so ask for it only "
+        "when that is what you want",
+    )
+    shape_command.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="how many lines to print (default 200)",
+    )
+
     explain_command = subcommands.add_parser(
         "explain",
         help="what is this payment? the shape of every transaction matching "
@@ -3120,6 +3140,18 @@ def main(argv: list[str] | None = None) -> int:
                 "excluded - transfers stay uncategorised)"
             )
         return 0
+
+    if args.command == "statement-shape":
+        from .statement_shape import shape_report
+
+        if not args.path.is_file():
+            print(f"No such file: {args.path}", file=sys.stderr)
+            return 2
+        shape = shape_report(
+            args.path, mask=not args.show_values, limit=args.limit
+        )
+        print(shape.describe())
+        return 0 if shape.readable else 1
 
     if args.command == "explain":
         from .categorise import explain
