@@ -3259,6 +3259,20 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + _breakdown_html(breakdown)
             + "<h2>Computed shape</h2>"
             + _shape_html(summary)
+            + (
+                # Where the render cost went, on the page it cost - the
+                # 40-second-index lesson: a slow page must name its own
+                # hotspot where the person suffering it is already looking.
+                '<p class="muted mono">computed: '
+                + html.escape(
+                    ", ".join(str(entry) for entry in raw_timings)
+                    if isinstance(raw_timings := shape.get("timings"), list)
+                    else ""
+                )
+                + "</p>"
+                if shape.get("timings")
+                else ""
+            )
             + HOME_LINK
         )
         self._respond(200, render_page("Account", body))

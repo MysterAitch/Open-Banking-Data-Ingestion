@@ -98,3 +98,54 @@ class TestHotReadPaths_GrowNearLinearly:
             small_s = _best_of(lambda: pair_transfer_entities(small_rows))
             large_s = _best_of(lambda: pair_transfer_entities(large_rows))
             _assert_near_linear("pair_transfer_entities", small_s, large_s)
+
+
+class TestSourceBreakdown_UnderSiblingHeavyDigests:
+    """The fourth bite of the digest-fan disease, found on the live account
+    page: 41s for the account with ~9.6k sightings against 0.7s for one
+    with 1.7k. source_breakdown ran two correlated subqueries against
+    raw_artefacts BY DIGEST for every sighting row - and rolling-epoch
+    feed digests carry hundreds of sibling rows, so the cost was
+    sightings x siblings. The general probe missed it because its sibling
+    density was too thin; this fixture is deliberately sibling-dense.
+    """
+
+    def test_SourceBreakdown_WithDenseSiblings_StaysNearLinear(self, tmp_path):
+        def build(n: int) -> Store:
+            store = Store(tmp_path / f"dense-{n}.sqlite3")
+            payload = b'{"feedItems": []}'
+            shared = artefact_digest(payload)
+            # Siblings scale WITH the data, as they do live: every cycle
+            # lands another byte-identical empty feed under a new origin.
+            for i in range(n):
+                store.land_artefact(
+                    RawArtefact(
+                        source="starling-feed", account_ref="acct-dense",
+                        fetched_at=datetime(2026, 8, 1, tzinfo=UTC),
+                        media_type="application/json", digest=shared,
+                        payload=payload, origin=f"https://x?dense={i}",
+                        connection_id="starling-api",
+                    )
+                )
+            store.begin_batch()
+            for i in range(n):
+                t = Transaction(
+                    account_id="acct-dense",
+                    amount_minor=-100 - i,
+                    value_date=date(2026, 1 + i % 12, 1 + i % 28),
+                    booking_date=date(2026, 1 + i % 12, 1 + i % 28),
+                    description=f"txn {i}", source="starling-feed",
+                    entity_id=f"d{i:07d}", content_key=f"dk{i}",
+                    artefact_digest=shared,
+                )
+                store.upsert_transaction(t, match_tier="exact")
+                store.record_source(t)
+            store.flush_batch()
+            store.connection.commit()
+            return store
+
+        with build(SMALL) as small, build(LARGE) as large:
+            small_s = _best_of(lambda: small.source_breakdown("acct-dense"))
+            large_s = _best_of(lambda: large.source_breakdown("acct-dense"))
+
+        _assert_near_linear("source_breakdown dense-siblings", small_s, large_s)

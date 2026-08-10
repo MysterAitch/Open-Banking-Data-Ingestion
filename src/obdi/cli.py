@@ -1372,11 +1372,25 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         More useful than a dozen overlapping artefacts for the same account:
         this is what the store BELIEVES after matching, in one table.
+        Phase-timed because the page hit 45s on the largest account with
+        every individually-suspected hook measuring fast in isolation -
+        when hypotheses run out, the page itself must name its cost.
         """
+        import time as _time
+
         from .rawview import summarise
 
+        timings: list[tuple[str, float]] = []
+
+        def _timed_phase(name: str, began: float) -> float:
+            now = _time.perf_counter()
+            timings.append((name, now - began))
+            return now
+
+        mark = _time.perf_counter()
         with Store(db_path) as store:
             held = store.transactions_by_sighting()
+        mark = _timed_phase("sightings", mark)
         rows = [t for t in held if t.account_id == ref]
         if not rows:
             return None
@@ -1402,6 +1416,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     item[f"provider.{key}"] = value
             items.append(item)
         payload = json.dumps({"results": items}).encode()
+        mark = _timed_phase("items+json", mark)
         details: dict[str, object] = {}
         with Store(db_path) as store:
             for connection_id in sorted(ConnectionStore(store_path).load()):
@@ -1416,18 +1431,23 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             "connection": connection_id,
                             "provider_ref": account["account_id"],
                         }
+        mark = _timed_phase("connection-details", mark)
         from .labels import collect_feeder_labels
 
         with Store(db_path) as store:
             breakdown = store.source_breakdown(ref)
+            mark = _timed_phase("source-breakdown", mark)
             feeder_labels = collect_feeder_labels(
                 store, sorted(ConnectionStore(store_path).load())
             )
+        mark = _timed_phase("feeder-labels", mark)
         feeders = breakdown.get("by_feeder")
         for entry in feeders if isinstance(feeders, list) else []:
             if isinstance(entry, dict):
                 raw_ref = str(entry.get("feeder", ""))
                 entry["label"] = feeder_labels.get(raw_ref, raw_ref or "(not recorded)")
+        shape_summary = summarise(payload, "application/json")
+        _timed_phase("summarise", mark)
         return {
             "ref": ref,
             # The headline is transactions, never sightings - a payment
@@ -1435,8 +1455,11 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "count": breakdown.get("transactions", len(rows)),
             "sources": sorted({t.source for t in rows}),
             "breakdown": breakdown,
-            "summary": summarise(payload, "application/json"),
+            "summary": shape_summary,
             "details": details,
+            "timings": [
+                f"{name} {seconds:.2f}s" for name, seconds in timings
+            ],
         }
 
     def account_feeders() -> dict[str, list[str]]:
