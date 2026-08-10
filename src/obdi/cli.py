@@ -2923,6 +2923,18 @@ def main(argv: list[str] | None = None) -> int:
         help="report the detected families without writing anything",
     )
 
+    explain_command = subcommands.add_parser(
+        "explain",
+        help="what is this payment? the shape of every transaction matching "
+        "a string - cadence, amounts, accounts, span - for identifying a "
+        "reference that names nothing",
+    )
+    explain_command.add_argument(
+        "needle",
+        help="substring of the description or counterparty (e.g. a bank "
+        "reference like the ones the worklist marks opaque)",
+    )
+
     subcommands.add_parser(
         "alert",
         help="evaluate findings (refusal trends, stale feeds, consent expiry) "
@@ -3072,7 +3084,12 @@ def main(argv: list[str] | None = None) -> int:
             for group in worklist.groups:
                 suffix = f"  <- '{group.example}'" if group.example != group.label else ""
                 note = f"  [{group.distinct} distinct]" if group.distinct > 1 else ""
-                if group.reference_coded:
+                if group.reference_coded and group.repeating:
+                    note += (
+                        "  [opaque reference, but it REPEATS - identify it once "
+                        "('obdi explain') then rule on the exact string]"
+                    )
+                elif group.reference_coded:
                     note += "  [reference codes, not a payee - a rule here would guess]"
                 print(f"  {group.count:>5}  {group.label}{suffix}{note}")
         else:
@@ -3082,6 +3099,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"({worklist.transfer_legs} confirmed transfer leg(s) "
                 "excluded - transfers stay uncategorised)"
             )
+        return 0
+
+    if args.command == "explain":
+        from .categorise import explain
+
+        with Store(db_path) as store:
+            print(explain(store, args.needle).describe())
         return 0
 
     if args.command == "propagate":

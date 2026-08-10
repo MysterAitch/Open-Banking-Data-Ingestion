@@ -375,6 +375,11 @@ class WorklistGroup:
     distinct: int = 0
     #: The example is mostly digits: a reference code, not a merchant.
     reference_coded: bool = False
+    #: The same few strings recur. Opposite advice from a scatter of
+    #: one-off references: a repeating reference can be ruled on EXACTLY
+    #: once a human identifies it, so the answer is "identify it", not
+    #: "do not write a rule".
+    repeating: bool = False
 
 
 @dataclass
@@ -415,9 +420,127 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
             example=examples[key],
             distinct=len(seen[key]),
             reference_coded=_reference_coded(examples[key]),
+            repeating=count >= 3 and len(seen[key]) <= max(2, count // 10),
         )
         for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
             :limit
         ]
     ]
     return worklist
+
+
+@dataclass
+class Explanation:
+    """The shape of a set of transactions, for identifying what a string
+    that names nothing actually is."""
+
+    needle: str
+    count: int = 0
+    incoming: int = 0
+    outgoing: int = 0
+    accounts: list[str] = field(default_factory=list)
+    distinct_descriptions: list[str] = field(default_factory=list)
+    amount_low: int = 0
+    amount_high: int = 0
+    common_amount: int | None = None
+    common_amount_count: int = 0
+    currency: str = "GBP"
+    first: str = ""
+    last: str = ""
+    typical_gap_days: int | None = None
+    day_of_month: list[int] = field(default_factory=list)
+
+    def cadence(self) -> str:
+        """A named rhythm only when the gaps actually show one."""
+        gap = self.typical_gap_days
+        if gap is None:
+            return ""
+        for low, high, name in (
+            (6, 8, "weekly"),
+            (13, 15, "fortnightly"),
+            (27, 32, "monthly"),
+            (88, 95, "quarterly"),
+            (360, 370, "annual"),
+        ):
+            if low <= gap <= high:
+                return name
+        return ""
+
+    def describe(self) -> str:
+        from .money import format_amount
+
+        if not self.count:
+            return f"no transaction matches '{self.needle}'"
+        lines = [
+            f"{self.count} transaction(s) matching '{self.needle}': "
+            f"{self.outgoing} out, {self.incoming} in, "
+            f"{self.first} .. {self.last}"
+        ]
+        band = format_amount(self.amount_low, currency=self.currency)
+        if self.amount_high != self.amount_low:
+            band += " .. " + format_amount(self.amount_high, currency=self.currency)
+        lines.append(f"  amounts: {band}")
+        if self.common_amount is not None and self.common_amount_count > 1:
+            lines.append(
+                f"  most common: "
+                f"{format_amount(self.common_amount, currency=self.currency)} "
+                f"x{self.common_amount_count} of {self.count}"
+            )
+        if self.typical_gap_days is not None:
+            rhythm = self.cadence()
+            named = f" ({rhythm})" if rhythm else " (no regular rhythm)"
+            lines.append(f"  typical gap: {self.typical_gap_days} day(s){named}")
+        if self.day_of_month:
+            days = ", ".join(str(day) for day in self.day_of_month)
+            lines.append(f"  lands on day: {days}")
+        lines.append(f"  accounts: {', '.join(self.accounts)}")
+        for description in self.distinct_descriptions[:5]:
+            lines.append(f"  description: '{description}'")
+        return "\n".join(lines)
+
+
+def explain(store: Store, needle: str) -> Explanation:
+    """Everything known about the transactions whose description or
+    counterparty contains `needle` - the evidence for identifying a
+    reference that names nothing."""
+    from collections import Counter
+
+    wanted = needle.casefold()
+    rows = [
+        transaction
+        for transaction in store.all_transactions()
+        if wanted in transaction.description.casefold()
+        or wanted in transaction.counterparty.casefold()
+    ]
+    found = Explanation(needle=needle, count=len(rows))
+    if not rows:
+        return found
+
+    rows.sort(key=lambda t: t.value_date)
+    found.incoming = sum(1 for t in rows if t.amount_minor > 0)
+    found.outgoing = len(rows) - found.incoming
+    found.accounts = sorted({t.account_id for t in rows})
+    found.distinct_descriptions = [
+        description
+        for description, _count in Counter(t.description for t in rows).most_common()
+    ]
+    amounts = [t.amount_minor for t in rows]
+    found.amount_low = min(amounts)
+    found.amount_high = max(amounts)
+    amount, hits = Counter(amounts).most_common(1)[0]
+    found.common_amount, found.common_amount_count = amount, hits
+    found.currency = str(rows[0].currency)
+    found.first, found.last = str(rows[0].value_date), str(rows[-1].value_date)
+
+    if len(rows) > 1:
+        gaps = sorted(
+            (rows[i + 1].value_date - rows[i].value_date).days
+            for i in range(len(rows) - 1)
+        )
+        found.typical_gap_days = gaps[len(gaps) // 2]
+    # Only report landing days when they concentrate; a scatter across the
+    # month is not a fact about the payment.
+    days = Counter(t.value_date.day for t in rows)
+    dominant = [day for day, hits in days.items() if hits >= max(2, len(rows) // 3)]
+    found.day_of_month = sorted(dominant)
+    return found
