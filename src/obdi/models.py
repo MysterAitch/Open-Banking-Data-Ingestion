@@ -115,6 +115,16 @@ class Transaction:
     """
 
     account_id: str
+    #: SIGNED, always and everywhere: money leaving is negative, money
+    #: arriving is positive, in every account of every kind. A balance is
+    #: then the running sum, so an overdraft goes negative, a credit card
+    #: goes further negative as it is spent on, and a payment to that card
+    #: moves it back towards zero - nothing downstream needs to know
+    #: whether an account is an asset or a liability, because the sign
+    #: already says which way the money went. Documents disagree about this
+    #: and always will (Starling publishes a spend as negative, Amex
+    #: publishes the same spend as positive), so the translation belongs in
+    #: the parser, at the document boundary, and nowhere else.
     amount_minor: int
     value_date: date
     booking_date: date
