@@ -56,6 +56,13 @@ class SweepSummary:
     protected: int = 0
     transfer_legs: int = 0
     samples: list[str] = field(default_factory=list)
+    hits: dict[str, int] = field(default_factory=dict)
+
+    def dead_rules(self) -> list[str]:
+        """Rules that matched nothing - the calibration signal. A rule
+        written from a lossy worklist label matches nothing while looking
+        exactly like a rule with nothing to match."""
+        return [match for match, count in self.hits.items() if count == 0]
 
     def describe(self) -> str:
         return (
@@ -67,7 +74,12 @@ class SweepSummary:
         )
 
 
-def _first_match(rules: list[dict[str, str]], texts: list[str], key: str) -> str | None:
+def _first_match(
+    rules: list[dict[str, str]],
+    texts: list[str],
+    key: str,
+    hits: dict[str, int] | None = None,
+) -> str | None:
     for rule in rules:
         needle = rule.get("match", "").casefold()
         if not needle:
@@ -75,6 +87,8 @@ def _first_match(rules: list[dict[str, str]], texts: list[str], key: str) -> str
         if any(needle in text.casefold() for text in texts):
             value = rule.get(key, "")
             if value:
+                if hits is not None:
+                    hits[rule["match"]] = hits.get(rule["match"], 0) + 1
                 return value
     return None
 
@@ -95,6 +109,12 @@ def apply_rules(
     category_rules = rules.get("category_rules", [])
     summary = SweepSummary()
 
+    # Every rule starts at zero so one that never fires is REPORTED rather
+    # than merely absent from the tally.
+    for rule in (*payee_rules, *category_rules):
+        if rule.get("match"):
+            summary.hits.setdefault(rule["match"], 0)
+
     held_categories = store.annotations("category")
     held_payees = store.annotations("payee")
 
@@ -109,7 +129,7 @@ def apply_rules(
         entity = transaction.entity_id
         texts = [transaction.description, transaction.counterparty]
 
-        payee = _first_match(payee_rules, texts, "payee")
+        payee = _first_match(payee_rules, texts, "payee", summary.hits)
         if payee is not None:
             existing = held_payees.get(entity)
             revisable = existing is None or existing[1].startswith("rule")
@@ -119,7 +139,7 @@ def apply_rules(
                 summary.payees_normalised += 1
             texts.append(payee)
 
-        category = _first_match(category_rules, texts, "category")
+        category = _first_match(category_rules, texts, "category", summary.hits)
         if category is None:
             continue
         existing = held_categories.get(entity)
@@ -308,7 +328,9 @@ class Worklist:
     """The uncategorised groups plus what was deliberately left out of
     them, so the exclusions stay observable rather than silent."""
 
-    groups: list[tuple[str, int]] = field(default_factory=list)
+    #: (label, count, example) - the label is lossy, the example is a real
+    #: description a rule can be written against.
+    groups: list[tuple[str, int, str]] = field(default_factory=list)
     transfer_legs: int = 0
 
 
@@ -320,6 +342,7 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
     so the default's cost is always visible."""
     categorised = set(store.annotations("category"))
     counts: dict[str, int] = {}
+    examples: dict[str, str] = {}
     worklist = Worklist()
     for transaction in store.all_transactions():
         if transaction.transfer_confirmed:
@@ -330,7 +353,11 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
         key = _group_key(transaction.description)
         if key:
             counts[key] = counts.get(key, 0) + 1
-    worklist.groups = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
-        :limit
+            examples.setdefault(key, transaction.description)
+    worklist.groups = [
+        (key, count, examples[key])
+        for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
+            :limit
+        ]
     ]
     return worklist

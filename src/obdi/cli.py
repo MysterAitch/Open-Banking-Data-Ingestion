@@ -3055,11 +3055,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(prefix + sweep.describe())
                 for sample in sweep.samples:
                     print(f"  {sample}")
+                dead = sweep.dead_rules()
+                if dead:
+                    print(
+                        f"  {len(dead)} of {len(sweep.hits)} rule(s) matched "
+                        "NOTHING - check them against the examples below "
+                        "(group labels are stripped of digits and *#, so a "
+                        "label is not always a matchable string):"
+                    )
+                    for match in dead:
+                        print(f"    no hits: '{match}'")
             worklist = uncategorised_summary(store)
         if worklist.groups:
             print("Biggest uncategorised groups (rule-writing worklist):")
-            for name, count in worklist.groups:
-                print(f"  {count:>5}  {name}")
+            print("  count  group -> example description to write rules against")
+            for name, count, example in worklist.groups:
+                suffix = f"  <- '{example}'" if example != name else ""
+                print(f"  {count:>5}  {name}{suffix}")
         else:
             print("Nothing uncategorised.")
         if worklist.transfer_legs:
