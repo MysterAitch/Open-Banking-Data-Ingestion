@@ -3674,9 +3674,24 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             summary_html = "".join(
                 f"<p>{html.escape(line)}</p>" for line in summary.splitlines()
             )
+        # A statement-chunk session imports many files into ONE account;
+        # sending the person back to the homepage to re-scroll and re-pick
+        # the same destination each time taxes exactly the workflow the
+        # door exists for. The destination is already known - only the
+        # file is new - and the pre-filled form still routes through the
+        # same preview, so destination-first verification is preserved.
+        another = (
+            f"<h2>Import another into {html.escape(account)}</h2>"
+            '<form action="/upload" method="post" enctype="multipart/form-data">'
+            f'<input type="hidden" name="account" value="{html.escape(account)}">'
+            '<p><input type="file" name="statement" required></p>'
+            '<p><button class="button" type="submit" '
+            'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+            "Preview import</button></p></form>"
+        )
         self._respond(
             200,
-            render_page("Imported", summary_html + HOME_LINK),
+            render_page("Imported", summary_html + another + HOME_LINK),
         )
 
     def _starling_probe(self, params: dict[str, list[str]]) -> None:

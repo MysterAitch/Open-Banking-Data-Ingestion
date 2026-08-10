@@ -2472,6 +2472,12 @@ class TestUploadingAFileFromThePage:
         assert "DISAGREE" in result
         assert "<li>1 in halifax-csv ONLY" in result
         assert "COFFEE" in result
+        # A chunk session imports many files into ONE account: the result
+        # page offers the next upload with the destination pre-filled,
+        # still routing through the same preview.
+        assert "Import another into halifax-current" in result
+        assert 'name="account" value="halifax-current"' in result
+        assert 'type="file" name="statement"' in result
 
     def test_Upload_UnrecognisedFile_IsRefusedWithTheParserVerdict(self, tmp_path):
         def preview(payload, filename, account):
