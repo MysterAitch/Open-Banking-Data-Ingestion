@@ -32,7 +32,7 @@ from .models import RawArtefact, SourceTier, Transaction, Valuation
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
@@ -224,6 +224,20 @@ CREATE TABLE IF NOT EXISTS review_queue (
     created_at TEXT NOT NULL,
     resolved_at TEXT
 );
+
+-- The annotation layer: revisable facts ABOUT transactions, beside the
+-- derived tables rather than in them. Keyed by entity_id (deterministic
+-- across rebuilds), so a rebuild wipes and re-derives the transactions and
+-- these simply re-attach - categorise once, keep forever. Single-valued
+-- per (entity, kind): category and payee today, extensible by kind.
+CREATE TABLE IF NOT EXISTS annotations (
+    entity_id    TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    provenance   TEXT NOT NULL,
+    annotated_at TEXT NOT NULL,
+    PRIMARY KEY (entity_id, kind)
+);
 """
 
 
@@ -235,6 +249,13 @@ class _WriteBatch:
     upserts: list[tuple[object, ...]] = field(default_factory=list)
     sightings: list[tuple[object, ...]] = field(default_factory=list)
     reviews: list[tuple[object, ...]] = field(default_factory=list)
+
+
+_PROVENANCE_RANKS = {"rule": 1, "model": 2, "human": 3}
+
+
+def _provenance_rank(provenance: str) -> int:
+    return _PROVENANCE_RANKS.get(provenance.split(":", 1)[0], 0)
 
 
 def _stamp_now() -> str:
@@ -818,6 +839,46 @@ class Store:
         )
         self.connection.commit()
         return cursor.rowcount
+
+    def annotate(
+        self, entity_id: str, kind: str, value: str, *, provenance: str
+    ) -> bool:
+        """Record a revisable fact about a transaction, respecting rank.
+
+        Provenance ranks human > model > rule (the prefix before any ':'
+        decides), and a write only lands when it EQUALS OR OUTRANKS what is
+        already there - a human's word is never overwritten by a machine's,
+        while a rule may revisit a rule's work as the rules evolve. Returns
+        whether the write landed.
+        """
+        row = self.connection.execute(
+            "SELECT provenance FROM annotations WHERE entity_id = ? AND kind = ?",
+            (entity_id, kind),
+        ).fetchone()
+        if row is not None:
+            existing = _provenance_rank(str(row["provenance"]))
+            if _provenance_rank(provenance) < existing:
+                return False
+        self.connection.execute(
+            "INSERT INTO annotations (entity_id, kind, value, provenance, annotated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(entity_id, kind) DO UPDATE SET "
+            "value = excluded.value, provenance = excluded.provenance, "
+            "annotated_at = excluded.annotated_at",
+            (entity_id, kind, value, provenance, _stamp_now()),
+        )
+        self.connection.commit()
+        return True
+
+    def annotations(self, kind: str) -> dict[str, tuple[str, str]]:
+        """Every annotation of one kind: entity_id -> (value, provenance)."""
+        return {
+            str(row["entity_id"]): (str(row["value"]), str(row["provenance"]))
+            for row in self.connection.execute(
+                "SELECT entity_id, value, provenance FROM annotations WHERE kind = ?",
+                (kind,),
+            )
+        }
 
     def refile_artefact(self, artefact_id: int, new_account_ref: str) -> str | None:
         """Correct ONE artefact's landed account - rebind's per-artefact

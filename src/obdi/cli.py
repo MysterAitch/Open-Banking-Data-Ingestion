@@ -2879,6 +2879,24 @@ def main(argv: list[str] | None = None) -> int:
         "network call; only an explicit invalid_client counts against them)",
     )
 
+    categorise_command = subcommands.add_parser(
+        "categorise",
+        help="apply the category/payee rules in bulk (annotations survive "
+        "rebuilds and seed every replay), then show the biggest "
+        "uncategorised groups - the rule-writing worklist",
+    )
+    categorise_command.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what the rules would do without writing anything",
+    )
+    categorise_command.add_argument(
+        "--rules",
+        type=Path,
+        default=None,
+        help="rules file (default: OBDI_RULES, else rules.json beside the store)",
+    )
+
     subcommands.add_parser(
         "alert",
         help="evaluate findings (refusal trends, stale feeds, consent expiry) "
@@ -2988,6 +3006,38 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "push-actual":
         return _push_actual(db_path)
+    if args.command == "categorise":
+        from .categorise import apply_rules, load_rules, uncategorised_summary
+
+        rules_path = args.rules or Path(
+            os.getenv("OBDI_RULES", "").strip()
+            or Path(db_path).with_name("rules.json")
+        )
+        rules: dict[str, list[dict[str, str]]] = {}
+        if rules_path.is_file():
+            rules = load_rules(rules_path)
+        else:
+            print(
+                f"No rules file at {rules_path} - the sweep has nothing to "
+                "apply. The uncategorised groups below are the worklist for "
+                "writing one.",
+            )
+        with Store(db_path) as store:
+            if rules:
+                sweep = apply_rules(store, rules, dry_run=args.dry_run)
+                prefix = "DRY RUN - " if args.dry_run else ""
+                print(prefix + sweep.describe())
+                for sample in sweep.samples:
+                    print(f"  {sample}")
+            groups = uncategorised_summary(store)
+        if groups:
+            print("Biggest uncategorised groups (rule-writing worklist):")
+            for name, count in groups:
+                print(f"  {count:>5}  {name}")
+        else:
+            print("Nothing uncategorised.")
+        return 0
+
     if args.command == "alert":
         from .alerts import (
             Finding,
