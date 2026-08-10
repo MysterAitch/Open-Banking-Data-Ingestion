@@ -733,6 +733,89 @@ def export_drift(
     return agreements(relabelled + fresh, sibling_accounts={})
 
 
+#: Above this share, a file's rows matching rows another witness filed under
+#: OTHER accounts stops being noise and becomes a wrong-destination signal.
+#: The motivating misfile measured 97%; a stray coincidence or two on a small
+#: file must not condemn it, hence a majority rather than an any.
+DESTINATION_DOUBT_THRESHOLD = 0.5
+
+
+@dataclass(frozen=True)
+class DestinationDoubt:
+    """Most of a file's rows match rows a witness filed under OTHER accounts.
+
+    The strongest wrong-destination signal there is - observed at 97%
+    (1,517 of 1,571 rows) on statement chunks mis-tapped into a Space,
+    which then took a refile-and-rebuild to undo. Carried with its
+    evidence: which witness, what share, and which sibling looks like the
+    intended destination.
+    """
+
+    witness: str
+    file_rows: int
+    matched_elsewhere: int
+    by_sibling: tuple[tuple[str, int], ...]
+
+    @property
+    def share(self) -> float:
+        return self.matched_elsewhere / self.file_rows if self.file_rows else 0.0
+
+    def describe(self) -> str:
+        siblings = ", ".join(
+            f"{sibling} ({count})" for sibling, count in self.by_sibling
+        )
+        likely = self.by_sibling[0][0] if self.by_sibling else "another account"
+        return (
+            f"{self.matched_elsewhere} of {self.file_rows} of this file's rows "
+            f"match rows {self.witness} filed under OTHER accounts: {siblings}. "
+            f"Is {likely} the intended destination?"
+        )
+
+
+def destination_doubt(
+    found: Sequence[Agreement],
+    *,
+    source: str,
+    account: str,
+    threshold: float = DESTINATION_DOUBT_THRESHOLD,
+) -> DestinationDoubt | None:
+    """Read the wrong-destination signal out of an already-run reconciliation.
+
+    No new comparison happens here: the preview computes the agreements
+    anyway, and this asks them one question - of the file-source's rows in
+    the chosen account, what share did each witness file somewhere else?
+    """
+    best: DestinationDoubt | None = None
+    for agreement in found:
+        if agreement.account_id != account:
+            continue
+        if source not in (agreement.left, agreement.right):
+            continue
+        side_count = (
+            agreement.left_count if agreement.left == source else agreement.right_count
+        )
+        if not side_count:
+            continue
+        mine = [match for match in agreement.attributed if match.source == source]
+        if len(mine) / side_count < threshold:
+            continue
+        counts: dict[str, int] = {}
+        for match in mine:
+            counts[match.sibling_account] = counts.get(match.sibling_account, 0) + 1
+        witness = agreement.right if agreement.left == source else agreement.left
+        candidate = DestinationDoubt(
+            witness=witness,
+            file_rows=side_count,
+            matched_elsewhere=len(mine),
+            by_sibling=tuple(
+                sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            ),
+        )
+        if best is None or candidate.share > best.share:
+            best = candidate
+    return best
+
+
 @dataclass(frozen=True)
 class Gap:
     """A month a source has nothing for, inside the period it otherwise covers."""

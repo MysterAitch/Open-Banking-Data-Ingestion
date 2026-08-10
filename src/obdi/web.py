@@ -147,26 +147,30 @@ class UploadSession:
     LIFETIME = timedelta(minutes=15)
 
     def __init__(self) -> None:
-        self._pending: dict[str, tuple[bytes, str, datetime]] = {}
+        self._pending: dict[str, tuple[bytes, str, datetime, bool]] = {}
 
-    def stash(self, payload: bytes, filename: str) -> str:
+    def stash(self, payload: bytes, filename: str, *, doubted: bool = False) -> str:
+        """`doubted` rides the stash so the CONFIRM can enforce the
+        wrong-destination override server-side - a checkbox the browser
+        merely requires is decoration, and the misfile this guards against
+        happened on a phone at 22:51."""
         now = datetime.now(UTC)
         expired = [
             token
-            for token, (_, _, created) in self._pending.items()
+            for token, (_, _, created, _) in self._pending.items()
             if now - created > self.LIFETIME
         ]
         for token in expired:
             del self._pending[token]
         token = token_urlsafe(16)
-        self._pending[token] = (payload, filename, now)
+        self._pending[token] = (payload, filename, now, doubted)
         return token
 
-    def claim(self, token: str) -> tuple[bytes, str]:
-        payload, filename, created = self._pending.pop(token)
+    def claim(self, token: str) -> tuple[bytes, str, bool]:
+        payload, filename, created, doubted = self._pending.pop(token)
         if datetime.now(UTC) - created > self.LIFETIME:
             raise KeyError("upload expired - upload the file again")
-        return payload, filename
+        return payload, filename, doubted
 
 
 def _parse_multipart(
@@ -3636,7 +3640,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
             )
             return
-        token = self.uploads.stash(payload, filename)
+        raw_doubt = preview.get("destination_doubt")
+        doubt_message = (
+            str(raw_doubt.get("message"))
+            if isinstance(raw_doubt, dict) and raw_doubt.get("message")
+            else ""
+        )
+        token = self.uploads.stash(payload, filename, doubted=bool(doubt_message))
         raw_sample = preview.get("sample")
         sample_rows = "".join(
             f'<tr><td>{html.escape(str(r.get("date")))}</td>'
@@ -3694,12 +3704,30 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + agreement_html
             + '<div class="scroll"><table><tr><th>date</th><th>amount</th>'
             f"<th>description</th></tr>{sample_rows}</table></div>"
-            f"<p>Nothing has been stored yet. Confirm to import into "
+            + (
+                # The wrong-destination guard, prevention half of the misfile
+                # that put three statement chunks in a Space: the doubt rides
+                # the stash, so the override below is enforced server-side at
+                # confirm - a checkbox the browser merely requires is
+                # decoration on a phone at 22:51.
+                '<h2 class="bad">Wrong destination?</h2>'
+                f'<p class="warn">{html.escape(doubt_message)}</p>'
+                if doubt_message
+                else ""
+            )
+            + f"<p>Nothing has been stored yet. Confirm to import into "
             f"<strong>{html.escape(account)}</strong>.</p>"
             '<form method="post" action="/upload-confirm">'
             f'<input type="hidden" name="token" value="{token}">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
-            '<p><button class="button" type="submit" '
+            + (
+                '<label style="display:block;margin:.35rem 0">'
+                '<input type="checkbox" name="override" value="yes" required> '
+                "Import here anyway - I have checked the destination</label>"
+                if doubt_message
+                else ""
+            )
+            + '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             f"Import into {html.escape(account)}</button></p></form>" + HOME_LINK
         )
@@ -3719,9 +3747,34 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._respond(400, error_page("Bad request", "<p>Token and account required.</p>"))
             return
         try:
-            payload, filename = self.uploads.claim(token)
+            payload, filename, doubted = self.uploads.claim(token)
         except KeyError as exc:
             self._respond(410, error_page("Upload expired", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        if doubted and form.get("override") != ["yes"]:
+            # The claim consumed the stash, so hand back a fresh token with
+            # the override stated plainly - refusal must not cost the person
+            # their upload.
+            fresh = self.uploads.stash(payload, filename, doubted=True)
+            self._respond(
+                409,
+                render_page(
+                    "Destination doubted",
+                    "<p>The preview doubted this destination: most of this "
+                    "file's rows match rows another source filed under a "
+                    "DIFFERENT account. Import only if you have checked "
+                    "the destination is right.</p>"
+                    '<form method="post" action="/upload-confirm">'
+                    f'<input type="hidden" name="token" value="{fresh}">'
+                    f'<input type="hidden" name="account" value="{html.escape(account)}">'
+                    '<label style="display:block;margin:.35rem 0">'
+                    '<input type="checkbox" name="override" value="yes" required> '
+                    "Import here anyway - I have checked the destination</label>"
+                    '<p><button class="button" type="submit" '
+                    'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+                    f"Import into {html.escape(account)}</button></p></form>" + HOME_LINK,
+                ),
+            )
             return
         try:
             summary = hook(payload, filename, account)

@@ -28,6 +28,7 @@ from .coverage import (
     SourceCoverage,
     agreements,
     coverage,
+    destination_doubt,
     export_drift,
     gaps,
     stale_feeds,
@@ -1592,17 +1593,23 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             for t in sightings
             if not (t.account_id == account and t.source == parser.source)
         ]
+        found = agreements(
+            held + rows, sibling_accounts=_account_map().accounts_by_source()
+        )
         agreement_preview: list[object] = [
             agreement.outline()
-            for agreement in agreements(
-                held + rows, sibling_accounts=_account_map().accounts_by_source()
-            )
+            for agreement in found
             if agreement.account_id == account
             and parser.source in (agreement.left, agreement.right)
         ] or [
             "no other source covers this account over this period yet - "
             "the file stands alone, uncorroborated"
         ]
+        # The wrong-destination signal, read from the reconciliation just
+        # run: most of this file's rows matching rows a witness filed under
+        # OTHER accounts means the chosen destination is probably a
+        # mis-tap - the class that put three statement chunks in a Space.
+        doubt = destination_doubt(found, source=parser.source, account=account)
         # The excluded own-source rows still get their own check, with the
         # opposite emphasis: agreement here is NOT corroboration (a file
         # cannot witness itself), but DISAGREEMENT is the export-drift
@@ -1627,6 +1634,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 for v in verify_export(payload, rows, filename)
             ],
             "agreement_preview": agreement_preview,
+            "destination_doubt": (
+                {"message": doubt.describe()} if doubt is not None else None
+            ),
         }
 
     def confirm_upload(payload: bytes, filename: str, account: str) -> dict[str, object]:

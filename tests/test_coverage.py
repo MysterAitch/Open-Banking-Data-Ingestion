@@ -20,6 +20,7 @@ from obdi.coverage import (
     Agreement,
     agreements,
     coverage,
+    destination_doubt,
     export_drift,
     gaps,
     stale_feeds,
@@ -1013,3 +1014,77 @@ class TestStaleFeeds:
         rows = coverage([txn("starling", 1, -500, account="starling-personal")])
 
         assert stale_feeds(rows, watched={"starling"}) == []
+
+
+class TestDestinationDoubt:
+    """Most of a file's rows matching rows another witness filed under
+    OTHER accounts is the strongest wrong-destination signal there is -
+    observed at 97% (1,517 of 1,571) on statement chunks mis-tapped into
+    a Space, which then took a refile-and-rebuild to undo. The doubt is
+    computed from the same reconciliation the preview already runs, and
+    carries its evidence: which witness, what share, which sibling looks
+    like the intended destination."""
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": ["starling-personal", "starling-space-money"]
+    }
+
+    def _found(self, extra):
+        rows = [
+            txn("starling", 1, -100, account="starling-space-money"),
+            txn("starling", 28, -110, account="starling-space-money"),
+            *extra,
+        ]
+        return agreements(rows, sibling_accounts=self.SIBLINGS)
+
+    def test_AFileWhoseRowsLiveElsewhere_RaisesDoubt_NamingTheSibling(self):
+        found = self._found(
+            [
+                # The file, imported into the SPACE by mistake: its rows
+                # match what the feed filed under the personal account.
+                txn("starling-csv", 5, -500, account="starling-space-money", desc="TESCO"),
+                txn("starling-csv", 9, -725, account="starling-space-money", desc="RENT"),
+                txn("starling-csv", 12, -300, account="starling-space-money", desc="COOP"),
+                txn("starling", 5, -500, account="starling-personal", desc="TESCO"),
+                txn("starling", 9, -725, account="starling-personal", desc="RENT"),
+                txn("starling", 12, -300, account="starling-personal", desc="COOP"),
+            ]
+        )
+
+        doubt = destination_doubt(
+            found, source="starling-csv", account="starling-space-money"
+        )
+
+        assert doubt is not None
+        assert doubt.witness == "starling"
+        assert doubt.matched_elsewhere == 3
+        assert doubt.file_rows == 3
+        assert doubt.by_sibling[0] == ("starling-personal", 3)
+        text = doubt.describe()
+        assert "3 of 3" in text
+        assert "starling-personal" in text
+
+    def test_AFileMostlyMatchingInPlace_RaisesNoDoubt(self):
+        found = self._found(
+            [
+                txn("starling-csv", 1, -100, account="starling-space-money"),
+                txn("starling-csv", 28, -110, account="starling-space-money"),
+                # One stray sibling match must not condemn the file.
+                txn("starling-csv", 5, -500, account="starling-space-money", desc="TESCO"),
+                txn("starling", 5, -500, account="starling-personal", desc="TESCO"),
+            ]
+        )
+
+        doubt = destination_doubt(
+            found, source="starling-csv", account="starling-space-money"
+        )
+
+        assert doubt is None
+
+    def test_DoubtIsScopedToTheChosenAccountAndSource(self):
+        found = self._found([])
+
+        assert (
+            destination_doubt(found, source="starling-csv", account="starling-personal")
+            is None
+        )

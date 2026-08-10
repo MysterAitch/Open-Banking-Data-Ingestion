@@ -3170,3 +3170,128 @@ class TestRefilingFromThePage:
 
         assert response.status_code == 400
         assert calls == []
+
+
+class TestTheWrongDestinationGuard:
+    """Prevention half of the Money misfile: when the preview's own
+    reconciliation says most of the file's rows match rows another witness
+    filed under a DIFFERENT account, the confirm requires an explicit
+    override - enforced server-side via the stash, because a checkbox the
+    browser merely requires is decoration on a phone at 22:51."""
+
+    def _server(self, tmp_path, confirms):
+        def preview(payload, filename, account):
+            return {
+                "parser": "StarlingCsvParser",
+                "date_format": "%d/%m/%Y",
+                "rows": 3,
+                "sample": [],
+                "date_ambiguous": False,
+                "earliest": "2020-01-01",
+                "latest": "2020-12-31",
+                "agreement_preview": [],
+                "destination_doubt": {
+                    "message": (
+                        "3 of 3 of this file's rows match rows starling filed "
+                        "under OTHER accounts: starling-personal (3). Is "
+                        "starling-personal the intended destination?"
+                    )
+                },
+            }
+
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            preview_upload=preview,
+            confirm_upload=lambda payload, filename, account: (
+                confirms.append(account) or "landed"
+            ),
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}"
+
+    def test_ADoubtedDestination_RefusesConfirmWithoutTheOverride(self, tmp_path):
+        confirms: list[str] = []
+        httpd, base = self._server(tmp_path, confirms)
+        try:
+            with httpx.Client() as client:
+                page = client.post(
+                    f"{base}/upload",
+                    data={"account": "starling-space-money"},
+                    files={"statement": ("chunk.csv", b"a,b\n", "text/csv")},
+                ).text
+                assert "Wrong destination?" in page
+                assert 'name="override"' in page
+                token = page.split('name="token" value="')[1].split('"')[0]
+
+                refused = client.post(
+                    f"{base}/upload-confirm",
+                    data={"token": token, "account": "starling-space-money"},
+                )
+                assert refused.status_code == 409
+                assert confirms == []
+
+                # The refusal hands back a fresh token: the upload survives.
+                fresh = refused.text.split('name="token" value="')[1].split('"')[0]
+                landed = client.post(
+                    f"{base}/upload-confirm",
+                    data={
+                        "token": fresh,
+                        "account": "starling-space-money",
+                        "override": "yes",
+                    },
+                )
+        finally:
+            httpd.shutdown()
+
+        assert landed.status_code == 200
+        assert confirms == ["starling-space-money"]
+
+    def test_AnUndoubtedUpload_ConfirmsWithoutCeremony(self, tmp_path):
+        confirms: list[str] = []
+        httpd, base = self._server(tmp_path, confirms)
+        # Re-wire preview to raise no doubt.
+        httpd.RequestHandlerClass.config = WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c2.json"),
+            preview_upload=lambda payload, filename, account: {
+                "parser": "StarlingCsvParser",
+                "date_format": "%d/%m/%Y",
+                "rows": 1,
+                "sample": [],
+                "date_ambiguous": False,
+                "earliest": None,
+                "latest": None,
+                "agreement_preview": [],
+                "destination_doubt": None,
+            },
+            confirm_upload=lambda payload, filename, account: (
+                confirms.append(account) or "landed"
+            ),
+        )
+        try:
+            with httpx.Client() as client:
+                page = client.post(
+                    f"{base}/upload",
+                    data={"account": "starling-personal"},
+                    files={"statement": ("chunk.csv", b"a,b\n", "text/csv")},
+                ).text
+                assert "Wrong destination?" not in page
+                token = page.split('name="token" value="')[1].split('"')[0]
+                landed = client.post(
+                    f"{base}/upload-confirm",
+                    data={"token": token, "account": "starling-personal"},
+                )
+        finally:
+            httpd.shutdown()
+
+        assert landed.status_code == 200
+        assert confirms == ["starling-personal"]
