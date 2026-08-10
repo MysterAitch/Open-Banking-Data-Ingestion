@@ -2897,6 +2897,32 @@ def main(argv: list[str] | None = None) -> int:
         help="rules file (default: OBDI_RULES, else rules.json beside the store)",
     )
 
+    propagate_command = subcommands.add_parser(
+        "propagate",
+        help="generalise each human annotation to its detectable siblings "
+        "(same description group, same currency, amount within tolerance - "
+        "FX drift on foreign-billed subscriptions included) and write them "
+        "at model rank, below the human seed",
+    )
+    propagate_command.add_argument(
+        "--kind",
+        default="category",
+        help="annotation kind to propagate (default: category; e.g. payee, "
+        "comment)",
+    )
+    propagate_command.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        help="amount drift allowed within a series, as a fraction of the "
+        "seed amount (default: 0.10)",
+    )
+    propagate_command.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the detected families without writing anything",
+    )
+
     subcommands.add_parser(
         "alert",
         help="evaluate findings (refusal trends, stale feeds, consent expiry) "
@@ -3036,6 +3062,51 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {count:>5}  {name}")
         else:
             print("Nothing uncategorised.")
+        return 0
+
+    if args.command == "propagate":
+        from .categorise import (
+            PROPAGATION_AMOUNT_TOLERANCE,
+            apply_propagation,
+            propagation_proposals,
+        )
+        from .money import format_amount
+
+        tolerance = (
+            args.tolerance
+            if args.tolerance is not None
+            else PROPAGATION_AMOUNT_TOLERANCE
+        )
+        with Store(db_path) as store:
+            propagation = propagation_proposals(
+                store, kind=args.kind, tolerance=tolerance
+            )
+            written = apply_propagation(store, propagation, dry_run=args.dry_run)
+        prefix = "DRY RUN - " if args.dry_run else ""
+        print(prefix + propagation.describe())
+        for proposal in propagation.proposals:
+            band = format_amount(proposal.amount_low, currency=proposal.currency)
+            if proposal.amount_high != proposal.amount_low:
+                band += " .. " + format_amount(
+                    proposal.amount_high, currency=proposal.currency
+                )
+            state = (
+                f"{len(proposal.targets)} row(s)"
+                if proposal.targets
+                else "no rows reached"
+            )
+            print(
+                f"  {state} <- {args.kind} '{proposal.value}' from "
+                f"{proposal.seed_count} seed(s) in '{proposal.group}'; "
+                f"{band}; {proposal.first} .. {proposal.last}"
+            )
+        if not propagation.proposals:
+            print(
+                "No human-annotated seeds to generalise - annotate one "
+                "instance of a recurring charge first."
+            )
+        if not args.dry_run and written:
+            print(f"wrote {written} row(s) at model:propagation")
         return 0
 
     if args.command == "alert":
