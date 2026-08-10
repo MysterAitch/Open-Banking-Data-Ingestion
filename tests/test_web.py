@@ -3145,7 +3145,12 @@ class TestRefilingFromThePage:
         try:
             page = httpx.post(
                 f"{base}/refile-artefact",
-                data={"id": "42", "account": "starling-personal", "confirm": "yes"},
+                data={
+                    "id": "42",
+                    "account": "",
+                    "account_other": "starling-personal",
+                    "confirm": "yes",
+                },
             ).text
         finally:
             httpd.shutdown()
@@ -3295,3 +3300,22 @@ class TestTheWrongDestinationGuard:
 
         assert landed.status_code == 200
         assert confirms == ["starling-personal"]
+
+
+class TestTheSharedAccountPicker:
+    """One chooser wherever an account is chosen: the refile form shipped
+    as a bare text input, and typing a canonical name by hand to CORRECT
+    a mis-pick is exactly where a second typo compounds the first."""
+
+    def test_Picker_RendersDropdownPlusFreeTextEscapeHatch(self):
+        from obdi.web import account_picker
+
+        markup = account_picker(
+            {"starling-personal": "Personal (starling)"},
+            other_placeholder="or type the correct canonical",
+        )
+
+        assert '<select name="account"' in markup
+        assert "Personal (starling)" in markup
+        assert 'name="account_other"' in markup
+        assert "or type the correct canonical" in markup

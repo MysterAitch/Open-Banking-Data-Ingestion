@@ -2505,6 +2505,30 @@ def account_options(labels: dict[str, str]) -> str:
     return "".join(options)
 
 
+def account_picker(
+    labels: dict[str, str],
+    *,
+    field: str = "account",
+    other_field: str = "account_other",
+    other_placeholder: str = "or type a canonical name, e.g. hsbc-old-current",
+) -> str:
+    """The shared destination picker: a labelled dropdown plus a free-text
+    escape hatch, one component wherever an account is chosen.
+
+    Extracted after the refile form shipped as a bare text input - typing a
+    canonical name by hand to CORRECT a mis-pick is exactly where a second
+    typo compounds the first. Every chooser gets the same self-identifying
+    options and the same fallback.
+    """
+    return (
+        f'<p><select name="{html.escape(field)}" style="width:100%;padding:.6rem">'
+        '<option value="">choose an account...</option>'
+        f"{account_options(labels)}</select></p>"
+        f'<p><input name="{html.escape(other_field)}" '
+        f'placeholder="{html.escape(other_placeholder)}"></p>'
+    )
+
+
 def render_index(
     store: ConnectionStore,
     holdings: Callable[[], list[SourceCoverage]] | None = None,
@@ -2536,10 +2560,11 @@ def render_index(
     # The import form picks its destination FIRST (the preview verifies
     # the file against what that account already holds), so the picker's
     # options are needed here rather than on the confirm page.
-    upload_options = ""
+    upload_labels: dict[str, str] = {}
     if display_labels is not None:
         with contextlib.suppress(Exception):
-            upload_options = account_options(display_labels())
+            upload_labels = display_labels()
+    upload_picker = account_picker(upload_labels)
     body = f"""
 {_credential_banner()}
 {_rebuild_running_banner(rebuild_status)}
@@ -2567,9 +2592,7 @@ def render_index(
 then verify the file against what that account already holds, before
 anything is stored.</p>
 <form action="/upload" method="post" enctype="multipart/form-data">
-  <p><select name="account" style="width:100%;padding:.6rem">
-  <option value="">choose an account...</option>{upload_options}</select></p>
-  <p><input name="account_other" placeholder="or type a canonical name, e.g. hsbc-old-current"></p>
+  {upload_picker}
   <p><input type="file" name="statement" required></p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
@@ -3091,6 +3114,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         raw_summary = detail.get("summary")
         summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
+        refile_labels: dict[str, str] = {}
+        if self.bound_config.display_labels is not None:
+            with contextlib.suppress(Exception):
+                refile_labels = self.bound_config.display_labels()
         body = (
             f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
@@ -3116,9 +3143,12 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 "<h2>Landed under the wrong account?</h2>"
                 '<form method="post" action="/refile-artefact">'
                 f'<input type="hidden" name="id" value="{artefact_id}">'
-                '<p><input name="account" placeholder="correct canonical, '
-                'e.g. starling-personal" required></p>'
-                '<label style="display:block;margin:.35rem 0">'
+                + account_picker(
+                    refile_labels,
+                    other_placeholder="or type the correct canonical, "
+                    "e.g. starling-personal",
+                )
+                + '<label style="display:block;margin:.35rem 0">'
                 '<input type="checkbox" name="confirm" value="yes" required> '
                 "I understand the filing changes and a rebuild re-derives</label>"
                 '<p><button class="button" type="submit" '
@@ -3149,7 +3179,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             artefact_id = int(form.get("id", ["0"])[0] or "0")
         except ValueError:
             artefact_id = 0
-        account = (form.get("account", [""])[0] or "").strip()
+        account = (
+            (form.get("account_other", [""])[0] or "").strip()
+            or (form.get("account", [""])[0] or "").strip()
+        )
         if not artefact_id or not account:
             self._respond(
                 400,
