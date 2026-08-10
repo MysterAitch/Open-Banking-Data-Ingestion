@@ -31,11 +31,13 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from secrets import token_urlsafe
 from typing import ParamSpec, TypeVar
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
@@ -2584,6 +2586,7 @@ def render_index(
 <p><a class="button" href="/attempts">Fetch attempts</a>
 <a class="button" href="/fetch-timeline">Fetch timeline</a></p>
 <p><a class="button" href="/agreements">Cross-source agreement report</a></p>
+<p><a class="button" href="/statement-shape">Statement shape (PDF layout, values masked)</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
@@ -2680,6 +2683,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/agreements":
             self._agreements_page()
+            return
+        if route == "/statement-shape":
+            self._statement_shape_form()
             return
         if route == "/actual-history":
             self._actual_history()
@@ -3414,6 +3420,87 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             ),
         )
 
+    #: Nothing is stored and nothing is parsed here - the page reads a PDF's
+    #: LAYOUT so a parser can be written for a bank's format. Masked output
+    #: is the default and the only thing safe to send anywhere.
+    STATEMENT_SHAPE_BLURB = (
+        "<p>Bank statements carry facts no feed exposes: the terms (rates "
+        "by kind, fees, promotional periods and when they revert), the "
+        "opening and closing balances, and - for accounts with no feed at "
+        "all - the transactions themselves. Writing a parser for a bank's "
+        "format needs its LAYOUT, not its contents.</p>"
+        "<p>This page reads a PDF and shows its shape with every value "
+        "masked: digits become 9s, other words become Xs of the same "
+        "length and casing, and spacing, headers and punctuation survive. "
+        "The file is NOT stored and nothing is imported. The masked output "
+        "is safe to share; the real contents are not.</p>"
+    )
+
+    def _statement_shape_form(self, note: str = "") -> None:
+        body = (
+            "<h2>Statement shape</h2>"
+            + self.STATEMENT_SHAPE_BLURB
+            + note
+            + '<form action="/statement-shape" method="post" '
+            'enctype="multipart/form-data">'
+            '<p><input type="file" name="file" accept="application/pdf" '
+            "required></p>"
+            '<p><label><input type="checkbox" name="show_values" value="1"> '
+            "Show the REAL contents instead of the masked shape - this "
+            "discloses transactions, balances and names</label></p>"
+            '<p><button type="submit">Read the shape</button></p>'
+            "</form>" + HOME_LINK
+        )
+        self._respond(200, render_page("Statement shape", body))
+
+    def _statement_shape(self) -> None:
+        from .statement_shape import shape_report
+
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 25 * 1024 * 1024:
+            self._respond(
+                413,
+                error_page("Too large", "<p>A statement PDF is not this big.</p>"),
+            )
+            return
+        try:
+            payload, filename, fields = _parse_multipart(
+                self.headers.get("Content-Type") or "", self.rfile.read(length)
+            )
+        except Exception as exc:
+            self._respond(
+                400,
+                error_page(
+                    "Could not read the file", f"<p>{html.escape(str(exc))}</p>"
+                ),
+            )
+            return
+
+        masked = not fields.get("show_values")
+        with tempfile.TemporaryDirectory() as scratch:
+            # Written to a temporary file because pypdf reads a path, and
+            # removed on the way out: this page stores nothing.
+            temporary = Path(scratch) / (filename or "statement.pdf")
+            temporary.write_bytes(payload)
+            shape = shape_report(temporary, mask=masked, limit=400)
+
+        warning = (
+            ""
+            if masked
+            else '<p class="alarm"><strong>Real values shown.</strong> This '
+            "output names payees, amounts and balances - do not paste it "
+            "anywhere you would not paste the statement itself.</p>"
+        )
+        body = (
+            "<h2>Statement shape</h2>"
+            + warning
+            + f'<pre class="scroll" style="white-space:pre">'
+            f"{html.escape(shape.describe())}</pre>"
+            '<p><a class="button" href="/statement-shape">Read another</a></p>'
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Statement shape", body))
+
     def _review_report(self) -> None:
         hook = self.bound_config.review_report_text
         if hook is None:
@@ -3529,6 +3616,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
+        if route == "/statement-shape":
+            self._statement_shape()
+            return
+
         if route == "/upload":
             self._upload()
             return

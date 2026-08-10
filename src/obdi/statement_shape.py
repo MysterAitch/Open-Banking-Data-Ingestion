@@ -21,6 +21,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NewType
+
+#: Text taken verbatim from a statement: payees, addresses, account
+#: numbers, amounts. Never leaves the machine that read the file.
+RawText = NewType("RawText", str)
+
+#: Text whose values have been masked - layout intact, contents gone.
+#: The ONLY kind a sharing surface accepts, so disclosing by accident
+#: becomes a type error rather than a test that someone forgot to write.
+MaskedText = NewType("MaskedText", str)
 
 #: Words a parser keys on, which must survive masking or the report cannot
 #: describe the layout it exists to describe. Everything else is masked -
@@ -57,6 +67,16 @@ _MONTHS = frozenset(
 _WORD = re.compile(r"[0-9A-Za-z]+")
 
 
+def shareable(lines: list[MaskedText]) -> str:
+    """The door values pass through on their way to anyone else.
+
+    Typed rather than merely documented: pass raw text here and mypy - a
+    CI gate - refuses the build. A guarantee that holds for code nobody
+    has written yet is worth more than one asserted per call site.
+    """
+    return "\n".join(lines)
+
+
 def _mask_word(word: str) -> str:
     """Digits to 9, letters to X preserving case - length and shape kept."""
     return "".join(
@@ -64,7 +84,7 @@ def _mask_word(word: str) -> str:
     )
 
 
-def mask_line(line: str) -> str:
+def mask_line(line: str) -> MaskedText:
     """Mask a line's values while keeping every structural cue.
 
     Furniture words pass through so the layout stays legible. A word is
@@ -80,10 +100,10 @@ def mask_line(line: str) -> str:
             return word
         return _mask_word(word)
 
-    return _WORD.sub(replace, line)
+    return MaskedText(_WORD.sub(replace, line))
 
 
-def pdf_lines(path: Path) -> list[str]:
+def pdf_lines(path: Path) -> list[RawText]:
     """Every text line in a PDF, in page order.
 
     Text-embedded PDFs only - a scanned page has no text layer and yields
@@ -96,9 +116,11 @@ def pdf_lines(path: Path) -> list[str]:
         pages = [page.extract_text() or "" for page in reader.pages]
     except Exception:
         return []
-    lines: list[str] = []
+    lines: list[RawText] = []
     for text in pages:
-        lines.extend(line.rstrip() for line in text.splitlines() if line.strip())
+        lines.extend(
+            RawText(line.rstrip()) for line in text.splitlines() if line.strip()
+        )
     return lines
 
 
@@ -112,7 +134,9 @@ class ShapeReport:
     page_count: int = 0
     masked: bool = True
     readable: bool = True
-    lines: list[str] = field(default_factory=list)
+    #: Masked when `masked` is set, raw otherwise - which is why the union
+    #: is written out: a caller cannot forget which it is holding.
+    lines: list[MaskedText] | list[RawText] = field(default_factory=list)
 
     def describe(self) -> str:
         if not self.readable:
@@ -150,7 +174,18 @@ def shape_report(path: Path, *, mask: bool = True, limit: int = 200) -> ShapeRep
 
     raw = pdf_lines(path)
     report.line_count = len(raw)
-    report.lines = [mask_line(line) if mask else line for line in raw[:limit]]
-    if len(raw) > limit:
-        report.lines.append(f"... {len(raw) - limit} further line(s) not shown")
+    if mask:
+        masked_lines = [mask_line(line) for line in raw[:limit]]
+        if len(raw) > limit:
+            masked_lines.append(
+                MaskedText(f"... {len(raw) - limit} further line(s) not shown")
+            )
+        report.lines = masked_lines
+    else:
+        raw_lines = list(raw[:limit])
+        if len(raw) > limit:
+            raw_lines.append(
+                RawText(f"... {len(raw) - limit} further line(s) not shown")
+            )
+        report.lines = raw_lines
     return report
