@@ -3732,6 +3732,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f"(dates {html.escape(str(preview.get('date_format')))}): "
             f"{preview.get('rows')} row(s), "
             f"{preview.get('earliest')} .. {preview.get('latest')}</p>"
+            + (
+                (
+                    f'<p class="warn">{html.escape(str(preview.get("claimed_window")))}</p>'
+                    if "OUTSIDE" in str(preview.get("claimed_window"))
+                    else f'<p class="muted">{html.escape(str(preview.get("claimed_window")))}</p>'
+                )
+                if preview.get("claimed_window")
+                else ""
+            )
             + warning
             + verdicts_html
             + agreement_html

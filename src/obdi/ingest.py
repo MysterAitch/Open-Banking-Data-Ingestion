@@ -8,6 +8,7 @@ closes.
 from __future__ import annotations
 
 import contextlib
+import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -36,6 +37,106 @@ class ImportSummary:
             f"parsed {self.parsed}, new {self.inserted}, matched {self.matched}, "
             f"superseded {self.superseded}, for review {self.needs_review}"
         )
+
+
+_CLAIM_DAY_FIRST = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
+_CLAIM_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def claimed_window(
+    filename: str,
+    *,
+    rows_from: date | None = None,
+    rows_to: date | None = None,
+) -> tuple[date, date] | None:
+    """The date range the FILENAME claims - the file import's "asked".
+
+    Banks name their exports with the requested range, which is evidence
+    the rows alone cannot carry: a claim wider than the rows proves the
+    quiet days were genuinely quiet. Day-first is preferred (the UK
+    reality); when both tokens are ambiguous the reading that CONTAINS the
+    supplied row span wins, because a claim that cannot hold its own
+    contents is the wrong reading. Nothing parseable claims nothing -
+    absence of a claim is not a fault.
+    """
+    iso = _CLAIM_ISO.findall(filename)
+    if len(iso) >= 2:
+        try:
+            first = date(int(iso[0][0]), int(iso[0][1]), int(iso[0][2]))
+            second = date(int(iso[1][0]), int(iso[1][1]), int(iso[1][2]))
+        except ValueError:
+            return None
+        return (first, second) if first <= second else None
+
+    tokens = _CLAIM_DAY_FIRST.findall(filename)
+    if len(tokens) < 2:
+        return None
+
+    candidates: list[tuple[date, date]] = []
+    for day_index, month_index in ((0, 1), (1, 0)):
+        try:
+            first = date(
+                int(tokens[0][2]), int(tokens[0][month_index]), int(tokens[0][day_index])
+            )
+            second = date(
+                int(tokens[1][2]), int(tokens[1][month_index]), int(tokens[1][day_index])
+            )
+        except ValueError:
+            continue
+        if first <= second and (first, second) not in candidates:
+            candidates.append((first, second))
+    if not candidates:
+        return None
+    if len(candidates) > 1 and rows_from is not None and rows_to is not None:
+        containing = [
+            candidate
+            for candidate in candidates
+            if candidate[0] <= rows_from and candidate[1] >= rows_to
+        ]
+        if len(containing) == 1:
+            return containing[0]
+    return candidates[0]
+
+
+def claimed_window_note(
+    filename: str,
+    *,
+    earliest: date | None,
+    latest: date | None,
+) -> str | None:
+    """What the filename's claim adds to what the rows already say.
+
+    A quiet head or tail is AFFIRMED by the document - the origin question
+    ("opened on the 17th, first transaction on the 20th") answered
+    mechanically. Rows outside the claim are the opposite finding: the
+    filename and the content disagree, which is the export equivalent of
+    an ask-vs-artefact mismatch.
+    """
+    window = claimed_window(filename, rows_from=earliest, rows_to=latest)
+    if window is None:
+        return None
+    claim_from, claim_to = window
+    parts = [f"the filename claims {claim_from.isoformat()} .. {claim_to.isoformat()}"]
+    if earliest is not None and latest is not None:
+        if earliest < claim_from or latest > claim_to:
+            parts.append(
+                "rows fall OUTSIDE the claimed window - the filename and the "
+                "content disagree"
+            )
+        else:
+            quiet = []
+            head = (earliest - claim_from).days
+            tail = (claim_to - latest).days
+            if head > 0:
+                quiet.append(f"the first {head} day(s)")
+            if tail > 0:
+                quiet.append(f"the last {tail} day(s)")
+            if quiet:
+                parts.append(
+                    f"{' and '.join(quiet)} of the claim hold no rows - "
+                    "affirmed quiet by the document"
+                )
+    return "; ".join(parts)
 
 
 def dates_cannot_confirm_format(dates: Sequence[date]) -> bool:

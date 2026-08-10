@@ -1563,7 +1563,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         the period they share - the only external truth available to a
         file with no balance column, now visible before anything lands.
         """
-        from .ingest import dates_cannot_confirm_format
+        from .ingest import claimed_window_note, dates_cannot_confirm_format
         from .parsers.uk_banks import detect
 
         parser = detect(payload)
@@ -1645,6 +1645,14 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 for v in verify_export(payload, rows, filename)
             ],
             "agreement_preview": agreement_preview,
+            # The filename's claim - the file import's "asked". A quiet head
+            # or tail is affirmed by the document; rows outside the claim
+            # mean the filename and the content disagree.
+            "claimed_window": claimed_window_note(
+                filename,
+                earliest=min((r.value_date for r in rows), default=None),
+                latest=max((r.value_date for r in rows), default=None),
+            ),
             "destination_doubt": (
                 {"message": doubt.describe()} if doubt is not None else None
             ),
