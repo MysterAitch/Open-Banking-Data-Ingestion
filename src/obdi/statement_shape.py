@@ -51,6 +51,14 @@ FURNITURE = frozenset(
         "expires", "ends", "until", "limit", "available", "overdraft", "arranged",
         "minimum", "payment", "payments", "due", "repayment", "term",
         "and", "on", "the", "for", "your", "this", "was", "will", "be",
+        # Ledger markers and country codes. Both render as two or three
+        # capitals, so masking them made a CREDIT indistinguishable from a
+        # country - the single fact a parser most needs from a line, since
+        # getting it wrong inverts every payment. Neither identifies a
+        # person, a merchant or an amount.
+        "cr", "dr", "gb", "gbr", "us", "usa", "ie", "irl", "fr", "fra",
+        "de", "deu", "es", "esp", "nl", "nld", "it", "ita", "eur", "usd",
+        "gbp",
         "jan", "feb", "mar", "apr_month", "may", "jun", "jul", "aug", "sep",
         "oct", "nov", "dec",
         "january", "february", "march", "april", "june", "july", "august",

@@ -171,3 +171,33 @@ class TestTheReport:
 
         assert report.line_count == 0
         assert "no text" in report.describe().lower()
+
+
+class TestLedgerMarkersSurvive:
+    """A credit marker is the one fact a parser cannot afford to lose.
+
+    Masking rendered CR and GB identically as two capitals, which made a
+    payment indistinguishable from a purchase in a country - and getting
+    that wrong inverts every payment on the statement. Ledger markers and
+    country codes are structural, name nobody, and now come through.
+    """
+
+    def test_ACreditMarker_IsLegible(self):
+        assert mask_line("29th Jun Direct Payment CR 99.00") == (
+            "99xx Jun Xxxxxx Payment CR 99.99"
+        )
+
+    def test_ACountryCode_IsLegible_AndDistinctFromACredit(self):
+        purchase = mask_line("29th Jun SOME SHOP GB 12.34")
+        payment = mask_line("29th Jun Direct Payment CR 12.34")
+
+        assert "GB" in purchase and "CR" not in purchase
+        assert "CR" in payment and "GB" not in payment
+
+    def test_AMerchantIsStillMasked_BesideItsCountryCode(self):
+        masked = mask_line("29th Jun SAINSBURYS SELLY OAK GB 21.72")
+
+        assert "SAINSBURYS" not in masked
+        assert "SELLY" not in masked
+        assert "21.72" not in masked
+        assert "GB" in masked
