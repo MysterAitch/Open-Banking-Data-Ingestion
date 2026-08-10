@@ -375,6 +375,10 @@ class WebConfig:
     #: Answer a whole group at human rank. Separate from the overview so a
     #: read cannot write, and a test can exercise either alone.
     categorise_apply: Callable[[str, str, str], int] | None = None
+    #: Record that a group was looked at and left unanswered - an outcome in
+    #: its own right, since a queue emptied only by answering is a queue
+    #: emptied by guessing.
+    categorise_defer: Callable[[str], int] | None = None
     #: Settlement-lag measurement from the starling truth set.
     date_lag_text: Callable[[], str] | None = None
     #: Balance-walk integrity: bank running balances vs held transactions.
@@ -3650,7 +3654,18 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 + '<input type="text" name="value" size="28" '
                 'placeholder="Group: Leaf" autocomplete="off" required>'
                 + '<button type="submit">Answer all</button>'
-                + "</form></td></tr>"
+                + "</form>"
+                + '<form action="/review-defer" method="post">'
+                + f'<input type="hidden" name="label" value="{html.escape(label)}">'
+                + '<button type="submit">Cannot decide yet</button>'
+                + "</form>"
+                + (
+                    f'<span class="muted">{group.get("deferred", 0)} already '
+                    "set aside</span>"
+                    if int(str(group.get("deferred", 0) or 0))
+                    else ""
+                )
+                + "</td></tr>"
             )
 
         body = (
@@ -3673,6 +3688,34 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + HOME_LINK
         )
         self._respond(200, render_page("Categorise", body))
+
+    def _review_defer(self) -> None:
+        hook = self.bound_config.categorise_defer
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        fields = {
+            key: values[0]
+            for key, values in parse_qs(raw, keep_blank_values=True).items()
+        }
+        label = fields.get("label", "").strip()
+        if not label:
+            self._review_page('<p class="alarm">No group was named.</p>')
+            return
+        try:
+            marked = hook(label)
+        except Exception as exc:
+            self._respond(
+                500, error_page("Could not defer", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        self._review_page(
+            f'<p class="ok">Set aside {marked} row(s) in '
+            f"{html.escape(label)} - recorded as looked at and undecided, "
+            "and still listed.</p>"
+        )
 
     def _review_apply(self) -> None:
         hook = self.bound_config.categorise_apply
@@ -3828,6 +3871,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/review-apply":
             self._review_apply()
+            return
+        if route == "/review-defer":
+            self._review_defer()
             return
 
         if route == "/upload":

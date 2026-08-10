@@ -2008,10 +2008,17 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     "distinct": group.distinct,
                     "reference_coded": group.reference_coded,
                     "repeating": group.repeating,
+                    "deferred": group.deferred,
                 }
                 for group in worklist.groups
             ],
         }
+
+    def categorise_defer(label: str) -> int:
+        from .categorise import defer_group
+
+        with Store(db_path) as store:
+            return defer_group(store, label)
 
     def categorise_apply(label: str, value: str, kind: str) -> int:
         from .categorise import apply_to_group
@@ -2320,6 +2327,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         review_report_text=review_report_text,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
+        categorise_defer=categorise_defer,
         date_lag_text=date_lag_text,
         balance_walk_text=balance_walk_text,
         replay_artefact=replay_artefact,

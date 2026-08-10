@@ -418,6 +418,10 @@ class WorklistGroup:
     distinct: int = 0
     #: The example is mostly digits: a reference code, not a merchant.
     reference_coded: bool = False
+    #: How many members a person has looked at and withheld judgement on.
+    #: A group nobody has considered outranks a bigger one already weighed
+    #: and set aside, so this participates in the ordering.
+    deferred: int = 0
     #: The same few strings recur. Opposite advice from a scatter of
     #: one-off references: a repeating reference can be ruled on EXACTLY
     #: once a human identifies it, so the answer is "identify it", not
@@ -441,7 +445,9 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
     transfers stay uncategorised by default, and their count rides along
     so the default's cost is always visible."""
     categorised = set(store.annotations("category"))
+    held_review = store.annotations(DEFER_KIND)
     counts: dict[str, int] = {}
+    deferred: dict[str, int] = {}
     seen: dict[str, set[str]] = {}
     examples: dict[str, str] = {}
     worklist = Worklist()
@@ -456,6 +462,8 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
             counts[key] = counts.get(key, 0) + 1
             seen.setdefault(key, set()).add(transaction.description)
             examples.setdefault(key, transaction.description)
+            if held_review.get(transaction.entity_id, ("", ""))[0] == DEFER_VALUE:
+                deferred[key] = deferred.get(key, 0) + 1
     worklist.groups = [
         WorklistGroup(
             label=key,
@@ -464,10 +472,19 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
             distinct=len(seen[key]),
             reference_coded=_reference_coded(examples[key]),
             repeating=count >= 3 and len(seen[key]) <= max(2, count // 10),
+            deferred=deferred.get(key, 0),
         )
-        for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
-            :limit
-        ]
+        # Wholly deferred groups sort last: attention belongs on what nobody
+        # has weighed yet, and a group already considered should not keep
+        # winning the top of the list by being large.
+        for key, count in sorted(
+            counts.items(),
+            key=lambda item: (
+                deferred.get(item[0], 0) >= item[1],
+                -item[1],
+                item[0],
+            ),
+        )[:limit]
     ]
     return worklist
 
@@ -627,3 +644,26 @@ def apply_to_group(
         if store.annotate(entity, kind, answer, provenance="human"):
             written += 1
     return written
+
+
+#: Where a withheld judgement is recorded. Deliberately NOT the category
+#: kind: deferring is the absence of an answer, and writing it as one would
+#: make "I could not decide" indistinguishable from a decision.
+DEFER_KIND = "review"
+DEFER_VALUE = "deferred"
+
+
+def defer_group(store: Store, label: str) -> int:
+    """Record that a person looked at a group and withheld judgement.
+
+    A queue that can only be emptied by answering can only be emptied by
+    guessing, and a guess is worse than an open question. Deferring keeps
+    the group visible - a decision nobody can see is indistinguishable from
+    one nobody made - while letting unconsidered groups take precedence.
+    Returns how many rows were marked.
+    """
+    marked = 0
+    for entity in group_members(store, label):
+        if store.annotate(entity, DEFER_KIND, DEFER_VALUE, provenance="human"):
+            marked += 1
+    return marked
