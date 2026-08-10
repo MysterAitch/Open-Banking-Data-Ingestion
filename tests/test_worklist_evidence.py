@@ -50,9 +50,10 @@ class TestTheWorklistShowsMatchableEvidence:
 
             worklist = uncategorised_summary(store)
 
-            label, count, example = worklist.groups[0]
-            assert label == "UBER TRIP HELP.UBER.COM"
-            assert count == 2
+            group = worklist.groups[0]
+            assert group.label == "UBER TRIP HELP.UBER.COM"
+            assert group.count == 2
+            example = group.example
             assert example == "UBER *TRIP HELP.UBER.COM"
             assert "*" in example, "the example must be the unstripped string"
 
@@ -66,7 +67,8 @@ class TestTheWorklistShowsMatchableEvidence:
                 digest="d1",
             )
             worklist = uncategorised_summary(store)
-            label, _count, example = worklist.groups[0]
+            label = worklist.groups[0].label
+            example = worklist.groups[0].example
 
             from_label = apply_rules(
                 store,

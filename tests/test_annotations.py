@@ -192,8 +192,8 @@ class TestTheRuleSweep:
 
             worklist = uncategorised_summary(store, limit=5)
 
-            assert worklist.groups[0][0].startswith("COSTA COFFEE")
-            assert worklist.groups[0][1] == 3
+            assert worklist.groups[0].label.startswith("COSTA COFFEE")
+            assert worklist.groups[0].count == 3
 
     def test_RulesLoad_FromAJsonFile(self, tmp_path):
         rules_path = tmp_path / "rules.json"

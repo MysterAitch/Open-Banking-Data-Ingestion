@@ -74,7 +74,7 @@ class TestTransfersStayUncategorised:
         with _store_with_confirmed_pair(tmp_path) as store:
             worklist = uncategorised_summary(store)
 
-            names = [name for name, _count, _example in worklist.groups]
+            names = [group.label for group in worklist.groups]
             assert any("NETFLIX" in name for name in names)
             assert not any("SAVINGS" in name for name in names)
             assert not any("CURRENT" in name for name in names)

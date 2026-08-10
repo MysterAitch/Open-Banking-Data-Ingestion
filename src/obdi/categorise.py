@@ -52,11 +52,19 @@ class SweepSummary:
 
     considered: int = 0
     categorised: int = 0
+    agreed: int = 0
     payees_normalised: int = 0
     protected: int = 0
     transfer_legs: int = 0
+    now_categorised: int = 0
     samples: list[str] = field(default_factory=list)
     hits: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def eligible(self) -> int:
+        """Rows a category could apply to - the denominator that matters,
+        since confirmed transfer legs are deliberately out of scope."""
+        return self.considered - self.transfer_legs
 
     def dead_rules(self) -> list[str]:
         """Rules that matched nothing - the calibration signal. A rule
@@ -65,12 +73,17 @@ class SweepSummary:
         return [match for match, count in self.hits.items() if count == 0]
 
     def describe(self) -> str:
+        share = (
+            f" ({self.now_categorised / self.eligible:.0%})" if self.eligible else ""
+        )
         return (
-            f"considered {self.considered} transaction(s): "
-            f"categorised {self.categorised}, normalised {self.payees_normalised} "
-            f"payee(s), left {self.protected} alone (higher provenance), "
-            f"skipped {self.transfer_legs} confirmed transfer leg(s) "
-            "(transfers stay uncategorised)"
+            f"considered {self.considered} transaction(s), {self.eligible} "
+            f"eligible after skipping {self.transfer_legs} confirmed transfer "
+            f"leg(s): {self.categorised} newly categorised, {self.agreed} "
+            f"already agreed, {self.protected} left alone (higher provenance), "
+            f"{self.payees_normalised} payee(s) normalised. "
+            f"{self.now_categorised} of {self.eligible} eligible row(s) now "
+            f"carry a category{share}"
         )
 
 
@@ -147,6 +160,10 @@ def apply_rules(
             summary.protected += 1
             continue
         if existing is not None and existing[0] == category:
+            # The rule and the store already agree: no write, but this row
+            # IS categorised, and a re-run reporting only its delta would
+            # understate coverage to nothing.
+            summary.agreed += 1
             continue
         if not dry_run:
             store.annotate(entity, "category", category, provenance="rule:sweep")
@@ -156,6 +173,13 @@ def apply_rules(
                 f"{transaction.value_date} '{transaction.description[:40]}' "
                 f"-> {category}"
             )
+    # Coverage AFTER this sweep, predicted rather than read when nothing was
+    # written, so a dry run answers the same question a real run does.
+    summary.now_categorised = (
+        len(store.annotations("category"))
+        if not dry_run
+        else len(held_categories) + summary.categorised
+    )
     return summary
 
 
@@ -323,14 +347,42 @@ def _group_key(description: str) -> str:
     return re.sub(r"\s+", " ", _NOISE.sub("", description)).strip().upper()
 
 
+#: Above this share of digits, a description is a bank REFERENCE rather
+#: than a merchant name, and the group its stripped label forms is an
+#: artefact of the stripping - its rows share a prefix and nothing else.
+REFERENCE_DIGIT_SHARE = 0.5
+
+
+def _reference_coded(example: str) -> bool:
+    if not example:
+        return False
+    digits = sum(1 for char in example if char.isdigit())
+    return digits / len(example) > REFERENCE_DIGIT_SHARE
+
+
+@dataclass
+class WorklistGroup:
+    """One uncategorised group, carrying the evidence needed to judge
+    whether a rule is warranted at all."""
+
+    label: str
+    count: int
+    #: A real description - the label is lossy, this is matchable.
+    example: str = ""
+    #: How many DIFFERENT descriptions the group holds. Far fewer than
+    #: `count` means a genuine repeating payee; one per row means the rows
+    #: were only ever joined by what the stripping removed.
+    distinct: int = 0
+    #: The example is mostly digits: a reference code, not a merchant.
+    reference_coded: bool = False
+
+
 @dataclass
 class Worklist:
     """The uncategorised groups plus what was deliberately left out of
     them, so the exclusions stay observable rather than silent."""
 
-    #: (label, count, example) - the label is lossy, the example is a real
-    #: description a rule can be written against.
-    groups: list[tuple[str, int, str]] = field(default_factory=list)
+    groups: list[WorklistGroup] = field(default_factory=list)
     transfer_legs: int = 0
 
 
@@ -342,6 +394,7 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
     so the default's cost is always visible."""
     categorised = set(store.annotations("category"))
     counts: dict[str, int] = {}
+    seen: dict[str, set[str]] = {}
     examples: dict[str, str] = {}
     worklist = Worklist()
     for transaction in store.all_transactions():
@@ -353,9 +406,16 @@ def uncategorised_summary(store: Store, *, limit: int = 20) -> Worklist:
         key = _group_key(transaction.description)
         if key:
             counts[key] = counts.get(key, 0) + 1
+            seen.setdefault(key, set()).add(transaction.description)
             examples.setdefault(key, transaction.description)
     worklist.groups = [
-        (key, count, examples[key])
+        WorklistGroup(
+            label=key,
+            count=count,
+            example=examples[key],
+            distinct=len(seen[key]),
+            reference_coded=_reference_coded(examples[key]),
+        )
         for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[
             :limit
         ]

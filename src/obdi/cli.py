@@ -3069,9 +3069,12 @@ def main(argv: list[str] | None = None) -> int:
         if worklist.groups:
             print("Biggest uncategorised groups (rule-writing worklist):")
             print("  count  group -> example description to write rules against")
-            for name, count, example in worklist.groups:
-                suffix = f"  <- '{example}'" if example != name else ""
-                print(f"  {count:>5}  {name}{suffix}")
+            for group in worklist.groups:
+                suffix = f"  <- '{group.example}'" if group.example != group.label else ""
+                note = f"  [{group.distinct} distinct]" if group.distinct > 1 else ""
+                if group.reference_coded:
+                    note += "  [reference codes, not a payee - a rule here would guess]"
+                print(f"  {group.count:>5}  {group.label}{suffix}{note}")
         else:
             print("Nothing uncategorised.")
         if worklist.transfer_legs:
