@@ -3815,6 +3815,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "doubt</label></p>"
             '<p><button type="submit">Read the shape</button></p>'
             '<div id="progress" class="muted mono"></div>'
+            # Reachable from where statements are sent, because "what have
+            # I already uploaded?" is the question asked immediately
+            # before uploading and immediately after.
+            '<p><a href="/artefacts">Every statement kept so far</a></p>'
             + f"<script>{UPLOAD_SCRIPT}</script>"
             "</form>" + HOME_LINK
         )

@@ -60,6 +60,17 @@ def render_page(title: str, body: str) -> bytes:
             border-radius: .5rem;
             background: #2563eb; color: #fff; text-decoration: none; text-align: center;
             font-weight: 600; }}
+ /* A bare submit is the ACTION of the page it sits on, and it used to
+    render as the browser's default control - a small grey rectangle,
+    directly above a full-width navigation link. Missing it meant leaving
+    the page instead of doing the thing. Sized like the link below it so
+    the two are equally reachable, and outlined rather than filled so the
+    doing and the leaving are still told apart at a glance. */
+ form button:not(.button) {{ display: block; width: 100%; box-sizing: border-box;
+            padding: .9rem 1rem; margin: .5rem 0 1rem; border-radius: .5rem;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            background: transparent; color: #2563eb;
+            border: 2px solid #2563eb; }}
  .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
  table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
  th, td {{ padding: .45rem .5rem; text-align: left; border-bottom: 1px solid #8883;

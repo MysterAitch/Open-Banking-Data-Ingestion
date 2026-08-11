@@ -98,10 +98,21 @@ UPLOAD_SCRIPT = r"""
             sizeOf(total) + ' (' + Math.floor((done / total) * 100) + '%)');
       });
       request.addEventListener('load', function () {
-        resolve({ ok: request.status === 200, body: request.responseText });
+        resolve({
+          ok: request.status === 200,
+          body: request.responseText,
+          // The reason travels with the failure. "It did not work" sends
+          // somebody looking at their files; "the server said 500" and
+          // "there was no reply at all" send them somewhere useful.
+          why: request.status === 200 ? '' : 'the server replied ' +
+               request.status + ' ' + (request.statusText || '')
+        });
       });
       request.addEventListener('error', function () {
-        resolve({ ok: false, body: '' });
+        resolve({ ok: false, body: '', why: 'no reply - connection lost' });
+      });
+      request.addEventListener('timeout', function () {
+        resolve({ ok: false, body: '', why: 'timed out waiting for a reply' });
       });
       request.send(data);
     });
@@ -129,6 +140,109 @@ UPLOAD_SCRIPT = r"""
     return /\.pdf$/i.test(file.name || '');
   }
 
+  function block(text, className) {
+    var p = document.createElement('p');
+    if (className) p.className = className;
+    p.textContent = text;
+    progress.appendChild(p);
+    return p;
+  }
+
+  function listOf(items, limit) {
+    // A list, not a sentence. Names separated by commas and wrapped into a
+    // paragraph have to be READ to be counted, and anything said at the
+    // end of one - including a sentence that reverses its meaning - is
+    // indistinguishable from more of the same.
+    var list = document.createElement('ul');
+    items.slice(0, limit).forEach(function (item) {
+      var entry = document.createElement('li');
+      entry.textContent = item;
+      list.appendChild(entry);
+    });
+    progress.appendChild(list);
+    if (items.length > limit) {
+      block((items.length - limit) + ' more not listed, of ' + items.length +
+            ' altogether.', 'muted');
+    }
+  }
+
+  // Every outcome gets its own line, strongest first, each one able to
+  // stand alone. The headline says what happened before any detail, so a
+  // glance is enough and reading further is a choice rather than the only
+  // way to find out whether anything went wrong.
+  function report(outcome) {
+    progress.innerHTML = '';
+    var worked = outcome.sending - outcome.failed.length;
+
+    if (outcome.failed.length) {
+      block(worked + ' of ' + outcome.sending + ' file(s) kept. ' +
+            outcome.failed.length + ' FAILED.', 'bad');
+    } else {
+      block('All ' + worked + ' file(s) kept (' + sizeOf(outcome.total) + ').',
+            'ok');
+    }
+
+    if (outcome.stopped) {
+      block('Stopped early: three in a row failed, so the rest were not ' +
+            'attempted. That usually means the server became unreachable ' +
+            'rather than anything being wrong with the files.', 'warn');
+    }
+
+    if (outcome.failed.length) {
+      // Grouped by REASON, because thirty files failing one way is one
+      // problem and thirty failing thirty ways is thirty.
+      var reasons = {};
+      outcome.failed.forEach(function (item) {
+        reasons[item.why] = (reasons[item.why] || 0) + 1;
+      });
+      Object.keys(reasons).forEach(function (why) {
+        block(reasons[why] + ' failed: ' + why, 'bad');
+      });
+      block('Not kept - these can be sent again:', '');
+      listOf(outcome.failed.map(function (item) { return item.name; }), 8);
+    }
+
+    // Where the files came from, because two boxes make a total that
+    // matches neither of them and there is no way to tell from the number
+    // alone which one contributed what.
+    block(outcome.chosen + ' file(s) chosen: ' + outcome.picked +
+          ' picked individually, ' + outcome.foldered + ' from the folder.',
+          'muted');
+    if (outcome.ignored) {
+      block(outcome.ignored + ' were not PDFs and were ignored.', 'muted');
+    }
+    if (outcome.duplicated) {
+      block(outcome.duplicated + ' were the same document chosen twice ' +
+            '(both boxes), counted once.', 'muted');
+    }
+    if (outcome.skipped) {
+      block(outcome.skipped + ' already held, so not sent again.', 'muted');
+    }
+
+    if (outcome.kept.length) {
+      // Links, not a list of numbers. A statement that was kept is
+      // something to go and look at, and the id alone makes the reader
+      // construct the address themselves.
+      block('Kept - open any of these to read its masked shape:', '');
+      var line = document.createElement('p');
+      outcome.kept.forEach(function (id, index) {
+        var link = document.createElement('a');
+        link.href = '/statement-shape?artefact=' + encodeURIComponent(id);
+        link.textContent = id;
+        if (index) line.appendChild(document.createTextNode(', '));
+        line.appendChild(link);
+      });
+      progress.appendChild(line);
+    }
+
+    var all = document.createElement('p');
+    var index = document.createElement('a');
+    index.href = '/artefacts';
+    index.textContent = 'Every statement kept so far';
+    all.appendChild(index);
+    progress.appendChild(all);
+  }
+
   // Set when the enhanced path has failed. The next submit is then left
   // entirely alone, so the form posts natively. Without this the listener
   // would keep calling preventDefault and the advice to "try again with
@@ -139,11 +253,10 @@ UPLOAD_SCRIPT = r"""
 
   form.addEventListener('submit', function (event) {
     if (standDown) return;
-    var chosen = Array.prototype.slice.call(input.files || []);
+    var picked = Array.prototype.slice.call(input.files || []);
     var picker = document.getElementById('folder');
-    if (picker && picker.files && picker.files.length) {
-      chosen = chosen.concat(Array.prototype.slice.call(picker.files));
-    }
+    var foldered = picker ? Array.prototype.slice.call(picker.files || []) : [];
+    var chosen = picked.concat(foldered);
     if (!chosen.length) return;
     event.preventDefault();
 
@@ -172,6 +285,24 @@ UPLOAD_SCRIPT = r"""
       });
     }).then(function (answer) {
       var digests = answer.digests || [];
+      // Choosing three files AND the folder that contains them is the
+      // ordinary way to use two boxes, and it presented the same document
+      // twice - counted twice, hashed twice, sent twice. The digest that
+      // was computed anyway settles it.
+      var seen = {};
+      var unique = [];
+      var uniqueDigests = [];
+      files.forEach(function (file, index) {
+        var digest = digests[index];
+        if (digest && seen[digest]) return;
+        if (digest) seen[digest] = true;
+        unique.push(file);
+        uniqueDigests.push(digest);
+      });
+      var duplicated = files.length - unique.length;
+      files = unique;
+      digests = uniqueDigests;
+
       var sending = files.filter(function (_file, index) {
         return !answer.skip[digests[index]];
       });
@@ -191,51 +322,45 @@ UPLOAD_SCRIPT = r"""
       var kept = [];
       var failed = [];
       var sent = 0;
+      var consecutive = 0;
+      var stopped = false;
       var chain = Promise.resolve();
       sending.forEach(function (file) {
         chain = chain.then(function () {
+          // Once several in a row have failed the cause is almost never
+          // the individual file - the destination has gone away - and
+          // sending the rest just produces a longer list of the same
+          // failure while the person waits for it.
+          if (stopped) return;
           return send(file, sent, total).then(function (result) {
             sent += file.size;
             if (result.ok) {
+              consecutive = 0;
               statementsIn(result.body).forEach(function (id) {
                 if (kept.indexOf(id) === -1) kept.push(id);
               });
             } else {
-              failed.push(file.name);
+              consecutive += 1;
+              failed.push({ name: file.name, why: result.why });
+              if (consecutive >= 3) stopped = true;
             }
           });
         });
       });
 
       return chain.then(function () {
-        // Counts with their denominator, and the failures NAMED - a
-        // summary that reports only successes reads identically whether
-        // or not anything went wrong.
-        var lines = [
-          'Sent ' + (sending.length - failed.length) + ' of ' +
-          sending.length + ' file(s), ' + sizeOf(total) + '.'
-        ];
-        if (skipped) {
-          lines.push(skipped + ' already held, not sent.');
-        }
-        if (ignored) {
-          // Named rather than dropped quietly: a person who chose a
-          // folder is entitled to know what was left out of it.
-          lines.push(ignored + ' of ' + chosen.length +
-                     ' file(s) chosen were not PDFs and were ignored.');
-        }
-        if (failed.length) {
-          lines.push('FAILED: ' + failed.join(', ') +
-                     ' - these were not kept. Try them again.');
-        }
-        if (kept.length) {
-          lines.push('statements ' + kept.join(', '));
-        }
-        progress.innerHTML = '';
-        lines.forEach(function (line) {
-          var p = document.createElement('p');
-          p.textContent = line;
-          progress.appendChild(p);
+        report({
+          sending: sending.length,
+          failed: failed,
+          skipped: skipped,
+          ignored: ignored,
+          duplicated: duplicated,
+          chosen: chosen.length,
+          picked: picked.length,
+          foldered: foldered.length,
+          kept: kept,
+          total: total,
+          stopped: stopped
         });
       });
     }).catch(function (error) {
