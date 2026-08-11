@@ -33,7 +33,7 @@ from __future__ import annotations
 
 #: Served inline. No CDN, no build step - the page has one dependency and
 #: it is the browser.
-UPLOAD_SCRIPT = """
+UPLOAD_SCRIPT = r"""
 (function () {
   var form = document.querySelector('form[action="/statement-shape"]');
   if (!form) return;
@@ -129,7 +129,16 @@ UPLOAD_SCRIPT = """
     return /\.pdf$/i.test(file.name || '');
   }
 
+  // Set when the enhanced path has failed. The next submit is then left
+  // entirely alone, so the form posts natively. Without this the listener
+  // would keep calling preventDefault and the advice to "try again with
+  // the plain form" would be impossible to follow - the enhancement would
+  // have become the only path by failing, which is the one outcome
+  // progressive enhancement exists to prevent.
+  var standDown = false;
+
   form.addEventListener('submit', function (event) {
+    if (standDown) return;
     var chosen = Array.prototype.slice.call(input.files || []);
     var picker = document.getElementById('folder');
     if (picker && picker.files && picker.files.length) {
@@ -149,7 +158,9 @@ UPLOAD_SCRIPT = """
     say('Hashing ' + files.length + ' file(s)...');
 
     Promise.all(files.map(digestOf)).then(function (digests) {
-      if (forcing) return { skip: {}, checked: true };
+      // The override skips the asking, not the sending: nothing is held
+      // as far as this run is concerned.
+      if (forcing) return { skip: {}, checked: true, digests: digests };
       return heldAmong(digests).then(function (held) {
         if (held === null) return { skip: {}, checked: false };
         var skip = {};
@@ -228,9 +239,10 @@ UPLOAD_SCRIPT = """
         });
       });
     }).catch(function (error) {
+      standDown = true;
       say('Upload could not be completed in the browser (' + error +
-          '). Untick nothing and press the button again to use the plain ' +
-          'form, which always works.');
+          '). Press the button again - it will now send the files the ' +
+          'plain way, which needs no scripting.');
     });
   });
 })();
