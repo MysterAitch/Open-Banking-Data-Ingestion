@@ -73,7 +73,16 @@ class StatementParser(ABC):
         except StopIteration as exc:
             raise ParseError("file is empty") from exc
 
+    #: How many rows the file offered, as opposed to how many became
+    #: transactions. Counted here rather than in each parser, so a parser
+    #: that filters cannot forget to say so: a file whose id column
+    #: changes shape can otherwise import as a clean no-op, and months of
+    #: absent transactions read as a quiet period rather than a failed
+    #: read. None means the format does not present rows this way.
+    rows_offered: int | None = None
+
     def rows(self, payload: bytes) -> Iterator[dict[str, str]]:
+        self.rows_offered = 0
         text = payload.decode(self.encoding, errors="strict")
         reader = csv.DictReader(io.StringIO(text))
         if reader.fieldnames is None:
@@ -94,6 +103,7 @@ class StatementParser(ABC):
                     f"{self.source}: a row has more fields than the header. "
                     "An unquoted comma in a description is the usual cause."
                 )
+            self.rows_offered = (self.rows_offered or 0) + 1
             yield {
                 (key or "").strip(): (value or "").strip() for key, value in row.items()
             }

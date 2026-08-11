@@ -133,3 +133,53 @@ class TestMalformedRows:
         assert issubclass(ParseError, DataError)
         assert issubclass(AmountParseError, DataError)
         assert issubclass(JsonShapeError, DataError)
+
+
+class TestSkippedRowsAreCounted:
+    """A file that offers rows and yields none must not read as success.
+
+    Found by review. The Monzo parser skips rows with no transaction id -
+    correctly, they are the app's own non-transaction lines - on a bare
+    `continue`, and the import summary reported only how many rows became
+    transactions. So an export whose id column changed shape would import
+    as a clean no-op: months of transactions absent while the ledger said
+    the file processed successfully, and the gap reading as a quiet period
+    rather than a failed read.
+
+    Counted in the shared row reader rather than in each parser, so a
+    parser that filters cannot forget to say so.
+    """
+
+    def test_TheRowsAFileOffered_AreCountedAlongsideThoseParsed(self):
+        parser = MonzoCsvParser()
+
+        parsed = list(parser.parse(MONZO, account_id="a"))
+
+        assert len(parsed) == 2
+        assert parser.rows_offered == 3, "the file offered three rows"
+
+    def test_AnImportThatSkipsRows_SaysSoWithItsDenominator(self, tmp_path):
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        path = tmp_path / "monzo.csv"
+        path.write_bytes(MONZO)
+        with Store(tmp_path / "s.sqlite3") as store:
+            summary = import_file(store, path, account_id="monzo-personal")
+
+            described = summary.describe()
+            assert "of 3 row(s)" in described
+            assert "1 skipped" in described
+
+    def test_AnImportThatSkipsNothing_StaysQuietAboutIt(self, tmp_path):
+        # The denominator appears when it differs, so a clean import is not
+        # made to look like it has something to answer for.
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        path = tmp_path / "starling.csv"
+        path.write_bytes(STARLING)
+        with Store(tmp_path / "s.sqlite3") as store:
+            summary = import_file(store, path, account_id="starling-personal")
+
+            assert "skipped" not in summary.describe()

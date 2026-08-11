@@ -27,15 +27,27 @@ from .store import Store
 class ImportSummary:
     artefact_new: bool
     parsed: int = 0
+    #: How many rows the file held, where the format presents rows. The
+    #: denominator for `parsed`: without it, a parser that filtered every
+    #: row reports a successful import of nothing.
+    rows_offered: int | None = None
     inserted: int = 0
     matched: int = 0
     superseded: int = 0
     needs_review: int = 0
 
     def describe(self) -> str:
+        offered = ""
+        if self.rows_offered is not None and self.rows_offered != self.parsed:
+            skipped = self.rows_offered - self.parsed
+            offered = (
+                f" of {self.rows_offered} row(s) in the file - {skipped} "
+                "skipped, which is a fault unless you know why"
+            )
         return (
-            f"parsed {self.parsed}, new {self.inserted}, matched {self.matched}, "
-            f"superseded {self.superseded}, for review {self.needs_review}"
+            f"parsed {self.parsed}{offered}, new {self.inserted}, "
+            f"matched {self.matched}, superseded {self.superseded}, "
+            f"for review {self.needs_review}"
         )
 
 
@@ -194,6 +206,7 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
 
     parser = detect(payload)
     incoming = list(parser.parse(payload, account_id=account_id))
+    offered = getattr(parser, "rows_offered", None)
 
     if dates_cannot_confirm_format([item.value_date for item in incoming]):
         print(
@@ -208,7 +221,7 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     # Reconciliation is shared with API pulls rather than duplicated here, so
     # identity resolution cannot drift between the two routes - the same
     # payment arriving by file and by API must resolve identically.
-    summary = ImportSummary(artefact_new=is_new_artefact)
+    summary = ImportSummary(artefact_new=is_new_artefact, rows_offered=offered)
     reconcile_batch(store, incoming, digest=digest, summary=summary)
     return summary
 
