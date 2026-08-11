@@ -171,6 +171,16 @@ class ShapeReport:
     #: Masked when `masked` is set, raw otherwise - which is why the union
     #: is written out: a caller cannot forget which it is holding.
     lines: list[MaskedText] | list[RawText] = field(default_factory=list)
+    #: The same page read by coordinate rather than by spacing, as equal-
+    #: length rows. Carried ALONGSIDE the lines rather than instead of
+    #: them, because the disagreement between the two views is the
+    #: evidence: where reconstruction fused two fields, the line shows one
+    #: token and the row shows two, and a reader can see which to believe.
+    #: Masked on exactly the same terms as `lines`.
+    rows: list[list[MaskedText]] | list[list[RawText]] = field(default_factory=list)
+    #: The left edges the page uses, so a reader can see the table's shape
+    #: without reading its contents.
+    edges: list[float] = field(default_factory=list)
 
     def describe(self) -> str:
         if not self.readable:
@@ -187,12 +197,30 @@ class ShapeReport:
             f"{self.path}: {self.line_count} line(s) across {self.page_count} "
             f"page(s)"
             + (
+                f", read as {len(self.rows)} row(s) of "
+                f"{len(self.edges)} column(s)"
+                if self.rows
+                else " - NO column reading (the page's geometry could not "
+                "be read, so only the spacing view is available)"
+            )
+            + (
                 " - values MASKED (digits as 9, other words as X, layout kept)"
                 if self.masked
                 else " - REAL VALUES, not masked"
             )
         )
-        return "\n".join([header, *self.lines])
+        parts = [header, *self.lines]
+        if self.rows:
+            edges = ", ".join(f"{edge:.0f}" for edge in self.edges)
+            parts.append("")
+            parts.append(
+                f"--- the same pages read by position, columns at x={edges} ---"
+            )
+            # Pipes rather than spacing, so a cell the page left EMPTY is
+            # visible as an empty cell. Reading this view back as spacing
+            # would reintroduce the exact ambiguity it exists to remove.
+            parts.extend(" | ".join(row) for row in self.rows)
+        return "\n".join(parts)
 
 
 def shape_report(path: Path, *, mask: bool = True, limit: int = 1200) -> ShapeReport:
@@ -222,4 +250,32 @@ def shape_report(path: Path, *, mask: bool = True, limit: int = 1200) -> ShapeRe
                 RawText(f"... {len(raw) - limit} further line(s) not shown")
             )
         report.lines = raw_lines
+
+    _add_column_view(report, path, mask=mask, limit=limit)
     return report
+
+
+def _add_column_view(
+    report: ShapeReport, path: Path, *, mask: bool, limit: int
+) -> None:
+    """Attach the coordinate reading of the same pages.
+
+    Failure here is not failure of the report: the line view is the older
+    and better-proven of the two, so a page whose geometry cannot be read
+    still yields everything it yielded before, with the rows simply
+    absent. Absent rows are visible in the summary rather than silent.
+    """
+    from .statement_columns import aligned, column_edges, rows
+
+    try:
+        table = rows(path)
+    except Exception:
+        return
+    if not table:
+        return
+    report.edges = column_edges(table)
+    grid = aligned(table)[:limit]
+    if mask:
+        report.rows = [[mask_line(cell) for cell in row] for row in grid]
+    else:
+        report.rows = [[RawText(cell) for cell in row] for row in grid]

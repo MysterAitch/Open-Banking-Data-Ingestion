@@ -1,6 +1,6 @@
 [project]
 name = "obdi"
-version = "0.4.163"
+version = "0.4.164"
 description = "Open banking data ingestion - canonical local store, app-agnostic"
 requires-python = ">=3.11"
 # Floors track the versions this project is actually tested against, so a
@@ -11,6 +11,12 @@ dependencies = [
     "pyjwt[crypto]>=2.13",
     "python-dotenv>=1.2.2",
     "pypdf>=6.15",
+    # Word-level geometry. pypdf reads text but reconstructs columns from
+    # whitespace and coalesces a line into a single fragment, which loses
+    # the positions a wide statement needs; pdfplumber reports each word's
+    # own coordinates. Both are kept: the two readings of a page
+    # disagreeing is how a fused field gets noticed.
+    "pdfplumber>=0.11.10",
 ]
 
 [project.optional-dependencies]

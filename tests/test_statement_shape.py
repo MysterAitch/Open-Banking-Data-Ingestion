@@ -245,3 +245,111 @@ class TestLayoutExtraction:
         from obdi.statement_shape import _page_text
 
         assert _page_text(Page()) == "plain"
+
+
+class TestTheColumnViewIsMaskedOnTheSameTerms:
+    """The coordinate reading is a SECOND way out of the same document.
+
+    It was added beside a masking door that already worked, and a new
+    surface does not inherit the guard on the one beside it - so the door
+    is tested here on its own terms. The geometry is supplied directly
+    rather than through a PDF, because what is under test is whether the
+    report masks what it is handed, not whether a library can parse a
+    fixture.
+    """
+
+    @staticmethod
+    def _with_geometry(monkeypatch, table) -> None:
+        import obdi.statement_columns as columns
+
+        monkeypatch.setattr(columns, "rows", lambda path, **kwargs: table)
+
+    @staticmethod
+    def _table() -> list:
+        from obdi.statement_columns import Fragment, rows_from_words
+
+        return rows_from_words(
+            [
+                Fragment(text="ACME", x=60.0, y=-100.0, page=1, x_end=82.0),
+                Fragment(text="1,234.56", x=400.0, y=-100.0, page=1, x_end=444.0),
+                Fragment(text="SAINSBURYS", x=60.0, y=-120.0, page=1, x_end=115.0),
+                Fragment(text="21.72", x=400.0, y=-120.0, page=1, x_end=427.0),
+            ]
+        )
+
+    def test_AReadableTable_ReachesThePageWithItsValuesMasked(
+        self, tmp_path, monkeypatch
+    ):
+        self._with_geometry(monkeypatch, self._table())
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(FAKE_PDF)
+
+        text = shape_report(path).describe()
+
+        assert "read as 2 row(s) of 2 column(s)" in text
+        assert "ACME" not in text
+        assert "1,234.56" not in text
+        assert "SAINSBURYS" not in text
+        assert "9,999.99" in text, "the shape of an amount must survive"
+
+    def test_DisclosingTheTable_RequiresTheSameExplicitAsk_AsTheLines(
+        self, tmp_path, monkeypatch
+    ):
+        self._with_geometry(monkeypatch, self._table())
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(FAKE_PDF)
+
+        text = shape_report(path, mask=False).describe()
+
+        assert "1,234.56" in text
+
+    def test_AnEmptyCell_IsVisibleAsAnEmptyCell(self, tmp_path, monkeypatch):
+        # Which side of the ledger a row fell on is carried by the blank.
+        # Rendered with separators for exactly this reason: laid out with
+        # spacing, the blank would be unreadable again.
+        from obdi.statement_columns import Fragment, rows_from_words
+
+        table = rows_from_words(
+            [
+                Fragment(text="99.99", x=60.0, y=-100.0, page=1, x_end=87.0),
+                Fragment(text="11.11", x=400.0, y=-100.0, page=1, x_end=427.0),
+                Fragment(text="22.22", x=400.0, y=-120.0, page=1, x_end=427.0),
+            ]
+        )
+        self._with_geometry(monkeypatch, table)
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(FAKE_PDF)
+
+        text = shape_report(path).describe()
+
+        assert "99.99 | 99.99" in text
+        assert " | 99.99" in text, "the missing first cell must stay missing"
+
+    def test_GeometryThatCannotBeRead_IsNamed_NotSilentlyOmitted(self, tmp_path):
+        # The report still answers - the line view is the older and better
+        # proven of the two - but a reader must not mistake an absent
+        # column reading for a document with no columns.
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(FAKE_PDF)
+
+        text = shape_report(path).describe()
+
+        assert "NO column reading" in text
+
+    def test_GeometryThatRaises_LeavesTheRestOfTheReportIntact(
+        self, tmp_path, monkeypatch
+    ):
+        import obdi.statement_columns as columns
+
+        def explode(path, **kwargs):
+            raise RuntimeError("geometry unavailable")
+
+        monkeypatch.setattr(columns, "rows", explode)
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(FAKE_PDF)
+
+        report = shape_report(path)
+
+        assert report.line_count >= 4
+        assert report.rows == []
+        assert "NO column reading" in report.describe()
