@@ -96,3 +96,20 @@ class TestTheScriptIsWellFormed:
         # the number - what was ignored, what was a duplicate of what -
         # were never shown on the path where they matter most.
         assert "Nothing to send - every one of them is already held." in UPLOAD_SCRIPT
+
+    def test_EveryFileKeepsItsOwnLine_WithItsPositionAndOutcome(self):
+        # A single line rewritten in place showed only whichever file was
+        # in flight, so a batch scrolled past as one changing sentence and
+        # left no record of which files had been dealt with - which is the
+        # question actually being asked while waiting.
+        assert "function fileLine(" in UPLOAD_SCRIPT
+        assert "'file ' + position + '/'" in UPLOAD_SCRIPT
+        assert "' - kept'" in UPLOAD_SCRIPT
+        assert "' - FAILED'" in UPLOAD_SCRIPT
+
+    def test_TheRunningTotal_HoldsOnePlace_RatherThanMovingAsItGoes(self):
+        # Created at first use it landed wherever the first progress event
+        # fired - between the first and second file. A summary that moves
+        # is one a reader has to find again every time they look.
+        assert "ticker = say('', 'muted mono');" in UPLOAD_SCRIPT
+        assert "'Overall: '" in UPLOAD_SCRIPT

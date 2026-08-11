@@ -75,8 +75,13 @@ UPLOAD_SCRIPT = r"""
     if (progress.childNodes.length) {
       progress.appendChild(document.createElement('hr'));
     }
-    ticker = null;
     say(what, '');
+    // The running total is created HERE rather than at first use, so it
+    // holds one position under the heading while the per-file lines append
+    // beneath it. Created lazily it landed wherever the first progress
+    // event happened to fire - between the first and second file - and a
+    // summary that moves is one a reader has to find again each time.
+    ticker = say('', 'muted mono');
   }
 
   // Units follow magnitude, and below the resolution the answer is a
@@ -144,7 +149,18 @@ UPLOAD_SCRIPT = r"""
     } catch (error) { return ''; }
   }
 
-  function send(file, sent, total) {
+  // One line per file, kept. A single line rewritten in place showed only
+  // whichever file was in flight, so a batch of thirty scrolled past as one
+  // changing sentence and left no record of which files had been dealt with
+  // - the question actually being asked while waiting.
+  function fileLine(position, count, file) {
+    var line = say('', 'muted mono');
+    line.textContent = 'file ' + position + '/' + count + ' ' + file.name +
+                       ' - 0 B of ' + sizeOf(file.size);
+    return line;
+  }
+
+  function send(file, sent, total, line, position, count) {
     return new Promise(function (resolve) {
       var began = (window.performance || Date).now();
       var data = new FormData();
@@ -157,9 +173,18 @@ UPLOAD_SCRIPT = r"""
         // around it, so raw progress passes the total and reports more
         // than all of it - 109% of 2 KiB was on screen. A share of
         // something cannot exceed the something.
+        var mine = Math.min(event.loaded, file.size);
         var done = Math.min(sent + event.loaded, total);
-        tick('Sending ' + file.name + ' - ' + sizeOf(done) + ' of ' +
-             sizeOf(total) + ' (' + Math.floor((done / total) * 100) + '%)');
+        if (line) {
+          line.textContent = 'file ' + position + '/' + count + ' ' +
+                             file.name + ' - ' + sizeOf(mine) + ' of ' +
+                             sizeOf(file.size);
+        }
+        // The overall figure stays in ONE place that overwrites, because a
+        // running total is only ever interesting as its latest value.
+        tick('Overall: ' + position + ' of ' + count + ' file(s), ' +
+             sizeOf(done) + ' of ' + sizeOf(total) +
+             ' (' + Math.floor((done / total) * 100) + '%)');
       });
       request.addEventListener('load', function () {
         resolve({
@@ -555,7 +580,7 @@ UPLOAD_SCRIPT = r"""
       var consecutive = 0;
       var stopped = false;
       var chain = Promise.resolve();
-      sending.forEach(function (file) {
+      sending.forEach(function (file, index) {
         chain = chain.then(function () {
           // Once several in a row have failed the cause is almost never
           // the individual file - the destination has gone away - and
@@ -563,8 +588,18 @@ UPLOAD_SCRIPT = r"""
           // failure while the person waits for it.
           if (stopped) return;
           attempted += 1;
-          return send(file, sent, total).then(function (result) {
+          var position = index + 1;
+          var line = fileLine(position, sending.length, file);
+          return send(file, sent, total, line, position, sending.length)
+            .then(function (result) {
             sent += file.size;
+            // The line stays, and says how it ended. A list of files with
+            // no outcome against them answers "what was sent" and not
+            // "what happened", which is the question being asked.
+            line.textContent = 'file ' + position + '/' + sending.length +
+                               ' ' + file.name + ' - ' + sizeOf(file.size) +
+                               (result.ok ? ' - kept' : ' - FAILED');
+            if (!result.ok) line.className = 'mono bad';
             if (result.ok) {
               consecutive = 0;
               measured.push({
