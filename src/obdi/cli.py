@@ -25,6 +25,7 @@ from . import fingerprint
 from .accounts import (
     AccountBinding,
     AccountMap,
+    AccountRecord,
     AccountRef,
     lifecycle_breach,
     read_registry_file,
@@ -2525,6 +2526,20 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             return []
         return [stale.describe() for stale in stale_feeds(holdings(), watched=watched)]
 
+    def declared_accounts() -> list[AccountRecord]:
+        with Store(db_path) as store:
+            return store.declared_accounts()
+
+    def declare_account(record: AccountRecord) -> AccountRecord:
+        """Declare or edit one account, from the page rather than the host.
+
+        A store per call, like every other hook here: the pages run on the
+        server's threads and a sqlite connection belongs to the thread that
+        opened it.
+        """
+        with Store(db_path) as store:
+            return store.declare_account(record)
+
     config = WebConfig(
         client_id=client_id,
         client_secret=current_secret,
@@ -2553,6 +2568,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
         display_labels=display_labels,
+        declared_accounts=declared_accounts,
+        declare_account=declare_account,
         account_feeders=account_feeders,
         push_actual=push_actual_hook,
         actual_status=actual_status,

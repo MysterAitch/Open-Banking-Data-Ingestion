@@ -240,6 +240,18 @@ looks like one the store is missing, so the file's original entry would come
 back as a second account with its own identity. The rename would appear to have
 worked, and the duplicate would surface later.
 
+**Declared accounts** on the web interface lists the registry, and declares and
+edits its entries: canonical reference, display name, kind, parent and the
+opened/closed dates. Both names can be changed freely, including the canonical
+one - each account also carries an opaque identity, minted once, that no rename
+touches and nothing displays.
+
+Creating an account is a **deliberate act**, which is why the "or type a
+canonical name" box on the import, refile and assign forms no longer creates one
+by typing into it. A name matching nothing asks first, and names the closest
+account it can see: one typo otherwise puts a second account beside the real one
+and files the document into it, with nothing anywhere saying so.
+
 ### Savings pots are accounts, not categories
 
 A Starling Space (and any equivalent pot elsewhere) gets its **own canonical

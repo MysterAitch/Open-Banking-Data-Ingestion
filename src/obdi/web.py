@@ -42,6 +42,7 @@ from secrets import token_urlsafe
 from typing import ParamSpec, TypeVar
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
+from .accounts import AccountRecord
 from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
@@ -55,6 +56,7 @@ from .secrets import SecretError, read_secret
 from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
+from .web_accounts import NEW_ACCOUNT_FIELD, AccountPages, picker_labels
 
 
 def _scratch_name(filename: str) -> str:
@@ -503,6 +505,14 @@ class WebConfig:
     backfill_status: Callable[[], dict[str, object]] | None = None
     #: canonical -> provider refs bound to it; the map's edges, readable.
     account_feeders: Callable[[], dict[str, list[str]]] | None = None
+    #: The account registry: which accounts EXIST, as declared by a person,
+    #: and the act of declaring or editing one. Declared state, not derived
+    #: - an account with no feed exists nowhere else - so these are the only
+    #: hooks on this config that CREATE something a rebuild cannot restore.
+    #: Wiring them is also what arms the typed-name guard: without a place
+    #: to declare an account there is nothing to confirm against.
+    declared_accounts: Callable[[], list[AccountRecord]] | None = None
+    declare_account: Callable[[AccountRecord], AccountRecord] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -2908,6 +2918,7 @@ def render_index(
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
     feed_warnings: Callable[[], list[str]] | None = None,
+    declared_accounts: Callable[[], list[AccountRecord]] | None = None,
 ) -> bytes:
     # The import form picks its destination FIRST (the preview verifies
     # the file against what that account already holds), so the picker's
@@ -2916,6 +2927,9 @@ def render_index(
     if display_labels is not None:
         with contextlib.suppress(Exception):
             upload_labels = display_labels()
+    if declared_accounts is not None:
+        with contextlib.suppress(Exception):
+            upload_labels = picker_labels(upload_labels, declared_accounts())
     upload_picker = account_picker(upload_labels)
     body = f"""
 {_credential_banner()}
@@ -2932,6 +2946,7 @@ def render_index(
               actual_heartbeat=actual_heartbeat,
               prune_available=prune_actual is not None)}
 {_extend_rows(extendables)}
+<p><a class="button" href="/accounts">Declared accounts</a></p>
 <p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
 <p><a class="button" href="/attempts">Fetch attempts</a>
 <a class="button" href="/fetch-timeline">Fetch timeline</a></p>
@@ -2971,7 +2986,7 @@ a new name would create a second connection to the same bank.</p>
 DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 
 
-class ConnectionHandler(BaseHTTPRequestHandler):
+class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
     #: Statements awaiting an explicit disclosure confirmation. Same
@@ -3084,6 +3099,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
 
         if route == "/account":
             self._account(params)
+            return
+        if route == "/accounts":
+            self._accounts_page()
+            return
+        if route == "/declare-account":
+            self._declare_account_form()
+            return
+        if route == "/edit-account":
+            self._edit_account_form(params)
             return
         if route == "/fetch-timeline":
             self._fetch_timeline(parse_qs(parsed.query))
@@ -3225,6 +3249,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 ),
                 backfill_status=timed(
                     "backfill_status", self.bound_config.backfill_status
+                ),
+                declared_accounts=timed(
+                    "declared_accounts", self.bound_config.declared_accounts
                 ),
             )
             render_seconds = time.perf_counter() - render_began
@@ -3559,6 +3586,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if self.bound_config.display_labels is not None:
             with contextlib.suppress(Exception):
                 refile_labels = self.bound_config.display_labels()
+        # Declared accounts included: an account with no feed is invisible
+        # to every provider-derived label, and filing a document into one
+        # is the reason it was declared.
+        refile_labels = picker_labels(refile_labels, self.declared_accounts())
         # Names beyond the first, which the line above already shows. The
         # same document arrives under a folder path and bare, and a
         # rolling fetch re-lands identical bytes under each window it
@@ -3642,15 +3673,26 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             artefact_id = int(form.get("id", ["0"])[0] or "0")
         except ValueError:
             artefact_id = 0
-        account = (
-            (form.get("account_other", [""])[0] or "").strip()
-            or (form.get("account", [""])[0] or "").strip()
-        )
-        if not artefact_id or not account:
+        typed = (form.get("account_other", [""])[0] or "").strip()
+        picked = (form.get("account", [""])[0] or "").strip()
+        if not artefact_id or not (typed or picked):
             self._respond(
                 400,
                 error_page("Bad request", "<p>Artefact id and account required.</p>"),
             )
+            return
+        # A name typed to CORRECT a mis-pick is exactly where a second typo
+        # compounds the first, so an unrecognised one asks before it becomes
+        # an account of its own.
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=(form.get(NEW_ACCOUNT_FIELD, [""])[0] or ""),
+            action="/refile-artefact",
+            carry=lambda: {"id": str(artefact_id), "confirm": "yes"},
+            proceed_label=f"Declare it and refile artefact {artefact_id}",
+        )
+        if account is None:
             return
         old = hook(artefact_id, account)
         if old is None:
@@ -4243,6 +4285,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if hook is not None:
             with contextlib.suppress(Exception):
                 labels = hook()
+        labels = picker_labels(labels, self.declared_accounts())
         return (
             "<h3>Assign to an account</h3><p>Reading it in resolves its rows "
             "against everything already held. The parser's own arithmetic "
@@ -4266,10 +4309,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             for key, values in parse_qs(raw, keep_blank_values=True).items()
         }
         artefact = fields.get("artefact", "").strip()
-        account = (
-            fields.get("account_other") or fields.get("account") or ""
-        ).strip()
-        if not artefact.isdigit() or not account:
+        typed = (fields.get("account_other") or "").strip()
+        picked = (fields.get("account") or "").strip()
+        if not artefact.isdigit() or not (typed or picked):
             self._respond(
                 400,
                 error_page(
@@ -4278,6 +4320,16 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     + HOME_LINK,
                 ),
             )
+            return
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
+            action="/statement-assign",
+            carry=lambda: {"artefact": artefact},
+            proceed_label="Declare it and read the statement in",
+        )
+        if account is None:
             return
         try:
             outcome = hook(int(artefact), account)
@@ -4712,8 +4764,14 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._statement_assign()
             return
 
+        if route == "/save-account":
+            self._save_account(self._read_form())
+            return
         if route == "/upload":
             self._upload()
+            return
+        if route == "/upload-preview":
+            self._resume_upload(self._read_form())
             return
         if route == "/upload-confirm":
             self._upload_confirm(parse_qs(self.rfile.read(
@@ -4828,8 +4886,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
 
     def _upload(self) -> None:
         """Receive a file, preview it, commit NOTHING yet."""
-        hook = self.bound_config.preview_upload
-        if hook is None:
+        # Refused before the body is read: an unwired door should not cost
+        # a phone the upload of five megabytes it will not use.
+        if self.bound_config.preview_upload is None:
             self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
             return
         length = int(self.headers.get("Content-Length") or 0)
@@ -4851,8 +4910,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # Destination FIRST: the preview verifies the file against what
         # this account already holds, which is impossible to do after the
         # fact - and it makes the confirm page a single honest button.
-        account = (fields.get("account_other") or fields.get("account") or "").strip()
-        if not account:
+        typed = (fields.get("account_other") or "").strip()
+        picked = (fields.get("account") or "").strip()
+        if not (typed or picked):
             self._respond(
                 400,
                 error_page(
@@ -4862,6 +4922,64 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     "the file against what that account already holds.</p>",
                 ),
             )
+            return
+        # The file has already crossed the wire, so the question about an
+        # unrecognised destination hands back a token rather than the file:
+        # refusing must not cost a phone on a slow uplink a second upload.
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
+            action="/upload-preview",
+            carry=lambda: {"token": self.uploads.stash(payload, filename)},
+            proceed_label="Declare it and preview the import",
+        )
+        if account is None:
+            return
+        self._preview_import(payload, filename, account)
+
+    def _resume_upload(self, form: dict[str, list[str]]) -> None:
+        """Preview a file already held, once its destination is settled.
+
+        The import door's second entrance: the destination question is
+        answered here rather than at the door, because the answer arrives
+        in a form and a form cannot carry a file back.
+        """
+        if self.bound_config.preview_upload is None:
+            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            return
+        token = (form.get("token", [""])[0] or "").strip()
+        typed = (form.get("account_other", [""])[0] or "").strip()
+        picked = (form.get("account", [""])[0] or "").strip()
+        if not token or not (typed or picked):
+            self._respond(
+                400, error_page("Bad request", "<p>A held file and an account are needed.</p>")
+            )
+            return
+        try:
+            payload, filename, _ = self.uploads.claim(token)
+        except KeyError as exc:
+            self._respond(410, error_page("Upload expired", f"<p>{html.escape(str(exc))}</p>"))
+            return
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=(form.get(NEW_ACCOUNT_FIELD, [""])[0] or ""),
+            action="/upload-preview",
+            # Claiming consumed the stash, so asking again re-stashes: the
+            # file survives however many times the destination is queried.
+            carry=lambda: {"token": self.uploads.stash(payload, filename)},
+            proceed_label="Declare it and preview the import",
+        )
+        if account is None:
+            return
+        self._preview_import(payload, filename, account)
+
+    def _preview_import(self, payload: bytes, filename: str, account: str) -> None:
+        """Parse without landing, and offer the single confirm button."""
+        hook = self.bound_config.preview_upload
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
             return
         try:
             preview = hook(payload, filename, account)
