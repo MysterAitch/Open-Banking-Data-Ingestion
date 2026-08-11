@@ -2219,6 +2219,43 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             ).fetchone()
         return int(row["rowid"]) if row else 0
 
+    def assign_kept_statement(artefact_id: int, account_id: str) -> str:
+        """Give a kept statement its account, then read it in.
+
+        The statement was landed before anyone decided whose it was, which
+        is what let it be kept at all. Assigning it is therefore the same
+        correction the refile flow makes to a misfiled import, followed by
+        the ordinary parse - the rows resolve against the same identity
+        rules as an API pull, and the parser's own arithmetic gate still
+        refuses a document whose rows do not carry its declared balances.
+        """
+        from .ingest import ImportSummary, reconcile_batch
+        from .parsers.uk_banks import detect
+
+        destination = account_id.strip()
+        if not destination:
+            return "No account was named, so nothing was assigned."
+        with Store(db_path) as store:
+            row = store.connection.execute(
+                "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
+                "WHERE rowid = ?",
+                (artefact_id,),
+            ).fetchone()
+            if row is None:
+                return f"No kept statement {artefact_id}."
+            payload = bytes(row["payload"])
+            store.refile_artefact(artefact_id, destination)
+            parser = detect(payload)
+            incoming = list(parser.parse(payload, account_id=destination))
+            summary = ImportSummary(artefact_new=False)
+            reconcile_batch(
+                store, incoming, digest=str(row["digest"]), summary=summary
+            )
+        return (
+            f"{row['origin']} assigned to {destination} and read by "
+            f"{parser.source}: {summary.describe()}"
+        )
+
     def statement_payload(artefact_id: int) -> tuple[str, bytes] | None:
         with Store(db_path) as store:
             row = store.connection.execute(
@@ -2348,6 +2385,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         artefact_index=artefact_index,
         keep_statement=keep_statement,
         statement_payload=statement_payload,
+        assign_kept_statement=assign_kept_statement,
         artefact_detail=artefact_detail,
         refile_artefact=(
             lambda artefact_id, account: _refile(db_path, artefact_id, account)

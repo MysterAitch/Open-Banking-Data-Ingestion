@@ -26,19 +26,27 @@ from obdi.parsers.uk_banks import (
 from test_parsers import AMEX, MONZO, STARLING
 from test_qif import BANK_QIF
 
-#: One case per parser: a payload holding a spend and (where the format
-#: shows one) a credit, and what the parser must produce for each.
+#: One case per parser: a payload, the note on which way that bank signs
+#: money, and the CREDIT row within the payload that proves the other half
+#: of the convention. The credit needle lives here rather than in a second
+#: list, because a parallel list is a place for a parser to be half
+#: covered - spend guarded, credit not - and a credit read the wrong way
+#: turns every payment into a purchase. An explicit None says the fixture
+#: shows no credit, and the registry check below insists on one or the
+#: other rather than accepting silence.
 CASES = {
-    StarlingCsvParser: (STARLING, "publishes spend negative"),
-    MonzoCsvParser: (MONZO, "publishes spend negative"),
-    AmexUkCsvParser: (AMEX, "publishes spend POSITIVE - must be inverted"),
-    QifParser: (BANK_QIF, "publishes spend negative"),
+    StarlingCsvParser: (STARLING, "publishes spend negative", "SALARY"),
+    MonzoCsvParser: (MONZO, "publishes spend negative", "REFUND RECEIVED"),
+    AmexUkCsvParser: (
+        AMEX, "publishes spend POSITIVE - must be inverted", "PAYMENT RECEIVED",
+    ),
+    QifParser: (BANK_QIF, "publishes spend negative", "EMPLOYER"),
 }
 
 
 class TestEveryParserSpeaksTheSameSign:
     def test_ASpend_IsNegative_WhicheverBankPublishedIt(self):
-        for parser_class, (payload, note) in CASES.items():
+        for parser_class, (payload, note, _credit) in CASES.items():
             rows = list(parser_class().parse(payload, account_id="a"))
             spends = [row for row in rows if "TESCO" in row.description.upper()]
             assert spends, f"{parser_class.__name__}: no spend row found"
@@ -49,13 +57,9 @@ class TestEveryParserSpeaksTheSameSign:
                 )
 
     def test_ACredit_IsPositive_WhicheverBankPublishedIt(self):
-        wanted = {
-            StarlingCsvParser: "SALARY",
-            AmexUkCsvParser: "PAYMENT RECEIVED",
-            QifParser: "EMPLOYER",
-        }
-        for parser_class, needle in wanted.items():
-            payload, note = CASES[parser_class]
+        for parser_class, (payload, note, needle) in CASES.items():
+            if needle is None:
+                continue
             rows = list(parser_class().parse(payload, account_id="a"))
             credits = [
                 row
@@ -92,3 +96,13 @@ class TestNoParserCanSkipTheRule:
         assert {parser.__name__ for parser in PARSERS} == {
             parser.__name__ for parser in CASES
         }, "a parser exists with no sign-convention case - add one"
+
+    def test_EveryCase_StatesWhetherItHasACredit(self):
+        # The half that used to live in a separate list, where a parser
+        # could be covered for spend and silently uncovered for credit.
+        # An explicit None is allowed; silence is not.
+        for parser_class, (_payload, _note, credit) in CASES.items():
+            assert credit is None or isinstance(credit, str), (
+                f"{parser_class.__name__}: say which row is its credit, or "
+                "None if its fixture has none"
+            )

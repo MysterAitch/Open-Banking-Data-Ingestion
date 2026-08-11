@@ -322,6 +322,10 @@ class WebConfig:
     keep_statement: Callable[[bytes, str], int] | None = None
     #: A kept statement's filename and bytes, by artefact id.
     statement_payload: Callable[[int], tuple[str, bytes] | None] | None = None
+    #: Give a kept statement its account and read it in. Separate from
+    #: keeping, because deciding whose a document is and deciding what
+    #: it says are different acts, and only one of them can be undone.
+    assign_kept_statement: Callable[[int, str], str] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
     #: Correct one artefact's landed account (the mis-tapped destination
     #: remedy). Takes (artefact_id, new_account_ref); returns the old ref,
@@ -3663,10 +3667,88 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "shape can be read again without uploading the file again.</p>"
             f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
-            '<p><a class="button" href="/statement-shape">Read another</a></p>'
+            + self._assign_form(artefact_id)
+            + '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
         self._respond(200, render_page("Statement shape", body))
+
+    def _assign_form(self, artefact_id: int) -> str:
+        """Whose is this, and read it in.
+
+        Offered on the kept statement's own page, because deciding an
+        account is a judgement about a document a person is looking at -
+        not a box to fill before they are allowed to look.
+        """
+        if self.bound_config.assign_kept_statement is None:
+            return ""
+        labels: dict[str, str] = {}
+        hook = self.bound_config.display_labels
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                labels = hook()
+        return (
+            "<h3>Assign to an account</h3><p>Reading it in resolves its rows "
+            "against everything already held. The parser's own arithmetic "
+            "gate still applies: a statement whose rows do not carry its "
+            "declared balances is refused rather than stored.</p>"
+            '<form action="/statement-assign" method="post">'
+            f'<input type="hidden" name="artefact" value="{artefact_id}">'
+            + account_picker(labels)
+            + '<p><button type="submit">Assign and read in</button></p></form>'
+        )
+
+    def _statement_assign(self) -> None:
+        hook = self.bound_config.assign_kept_statement
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        fields = {
+            key: values[0]
+            for key, values in parse_qs(raw, keep_blank_values=True).items()
+        }
+        artefact = fields.get("artefact", "").strip()
+        account = (
+            fields.get("account_other") or fields.get("account") or ""
+        ).strip()
+        if not artefact.isdigit() or not account:
+            self._respond(
+                400,
+                error_page(
+                    "Not assigned",
+                    "<p>A kept statement and an account are both needed.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
+        try:
+            outcome = hook(int(artefact), account)
+        except Exception as exc:
+            # The gate speaks here: a statement whose rows do not carry its
+            # own balances is refused, and saying why is the whole point.
+            self._respond(
+                200,
+                render_page(
+                    "Not read in",
+                    '<h2>Not read in</h2><p class="alarm">'
+                    + html.escape(str(exc))
+                    + "</p><p>The file is still kept, so a better parser can "
+                    "read it later without it being uploaded again.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Read in",
+                f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
+                '<p><a class="button" href="/statement-shape">Read another</a>'
+                "</p>" + HOME_LINK,
+            ),
+        )
 
     def _statement_shape_disclose(self) -> None:
         """The second half of the deliberate walk to real contents."""
@@ -3997,6 +4079,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             return
         if route == "/review-defer":
             self._review_defer()
+            return
+        if route == "/statement-assign":
+            self._statement_assign()
             return
 
         if route == "/upload":

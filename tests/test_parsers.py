@@ -15,6 +15,7 @@ STARLING = (
 MONZO = (
     "Transaction ID,Date,Time,Type,Name,Description,Amount,Currency\n"
     "tx_0001,14/03/2026,09:15:00,Card payment,Tesco,TESCO STORES,-14.99,GBP\n"
+    "tx_0002,16/03/2026,10:00:00,Faster payment,Acme Ltd,REFUND RECEIVED,4.99,GBP\n"
     ",14/03/2026,09:16:00,Note,,IGNORED ROW,0.00,GBP\n"
 ).encode("utf-8-sig")
 
@@ -50,8 +51,11 @@ class TestMonzoParser:
         assert rows[0].source_id == "tx_0001"
 
     def test_Statement_WhenMonzoRowHasNoTransactionId_RowSkipped(self):
+        # Two real rows and one of Monzo's own non-transaction lines, which
+        # carries no id and must not become a transaction.
         rows = list(MonzoCsvParser().parse(MONZO, account_id="monzo-personal"))
-        assert len(rows) == 1
+        assert len(rows) == 2
+        assert all(row.source_id for row in rows)
 
 
 class TestAmexParser:
