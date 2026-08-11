@@ -3845,7 +3845,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         keeper = self.bound_config.keep_statement
         # Name, shape, kept id, and what that file cost. The cost travels
         # per file because an aggregate cannot say WHICH one was slow.
-        read: list[tuple[str, ShapeReport, int, float, bool]] = []
+        read: list[tuple[str, ShapeReport, int, Timings, bool]] = []
         already_held = 0
         # A batch listing shows counts and a link per file, and nothing
         # else - so reading each page's GEOMETRY here buys an answer that
@@ -3858,23 +3858,28 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         timings.record("receive", received_seconds)
         pages = 0
         for payload, filename in uploaded:
-            began = time.perf_counter()
-            with timings.phase("read"):
-                shape = self._read_shape(
-                    payload, filename, mask=True, columns=want_columns
-                )
+            # One clock per file, merged into the batch's afterwards, so
+            # the per-file and aggregate views come from the SAME
+            # measurements and cannot drift apart.
+            per_file = Timings()
+            shape = self._read_shape(
+                payload,
+                filename,
+                mask=True,
+                columns=want_columns,
+                timings=per_file,
+            )
             pages += shape.page_count
             artefact_id = 0
             was_new = False
             if keeper is not None and shape.readable and shape.line_count:
                 # Kept BEFORE an account is chosen, because the exports most
                 # worth keeping are the ones that cannot be fetched twice.
-                with timings.phase("keep"):
+                with per_file.phase("keep"):
                     artefact_id, was_new = keeper(payload, filename)
             already_held += 0 if was_new or not artefact_id else 1
-            read.append(
-                (filename, shape, artefact_id, time.perf_counter() - began, was_new)
-            )
+            timings.merge(per_file)
+            read.append((filename, shape, artefact_id, per_file, was_new))
 
         payload, filename = uploaded[0]
         shape = read[0][1]
@@ -3900,10 +3905,35 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # cannot say WHICH file was the slow one - and "one pathological
             # document" and "every document costs this" are different
             # faults with different fixes.
-            + f"</td><td class='mono'>{took:.2f}s</td></tr>"
+            + f"</td><td class='mono'>{took.total():.2f}s</td>"
+            # The breakdown beside the total, because "this file was slow"
+            # and "this STEP was slow for this file" are different findings
+            # and the second is the one that says what to do next.
+            + "<td class='mono'>"
+            + html.escape(
+                " ".join(
+                    f"{phase.name} {phase.total:.2f}" for phase in took.summary()
+                )
+                or "-"
+            )
+            + "</td></tr>"
             for name, report, kept_id, took, is_new in read
         )
         kept_ids = [str(kept_id) for _n, _r, kept_id, _t, _new in read if kept_id]
+        matrix = (
+            "<table><tr><th>Phase</th><th>Runs</th><th>Total</th>"
+            "<th>Least</th><th>Median</th><th>Most</th></tr>"
+            + "".join(
+                f"<tr><td>{html.escape(phase.name)}</td>"
+                f"<td class='mono'>{phase.count}</td>"
+                f"<td class='mono'>{phase.total:.2f}s</td>"
+                f"<td class='mono'>{phase.least:.2f}s</td>"
+                f"<td class='mono'>{phase.middle:.2f}s</td>"
+                f"<td class='mono'>{phase.most:.2f}s</td></tr>"
+                for phase in timings.summary()
+            )
+            + "</table>"
+        )
         # Reading is per PAGE; receiving is per byte over whatever link the
         # browser is on. Dividing the pair by pages produces a rate that
         # moves when the network does and reads as though pages got dearer.
@@ -3934,7 +3964,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             "read again without uploading anything again, and assigned to "
             "an account later.</p>"
             "<table><tr><th>File</th><th>Statement</th><th>Size</th>"
-            f"<th>Outcome</th><th>Took</th></tr>{rows}</table>"
+            f"<th>Outcome</th><th>Took</th><th>Breakdown</th></tr>{rows}</table>"
             + (
                 f'<p class="mono">statements {", ".join(kept_ids)}</p>'
                 if len(kept_ids) > 1
@@ -3958,6 +3988,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + '<br>Server side only - a browser also spends time reading '
             "and encoding the files before any of this starts, and "
             "receiving the reply after it ends.</p>"
+            + matrix
         )
         body = "<h2>Statement shape</h2>" + summary
         if len(read) == 1:
@@ -3989,7 +4020,13 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(200, render_page("Statement shape", body))
 
     def _read_shape(
-        self, payload: bytes, filename: str, *, mask: bool, columns: bool = True
+        self,
+        payload: bytes,
+        filename: str,
+        *,
+        mask: bool,
+        columns: bool = True,
+        timings: Timings | None = None,
     ) -> ShapeReport:
         from .statement_shape import shape_report
 
@@ -3999,7 +4036,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             temporary = Path(scratch) / (filename or "statement.pdf")
             temporary.write_bytes(payload)
             return shape_report(
-                temporary, mask=mask, limit=1200, columns=columns
+                temporary,
+                mask=mask,
+                limit=1200,
+                columns=columns,
+                timings=timings,
             )
 
     def _kept_statement_shape(self, artefact_id: int) -> None:

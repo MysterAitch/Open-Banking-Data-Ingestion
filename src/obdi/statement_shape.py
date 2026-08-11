@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NewType
 
+from .timings import Timings
+
 #: Text taken verbatim from a statement: payees, addresses, account
 #: numbers, amounts. Never leaves the machine that read the file.
 RawText = NewType("RawText", str)
@@ -232,7 +234,12 @@ class ShapeReport:
 
 
 def shape_report(
-    path: Path, *, mask: bool = True, limit: int = 1200, columns: bool = True
+    path: Path,
+    *,
+    mask: bool = True,
+    limit: int = 1200,
+    columns: bool = True,
+    timings: Timings | None = None,
 ) -> ShapeReport:
     """Read a statement's layout, masked unless explicitly asked otherwise.
 
@@ -243,34 +250,42 @@ def shape_report(
     per file for an answer it then discards. The report says which happened
     rather than letting a declined reading look like a failed one.
     """
+    # Measured where the work happens rather than around the whole call.
+    # A single "read" figure said one provider's statements cost thirty
+    # times another's per page and could not say which step did it.
+    clock = timings if timings is not None else Timings()
     report = ShapeReport(path=path.name, masked=mask, columns_attempted=columns)
     try:
         from pypdf import PdfReader
 
-        report.page_count = len(PdfReader(str(path)).pages)
+        with clock.phase("open"):
+            report.page_count = len(PdfReader(str(path)).pages)
     except Exception:
         report.readable = False
         return report
 
-    raw = pdf_lines(path)
+    with clock.phase("text"):
+        raw = pdf_lines(path)
     report.line_count = len(raw)
-    if mask:
-        masked_lines = [mask_line(line) for line in raw[:limit]]
-        if len(raw) > limit:
-            masked_lines.append(
-                MaskedText(f"... {len(raw) - limit} further line(s) not shown")
-            )
-        report.lines = masked_lines
-    else:
-        raw_lines = list(raw[:limit])
-        if len(raw) > limit:
-            raw_lines.append(
-                RawText(f"... {len(raw) - limit} further line(s) not shown")
-            )
-        report.lines = raw_lines
+    with clock.phase("mask"):
+        if mask:
+            masked_lines = [mask_line(line) for line in raw[:limit]]
+            if len(raw) > limit:
+                masked_lines.append(
+                    MaskedText(f"... {len(raw) - limit} further line(s) not shown")
+                )
+            report.lines = masked_lines
+        else:
+            raw_lines = list(raw[:limit])
+            if len(raw) > limit:
+                raw_lines.append(
+                    RawText(f"... {len(raw) - limit} further line(s) not shown")
+                )
+            report.lines = raw_lines
 
     if columns:
-        _add_column_view(report, path, mask=mask, limit=limit)
+        with clock.phase("geometry"):
+            _add_column_view(report, path, mask=mask, limit=limit)
     return report
 
 

@@ -182,3 +182,30 @@ class TestThePageReportsWhatItSpent:
         response = _upload(server, 1)
 
         assert "Server side only" in response.text
+
+    def test_EachFile_ReportsWhichStepCostIt_NotJustATotal(self, server):
+        # "This file was slow" and "this STEP was slow for this file" are
+        # different findings, and only the second says what to do next.
+        response = _upload(server, 2)
+
+        assert "Breakdown" in response.text
+        assert "text" in response.text
+        assert "open" in response.text
+
+    def test_TheFooter_CarriesAPhaseByPhaseMatrix_WithSpreadPerPhase(self, server):
+        # One provider's statements costing thirty times another's per page
+        # is invisible in a single number and obvious in a table.
+        response = _upload(server, 3)
+
+        assert "<th>Phase</th>" in response.text
+        assert "<th>Median</th>" in response.text
+        assert "<th>Most</th>" in response.text
+        assert "<th>Runs</th>" in response.text
+
+    def test_ThePerFileAndAggregateViews_ComeFromTheSameMeasurements(self, server):
+        # Measured twice, they could disagree - and a reader with no way to
+        # tell which is right learns nothing from either.
+        response = _upload(server, 3)
+
+        assert response.text.count("<td>text</td>") == 1, "one matrix row per phase"
+        assert "Runs</th>" in response.text

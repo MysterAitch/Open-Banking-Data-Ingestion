@@ -158,3 +158,44 @@ class TestTheNumbersMustReconcile:
         timings.record("read", 10.0)
 
         assert "unaccounted" not in timings.describe()
+
+
+class TestMeasuringManyThingsAndAddingThemUp:
+    """Per item AND in aggregate, from one set of measurements.
+
+    A batch wants both: which file was slow, and what the batch as a whole
+    spent on each kind of work. Measuring twice would let the two disagree,
+    so the per-item timings are the ones that get added up.
+    """
+
+    def test_MergingOnesTimings_IntoAnothers_AddsTheirSamples(self) -> None:
+        first = Timings()
+        first.record("text", 1.0)
+        second = Timings()
+        second.record("text", 3.0)
+        second.record("mask", 0.5)
+
+        first.merge(second)
+        named = {phase.name: phase for phase in first.summary()}
+
+        assert named["text"].count == 2
+        assert named["text"].total == 4.0
+        assert named["mask"].count == 1
+
+    def test_MergedSamples_KeepTheirSpread_RatherThanBecomingOneNumber(
+        self,
+    ) -> None:
+        # Merging as a sum would lose exactly what the aggregate is for:
+        # a batch where one file cost twenty times the rest looks identical
+        # to an even one once each file is reduced to a total.
+        batch = Timings()
+        for seconds in (0.04, 0.04, 2.06):
+            per_file = Timings()
+            per_file.record("text", seconds)
+            batch.merge(per_file)
+
+        phase = batch.summary()[0]
+
+        assert phase.count == 3
+        assert phase.most == 2.06
+        assert phase.middle == 0.04

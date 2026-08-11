@@ -104,6 +104,18 @@ class Timings:
     def total(self) -> float:
         return sum(phase.total for phase in self.summary())
 
+    def merge(self, other: Timings) -> None:
+        """Fold another set of measurements into this one.
+
+        Samples are carried across individually rather than summed, so an
+        aggregate keeps the spread of what it aggregates - a batch where
+        one file cost twenty times the rest must not end up looking like
+        an even one. It also means the per-item and batch views come from
+        the SAME measurements and cannot disagree.
+        """
+        for name, samples in other._samples.items():
+            self._samples.setdefault(name, []).extend(samples)
+
     def seconds(self, name: str) -> float:
         """One phase's total, or zero if it never ran.
 
