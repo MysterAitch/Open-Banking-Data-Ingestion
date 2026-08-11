@@ -16,23 +16,33 @@ import sys
 from datetime import date, datetime
 
 from .account_observations import Observation
-from .parsers.pdf_statements import PDF_PARSERS, PdfStatementParser, _lines
+from .parsers.base import ParseError
+from .parsers.pdf_statements import PdfStatementParser, _lines, pdf_parser_for
 from .store import Store
 
 
-def _parser_for(lines: list[str]) -> PdfStatementParser | None:
-    """The parser whose issuer the document names.
+def _parser_for(payload: bytes) -> PdfStatementParser | None:
+    """The parser that claims this document, via the shared door.
 
-    Chosen from the TEXT rather than from the artefact's source column,
-    which records how the file arrived (its extension) rather than which
-    bank wrote it - a distinction that silently produced no terms at all
-    until a test asked for some.
+    Chosen from the document's TEXT rather than from the artefact's source
+    column, which records how the file arrived (its extension) rather than
+    which bank wrote it - a distinction that silently produced no terms at
+    all until a test asked for some.
+
+    This used to walk the registry itself, applying a looser rule than the
+    import door: any parser whose issuer was named, first match wins. Two
+    places choosing a parser are two places that can choose differently,
+    and the one reached by a person uploading a file was the stricter of
+    them. One door now, so an ambiguous document is refused here too.
     """
-    for parser_class in PDF_PARSERS:
-        marker = parser_class.marker.casefold()
-        if any(marker in line.casefold() for line in lines):
-            return parser_class()
-    return None
+    try:
+        return pdf_parser_for(payload)
+    except ParseError as exc:
+        # Terms are derived in a sweep over everything held, so one
+        # ambiguous statement must not stop the rest - but it says so
+        # rather than contributing nothing quietly.
+        print(f"ambiguous statement, no terms taken: {exc}", file=sys.stderr)
+        return None
 
 
 def observations_from_statements(store: Store) -> list[Observation]:
@@ -50,19 +60,27 @@ def observations_from_statements(store: Store) -> list[Observation]:
         "WHERE media_type = 'application/pdf'"
     ):
         digest = str(row["digest"])[:12]
+        payload = bytes(row["payload"])
         try:
-            lines = _lines(bytes(row["payload"]))
+            # Read for its own sake: a payload that cannot be turned into
+            # text at all is a document nothing downstream can use, and
+            # finding that out here keeps the reason attached to the
+            # artefact it belongs to.
+            _lines(payload)
         except Exception as exc:
             # Said aloud rather than skipped quietly: a statement that
             # contributes nothing looks exactly like a statement with
             # nothing to contribute, and only one of those is a fault.
             print(f"artefact {digest}: could not be read - {exc}", file=sys.stderr)
             continue
-        parser = _parser_for(lines)
+        parser = _parser_for(payload)
         if parser is None:
             continue
         try:
-            reading = parser.reader(lines)
+            # The payload rather than the lines: a format whose table is
+            # only legible by coordinate reads the page for itself, and the
+            # parser is the one that knows which reading its document needs.
+            reading = parser.read(payload)
         except Exception as exc:
             print(
                 f"artefact {digest}: {parser.source} could not read it - {exc}",

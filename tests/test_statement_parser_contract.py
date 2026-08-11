@@ -19,14 +19,19 @@ Adding a statement parser without a case here fails, which is the point.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
 import pytest
 
 from obdi.parsers.base import ParseError
 from obdi.parsers.pdf_statements import (
     PDF_PARSERS,
+    CreditUnionStatementPdfParser,
     SantanderCreditCardPdfParser,
     VirginMoneyCreditCardPdfParser,
 )
+from test_credit_union_statement import build_columned_pdf
 from test_statement_shape import build_pdf
 
 SANTANDER = [
@@ -47,31 +52,76 @@ VIRGIN = [
     "Your new  balance                                           £1,025.00",
 ]
 
-#: One case per statement parser: lines that balance, the spend and credit
-#: within them that prove which way the document signs money, and the row
-#: to delete when proving the gate notices a missing one. The row to drop
-#: is named rather than guessed - the two formats write a refund
-#: differently, which is the whole reason each needs its own parser.
+CREDIT_UNION = [
+    "Example Credit Union Limited",
+    "Account Name||||||Opening Balance|1,000.00",
+    "Regular Saver",
+    "Period 01/07/2026 to 31/07/2026",
+    "Date|Source|Payee|Debit|Credit|Interest|Transaction|Balance",
+    "|||Amount|Amount|Amount|Total",
+    "06/07/2026|Internet Transfer|EXAMPLE SHOP LTD|£40.00|||40.00|960.00",
+    "07/07/2026|DD Lodgement|Direct Payment||£15.00||15.00|975.00",
+    "Closing Balance|975.00",
+    "Page 1 of 1",
+]
+
+
+@dataclass(frozen=True)
+class Case:
+    """One statement parser's proof that it keeps the contract.
+
+    `spend` and `credit` name descriptions the reading must sign one way
+    and the other; `drop` names the row to delete when proving the gate
+    notices a missing one. Both are named rather than guessed - the
+    formats write a refund differently, which is the whole reason each
+    needs its own parser.
+
+    `build` is part of the format too. Most of these statements are legible
+    as lines, and one is a table so wide that reading it from spacing
+    fuses its columns - so its fixture is laid out at real coordinates
+    rather than padded with spaces. A shared builder here would have
+    quietly excluded the formats that need geometry from the contract.
+    """
+
+    lines: list[str]
+    spend: str
+    credit: str
+    drop: str
+    build: Callable[[list[str]], bytes] = field(default=build_pdf)
+
+
+#: One case per statement parser, tied to the registry below.
 CASES = {
-    SantanderCreditCardPdfParser: (
+    SantanderCreditCardPdfParser: Case(
         SANTANDER, "EXAMPLE SHOP", "Direct Payment", "Direct Payment",
     ),
-    VirginMoneyCreditCardPdfParser: (
+    VirginMoneyCreditCardPdfParser: Case(
         VIRGIN, "EXAMPLE STORE", "EXAMPLE STORE", "-£15.00",
+    ),
+    CreditUnionStatementPdfParser: Case(
+        CREDIT_UNION,
+        "EXAMPLE SHOP",
+        "Direct Payment",
+        "Direct Payment",
+        build=build_columned_pdf,
     ),
 }
 
 
-def _rows(parser_class, lines):
+def _rows(parser_class, case, lines=None):
     return list(
-        parser_class().parse(build_pdf(lines), account_id="an-account")
+        parser_class().parse(
+            case.build(case.lines if lines is None else lines),
+            account_id="an-account",
+        )
     )
 
 
 class TestEveryStatementParserKeepsTheContract:
     def test_ASpend_IsNegative_AndACreditIsPositive(self):
-        for parser_class, (lines, spend, credit, _drop) in CASES.items():
-            rows = _rows(parser_class, lines)
+        for parser_class, case in CASES.items():
+            spend, credit = case.spend, case.credit
+            rows = _rows(parser_class, case)
             spends = [
                 row.amount_minor
                 for row in rows
@@ -86,25 +136,25 @@ class TestEveryStatementParserKeepsTheContract:
             assert credits == [1500], f"{parser_class.__name__}: credit"
 
     def test_AStatementThatDoesNotBalance_IsRefused(self):
-        for parser_class, (lines, _spend, _credit, drop) in CASES.items():
+        for parser_class, case in CASES.items():
             # Delete a row and the declared balances no longer describe
             # what is left, which is the whole point of declaring them.
-            broken = [line for line in lines if drop not in line]
+            broken = [line for line in case.lines if case.drop not in line]
 
             with pytest.raises(ParseError) as refused:
-                _rows(parser_class, broken)
+                _rows(parser_class, case, broken)
 
             assert "unexplained" in str(refused.value), parser_class.__name__
 
     def test_EachParser_RecognisesItsOwnIssuer(self):
-        for parser_class, (lines, _spend, _credit, _drop) in CASES.items():
-            assert parser_class().sniff(build_pdf(lines)), parser_class.__name__
+        for parser_class, case in CASES.items():
+            assert parser_class().sniff(case.build(case.lines)), parser_class.__name__
 
     def test_NoParser_ClaimsAnotherBanksStatement(self):
-        for parser_class, (lines, _spend, _credit, _drop) in CASES.items():
+        for parser_class, case in CASES.items():
             others = [other for other in CASES if other is not parser_class]
             for other in others:
-                assert not other().sniff(build_pdf(lines)), (
+                assert not other().sniff(case.build(case.lines)), (
                     f"{other.__name__} claimed {parser_class.__name__}'s statement"
                 )
 

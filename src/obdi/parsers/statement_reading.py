@@ -32,6 +32,12 @@ class StatementReading:
     opening_balance_minor: int | None = None
     closing_balance_minor: int | None = None
     credit_limit_minor: int | None = None
+    #: What the document calls the account this statement covers, verbatim.
+    #: Worth keeping because some issuers put the account's TERMS inside its
+    #: name - a loan named for its rate - so the name is evidence as well as
+    #: a label, and the part of it that is stable between statements is what
+    #: identifies the account. Empty where the format states no name.
+    account_name: str = ""
     transactions: list[StatementRow] = field(default_factory=list)
     rates: dict[str, float] = field(default_factory=dict)
     rate_windows: list[RateWindow] = field(default_factory=list)

@@ -18,7 +18,7 @@ from .base import ParseError, StatementParser, parse_date
 #: Statement PDFs, tried only once every CSV parser has declined: a PDF
 #: cannot masquerade as a CSV, and sniffing one costs a text extraction
 #: that should not be paid on every import.
-from .pdf_statements import PDF_PARSERS
+from .pdf_statements import pdf_parser_for
 from .qif import QifParser
 
 
@@ -184,10 +184,12 @@ def detect(payload: bytes) -> StatementParser:
         if parser.sniff(payload):
             return parser
     if payload.startswith(PDF_MAGIC):
-        for pdf_class in PDF_PARSERS:
-            pdf_parser = pdf_class()
-            if pdf_parser.sniff(payload):
-                return pdf_parser
+        # One door, so this and the terms reader cannot disagree about
+        # which parser owns a document - and so an ambiguous claim is
+        # refused in both rather than resolved twice, differently.
+        claimed = pdf_parser_for(payload)
+        if claimed is not None:
+            return claimed
         raise ParseError(
             "This is a PDF statement from a bank with no parser yet. "
             "Read its layout first (the statement-shape page, or "
