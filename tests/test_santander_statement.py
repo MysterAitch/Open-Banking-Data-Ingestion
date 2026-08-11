@@ -177,3 +177,57 @@ class TestTheTerms:
         assert len(reading.rate_windows) == 1
         window = reading.rate_windows[0]
         assert (window.percent, window.until) == (0.0, date(2027, 3, 11))
+
+
+#: The same statement as extracted in LAYOUT mode, which is what the reader
+#: actually produces: columns are held apart by runs of spaces, so the
+#: credit marker sits in its own column rather than beside the description.
+#: Plain extraction ran them together, and a parser written against only
+#: that would break the moment the reader improved.
+LAYOUT = [
+    "Statement Date: 11th July 2026      Page No: 4 / 4",
+    "     Account credit limit:                                 £3,000.00",
+    "          Balance brought forward from previous statement          1,234.56",
+    " 29th Jun    Santander Credit Card Fee                                 3.00",
+    "          Total Payments received during period          CR             0.00",
+    " 30th Jun    EXAMPLE SHOP LTD LONDON GB                               45.00",
+    " 30th Jun    EXAMPLE SHOP LTD LONDON                     CR           15.00",
+    " 1st Jul     Some Merchant Inc Somewhere US                           12.57",
+    " 3rd Jul     Direct Payment                              CR        1,197.56",
+    " 5th Jul     Another Shop Birmingham GB                              12.00",
+    "          Purchase Interest              5.42",
+    "          Balance 99.99 Interest  0.000% to 11-03-2027",
+    "     Your new balance:                                       £99.99",
+]
+
+
+class TestTheLayoutExtractedForm:
+    """The reader emits layout-mode text, so the parser must read that.
+
+    Columns are held apart by runs of spaces, which puts the credit marker
+    in its own column instead of beside the description - a shape the
+    plain-extraction form never showed.
+    """
+
+    def test_TheSameStatement_ReadsIdenticallyFromItsLayoutForm(self):
+        laid_out = read_statement(LAYOUT)
+
+        assert laid_out.reconciles, laid_out.discrepancy_minor
+        assert len(laid_out.transactions) == 7
+
+    def test_AMarkerInItsOwnColumn_IsStillTheMarker(self):
+        laid_out = read_statement(LAYOUT)
+        payment = next(
+            row for row in laid_out.transactions if row.description == "Direct Payment"
+        )
+
+        assert payment.amount_minor == 119756
+
+    def test_ATotalsLineCarryingAMarker_IsNotATransaction(self):
+        # "Total Payments received during period CR 0.00" looks like a row
+        # with a credit marker and is a summary of the rows below it.
+        laid_out = read_statement(LAYOUT)
+
+        assert not any(
+            "Total" in row.description for row in laid_out.transactions
+        )
