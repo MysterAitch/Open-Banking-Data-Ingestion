@@ -215,10 +215,18 @@ class TestLearnedProviderFacts:
 class TestRebindingIsAnOperationNotAFate:
     """Which canonical account a payment belongs to is revisable, cheaply.
 
-    Content keys no longer contain the account, so re-binding is a column
-    update: entity ids survive, sightings survive, raw is untouched, and
-    nothing is refetched. The alternative was discarding derived data and
-    re-authorising at the bank - spending quota to change a label.
+    Content keys exclude the account, so re-binding stays a column update:
+    sightings survive, raw is untouched, nothing is refetched. The
+    alternative was discarding derived data and re-authorising at the bank
+    - spending quota to change a label.
+
+    Entity ids do NOT survive, and this file used to claim they did. They
+    fold the account into their material, so a rename re-mints them; the
+    old assertion held only until the next rebuild, which mints from the
+    current account map and would have left every annotation, event and
+    pair keyed to an id no row carried. The stronger thing must be true
+    instead: the ids move here, deterministically to the values the next
+    rebuild will mint, and everything keyed by them moves with them.
     """
 
     def test_Rebind_MovesRowsAndReportsHowMany(self, tmp_path):
@@ -235,7 +243,12 @@ class TestRebindingIsAnOperationNotAFate:
             held = store.all_transactions()
             assert moved == 2
             assert {t.account_id for t in held} == {"halifax-current"}
-            assert {t.entity_id for t in held} == before, "identity survives the rename"
+            assert {t.entity_id for t in held} != before, (
+                "ids fold the account in, so a rename re-mints them - doing "
+                "it here rather than leaving it to the next rebuild is what "
+                "lets everything keyed by them come along"
+            )
+            assert len({t.entity_id for t in held}) == 2, "still distinct"
 
     def test_Rebind_TouchesOnlyTheNamedAccount(self, tmp_path):
         with Store(tmp_path / "s.sqlite3") as store:

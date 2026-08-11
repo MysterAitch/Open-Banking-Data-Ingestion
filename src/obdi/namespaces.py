@@ -187,3 +187,24 @@ def qualified_ref(provider: str, provider_id: str) -> str:
 #: keep it until that is settled loses the exports that cannot be fetched
 #: twice. The ordinary refile assigns it later.
 UNASSIGNED_ACCOUNT = "(unassigned)"
+
+
+#: Every table that keys rows by an entity id, and the columns that do it.
+#: Declared because a rebind must move ALL of them together: an entity id
+#: folds the account into its material, so renaming an account re-mints
+#: every id under it, and a table left behind holds keys pointing at rows
+#: that no longer exist. Annotations are the painful case - a person's
+#: categorisation detaching silently - but the outbox and the pairing
+#: table dangle the same way.
+#:
+#: A test reads the schema and fails when a table grows an entity-id
+#: column without appearing here, so the list cannot fall behind the
+#: tables it describes.
+ENTITY_KEYED_TABLES: dict[str, tuple[str, ...]] = {
+    "transactions": ("entity_id", "matched_entity_id"),
+    "transaction_sources": ("entity_id",),
+    "review_queue": ("entity_id",),
+    "annotations": ("entity_id",),
+    "events": ("entity_id",),
+    "transfer_pairs": ("debit_entity_id", "credit_entity_id"),
+}

@@ -825,10 +825,19 @@ class Store:
         # while the scheduler container held the store.
         if not self.connection.in_transaction:
             self.connection.execute("BEGIN IMMEDIATE")
+        # Move the entity ids FIRST, while the rows still carry the old
+        # account and the old id can still be matched. An entity id folds
+        # the account into its material, so this rename re-mints every id
+        # under it - and the next rebuild will mint exactly these values
+        # from the same evidence. Anything keyed by the old id and not
+        # moved here is left pointing at a row that will not exist: a
+        # person's categorisation, an unsent event, a confirmed pair.
+        remapped = self._remap_entity_ids(old_account_id, new_account_id)
         cursor = self.connection.execute(
             "UPDATE transactions SET account_id = ? WHERE account_id = ?",
             (new_account_id, old_account_id),
         )
+        _ = remapped
         self.connection.execute(
             "UPDATE OR IGNORE raw_artefacts SET account_ref = ? WHERE account_ref = ?",
             (new_account_id, old_account_id),
@@ -839,6 +848,69 @@ class Store:
         )
         self.connection.commit()
         return cursor.rowcount
+
+    def _remap_entity_ids(self, old_account_id: str, new_account_id: str) -> int:
+        """Rewrite every entity id an account rename will change.
+
+        The new id is COMPUTED, not guessed: the id is a pure function of
+        the account, the source, the sighting key and the artefact digest,
+        and every one of those is on the row already. So the value written
+        here is the same value the next rebuild will mint from the raw
+        evidence, and the store agrees with itself both before and after
+        that rebuild.
+        """
+        from .identity import entity_id_for
+        from .namespaces import ENTITY_KEYED_TABLES
+
+        rows = self.connection.execute(
+            "SELECT entity_id, source, source_id, content_key, occurrence, "
+            "artefact_digest FROM transactions WHERE account_id = ?",
+            (old_account_id,),
+        ).fetchall()
+        moves = []
+        for row in rows:
+            new_id = entity_id_for(
+                account_id=new_account_id,
+                source=str(row["source"]),
+                source_id=(
+                    None if row["source_id"] is None else str(row["source_id"])
+                ),
+                content_key_value=str(row["content_key"]),
+                occurrence=int(row["occurrence"] or 0),
+                first_artefact_digest=str(row["artefact_digest"] or ""),
+            )
+            if new_id != str(row["entity_id"]):
+                moves.append((new_id, str(row["entity_id"])))
+        if not moves:
+            return 0
+        for table, columns in ENTITY_KEYED_TABLES.items():
+            for column in columns:
+                # The names are interpolated because a table or column
+                # cannot be a bound parameter. They come from a module
+                # constant, never from input, and are checked here anyway
+                # so the safety is a property of the code rather than a
+                # claim about where the values happened to come from.
+                if not (table.isidentifier() and column.isidentifier()):
+                    raise ValueError(f"unsafe identifier: {table}.{column}")
+                self.connection.executemany(
+                    f"UPDATE OR IGNORE {table} SET {column} = ? WHERE {column} = ?",  # noqa: S608
+                    moves,
+                )
+        return len(moves)
+
+    def dangling_annotations(self) -> int:
+        """Annotations whose entity id matches no transaction.
+
+        A count worth having even when it is zero: an annotation pointing
+        at nothing is invisible from every other angle - the row simply
+        looks uncategorised - so nothing else would ever say the work was
+        lost rather than never done.
+        """
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS dangling FROM annotations "
+            "WHERE entity_id NOT IN (SELECT entity_id FROM transactions)"
+        ).fetchone()
+        return int(row["dangling"]) if row else 0
 
     def annotate(
         self, entity_id: str, kind: str, value: str, *, provenance: str
