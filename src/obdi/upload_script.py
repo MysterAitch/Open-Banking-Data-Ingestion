@@ -66,6 +66,7 @@ UPLOAD_SCRIPT = r"""
   // only ever interesting as its latest value, and appending one line per
   // event would bury everything else under thousands of them.
   var ticker = null;
+  var runBegan = 0;
   function tick(text) {
     if (!ticker || !ticker.parentNode) ticker = say('', 'muted mono');
     ticker.textContent = text;
@@ -82,6 +83,7 @@ UPLOAD_SCRIPT = r"""
     // event happened to fire - between the first and second file - and a
     // summary that moves is one a reader has to find again each time.
     ticker = say('', 'muted mono');
+    runBegan = (window.performance || Date).now();
   }
 
   // Units follow magnitude, and below the resolution the answer is a
@@ -184,7 +186,12 @@ UPLOAD_SCRIPT = r"""
         // running total is only ever interesting as its latest value.
         tick('Overall: ' + position + ' of ' + count + ' file(s), ' +
              sizeOf(done) + ' of ' + sizeOf(total) +
-             ' (' + Math.floor((done / total) * 100) + '%)');
+             ' (' + Math.floor((done / total) * 100) + '%), ' +
+             // Elapsed so far rather than an estimate of what remains: the
+             // link has been measured varying six-fold between consecutive
+             // attempts, so any prediction made from it would be fiction.
+             duration(((window.performance || Date).now() - runBegan) / 1000) +
+             ' so far');
       });
       request.addEventListener('load', function () {
         resolve({
@@ -596,8 +603,13 @@ UPLOAD_SCRIPT = r"""
             // The line stays, and says how it ended. A list of files with
             // no outcome against them answers "what was sent" and not
             // "what happened", which is the question being asked.
+            // How long it took, on the line that says what happened to it.
+            // A file that took twenty times its neighbours is the thing
+            // worth noticing while a batch runs, and it cannot be noticed
+            // from a total afterwards.
             line.textContent = 'file ' + position + '/' + sending.length +
                                ' ' + file.name + ' - ' + sizeOf(file.size) +
+                               ' in ' + duration(result.seconds || 0) +
                                (result.ok ? ' - kept' : ' - FAILED');
             if (!result.ok) line.className = 'mono bad';
             if (result.ok) {

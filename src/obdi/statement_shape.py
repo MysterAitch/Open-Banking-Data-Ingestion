@@ -299,7 +299,7 @@ def _add_column_view(
     still yields everything it yielded before, with the rows simply
     absent. Absent rows are visible in the summary rather than silent.
     """
-    from .statement_columns import aligned, column_edges, rows
+    from .statement_columns import COLUMN_TOLERANCE, aligned, covering_edges, rows
 
     try:
         table = rows(path)
@@ -307,7 +307,11 @@ def _add_column_view(
         return
     if not table:
         return
-    report.edges = column_edges(table)
+    # The edges the rows were ACTUALLY laid out against, not the stricter
+    # set the majority rule starts from. A real statement reported "1
+    # column" in its summary above a grid of eighteen, because the header
+    # was quoting a different answer from the one the table used.
+    report.edges = covering_edges(table, column_tolerance=COLUMN_TOLERANCE)
     grid = aligned(table)[:limit]
     if mask:
         report.rows = [[mask_line(cell) for cell in row] for row in grid]

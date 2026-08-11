@@ -240,7 +240,7 @@ def column_edges(
     return sorted(edge for edge, rows_at in seen if len(rows_at) * 2 > len(table))
 
 
-def _covering_edges(
+def covering_edges(
     table: list[Row], *, column_tolerance: float
 ) -> list[float]:
     """Column edges, widened until no row has two cells in one column.
@@ -281,7 +281,7 @@ def _column_of(
     """The column a word at x belongs to: the nearest edge at or before it.
 
     None when the word starts before every known edge, which is not a
-    placement but a question - answered by `_covering_edges` admitting the
+    placement but a question - answered by `covering_edges` admitting the
     edge rather than by rounding the word into the first column.
     """
     at_or_left = [
@@ -307,7 +307,7 @@ def aligned(
     rightwards. Nearest-in-either-direction would pull the tail of a long
     description into the column beyond it.
     """
-    edges = _covering_edges(table, column_tolerance=column_tolerance)
+    edges = covering_edges(table, column_tolerance=column_tolerance)
     if not edges:
         return []
     out: list[list[str]] = []
@@ -315,7 +315,7 @@ def aligned(
         cells = [""] * len(edges)
         for cell in row.cells:
             index = _column_of(cell.x, edges, column_tolerance)
-            # `_covering_edges` guarantees an edge at or before every cell,
+            # `covering_edges` guarantees an edge at or before every cell,
             # so the fallback is unreachable rather than a rounding rule.
             cells[index if index is not None else 0] = (
                 f"{cells[index if index is not None else 0]} {cell.text}".strip()
