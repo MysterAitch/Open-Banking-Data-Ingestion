@@ -168,3 +168,122 @@ class TestAKeptStatement:
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class TestABatchOfStatements:
+    """A dozen documents in one go.
+
+    Keeping a statement asks nothing about it - no destination, no preview,
+    nothing imported - so the reason the import flow takes one file at a
+    time does not apply here, and uploading a bank's whole history one file
+    at a time is the tax this removes.
+    """
+
+    def _server(self, tmp_path):
+        kept: dict[int, tuple[str, bytes]] = {}
+        counter = {"next": 100}
+
+        def keep(payload: bytes, filename: str) -> int:
+            counter["next"] += 1
+            kept[counter["next"]] = (filename, payload)
+            return counter["next"]
+
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="secret-1",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            keep_statement=keep,
+            statement_payload=kept.get,
+        )
+        handler = type(
+            "BatchHandler",
+            (ConnectionHandler,),
+            {"config": config, "session": AuthorisationSession()},
+        )
+        httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        return httpd, f"http://127.0.0.1:{httpd.server_port}", kept
+
+    def test_EveryFileInTheBatch_IsKept_AndListedWithItsOwnAddress(self, tmp_path):
+        httpd, base, kept = self._server(tmp_path)
+        try:
+            response = httpx.post(
+                f"{base}/statement-shape",
+                files=[
+                    ("file", ("jan.pdf", STATEMENT, "application/pdf")),
+                    ("file", ("feb.pdf", STATEMENT, "application/pdf")),
+                    ("file", ("mar.pdf", STATEMENT, "application/pdf")),
+                ],
+                headers={"Origin": base},
+                timeout=30,
+            )
+
+            assert response.status_code == 200
+            assert len(kept) == 3, "each file kept, not just the first"
+            assert "3 file(s) read, 3 kept" in response.text
+            for name in ("jan.pdf", "feb.pdf", "mar.pdf"):
+                assert name in response.text
+            for artefact_id in kept:
+                assert f"/statement-shape?artefact={artefact_id}" in response.text
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_ABatch_NeverDisclosesRealValues(self, tmp_path):
+        httpd, base, _kept = self._server(tmp_path)
+        try:
+            response = httpx.post(
+                f"{base}/statement-shape",
+                files=[
+                    ("file", ("jan.pdf", STATEMENT, "application/pdf")),
+                    ("file", ("feb.pdf", STATEMENT, "application/pdf")),
+                ],
+                data={"show_values": "1"},
+                headers={"Origin": base},
+                timeout=30,
+            )
+
+            assert "1,234.56" not in response.text
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_AnUnreadableFileInABatch_IsNamed_AndTheRestStillKept(self, tmp_path):
+        # One bad document must not cost the person the other eleven.
+        httpd, base, kept = self._server(tmp_path)
+        try:
+            response = httpx.post(
+                f"{base}/statement-shape",
+                files=[
+                    ("file", ("good.pdf", STATEMENT, "application/pdf")),
+                    ("file", ("notes.txt", b"not a pdf at all", "text/plain")),
+                ],
+                headers={"Origin": base},
+                timeout=30,
+            )
+
+            assert response.status_code == 200
+            assert len(kept) == 1, "the readable one is kept"
+            assert "notes.txt" in response.text
+            assert "not kept" in response.text
+            assert "2 file(s) read, 1 kept" in response.text
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_ASingleFile_StillShowsItsShapeInline(self, tmp_path):
+        httpd, base, _kept = self._server(tmp_path)
+        try:
+            response = httpx.post(
+                f"{base}/statement-shape",
+                files=[("file", ("one.pdf", STATEMENT, "application/pdf"))],
+                headers={"Origin": base},
+                timeout=30,
+            )
+
+            assert "9,999.99" in response.text, "one file, so show it here"
+        finally:
+            httpd.shutdown()
+            httpd.server_close()

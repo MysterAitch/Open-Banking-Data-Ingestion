@@ -176,24 +176,26 @@ class UploadSession:
         return payload, filename, doubted
 
 
-def _parse_multipart(
+def _parse_multipart_files(
     content_type: str, body: bytes
-) -> tuple[bytes, str, dict[str, str]]:
-    """The file AND the text fields out of a multipart form.
+) -> tuple[list[tuple[bytes, str]], dict[str, str]]:
+    """EVERY file in a multipart form, plus the text fields.
 
-    Minimal on purpose: our own form, not a general parser. The boundary
-    comes from the content type; the first part with a filename is the
-    file; parts with a plain name are collected as fields - the account
-    choice travels alongside the file, since the flow picks the
-    destination FIRST so the preview can verify against it.
+    Minimal on purpose: our own form, not a general parser. Parts carrying
+    a filename are files, in the order the browser sent them; parts with a
+    plain name are fields.
+
+    All of them rather than the first, because keeping statements is a PURE
+    upload step - no destination to choose, nothing imported, no preview to
+    verify against - so a dozen documents at once carries none of the risk
+    that keeps the import flow to one file at a time.
     """
     marker = "boundary="
     if marker not in content_type:
         raise ValueError("not a multipart upload")
     boundary = content_type.split(marker, 1)[1].split(";")[0].strip().strip('"')
     delimiter = b"--" + boundary.encode()
-    payload: bytes | None = None
-    filename = ""
+    files: list[tuple[bytes, str]] = []
     fields: dict[str, str] = {}
     for part in body.split(delimiter):
         header_end = part.find(b"\r\n\r\n")
@@ -204,16 +206,30 @@ def _parse_multipart(
         if content.endswith(b"\r\n"):
             content = content[:-2]
         if "filename=" in headers:
-            if payload is None:
-                filename = (
-                    headers.split("filename=", 1)[1].split("\r\n")[0].strip().strip('"')
-                )
-                payload = content
+            filename = (
+                headers.split("filename=", 1)[1].split("\r\n")[0].strip().strip('"')
+            )
+            # A file input with nothing chosen still sends an empty part.
+            if filename or content:
+                files.append((content, filename))
         elif 'name="' in headers:
             name = headers.split('name="', 1)[1].split('"')[0]
             fields[name] = content.decode("utf-8", "replace").strip()
-    if payload is None:
+    return files, fields
+
+
+def _parse_multipart(
+    content_type: str, body: bytes
+) -> tuple[bytes, str, dict[str, str]]:
+    """The FIRST file and the text fields.
+
+    The shape the import flow wants: it takes one file at a time so the
+    preview can verify it against the destination chosen beforehand.
+    """
+    files, fields = _parse_multipart_files(content_type, body)
+    if not files:
         raise ValueError("no file found in the upload")
+    payload, filename = files[0]
     return payload, filename or "upload.csv", fields
 
 
@@ -3484,7 +3500,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + '<form action="/statement-shape" method="post" '
             'enctype="multipart/form-data">'
             '<p><input type="file" name="file" accept="application/pdf" '
-            "required></p>"
+            'multiple required></p>'
+            '<p class="muted">Several at once is fine - keeping a statement '
+            "asks nothing about it, so a batch carries no more risk than "
+            "one.</p>"
             '<p><label><input type="checkbox" name="show_values" value="1"> '
             "Show the REAL contents instead of the masked shape - this "
             "discloses transactions, balances and names</label></p>"
@@ -3496,22 +3515,34 @@ class ConnectionHandler(BaseHTTPRequestHandler):
     def _statement_shape(self) -> None:
 
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 25 * 1024 * 1024:
+        # Generous, because a batch of statements is the ordinary case now
+        # and a person who has just chosen a dozen files should not have to
+        # discover a limit by tripping over it.
+        if length > 200 * 1024 * 1024:
             self._respond(
                 413,
-                error_page("Too large", "<p>A statement PDF is not this big.</p>"),
+                error_page(
+                    "Too large",
+                    "<p>Even a batch of statements is not this big. Upload "
+                    "them in smaller groups.</p>",
+                ),
             )
             return
         try:
-            payload, filename, fields = _parse_multipart(
+            uploaded, fields = _parse_multipart_files(
                 self.headers.get("Content-Type") or "", self.rfile.read(length)
             )
         except Exception as exc:
             self._respond(
                 400,
                 error_page(
-                    "Could not read the file", f"<p>{html.escape(str(exc))}</p>"
+                    "Could not read the upload", f"<p>{html.escape(str(exc))}</p>"
                 ),
+            )
+            return
+        if not uploaded:
+            self._statement_shape_form(
+                '<p class="alarm">No file was chosen.</p>'
             )
             return
 
@@ -3520,27 +3551,59 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # phrase, because one request with one extra field is exactly the
         # shape an automated caller produces by accident - and these pages
         # are read programmatically as well as by a person.
-        shape = self._read_shape(payload, filename, mask=True)
-        kept = ""
         keeper = self.bound_config.keep_statement
-        if keeper is not None and shape.readable and shape.line_count:
-            # Kept BEFORE an account is chosen, because the exports most
-            # worth keeping are the ones that cannot be fetched twice.
-            artefact_id = keeper(payload, filename)
-            if artefact_id:
-                kept = (
-                    f'<p class="ok">Kept as statement {artefact_id}. Its '
-                    f'masked shape stays at <a href="/statement-shape?'
-                    f'artefact={artefact_id}">/statement-shape?artefact='
-                    f"{artefact_id}</a>, so it can be read again without "
-                    "uploading it again, and assigned to an account later.</p>"
-                )
-        body = (
-            "<h2>Statement shape</h2>"
-            + kept
-            + f'<pre class="scroll" style="white-space:pre">'
-            f"{html.escape(shape.describe())}</pre>"
+        read: list[tuple[str, ShapeReport, int]] = []
+        for payload, filename in uploaded:
+            shape = self._read_shape(payload, filename, mask=True)
+            artefact_id = 0
+            if keeper is not None and shape.readable and shape.line_count:
+                # Kept BEFORE an account is chosen, because the exports most
+                # worth keeping are the ones that cannot be fetched twice.
+                artefact_id = keeper(payload, filename)
+            read.append((filename, shape, artefact_id))
+
+        payload, filename = uploaded[0]
+        shape = read[0][1]
+        rows = "".join(
+            "<tr><td>"
+            + html.escape(name or "(unnamed)")
+            + "</td><td>"
+            + (
+                f'<a href="/statement-shape?artefact={kept_id}">{kept_id}</a>'
+                if kept_id
+                else '<span class="alarm">not kept</span>'
+            )
+            + f"</td><td>{report.line_count} line(s), "
+            f"{report.page_count} page(s)</td><td>"
+            + (
+                "kept"
+                if kept_id
+                else html.escape(report.describe().split(" - ")[0].split(": ", 1)[-1])
+            )
+            + "</td></tr>"
+            for name, report, kept_id in read
         )
+        kept_ids = [str(kept_id) for _n, _r, kept_id in read if kept_id]
+        summary = (
+            f"<p>{len(read)} file(s) read, {len(kept_ids)} kept. Each masked "
+            "shape stays at its own address, so it can be read again without "
+            "uploading anything again, and assigned to an account later.</p>"
+            "<table><tr><th>File</th><th>Statement</th><th>Size</th>"
+            f"<th>Outcome</th></tr>{rows}</table>"
+            + (
+                f'<p class="mono">statements {", ".join(kept_ids)}</p>'
+                if len(kept_ids) > 1
+                else ""
+            )
+        )
+        body = "<h2>Statement shape</h2>" + summary
+        if len(read) == 1:
+            # One file, so show its shape here rather than making the
+            # person follow a link to the thing they just asked for.
+            body += (
+                f'<pre class="scroll" style="white-space:pre">'
+                f"{html.escape(shape.describe())}</pre>"
+            )
         if fields.get("show_values") and shape.readable and shape.line_count:
             token = self.disclosures.stash(payload, filename)
             body += (
