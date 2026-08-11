@@ -47,6 +47,7 @@ from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import SourceCoverage
 from .doctor import shape_problems
+from .logs import say
 from .money import format_amount
 from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
@@ -91,7 +92,13 @@ def _report_slow_route(method: str, route: str, seconds: float) -> None:
     """
     threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
     if seconds >= threshold:
-        print(f"web timing: {method} {route} took {seconds:.2f}s", flush=True)
+        say(
+            "web.slow",
+            method=method,
+            route=route,
+            seconds=f"{seconds:.2f}",
+            threshold=f"{threshold:.2f}",
+        )
 
 
 _HookParams = ParamSpec("_HookParams")
@@ -3042,12 +3049,16 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         """
         import traceback
 
-        print(
-            f"web fault: {method} {route} raised "
-            f"{type(exc).__name__}: {exc}",
-            traceback.format_exc(),
-            sep="\n",
-            flush=True,
+        # The trace goes BELOW the line rather than into a field: it is
+        # worth having in full, and worth keeping away from anything that
+        # might try to parse a value.
+        say(
+            "web.fault",
+            detail=traceback.format_exc(),
+            method=method,
+            route=route,
+            error=type(exc).__name__,
+            message=str(exc),
         )
         try:
             self._respond(
@@ -3066,7 +3077,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # The response could not be delivered either. Nothing useful
             # remains to say to the client, but the log should not lose
             # the fact that a failure failed to report itself.
-            print(f"web fault: could not report {route}: {also}", flush=True)
+            say("web.fault.unreported", route=route, error=str(also))
 
     def _dispatch_get(self, parsed: ParseResult, route: str) -> None:
         params = parse_qs(parsed.query)

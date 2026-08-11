@@ -64,8 +64,8 @@ class TestWhatAPageSpentItsTimeOn:
         described = timings.describe()
 
         assert "n=4" in described, "a count without its denominator says less"
-        assert "max 3.40" in described
-        assert "med 0.10" in described
+        assert "max 3.40s" in described
+        assert "med 100ms" in described
 
     def test_APhaseThatRanOnce_DoesNotClutterWithASpread(self) -> None:
         # A single sample has no distribution, and printing one invites a
@@ -75,7 +75,7 @@ class TestWhatAPageSpentItsTimeOn:
 
         described = timings.describe()
 
-        assert "0.25" in described
+        assert "250ms" in described
         assert "n=1" not in described
         assert "med" not in described
 
@@ -199,3 +199,54 @@ class TestMeasuringManyThingsAndAddingThemUp:
         assert phase.count == 3
         assert phase.most == 2.06
         assert phase.middle == 0.04
+
+
+class TestSayingOnlyWhatWasMeasured:
+    """0.00s and 0% are assertions the clock cannot support.
+
+    A phase that ran in a tenth of a millisecond is not zero, and printing
+    it as zero states something false about work that definitely happened.
+    Below the resolution of the measurement the honest report is a bound,
+    not a figure.
+    """
+
+    def test_ASecondOrMore_ReadsInSeconds(self) -> None:
+        from obdi.timings import duration
+
+        assert duration(1.234) == "1.23s"
+        assert duration(31.4) == "31.40s"
+
+    def test_UnderASecond_ReadsInMilliseconds_RatherThanLeadingZeroes(
+        self,
+    ) -> None:
+        # "0.02s" makes the eye count decimal places to find the
+        # magnitude; "20ms" states it.
+        from obdi.timings import duration
+
+        assert duration(0.02) == "20ms"
+        assert duration(0.163) == "163ms"
+
+    def test_AFewMilliseconds_KeepAFraction_RatherThanRoundingToOne(self) -> None:
+        from obdi.timings import duration
+
+        assert duration(0.0045) == "4.5ms"
+
+    def test_BelowTheResolution_IsABound_NotZero(self) -> None:
+        # The work happened. Reporting it as zero says it did not.
+        from obdi.timings import duration
+
+        assert duration(0.0000004) == "<0.01ms"
+        assert duration(0.0) == "<0.01ms"
+
+    def test_ATrulyNegligibleShare_IsBounded_NotClaimedToBeNothing(self) -> None:
+        from obdi.timings import share
+
+        assert share(0.63, 1.0) == "63%"
+        assert share(0.004, 1.0) == "0.4%"
+        assert share(0.00001, 1.0) == "<0.1%"
+        assert share(0.0, 1.0) == "<0.1%"
+
+    def test_AShareOfNothing_SaysSo_RatherThanDividing(self) -> None:
+        from obdi.timings import share
+
+        assert share(0.0, 0.0) == "-"

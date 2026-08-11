@@ -2996,7 +2996,13 @@ class TestHealthzAndRenderTiming:
             httpd.shutdown()
 
         out = capsys.readouterr().out
-        assert "web timing: GET" in out
+        # Fields rather than prose, and stamped with the build. Which code
+        # was slow is the first question asked of a timing line, and the
+        # answer used to live only in a page footer.
+        assert "web.slow" in out
+        assert "method=GET" in out
+        assert "route=" in out
+        assert "obdi " in out, "the running build stamps every line"
 
 
 class TestAccountPickerOptions:

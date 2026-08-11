@@ -79,6 +79,25 @@ UPLOAD_SCRIPT = r"""
     say(what, '');
   }
 
+  // Units follow magnitude, and below the resolution the answer is a
+  // BOUND. "0.00s" asserts that work which definitely happened took no
+  // time, and "0%" asserts it was none of the total - both are what
+  // rounding did to a small number, not what was measured.
+  function duration(seconds) {
+    if (seconds >= 1) return seconds.toFixed(2) + 's';
+    if (seconds >= 0.01) return Math.round(seconds * 1000) + 'ms';
+    if (seconds >= 0.0001) return (seconds * 1000).toFixed(1) + 'ms';
+    return '<0.01ms';
+  }
+
+  function shareOf(part, whole) {
+    if (!(whole > 0)) return '-';
+    var percent = (part / whole) * 100;
+    if (percent >= 1) return Math.round(percent) + '%';
+    if (percent >= 0.1) return percent.toFixed(1) + '%';
+    return '<0.1%';
+  }
+
   function sizeOf(bytes) {
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MiB';
     if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KiB';
@@ -213,10 +232,118 @@ UPLOAD_SCRIPT = r"""
     }
   }
 
-  // Per file, as blocks rather than a table. A four-column table on a
-  // phone gives each column a few characters and sets the headings one
-  // letter per line, which is a table in name only. Each file gets its
-  // name, then what it cost, then where the cost went.
+  // A stable colour per phase, so the same kind of work is the same
+  // colour on every row and a shape can be recognised without reading.
+  // Named phases are fixed; anything new gets a hue from its own letters
+  // rather than a colour that shifts when the list changes.
+  var PHASE_COLOURS = {
+    receive: '#2563eb', open: '#7c3aed', text: '#dc2626',
+    mask: '#ea580c', geometry: '#0891b2', keep: '#16a34a',
+    unaccounted: '#94a3b8'
+  };
+
+  function colourFor(name) {
+    if (PHASE_COLOURS[name]) return PHASE_COLOURS[name];
+    var hue = 0;
+    for (var i = 0; i < name.length; i += 1) {
+      hue = (hue * 31 + name.charCodeAt(i)) % 360;
+    }
+    return 'hsl(' + hue + ', 55%, 45%)';
+  }
+
+  // "geometry 0.17s | receive 0.04s | text 0.04s" makes the eye chase
+  // numbers across a line and compare them by reading. The same figures
+  // as proportional blocks can be compared by LOOKING - which phase
+  // dominates is the shape of the bar, not an arithmetic exercise.
+  function parsePhases(text) {
+    var phases = [];
+    (text || '').split('|').forEach(function (part) {
+      // Seconds or milliseconds, and a bound like "<0.01ms" counts as
+      // present-but-tiny rather than absent - dropping it would make the
+      // shares add up to less than the whole with nothing saying why.
+      // No backslash escapes in this pattern, deliberately. The
+      // script is a string in a Python module served inside an HTML
+      // page, so a backslash has several layers to survive - and one
+      // that does not arrive turns the pattern into one that matches
+      // nothing, silently, for every row at once. A class spelled out
+      // in full cannot be mangled on the way here.
+      var match = /([a-zA-Z.]+)[ ]+<?([0-9.]+)(ms|s)/.exec(part);
+      if (!match) return;
+      var value = parseFloat(match[2]);
+      phases.push({
+        name: match[1],
+        seconds: match[3].toLowerCase() === 'ms' ? value / 1000 : value
+      });
+    });
+    return phases;
+  }
+
+  function waterfall(phases, into) {
+    var total = phases.reduce(function (sum, p) { return sum + p.seconds; }, 0);
+    if (!(total > 0)) {
+      // Every phase rounded to zero. Drawing nothing here leaves a gap
+      // that reads as "not measured" when it means "too fast to measure",
+      // and those two want opposite reactions.
+      var quick = document.createElement('div');
+      quick.className = 'muted mono';
+      quick.textContent = 'every phase under 0.01s - nothing to divide up';
+      into.appendChild(quick);
+      return;
+    }
+
+    var bar = document.createElement('div');
+    bar.style.display = 'flex';
+    bar.style.height = '14px';
+    bar.style.borderRadius = '3px';
+    bar.style.overflow = 'hidden';
+    bar.style.margin = '.35rem 0';
+    phases.forEach(function (phase) {
+      var share = (phase.seconds / total) * 100;
+      if (share <= 0) return;
+      var segment = document.createElement('div');
+      segment.style.width = share + '%';
+      segment.style.background = colourFor(phase.name);
+      // The bar is the glance; the title is for anyone who wants the
+      // number without leaving it.
+      segment.title = phase.name + ' ' + duration(phase.seconds);
+      bar.appendChild(segment);
+    });
+    into.appendChild(bar);
+
+    // Numbers in a column, right-aligned, so digits line up under digits
+    // and two rows can be compared down the page rather than across it.
+    var table = document.createElement('table');
+    phases.slice().sort(function (a, b) { return b.seconds - a.seconds; })
+      .forEach(function (phase) {
+        var row = document.createElement('tr');
+        var key = document.createElement('td');
+        var swatch = document.createElement('span');
+        swatch.style.display = 'inline-block';
+        swatch.style.width = '.7rem';
+        swatch.style.height = '.7rem';
+        swatch.style.borderRadius = '2px';
+        swatch.style.background = colourFor(phase.name);
+        swatch.style.marginRight = '.4rem';
+        key.appendChild(swatch);
+        key.appendChild(document.createTextNode(phase.name));
+        row.appendChild(key);
+        var value = document.createElement('td');
+        value.className = 'mono';
+        value.style.textAlign = 'right';
+        value.style.whiteSpace = 'nowrap';
+        value.textContent = duration(phase.seconds);
+        row.appendChild(value);
+        var portion = document.createElement('td');
+        portion.className = 'mono muted';
+        portion.style.textAlign = 'right';
+        portion.style.whiteSpace = 'nowrap';
+        portion.textContent = shareOf(phase.seconds, total);
+        row.appendChild(portion);
+        table.appendChild(row);
+      });
+    into.appendChild(table);
+  }
+
   function timingsTable(measured) {
     var seconds = measured.reduce(function (sum, m) { return sum + m.seconds; }, 0);
     var bytes = measured.reduce(function (sum, m) { return sum + m.bytes; }, 0);
@@ -230,14 +357,17 @@ UPLOAD_SCRIPT = r"""
       entry.appendChild(name);
       var cost = document.createElement('div');
       cost.className = 'muted mono';
-      cost.textContent = sizeOf(m.bytes) + ' - ' + m.seconds.toFixed(2) +
-                         's round trip';
+      cost.textContent = sizeOf(m.bytes) + ' - ' + duration(m.seconds) +
+                         ' round trip';
       entry.appendChild(cost);
-      if (m.server) {
-        var phases = document.createElement('div');
-        phases.className = 'muted mono';
-        phases.textContent = m.server;
-        entry.appendChild(phases);
+      var phases = parsePhases(m.server);
+      if (phases.length) {
+        waterfall(phases, entry);
+      } else if (m.server) {
+        var raw = document.createElement('div');
+        raw.className = 'muted mono';
+        raw.textContent = m.server;
+        entry.appendChild(raw);
       }
       progress.appendChild(entry);
     });
@@ -247,7 +377,7 @@ UPLOAD_SCRIPT = r"""
     // attempt and the next, so a single past reading predicts nothing.
     if (seconds > 0) {
       var mbps = (bytes * 8) / seconds / 1000000;
-      block(sizeOf(bytes) + ' in ' + seconds.toFixed(1) + 's - ' +
+      block(sizeOf(bytes) + ' in ' + duration(seconds) + ' - ' +
             mbps.toFixed(2) + ' Mbps, this attempt.', 'muted');
     }
   }

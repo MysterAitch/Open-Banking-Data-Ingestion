@@ -25,6 +25,43 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 
+def duration(seconds: float) -> str:
+    """A duration in units that suit its size, never a false zero.
+
+    "0.00s" is an assertion the clock cannot support: a phase that ran in
+    a tenth of a millisecond is not zero, and printing it as zero states
+    something false about work that definitely happened. Below the
+    resolution the honest answer is a bound.
+
+    Units follow magnitude so the eye does not have to count decimal
+    places to find it - "20ms" states the size that "0.02s" makes you
+    work out.
+    """
+    if seconds >= 1:
+        return f"{seconds:.2f}s"
+    if seconds >= 0.01:
+        return f"{seconds * 1000:.0f}ms"
+    if seconds >= 0.0001:
+        return f"{seconds * 1000:.1f}ms"
+    return "<0.01ms"
+
+
+def share(part: float, whole: float) -> str:
+    """One part's share, bounded rather than rounded away to nothing.
+
+    "0%" of a total says the work took none of it, which is never what was
+    measured - it is what rounding did to a small number.
+    """
+    if whole <= 0:
+        return "-"
+    percent = (part / whole) * 100
+    if percent >= 1:
+        return f"{percent:.0f}%"
+    if percent >= 0.1:
+        return f"{percent:.1f}%"
+    return "<0.1%"
+
+
 @dataclass(frozen=True)
 class Phase:
     """One named piece of work, and how long it took every time it ran."""
@@ -63,10 +100,11 @@ class Phase:
 
     def describe(self) -> str:
         if self.count <= 1:
-            return f"{self.name} {self.total:.2f}s"
+            return f"{self.name} {duration(self.total)}"
         return (
-            f"{self.name} {self.total:.2f}s (n={self.count}, "
-            f"min {self.least:.2f} med {self.middle:.2f} max {self.most:.2f})"
+            f"{self.name} {duration(self.total)} (n={self.count}, "
+            f"min {duration(self.least)} med {duration(self.middle)} "
+            f"max {duration(self.most)})"
         )
 
 
@@ -150,5 +188,5 @@ class Timings:
         # never happened.
         residue = wall_seconds - self.total()
         if residue >= 0.001:
-            described += f" | unaccounted {residue:.2f}s"
-        return f"{described} - {wall_seconds:.2f}s elapsed"
+            described += f" | unaccounted {duration(residue)}"
+        return f"{described} - {duration(wall_seconds)} elapsed"

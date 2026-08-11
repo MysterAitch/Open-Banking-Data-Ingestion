@@ -1,6 +1,6 @@
 [project]
 name = "obdi"
-version = "0.4.174"
+version = "0.4.175"
 description = "Open banking data ingestion - canonical local store, app-agnostic"
 requires-python = ">=3.11"
 # Floors track the versions this project is actually tested against, so a
@@ -24,6 +24,14 @@ dev = [
     "pytest>=9.1",
     "ruff>=0.16",
     "mypy>=2.3",
+    # Drives the pages in a real browser. Every fault in the upload flow
+    # that reached use was one only eyes catch - a tap target too small, a
+    # summary that read as a wall, a count wrong on the screen, a section
+    # that silently vanished - and none could fail a test that never
+    # rendered anything. NOT a runtime dependency: it also needs a browser
+    # downloaded separately (`playwright install chromium`), so a plain
+    # `pip install .` must never pull it.
+    "playwright>=1.62",
 ]
 
 [project.scripts]
