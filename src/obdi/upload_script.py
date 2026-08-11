@@ -85,8 +85,21 @@ UPLOAD_SCRIPT = r"""
     }).catch(function () { return null; });
   }
 
+  // The server renders its own phase breakdown on the result page, which
+  // this script never navigates to - so it is read back out of the reply
+  // rather than being reported in a second format the server would have
+  // to keep in step with the first.
+  function timingsIn(body) {
+    try {
+      var page = new DOMParser().parseFromString(body, 'text/html');
+      var found = page.getElementById('timings');
+      return found ? found.textContent.replace(/^timings:\s*/, '') : '';
+    } catch (error) { return ''; }
+  }
+
   function send(file, sent, total) {
     return new Promise(function (resolve) {
+      var began = (window.performance || Date).now();
       var data = new FormData();
       data.append('file', file);
       var request = new XMLHttpRequest();
@@ -101,6 +114,8 @@ UPLOAD_SCRIPT = r"""
         resolve({
           ok: request.status === 200,
           body: request.responseText,
+          seconds: ((window.performance || Date).now() - began) / 1000,
+          server: timingsIn(request.responseText),
           // The reason travels with the failure. "It did not work" sends
           // somebody looking at their files; "the server said 500" and
           // "there was no reply at all" send them somewhere useful.
@@ -163,6 +178,54 @@ UPLOAD_SCRIPT = r"""
     if (items.length > limit) {
       block((items.length - limit) + ' more not listed, of ' + items.length +
             ' altogether.', 'muted');
+    }
+  }
+
+  function cell(row, text, mono) {
+    var td = document.createElement('td');
+    if (mono) td.className = 'mono';
+    td.textContent = text;
+    row.appendChild(td);
+  }
+
+  // What each file cost, measured HERE rather than on the server, because
+  // the server cannot see the time its reply spends reaching this page or
+  // the time the file spent getting there. The server's own phase
+  // breakdown travels in the last column, so the two accounts sit beside
+  // each other and their difference is the network.
+  function timingsTable(measured) {
+    var seconds = measured.reduce(function (sum, m) { return sum + m.seconds; }, 0);
+    var bytes = measured.reduce(function (sum, m) { return sum + m.bytes; }, 0);
+
+    var heading = document.createElement('p');
+    heading.textContent = 'What it cost, per file';
+    progress.appendChild(heading);
+
+    var table = document.createElement('table');
+    var head = document.createElement('tr');
+    ['File', 'Size', 'Round trip', 'Server phases'].forEach(function (name) {
+      var th = document.createElement('th');
+      th.textContent = name;
+      head.appendChild(th);
+    });
+    table.appendChild(head);
+    measured.forEach(function (m) {
+      var row = document.createElement('tr');
+      cell(row, m.name, false);
+      cell(row, sizeOf(m.bytes), true);
+      cell(row, m.seconds.toFixed(2) + 's', true);
+      cell(row, m.server || '-', true);
+      table.appendChild(row);
+    });
+    progress.appendChild(table);
+
+    // Throughput, because on this link it is the figure that explains the
+    // duration - and it has been measured varying six-fold between one
+    // attempt and the next, so a single past reading predicts nothing.
+    if (seconds > 0) {
+      var mbps = (bytes * 8) / seconds / 1000000;
+      block(sizeOf(bytes) + ' in ' + seconds.toFixed(1) + 's - ' +
+            mbps.toFixed(2) + ' Mbps, this attempt.', 'muted');
     }
   }
 
@@ -233,6 +296,10 @@ UPLOAD_SCRIPT = r"""
         line.appendChild(link);
       });
       progress.appendChild(line);
+    }
+
+    if (outcome.measured.length) {
+      timingsTable(outcome.measured);
     }
 
     var all = document.createElement('p');
@@ -321,6 +388,7 @@ UPLOAD_SCRIPT = r"""
 
       var kept = [];
       var failed = [];
+      var measured = [];
       var sent = 0;
       var consecutive = 0;
       var stopped = false;
@@ -336,6 +404,12 @@ UPLOAD_SCRIPT = r"""
             sent += file.size;
             if (result.ok) {
               consecutive = 0;
+              measured.push({
+                name: file.name,
+                bytes: file.size,
+                seconds: result.seconds || 0,
+                server: result.server || ''
+              });
               statementsIn(result.body).forEach(function (id) {
                 if (kept.indexOf(id) === -1) kept.push(id);
               });
@@ -360,6 +434,7 @@ UPLOAD_SCRIPT = r"""
           foldered: foldered.length,
           kept: kept,
           total: total,
+          measured: measured,
           stopped: stopped
         });
       });

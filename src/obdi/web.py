@@ -4000,7 +4000,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # Shown whether or not it is alarming. A figure that appears
             # only once somebody suspects a problem cannot be the thing
             # that tells them there is one.
-            + '<p class="muted mono">timings: '
+            + '<p class="muted mono" id="timings">timings: '
             + html.escape(
                 timings.describe(
                     wall_seconds=time.perf_counter() - handling_began

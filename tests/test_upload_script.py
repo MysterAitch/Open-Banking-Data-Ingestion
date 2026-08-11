@@ -62,3 +62,18 @@ class TestTheScriptIsWellFormed:
         # status or the absence of a reply sends them somewhere useful.
         assert "the server replied" in UPLOAD_SCRIPT
         assert "connection lost" in UPLOAD_SCRIPT
+
+    def test_ThePerformanceDetail_SurvivesTheScriptedPath(self):
+        # The script renders its own summary and never navigates to the
+        # server's result page, so the phase breakdown rendered there was
+        # invisible to anyone using the enhanced path - a regression
+        # introduced by the enhancement, and reported from use.
+        assert "timingsIn" in UPLOAD_SCRIPT
+        assert "getElementById('timings')" in UPLOAD_SCRIPT
+        assert "Server phases" in UPLOAD_SCRIPT
+
+    def test_TheThroughputOfTheAttempt_IsReported_NotJustTheDuration(self):
+        # The link has been measured varying six-fold between consecutive
+        # attempts, so a duration without the rate that produced it cannot
+        # be compared with any other attempt.
+        assert "Mbps, this attempt" in UPLOAD_SCRIPT

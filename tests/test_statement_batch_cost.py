@@ -209,3 +209,12 @@ class TestThePageReportsWhatItSpent:
 
         assert response.text.count("<td>text</td>") == 1, "one matrix row per phase"
         assert "Runs</th>" in response.text
+
+    def test_TheTimingsCarryAStableIdentifier_TheBrowserCanFind(self, server):
+        # The upload script never navigates to this page - it reads the
+        # phase breakdown back out of the reply and shows it beside its own
+        # measurements. That makes this id a contract between two files,
+        # and renaming it would silently blank the column rather than fail.
+        response = _upload(server, 1)
+
+        assert 'id="timings"' in response.text
