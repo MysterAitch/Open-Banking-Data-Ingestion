@@ -17,6 +17,7 @@ otherwise slip through.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from functools import lru_cache
 
 from ..identity import content_key
 from ..models import SourceTier, Transaction
@@ -29,11 +30,28 @@ from .virgin_money_pdf import read_statement as read_virgin
 PDF_MAGIC = b"%PDF-"
 
 
+#: How many payloads keep their readings. Two, because the sequence that
+#: matters is one document being read several times in a row: every parser
+#: in the registry sniffs it, then the one that claims it reads it again.
+#: A third payload means a different document, and the first is finished
+#: with. Small on purpose - a reading holds its payload alive.
+_READINGS_KEPT = 2
+
+
+@lru_cache(maxsize=_READINGS_KEPT)
 def _lines(payload: bytes) -> list[str]:
     """The document's text, laid out - the same reading the shape page shows.
 
     Written to a temporary file because the reader takes a path, and removed
     immediately: the durable copy is the artefact the store already holds.
+
+    CACHED because choosing a parser asks every parser in the registry
+    whether it recognises the document, and each one asked for this text.
+    Three parsers meant three full extractions of the same bytes before any
+    reading began, and the fourth was the reading itself; twenty parsers
+    would have meant twenty. That is per FILE, so a directory of two
+    hundred statements paid it two hundred times over - the same shape as
+    the batch upload that read every page's geometry and discarded it.
     """
     import tempfile
     from pathlib import Path
@@ -46,6 +64,7 @@ def _lines(payload: bytes) -> list[str]:
         return [str(line) for line in pdf_lines(temporary)]
 
 
+@lru_cache(maxsize=_READINGS_KEPT)
 def _grid(payload: bytes) -> list[list[str]]:
     """The document's TABLE, read by coordinate rather than by spacing.
 
@@ -53,6 +72,10 @@ def _grid(payload: bytes) -> list[list[str]]:
     word has no position until the page's fonts have been parsed - and the
     only one that survives a table whose columns sit at the far edges of a
     wide page, where reconstruction fuses one field into the next.
+
+    Cached for the same reason as the text, and it matters more here: this
+    is the expensive reading, and where several parsers claim a document
+    they are all run and compared, so it happens once per claimant.
     """
     import tempfile
     from pathlib import Path
