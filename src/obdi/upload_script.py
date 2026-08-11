@@ -49,7 +49,35 @@ UPLOAD_SCRIPT = r"""
     return;
   }
 
-  function say(text) { progress.textContent = text; }
+  // Appends rather than replaces. Each stage used to overwrite the last,
+  // so "hashing 32 files" flashed past and the answer that followed it -
+  // mentioning 31 - looked like a contradiction with no way to check,
+  // because the sentence that would have explained it had already gone.
+  // A run leaves a record of itself, and so does the run before it.
+  function say(text, className) {
+    var line = document.createElement('p');
+    line.className = className || 'muted mono';
+    line.textContent = text;
+    progress.appendChild(line);
+    return line;
+  }
+
+  // Progress is the one thing that SHOULD overwrite: a percentage is
+  // only ever interesting as its latest value, and appending one line per
+  // event would bury everything else under thousands of them.
+  var ticker = null;
+  function tick(text) {
+    if (!ticker || !ticker.parentNode) ticker = say('', 'muted mono');
+    ticker.textContent = text;
+  }
+
+  function beginRun(what) {
+    if (progress.childNodes.length) {
+      progress.appendChild(document.createElement('hr'));
+    }
+    ticker = null;
+    say(what, '');
+  }
 
   function sizeOf(bytes) {
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MiB';
@@ -106,9 +134,13 @@ UPLOAD_SCRIPT = r"""
       request.open('POST', '/statement-shape');
       request.upload.addEventListener('progress', function (event) {
         if (!event.lengthComputable) return;
-        var done = sent + event.loaded;
-        say('Sending ' + file.name + ' - ' + sizeOf(done) + ' of ' +
-            sizeOf(total) + ' (' + Math.floor((done / total) * 100) + '%)');
+        // What goes over the wire is the file PLUS the multipart framing
+        // around it, so raw progress passes the total and reports more
+        // than all of it - 109% of 2 KiB was on screen. A share of
+        // something cannot exceed the something.
+        var done = Math.min(sent + event.loaded, total);
+        tick('Sending ' + file.name + ' - ' + sizeOf(done) + ' of ' +
+             sizeOf(total) + ' (' + Math.floor((done / total) * 100) + '%)');
       });
       request.addEventListener('load', function () {
         resolve({
@@ -181,43 +213,34 @@ UPLOAD_SCRIPT = r"""
     }
   }
 
-  function cell(row, text, mono) {
-    var td = document.createElement('td');
-    if (mono) td.className = 'mono';
-    td.textContent = text;
-    row.appendChild(td);
-  }
-
-  // What each file cost, measured HERE rather than on the server, because
-  // the server cannot see the time its reply spends reaching this page or
-  // the time the file spent getting there. The server's own phase
-  // breakdown travels in the last column, so the two accounts sit beside
-  // each other and their difference is the network.
+  // Per file, as blocks rather than a table. A four-column table on a
+  // phone gives each column a few characters and sets the headings one
+  // letter per line, which is a table in name only. Each file gets its
+  // name, then what it cost, then where the cost went.
   function timingsTable(measured) {
     var seconds = measured.reduce(function (sum, m) { return sum + m.seconds; }, 0);
     var bytes = measured.reduce(function (sum, m) { return sum + m.bytes; }, 0);
 
-    var heading = document.createElement('p');
-    heading.textContent = 'What it cost, per file';
-    progress.appendChild(heading);
-
-    var table = document.createElement('table');
-    var head = document.createElement('tr');
-    ['File', 'Size', 'Round trip', 'Server phases'].forEach(function (name) {
-      var th = document.createElement('th');
-      th.textContent = name;
-      head.appendChild(th);
-    });
-    table.appendChild(head);
+    block('What each file cost', '');
     measured.forEach(function (m) {
-      var row = document.createElement('tr');
-      cell(row, m.name, false);
-      cell(row, sizeOf(m.bytes), true);
-      cell(row, m.seconds.toFixed(2) + 's', true);
-      cell(row, m.server || '-', true);
-      table.appendChild(row);
+      var entry = document.createElement('div');
+      entry.className = 'row';
+      var name = document.createElement('div');
+      name.textContent = m.name;
+      entry.appendChild(name);
+      var cost = document.createElement('div');
+      cost.className = 'muted mono';
+      cost.textContent = sizeOf(m.bytes) + ' - ' + m.seconds.toFixed(2) +
+                         's round trip';
+      entry.appendChild(cost);
+      if (m.server) {
+        var phases = document.createElement('div');
+        phases.className = 'muted mono';
+        phases.textContent = m.server;
+        entry.appendChild(phases);
+      }
+      progress.appendChild(entry);
     });
-    progress.appendChild(table);
 
     // Throughput, because on this link it is the figure that explains the
     // duration - and it has been measured varying six-fold between one
@@ -234,21 +257,30 @@ UPLOAD_SCRIPT = r"""
   // glance is enough and reading further is a choice rather than the only
   // way to find out whether anything went wrong.
   function report(outcome) {
-    progress.innerHTML = '';
-    var worked = outcome.sending - outcome.failed.length;
+    // Counted, not subtracted. A run that stops early leaves files
+    // UNATTEMPTED, and subtracting failures from the total quietly
+    // reported every one of those as kept - it once claimed 28 of 31 when
+    // one had been sent. Three outcomes, and they must add up.
+    var attempted = outcome.attempted || 0;
+    var worked = attempted - outcome.failed.length;
+    var untried = outcome.sending - attempted;
 
-    if (outcome.failed.length) {
-      block(worked + ' of ' + outcome.sending + ' file(s) kept. ' +
-            outcome.failed.length + ' FAILED.', 'bad');
+    if (!outcome.sending) {
+      block('Nothing to send - every one of them is already held.', 'ok');
+    } else if (outcome.failed.length) {
+      block(worked + ' kept, ' + outcome.failed.length + ' FAILED, ' +
+            untried + ' not attempted - of ' + outcome.sending + ' to send.',
+            'bad');
     } else {
       block('All ' + worked + ' file(s) kept (' + sizeOf(outcome.total) + ').',
             'ok');
     }
 
     if (outcome.stopped) {
-      block('Stopped early: three in a row failed, so the rest were not ' +
-            'attempted. That usually means the server became unreachable ' +
-            'rather than anything being wrong with the files.', 'warn');
+      block('Stopped after three failures in a row, so the remaining ' +
+            untried + ' were not attempted. That usually means the server ' +
+            'became unreachable rather than anything being wrong with the ' +
+            'files - the untried ones are still worth sending.', 'warn');
     }
 
     if (outcome.failed.length) {
@@ -302,12 +334,6 @@ UPLOAD_SCRIPT = r"""
       timingsTable(outcome.measured);
     }
 
-    var all = document.createElement('p');
-    var index = document.createElement('a');
-    index.href = '/artefacts';
-    index.textContent = 'Every statement kept so far';
-    all.appendChild(index);
-    progress.appendChild(all);
   }
 
   // Set when the enhanced path has failed. The next submit is then left
@@ -335,7 +361,7 @@ UPLOAD_SCRIPT = r"""
     }
 
     var forcing = force && force.checked;
-    say('Hashing ' + files.length + ' file(s)...');
+    beginRun('Reading ' + files.length + ' PDF(s)...');
 
     Promise.all(files.map(digestOf)).then(function (digests) {
       // The override skips the asking, not the sending: nothing is held
@@ -381,14 +407,20 @@ UPLOAD_SCRIPT = r"""
             sizeOf(total) + '.');
       }
       if (!sending.length) {
-        say('All ' + files.length + ' file(s) already held - nothing to send. ' +
-            'Tick the override to send them anyway.');
+        report({
+          sending: 0, failed: [], skipped: skipped, ignored: ignored,
+          duplicated: duplicated, chosen: chosen.length, picked: picked.length,
+          foldered: foldered.length, kept: [], total: 0, measured: [],
+          stopped: false
+        });
+        block('Tick the override above to send them anyway.', 'muted');
         return;
       }
 
       var kept = [];
       var failed = [];
       var measured = [];
+      var attempted = 0;
       var sent = 0;
       var consecutive = 0;
       var stopped = false;
@@ -400,6 +432,7 @@ UPLOAD_SCRIPT = r"""
           // sending the rest just produces a longer list of the same
           // failure while the person waits for it.
           if (stopped) return;
+          attempted += 1;
           return send(file, sent, total).then(function (result) {
             sent += file.size;
             if (result.ok) {
@@ -425,6 +458,7 @@ UPLOAD_SCRIPT = r"""
       return chain.then(function () {
         report({
           sending: sending.length,
+          attempted: attempted,
           failed: failed,
           skipped: skipped,
           ignored: ignored,

@@ -70,10 +70,29 @@ class TestTheScriptIsWellFormed:
         # introduced by the enhancement, and reported from use.
         assert "timingsIn" in UPLOAD_SCRIPT
         assert "getElementById('timings')" in UPLOAD_SCRIPT
-        assert "Server phases" in UPLOAD_SCRIPT
+        assert "What each file cost" in UPLOAD_SCRIPT
 
     def test_TheThroughputOfTheAttempt_IsReported_NotJustTheDuration(self):
         # The link has been measured varying six-fold between consecutive
         # attempts, so a duration without the rate that produced it cannot
         # be compared with any other attempt.
         assert "Mbps, this attempt" in UPLOAD_SCRIPT
+
+    def test_ProgressAppends_SoAnEarlierLineCanStillBeRead(self):
+        # Each stage overwrote the last, so "hashing 32 files" flashed past
+        # and the answer mentioning 31 looked like a contradiction with no
+        # way to check - the line that would have explained it was gone.
+        assert "progress.appendChild(line)" in UPLOAD_SCRIPT
+        assert "progress.innerHTML = ''" not in UPLOAD_SCRIPT
+
+    def test_ThePercentage_OverwritesRatherThanAccumulating(self):
+        # The one thing that should replace: a rate is only interesting as
+        # its latest value, and one line per progress event would bury
+        # every other line under thousands.
+        assert "function tick(" in UPLOAD_SCRIPT
+
+    def test_NothingToSend_StillExplainsHowItGotThere(self):
+        # The early return skipped the summary, so the counts that explain
+        # the number - what was ignored, what was a duplicate of what -
+        # were never shown on the path where they matter most.
+        assert "Nothing to send - every one of them is already held." in UPLOAD_SCRIPT

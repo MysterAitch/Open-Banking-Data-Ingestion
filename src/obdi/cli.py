@@ -2351,14 +2351,24 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             ).fetchall()
         listing = []
         for row in rows:
-            meta = _json.loads(row["request_meta"]) if row["request_meta"] else {}
+            # Both of these have taken the page down rather than a row.
+            # `length(payload)` is NULL when the payload is, and a stored
+            # meta of "null" parses to None - so a value that is PRESENT
+            # but empty reached code expecting a number and a mapping.
+            # Neither is worth losing four hundred readable rows over.
+            try:
+                parsed = _json.loads(row["request_meta"]) if row["request_meta"] else {}
+            except ValueError:
+                parsed = None
+            meta = parsed if isinstance(parsed, dict) else {}
             listing.append(
                 {
                     "id": row["rowid"],
                     "source": row["source"],
                     "account_ref": row["account_ref"],
                     "fetched_at": row["fetched_at"],
-                    "bytes": row["size"],
+                    "bytes": row["size"] if row["size"] is not None else 0,
+                    "bytes_known": row["size"] is not None,
                     "origin": row["origin"],
                     "trigger": meta.get("trigger", "unrecorded"),
                 }

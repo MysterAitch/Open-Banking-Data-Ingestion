@@ -56,6 +56,29 @@ from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
 
 
+def _scratch_name(filename: str) -> str:
+    """A safe basename for a file we are about to write to a scratch dir.
+
+    An uploaded name is data from elsewhere and must never decide WHERE
+    bytes land. Choosing a folder sends every name with its path attached,
+    so joining the name onto a directory asked for a write into a
+    subdirectory that does not exist - the whole page failed, and from
+    outside that looked like the server going away. The same join would
+    honour a name that walked upwards out of the scratch directory
+    entirely.
+
+    Only the last component survives, separators of both kinds are
+    treated as separators regardless of platform, and a name that is
+    nothing but separators or dots yields a plain default rather than
+    something that resolves anywhere surprising. The ORIGINAL name is
+    still what gets recorded against the artefact - it is meaningful as a
+    fact about the document, and meaningless as a path.
+    """
+    last = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = last.strip().strip(".")
+    return cleaned or "statement.pdf"
+
+
 def _report_slow_route(method: str, route: str, seconds: float) -> None:
     """Any route slower than the threshold names itself in the log.
 
@@ -2997,8 +3020,53 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         began = time.perf_counter()
         try:
             self._dispatch_get(parsed, route)
+        except Exception as exc:
+            self._report_fault("GET", route, exc)
         finally:
             _report_slow_route("GET", route, time.perf_counter() - began)
+
+    def _report_fault(self, method: str, route: str, exc: Exception) -> None:
+        """Answer a request whose handler raised, instead of hanging up.
+
+        A handler that raises writes nothing, so the socket closes and a
+        fronting proxy reports 502 - which says that something, somewhere,
+        failed. That is the least useful true statement available: the site
+        was healthy, one page was not, and the error named neither which
+        page nor why.
+
+        The trace goes to the log, where the whole of it is useful. The
+        page carries the route and the exception, because the person
+        reading it is the one deciding whether it matters - and because a
+        failure that names itself can be reported without a second trip to
+        fetch the detail.
+        """
+        import traceback
+
+        print(
+            f"web fault: {method} {route} raised "
+            f"{type(exc).__name__}: {exc}",
+            traceback.format_exc(),
+            sep="\n",
+            flush=True,
+        )
+        try:
+            self._respond(
+                500,
+                error_page(
+                    "That page failed",
+                    f"<p><code>{html.escape(method)} {html.escape(route)}</code> "
+                    "could not be built.</p>"
+                    f"<p class=\"bad\">{html.escape(type(exc).__name__)}: "
+                    f"{html.escape(str(exc))}</p>"
+                    "<p>The full trace is in the log. Everything else on the "
+                    "site is unaffected by this.</p>" + HOME_LINK,
+                ),
+            )
+        except Exception as also:  # pragma: no cover - socket already gone
+            # The response could not be delivered either. Nothing useful
+            # remains to say to the client, but the log should not lose
+            # the fact that a failure failed to report itself.
+            print(f"web fault: could not report {route}: {also}", flush=True)
 
     def _dispatch_get(self, parsed: ParseResult, route: str) -> None:
         params = parse_qs(parsed.query)
@@ -3404,6 +3472,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, render_page("Fetch attempts", body))
 
+    @staticmethod
+    def _as_count(value: object) -> int:
+        """A count from an untyped hook, or zero when there is not one."""
+        return value if isinstance(value, int) else 0
+
     def _artefacts(self) -> None:
         hook = self.bound_config.artefact_index
         if hook is None:
@@ -3416,7 +3489,16 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 f'<div class="row"><strong>{html.escape(str(item.get("source", "")))}</strong> '
                 f'- {html.escape(str(item.get("account_ref", "")))}<br>'
                 f'{html.escape(str(item.get("fetched_at", "")))} - '
-                f'{item.get("bytes", 0):,} bytes - '
+                # Size shown only when it is KNOWN. Rendering an absent
+                # payload as "0 bytes" would state something false about
+                # the evidence layer, which is the one place a wrong
+                # figure is worst.
+                + (
+                    f'{self._as_count(item.get("bytes")):,} bytes'
+                    if item.get("bytes_known", True)
+                    else '<span class="bad">size unknown - no payload stored</span>'
+                )
+                + ' - '
                 f'trigger: {html.escape(str(item.get("trigger", "unrecorded")))}<br>'
                 f'<span style="opacity:.7;word-break:break-all">{origin}</span><br>'
                 f'<a class="button" href="/artefact?id={item.get("id")}">Inspect</a></div>'
@@ -3790,8 +3872,14 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             + note
             + '<form action="/statement-shape" method="post" '
             'enctype="multipart/form-data">'
+            # NOT `required`. Either box may supply the files, and the
+            # browser validates this one before any script runs - so
+            # choosing a folder and nothing else was refused by the page
+            # itself, with a message pointing at the empty box rather than
+            # the full one. Emptiness is checked where both boxes can be
+            # seen at once: in the script, and at the door behind it.
             '<p><input type="file" name="file" accept="application/pdf" '
-            'multiple required></p>'
+            'multiple></p>'
             '<p class="muted">Several at once is fine - keeping a statement '
             "asks nothing about it, so a batch carries no more risk than "
             "one.</p>"
@@ -4007,12 +4095,18 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 )
             )
             + html.escape(per_page)
+            + "</p>"
+            # Its own paragraph, OUTSIDE the timings element. The upload
+            # script reads that element to show the phases beside its own
+            # measurements, so prose living inside it arrived in the
+            # middle of a table cell.
+            + '<p class="muted">'
             # Whatever is left after the residue is OUTSIDE this process:
             # the browser reading files off disk and encoding them, the
             # link, and the response travelling back. Said plainly, because
             # a person comparing this against a stopwatch deserves to know
             # which side of the wire the difference lives on.
-            + '<br>Server side only - a browser also spends time reading '
+            + "Server side only - a browser also spends time reading "
             "and encoding the files before any of this starts, and "
             "receiving the reply after it ends.</p>"
             + matrix
@@ -4060,7 +4154,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         with tempfile.TemporaryDirectory() as scratch:
             # Written to a temporary file because the readers take a path,
             # and removed on the way out: this page stores nothing.
-            temporary = Path(scratch) / (filename or "statement.pdf")
+            temporary = Path(scratch) / _scratch_name(filename)
             temporary.write_bytes(payload)
             return shape_report(
                 temporary,
@@ -4545,6 +4639,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path.rstrip("/") or "/"
         try:
             self._dispatch_post()
+        except Exception as exc:
+            self._report_fault("POST", route, exc)
         finally:
             _report_slow_route("POST", route, time.perf_counter() - began)
 
