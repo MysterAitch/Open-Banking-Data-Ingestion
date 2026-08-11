@@ -187,6 +187,15 @@ def media_type_of(payload: bytes, path: Path) -> str:
 
 
 def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
+    # The account becomes a query key across every layer, so it is checked
+    # at the door rather than trusted from whoever posted it. The rule
+    # existed and had no live call site: every writer invented its own or
+    # none, and a canonical name that could pose as a provider reference
+    # merges two real accounts into one - after which the agreement report
+    # cheerfully "corroborates" one bank's rows with another's.
+    from .namespaces import validate_canonical_name
+
+    validate_canonical_name(account_id)
     payload = path.read_bytes()
     digest = artefact_digest(payload)
 

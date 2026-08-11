@@ -158,3 +158,61 @@ class TestQualifiedReferences:
     def test_AnUnknownProvider_IsRefusedRatherThanMintingAStrayNamespace(self):
         with pytest.raises(ValueError, match="unknown provider"):
             qualified_ref("monzo", "abc")
+
+
+class TestTheCanonicalRuleHasCallSites:
+    """One rule for account names, actually applied.
+
+    Found by review: `validate_canonical_name` existed with NO live call
+    site, while the bind door carried its own regex that had drifted from
+    it - the shared rule refuses a name identical to a provider, the local
+    copy did not. So an account could be bound to a name that poses as the
+    pipe it arrived through, and two real accounts silently become one:
+    their transactions merge, matching scopes to the wrong thing, and the
+    cross-source agreement report "corroborates" one bank's rows with
+    another's.
+    """
+
+    def test_AnImport_RefusesAnAccountNameThatCouldPoseAsAProviderRef(
+        self, tmp_path
+    ):
+        import pytest
+
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        path = tmp_path / "export.csv"
+        path.write_bytes(
+            b"Date,Counter Party,Reference,Type,Amount (GBP)\n"
+            b"14/03/2026,Tesco,SHOP,CARD,-1.00\n"
+        )
+        with Store(tmp_path / "s.sqlite3") as store, pytest.raises(ValueError):
+            import_file(store, path, account_id="starling:acc-1")
+
+    def test_AnImport_RefusesAProviderNameAsAnAccount(self, tmp_path):
+        import pytest
+
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        path = tmp_path / "export.csv"
+        path.write_bytes(
+            b"Date,Counter Party,Reference,Type,Amount (GBP)\n"
+            b"14/03/2026,Tesco,SHOP,CARD,-1.00\n"
+        )
+        with Store(tmp_path / "s.sqlite3") as store, pytest.raises(ValueError):
+            import_file(store, path, account_id="starling")
+
+    def test_AnOrdinaryCanonicalName_IsAccepted(self, tmp_path):
+        from obdi.ingest import import_file
+        from obdi.store import Store
+
+        path = tmp_path / "export.csv"
+        path.write_bytes(
+            b"Date,Counter Party,Reference,Type,Amount (GBP)\n"
+            b"14/03/2026,Tesco,SHOP,CARD,-1.00\n"
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            summary = import_file(store, path, account_id="starling-personal")
+
+            assert summary.parsed == 1

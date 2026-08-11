@@ -1331,17 +1331,12 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         if busy:
             raise ValueError(busy)
         source, provider_ref = _split_bind_ref(provider_ref)
-        import re as _re
-
         canonical = canonical.strip().lower()
-        if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]", canonical) and not _re.fullmatch(
-            r"[a-z0-9][a-z0-9]", canonical
-        ):
-            raise ValueError(
-                "canonical name must be 2-64 characters of lowercase "
-                "letters, digits and hyphens (not ending in a hyphen), "
-                "e.g. halifax-committed-spends-reward-current-account"
-            )
+        # The shared rule, not a second copy of it. This door carried its
+        # own regex, which had drifted: it allowed a name identical to a
+        # PROVIDER, so an account could be bound to "starling" and then be
+        # indistinguishable from the pipe it arrived through.
+        _guard_canonical(canonical)
         map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
         if not map_path:
             raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
@@ -2230,11 +2225,16 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         refuses a document whose rows do not carry its declared balances.
         """
         from .ingest import ImportSummary, reconcile_batch
+        from .namespaces import validate_canonical_name
         from .parsers.uk_banks import detect
 
         destination = account_id.strip()
         if not destination:
             return "No account was named, so nothing was assigned."
+        try:
+            validate_canonical_name(destination)
+        except ValueError as exc:
+            return f"Not assigned: {exc}"
         with Store(db_path) as store:
             row = store.connection.execute(
                 "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
