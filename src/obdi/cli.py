@@ -30,6 +30,7 @@ from .accounts import (
     lifecycle_breach,
     read_registry_file,
 )
+from .backup import BackupRefused, take_backup, verify_copy
 from .connections import ConnectionStore
 from .coverage import (
     SourceCoverage,
@@ -3173,6 +3174,19 @@ def main(argv: list[str] | None = None) -> int:
         help="show the fetch-attempt ledger: every ask made of a provider",
     )
     subcommands.add_parser("status", help="show row counts per layer")
+    backup_command = subcommands.add_parser(
+        "backup",
+        help=(
+            "copy the store to a file and PROVE the copy holds every row - "
+            "a plain file copy silently loses whatever is still in the write-ahead log"
+        ),
+    )
+    backup_command.add_argument("destination", help="path to write; must not already exist")
+    verify_command = subcommands.add_parser(
+        "verify-backup",
+        help="check an existing backup against the live store, table by table",
+    )
+    verify_command.add_argument("backup", help="path to a backup file to check")
     subcommands.add_parser(
         "duplication",
         help=(
@@ -3695,6 +3709,29 @@ def main(argv: list[str] | None = None) -> int:
             print("not restorable by any rebuild:")
             for what, count in store.irreplaceable().items():
                 print(f"  {what:<24} {count}")
+        return 0
+
+    if args.command == "backup":
+        try:
+            print(take_backup(db_path, Path(args.destination)).describe())
+        except BackupRefused as refusal:
+            # Loudly, and with the reason: a backup step that fails quietly is
+            # indistinguishable from one that never ran, and the difference only
+            # becomes interesting on the day it matters.
+            print(f"BACKUP REFUSED: {refusal}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.command == "verify-backup":
+        try:
+            counts = verify_copy(db_path, Path(args.backup))
+        except BackupRefused as refusal:
+            print(f"BACKUP NOT TRUSTWORTHY: {refusal}", file=sys.stderr)
+            return 1
+        print(
+            f"verified {len(counts)} tables, {sum(counts.values())} rows, "
+            f"against {db_path}"
+        )
         return 0
 
     return 2
