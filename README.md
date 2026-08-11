@@ -225,6 +225,21 @@ your ids. To find them, just run a pull: **any unbound account is named in the
 output**, since an unbound account still ingests but silently forgoes
 cross-source matching, and a silent omission is the thing worth avoiding.
 
+The **declared accounts** in that file — which accounts exist at all, as distinct
+from which provider feeds them — now live in the store. The first open after
+upgrading imports whatever the file holds, so nothing needs doing by hand.
+
+That import happens **once**. Afterwards the store is the only registry: an
+account added to the file later does not arrive, and editing happens through the
+application rather than by hand. The file is read, never written and never
+deleted.
+
+Once, rather than on every upgrade, because renaming an account is the point of
+having a registry you can edit — and to a repeated import a renamed account
+looks like one the store is missing, so the file's original entry would come
+back as a second account with its own identity. The rename would appear to have
+worked, and the duplicate would surface later.
+
 ### Savings pots are accounts, not categories
 
 A Starling Space (and any equivalent pot elsewhere) gets its **own canonical
