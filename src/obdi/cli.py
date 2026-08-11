@@ -2233,6 +2233,25 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         joiner = chr(10)
         return joiner.join([*transcript, endings.get(outcome, outcome)])
 
+    def statement_digests_held(digests: set[str]) -> set[str]:
+        """Which of these the store already holds, asked before sending.
+
+        One query for the whole batch rather than one per digest: a
+        browser asking about forty files should not cost forty round
+        trips on a link slow enough to make this worth doing at all.
+        """
+        if not digests:
+            return set()
+        with Store(db_path) as store:
+            places = ",".join("?" * len(digests))
+            rows = store.connection.execute(
+                # Digests are validated as hex at the web door before they
+                # reach here, and are bound as parameters regardless.
+                f"SELECT digest FROM raw_artefacts WHERE digest IN ({places})",  # noqa: S608
+                tuple(digests),
+            ).fetchall()
+        return {str(row["digest"]) for row in rows}
+
     def keep_statement(payload: bytes, filename: str) -> tuple[int, bool]:
         """Land a statement as evidence BEFORE anyone decides whose it is.
 
@@ -2440,6 +2459,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         extend_window=extend_window,
         artefact_index=artefact_index,
         keep_statement=keep_statement,
+        statement_digests_held=statement_digests_held,
         statement_payload=statement_payload,
         assign_kept_statement=assign_kept_statement,
         artefact_detail=artefact_detail,

@@ -53,6 +53,7 @@ from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 from .statement_shape import ShapeReport
 from .timings import Timings
+from .upload_script import UPLOAD_SCRIPT
 
 
 def _report_slow_route(method: str, route: str, seconds: float) -> None:
@@ -326,6 +327,11 @@ class WebConfig:
     #: from one newly kept, and reporting them identically hides the
     #: answer to the question a person re-uploading actually has.
     keep_statement: Callable[[bytes, str], tuple[int, bool]] | None = None
+    #: Which of these digests the store already holds. Lets a browser ask
+    #: before sending: the answer costs 64 characters where the file costs
+    #: megabytes, which on a slow uplink is the difference between minutes
+    #: and seconds.
+    statement_digests_held: Callable[[set[str]], set[str]] | None = None
     #: A kept statement's filename and bytes, by artefact id.
     statement_payload: Callable[[int], tuple[str, bytes] | None] | None = None
     #: Give a kept statement its account and read it in. Separate from
@@ -3789,10 +3795,27 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             '<p class="muted">Several at once is fine - keeping a statement '
             "asks nothing about it, so a batch carries no more risk than "
             "one.</p>"
+            # Offered as a SECOND input rather than replacing the first.
+            # Directory picking is not available everywhere - notably not
+            # on every phone - and a browser that does not support it
+            # treats this as an ordinary file box, which still works.
+            '<p><label>...or choose a whole folder, if your browser offers '
+            'it: <input type="file" name="folder" id="folder" '
+            'webkitdirectory directory multiple></label></p>'
+            '<p class="muted">Anything in it that is not a PDF is ignored, '
+            "and the count of what was left out is reported. Files already "
+            "held are recognised before they are sent, so choosing the same "
+            "folder twice costs almost nothing the second time.</p>"
             '<p><label><input type="checkbox" name="show_values" value="1"> '
             "Show the REAL contents instead of the masked shape - this "
             "discloses transactions, balances and names</label></p>"
+            '<p><label><input type="checkbox" name="force" value="1" '
+            'id="force"> Send every file even if this statement is already '
+            "held - slower, and the way to replace a stored copy you "
+            "doubt</label></p>"
             '<p><button type="submit">Read the shape</button></p>'
+            '<div id="progress" class="muted mono"></div>'
+            + f"<script>{UPLOAD_SCRIPT}</script>"
             "</form>" + HOME_LINK
         )
         self._respond(200, render_page("Statement shape", body))
@@ -4425,6 +4448,73 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         )
         self._respond(200, render_page("Balance walk", body))
 
+    def _statement_held(self) -> None:
+        """Which of these digests is already held - asked before sending.
+
+        The store keys artefacts by content, so a browser that can hash a
+        file locally can ask whether sending it would tell us anything new.
+        On a 0.27 Mbps uplink a directory of statements is minutes of
+        upload, most of it re-sending documents already held.
+
+        Answers about DIGESTS, never about accounts, amounts or names: the
+        caller has to already know the exact hash of a document to learn
+        anything, which is only true of somebody holding that document.
+        """
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 1024 * 1024:
+            # Refused without reading it, so the connection cannot be
+            # reused - there would be a megabyte of unread request sitting
+            # in front of the next one.
+            self.close_connection = True
+            self._respond_json(413, {"error": "too many digests"})
+            return
+        # Read BEFORE deciding anything, including whether this is wired at
+        # all. A body left unread is still in the socket when the next
+        # request arrives on the same connection, and the failure that
+        # causes surfaces intermittently and somewhere else entirely.
+        raw = self.rfile.read(length)
+        hook = self.bound_config.statement_digests_held
+        if hook is None:
+            # Not wired is not "holds nothing". A browser told the latter
+            # would upload everything, which is merely slow - but it would
+            # have been told something false, and the page can say plainly
+            # that the check is unavailable instead.
+            self._respond_json(404, {"error": "not wired"})
+            return
+        try:
+            asked = json.loads(raw.decode("utf-8"))
+            digests = [str(digest) for digest in asked["digests"]]
+        except Exception:
+            self._respond_json(400, {"error": "expected {\"digests\": [...]}"})
+            return
+        # Checked at the door rather than trusted onward: these go straight
+        # into a store lookup, and a hex digest is a shape that can be
+        # verified completely.
+        if any(
+            len(digest) != 64 or not all(c in "0123456789abcdef" for c in digest)
+            for digest in digests
+        ):
+            self._respond_json(400, {"error": "not a sha256 hex digest"})
+            return
+        held = hook(set(digests))
+        self._respond_json(
+            200,
+            {
+                # The denominator travels with the count, so a caller can
+                # see every digest it asked about was considered.
+                "asked": len(digests),
+                "held": [digest for digest in digests if digest in held],
+            },
+        )
+
+    def _respond_json(self, status: int, body: dict[str, object]) -> None:
+        payload = json.dumps(body).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _read_form(self) -> dict[str, list[str]]:
         length = int(self.headers.get("Content-Length") or 0)
         return parse_qs(self.rfile.read(length).decode("utf-8"))
@@ -4469,6 +4559,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                     "obdi's own pages.</p>",
                 ),
             )
+            return
+        if route == "/statement-held":
+            self._statement_held()
             return
         if route == "/statement-shape":
             self._statement_shape()
