@@ -2410,6 +2410,40 @@ class Store:
             for table, query in self._COUNT_QUERIES.items()
         }
 
+    def irreplaceable(self) -> dict[str, int]:
+        """What discarding this store would cost that no rebuild restores.
+
+        Almost everything here is cheap to lose: transactions replay from
+        artefacts, artefacts re-download or re-upload, a provider consent
+        takes minutes to recreate. That is what makes wiping a young store
+        a reasonable thing to do - and a clean-slate run is the only honest
+        test of what installing from nothing is like.
+
+        Two things are not. A category applied BY HAND has no artefact
+        behind it, and a declared account need have none either - a
+        passbook, cash in a tin, a mortgage with no feed. Both are declared
+        state, and declared state is what a replay cannot invent.
+
+        Reported as a named breakdown rather than a total, because a single
+        number nobody can decompose is a number nobody trusts - and always
+        reported, including zeroes, since a missing line reads as "not
+        measured" and that is the opposite of what it would mean.
+
+        Rule and model annotations are deliberately NOT counted: re-running
+        a rule costs a command rather than a decision, and including them
+        would inflate the figure that exists to stop somebody.
+        """
+        hand_entered = self.connection.execute(
+            "SELECT COUNT(*) FROM annotations WHERE provenance LIKE 'human:%'"
+        ).fetchone()[0]
+        declared = self.connection.execute(
+            "SELECT COUNT(*) FROM declared_accounts"
+        ).fetchone()[0]
+        return {
+            "hand-entered categories": int(hand_entered),
+            "declared accounts": int(declared),
+        }
+
 
 def _row_to_transaction(row: sqlite3.Row) -> Transaction:
     from datetime import date

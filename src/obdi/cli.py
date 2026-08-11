@@ -3669,6 +3669,15 @@ def main(argv: list[str] | None = None) -> int:
         with Store(db_path) as store:
             for table, count in store.counts().items():
                 print(f"{table:<16} {count}")
+            # Beside the row counts, where somebody weighing up a wipe is
+            # already looking. Discarding a young store is reasonable and
+            # useful - it is the only honest test of installing from
+            # nothing - and it stops being reasonable at a threshold nobody
+            # can see unless it is printed.
+            print()
+            print("not restorable by any rebuild:")
+            for what, count in store.irreplaceable().items():
+                print(f"  {what:<24} {count}")
         return 0
 
     return 2
