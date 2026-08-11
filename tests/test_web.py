@@ -2782,6 +2782,55 @@ class TestBrowsingRawArtefactsFromThePage:
         assert "2024-08-02T00:00:00Z" in page
         assert 'href="/artefact?id=7&view=payload"' in page
 
+    def test_Detail_WhenTheSameBytesArrivedUnderSeveralNames_ShowsEveryName(
+        self, tmp_path
+    ):
+        """One document uploaded from a folder and again by the file
+        picker is one artefact under two names, and both are evidence
+        about it - the folder often says which account it belongs to."""
+        detail = {
+            "id": 7,
+            "source": "statement",
+            "account_ref": "santander-credit",
+            "fetched_at": "2026-07-11T09:00:00+00:00",
+            "origin": "2026.07.11 - Santander CC.pdf",
+            "origins": [
+                "2026.07.11 - Santander CC.pdf",
+                "Bank statements/Santander/2026.07.11 - Santander CC.pdf",
+            ],
+            "request_meta": {},
+            "summary": {"kind": "pdf", "bytes": 1200},
+        }
+        httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: detail)
+        try:
+            page = httpx.get(f"{base}/artefact", params={"id": "7"}).text
+        finally:
+            httpd.shutdown()
+
+        assert "Also seen as" in page
+        assert "Bank statements/Santander/2026.07.11 - Santander CC.pdf" in page
+
+    def test_Detail_WhenTheOnlyNameIsTheOneOnTheRow_SaysNothingFurther(self, tmp_path):
+        """No "also seen as" heading over a repeat of the name already
+        shown: a section that always appears stops meaning anything."""
+        detail = {
+            "id": 7,
+            "source": "statement",
+            "account_ref": "santander-credit",
+            "fetched_at": "2026-07-11T09:00:00+00:00",
+            "origin": "2026.07.11 - Santander CC.pdf",
+            "origins": ["2026.07.11 - Santander CC.pdf"],
+            "request_meta": {},
+            "summary": {"kind": "pdf", "bytes": 1200},
+        }
+        httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: detail)
+        try:
+            page = httpx.get(f"{base}/artefact", params={"id": "7"}).text
+        finally:
+            httpd.shutdown()
+
+        assert "Also seen as" not in page
+
     def test_PayloadView_RendersPrettyAndEscaped(self, tmp_path):
         detail = {
             "id": 7,

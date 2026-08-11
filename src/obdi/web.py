@@ -3559,13 +3559,35 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if self.bound_config.display_labels is not None:
             with contextlib.suppress(Exception):
                 refile_labels = self.bound_config.display_labels()
+        # Names beyond the first, which the line above already shows. The
+        # same document arrives under a folder path and bare, and a
+        # rolling fetch re-lands identical bytes under each window it
+        # asked for - all of them facts about this artefact that its
+        # payload does not state.
+        raw_origins = detail.get("origins")
+        also_seen = [
+            str(name)
+            for name in (raw_origins if isinstance(raw_origins, list) else [])
+            if str(name) != str(detail.get("origin", ""))
+        ]
         body = (
             f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
             f'fetched {html.escape(str(detail.get("fetched_at", "")))}<br>'
             f'<span style="opacity:.7;word-break:break-all">'
             f'{html.escape(str(detail.get("origin", "")))}</span></p>'
-            "<h2>Request circumstances</h2>"
+            + (
+                "<p>Also seen as:<br>"
+                + "<br>".join(
+                    f'<span style="opacity:.7;word-break:break-all">'
+                    f"{html.escape(name)}</span>"
+                    for name in also_seen
+                )
+                + "</p>"
+                if also_seen
+                else ""
+            )
+            + "<h2>Request circumstances</h2>"
             f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
             "<h2>Computed shape</h2>"
             + _shape_html(summary)

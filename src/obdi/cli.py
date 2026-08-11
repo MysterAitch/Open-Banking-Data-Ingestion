@@ -893,14 +893,23 @@ def _earliest_asked(store: Store, canonical: str) -> date | None:
     no data there, but the ask happened, and the next press should walk
     further back rather than re-asking the same span forever (observed live
     on an empty account whose +730 button never moved).
+
+    Every NAME an artefact landed under, not the one on its row: empty
+    bodies are byte-identical, so a dozen windows that each came back
+    empty are one artefact, and the range each of them asked for survives
+    only as the origin it landed under.
     """
     aliases = _evidence_aliases(canonical)
     placeholders = ", ".join("?" for _ in aliases)
     rows = store.connection.execute(
         # Only "?" placeholders are interpolated; the values themselves are
         # parameterised.
-        f"SELECT origin FROM raw_artefacts WHERE account_ref IN ({placeholders}) "  # noqa: S608
-        "AND source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
+        "SELECT o.origin AS origin FROM raw_artefacts a "  # noqa: S608
+        "JOIN artefact_origins o "
+        "  ON o.digest = a.digest AND o.account_ref = a.account_ref "
+        " AND o.source = a.source "
+        f"WHERE a.account_ref IN ({placeholders}) "
+        "AND a.source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
         aliases,
     ).fetchall()
     asked: list[date] = []
@@ -923,13 +932,24 @@ def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
     while the latest asked `to=` says how far the fetching has actually
     covered - the difference is exactly what goes invisible if the scheduler
     quietly stops for a week.
+
+    Dated by the NAME's own first sighting rather than the artefact's
+    fetched_at, and the two differ precisely in the case this measures: a
+    rolling feed returning identical bytes day after day is one artefact
+    holding the earliest fetch, while each day's ask is its own origin.
+    An artefact with no recorded name still counts, by its own fetch.
     """
     aliases = _evidence_aliases(canonical)
     placeholders = ", ".join("?" for _ in aliases)
     rows = store.connection.execute(
-        "SELECT origin, fetched_at, source FROM raw_artefacts "  # noqa: S608
-        f"WHERE account_ref IN ({placeholders}) "
-        "AND source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
+        "SELECT COALESCE(o.origin, '') AS origin, "  # noqa: S608
+        "COALESCE(o.first_seen_at, a.fetched_at) AS fetched_at, "
+        "a.source AS source FROM raw_artefacts a "
+        "LEFT JOIN artefact_origins o "
+        "  ON o.digest = a.digest AND o.account_ref = a.account_ref "
+        " AND o.source = a.source "
+        f"WHERE a.account_ref IN ({placeholders}) "
+        "AND a.source IN ('truelayer-booked', 'truelayer-card-booked', 'starling-feed')",
         aliases,
     ).fetchall()
     covered: date | None = None
@@ -2384,18 +2404,26 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         with Store(db_path) as store:
             row = store.connection.execute(
-                "SELECT rowid, source, account_ref, fetched_at, media_type, origin, "
-                "payload, request_meta FROM raw_artefacts WHERE rowid = ?",
+                "SELECT rowid, digest, source, account_ref, fetched_at, media_type, "
+                "origin, payload, request_meta FROM raw_artefacts WHERE rowid = ?",
                 (artefact_id,),
             ).fetchone()
-        if row is None:
-            return None
+            if row is None:
+                return None
+            # Every name these bytes have been seen under, not just the
+            # first: the folder a statement was uploaded from and the
+            # window a fetch asked for are facts about this artefact that
+            # the payload does not state.
+            origins = store.origins_for_artefact(
+                str(row["digest"]), str(row["account_ref"]), str(row["source"])
+            )
         detail: dict[str, object] = {
             "id": row["rowid"],
             "source": row["source"],
             "account_ref": row["account_ref"],
             "fetched_at": row["fetched_at"],
             "origin": row["origin"],
+            "origins": origins,
             "request_meta": _json.loads(row["request_meta"]) if row["request_meta"] else {},
             "summary": summarise(row["payload"], row["media_type"]),
         }
@@ -2593,6 +2621,18 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
             "SELECT source, account_ref, fetched_at, media_type, origin, payload, "
             "request_meta, digest FROM raw_artefacts ORDER BY fetched_at"
         ).fetchall()
+        # Every name each artefact has been seen under, read in ONE
+        # statement rather than one per row: the sidecar carries the
+        # artefact's provenance, and the first name is not all of it.
+        origins: dict[tuple[str, str, str], list[str]] = {}
+        for name in store.connection.execute(
+            "SELECT digest, account_ref, source, origin FROM artefact_origins "
+            "ORDER BY first_seen_at, origin"
+        ):
+            origins.setdefault(
+                (str(name["digest"]), str(name["account_ref"]), str(name["source"])),
+                [],
+            ).append(str(name["origin"]))
 
     written = 0
     for row in rows:
@@ -2605,6 +2645,9 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
         sidecar = {
             "account_ref": row["account_ref"],
             "origin": row["origin"],
+            "origins": origins.get(
+                (str(row["digest"]), str(row["account_ref"]), str(row["source"])), []
+            ),
             "fetched_at": row["fetched_at"],
             "digest": row["digest"],
             "request_meta": json.loads(row["request_meta"]) if row["request_meta"] else {},

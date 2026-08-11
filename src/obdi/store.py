@@ -34,21 +34,37 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
--- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
--- from a different request are different EVIDENCE: every empty API body is
--- byte-identical, so a digest-only key would collapse "account A asked for
--- range R, got nothing" across every account and every day into one row -
--- destroying exactly the asked-and-empty facts the origin column exists to
--- preserve. Same bytes from the SAME request remain deduplicated, which is
--- what makes re-importing a download harmless.
+-- Keyed on (digest, account_ref, source): the bytes, the account they are
+-- filed against, and the pipe that delivered them - and NOTHING about the
+-- name they arrived under.
+--   account_ref  one export legitimately covers two accounts, and the same
+--                bytes filed against each are two pieces of evidence.
+--   source       every empty API body is byte-identical, and an empty
+--                PENDING snapshot is not the same fact as an empty booked
+--                window: the first says every held pending has vanished
+--                and voids them, the second says a date range held
+--                nothing. Collapsing the two loses the voiding entirely.
+--   origin       a browser uploading a folder sends each file's relative
+--                path as its name while the file picker sends the bare
+--                name, so one document landed twice under two keys - 62
+--                artefact rows for 31 statements on the live store.
+-- Every name the bytes have been seen under is kept in artefact_origins,
+-- which is where a set belongs; the column here is the FIRST of them.
+-- That is what keeps the asked-and-empty facts intact after the key
+-- narrowed: identical empty answers to a dozen different windows are one
+-- artefact, and the range each ask covered survives as an origin rather
+-- than as a duplicate row.
 CREATE TABLE IF NOT EXISTS raw_artefacts (
     digest        TEXT NOT NULL,
     source        TEXT NOT NULL,
     account_ref   TEXT NOT NULL,
     media_type    TEXT NOT NULL,
+    -- The name these bytes FIRST arrived under, so every reader has one to
+    -- show. Anything that must not miss a sibling - which windows were
+    -- asked, which folder a document came from - reads artefact_origins.
     origin        TEXT NOT NULL DEFAULT '',
     fetched_at    TEXT NOT NULL,
     payload       BLOB NOT NULL,
@@ -58,7 +74,32 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     -- progress and ETA maths never re-parse history. NULL means "not yet
     -- counted"; the next rebuild backfills it.
     record_count  INTEGER,
-    PRIMARY KEY (digest, account_ref, origin)
+    PRIMARY KEY (digest, account_ref, source)
+);
+
+-- Every name one artefact's bytes have been observed under - a set, in the
+-- only shape that can be queried as one: sibling rows, not a delimited
+-- column. The names carry signal the payload does not. "6_2026" dates a
+-- statement, a parent directory often says which account a file called
+-- "statement.pdf" belongs to, and a fetch URL records the window actually
+-- requested, which is the only record of an ask that came back empty. So
+-- landing bytes already held stores no payload and still records the name,
+-- and that is the entire point of the table.
+-- Keyed by the whole of the artefact's identity plus the name, so a name
+-- belongs to ONE artefact rather than to whichever of several shares its
+-- bytes.
+CREATE TABLE IF NOT EXISTS artefact_origins (
+    digest        TEXT NOT NULL,
+    account_ref   TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    origin        TEXT NOT NULL,
+    -- When the bytes were first seen under THIS name, which is not the
+    -- artefact's fetched_at: the artefact keeps the earliest fetch, while
+    -- each later name carries its own first sighting - and that is what
+    -- keeps the forward edge of asked coverage from freezing at the day
+    -- the payload first landed.
+    first_seen_at TEXT NOT NULL,
+    PRIMARY KEY (digest, account_ref, source, origin)
 );
 
 -- One row per derivation run: the cost record the timings flag prints to
@@ -294,7 +335,7 @@ def _column_default(table: str, column: str) -> str:
     return default.group(1) if default else "NULL"
 
 
-def _rebuild_table_script(table: str, held: set[str]) -> str:
+def _rebuild_table_script(table: str, held: set[str], *, prepare: str = "") -> str:
     """A rebuild of one table onto its current shape, preserving rows.
 
     Needed wherever a change cannot be an ALTER: a widened primary key, a
@@ -304,6 +345,10 @@ def _rebuild_table_script(table: str, held: set[str]) -> str:
     silently depends on the old table having the same columns in the same
     order as the new one: true only until the table grew, at which point
     the rebuild would have failed on the one store it exists to rescue.
+
+    `prepare` runs inside the SAME transaction, before the rename: where a
+    rebuild onto a NARROWER key does the collapsing that key demands, so a
+    half-collapsed table can never be what a crash leaves behind.
     """
     columns = table_columns(table)
     selected = ", ".join(
@@ -316,6 +361,7 @@ def _rebuild_table_script(table: str, held: set[str]) -> str:
     # safe here rather than merely convenient.
     return f"""
         BEGIN;
+        {prepare}
         ALTER TABLE {table} RENAME TO {table}_old;
         {table_ddl(table)}
         INSERT INTO {table} ({", ".join(columns)})
@@ -323,6 +369,50 @@ def _rebuild_table_script(table: str, held: set[str]) -> str:
         DROP TABLE {table}_old;
         COMMIT;
     """  # noqa: S608
+
+
+#: The two statements that make a duplicated artefact table safe to key on
+#: (digest, account_ref, source), run inside the rebuild's own
+#: transaction. The ORDER is the whole substance: harvesting after the
+#: delete would lose exactly the names the delete removes, which are the
+#: reason the origin was ever in the key. The survivor is the earliest
+#: fetch, with rowid breaking a tie so the choice is deterministic rather
+#: than whichever row the scan happened to reach first.
+_HARVEST_AND_COLLAPSE_ARTEFACTS = """
+        INSERT OR IGNORE INTO artefact_origins
+            (digest, account_ref, source, origin, first_seen_at)
+        SELECT digest, account_ref, source, origin, fetched_at
+          FROM raw_artefacts WHERE origin != '';
+        DELETE FROM raw_artefacts
+         WHERE EXISTS (
+               SELECT 1 FROM raw_artefacts AS earlier
+                WHERE earlier.digest = raw_artefacts.digest
+                  AND earlier.account_ref = raw_artefacts.account_ref
+                  AND earlier.source = raw_artefacts.source
+                  AND (earlier.fetched_at, earlier.rowid)
+                    < (raw_artefacts.fetched_at, raw_artefacts.rowid)
+         );
+"""
+
+
+@dataclass(frozen=True)
+class ArtefactLanding:
+    """What landing one payload actually DID, as two separate facts.
+
+    One boolean could not say both. "Already held" and "recorded nothing"
+    stopped being the same statement once names were kept beside the
+    bytes: a document re-uploaded under its folder path stores no payload
+    and still records something, and that case is the entire reason the
+    origins are kept.
+    """
+
+    #: The payload was not already held under this artefact's identity -
+    #: its digest, the account it is filed against and the pipe it came
+    #: through.
+    payload_stored: bool
+    #: The name it arrived under had not been recorded for it before. False
+    #: for a nameless landing, which has no name to record.
+    origin_recorded: bool
 
 
 @dataclass
@@ -668,21 +758,40 @@ class Store:
             self.connection.commit()
 
     def _migrate_raw_artefact_key(self) -> None:
-        """Upgrade a digest-only raw_artefacts table to the composite key.
+        """Take the NAME out of an artefact's identity, keeping every name.
 
-        CREATE TABLE IF NOT EXISTS never alters an existing table, so a store
-        created before the key change keeps the old primary key silently -
-        and with it the empty-body collapse the new key exists to prevent.
-        Rebuilding the table preserves every row; the composite key is strictly
-        wider than the old one, so no existing data can conflict. Columns the
-        old table never had take their schema defaults, which is what the
-        later ALTER migrations would have given them anyway.
+        CREATE TABLE IF NOT EXISTS never alters an existing table, so a
+        store created under an earlier key keeps it silently. Two of them
+        reach this: the original digest-only key, and the one that put the
+        origin - the filename - in the identity. The second duplicated
+        documents wholesale, because a browser uploading a folder names
+        each file by its path while the file picker names it bare: the
+        live store held 62 artefact rows for 31 statements, every one of
+        them landed twice under two names.
+
+        Duplicates collapse onto the EARLIEST fetch, which is the honest
+        one - it is when the bytes actually first arrived, and a later
+        landing only re-observed what was already held. Every duplicate's
+        name is harvested into artefact_origins BEFORE the collapse, so
+        nothing the old key preserved is lost by narrowing it: the window
+        an empty API response was asked for still has somewhere to live.
+        Bytes that reached one account down two different pipes are NOT
+        duplicates and are not collapsed - an empty pending snapshot voids
+        every held pending, and an empty booked window does not.
+
+        One transaction, so the shape it produces IS its completion record
+        and no marker is needed. Re-running is harmless, which matters
+        because every later schema bump runs the whole ladder again: the
+        harvest ignores names already recorded, and the collapse finds no
+        twins the second time.
         """
-        if self._primary_key("raw_artefacts") == ["digest", "account_ref", "origin"]:
+        if self._primary_key("raw_artefacts") == ["digest", "account_ref", "source"]:
             return
         self.connection.executescript(
             _rebuild_table_script(
-                "raw_artefacts", set(self._table_columns("raw_artefacts"))
+                "raw_artefacts",
+                set(self._table_columns("raw_artefacts")),
+                prepare=_HARVEST_AND_COLLAPSE_ARTEFACTS,
             )
         )
 
@@ -811,11 +920,20 @@ class Store:
     def abort_batch(self) -> None:
         self._batch = None
 
-    def land_artefact(self, artefact: RawArtefact) -> bool:
-        """Store a raw payload. Returns False if it was already held.
+    def land_artefact(self, artefact: RawArtefact) -> ArtefactLanding:
+        """Store a raw payload, and record the name it arrived under.
 
-        Idempotent on content digest, so re-importing the same download is
-        harmless - which matters because export caps force overlapping pulls.
+        Idempotent on (digest, account_ref, source): identical bytes from
+        one pipe, filed against one account, are ONE artefact however many
+        names they arrive under. That is what makes re-importing a
+        download harmless - export caps force overlapping pulls, and a
+        folder upload and a file-picker upload of the same document
+        disagree about its name.
+
+        The name is never identity, but it is evidence about the artefact,
+        so a landing that stores no payload still records a name never
+        seen before. The two flags say which happened; neither implies the
+        other, which is why this returns a pair rather than a bool.
         """
         cursor = self.connection.execute(
             "INSERT OR IGNORE INTO raw_artefacts "
@@ -835,8 +953,50 @@ class Store:
                 artefact.connection_id,
             ),
         )
+        origin_recorded = False
+        if artefact.origin:
+            # An empty name is not a name: recording it would put a row in
+            # the set that says nothing about where the bytes came from.
+            origin_recorded = (
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO artefact_origins "
+                    "(digest, account_ref, source, origin, first_seen_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        artefact.digest,
+                        artefact.account_ref,
+                        artefact.source,
+                        artefact.origin,
+                        artefact.fetched_at.isoformat(),
+                    ),
+                ).rowcount
+                > 0
+            )
         self.connection.commit()
-        return cursor.rowcount > 0
+        return ArtefactLanding(
+            payload_stored=cursor.rowcount > 0, origin_recorded=origin_recorded
+        )
+
+    def origins_for_artefact(
+        self, digest: str, account_ref: str, source: str
+    ) -> list[str]:
+        """Every name these bytes have been observed under, oldest first.
+
+        The first is the one the artefact row carries; the rest are what a
+        folder upload, a re-import or a rolling window added afterwards.
+        Each one is a fact about the document - the date in a filename,
+        the account in a parent directory, the range in a fetch URL - that
+        the payload itself does not state.
+        """
+        return [
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT origin FROM artefact_origins "
+                "WHERE digest = ? AND account_ref = ? AND source = ? "
+                "ORDER BY first_seen_at, origin",
+                (digest, account_ref, source),
+            )
+        ]
 
     def transactions_for_account(self, account_id: str) -> list[Transaction]:
         rows = self.connection.execute(
@@ -955,9 +1115,11 @@ class Store:
             # payloads land under sibling origins (the rolling-epoch
             # Starling fetches differ only by their computed date), and an
             # arbitrary sibling made the timeline's sanity check cry wolf
-            # 58 times against asks that agreed with their own fetch.
-            "(SELECT GROUP_CONCAT(DISTINCT a.origin) FROM raw_artefacts a "
-            " WHERE a.digest = f.artefact_digest AND a.account_ref = f.account_ref "
+            # 58 times against asks that agreed with their own fetch. Read
+            # from the origins table, which is where the siblings live now
+            # that they are no longer duplicate artefact rows.
+            "(SELECT GROUP_CONCAT(o.origin) FROM artefact_origins o "
+            " WHERE o.digest = f.artefact_digest AND o.account_ref = f.account_ref "
             " AND f.artefact_digest != '') AS artefact_origins "
             "FROM fetch_attempts f "
             "ORDER BY f.attempted_at DESC, f.rowid DESC LIMIT ?",
@@ -986,13 +1148,14 @@ class Store:
         updates. Entity ids survive, sightings survive, payload BYTES and
         digests are untouched, and nothing needs refetching from anyone.
 
-        Artefact and attempt rows move too: account_ref on those tables is
-        our labelling, not provider evidence - and leaving them behind was a
-        real fault (the probed-back-to anchor and the 24-hour quota counts
-        query by canonical ref, so a bind would silently orphan both).
-        OR IGNORE on artefacts because account_ref is part of that primary
-        key: in the rare case the same bytes landed under both names, the
-        old-named duplicate is retained rather than erred on.
+        Artefact and attempt rows move too, and an artefact's recorded
+        names move with it: account_ref on those tables is our labelling,
+        not provider evidence - and leaving them behind was a real fault
+        (the probed-back-to anchor and the 24-hour quota counts query by
+        canonical ref, so a bind would silently orphan both). OR IGNORE on
+        artefacts and their names because account_ref is part of both
+        primary keys: in the rare case the same bytes landed under both
+        names, the old-named duplicate is retained rather than erred on.
         """
         # BEGIN IMMEDIATE takes the write lock up front, where the busy
         # timeout applies - a deferred transaction that upgrades to a write
@@ -1016,6 +1179,11 @@ class Store:
         _ = remapped
         self.connection.execute(
             "UPDATE OR IGNORE raw_artefacts SET account_ref = ? WHERE account_ref = ?",
+            (new_account_id, old_account_id),
+        )
+        self.connection.execute(
+            "UPDATE OR IGNORE artefact_origins SET account_ref = ? "
+            "WHERE account_ref = ?",
             (new_account_id, old_account_id),
         )
         self.connection.execute(
@@ -1177,7 +1345,13 @@ class Store:
         landed under the target (the recovery-by-reimport case, observed
         live within a minute of the misfile), the misfiled row collapses
         into the survivor - which records what it absorbed - instead of
-        violating the (digest, account_ref) key or duplicating derivation.
+        violating the (digest, account_ref, source) key or duplicating
+        derivation.
+
+        The names the bytes have been seen under travel with the filing,
+        and merge into the survivor's when one absorbs the other - so a
+        statement that arrived under a folder path and again bare still
+        reports both after being assigned to its account.
 
         Returns the old account_ref, or None if no such artefact. Derived
         rows are NOT touched here: a rebuild replays layer 0 through the
@@ -1186,7 +1360,7 @@ class Store:
         if not self.connection.in_transaction:
             self.connection.execute("BEGIN IMMEDIATE")
         row = self.connection.execute(
-            "SELECT digest, account_ref, request_meta FROM raw_artefacts "
+            "SELECT digest, account_ref, source, request_meta FROM raw_artefacts "
             "WHERE rowid = ?",
             (artefact_id,),
         ).fetchone()
@@ -1195,10 +1369,14 @@ class Store:
             return None
         old_ref = str(row["account_ref"])
         stamp = datetime.now().astimezone().isoformat()
+        # The whole key, not part of it: bytes that reached the target
+        # through a DIFFERENT pipe are a different artefact and the move
+        # would not collide with them, so absorbing into one would destroy
+        # a row for no reason.
         survivor = self.connection.execute(
             "SELECT rowid, request_meta FROM raw_artefacts "
-            "WHERE digest = ? AND account_ref = ? AND rowid != ?",
-            (row["digest"], new_account_ref, artefact_id),
+            "WHERE digest = ? AND account_ref = ? AND source = ? AND rowid != ?",
+            (row["digest"], new_account_ref, row["source"], artefact_id),
         ).fetchone()
         if survivor is not None:
             self.connection.execute(
@@ -1222,6 +1400,20 @@ class Store:
                     artefact_id,
                 ),
             )
+        if new_account_ref != old_ref:
+            # The names follow the filing. OR IGNORE then DELETE merges
+            # them when the survivor already knows a name, rather than
+            # refusing the move over a name both copies were seen under.
+            self.connection.execute(
+                "UPDATE OR IGNORE artefact_origins SET account_ref = ? "
+                "WHERE digest = ? AND account_ref = ? AND source = ?",
+                (new_account_ref, row["digest"], old_ref, row["source"]),
+            )
+            self.connection.execute(
+                "DELETE FROM artefact_origins "
+                "WHERE digest = ? AND account_ref = ? AND source = ?",
+                (row["digest"], old_ref, row["source"]),
+            )
         self.connection.commit()
         return old_ref
 
@@ -1243,6 +1435,11 @@ class Store:
             "UPDATE OR IGNORE raw_artefacts SET account_ref = ? WHERE account_ref = ?",
             (new_id, old_id),
         ).rowcount
+        self.connection.execute(
+            "UPDATE OR IGNORE artefact_origins SET account_ref = ? "
+            "WHERE account_ref = ?",
+            (new_id, old_id),
+        )
         attempts = self.connection.execute(
             "UPDATE fetch_attempts SET connection_id = ? WHERE connection_id = ?",
             (new_id, old_id),
@@ -1448,10 +1645,10 @@ class Store:
         ).fetchall()
         # digest -> connection is collapsed BEFORE the sightings join, and
         # that ordering is load-bearing: raw_artefacts is deliberately
-        # keyed (digest, account_ref, origin), so byte-identical payloads
-        # - every empty response, every rolling redelivery - share one
-        # digest across hundreds of sibling rows. Joined directly, every
-        # sighting fanned out against every sibling of its digest before
+        # keyed (digest, account_ref, source), so byte-identical payloads
+        # - every empty response, every account a dormant pipe answers for
+        # - still share one digest across sibling rows. Joined directly,
+        # every sighting fanned out against every sibling of its digest before
         # DISTINCT collapsed the wreckage: 38.7s of a 40.4s index render
         # at 42k transactions, measured live. Third bite from the same
         # fact - the timeline's 58 false alarms were siblings too.

@@ -211,7 +211,7 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     # Landed BEFORE parsing, so evidence survives a file nothing can read
     # yet - a statement whose parser is written next week replays from here
     # rather than needing to be fetched from the bank again.
-    is_new_artefact = store.land_artefact(artefact)
+    is_new_artefact = store.land_artefact(artefact).payload_stored
 
     parser = detect(payload)
     incoming = list(parser.parse(payload, account_id=account_id))

@@ -130,10 +130,10 @@ class TestEmptyResultsAreEvidence:
                 origin="https://api/transactions?from=2016-01-01",
             )
 
-            assert store.land_artefact(first)
+            assert store.land_artefact(first).payload_stored
             # Identical bytes, different account: different evidence, not a
             # duplicate. A digest-only key would silently swallow this.
-            assert store.land_artefact(second)
+            assert store.land_artefact(second).payload_stored
 
     def test_Landing_WhenTheSameRequestIsReimported_IsDeduplicated(self, tmp_path):
         from datetime import UTC, datetime
@@ -150,8 +150,13 @@ class TestEmptyResultsAreEvidence:
             origin="https://api/transactions?from=2016-01-01",
         )
         with Store(tmp_path / "s.sqlite3") as store:
-            assert store.land_artefact(artefact)
-            assert not store.land_artefact(artefact), "same bytes, same request: a re-download"
+            assert store.land_artefact(artefact).payload_stored
+            landing = store.land_artefact(artefact)
+
+        # Same bytes, same request: a re-download. Nothing is stored and
+        # nothing is learnt - the name was already on record too.
+        assert landing.payload_stored is False
+        assert landing.origin_recorded is False
 
     def test_Migration_WhenAStoreHasTheOldDigestOnlyKey_IsUpgradedWithDataIntact(
         self, tmp_path
@@ -185,7 +190,10 @@ class TestEmptyResultsAreEvidence:
                 )
                 if row["pk"]
             ]
-            assert pk == ["digest", "account_ref", "origin"]
+            assert pk == ["digest", "account_ref", "source"]
+            # The name the row carried is not lost by leaving the key: it
+            # moves to the set of names the artefact has been seen under.
+            assert store.origins_for_artefact("d1", "acc", "s") == ["o"]
 
 
 class TestLearnedProviderFacts:

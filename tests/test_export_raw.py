@@ -59,6 +59,36 @@ class TestExportRaw:
         assert sidecar["request_meta"]["trigger"] == "cli-attended"
         assert sidecar["account_ref"] == "halifax-current"
 
+    def test_Export_WhenOneArtefactWasSeenUnderSeveralNames_CarriesThemAll(
+        self, monkeypatch, tmp_path
+    ):
+        """The projection is what a person greps, so it must not know less
+        about where the bytes came from than the store does."""
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
+        monkeypatch.setattr("obdi.cli.load_dotenv", lambda *a, **k: None)
+        with Store(tmp_path / "store.sqlite3") as store:
+            for origin in ("statement.pdf", "Santander/statement.pdf"):
+                _land(
+                    store,
+                    source="statement",
+                    digest="abcdef1234567890",
+                    payload=b"%PDF-1.4 bytes",
+                    origin=origin,
+                )
+
+        out = tmp_path / "raw"
+        assert main(["export-raw", "--dir", str(out)]) == 0
+
+        sidecar = json.loads(
+            next(out.rglob("*.meta.json")).read_text(encoding="utf-8")
+        )
+        # Both landings are stamped the same second, so their order is the
+        # documented tie-break rather than anything meaningful.
+        assert sorted(sidecar["origins"]) == [
+            "Santander/statement.pdf",
+            "statement.pdf",
+        ]
+
     def test_Export_IsIdempotent_SameNamesOnRerun(self, monkeypatch, tmp_path):
         monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
         monkeypatch.setattr("obdi.cli.load_dotenv", lambda *a, **k: None)
