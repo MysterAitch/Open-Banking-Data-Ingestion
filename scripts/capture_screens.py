@@ -152,8 +152,9 @@ def running_build() -> tuple[str, str]:
     ).stdout.strip()
     # A working tree with changes in it did not come from that commit, and
     # saying so is cheaper than wondering later why the picture and the
-    # commit disagree.
-    return version, (f"{commit}-dirty" if dirty else commit)
+    # commit disagree. Spelled out rather than abbreviated, because the
+    # suffix is read by whoever is trying to reproduce the image.
+    return version, (f"{commit}+local-changes" if dirty else commit)
 
 
 def wait_for(url: str, seconds: int = 30) -> None:
@@ -310,8 +311,11 @@ def main() -> int:
             "TRUELAYER_CLIENT_ID": "screens",
             "TRUELAYER_CLIENT_SECRET": "screens",
             "TRUELAYER_REDIRECT_URI": "http://127.0.0.1/callback",
-            # So the footer in every image names the build it is of.
-            "OBDI_BUILD_VERSION": version,
+            # So the footer in every image names the build it is of. Only
+            # the commit is passed: the version answers for itself from the
+            # source tree, and an environment variable that could state a
+            # different one would be a way to publish a picture of a
+            # version nobody is running.
             "OBDI_BUILD_COMMIT": commit,
         }
         server = subprocess.Popen(  # noqa: S603 - fixed argv
