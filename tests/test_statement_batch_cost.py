@@ -117,3 +117,45 @@ class TestABatchDoesNotPayForWhatItDoesNotShow:
         response = _upload(server, 3)
 
         assert "NO column reading" not in response.text
+
+
+class TestThePageReportsWhatItSpent:
+    """Instrumentation is only useful if it arrives unasked.
+
+    Both performance faults this project has had were invisible until
+    something rendered its own cost. A figure available on request, behind
+    a flag or in a log nobody tails, is not what tells somebody there is a
+    problem - it is what confirms one they already suspect.
+    """
+
+    def test_ABatch_ReportsItsPhasesAndItsSpread(self, server):
+        response = _upload(server, 4)
+
+        assert "timings:" in response.text
+        assert "read" in response.text
+        # Four files means four samples, so the spread is meaningful and
+        # the count travels with it.
+        assert "n=4" in response.text
+        assert "med" in response.text
+
+    def test_EachFile_ReportsItsOwnTime_NotOnlyTheTotal(self, server):
+        # An aggregate cannot say WHICH file was slow, and "one
+        # pathological document" and "every document costs this" want
+        # different responses.
+        response = _upload(server, 3)
+
+        assert response.text.count("s</td></tr>") >= 3
+
+    def test_TheCost_IsReportedPerPage_NotOnlyPerFile(self, server):
+        # Files vary in length, so per-file time alone cannot say whether
+        # a batch was slow because it was big or because it was expensive.
+        response = _upload(server, 2)
+
+        assert "per page across" in response.text
+
+    def test_ASingleFile_ReportsItsCostToo(self, server):
+        # The single-file case is the one that DOES read geometry, so its
+        # cost is the more interesting of the two.
+        response = _upload(server, 1)
+
+        assert "timings:" in response.text

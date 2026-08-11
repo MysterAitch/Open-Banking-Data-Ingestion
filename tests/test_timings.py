@@ -1,0 +1,108 @@
+"""What a page spent its time on, shown on the page that spent it.
+
+A slow page diagnosed by guesswork costs a day; a slow page that names its
+own phases costs a glance. This project learned that from a 44-second
+account page whose footer identified the culprit on the first live load,
+and again from a batch upload that looked hung.
+
+A total alone is not enough. Seven files taking four seconds is a
+different fault depending on whether one took 3.4 of them or each took
+0.6, so a phase carries its COUNT and its spread, not just its sum - the
+same discipline as counts carrying denominators.
+"""
+
+from __future__ import annotations
+
+from obdi.timings import Timings
+
+
+class TestWhatAPageSpentItsTimeOn:
+    def test_APhaseRunOnce_ReportsItsShareOfTheWhole(self) -> None:
+        timings = Timings()
+        timings.record("text", 0.25)
+        timings.record("geometry", 0.75)
+
+        named = {phase.name: phase for phase in timings.summary()}
+
+        assert named["text"].total == 0.25
+        assert named["geometry"].total == 0.75
+        assert timings.total() == 1.0
+
+    def test_TheSlowestPhase_IsReportedFirst(self) -> None:
+        # A reader looking for the culprit should not have to scan.
+        timings = Timings()
+        timings.record("cheap", 0.01)
+        timings.record("expensive", 2.00)
+        timings.record("middling", 0.30)
+
+        assert [phase.name for phase in timings.summary()] == [
+            "expensive",
+            "middling",
+            "cheap",
+        ]
+
+    def test_APhaseRunManyTimes_CarriesItsCountAndItsSpread(self) -> None:
+        # The distinction that matters: one slow file among many, or every
+        # file equally slow. A sum cannot tell those apart.
+        timings = Timings()
+        for seconds in (0.10, 0.20, 0.30, 3.40):
+            timings.record("per-file", seconds)
+
+        phase = timings.summary()[0]
+
+        assert phase.count == 4
+        assert phase.total == 4.0
+        assert phase.least == 0.10
+        assert phase.most == 3.40
+        assert phase.middle == 0.25
+
+    def test_OneSlowSampleAmongMany_IsVisibleInTheDescription(self) -> None:
+        timings = Timings()
+        for seconds in (0.10, 0.10, 0.10, 3.40):
+            timings.record("per-file", seconds)
+
+        described = timings.describe()
+
+        assert "n=4" in described, "a count without its denominator says less"
+        assert "max 3.40" in described
+        assert "med 0.10" in described
+
+    def test_APhaseThatRanOnce_DoesNotClutterWithASpread(self) -> None:
+        # A single sample has no distribution, and printing one invites a
+        # reader to compare figures that are all the same number.
+        timings = Timings()
+        timings.record("text", 0.25)
+
+        described = timings.describe()
+
+        assert "0.25" in described
+        assert "n=1" not in described
+        assert "med" not in described
+
+    def test_TimingAPhase_MeasuresIt_WithoutTheCallerDoingArithmetic(self) -> None:
+        timings = Timings()
+
+        with timings.phase("work"):
+            pass
+
+        assert timings.summary()[0].count == 1
+        assert timings.summary()[0].total >= 0.0
+
+    def test_APhaseThatRaises_IsStillRecorded(self) -> None:
+        # A phase that blew up is exactly the one worth seeing the time
+        # for, and losing it would make a failure look instantaneous.
+        timings = Timings()
+
+        try:
+            with timings.phase("doomed"):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+
+        assert timings.summary()[0].name == "doomed"
+        assert timings.summary()[0].count == 1
+
+    def test_NothingMeasured_DescribesItselfAsSuch_RatherThanEmptily(self) -> None:
+        # A blank where a measurement belongs reads as "instant". It is
+        # not: it is "not measured", and the two want different reactions.
+        assert Timings().describe() == "nothing measured"

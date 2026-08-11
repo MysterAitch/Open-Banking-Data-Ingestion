@@ -52,6 +52,7 @@ from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 from .statement_shape import ShapeReport
+from .timings import Timings
 
 
 def _report_slow_route(method: str, route: str, seconds: float) -> None:
@@ -3808,6 +3809,10 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
+        # Timed separately from the reading that follows, because they fail
+        # differently: this is the network carrying the bytes here, and a
+        # slow one looks identical to slow processing from a browser.
+        received_began = time.perf_counter()
         try:
             uploaded, fields = _parse_multipart_files(
                 self.headers.get("Content-Type") or "", self.rfile.read(length)
@@ -3820,6 +3825,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
+        received_seconds = time.perf_counter() - received_began
         if not uploaded:
             self._statement_shape_form(
                 '<p class="alarm">No file was chosen.</p>'
@@ -3832,7 +3838,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # shape an automated caller produces by accident - and these pages
         # are read programmatically as well as by a person.
         keeper = self.bound_config.keep_statement
-        read: list[tuple[str, ShapeReport, int]] = []
+        # Name, shape, kept id, and what that file cost. The cost travels
+        # per file because an aggregate cannot say WHICH one was slow.
+        read: list[tuple[str, ShapeReport, int, float]] = []
         # A batch listing shows counts and a link per file, and nothing
         # else - so reading each page's GEOMETRY here buys an answer that
         # is then thrown away, at seconds per page per file. A person who
@@ -3840,16 +3848,25 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # The geometry is read when a shape is actually displayed: for the
         # single-file case below, and at each kept statement's own address.
         want_columns = len(uploaded) == 1
+        timings = Timings()
+        timings.record("receive", received_seconds)
+        pages = 0
         for payload, filename in uploaded:
-            shape = self._read_shape(
-                payload, filename, mask=True, columns=want_columns
-            )
+            began = time.perf_counter()
+            with timings.phase("read"):
+                shape = self._read_shape(
+                    payload, filename, mask=True, columns=want_columns
+                )
+            pages += shape.page_count
             artefact_id = 0
             if keeper is not None and shape.readable and shape.line_count:
                 # Kept BEFORE an account is chosen, because the exports most
                 # worth keeping are the ones that cannot be fetched twice.
-                artefact_id = keeper(payload, filename)
-            read.append((filename, shape, artefact_id))
+                with timings.phase("keep"):
+                    artefact_id = keeper(payload, filename)
+            read.append(
+                (filename, shape, artefact_id, time.perf_counter() - began)
+            )
 
         payload, filename = uploaded[0]
         shape = read[0][1]
@@ -3869,21 +3886,35 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 if kept_id
                 else html.escape(report.describe().split(" - ")[0].split(": ", 1)[-1])
             )
-            + "</td></tr>"
-            for name, report, kept_id in read
+            # Per file as well as in aggregate, because the aggregate
+            # cannot say WHICH file was the slow one - and "one pathological
+            # document" and "every document costs this" are different
+            # faults with different fixes.
+            + f"</td><td class='mono'>{took:.2f}s</td></tr>"
+            for name, report, kept_id, took in read
         )
-        kept_ids = [str(kept_id) for _n, _r, kept_id in read if kept_id]
+        kept_ids = [str(kept_id) for _n, _r, kept_id, _t in read if kept_id]
+        per_page = (
+            f", {timings.total() / pages:.2f}s per page across {pages} page(s)"
+            if pages
+            else ""
+        )
         summary = (
             f"<p>{len(read)} file(s) read, {len(kept_ids)} kept. Each masked "
             "shape stays at its own address, so it can be read again without "
             "uploading anything again, and assigned to an account later.</p>"
             "<table><tr><th>File</th><th>Statement</th><th>Size</th>"
-            f"<th>Outcome</th></tr>{rows}</table>"
+            f"<th>Outcome</th><th>Took</th></tr>{rows}</table>"
             + (
                 f'<p class="mono">statements {", ".join(kept_ids)}</p>'
                 if len(kept_ids) > 1
                 else ""
             )
+            # Shown whether or not it is alarming. A figure that appears
+            # only once somebody suspects a problem cannot be the thing
+            # that tells them there is one.
+            + f'<p class="muted mono">timings: {html.escape(timings.describe())}'
+            f"{html.escape(per_page)}</p>"
         )
         body = "<h2>Statement shape</h2>" + summary
         if len(read) == 1:
