@@ -23,7 +23,15 @@
     "drive the lifecycle import guard (rows outside the window must be",
     "overridden); limits and rates are captured AHEAD of consumers - dated",
     "windows with future dates welcome (a promotional rate carries the day",
-    "it reverts, which is what a future notification will hang from)."
+    "it reverts, which is what a future notification will hang from).",
+    "",
+    "These now live in the STORE, not here. The first open after upgrading",
+    "imports whatever this key holds, and the store is the master copy from",
+    "then on: an account edited there is not reverted by this file, and an",
+    "account added here is still picked up. Nothing needs doing by hand.",
+    "The account's \"id\" is its canonical NAME - the reference every stored",
+    "row resolves through. The store also mints an opaque stable id per",
+    "account, which never appears in this file and never changes."
   ],
   "accounts": [
     {

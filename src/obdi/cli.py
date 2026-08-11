@@ -22,7 +22,13 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from . import fingerprint
-from .accounts import AccountBinding, AccountMap, AccountRecord, lifecycle_breach
+from .accounts import (
+    AccountBinding,
+    AccountMap,
+    AccountRef,
+    lifecycle_breach,
+    read_registry_file,
+)
 from .connections import ConnectionStore
 from .coverage import (
     SourceCoverage,
@@ -56,23 +62,45 @@ def _store_path(explicit: str | None) -> Path:
     return Path(explicit or os.getenv("OBDI_DB_PATH") or DEFAULT_DB)
 
 
-def _account_map() -> AccountMap:
-    """Load canonical account bindings.
+def _account_map(source: Store | Path | None = None) -> AccountMap:
+    """Load the account map: which provider account is which real account.
 
-    Held in a JSON file rather than the store because it is configuration a
-    human writes, not data the ingester derives. Absent means nothing is bound,
-    which still works - accounts stay source-qualified and simply do not
+    The two halves come from two places, and deliberately so.
+
+    DECLARED ACCOUNTS - which accounts exist at all - live in the store.
+    They are edited from the pages, so they need a transaction rather than
+    a rewritten file, and they need the schema ladder that a file does not
+    have. Pass the Store already open at the call site where there is one;
+    passing a path (or nothing, taking the configured store) opens a second
+    connection, which reads fine but is worth avoiding inside a loop.
+
+    BINDINGS - which provider account feeds which of them - still live in
+    the JSON file named by OBDI_ACCOUNT_MAP. Absent means nothing is bound,
+    which still works: accounts stay source-qualified and simply do not
     cross-check.
+
+    The file's own "accounts" key is still read, and fills in accounts the
+    store has not got, so the file keeps working as an import source for
+    anyone still editing it. Where both name the same account the STORE
+    wins, because that is where editing now happens.
     """
+    if isinstance(source, Store):
+        declared = {record.ref: record for record in source.declared_accounts()}
+    else:
+        with Store(source or _store_path(None)) as store:
+            declared = {record.ref: record for record in store.declared_accounts()}
+
     path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
     if not path or not Path(path).is_file():
-        return AccountMap()
+        return AccountMap(records=list(declared.values()))
+    # Read the accounts side first: it refuses loudly on a file that cannot
+    # be read, which is the answer this whole surface needs - an empty
+    # registry is indistinguishable from "no accounts declared".
+    from_file = {record.ref: record for record in read_registry_file(Path(path))}
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     return AccountMap(
         [AccountBinding(**binding) for binding in raw.get("bindings", [])],
-        records=[
-            AccountRecord.from_dict(entry) for entry in raw.get("accounts", [])
-        ],
+        records=list({**from_file, **declared}.values()),
     )
 
 
@@ -274,7 +302,7 @@ def queue_actual_push(db_path: Path) -> str:
             if isinstance(b, dict) and b.get("canonical_id")
         }
     with Store(db_path) as store:
-        labels = collect_display_labels(store, _account_map(), connection_ids)
+        labels = collect_display_labels(store, _account_map(store), connection_ids)
         envelope = build_envelope(store, bindings, labels, named_canonicals=named)
     queued = queue_push(envelope, actual_dir)
     raw_accounts = envelope.get("accounts")
@@ -471,7 +499,7 @@ def start_background_rebuild(db_path: Path) -> str:
             # here it is only renewed (on_progress) and released.
             with Store(db_path) as store:
                 report = rebuild_from_raw(
-                    store, progress=on_progress, account_map=_account_map()
+                    store, progress=on_progress, account_map=_account_map(store)
                 )
                 # The stamp says "this data was derived by this code".
                 # Success-only, inside the same Store: a failed rebuild
@@ -566,7 +594,7 @@ def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
         token = read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=True)
         with Store(db_path) as store:
             return probe_starling_changes(
-                store, token, cutoff, account_map=_account_map()
+                store, token, cutoff, account_map=_account_map(store)
             )
 
     return run
@@ -655,7 +683,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 "WHERE source = 'starling-accounts'"
             ).fetchall()
         )
-        account_ref = resolve_artefact_ref(row, _account_map(), defaults)
+        account_ref = resolve_artefact_ref(row, _account_map(store), defaults)
         transactions = parse_artefact_transactions(
             source, row["payload"], account_ref, str(row["digest"])
         )
@@ -1200,6 +1228,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         """
         found = []
         with Store(db_path) as store:
+            account_map = _account_map(store)
             held = store.transactions_by_sighting()
             connections = ConnectionStore(store_path).load()
             for connection_id in sorted(connections):
@@ -1226,7 +1255,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     refusal_seen=refusal_seen,
                 )
                 for account in store.accounts_for_connection(connection_id):
-                    canonical = _account_map().resolve("truelayer", account["account_id"])
+                    canonical = account_map.resolve("truelayer", account["account_id"])
                     dates = [
                         t.value_date
                         for t in held
@@ -1257,9 +1286,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 # orphans forever. Whether /cards honours offset windows
                 # at all is exactly what pressing these will measure.
                 for card in store.cards_for_connection(connection_id):
-                    canonical = _account_map().resolve(
-                        "truelayer", card["account_id"]
-                    )
+                    canonical = account_map.resolve("truelayer", card["account_id"])
                     dates = [
                         t.value_date
                         for t in held
@@ -1312,8 +1339,9 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         if target is None:
             raise RuntimeError(f"no connection named {connection!r}")
 
-        canonical = _account_map().resolve("truelayer", provider_ref)
         with Store(db_path) as store:
+            account_map = _account_map(store)
+            canonical = account_map.resolve("truelayer", provider_ref)
             held = store.transactions_by_sighting()
             probed = _earliest_asked(store, canonical)
         dates = [
@@ -1336,7 +1364,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                     client_id=client_id,
                     client_secret=current_secret(),
                     connection_store=ConnectionStore(store_path),
-                    account_map=_account_map(),
+                    account_map=account_map,
                     since=window_since,
                     until=window_until,
                     only_account=provider_ref,
@@ -1402,7 +1430,12 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         if not map_path:
             raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
         moved = _apply_bind(
-            db_path, Path(map_path), _account_map(), source, provider_ref, canonical
+            db_path,
+            Path(map_path),
+            _account_map(db_path),
+            source,
+            provider_ref,
+            canonical,
         )
         return (
             f"bound {_short(provider_ref)} -> {canonical}: {moved} stored "
@@ -1476,11 +1509,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         mark = _timed_phase("items+json", mark)
         details: dict[str, object] = {}
         with Store(db_path) as store:
+            account_map = _account_map(store)
             for connection_id in sorted(ConnectionStore(store_path).load()):
                 for account in store.accounts_for_connection(connection_id):
-                    canonical = _account_map().resolve(
-                        "truelayer", account["account_id"]
-                    )
+                    canonical = account_map.resolve("truelayer", account["account_id"])
                     if canonical == ref:
                         details = {
                             "display_name": account["display_name"],
@@ -1554,12 +1586,13 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         """
         labels: dict[str, str] = {}
         with Store(db_path) as store:
+            account_map = _account_map(store)
             store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
             if store_path_env:
                 with contextlib.suppress(OSError, ValueError):
                     for connection_id in sorted(ConnectionStore(store_path_env).load()):
                         for account in store.accounts_for_connection(connection_id):
-                            canonical = _account_map().resolve(
+                            canonical = account_map.resolve(
                                 "truelayer", account["account_id"]
                             )
                             labels[canonical] = (
@@ -1579,14 +1612,14 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         uid = str(account.get("accountUid", ""))
                         name = str(account.get("name", "") or "account")
                         if uid:
-                            canonical = _account_map().resolve("starling", uid)
+                            canonical = account_map.resolve("starling", uid)
                             labels[canonical] = f"{name} (starling)"
                             # The default category holds the account's own
                             # feed, so it inherits the account's name.
                             default_cat = str(account.get("defaultCategory", ""))
                             if default_cat:
                                 labels[
-                                    _account_map().resolve("starling", default_cat)
+                                    account_map.resolve("starling", default_cat)
                                 ] = f"{name} (starling)"
             for row in store.connection.execute(
                 "SELECT payload FROM raw_artefacts WHERE source = 'starling-spaces' "
@@ -1606,7 +1639,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         name = str(goal.get("name", "") or "space")
                         if uid:
                             labels[
-                                _account_map().resolve("starling", uid)
+                                account_map.resolve("starling", uid)
                             ] = f"{name} (starling space)"
         return labels
 
@@ -1668,6 +1701,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         # source filed the movement under.
         with Store(db_path) as store:
             sightings = store.transactions_by_sighting()
+            account_map = _account_map(store)
         own_held = [
             t
             for t in sightings
@@ -1679,7 +1713,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             if not (t.account_id == account and t.source == parser.source)
         ]
         found = agreements(
-            held + rows, sibling_accounts=_account_map().accounts_by_source()
+            held + rows, sibling_accounts=account_map.accounts_by_source()
         )
         agreement_preview: list[object] = [
             agreement.outline()
@@ -1699,7 +1733,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         # declared open window have to explain themselves. Only speaks
         # where a human declared the dates it checks.
         breach = lifecycle_breach(
-            [row.value_date for row in rows], _account_map().record(account)
+            [row.value_date for row in rows], account_map.record(AccountRef(account))
         )
         # The excluded own-source rows still get their own check, with the
         # opposite emphasis: agreement here is NOT corroboration (a file
@@ -1760,7 +1794,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 outlines: list[object] = [
                     agreement.outline()
                     for agreement in agreements(
-                        held, sibling_accounts=_account_map().accounts_by_source()
+                        held,
+                        sibling_accounts=_account_map(store).accounts_by_source(),
                     )
                     if agreement.account_id == account
                 ]
@@ -1870,10 +1905,16 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             with contextlib.suppress(OSError, ValueError):
                 connection_ids = sorted(ConnectionStore(store_path_env).load())
         with Store(db_path) as store:
-            labels = collect_display_labels(store, _account_map(), connection_ids)
+            account_map = _account_map(store)
+            labels = collect_display_labels(store, account_map, connection_ids)
             # The registry's declared names win: a human named the account,
             # and declared-but-feedless accounts appear at all only here.
-            labels.update(_account_map().registry_labels())
+            # Assigned key by key rather than updated wholesale: the
+            # registry's keys are account REFS and the label map's are
+            # plain strings, and a dict of the narrower key type is not a
+            # dict of the wider one.
+            for declared_ref, declared_label in account_map.registry_labels().items():
+                labels[declared_ref] = declared_label
             counts = {
                 str(row[0]): int(row[1])
                 for row in store.connection.execute(
@@ -2452,9 +2493,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         """
         with Store(db_path) as store:
             held = store.transactions_by_sighting()
+            account_map = _account_map(store)
         by_account: dict[str, list[object]] = {}
         for agreement in agreements(
-            held, sibling_accounts=_account_map().accounts_by_source()
+            held, sibling_accounts=account_map.accounts_by_source()
         ):
             by_account.setdefault(agreement.account_id, []).append(
                 agreement.outline()
@@ -2876,7 +2918,7 @@ def _pull(
     psu_ip: str | None = None,
     trigger: str | None = None,
 ) -> int:
-    account_map = _account_map()
+    account_map = _account_map(db_path)
 
     if target == "starling":
         try:
@@ -3551,7 +3593,7 @@ def main(argv: list[str] | None = None) -> int:
 
         cli_started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with Store(db_path) as store:
-            cli_report = rebuild_from_raw(store, account_map=_account_map())
+            cli_report = rebuild_from_raw(store, account_map=_account_map(store))
             fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
             _record_run(store, cli_report, ok=True, started_at=cli_started)
         print(cli_report.describe())
@@ -3581,10 +3623,11 @@ def main(argv: list[str] | None = None) -> int:
             # every source that corroborated a payment - the per-sighting view
             # is the only one the comparison reports are correct against.
             held = store.transactions_by_sighting()
+            sibling_accounts = _account_map(store).accounts_by_source()
         print(
             coverage_report(
                 coverage(held),
-                agreements(held, sibling_accounts=_account_map().accounts_by_source()),
+                agreements(held, sibling_accounts=sibling_accounts),
                 gaps(held),
                 transpositions(held),
             )

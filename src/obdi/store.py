@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass, field, replace
@@ -27,6 +28,17 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import ClassVar
 
+from .accounts import (
+    AccountId,
+    AccountRecord,
+    AccountRef,
+    LimitWindow,
+    RateWindow,
+    account_id_well_formed,
+    mint_account_id,
+    read_registry_file,
+)
+from .errors import DataError
 from .models import RawArtefact, SourceTier, Transaction, Valuation
 from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 
@@ -34,7 +46,7 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, source): the bytes, the account they are
@@ -285,6 +297,60 @@ CREATE TABLE IF NOT EXISTS annotations (
     annotated_at TEXT NOT NULL,
     PRIMARY KEY (entity_id, kind)
 );
+
+-- The account registry: which accounts EXIST, as declared by a person.
+-- DECLARED state, not derived - there is no artefact a mortgage with no
+-- feed or cash in a tin could ever be replayed from, so nothing that
+-- regenerates the derived layers may touch these tables.
+-- Held here rather than in a JSON file on the host because the page that
+-- edits it needs a transaction, because the schema ladder covers a table
+-- and does not cover a file, and because declaring an account should not
+-- require a shell on the Docker host.
+CREATE TABLE IF NOT EXISTS declared_accounts (
+    -- Opaque, minted once, never changed and never reused. Nothing joins
+    -- on it YET - every stored account_ref still resolves through the
+    -- canonical name below - but it exists from the table's first day
+    -- because retrofitting a stable identity means migrating twice.
+    stable_id   TEXT PRIMARY KEY,
+    -- The canonical name, and today the reference everything actually
+    -- resolves through, so it is unique and renaming it has consequences
+    -- outside this table.
+    ref         TEXT NOT NULL UNIQUE,
+    kind        TEXT NOT NULL DEFAULT '',
+    -- The display name. Renameable freely: nothing joins on it.
+    label       TEXT NOT NULL DEFAULT '',
+    parent      TEXT,
+    opened      TEXT,
+    closed      TEXT,
+    declared_at TEXT NOT NULL
+);
+
+-- Limits and rates as dated windows, in child tables rather than JSON in a
+-- column, so "which accounts revert to a real rate within 30 days" stays a
+-- query. Keyed by the STABLE id: a window must not be orphaned by the
+-- account being renamed. Position preserves the order they were declared
+-- in, which is the order a person reads them back in.
+CREATE TABLE IF NOT EXISTS declared_account_limits (
+    stable_id    TEXT NOT NULL REFERENCES declared_accounts(stable_id)
+                 ON DELETE CASCADE,
+    position     INTEGER NOT NULL,
+    kind         TEXT NOT NULL DEFAULT '',
+    window_from  TEXT,
+    window_to    TEXT,
+    amount_minor INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (stable_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS declared_account_rates (
+    stable_id      TEXT NOT NULL REFERENCES declared_accounts(stable_id)
+                   ON DELETE CASCADE,
+    position       INTEGER NOT NULL,
+    kind           TEXT NOT NULL DEFAULT '',
+    window_from    TEXT,
+    window_to      TEXT,
+    annual_percent REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (stable_id, position)
+);
 """
 
 
@@ -429,6 +495,18 @@ def _stamp_now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _read_date(value: object) -> date | None:
+    """A stored ISO date, or None where the column holds nothing.
+
+    Dates go in as text because SQLite has no date type; an absent one is
+    genuinely absent (an account with no closing date is open), which is
+    why this returns None rather than a sentinel date.
+    """
+    if value is None or value == "":
+        return None
+    return date.fromisoformat(str(value))
+
+
 _UPSERT_TRANSACTION_SQL = """
     INSERT INTO transactions (
         entity_id, account_id, amount_minor, currency, value_date, booking_date,
@@ -532,7 +610,15 @@ class Store:
         self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.execute("PRAGMA busy_timeout = 30000")
         self._batch: _WriteBatch | None = None
-        self._prepare()
+        try:
+            self._prepare()
+        except Exception:
+            # A store that refuses to open must not also leave its
+            # connection - and with it the WAL lock - behind: the refusal
+            # is meant to be one edit away from fixed, not to need a
+            # container restart as well.
+            self.connection.close()
+            raise
 
     def _schema_is_current(self) -> bool:
         """Read-only test for "this store needs no work".
@@ -568,6 +654,7 @@ class Store:
         self._migrate_content_keys()
         self._migrate_starling_connection_id()
         self._migrate_artefact_connection_attribution()
+        self._migrate_declared_accounts_from_file()
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -794,6 +881,227 @@ class Store:
                 prepare=_HARVEST_AND_COLLAPSE_ARTEFACTS,
             )
         )
+
+    def _migrate_declared_accounts_from_file(self) -> None:
+        """Bring a deployment's declared accounts in from the JSON file.
+
+        The registry used to live in the file named by OBDI_ACCOUNT_MAP,
+        under its "accounts" key, and the whole point of moving it is that
+        nobody should have to do anything on the host for the move to
+        happen. So the upgrade reads that file and declares what it finds.
+
+        It runs ONCE, and the marker is what makes that true. "Import
+        whatever the file holds that the store lacks" reads as safe and is
+        not: renaming an account is the entire purpose of the page this
+        registry exists for, and to a second run a RENAMED account is one
+        the store does not hold - so the file's original entry returns as
+        a separate account, with its own stable id, and a statement could
+        then land against either. That is the defect that put sixty-two
+        artefacts in the store for thirty-one documents, one layer up, and
+        here it would arrive on the next schema bump rather than at once,
+        which is worse: the rename would look to have worked.
+
+        The consequence is deliberate. An account added to the file AFTER
+        the import does not arrive later; hand-editing that file is what
+        moving the registry exists to replace, and the page is the answer.
+
+        The file is read, never written and never deleted - a person's own
+        configuration is not this code's to discard.
+
+        An unreadable file refuses rather than importing nothing, for the
+        same reason the loader does: an empty registry is a statement, and
+        it is the wrong one.
+        """
+        if self._migration_completed("declared_accounts_from_file"):
+            return
+        configured = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+        if not configured:
+            # Not marked done: a deployment that configures the file later
+            # should still have it imported, and nothing has been read yet
+            # for a rename to disagree with.
+            return
+        records = read_registry_file(Path(configured).expanduser())
+        held = {record.ref for record in self.declared_accounts()}
+        for record in records:
+            if record.ref not in held:
+                self.declare_account(record)
+        # Recorded even when the file held nothing: having READ it is what
+        # is being remembered. A marker written only on a non-empty import
+        # would leave a deployment whose file is empty today re-importing
+        # for ever, which is the same rename hazard waiting on the day
+        # somebody adds an entry.
+        self._record_migration_completed("declared_accounts_from_file")
+
+    def declare_account(self, record: AccountRecord) -> AccountRecord:
+        """Declare an account, or edit one already declared.
+
+        Returns the account as stored, which is the given record plus the
+        stable id it now carries. Editing keeps that id whatever else
+        changes - both names on an account are renameable, and an identity
+        that moved when a name did would be no identity at all.
+
+        Windows are REPLACED rather than added to: editing an account down
+        to one limit must not leave the superseded ones sitting beside it
+        with nothing to say which is current.
+        """
+        stable_id = record.stable_id
+        if stable_id is not None and not account_id_well_formed(stable_id):
+            raise DataError(
+                f"'{stable_id}' is not a well-formed account id - it fails its "
+                "own check character, so it names no account. Nothing was "
+                "declared."
+            )
+        if stable_id is None:
+            existing = self.declared_account(record.ref)
+            stable_id = (
+                existing.stable_id
+                if existing is not None and existing.stable_id is not None
+                else mint_account_id()
+            )
+        stored = replace(record, stable_id=stable_id)
+        try:
+            self.connection.execute(
+                "INSERT INTO declared_accounts (stable_id, ref, kind, label, "
+                "parent, opened, closed, declared_at) VALUES (?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(stable_id) DO UPDATE SET ref = excluded.ref, "
+                "kind = excluded.kind, label = excluded.label, "
+                "parent = excluded.parent, opened = excluded.opened, "
+                "closed = excluded.closed",
+                (
+                    stable_id,
+                    stored.ref,
+                    stored.kind,
+                    stored.label,
+                    stored.parent,
+                    stored.opened.isoformat() if stored.opened else None,
+                    stored.closed.isoformat() if stored.closed else None,
+                    _stamp_now(),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            self.connection.rollback()
+            raise DataError(
+                f"another account is already declared as '{stored.ref}' - the "
+                "canonical name is what every stored row resolves through, so "
+                "two accounts cannot share one. Nothing was declared."
+            ) from exc
+        self.connection.execute(
+            "DELETE FROM declared_account_limits WHERE stable_id = ?", (stable_id,)
+        )
+        self.connection.execute(
+            "DELETE FROM declared_account_rates WHERE stable_id = ?", (stable_id,)
+        )
+        self.connection.executemany(
+            "INSERT INTO declared_account_limits (stable_id, position, kind, "
+            "window_from, window_to, amount_minor) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    stable_id,
+                    position,
+                    window.kind,
+                    window.window_from.isoformat() if window.window_from else None,
+                    window.window_to.isoformat() if window.window_to else None,
+                    window.amount_minor,
+                )
+                for position, window in enumerate(stored.limits)
+            ],
+        )
+        self.connection.executemany(
+            "INSERT INTO declared_account_rates (stable_id, position, kind, "
+            "window_from, window_to, annual_percent) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    stable_id,
+                    position,
+                    window.kind,
+                    window.window_from.isoformat() if window.window_from else None,
+                    window.window_to.isoformat() if window.window_to else None,
+                    window.annual_percent,
+                )
+                for position, window in enumerate(stored.rates)
+            ],
+        )
+        self.connection.commit()
+        return stored
+
+    def declared_accounts(self) -> list[AccountRecord]:
+        """Every declared account, by canonical name.
+
+        One query per window table rather than one per account: the page
+        that lists accounts renders the whole registry, and a per-account
+        follow-up would make that a query per row.
+        """
+        limits: dict[AccountId, list[LimitWindow]] = {}
+        for row in self.connection.execute(
+            "SELECT stable_id, kind, window_from, window_to, amount_minor "
+            "FROM declared_account_limits ORDER BY stable_id, position"
+        ):
+            limits.setdefault(AccountId(str(row["stable_id"])), []).append(
+                LimitWindow(
+                    kind=str(row["kind"]),
+                    window_from=_read_date(row["window_from"]),
+                    window_to=_read_date(row["window_to"]),
+                    amount_minor=int(row["amount_minor"]),
+                )
+            )
+        rates: dict[AccountId, list[RateWindow]] = {}
+        for row in self.connection.execute(
+            "SELECT stable_id, kind, window_from, window_to, annual_percent "
+            "FROM declared_account_rates ORDER BY stable_id, position"
+        ):
+            rates.setdefault(AccountId(str(row["stable_id"])), []).append(
+                RateWindow(
+                    kind=str(row["kind"]),
+                    window_from=_read_date(row["window_from"]),
+                    window_to=_read_date(row["window_to"]),
+                    annual_percent=float(row["annual_percent"]),
+                )
+            )
+        records = []
+        for row in self.connection.execute(
+            "SELECT stable_id, ref, kind, label, parent, opened, closed "
+            "FROM declared_accounts ORDER BY ref"
+        ):
+            stable_id = AccountId(str(row["stable_id"]))
+            records.append(
+                AccountRecord(
+                    ref=AccountRef(str(row["ref"])),
+                    kind=str(row["kind"]),
+                    label=str(row["label"]),
+                    parent=(
+                        AccountRef(str(row["parent"]))
+                        if row["parent"] is not None
+                        else None
+                    ),
+                    opened=_read_date(row["opened"]),
+                    closed=_read_date(row["closed"]),
+                    limits=tuple(limits.get(stable_id, ())),
+                    rates=tuple(rates.get(stable_id, ())),
+                    stable_id=stable_id,
+                )
+            )
+        return records
+
+    def declared_account(self, ref: AccountRef) -> AccountRecord | None:
+        """One declared account by its canonical name, or None.
+
+        None means "nobody declared an account under that name", which is
+        a different statement from an account with nothing filled in, and
+        both are ordinary.
+        """
+        return next(
+            (record for record in self.declared_accounts() if record.ref == ref), None
+        )
+
+    def forget_account(self, stable_id: AccountId) -> bool:
+        """Remove a declared account and its windows. Returns whether
+        there was one to remove - a caller that deleted nothing deserves
+        to be told so rather than shown a success message."""
+        cursor = self.connection.execute(
+            "DELETE FROM declared_accounts WHERE stable_id = ?", (stable_id,)
+        )
+        self.connection.commit()
+        return bool(cursor.rowcount)
 
     def close(self) -> None:
         self.connection.close()

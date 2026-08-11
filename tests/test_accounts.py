@@ -66,7 +66,7 @@ class TestTheRegistryDeclaresAccounts:
         registry = _registry()
 
         assert registry.record("piggy-bank") is not None
-        assert "piggy-bank" in registry.declared_ids()
+        assert "piggy-bank" in registry.declared_refs()
 
     def test_MetadataWindows_AreCapturedAheadOfConsumers(self):
         record = AccountRecord.from_dict(
