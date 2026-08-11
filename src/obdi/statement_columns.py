@@ -7,10 +7,12 @@ reconstruction ran fields together - two amounts arriving as one token, an
 amount fused to the description after it - and a parser reading those
 lines would be guessing rather than reading.
 
-The positions are in the document all along. Each fragment of text carries
-the matrix that places it on the page, so a row is a set of fragments
-sharing a baseline and a column is a set sharing a left edge. Reading them
-that way needs no guess about how many spaces mean a new column.
+The positions are in the document all along. Every word carries its own
+coordinates and its own width, so a row is a set of words sharing a
+baseline, a column is a set sharing a left edge, and a cell ends where a
+measured band of empty space begins. None of that needs a guess about how
+many spaces mean a new field, and coordinates cannot be fused the way
+reconstructed text can.
 
 Nothing here interprets a statement. It turns a page into rows of cells,
 which is the thing a parser can then read without inventing anything.
@@ -87,8 +89,10 @@ def words_from(path: Path) -> list[Fragment]:
     it. A word's own coordinates cannot be fused with anything.
 
     Kept deliberately thin: everything that decides what the words MEAN
-    lives below in pure functions, which is where the risk is and where
-    the tests are.
+    lives below in pure functions, tested by supplying coordinates
+    directly. This function is tested too, against a real file - untested
+    it would be a claim rather than a fact, and it is the one place the
+    module depends on a reader's account of a document.
     """
     try:
         import pdfplumber

@@ -22,7 +22,14 @@ def build_pdf(lines: list[str]) -> bytes:
     """A valid single-page PDF containing `lines` - entirely invented
     figures, so the end-to-end path is exercised with no real statement
     anywhere in the repository. Offsets are computed rather than guessed,
-    because a PDF without a correct xref is not a PDF."""
+    because a PDF without a correct xref is not a PDF.
+
+    Objects are delimited by newlines. Without them `endstream` runs
+    straight into `endobj`, a strict reader lexes the pair as one token,
+    never closes the stream, and reports a page with no content at all.
+    That is a malformed file rather than a quirk to work around - and a
+    lenient reader accepting it is what let this fixture pass for valid.
+    A fixture only one reader accepts tests that reader's tolerance."""
     drawn = "\n".join(
         f"BT /F1 12 Tf 50 {700 - index * 20} Td ({line}) Tj ET"
         for index, line in enumerate(lines)
@@ -40,7 +47,7 @@ def build_pdf(lines: list[str]) -> bytes:
     offsets = []
     for number, body in enumerate(objects, start=1):
         offsets.append(len(out))
-        out += b"%d 0 obj" % number + body + b"endobj\n"
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
     xref_at = len(out)
     out += b"xref\n0 %d\n" % (len(objects) + 1)
     out += b"0000000000 65535 f \n"
@@ -325,10 +332,15 @@ class TestTheColumnViewIsMaskedOnTheSameTerms:
         assert "99.99 | 99.99" in text
         assert " | 99.99" in text, "the missing first cell must stay missing"
 
-    def test_GeometryThatCannotBeRead_IsNamed_NotSilentlyOmitted(self, tmp_path):
+    def test_GeometryThatCannotBeRead_IsNamed_NotSilentlyOmitted(
+        self, tmp_path, monkeypatch
+    ):
         # The report still answers - the line view is the older and better
         # proven of the two - but a reader must not mistake an absent
-        # column reading for a document with no columns.
+        # column reading for a document with no columns. A page with a text
+        # layer whose geometry yields nothing is the real case here: a
+        # scanned page is named separately and never reaches this branch.
+        self._with_geometry(monkeypatch, [])
         path = tmp_path / "statement.pdf"
         path.write_bytes(FAKE_PDF)
 

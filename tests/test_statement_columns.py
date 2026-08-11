@@ -1,13 +1,21 @@
 """Reading a statement as the table it is, by position rather than by spacing.
 
-These tests place words at coordinates directly rather than through a PDF.
-That is deliberate. Two attempts to build a fixture PDF by hand produced
-files the readers disagreed about - one coalesced a whole line into a single
-fragment at the line's left edge, another refused the file outright - so a
-test built that way would have measured the fixture, not the code. The
-geometry reader is one thin call verified against a real statement;
-everything that DECIDES what the geometry means is pure, and that is what is
-exercised here.
+Two kinds of test, deliberately separated.
+
+Most of them place words at coordinates DIRECTLY, because everything that
+decides what geometry means is a pure function and that is where the risk
+lives - the majority rule for columns, the measured gap that ends a cell,
+the blank that must stay blank. Supplying coordinates by hand states the
+case exactly and cannot be confounded by a reader's opinion of a file.
+
+The last class reads a real PDF, because the geometry reader is otherwise
+a claim rather than a fact - and the claim it makes, that a word's own
+coordinates cannot be fused, is the one the module rests on. Building that
+fixture took three attempts, and the failures are worth knowing: a page
+written as one text object per string is read differently from one holding
+many positioned runs, and a file whose objects are not newline-delimited
+is malformed in a way one reader tolerates and another rejects outright.
+A fixture only one reader accepts measures that reader's tolerance.
 
 The scenario throughout is the one that defeated whitespace reconstruction:
 a wide page whose columns sit far apart, where two amounts arrived fused
@@ -15,6 +23,10 @@ into one token and an amount arrived glued to the description beside it.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
 
 from obdi.statement_columns import (
     Fragment,
@@ -223,3 +235,125 @@ class TestReadingByPosition:
     def test_APageWithNoText_YieldsNoRows_RatherThanOneEmptyOne(self) -> None:
         assert rows_from_words([]) == []
         assert aligned([]) == []
+
+
+def build_positioned_pdf(placements: list[tuple[float, float, str]]) -> bytes:
+    """A valid wide single-page PDF placing each string at an absolute point.
+
+    Wide on purpose - a landscape MediaBox with text out past x=1300 - so
+    the fixture reproduces the layout that defeated whitespace
+    reconstruction rather than a comfortable one.
+
+    One text object holding many positioned runs, which is what a real
+    generator emits: a Tm before each Tj sets the text matrix absolutely.
+    A file written as one text object PER string reads differently, and a
+    fixture shaped unlike any real document proves nothing about real
+    documents.
+    """
+    placed = "\n".join(
+        f"1 0 0 1 {x:.2f} {y:.2f} Tm ({text}) Tj" for x, y, text in placements
+    )
+    drawn = (f"BT /F1 10 Tf\n{placed}\nET" if placements else "").encode("latin-1")
+    objects = [
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 1684 792]/Contents 4 0 R"
+        b"/Resources<</Font<</F1 5 0 R>>>>>>",
+        b"<</Length %d>>stream\n%s\nendstream" % (len(drawn), drawn),
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        # Newline-delimited. Run `endstream` into `endobj` and a strict
+        # reader lexes one token, never closes the stream and reports an
+        # empty page - a malformed file that a lenient reader will accept,
+        # which is the worst kind because it looks like it works.
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref_at = len(out)
+    out += b"xref\n0 %d\n" % (len(objects) + 1)
+    out += b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref_at,
+    )
+    return bytes(out)
+
+
+class TestTheGeometryReaderAgainstARealFile:
+    """The one part that cannot be pure: reading positions out of a PDF.
+
+    Thin by design, but untested it is a claim rather than a fact - and
+    the claim it makes ("a word's coordinates cannot be fused") is the one
+    the whole module rests on.
+    """
+
+    @staticmethod
+    def _written(tmp_path, placements) -> Path:
+        path = tmp_path / "wide.pdf"
+        path.write_bytes(build_positioned_pdf(placements))
+        return path
+
+    def test_AWordsOwnPosition_SurvivesBeingReadOutOfThePage(self, tmp_path):
+        from obdi.statement_columns import words_from
+
+        path = self._written(
+            tmp_path,
+            [(60.0, 700.0, "Date"), (300.0, 700.0, "Source"), (1360.0, 700.0, "Bal")],
+        )
+
+        found = {word.text: word for word in words_from(path)}
+
+        assert set(found) == {"Date", "Source", "Bal"}
+        assert found["Date"].x == pytest.approx(60.0, abs=1.0)
+        assert found["Source"].x == pytest.approx(300.0, abs=1.0)
+        assert found["Bal"].x == pytest.approx(1360.0, abs=1.0)
+
+    def test_EachWordCarriesAWidth_SoGapsCanBeMeasured(self, tmp_path):
+        # Without widths the gap between two words is unknowable and every
+        # word becomes its own cell. This is the fact that makes cells
+        # possible at all.
+        from obdi.statement_columns import words_from
+
+        path = self._written(tmp_path, [(60.0, 700.0, "Date")])
+
+        word = words_from(path)[0]
+
+        assert word.x_end > word.x, "a word with no width cannot be measured"
+
+    def test_AWideTable_IsReadAsColumns_NotAsRunTogetherText(self, tmp_path):
+        # The end-to-end claim: columns 1300 points apart, one row missing
+        # its debit, read back as a table with the blank preserved.
+        from obdi.statement_columns import aligned, rows
+
+        path = self._written(
+            tmp_path,
+            [
+                (60.0, 700.0, "04/04/2025"),
+                (300.0, 700.0, "Lodgement"),
+                (1180.0, 700.0, "25.00"),
+                (1360.0, 700.0, "868.41"),
+                (60.0, 680.0, "30/04/2025"),
+                (300.0, 680.0, "Transfer"),
+                (1000.0, 680.0, "367.61"),
+                (1360.0, 680.0, "500.80"),
+            ],
+        )
+
+        assert aligned(rows(path)) == [
+            ["04/04/2025", "Lodgement", "", "25.00", "868.41"],
+            ["30/04/2025", "Transfer", "367.61", "", "500.80"],
+        ]
+
+    def test_AnUnreadableFile_YieldsNoWords_RatherThanRaising(self, tmp_path):
+        # The report treats absent geometry as a fact to state, which only
+        # works if the reader declines rather than throws.
+        from obdi.statement_columns import words_from
+
+        path = tmp_path / "not.pdf"
+        path.write_text("this is not a pdf", encoding="utf-8")
+
+        assert words_from(path) == []
