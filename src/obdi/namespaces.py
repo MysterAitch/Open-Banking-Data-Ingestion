@@ -41,6 +41,12 @@ FILE_SOURCES = frozenset(
         "starling-csv",
         "monzo-csv",
         "amex-uk-csv",
+        # Statement PDFs. Named per ISSUER as well as per format, because
+        # two banks' statements share nothing but their file type - the
+        # layout, the credit marker and the date form all differ, so the
+        # parser that read a row is the fact worth recording.
+        "santander-cc-pdf",
+        "virgin-money-cc-pdf",
     }
 )
 

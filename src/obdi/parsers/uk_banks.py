@@ -14,6 +14,11 @@ from ..identity import content_key
 from ..models import SourceTier, Transaction, TransactionStatus
 from ..money import parse_amount
 from .base import ParseError, StatementParser, parse_date
+
+#: Statement PDFs, tried only once every CSV parser has declined: a PDF
+#: cannot masquerade as a CSV, and sniffing one costs a text extraction
+#: that should not be paid on every import.
+from .pdf_statements import PDF_PARSERS
 from .qif import QifParser
 
 
@@ -165,7 +170,6 @@ PARSERS: tuple[type[StatementParser], ...] = (
     QifParser,
 )
 
-
 #: A PDF announces itself in its first bytes. Worth recognising even with
 #: no parser to hand: "no parser for this bank's statement yet" is a
 #: different situation from "this export's layout changed", and only one of
@@ -180,9 +184,13 @@ def detect(payload: bytes) -> StatementParser:
         if parser.sniff(payload):
             return parser
     if payload.startswith(PDF_MAGIC):
+        for pdf_class in PDF_PARSERS:
+            pdf_parser = pdf_class()
+            if pdf_parser.sniff(payload):
+                return pdf_parser
         raise ParseError(
-            "This is a PDF statement, and no parser exists for this bank's "
-            "layout yet. Read the layout first (the statement-shape page, or "
+            "This is a PDF statement from a bank with no parser yet. "
+            "Read its layout first (the statement-shape page, or "
             "'obdi statement-shape') - a parser is written per format from "
             "that shape. The file itself is kept either way, so a parser "
             "written later replays it without a re-download."
