@@ -2433,14 +2433,41 @@ class Store:
         a rule costs a command rather than a decision, and including them
         would inflate the figure that exists to stop somebody.
         """
-        hand_entered = self.connection.execute(
-            "SELECT COUNT(*) FROM annotations WHERE provenance LIKE 'human:%'"
+        # The RANK, matched the way the rest of the system matches it: the
+        # part before the colon, with the suffix optional. The first
+        # version of this looked for 'human:%' and therefore counted
+        # nothing at all - every human write in the application passes the
+        # bare string 'human' (categorise.apply_to_group, defer_group), and
+        # the suffix naming a person is a shape nothing has ever written.
+        # The test that should have caught it inserted its own rows with
+        # its own guess at the string, so writer and reader disagreed and
+        # the suite agreed with both.
+        by_kind = (
+            "SELECT COUNT(*) FROM annotations WHERE kind = ? "
+            "AND (provenance = 'human' OR provenance LIKE 'human:%')"
+        )
+        categories = self.connection.execute(by_kind, ("category",)).fetchone()[0]
+        # A withheld decision is human work that survives a rebuild, so it
+        # belongs here - but it is not a category, and a line labelled
+        # "categories" that quietly includes deferrals is a wrong answer
+        # rather than a rounded one.
+        deferrals = self.connection.execute(by_kind, ("review",)).fetchone()[0]
+        # Anything else a person may write later - a note, a correction -
+        # counted without having to be listed here first, so a new kind is
+        # visible in the report from the day it exists rather than from the
+        # day somebody remembers to add it.
+        other = self.connection.execute(
+            "SELECT COUNT(*) FROM annotations "
+            "WHERE kind NOT IN ('category', 'review') "
+            "AND (provenance = 'human' OR provenance LIKE 'human:%')"
         ).fetchone()[0]
         declared = self.connection.execute(
             "SELECT COUNT(*) FROM declared_accounts"
         ).fetchone()[0]
         return {
-            "hand-entered categories": int(hand_entered),
+            "hand-entered categories": int(categories),
+            "deferred decisions": int(deferrals),
+            "other hand-entered notes": int(other),
             "declared accounts": int(declared),
         }
 
