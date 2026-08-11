@@ -104,11 +104,39 @@ class Timings:
     def total(self) -> float:
         return sum(phase.total for phase in self.summary())
 
-    def describe(self) -> str:
+    def seconds(self, name: str) -> float:
+        """One phase's total, or zero if it never ran.
+
+        Zero for an absent phase rather than an error, because callers ask
+        this to SUBTRACT a cost that does not belong in a rate - and a
+        phase that did not run contributed nothing to subtract.
+        """
+        return sum(self._samples.get(name, []))
+
+    def describe(self, *, wall_seconds: float | None = None) -> str:
+        """The phases, and - given the elapsed time - what they leave out.
+
+        A breakdown that does not add up to the clock invites the reader to
+        assume the work is accounted for. Every second between the sum and
+        the elapsed time was real work happening somewhere unnamed, and
+        naming the residue is what turns "these numbers look wrong" into
+        "there is a phase nobody is measuring".
+        """
         phases = self.summary()
         if not phases:
             # Not the same as "took no time". A blank where a measurement
             # belongs reads as instant, and the two want different
             # reactions from whoever is looking.
             return "nothing measured"
-        return " | ".join(phase.describe() for phase in phases)
+        described = " | ".join(phase.describe() for phase in phases)
+        if wall_seconds is None:
+            return described
+        # Phases can overlap when work runs concurrently, so the sum can
+        # exceed the elapsed time; a negative residue is not a finding.
+        # Sub-millisecond drift is measurement noise rather than a missing
+        # phase, and reporting it would send a reader hunting for work that
+        # never happened.
+        residue = wall_seconds - self.total()
+        if residue >= 0.001:
+            described += f" | unaccounted {residue:.2f}s"
+        return f"{described} - {wall_seconds:.2f}s elapsed"

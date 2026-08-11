@@ -2233,7 +2233,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         joiner = chr(10)
         return joiner.join([*transcript, endings.get(outcome, outcome)])
 
-    def keep_statement(payload: bytes, filename: str) -> int:
+    def keep_statement(payload: bytes, filename: str) -> tuple[int, bool]:
         """Land a statement as evidence BEFORE anyone decides whose it is.
 
         The exports that most need keeping are the ones that cannot be
@@ -2248,6 +2248,12 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         digest = artefact_digest(payload)
         with Store(db_path) as store:
+            # Asked BEFORE landing, because landing is idempotent on the
+            # digest: afterwards there is no way to tell a statement that
+            # was already held from one this upload created.
+            held = store.connection.execute(
+                "SELECT rowid FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+            ).fetchone()
             store.land_artefact(
                 RawArtefact(
                     source="statement",
@@ -2262,7 +2268,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             row = store.connection.execute(
                 "SELECT rowid FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
             ).fetchone()
-        return int(row["rowid"]) if row else 0
+        return (int(row["rowid"]) if row else 0, held is None)
 
     def assign_kept_statement(artefact_id: int, account_id: str) -> str:
         """Give a kept statement its account, then read it in.

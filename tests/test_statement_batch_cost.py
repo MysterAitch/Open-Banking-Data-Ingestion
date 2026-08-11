@@ -159,3 +159,26 @@ class TestThePageReportsWhatItSpent:
         response = _upload(server, 1)
 
         assert "timings:" in response.text
+
+    def test_TheBreakdown_ReconcilesAgainstTheRequestsOwnClock(self, server):
+        # Phases summing to less than the request took is the report that
+        # prompted this: the difference was real work in an unnamed phase,
+        # and leaving it out implied everything was accounted for.
+        response = _upload(server, 3)
+
+        assert "elapsed" in response.text
+
+    def test_ThePerPageRate_ExcludesTimeThatIsNotPerPage(self, server):
+        # Receiving an upload costs by the byte over whatever link the
+        # browser is on. Folded into a per-page rate it would move with the
+        # network and read as though pages had got more expensive.
+        response = _upload(server, 2)
+
+        assert "receiving is not per page" in response.text
+
+    def test_ThePage_SaysWhichSideOfTheWireItMeasured(self, server):
+        # A person comparing this against a stopwatch needs to know that
+        # the browser's own file reading and encoding are not in it.
+        response = _upload(server, 1)
+
+        assert "Server side only" in response.text

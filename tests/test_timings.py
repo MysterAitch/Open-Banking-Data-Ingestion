@@ -106,3 +106,55 @@ class TestWhatAPageSpentItsTimeOn:
         # A blank where a measurement belongs reads as "instant". It is
         # not: it is "not measured", and the two want different reactions.
         assert Timings().describe() == "nothing measured"
+
+
+class TestTheNumbersMustReconcile:
+    """A breakdown that does not add up to the wall clock invites the wrong
+    conclusion.
+
+    Reported from use: phases summing to 44s under a request that took
+    over 60. Every second between them was real work happening somewhere,
+    and a display that leaves it out implies the work was accounted for.
+    """
+
+    def test_TimeNotInAnyPhase_IsNamed_RatherThanQuietlyMissing(self) -> None:
+        timings = Timings()
+        timings.record("read", 10.0)
+        timings.record("keep", 2.0)
+
+        described = timings.describe(wall_seconds=20.0)
+
+        assert "unaccounted 8.00s" in described
+        assert "20.00s" in described, "the wall clock it is reconciled against"
+
+    def test_WhenEverythingIsAccountedFor_NoResidueIsClaimed(self) -> None:
+        # Sub-millisecond drift between the wall clock and the sum of its
+        # parts is measurement noise, not a missing phase, and reporting
+        # it as one would send a reader looking for work that never
+        # happened.
+        timings = Timings()
+        timings.record("read", 10.0)
+
+        described = timings.describe(wall_seconds=10.0002)
+
+        assert "unaccounted" not in described
+
+    def test_APhaseSumExceedingTheWallClock_DoesNotReportNegativeTime(
+        self,
+    ) -> None:
+        # Concurrent phases can legitimately overlap, so the sum can exceed
+        # the elapsed time. Negative "unaccounted" would be nonsense.
+        timings = Timings()
+        timings.record("a", 10.0)
+        timings.record("b", 10.0)
+
+        described = timings.describe(wall_seconds=12.0)
+
+        assert "unaccounted" not in described, "overlap is not missing work"
+        assert "12.00s elapsed" in described
+
+    def test_WithoutAWallClock_NothingIsClaimedAboutCompleteness(self) -> None:
+        timings = Timings()
+        timings.record("read", 10.0)
+
+        assert "unaccounted" not in timings.describe()

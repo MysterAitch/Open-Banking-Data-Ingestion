@@ -321,7 +321,11 @@ class WebConfig:
     #: Keep an uploaded statement as evidence before an account is
     #: chosen - the exports worth keeping most are the ones that
     #: cannot be fetched twice.
-    keep_statement: Callable[[bytes, str], int] | None = None
+    #: Returns the artefact id and whether this upload CREATED it.
+    #: Both, because a statement already held is a different outcome
+    #: from one newly kept, and reporting them identically hides the
+    #: answer to the question a person re-uploading actually has.
+    keep_statement: Callable[[bytes, str], tuple[int, bool]] | None = None
     #: A kept statement's filename and bytes, by artefact id.
     statement_payload: Callable[[int], tuple[str, bytes] | None] | None = None
     #: Give a kept statement its account and read it in. Separate from
@@ -3812,7 +3816,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # Timed separately from the reading that follows, because they fail
         # differently: this is the network carrying the bytes here, and a
         # slow one looks identical to slow processing from a browser.
-        received_began = time.perf_counter()
+        handling_began = time.perf_counter()
+        received_began = handling_began
         try:
             uploaded, fields = _parse_multipart_files(
                 self.headers.get("Content-Type") or "", self.rfile.read(length)
@@ -3840,7 +3845,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         keeper = self.bound_config.keep_statement
         # Name, shape, kept id, and what that file cost. The cost travels
         # per file because an aggregate cannot say WHICH one was slow.
-        read: list[tuple[str, ShapeReport, int, float]] = []
+        read: list[tuple[str, ShapeReport, int, float, bool]] = []
+        already_held = 0
         # A batch listing shows counts and a link per file, and nothing
         # else - so reading each page's GEOMETRY here buys an answer that
         # is then thrown away, at seconds per page per file. A person who
@@ -3859,13 +3865,15 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 )
             pages += shape.page_count
             artefact_id = 0
+            was_new = False
             if keeper is not None and shape.readable and shape.line_count:
                 # Kept BEFORE an account is chosen, because the exports most
                 # worth keeping are the ones that cannot be fetched twice.
                 with timings.phase("keep"):
-                    artefact_id = keeper(payload, filename)
+                    artefact_id, was_new = keeper(payload, filename)
+            already_held += 0 if was_new or not artefact_id else 1
             read.append(
-                (filename, shape, artefact_id, time.perf_counter() - began)
+                (filename, shape, artefact_id, time.perf_counter() - began, was_new)
             )
 
         payload, filename = uploaded[0]
@@ -3883,6 +3891,8 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             f"{report.page_count} page(s)</td><td>"
             + (
                 "kept"
+                if kept_id and is_new
+                else "already held"
                 if kept_id
                 else html.escape(report.describe().split(" - ")[0].split(": ", 1)[-1])
             )
@@ -3891,18 +3901,38 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # document" and "every document costs this" are different
             # faults with different fixes.
             + f"</td><td class='mono'>{took:.2f}s</td></tr>"
-            for name, report, kept_id, took in read
+            for name, report, kept_id, took, is_new in read
         )
-        kept_ids = [str(kept_id) for _n, _r, kept_id, _t in read if kept_id]
+        kept_ids = [str(kept_id) for _n, _r, kept_id, _t, _new in read if kept_id]
+        # Reading is per PAGE; receiving is per byte over whatever link the
+        # browser is on. Dividing the pair by pages produces a rate that
+        # moves when the network does and reads as though pages got dearer.
+        processing = timings.total() - timings.seconds("receive")
         per_page = (
-            f", {timings.total() / pages:.2f}s per page across {pages} page(s)"
+            f", {processing / pages:.2f}s per page across {pages} page(s) "
+            "to read (receiving is not per page)"
             if pages
             else ""
         )
         summary = (
-            f"<p>{len(read)} file(s) read, {len(kept_ids)} kept. Each masked "
-            "shape stays at its own address, so it can be read again without "
-            "uploading anything again, and assigned to an account later.</p>"
+            f"<p>{len(read)} file(s) read, {len(kept_ids) - already_held} "
+            f"newly kept"
+            # Named rather than folded into the total. Uploading the same
+            # statement twice is the ordinary case when a person cannot
+            # recall what they sent before, and a listing that reports a
+            # duplicate identically to a new file answers the wrong
+            # question - it says how many files were sent, which they
+            # already know, instead of how many were new.
+            + (
+                f", {already_held} already held (same contents, so the "
+                "statement it was kept as first time is reused rather than "
+                "stored twice)"
+                if already_held
+                else ""
+            )
+            + ". Each masked shape stays at its own address, so it can be "
+            "read again without uploading anything again, and assigned to "
+            "an account later.</p>"
             "<table><tr><th>File</th><th>Statement</th><th>Size</th>"
             f"<th>Outcome</th><th>Took</th></tr>{rows}</table>"
             + (
@@ -3913,8 +3943,21 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # Shown whether or not it is alarming. A figure that appears
             # only once somebody suspects a problem cannot be the thing
             # that tells them there is one.
-            + f'<p class="muted mono">timings: {html.escape(timings.describe())}'
-            f"{html.escape(per_page)}</p>"
+            + '<p class="muted mono">timings: '
+            + html.escape(
+                timings.describe(
+                    wall_seconds=time.perf_counter() - handling_began
+                )
+            )
+            + html.escape(per_page)
+            # Whatever is left after the residue is OUTSIDE this process:
+            # the browser reading files off disk and encoding them, the
+            # link, and the response travelling back. Said plainly, because
+            # a person comparing this against a stopwatch deserves to know
+            # which side of the wire the difference lives on.
+            + '<br>Server side only - a browser also spends time reading '
+            "and encoding the files before any of this starts, and "
+            "receiving the reply after it ends.</p>"
         )
         body = "<h2>Statement shape</h2>" + summary
         if len(read) == 1:

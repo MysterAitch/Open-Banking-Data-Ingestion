@@ -17,6 +17,24 @@ from obdi.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_statement_shape import build_pdf
 
+
+def _statement_for(month: str) -> bytes:
+    """A statement distinguishable from the others by its contents.
+
+    Distinct because the store keys artefacts by CONTENT: two uploads of
+    identical bytes are one statement however they are named, and a test
+    that wants three statements has to supply three.
+    """
+    return build_pdf(
+        [
+            "Statement of account",
+            f"01 {month.title()} 2026 to 28 {month.title()} 2026",
+            "Opening balance 1,234.56",
+            f"04 {month.title()} ACME LTD 12.34",
+        ]
+    )
+
+
 STATEMENT = build_pdf(
     [
         "Statement of account",
@@ -129,9 +147,10 @@ class TestAKeptStatement:
     def test_AnUpload_IsKept_AndItsShapeGetsAnAddress(self, tmp_path):
         kept: dict[int, tuple[str, bytes]] = {}
 
-        def keep(payload: bytes, filename: str) -> int:
+        def keep(payload: bytes, filename: str) -> tuple[int, bool]:
+            was_new = 7 not in kept
             kept[7] = (filename, payload)
-            return 7
+            return 7, was_new
 
         config = WebConfig(
             client_id="client-1",
@@ -183,10 +202,15 @@ class TestABatchOfStatements:
         kept: dict[int, tuple[str, bytes]] = {}
         counter = {"next": 100}
 
-        def keep(payload: bytes, filename: str) -> int:
+        def keep(payload: bytes, filename: str) -> tuple[int, bool]:
+            # Keyed by CONTENT, as the real one is: the same statement sent
+            # twice comes back as the artefact it already is.
+            for held_id, (_name, held) in kept.items():
+                if held == payload:
+                    return held_id, False
             counter["next"] += 1
             kept[counter["next"]] = (filename, payload)
-            return counter["next"]
+            return counter["next"], True
 
         config = WebConfig(
             client_id="client-1",
@@ -211,10 +235,14 @@ class TestABatchOfStatements:
         try:
             response = httpx.post(
                 f"{base}/statement-shape",
+                # Three DIFFERENT statements. Sending the same bytes three
+                # times is a duplicate, which the store is right to collapse
+                # onto one artefact - so identical fixtures would assert
+                # that keeping is broken.
                 files=[
-                    ("file", ("jan.pdf", STATEMENT, "application/pdf")),
-                    ("file", ("feb.pdf", STATEMENT, "application/pdf")),
-                    ("file", ("mar.pdf", STATEMENT, "application/pdf")),
+                    ("file", (f"{month}.pdf", _statement_for(month),
+                              "application/pdf"))
+                    for month in ("jan", "feb", "mar")
                 ],
                 headers={"Origin": base},
                 timeout=30,
@@ -222,7 +250,7 @@ class TestABatchOfStatements:
 
             assert response.status_code == 200
             assert len(kept) == 3, "each file kept, not just the first"
-            assert "3 file(s) read, 3 kept" in response.text
+            assert "3 file(s) read, 3 newly kept" in response.text
             for name in ("jan.pdf", "feb.pdf", "mar.pdf"):
                 assert name in response.text
             for artefact_id in kept:
@@ -268,7 +296,7 @@ class TestABatchOfStatements:
             assert len(kept) == 1, "the readable one is kept"
             assert "notes.txt" in response.text
             assert "not kept" in response.text
-            assert "2 file(s) read, 1 kept" in response.text
+            assert "2 file(s) read, 1 newly kept" in response.text
         finally:
             httpd.shutdown()
             httpd.server_close()
