@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
@@ -27,12 +28,13 @@ from pathlib import Path
 from typing import ClassVar
 
 from .models import RawArtefact, SourceTier, Transaction, Valuation
+from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, origin), NOT digest alone. Identical bytes
@@ -52,6 +54,10 @@ CREATE TABLE IF NOT EXISTS raw_artefacts (
     payload       BLOB NOT NULL,
     request_meta  TEXT NOT NULL DEFAULT '',
     connection_id TEXT NOT NULL DEFAULT '',
+    -- How many records the payload parses into, landed as metadata so
+    -- progress and ETA maths never re-parse history. NULL means "not yet
+    -- counted"; the next rebuild backfills it.
+    record_count  INTEGER,
     PRIMARY KEY (digest, account_ref, origin)
 );
 
@@ -241,6 +247,84 @@ CREATE TABLE IF NOT EXISTS annotations (
 """
 
 
+#: Every table SCHEMA creates. Read out of the schema text rather than
+#: kept alongside it, so the list cannot fall behind the tables.
+TABLE_NAMES: tuple[str, ...] = tuple(
+    re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA)
+)
+
+
+def table_ddl(table: str) -> str:
+    """The CREATE TABLE statement for one table, read out of SCHEMA.
+
+    A migration that rebuilds a table must build the table's CURRENT
+    shape, and a second copy of the definition inside the migration is a
+    copy that drifts - silently, because the rebuild only ever runs on
+    somebody else's old store. Reading SCHEMA means this module holds one
+    definition of each table and the rebuilds cannot disagree with it.
+    """
+    match = re.search(
+        rf"^CREATE TABLE IF NOT EXISTS {table} \(.*?^\);", SCHEMA, re.S | re.M
+    )
+    if match is None:
+        raise KeyError(f"no table named {table!r} in SCHEMA")
+    return match.group(0)
+
+
+def table_columns(table: str) -> list[str]:
+    """The current column names of one table, in declaration order."""
+    return re.findall(
+        r"^ {4}(?!PRIMARY|UNIQUE|FOREIGN|CHECK|CONSTRAINT)(\w+)\s",
+        table_ddl(table),
+        re.M,
+    )
+
+
+def _column_default(table: str, column: str) -> str:
+    """The SELECT expression for a column an old table does not have.
+
+    Taken from the column's own DEFAULT in SCHEMA, so a rebuild fills a
+    new column with exactly what an ALTER ADD COLUMN would have put
+    there, and no migration carries a second opinion about it.
+    """
+    line = re.search(rf"^ {{4}}{column}\s+.*$", table_ddl(table), re.M)
+    if line is None:
+        raise KeyError(f"no column {column!r} in {table!r}")
+    default = re.search(r"\bDEFAULT\s+('[^']*'|[^\s,]+)", line.group(0))
+    return default.group(1) if default else "NULL"
+
+
+def _rebuild_table_script(table: str, held: set[str]) -> str:
+    """A rebuild of one table onto its current shape, preserving rows.
+
+    Needed wherever a change cannot be an ALTER: a widened primary key, a
+    relaxed NOT NULL. Columns are named on both sides, and `held` says
+    which of them the old table can actually supply - the rest take their
+    schema default. The raw_artefacts rebuild once used SELECT *, which
+    silently depends on the old table having the same columns in the same
+    order as the new one: true only until the table grew, at which point
+    the rebuild would have failed on the one store it exists to rescue.
+    """
+    columns = table_columns(table)
+    selected = ", ".join(
+        column if column in held else _column_default(table, column)
+        for column in columns
+    )
+    # Table and column names are interpolated because neither can be a
+    # bound parameter. Every one of them is read out of SCHEMA in this
+    # module and never from input, which is what makes the interpolation
+    # safe here rather than merely convenient.
+    return f"""
+        BEGIN;
+        ALTER TABLE {table} RENAME TO {table}_old;
+        {table_ddl(table)}
+        INSERT INTO {table} ({", ".join(columns)})
+            SELECT {selected} FROM {table}_old;
+        DROP TABLE {table}_old;
+        COMMIT;
+    """  # noqa: S608
+
+
 @dataclass
 class _WriteBatch:
     """One reconcile batch's pending writes, stamped once."""
@@ -249,13 +333,6 @@ class _WriteBatch:
     upserts: list[tuple[object, ...]] = field(default_factory=list)
     sightings: list[tuple[object, ...]] = field(default_factory=list)
     reviews: list[tuple[object, ...]] = field(default_factory=list)
-
-
-_PROVENANCE_RANKS = {"rule": 1, "model": 2, "human": 3}
-
-
-def _provenance_rank(provenance: str) -> int:
-    return _PROVENANCE_RANKS.get(provenance.split(":", 1)[0], 0)
 
 
 def _stamp_now() -> str:
@@ -393,6 +470,9 @@ class Store:
             return
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
+        self._migrate_transaction_tier_and_occurrence()
+        self._migrate_sighting_artefact_digest()
+        self._migrate_valuation_income_columns()
         self._migrate_request_meta_column()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
@@ -404,6 +484,122 @@ class Store:
             (str(SCHEMA_VERSION),),
         )
         self.connection.commit()
+
+    def _table_columns(self, table: str) -> dict[str, sqlite3.Row]:
+        return {
+            str(row["name"]): row
+            for row in self.connection.execute(f"PRAGMA table_info({table})")
+        }
+
+    def _primary_key(self, table: str) -> list[str]:
+        info = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return [
+            str(row["name"])
+            for row in sorted(info, key=lambda r: int(r["pk"]))
+            if int(row["pk"])
+        ]
+
+    def _migration_completed(self, name: str) -> bool:
+        """Whether a named migration recorded that it FINISHED.
+
+        The shape a migration produces is not proof that it ran. ALTER
+        TABLE is DDL and commits on its own, so a process killed between
+        the ALTER and the rows it was about to populate leaves the new
+        column present and empty - and a gate that tests for the column
+        then skips the work permanently, on a store that looks migrated
+        from every angle. Only a marker written in the same transaction as
+        the last write can answer the question.
+
+        A migration whose whole effect is one atomic rebuild needs no
+        marker: that transaction either committed or did not, so the shape
+        is its own completion record.
+        """
+        try:
+            row = self.connection.execute(
+                "SELECT 1 FROM obdi_meta WHERE key = ?", (f"migration:{name}",)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # No meta table: a store from before this mechanism.
+            return False
+        return row is not None
+
+    def _record_migration_completed(self, name: str) -> None:
+        """Mark a migration finished. Deliberately does NOT commit - the
+        caller commits it together with the writes it vouches for, so the
+        marker cannot outlive them."""
+        self.connection.execute(
+            "INSERT INTO obdi_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (f"migration:{name}", _stamp_now()),
+        )
+
+    def _migrate_transaction_tier_and_occurrence(self) -> None:
+        """Add the identity-trust and repeat-within-batch columns.
+
+        Both carry defaults that describe pre-existing rows honestly: a
+        row from before source tiers existed was never assessed, and one
+        from before occurrences were numbered was the only sighting of its
+        content that the fold had at the time.
+        """
+        columns = self._table_columns("transactions")
+        added = False
+        if "tier" not in columns:
+            self.connection.execute(
+                "ALTER TABLE transactions "
+                "ADD COLUMN tier TEXT NOT NULL DEFAULT 'synthetic'"
+            )
+            added = True
+        if "occurrence" not in columns:
+            self.connection.execute(
+                "ALTER TABLE transactions "
+                "ADD COLUMN occurrence INTEGER NOT NULL DEFAULT 0"
+            )
+            added = True
+        if added:
+            self.connection.commit()
+
+    def _migrate_sighting_artefact_digest(self) -> None:
+        """Give sightings their artefact link, and widen the key to it.
+
+        Without this a store predating the change refuses the fold's own
+        write - the sighting INSERT names a column that is not there - so
+        the first pull after an upgrade fails at the write door rather
+        than anywhere a person would think to look. The key widens from
+        (entity, source) to include the digest, so the second artefact to
+        witness a payment is recorded rather than dropped as a conflict.
+
+        Existing rows keep an empty digest: their sighting really was
+        recorded before anyone kept the artefact it came from, and the
+        empty value says exactly that. The new key is strictly wider than
+        the old one, so no existing row can collide under it.
+        """
+        columns = self._table_columns("transaction_sources")
+        wanted = ["entity_id", "source", "artefact_digest"]
+        if (
+            "artefact_digest" in columns
+            and self._primary_key("transaction_sources") == wanted
+        ):
+            return
+        self.connection.executescript(
+            _rebuild_table_script("transaction_sources", set(columns))
+        )
+
+    def _migrate_valuation_income_columns(self) -> None:
+        """Teach valuations the difference between a pot and an income.
+
+        An entitlement - a defined-benefit pension, an annuity - has no
+        capital value to record, so value_minor stops being mandatory and
+        annual_income_minor appears beside it. Relaxing a NOT NULL is not
+        an ALTER in SQLite, so the table is rebuilt; every existing row is
+        a pot observation and keeps its value, taking the default kind.
+        """
+        columns = self._table_columns("valuations")
+        value = columns.get("value_minor")
+        if "kind" in columns and value is not None and not int(value["notnull"]):
+            return
+        self.connection.executescript(
+            _rebuild_table_script("valuations", set(columns))
+        )
 
     def _migrate_content_keys(self) -> None:
         """Re-key any row whose stored key no longer matches its own content.
@@ -451,13 +647,7 @@ class Store:
             self.connection.execute(
                 "ALTER TABLE raw_artefacts ADD COLUMN request_meta TEXT NOT NULL DEFAULT ''"
             )
-        if "record_count" not in {
-            str(row[1])
-            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
-        }:
-            # How many records the payload parses into - landed as metadata
-            # so progress and ETA maths never re-parse history. NULL means
-            # "not yet counted"; the next rebuild backfills it.
+        if "record_count" not in self._table_columns("raw_artefacts"):
             self.connection.execute(
                 "ALTER TABLE raw_artefacts ADD COLUMN record_count INTEGER"
             )
@@ -484,30 +674,16 @@ class Store:
         created before the key change keeps the old primary key silently -
         and with it the empty-body collapse the new key exists to prevent.
         Rebuilding the table preserves every row; the composite key is strictly
-        wider than the old one, so no existing data can conflict.
+        wider than the old one, so no existing data can conflict. Columns the
+        old table never had take their schema defaults, which is what the
+        later ALTER migrations would have given them anyway.
         """
-        info = self.connection.execute("PRAGMA table_info(raw_artefacts)").fetchall()
-        pk_columns = [row["name"] for row in sorted(info, key=lambda r: r["pk"]) if row["pk"]]
-        if pk_columns == ["digest", "account_ref", "origin"]:
+        if self._primary_key("raw_artefacts") == ["digest", "account_ref", "origin"]:
             return
         self.connection.executescript(
-            """
-            BEGIN;
-            ALTER TABLE raw_artefacts RENAME TO raw_artefacts_old;
-            CREATE TABLE raw_artefacts (
-                digest        TEXT NOT NULL,
-                source        TEXT NOT NULL,
-                account_ref   TEXT NOT NULL,
-                media_type    TEXT NOT NULL,
-                origin        TEXT NOT NULL DEFAULT '',
-                fetched_at    TEXT NOT NULL,
-                payload       BLOB NOT NULL,
-                PRIMARY KEY (digest, account_ref, origin)
-            );
-            INSERT INTO raw_artefacts SELECT * FROM raw_artefacts_old;
-            DROP TABLE raw_artefacts_old;
-            COMMIT;
-            """
+            _rebuild_table_script(
+                "raw_artefacts", set(self._table_columns("raw_artefacts"))
+            )
         )
 
     def close(self) -> None:
@@ -922,14 +1098,20 @@ class Store:
         already there - a human's word is never overwritten by a machine's,
         while a rule may revisit a rule's work as the rules evolve. Returns
         whether the write landed.
+
+        An unregistered provenance is REFUSED rather than ranked. A write
+        that cannot say where it sits on the ladder cannot be defended
+        against the next one, and a returned False would read as "the
+        existing annotation outranked you" - the opposite of the truth.
         """
+        incoming = provenance_rank(provenance)
         row = self.connection.execute(
             "SELECT provenance FROM annotations WHERE entity_id = ? AND kind = ?",
             (entity_id, kind),
         ).fetchone()
         if row is not None:
-            existing = _provenance_rank(str(row["provenance"]))
-            if _provenance_rank(provenance) < existing:
+            existing = stored_provenance_rank(str(row["provenance"]))
+            if incoming < existing:
                 return False
         self.connection.execute(
             "INSERT INTO annotations (entity_id, kind, value, provenance, annotated_at) "
@@ -962,14 +1144,20 @@ class Store:
         produces no value produces no write at all. The rank ceiling is
         what keeps a rules-file edit from ever sweeping away a human's or a
         model's decision. Returns whether anything was removed.
+
+        The ceiling is refused, not assumed, when the retracting
+        provenance is unregistered: a retraction that cannot say how high
+        it reaches would otherwise reach nowhere and report that as
+        "nothing to retract".
         """
+        ceiling = provenance_rank(up_to_provenance)
         row = self.connection.execute(
             "SELECT provenance FROM annotations WHERE entity_id = ? AND kind = ?",
             (entity_id, kind),
         ).fetchone()
         if row is None:
             return False
-        if _provenance_rank(str(row["provenance"])) > _provenance_rank(up_to_provenance):
+        if stored_provenance_rank(str(row["provenance"])) > ceiling:
             return False
         self.connection.execute(
             "DELETE FROM annotations WHERE entity_id = ? AND kind = ?",
@@ -1084,22 +1272,29 @@ class Store:
                      connection has ever existed
           unknown    stays empty - file imports have no connection, and
                      an empty value is honest where nothing is known.
+
+        Gated on a completion marker, NOT on the column it adds. The
+        ALTER commits by itself, so a process killed part-way through the
+        ladder leaves the column in place and unpopulated - and a gate
+        that tested for the column would then skip the ladder forever,
+        leaving every artefact unattributed with nothing to say so. Every
+        rung only ever fills a still-empty value, so the whole thing can
+        be re-run until it is known to have finished.
         """
-        columns = [
-            row["name"]
-            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
-        ]
-        if "connection_id" in columns:
+        if self._migration_completed("artefact_connection_attribution"):
             return
-        self.connection.execute(
-            "ALTER TABLE raw_artefacts ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''"
-        )
+        columns = self._table_columns("raw_artefacts")
+        if "connection_id" not in columns:
+            self.connection.execute(
+                "ALTER TABLE raw_artefacts "
+                "ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''"
+            )
 
         # Rung one: recorded in the request circumstances.
         self.connection.execute(
             """UPDATE raw_artefacts
                SET connection_id = COALESCE(json_extract(request_meta, '$.connection_id'), '')
-               WHERE request_meta != '' AND json_valid(request_meta)"""
+               WHERE connection_id = '' AND request_meta != '' AND json_valid(request_meta)"""
         )
 
         # Rung one-and-a-half: a connection's own accounts enumeration is
@@ -1141,7 +1336,67 @@ class Store:
             "UPDATE raw_artefacts SET connection_id = 'starling-api' "
             "WHERE connection_id = '' AND source LIKE 'starling%'"
         )
+        self._record_migration_completed("artefact_connection_attribution")
         self.connection.commit()
+
+    def unattributed_api_artefacts(self, *, sample_limit: int = 5) -> dict[str, object]:
+        """API artefacts naming no connection, against their denominator.
+
+        The drift backstop for the attribution migration, and for every
+        later pull that forgets to record which connection it used. A
+        half-attributed store is invisible from every other angle: the
+        column is there, and every question asked per connection simply
+        returns nothing - which reads exactly like a store that has no
+        connections yet. So the count comes with the total it is out of
+        and with a sample of the artefacts themselves, because "412 of
+        412 unattributed, e.g. truelayer-booked for halifax-current" is
+        actionable where a bare number is only alarming.
+
+        File imports are excluded by construction: their evidence arrived
+        through no connection, so an empty value there is the truth.
+        """
+        sources = sorted(API_SOURCES)
+        placeholders = ",".join("?" * len(sources))
+        # The placeholder run is interpolated because a variable-length IN
+        # list cannot itself be one bound parameter. It is punctuation
+        # counted off the registry, never a value: the sources ride in as
+        # parameters below.
+        counts = self.connection.execute(
+            "SELECT COUNT(*) AS total, "  # noqa: S608
+            "SUM(CASE WHEN connection_id = '' THEN 1 ELSE 0 END) AS unattributed "
+            f"FROM raw_artefacts WHERE source IN ({placeholders})",
+            sources,
+        ).fetchone()
+        total = int(counts["total"] or 0)
+        unattributed = int(counts["unattributed"] or 0)
+        sample = [
+            {
+                "source": str(row["source"]),
+                "account_ref": str(row["account_ref"]),
+                "origin": str(row["origin"]),
+                "fetched_at": str(row["fetched_at"]),
+            }
+            for row in self.connection.execute(
+                "SELECT source, account_ref, origin, fetched_at "  # noqa: S608
+                "FROM raw_artefacts "
+                f"WHERE connection_id = '' AND source IN ({placeholders}) "
+                # rowid breaks the ties a fetch cycle creates in bulk: a
+                # sample that reshuffles between two renders of the same
+                # store reads as movement where there is none.
+                "ORDER BY fetched_at DESC, rowid DESC LIMIT ?",
+                [*sources, sample_limit],
+            )
+        ]
+        return {
+            "total": total,
+            "attributed": total - unattributed,
+            "unattributed": unattributed,
+            "sample": sample,
+            "sample_of": unattributed,
+            "migration_completed": self._migration_completed(
+                "artefact_connection_attribution"
+            ),
+        }
 
     def _migrate_starling_connection_id(self) -> None:
         """Historical first-party rows carried the bare id "starling".

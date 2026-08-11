@@ -47,7 +47,8 @@ from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import SourceCoverage
 from .doctor import shape_problems
-from .namespaces import validate_connection_name
+from .money import format_amount
+from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 from .statement_shape import ShapeReport
@@ -388,8 +389,13 @@ class WebConfig:
     actual_queue: Callable[[], list[dict[str, object]]] | None = None
     #: Queue a read-only audit: the applier reads Actual back and reports.
     audit_actual: Callable[[], str] | None = None
-    #: The full sync history - every result, not just the newest handful.
-    actual_history: Callable[[], list[dict[str, object]]] | None = None
+    #: The sync history behind the homepage's newest handful. Either the
+    #: bare list of results, or a mapping of {"results", "total",
+    #: "unreadable"} - the reading side caps and skips, and a page can
+    #: only state a denominator it is handed.
+    actual_history: (
+        Callable[[], list[dict[str, object]] | dict[str, object]] | None
+    ) = None
     #: The audit's action arm: delete provably-ours orphaned imports.
     prune_actual: Callable[[], str] | None = None
     #: The review queue decomposed: reasons, clusters, declaration matches.
@@ -422,6 +428,13 @@ class WebConfig:
     #: is read back via rebuild_status.
     rebuild_derived: Callable[[], str] | None = None
     rebuild_status: Callable[[], dict[str, object]] | None = None
+    #: The same answer the CLI's gates refuse on - the rebuild lease
+    #: first, a status file stuck at "running" second - as the refusal
+    #: sentence itself, or None when nothing is in flight. The banner
+    #: asks this rather than reading the status file, so a page cannot
+    #: present a mid-replay store as settled while every button on it is
+    #: being refused.
+    rebuild_busy_note: Callable[[], str | None] | None = None
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None
     #: (account, source) -> connection names, for the roster's via-labels.
     source_connections: Callable[[], dict[tuple[str, str], list[str]]] | None = None
@@ -1582,20 +1595,33 @@ def _backfill_running_banner(
 
 def _rebuild_running_banner(
     rebuild_status: Callable[[], dict[str, object]] | None,
+    rebuild_busy_note: Callable[[], str | None] | None = None,
 ) -> str:
     """Shown at the TOP of the page while a rebuild runs: the account
     listing below is a store mid-replay, and without a banner it
-    masquerades as the truth."""
-    if rebuild_status is None:
-        return ""
+    masquerades as the truth.
+
+    The banner and the gates that refuse a push, an audit, a prune or a
+    bind must answer "is a rebuild in flight" from the same authority,
+    or the page calls the store settled while every action on it is
+    being refused. That authority is the busy note (the lease first, a
+    status file stuck at running second); the status file on its own is
+    only the progress detail, and it is absent for the whole window
+    between taking the lease and the first status write.
+    """
     status: dict[str, object] = {}
-    try:
-        status = rebuild_status() or {}
-    except Exception:
+    if rebuild_status is not None:
+        with contextlib.suppress(Exception):
+            status = rebuild_status() or {}
+    if str(status.get("state", "")) == "running":
+        return _rebuild_status_line(lambda: status)
+    note = ""
+    if rebuild_busy_note is not None:
+        with contextlib.suppress(Exception):
+            note = (rebuild_busy_note() or "").strip()
+    if not note:
         return ""
-    if str(status.get("state", "")) != "running":
-        return ""
-    return _rebuild_status_line(lambda: status)
+    return f'<p class="warn">{html.escape(note)}</p>'
 
 
 @dataclass(frozen=True)
@@ -2081,11 +2107,23 @@ def _danger_zone(
 
 def _result_row(result: dict[str, object]) -> str:
     """One sync outcome, whatever its kind - shared by the homepage
-    section (newest handful) and the full history page."""
-    if str(result.get("kind", "")) == "audit":
-        return _audit_result_row(result)
-    if str(result.get("kind", "")) == "prune":
-        return _prune_result_row(result)
+    section (newest handful) and the full history page.
+
+    Dispatch is a lookup in the renderer table rather than a chain of
+    comparisons with a renderer on the end: a chain answers an unknown
+    kind with whichever renderer sits in the fallback, so a destructive
+    outcome this build cannot read would be announced as a successful
+    push. An unnamed kind is a push because push results predate the
+    kind field; a NAMED kind nobody renders is reported as such.
+    """
+    kind = str(result.get("kind", "")) or "push"
+    renderer = _RESULT_ROWS.get(kind)
+    if renderer is None:
+        return _unknown_kind_result_row(result, kind)
+    return renderer(result)
+
+
+def _push_result_row(result: dict[str, object]) -> str:
     ok = bool(result.get("ok"))
     badge = (
         '<span class="pill pill-ok">applied</span>'
@@ -2102,6 +2140,29 @@ def _result_row(result: dict[str, object]) -> str:
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}'
         f'<br><span class="muted">{detail}</span></div>'
+    )
+
+
+def _unknown_kind_result_row(result: dict[str, object], kind: str) -> str:
+    """A result whose kind this build has no renderer for.
+
+    Named and shown with its own contents rather than dropped or guessed
+    at: the applier and the page are deployed separately, so the page
+    meeting a kind it does not know means the two are out of step, and
+    the outcome is still worth reading by eye.
+    """
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    evidence = ", ".join(
+        f"{html.escape(str(key))} {html.escape(str(value))}"
+        for key, value in result.items()
+        if key not in {"kind", "finished_at", "request"}
+    )
+    return (
+        f'<div class="row"><strong>{stamp}Z</strong> '
+        f'<span class="pill pill-bad">unknown result kind: '
+        f"{html.escape(kind)}</span><br>"
+        f'<span class="muted">this build cannot read it - the applier is '
+        f"newer than the page. {evidence}</span></div>"
     )
 
 
@@ -2140,8 +2201,106 @@ def _prune_result_row(result: dict[str, object]) -> str:
     )
 
 
+#: Audit keys that describe the comparison rather than report a
+#: difference: the two totals being compared, the person's own rows
+#: (counted precisely so they are never read as a fault), the row count
+#: on a stray account, and the account's own identity.
+_AUDIT_NON_DIFFERENCE_KEYS = frozenset(
+    {"expected", "present", "human", "rows", "account_id", "name"}
+)
+
+#: The difference categories with a fixed place in the detail line, in
+#: reading order. Anything else the applier reports is appended after
+#: them - see _audit_differences.
+_AUDIT_NAMED_DIFFERENCES = ("missing", "orphaned", "diverged", "duplicated")
+
+
+def _audit_differences(account: dict[str, object]) -> dict[str, object]:
+    """Every key in an account's audit line that reports a difference.
+
+    Read from the result rather than from a list of the categories known
+    when this page was written: the applier chooses those names on its
+    own side of a file boundary, so a category this page has never heard
+    of must read as a difference to look at, never as a clean audit. A
+    difference is a flag that is true or a count that is not zero;
+    samples are the evidence for a count, not a category of their own.
+    """
+    differences: dict[str, object] = {}
+    for key, value in account.items():
+        if key in _AUDIT_NON_DIFFERENCE_KEYS or key.endswith("_sample"):
+            continue
+        if isinstance(value, bool):
+            if value:
+                differences[key] = value
+        elif isinstance(value, int | float) and value:
+            differences[key] = value
+    return differences
+
+
+def _audit_sample_entry(item: object) -> str:
+    if not isinstance(item, dict):
+        return html.escape(str(item))
+    parts: list[str] = []
+    for key, value in item.items():
+        if isinstance(value, dict):
+            inner = ", ".join(
+                _audit_sample_field(sub_key, sub_value)
+                for sub_key, sub_value in value.items()
+            )
+            parts.append(f"{html.escape(str(key))}({inner})")
+        else:
+            parts.append(_audit_sample_field(str(key), value))
+    return " ".join(parts)
+
+
+def _audit_sample_field(key: str, value: object) -> str:
+    # Actual holds amounts in minor units and the budget file is
+    # single-currency, so a bare integer here reads as pence dressed as
+    # pounds. Ids and dates are what a person searches on, so they are
+    # shown bare; anything else is labelled with the key it arrived under.
+    if key == "amount" and isinstance(value, int) and not isinstance(value, bool):
+        return html.escape(format_amount(value))
+    if key in {"imported_id", "date"}:
+        return html.escape(str(value))
+    return f"{html.escape(key)} {html.escape(str(value))}"
+
+
+def _audit_sample_lines(account: dict[str, object]) -> list[str]:
+    """The rows behind the counts, as the applier sampled them.
+
+    A count says how bad it is; the sample says where to start looking,
+    and the applier already pays to compute it - "missing 37" with the
+    ids dropped on the floor cannot be acted on without a shell. Every
+    "<category>_sample" key present is rendered, so a category added on
+    the applier's side arrives on the page rather than waiting for this
+    function to learn its name. The sample is capped upstream, so it
+    carries the count it was drawn from.
+    """
+    lines: list[str] = []
+    for key in sorted(account):
+        if not key.endswith("_sample"):
+            continue
+        sample = account[key]
+        if not isinstance(sample, list) or not sample:
+            continue
+        category = key[: -len("_sample")]
+        total = account.get(category)
+        denominator = (
+            total
+            if isinstance(total, int) and not isinstance(total, bool)
+            else len(sample)
+        )
+        entries = "; ".join(_audit_sample_entry(item) for item in sample)
+        lines.append(
+            f'<span class="muted">{html.escape(category)} - showing '
+            f"{len(sample)} of {denominator}: {entries}</span>"
+        )
+    return lines
+
+
 def _audit_result_row(result: dict[str, object]) -> str:
-    """One audit outcome: a verdict pill, then a line per account.
+    """One audit outcome: a verdict pill, then a line per account, then
+    the sampled rows behind each account's counts.
 
     "yours" is the count of rows without an imported id - the person's own
     entries, counted to show they were seen and deliberately not compared.
@@ -2157,24 +2316,15 @@ def _audit_result_row(result: dict[str, object]) -> str:
     raw = result.get("accounts")
     accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
 
-    def _dirty(account: dict[str, object]) -> bool:
-        return bool(
-            account.get("missing_account")
-            or account.get("unbound_in_actual")
-            or account.get("missing")
-            or account.get("orphaned")
-            or account.get("diverged")
-            or account.get("duplicated")
-        )
-
     badge = (
         '<span class="pill pill-bad">audit: differences</span>'
-        if any(_dirty(a) for a in accounts)
+        if any(_audit_differences(a) for a in accounts)
         else '<span class="pill pill-ok">audit clean</span>'
     )
     lines = []
     for account in accounts:
         name = html.escape(str(account.get("name") or account.get("account_id", "")))
+        differences = _audit_differences(account)
         if account.get("missing_account"):
             lines.append(
                 f'<span class="warn">{name}: account missing from Actual '
@@ -2197,13 +2347,133 @@ def _audit_result_row(result: dict[str, object]) -> str:
             f"diverged {account.get('diverged', 0)}, "
             f"duplicated {account.get('duplicated', 0)}"
         )
-        css = "warn" if _dirty(account) else "muted"
+        unnamed = [
+            key for key in sorted(differences) if key not in _AUDIT_NAMED_DIFFERENCES
+        ]
+        if unnamed:
+            detail += ", " + ", ".join(
+                f"{html.escape(key)} {html.escape(str(differences[key]))}"
+                for key in unnamed
+            )
+        css = "warn" if differences else "muted"
         lines.append(f'<span class="{css}">{name}: {detail}</span>')
+        lines.extend(_audit_sample_lines(account))
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}<br>'
         + "<br>".join(lines)
         + "</div>"
     )
+
+
+#: One renderer per queue kind, keyed by the kind the applier stamps on
+#: its result. A test reads namespaces.QUEUE_KINDS and fails when a kind
+#: in the registry has no entry here, so the table cannot fall behind the
+#: kinds the applier is allowed to emit.
+_RESULT_ROWS: dict[str, Callable[[dict[str, object]], str]] = {
+    "push": _push_result_row,
+    "audit": _audit_result_row,
+    "prune": _prune_result_row,
+}
+
+
+@dataclass(frozen=True)
+class _ResultHistory:
+    """The sync results a history hook handed over, and what it admits
+    it left behind.
+
+    The results directory is read with a cap and with unreadable files
+    skipped, and both are invisible in the rows themselves: a page that
+    prints the length of what it was given describes its own list, not
+    the record. The totals ride alongside the rows so the page can state
+    the denominator, and a hook that reports no total is said to report
+    no total rather than being taken as complete.
+    """
+
+    results: tuple[dict[str, object], ...] = ()
+    #: How many results exist to be shown, or None when the hook cannot say.
+    total: int | None = None
+    #: Result files that could not be read, named where the hook names them.
+    unreadable: tuple[str, ...] = ()
+    unreadable_count: int = 0
+
+
+def _read_history(payload: object) -> _ResultHistory:
+    """Accept either shape a history hook may hand back: a bare list of
+    results, or a mapping carrying the same list with its totals."""
+    if isinstance(payload, dict):
+        raw = payload.get("results")
+        results = (
+            tuple(r for r in raw if isinstance(r, dict))
+            if isinstance(raw, list)
+            else ()
+        )
+        total = payload.get("total")
+        unreadable_raw = payload.get("unreadable")
+        names: tuple[str, ...] = ()
+        count = 0
+        if isinstance(unreadable_raw, list):
+            names = tuple(str(name) for name in unreadable_raw)
+            count = len(names)
+        elif isinstance(unreadable_raw, int) and not isinstance(unreadable_raw, bool):
+            count = unreadable_raw
+        return _ResultHistory(
+            results=results,
+            total=(
+                total
+                if isinstance(total, int) and not isinstance(total, bool)
+                else None
+            ),
+            unreadable=names,
+            unreadable_count=count,
+        )
+    if isinstance(payload, list):
+        return _ResultHistory(
+            results=tuple(r for r in payload if isinstance(r, dict))
+        )
+    return _ResultHistory()
+
+
+def _history_summary(history: _ResultHistory) -> str:
+    """The count line, with its denominator and its omissions."""
+    shown = len(history.results)
+    if history.total is None:
+        sentence = (
+            f"{shown} result(s) shown - this history hook reports no total, "
+            "so whether older results were left out is unknown"
+        )
+    elif history.total > shown:
+        sentence = (
+            f"showing {shown} of {history.total} result(s) - the newest "
+            "ones, the rest are on disk only"
+        )
+    else:
+        sentence = f"{shown} of {history.total} result(s)"
+    if history.unreadable_count:
+        named = (
+            ": " + ", ".join(html.escape(name) for name in history.unreadable)
+            if history.unreadable
+            else " (not named by the hook)"
+        )
+        sentence += (
+            f". {history.unreadable_count} result file(s) could not be read"
+            f"{named}"
+        )
+    return f'<p class="muted">{sentence}</p>'
+
+
+def _queued_kind_note(kind: str) -> str:
+    """How a queued envelope names itself in its pill.
+
+    Every registered kind carries its own name. A push adds rows to
+    Actual and a prune deletes them, so a label written for one kind
+    only leaves the rest sharing a pill with no way to tell which piece
+    of work is waiting.
+    """
+    if not kind:
+        return ""
+    if kind in QUEUE_KINDS:
+        return f" ({html.escape(kind)})"
+    return f" (unknown kind: {html.escape(kind)})"
 
 
 def _actual_rows(
@@ -2239,7 +2509,7 @@ def _actual_rows(
             stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
                 str(entry.get("name", ""))
             )
-            kind_note = " (audit)" if entry.get("kind") == "audit" else ""
+            kind_note = _queued_kind_note(str(entry.get("kind", "")))
             since = str(entry.get("in_progress_since", ""))
             if since:
                 what = f"in progress{kind_note}"
@@ -2589,6 +2859,7 @@ def render_index(
     rebuild_available: bool = False,
     forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
+    rebuild_busy_note: Callable[[], str | None] | None = None,
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
     source_connections: dict[tuple[str, str], list[str]] | None = None,
     starling_probe_available: bool = False,
@@ -2607,7 +2878,7 @@ def render_index(
     upload_picker = account_picker(upload_labels)
     body = f"""
 {_credential_banner()}
-{_rebuild_running_banner(rebuild_status)}
+{_rebuild_running_banner(rebuild_status, rebuild_busy_note)}
 {_backfill_running_banner(backfill_status)}
 {_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
@@ -2835,6 +3106,9 @@ class ConnectionHandler(BaseHTTPRequestHandler):
                 forget_available=self.bound_config.forget_actual is not None,
                 rebuild_status=timed(
                     "rebuild_status", self.bound_config.rebuild_status
+                ),
+                rebuild_busy_note=timed(
+                    "rebuild_busy_note", self.bound_config.rebuild_busy_note
                 ),
                 recent_rebuilds=timed(
                     "recent_rebuilds", self.bound_config.recent_rebuilds
@@ -3429,19 +3703,21 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No history wired.</p>"))
             return
+        payload: object = []
         try:
-            results = hook()
+            payload = hook()
         except Exception:
-            results = []
+            payload = []
+        history = _read_history(payload)
         body = (
             "<h2>Actual sync history</h2>"
-            "<p>Every recorded outcome, newest first - the home page shows "
+            "<p>Recorded outcomes, newest first - the home page shows "
             "only the latest handful. Times are UTC (marked Z).</p>"
-            + "".join(_result_row(result) for result in results)
+            + "".join(_result_row(result) for result in history.results)
             + (
-                "<p>Nothing recorded yet.</p>"
-                if not results
-                else f'<p class="muted">{len(results)} result(s)</p>'
+                _history_summary(history)
+                if history.results or history.total or history.unreadable_count
+                else "<p>Nothing recorded yet.</p>"
             )
             + HOME_LINK
         )

@@ -214,7 +214,7 @@ class TestBindingsRoundTrip:
             encoding="utf-8",
         )
 
-        merged = merge_pending_bindings(map_path, actual_dir)
+        merged = merge_pending_bindings(map_path, actual_dir).merged
 
         assert merged == 1
         stored = json.loads(map_path.read_text(encoding="utf-8"))
@@ -453,7 +453,7 @@ class TestMergeClaimsBeforeReading:
             encoding="utf-8",
         )
 
-        assert merge_pending_bindings(map_path, actual_dir) == 1
+        assert merge_pending_bindings(map_path, actual_dir).merged == 1
         # The applier writes a NEW binding after the first merge consumed
         # its claim - exactly the mid-merge write, one tick later.
         (actual_dir / "bindings-pending.json").write_text(
@@ -462,7 +462,7 @@ class TestMergeClaimsBeforeReading:
             ),
             encoding="utf-8",
         )
-        assert merge_pending_bindings(map_path, actual_dir) == 1
+        assert merge_pending_bindings(map_path, actual_dir).merged == 1
 
         merged = _json.loads(map_path.read_text(encoding="utf-8"))
         canonicals = sorted(e["canonical_id"] for e in merged["actual"])
@@ -484,6 +484,6 @@ class TestMergeClaimsBeforeReading:
             encoding="utf-8",
         )
 
-        assert merge_pending_bindings(map_path, actual_dir) == 1
+        assert merge_pending_bindings(map_path, actual_dir).merged == 1
         merged = _json.loads(map_path.read_text(encoding="utf-8"))
         assert merged["actual"][0]["canonical_id"] == "c"

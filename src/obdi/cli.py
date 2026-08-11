@@ -76,6 +76,30 @@ def _account_map() -> AccountMap:
     )
 
 
+def _carry_account_facts(store: Store, old_canonical: str, new_canonical: str) -> int:
+    """Bring account-keyed provider facts along with a rename.
+
+    Most provider facts describe a CONNECTION (its SCA window, the backfill
+    depth it grants) and are untouched by an account changing name. The
+    history boundary is the exception: its key names the account, exactly
+    like the account_ref columns the rebind moves, so it must travel with
+    them. The alias set rescues a fact left under the source-qualified
+    fallback, but a name the account has since shed is reachable through no
+    alias at all - and the wall cost a provider request to find. OR IGNORE
+    because a fact already recorded under the new name is the better-informed
+    answer and must not be overwritten by an older one. Returns facts moved.
+    """
+    cursor = store.connection.execute(
+        "UPDATE OR IGNORE provider_facts SET fact = ? WHERE fact = ?",
+        (
+            f"history_boundary:{new_canonical}",
+            f"history_boundary:{old_canonical}",
+        ),
+    )
+    store.connection.commit()
+    return int(cursor.rowcount or 0)
+
+
 def _apply_bind(
     db_path: Path,
     map_file: Path,
@@ -100,6 +124,7 @@ def _apply_bind(
         try:
             for stranded in {old_canonical, qualified} - {canonical}:
                 moved += store.rebind_account(stranded, canonical)
+                _carry_account_facts(store, stranded, canonical)
         except _sqlite3.IntegrityError as exc:
             if "UNIQUE" not in str(exc):
                 raise
@@ -219,9 +244,9 @@ def queue_actual_push(db_path: Path) -> str:
     from .actual_push import drop_conflicting_bindings
 
     lines = []
-    merged = merge_pending_bindings(Path(map_path_env), actual_dir)
-    if merged:
-        lines.append(f"merged {merged} applier-minted binding(s) into the account map")
+    merge_note = merge_pending_bindings(Path(map_path_env), actual_dir).describe()
+    if merge_note:
+        lines.append(merge_note)
     dropped = drop_conflicting_bindings(Path(map_path_env))
     if dropped:
         lines.append(
@@ -834,6 +859,32 @@ def _evidence_aliases(ref: str) -> list[str]:
     return sorted(alias for alias in aliases if alias and alias != ":")
 
 
+def _recorded_boundary(
+    store: Store, connection_id: str, canonical: str
+) -> date | None:
+    """The provider's history wall for this account, under any label it wore.
+
+    A boundary is knowledge a refused probe PAID a provider request for, and
+    it is keyed by whichever canonical name resolved at the moment it was
+    recorded - so binding an account renames it out from under that key. Read
+    through the same alias set every other ref-filtered query uses, or a bind
+    orphans the wall and the extend rows go back to inviting someone to spend
+    quota rediscovering it. The current name is consulted first: where both
+    vintages carry a boundary, the one recorded under today's name is the
+    better-informed answer.
+    """
+    aliases = [canonical] + [
+        alias for alias in _evidence_aliases(canonical) if alias != canonical
+    ]
+    for alias in aliases:
+        value = store.provider_fact(
+            "truelayer", connection_id, f"history_boundary:{alias}"
+        )
+        if value:
+            return date.fromisoformat(value)
+    return None
+
+
 def _earliest_asked(store: Store, canonical: str) -> date | None:
     """How far back any landed window has ALREADY reached for this account.
 
@@ -1161,9 +1212,6 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         for t in held
                         if t.account_id == canonical and t.source == "truelayer"
                     ]
-                    boundary_fact = store.provider_fact(
-                        "truelayer", connection_id, f"history_boundary:{canonical}"
-                    )
                     covered_to, last_landed = _latest_asked(store, canonical)
                     found.append(
                         ExtendableAccount(
@@ -1174,10 +1222,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
                             auth_note=note,
-                            boundary=(
-                                date.fromisoformat(boundary_fact)
-                                if boundary_fact
-                                else None
+                            boundary=_recorded_boundary(
+                                store, connection_id, canonical
                             ),
                             canonical=canonical,
                             unbound=canonical.startswith("truelayer:"),
@@ -1199,9 +1245,6 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                         for t in held
                         if t.account_id == canonical and t.source == "truelayer"
                     ]
-                    boundary_fact = store.provider_fact(
-                        "truelayer", connection_id, f"history_boundary:{canonical}"
-                    )
                     covered_to, last_landed = _latest_asked(store, canonical)
                     suffix = (
                         f"{card['card_type'] or 'card'} card "
@@ -1217,10 +1260,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
                             auth_note=note,
-                            boundary=(
-                                date.fromisoformat(boundary_fact)
-                                if boundary_fact
-                                else None
+                            boundary=_recorded_boundary(
+                                store, connection_id, canonical
                             ),
                             canonical=canonical,
                             unbound=canonical.startswith("truelayer:"),
@@ -2039,10 +2080,19 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 entry["in_progress_since"] = str(working.get("started_at", ""))
         return queued
 
-    def actual_history() -> list[dict[str, object]]:
-        from .actual_push import latest_results
+    def actual_history() -> dict[str, object]:
+        """The recent results WITH their denominator.
 
-        return latest_results(_actual_dir(db_path), limit=200)
+        The cap and the unreadable files travel with the rows, because a
+        page showing five of two hundred looks identical to a page showing
+        everything unless it is told which it is holding.
+        """
+        from .actual_push import latest_results_with_totals
+
+        results, total, unreadable = latest_results_with_totals(
+            _actual_dir(db_path), limit=200
+        )
+        return {"results": results, "total": total, "unreadable": unreadable}
 
     def actual_heartbeat() -> str:
         from .actual_push import applier_heartbeat
@@ -2415,6 +2465,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         replay_artefact=replay_artefact,
         rebuild_derived=rebuild_derived,
         rebuild_status=rebuild_status,
+        # The banner asks the same gate the refusals ask, so the page
+        # and the doors cannot disagree about whether a rebuild is in
+        # flight.
+        rebuild_busy_note=lambda: rebuild_in_progress_note(db_path),
         recent_rebuilds=lambda: _recent_rebuilds(db_path),
         recent_attempts=lambda: _recent_attempts(db_path),
         source_connections=lambda: _source_connections(db_path),
@@ -2579,6 +2633,7 @@ def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
 
     with Store(db_path) as store:
         moved = store.rebind_account(f"{source}:{provider_ref}", canonical)
+        _carry_account_facts(store, f"{source}:{provider_ref}", canonical)
 
     print(
         f"bound {source}:{provider_ref} -> {canonical} "

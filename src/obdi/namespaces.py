@@ -1,10 +1,11 @@
 """Every shared string namespace, declared once.
 
-Four kinds of identifier in this system are chosen by one actor and read
-by another: evidence SOURCES, cooperative LEASES, connection ids, and
-queue kinds. None of them is a type - they are bare strings crossing a
-process boundary - so nothing stops a new member from colliding with an
-existing one, or a typo from creating a member nobody reads.
+Five kinds of identifier in this system are chosen by one actor and read
+by another: evidence SOURCES, cooperative LEASES, connection ids, queue
+kinds, and the PROVENANCE that ranks one annotation above another. None
+of them is a type - they are bare strings crossing a process boundary -
+so nothing stops a new member from colliding with an existing one, or a
+typo from creating a member nobody reads.
 
 That is not hypothetical. The first-party Starling path recorded its
 attempts under the id "starling", which the connection form would happily
@@ -99,6 +100,55 @@ LEASES = frozenset(
 
 #: Envelope kinds the applier dispatches on.
 QUEUE_KINDS = frozenset({"push", "audit", "prune"})
+
+#: The annotation ladder: who said so, and who may overwrite whom. The
+#: prefix before any ':' decides, so "rule:sweep" and "rule:v2" rank
+#: alike - a rule may revisit a rule's work as the rules evolve, while
+#: nothing mechanical may overwrite a person's decision.
+#:
+#: There is deliberately no rank zero. An unregistered prefix used to
+#: fall to zero, which placed it BENEATH every declared rank: a typo in
+#: a provenance string produced an annotation that the next rule sweep
+#: was then entitled to overwrite. Unknown authority is not the lowest
+#: authority, so the write door refuses it instead of ranking it.
+PROVENANCE_RANKS: dict[str, int] = {"rule": 1, "model": 2, "human": 3}
+
+
+def provenance_rank(provenance: str) -> int:
+    """The ladder position of a provenance a caller is writing WITH.
+
+    Raises ValueError on anything unregistered, because the alternative -
+    guessing a rank - decides the precedence question the ladder exists
+    to answer, and decides it in the direction that loses work.
+    """
+    prefix = provenance.split(":", 1)[0]
+    rank = PROVENANCE_RANKS.get(prefix)
+    if rank is None:
+        raise ValueError(
+            f"unregistered annotation provenance {provenance!r}: '{prefix}' is "
+            f"not one of {sorted(PROVENANCE_RANKS)}. Declare it in "
+            "namespaces.PROVENANCE_RANKS, at the rung it belongs on, before "
+            "writing with it - an unranked provenance cannot be defended "
+            "against an overwrite"
+        )
+    return rank
+
+
+def stored_provenance_rank(provenance: str) -> int:
+    """The ladder position to give a provenance ALREADY in the store.
+
+    The write door refuses an unregistered provenance, so one can only be
+    on a row from before that door existed, or from a hand-edited
+    database. Raising here would make a single unrecognised row lock
+    every read of the annotation layer; ranking it zero is the very fault
+    the door exists to prevent. It ranks with the top rung instead:
+    unknown authority is protected from every machine, and a person - who
+    is already at the top - can still correct it.
+    """
+    return PROVENANCE_RANKS.get(
+        provenance.split(":", 1)[0], max(PROVENANCE_RANKS.values())
+    )
+
 
 #: Connection ids owned by first-party paths, which are not aggregator
 #: connections but write to the same ledger. No connection may be given

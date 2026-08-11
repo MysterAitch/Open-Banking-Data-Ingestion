@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,38 @@ def write_map(map_path: Path, payload: dict[str, object]) -> None:
     tmp.replace(map_path)
 
 
-def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
+@dataclass(frozen=True)
+class PendingMergeReport:
+    """What a merge folded in, out of what it was offered, and what defeated it.
+
+    A bare merged count cannot tell "there was nothing to merge" from "a
+    file carrying a provisioned account's id was unreadable", and those
+    demand opposite responses - the second is a binding at risk of being
+    lost, which is the one outcome this whole claim dance exists to prevent.
+    """
+
+    merged: int
+    offered: int
+    unreadable: list[str]
+
+    def describe(self) -> str:
+        """The line the push prints, empty when there was nothing to merge."""
+        if not (self.offered or self.unreadable):
+            return ""
+        note = (
+            f"merged {self.merged} of {self.offered} applier-minted "
+            "binding(s) into the account map"
+        )
+        if self.unreadable:
+            note += (
+                f"; {len(self.unreadable)} unreadable claim(s) RETAINED for "
+                "repair (any account they name stays unbound until they are "
+                "readable or removed): " + ", ".join(sorted(self.unreadable))
+            )
+        return note
+
+
+def merge_pending_bindings(map_path: Path, actual_dir: Path) -> PendingMergeReport:
     """Fold applier-minted bindings into the account map, consuming the file.
 
     The pending file is CLAIMED (renamed) before it is read: a binding the
@@ -42,6 +74,12 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     merged next call, instead of being archived unread behind our back.
     Claims from crashed merges (claimed, never marked merged) are swept
     and re-merged here too - re-merging is idempotent, losing is not.
+
+    Only a claim that PARSED is marked merged. A truncated or non-list
+    claim keeps its claim name, so it is swept again next call and reported
+    every time until someone repairs or removes it: marking it merged would
+    archive an unread binding under a name that says it was read, which is
+    exactly the loss the claim protocol exists to prevent.
     """
     pending_path = actual_dir / "bindings-pending.json"
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
@@ -55,7 +93,7 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
         else:
             claims.append(claim)
     if not claims:
-        return 0
+        return PendingMergeReport(merged=0, offered=0, unreadable=[])
 
     payload: dict[str, object] = {"bindings": [], "actual": []}
     if map_path.is_file():
@@ -65,14 +103,21 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     by_canonical = {str(e.get("canonical_id")): e for e in entries}
 
     merged = 0
+    offered = 0
+    unreadable: list[str] = []
+    consumed: list[Path] = []
     for claim in claims:
         try:
             pending = json.loads(claim.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            unreadable.append(claim.name)
             continue
         if not isinstance(pending, list):
+            unreadable.append(claim.name)
             continue
+        consumed.append(claim)
         for entry in pending:
+            offered += 1
             if not isinstance(entry, dict):
                 continue
             canonical = str(entry.get("canonical_id") or "")
@@ -87,12 +132,12 @@ def merge_pending_bindings(map_path: Path, actual_dir: Path) -> int:
     write_map(map_path, payload)
     # Mark claims consumed only AFTER the map is safely on disk: a crash
     # before this line re-merges them; after it, they are history.
-    for claim in claims:
+    for claim in consumed:
         with contextlib.suppress(OSError):
             claim.rename(
                 claim.with_name(claim.name.replace(".merging-", ".merged-"))
             )
-    return merged
+    return PendingMergeReport(merged=merged, offered=offered, unreadable=unreadable)
 
 
 def drop_conflicting_bindings(map_path: Path) -> list[str]:
@@ -313,16 +358,35 @@ def latest_results(actual_dir: Path, limit: int = 5) -> list[dict[str, object]]:
     """Newest first BY FINISH TIME, never by filename: audit- sorts before
     push- alphabetically, and ranking on names buried the first real audit
     report under five push results while it sat on disk the whole time."""
+    results, _total, _unreadable = latest_results_with_totals(actual_dir, limit)
+    return results
+
+
+def latest_results_with_totals(
+    actual_dir: Path, limit: int = 5
+) -> tuple[list[dict[str, object]], int, list[str]]:
+    """The newest results, HOW MANY there were, and which could not be read.
+
+    A capped list on its own reads as the whole record, and a result file
+    that failed to parse vanishes from it entirely - so a page showing five
+    of two hundred, with one unreadable, looks identical to a page showing
+    everything there is. The counts travel with the rows so the display can
+    say which it is holding.
+    """
     results_dir = actual_dir / "results"
     if not results_dir.is_dir():
-        return []
+        return [], 0, []
     decoded_all: list[dict[str, object]] = []
-    for path in results_dir.glob("*.json"):
+    unreadable: list[str] = []
+    for path in sorted(results_dir.glob("*.json")):
         try:
             decoded = json.loads(path.read_text(encoding="utf-8"))
-        except ValueError:
+        except (ValueError, OSError):
+            unreadable.append(path.name)
             continue
         if isinstance(decoded, dict):
             decoded_all.append(decoded)
+        else:
+            unreadable.append(path.name)
     decoded_all.sort(key=lambda r: str(r.get("finished_at", "")), reverse=True)
-    return decoded_all[:limit]
+    return decoded_all[:limit], len(decoded_all) + len(unreadable), unreadable
