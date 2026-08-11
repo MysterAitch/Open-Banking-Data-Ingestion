@@ -47,6 +47,10 @@ FILE_SOURCES = frozenset(
         # parser that read a row is the fact worth recording.
         "santander-cc-pdf",
         "virgin-money-cc-pdf",
+        # A statement kept before anyone has decided which bank wrote it,
+        # let alone which account it belongs to. It becomes one of the
+        # issuer names above once a parser claims it.
+        "statement",
     }
 )
 
@@ -176,3 +180,10 @@ def qualified_ref(provider: str, provider_id: str) -> str:
     if provider not in PROVIDERS:
         raise ValueError(f"unknown provider {provider!r}")
     return f"{provider}:{provider_id}"
+
+
+#: Where a statement lands before anyone decides whose it is. A document
+#: still being read is not yet evidence ABOUT an account, and refusing to
+#: keep it until that is settled loses the exports that cannot be fetched
+#: twice. The ordinary refile assigns it later.
+UNASSIGNED_ACCOUNT = "(unassigned)"

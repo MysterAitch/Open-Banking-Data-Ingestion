@@ -300,6 +300,12 @@ class WebConfig:
     #: like every other hook; the page renders whatever dictionaries arrive,
     #: so the analysis lives beside the store, not in the HTML.
     artefact_index: Callable[[], list[dict[str, object]]] | None = None
+    #: Keep an uploaded statement as evidence before an account is
+    #: chosen - the exports worth keeping most are the ones that
+    #: cannot be fetched twice.
+    keep_statement: Callable[[bytes, str], int] | None = None
+    #: A kept statement's filename and bytes, by artefact id.
+    statement_payload: Callable[[int], tuple[str, bytes] | None] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
     #: Correct one artefact's landed account (the mis-tapped destination
     #: remedy). Takes (artefact_id, new_account_ref); returns the old ref,
@@ -2708,6 +2714,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             self._agreements_page()
             return
         if route == "/statement-shape":
+            params = parse_qs(parsed.query)
+            kept = params.get("artefact", [""])[0].strip()
+            if kept.isdigit():
+                self._kept_statement_shape(int(kept))
+                return
             self._statement_shape_form()
             return
         if route == "/review":
@@ -3458,8 +3469,11 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         "<p>This page reads a PDF and shows its shape with every value "
         "masked: digits become 9s, other words become Xs of the same "
         "length and casing, and spacing, headers and punctuation survive. "
-        "The file is NOT stored and nothing is imported. The masked output "
-        "is safe to share; the real contents are not.</p>"
+        "The masked output is safe to share; the real contents are not.</p>"
+        "<p>The file is KEPT as evidence, before any account is chosen - "
+        "the exports worth keeping most are the ones that cannot be "
+        "fetched twice. Nothing is imported until it is assigned to an "
+        "account.</p>"
     )
 
     def _statement_shape_form(self, note: str = "") -> None:
@@ -3507,8 +3521,23 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # shape an automated caller produces by accident - and these pages
         # are read programmatically as well as by a person.
         shape = self._read_shape(payload, filename, mask=True)
+        kept = ""
+        keeper = self.bound_config.keep_statement
+        if keeper is not None and shape.readable and shape.line_count:
+            # Kept BEFORE an account is chosen, because the exports most
+            # worth keeping are the ones that cannot be fetched twice.
+            artefact_id = keeper(payload, filename)
+            if artefact_id:
+                kept = (
+                    f'<p class="ok">Kept as statement {artefact_id}. Its '
+                    f'masked shape stays at <a href="/statement-shape?'
+                    f'artefact={artefact_id}">/statement-shape?artefact='
+                    f"{artefact_id}</a>, so it can be read again without "
+                    "uploading it again, and assigned to an account later.</p>"
+                )
         body = (
             "<h2>Statement shape</h2>"
+            + kept
             + f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
         )
@@ -3544,6 +3573,37 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             temporary = Path(scratch) / (filename or "statement.pdf")
             temporary.write_bytes(payload)
             return shape_report(temporary, mask=mask, limit=1200)
+
+    def _kept_statement_shape(self, artefact_id: int) -> None:
+        """A kept statement's masked shape, at an address that stays put.
+
+        Masked ONLY. A fetchable URL that returned real contents would be a
+        standing bypass of the two-step disclosure, and a link that exists
+        at all is a link something can follow.
+        """
+        hook = self.bound_config.statement_payload
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        held = hook(artefact_id)
+        if held is None:
+            self._respond(
+                404,
+                error_page("Not found", "<p>No kept statement with that id.</p>"),
+            )
+            return
+        filename, payload = held
+        shape = self._read_shape(payload, filename, mask=True)
+        body = (
+            f"<h2>Statement shape</h2><p class=\"muted\">Kept statement "
+            f"{artefact_id}, values masked. This address stays put, so the "
+            "shape can be read again without uploading the file again.</p>"
+            f'<pre class="scroll" style="white-space:pre">'
+            f"{html.escape(shape.describe())}</pre>"
+            '<p><a class="button" href="/statement-shape">Read another</a></p>'
+            + HOME_LINK
+        )
+        self._respond(200, render_page("Statement shape", body))
 
     def _statement_shape_disclose(self) -> None:
         """The second half of the deliberate walk to real contents."""

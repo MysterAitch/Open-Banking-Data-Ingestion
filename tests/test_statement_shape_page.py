@@ -61,11 +61,15 @@ def _post(base: str, *, show_values: bool = False) -> httpx.Response:
 
 
 class TestThePage:
-    def test_TheForm_ExplainsWhatItDoesAndDoesNotStore(self, server):
+    def test_TheForm_SaysTheFileIsKept_AndTheShapeMasked(self, server):
+        # It used to promise the file was not stored. Keeping it is the
+        # better answer - the exports worth keeping most are the ones that
+        # cannot be fetched twice - and a promise the page no longer
+        # honours would be worse than either.
         page = httpx.get(f"{server}/statement-shape", timeout=20)
 
         assert page.status_code == 200
-        assert "not stored" in page.text.lower()
+        assert "kept as evidence" in page.text.lower()
         assert "masked" in page.text.lower()
 
     def test_AnUploadedStatement_ComesBackMasked_ByDefault(self, server):
@@ -110,3 +114,57 @@ class TestThePage:
         )
 
         assert response.status_code == 403
+
+
+class TestAKeptStatement:
+    """An uploaded statement survives, and its shape keeps an address.
+
+    A search-and-export that cannot be fetched twice is exactly the file a
+    reader must not hold for only one request - losing it loses the
+    evidence the raw layer exists to keep. And a stable address is what
+    ends the paste-a-shape loop: the same document can be read again,
+    without another upload, however wide or long it is.
+    """
+
+    def test_AnUpload_IsKept_AndItsShapeGetsAnAddress(self, tmp_path):
+        kept: dict[int, tuple[str, bytes]] = {}
+
+        def keep(payload: bytes, filename: str) -> int:
+            kept[7] = (filename, payload)
+            return 7
+
+        config = WebConfig(
+            client_id="client-1",
+            client_secret="secret-1",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            keep_statement=keep,
+            statement_payload=kept.get,
+        )
+        handler = type(
+            "KeepHandler",
+            (ConnectionHandler,),
+            {"config": config, "session": AuthorisationSession()},
+        )
+        httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        try:
+            upload = httpx.post(
+                f"{base}/statement-shape",
+                files={"file": ("statement.pdf", STATEMENT, "application/pdf")},
+                headers={"Origin": base},
+                timeout=20,
+            )
+            assert "artefact=7" in upload.text
+            assert kept, "the file itself is kept, not only its shape"
+
+            again = httpx.get(f"{base}/statement-shape?artefact=7", timeout=20)
+
+            assert again.status_code == 200
+            assert "9,999.99" in again.text, "the shape reads again, masked"
+            assert "1,234.56" not in again.text, "and never unmasked by URL"
+        finally:
+            httpd.shutdown()
+            httpd.server_close()

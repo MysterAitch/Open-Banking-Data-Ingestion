@@ -39,6 +39,7 @@ from .doctor import live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
+from .namespaces import UNASSIGNED_ACCOUNT
 from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
@@ -2187,6 +2188,47 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         joiner = chr(10)
         return joiner.join([*transcript, endings.get(outcome, outcome)])
 
+    def keep_statement(payload: bytes, filename: str) -> int:
+        """Land a statement as evidence BEFORE anyone decides whose it is.
+
+        The exports that most need keeping are the ones that cannot be
+        fetched twice - a search-and-export that expires, an archive a
+        provider happens to still hold. Demanding a destination first
+        turns a document you are still trying to read into one you cannot
+        keep, so the account is assigned later, by the same refile the
+        misfile recovery uses.
+        """
+        from .identity import artefact_digest
+        from .models import RawArtefact
+
+        digest = artefact_digest(payload)
+        with Store(db_path) as store:
+            store.land_artefact(
+                RawArtefact(
+                    source="statement",
+                    account_ref=UNASSIGNED_ACCOUNT,
+                    fetched_at=datetime.now().astimezone(),
+                    media_type="application/pdf",
+                    digest=digest,
+                    payload=payload,
+                    origin=filename or "statement.pdf",
+                )
+            )
+            row = store.connection.execute(
+                "SELECT rowid FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+            ).fetchone()
+        return int(row["rowid"]) if row else 0
+
+    def statement_payload(artefact_id: int) -> tuple[str, bytes] | None:
+        with Store(db_path) as store:
+            row = store.connection.execute(
+                "SELECT origin, payload FROM raw_artefacts WHERE rowid = ?",
+                (artefact_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["origin"]), bytes(row["payload"])
+
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
 
@@ -2304,6 +2346,8 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         extendables=extendables,
         extend_window=extend_window,
         artefact_index=artefact_index,
+        keep_statement=keep_statement,
+        statement_payload=statement_payload,
         artefact_detail=artefact_detail,
         refile_artefact=(
             lambda artefact_id, account: _refile(db_path, artefact_id, account)
