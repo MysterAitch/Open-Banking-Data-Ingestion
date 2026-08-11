@@ -3543,7 +3543,7 @@ class ConnectionHandler(BaseHTTPRequestHandler):
             # removed on the way out: this page stores nothing.
             temporary = Path(scratch) / (filename or "statement.pdf")
             temporary.write_bytes(payload)
-            return shape_report(temporary, mask=mask, limit=400)
+            return shape_report(temporary, mask=mask, limit=1200)
 
     def _statement_shape_disclose(self) -> None:
         """The second half of the deliberate walk to real contents."""

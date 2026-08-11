@@ -201,3 +201,47 @@ class TestLedgerMarkersSurvive:
         assert "SELLY" not in masked
         assert "21.72" not in masked
         assert "GB" in masked
+
+
+class TestLayoutExtraction:
+    """A statement is a table, and a table needs its horizontal positions.
+
+    Plain extraction emitted one TOKEN per line on a real statement - 2,714
+    lines of what layout mode renders as a few hundred - which destroyed
+    the columns and pushed the transaction table past the display limit.
+    Layout mode is tried first for that reason, with plain kept as the
+    fallback because some documents defeat it and a worse shape beats none.
+    """
+
+    def test_LayoutModeIsPreferred(self, tmp_path):
+        seen = {}
+
+        class Page:
+            def extract_text(self, **kwargs):
+                seen.update(kwargs)
+                return "Date Description Amount"
+
+        from obdi.statement_shape import _page_text
+
+        assert _page_text(Page()) == "Date Description Amount"
+        assert seen.get("extraction_mode") == "layout"
+
+    def test_WhenLayoutModeFails_PlainExtractionStillAnswers(self, tmp_path):
+        class Page:
+            def extract_text(self, **kwargs):
+                if kwargs.get("extraction_mode") == "layout":
+                    raise RuntimeError("this document defeats layout mode")
+                return "fallback text"
+
+        from obdi.statement_shape import _page_text
+
+        assert _page_text(Page()) == "fallback text"
+
+    def test_WhenLayoutModeReturnsNothing_PlainExtractionIsTried(self, tmp_path):
+        class Page:
+            def extract_text(self, **kwargs):
+                return "" if kwargs.get("extraction_mode") == "layout" else "plain"
+
+        from obdi.statement_shape import _page_text
+
+        assert _page_text(Page()) == "plain"

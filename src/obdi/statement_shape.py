@@ -111,6 +111,32 @@ def mask_line(line: str) -> MaskedText:
     return MaskedText(_WORD.sub(replace, line))
 
 
+def _page_text(page: object) -> str:
+    """One page's text, laid out rather than merely extracted.
+
+    Layout mode keeps horizontal position, which is what makes a statement
+    readable as the table it is. Plain extraction can emit one TOKEN per
+    line - observed on a real statement, where 2,714 lines held what layout
+    mode renders as a few hundred, and the transaction table became
+    unreadable and got truncated away. Plain remains the fallback, because
+    some documents defeat layout mode entirely and a worse shape beats no
+    shape.
+    """
+    extract = getattr(page, "extract_text", None)
+    if extract is None:
+        return ""
+    try:
+        laid_out = extract(extraction_mode="layout") or ""
+    except Exception:
+        laid_out = ""
+    if laid_out.strip():
+        return str(laid_out)
+    try:
+        return str(extract() or "")
+    except Exception:
+        return ""
+
+
 def pdf_lines(path: Path) -> list[RawText]:
     """Every text line in a PDF, in page order.
 
@@ -121,7 +147,7 @@ def pdf_lines(path: Path) -> list[RawText]:
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        pages = [_page_text(page) for page in reader.pages]
     except Exception:
         return []
     lines: list[RawText] = []
@@ -169,7 +195,7 @@ class ShapeReport:
         return "\n".join([header, *self.lines])
 
 
-def shape_report(path: Path, *, mask: bool = True, limit: int = 200) -> ShapeReport:
+def shape_report(path: Path, *, mask: bool = True, limit: int = 1200) -> ShapeReport:
     """Read a statement's layout, masked unless explicitly asked otherwise."""
     report = ShapeReport(path=path.name, masked=mask)
     try:
