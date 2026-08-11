@@ -16,12 +16,29 @@ import os
 
 
 def describe() -> str:
-    """The running build, as "version+shortcommit" when the commit is known."""
-    try:
-        from importlib.metadata import version
+    """The running build, as "version+shortcommit" when the commit is known.
 
-        base = version("obdi")
-    except Exception:
-        base = "unpackaged"
+    The version can be overridden by OBDI_BUILD_VERSION for the case the
+    installed metadata cannot answer honestly: an editable install records
+    the version it was installed AT and never moves, so a working tree at
+    0.4.179 reports whatever it was when `pip install -e` last ran. That
+    stale number then reaches anything rendering this - including a
+    screenshot committed to the README, which would advertise a version
+    nobody is running.
+
+    The override is a label. The COMMIT remains the thing that pins the
+    code, which is why it is the half injected at image build and the half
+    that cannot be argued with.
+    """
+    override = os.environ.get("OBDI_BUILD_VERSION", "").strip()
+    if override:
+        base = override
+    else:
+        try:
+            from importlib.metadata import version
+
+            base = version("obdi")
+        except Exception:
+            base = "unpackaged"
     commit = os.environ.get("OBDI_BUILD_COMMIT", "").strip()[:12]
     return f"{base}+{commit}" if commit else base

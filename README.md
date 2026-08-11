@@ -59,6 +59,17 @@ with it.
 |---|---|---|
 | ![The upload page](docs/screens/statement-shape.png) | ![A statement with every value masked](docs/screens/statement-masked.png) | ![The raw artefact list](docs/screens/artefacts.png) |
 
+Keeping a batch, recorded over a throttled connection because that is the
+ordinary case — statements already held are recognised and never sent, and the
+rest go one at a time, each keeping its own line with its size, its duration and
+what happened to it:
+
+![A batch of statements being kept](docs/screens/keeping-a-batch.gif)
+
+Every image names the version and commit it was generated from, in the footer;
+`docs/screens/generated-from.txt` carries the same pair as text, because a
+footer inside a picture cannot be grepped.
+
 The middle one is the point of the PDF arm. Writing a parser for a bank's
 statement needs its LAYOUT — column order, header wording, date format, how the
 balance lines are phrased — and none of its contents. So a statement is shown
