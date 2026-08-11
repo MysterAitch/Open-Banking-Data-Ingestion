@@ -301,6 +301,13 @@ def rebuild_from_raw(
         )
     }
 
+    # The claim of currency is withdrawn BEFORE the wipe. Anything that
+    # kills this process from here until the re-stamp leaves a partial
+    # derived layer, and a store that says so rather than one that
+    # certifies itself current while holding half the corpus.
+    from .fingerprint import invalidate_fingerprint
+
+    invalidate_fingerprint(store)
     store.connection.execute("DELETE FROM transactions")
     store.connection.execute("DELETE FROM transaction_sources")
     store.connection.execute("DELETE FROM review_queue")

@@ -56,12 +56,34 @@ def stored_fingerprint(store: Store) -> str | None:
     return str(row[0]) if row is not None else None
 
 
+def invalidate_fingerprint(store: Store) -> None:
+    """Withdraw the claim that the derived layer is current.
+
+    Called BEFORE the wipe, not after the failure. The stamp used to be
+    written only on success, which reads as fail-closed and is not: a
+    rebuild that dies part-way - a write error, a container killed
+    mid-replay - leaves a truncated derived layer with the PREVIOUS
+    stamp still in place, and that stamp already matched the running
+    code. The store then reports itself current while holding an
+    arbitrary prefix of the corpus, and every balance and total computed
+    from it is plausible and short.
+
+    Withdrawing the claim first inverts that: an interrupted rebuild
+    leaves no stamp, so the next start rebuilds again.
+    """
+    store.connection.execute(
+        "DELETE FROM obdi_meta WHERE key = ?", (_STAMP_KEY,)
+    )
+    store.connection.commit()
+
+
 def stamp_fingerprint(store: Store, value: str) -> None:
     """Record which code the derived layer was last rebuilt under.
 
-    Written only after a SUCCESSFUL rebuild, by the rebuild itself - a
-    failed rebuild leaves the old stamp, so the next startup tries
-    again rather than believing the store is current.
+    Written only after a SUCCESSFUL rebuild, and only meaningful because
+    `invalidate_fingerprint` withdrew the previous claim before the wipe -
+    on its own, writing on success leaves a stale-but-matching stamp over
+    a half-built store.
     """
     store.connection.execute(
         "INSERT INTO obdi_meta (key, value) VALUES (?, ?) "

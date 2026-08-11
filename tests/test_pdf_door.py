@@ -50,9 +50,13 @@ class TestTheRefusalNamesTheSituation:
         assert "statement-shape" in str(refused.value)
 
     def test_ARecognisedCsv_IsUnaffected(self):
-        parser = detect(STARLING_CSV)
+        # Named, not merely non-None: detect either returns a parser or
+        # raises, so asserting non-None asserts nothing at all - the test
+        # would have passed with a Starling export handed to Monzo's
+        # parser, which is the regression it exists to catch.
+        from obdi.parsers.uk_banks import StarlingCsvParser
 
-        assert parser is not None
+        assert isinstance(detect(STARLING_CSV), StarlingCsvParser)
 
     def test_AnUnknownTextFile_StillGetsTheHeaderRowRefusal(self):
         with pytest.raises(ParseError) as refused:

@@ -68,7 +68,15 @@ def _best_of(fn, repeats: int = 3) -> float:
 
 
 def _assert_near_linear(name: str, small_s: float, large_s: float) -> None:
-    if large_s < FLOOR_SECONDS:
+    # The floor guards BOTH measurements, not only the larger. A ratio is
+    # only as trustworthy as its denominator, and a sub-millisecond small
+    # reading is noise: on a loaded machine it shrinks while the large
+    # reading grows, and the quotient of the two accuses a linear function
+    # of being quadratic. This gate has cried wolf twice that way, both
+    # times while something else saturated the CPU, and a gate that cries
+    # wolf gets switched off - which costs more than the regression it
+    # was meant to catch.
+    if large_s < FLOOR_SECONDS or small_s < FLOOR_SECONDS:
         return
     ratio = large_s / max(small_s, 1e-9)
     assert ratio < MAX_RATIO, (
