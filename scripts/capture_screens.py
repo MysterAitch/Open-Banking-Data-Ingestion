@@ -143,8 +143,14 @@ def running_build() -> tuple[str, str]:
         text=True,
         check=False,
     ).stdout.strip()
-    dirty = subprocess.run(
-        ["git", "status", "--porcelain"],  # noqa: S607
+    # The script's OWN output is excluded. The question this answers is
+    # "did the code that produced these pictures differ from that commit?",
+    # and the pictures cannot answer it - running twice without committing
+    # would otherwise report changes that are only the previous run's
+    # images, and a suffix that appears for no reason is a suffix nobody
+    # believes when it means something.
+    changed = subprocess.run(
+        ["git", "status", "--porcelain", "--", ":!docs/screens"],  # noqa: S607
         cwd=str(REPO),
         capture_output=True,
         text=True,
@@ -154,7 +160,7 @@ def running_build() -> tuple[str, str]:
     # saying so is cheaper than wondering later why the picture and the
     # commit disagree. Spelled out rather than abbreviated, because the
     # suffix is read by whoever is trying to reproduce the image.
-    return version, (f"{commit}+local-changes" if dirty else commit)
+    return version, (f"{commit}+local-changes" if changed else commit)
 
 
 def wait_for(url: str, seconds: int = 30) -> None:
