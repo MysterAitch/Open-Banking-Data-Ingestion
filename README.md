@@ -37,6 +37,35 @@ CSV and QIF are text, so version control gives an append-only, provenance-stampe
 archive for free — and shows you the diff when a bank silently changes its export
 format. PDFs do not belong there; they neither diff nor compress.
 
+## What it looks like
+
+**Every figure in these images is invented.** They are produced by
+`scripts/capture_screens.py`, which starts the real application against a store
+in a temporary directory, lands statements built in that script with made-up
+amounts, photographs the pages and throws the store away. Nothing real is
+involved, which is what lets pictures live in a repository that holds no data.
+
+Generated rather than taken by hand for a second reason: a screenshot is a
+claim about the interface, and one nobody can regenerate keeps asserting a
+layout that changed months ago. When the pages move, one command moves the
+pictures with them — and a page that has started failing takes the script down
+with it.
+
+```
+.venv/Scripts/python.exe scripts/capture_screens.py    # needs `playwright install chromium`
+```
+
+| Reading a statement | Its masked shape | Everything landed |
+|---|---|---|
+| ![The upload page](docs/screens/statement-shape.png) | ![A statement with every value masked](docs/screens/statement-masked.png) | ![The raw artefact list](docs/screens/artefacts.png) |
+
+The middle one is the point of the PDF arm. Writing a parser for a bank's
+statement needs its LAYOUT — column order, header wording, date format, how the
+balance lines are phrased — and none of its contents. So a statement is shown
+with every digit masked to a 9 and every word that is not recognisable
+statement furniture masked to Xs of the same length and casing. The format
+stays legible enough to write a parser from; the money does not appear.
+
 ## Architecture
 
 ```
