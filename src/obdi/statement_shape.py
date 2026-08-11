@@ -181,6 +181,12 @@ class ShapeReport:
     #: The left edges the page uses, so a reader can see the table's shape
     #: without reading its contents.
     edges: list[float] = field(default_factory=list)
+    #: Whether the coordinate reading was ASKED FOR. Distinct from whether
+    #: it succeeded, and the distinction is load-bearing: reading geometry
+    #: costs seconds per page on a real statement, so a caller that only
+    #: needs counts declines it - and "not asked" reported as "could not be
+    #: read" would accuse a perfectly readable document.
+    columns_attempted: bool = True
 
     def describe(self) -> str:
         if not self.readable:
@@ -200,6 +206,8 @@ class ShapeReport:
                 f", read as {len(self.rows)} row(s) of "
                 f"{len(self.edges)} column(s)"
                 if self.rows
+                else ""
+                if not self.columns_attempted
                 else " - NO column reading (the page's geometry could not "
                 "be read, so only the spacing view is available)"
             )
@@ -223,9 +231,19 @@ class ShapeReport:
         return "\n".join(parts)
 
 
-def shape_report(path: Path, *, mask: bool = True, limit: int = 1200) -> ShapeReport:
-    """Read a statement's layout, masked unless explicitly asked otherwise."""
-    report = ShapeReport(path=path.name, masked=mask)
+def shape_report(
+    path: Path, *, mask: bool = True, limit: int = 1200, columns: bool = True
+) -> ShapeReport:
+    """Read a statement's layout, masked unless explicitly asked otherwise.
+
+    Set `columns` false when only the counts are wanted. Reading a page's
+    geometry costs seconds per page on a real statement - font programs
+    have to be parsed before a word has a position - against milliseconds
+    for the text, so a caller listing a batch of files pays that cost once
+    per file for an answer it then discards. The report says which happened
+    rather than letting a declined reading look like a failed one.
+    """
+    report = ShapeReport(path=path.name, masked=mask, columns_attempted=columns)
     try:
         from pypdf import PdfReader
 
@@ -251,7 +269,8 @@ def shape_report(path: Path, *, mask: bool = True, limit: int = 1200) -> ShapeRe
             )
         report.lines = raw_lines
 
-    _add_column_view(report, path, mask=mask, limit=limit)
+    if columns:
+        _add_column_view(report, path, mask=mask, limit=limit)
     return report
 
 

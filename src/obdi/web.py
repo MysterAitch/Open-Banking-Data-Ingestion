@@ -3833,8 +3833,17 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         # are read programmatically as well as by a person.
         keeper = self.bound_config.keep_statement
         read: list[tuple[str, ShapeReport, int]] = []
+        # A batch listing shows counts and a link per file, and nothing
+        # else - so reading each page's GEOMETRY here buys an answer that
+        # is then thrown away, at seconds per page per file. A person who
+        # picks fifteen statements waits minutes for a table of numbers.
+        # The geometry is read when a shape is actually displayed: for the
+        # single-file case below, and at each kept statement's own address.
+        want_columns = len(uploaded) == 1
         for payload, filename in uploaded:
-            shape = self._read_shape(payload, filename, mask=True)
+            shape = self._read_shape(
+                payload, filename, mask=True, columns=want_columns
+            )
             artefact_id = 0
             if keeper is not None and shape.readable and shape.line_count:
                 # Kept BEFORE an account is chosen, because the exports most
@@ -3906,16 +3915,18 @@ class ConnectionHandler(BaseHTTPRequestHandler):
         self._respond(200, render_page("Statement shape", body))
 
     def _read_shape(
-        self, payload: bytes, filename: str, *, mask: bool
+        self, payload: bytes, filename: str, *, mask: bool, columns: bool = True
     ) -> ShapeReport:
         from .statement_shape import shape_report
 
         with tempfile.TemporaryDirectory() as scratch:
-            # Written to a temporary file because pypdf reads a path, and
-            # removed on the way out: this page stores nothing.
+            # Written to a temporary file because the readers take a path,
+            # and removed on the way out: this page stores nothing.
             temporary = Path(scratch) / (filename or "statement.pdf")
             temporary.write_bytes(payload)
-            return shape_report(temporary, mask=mask, limit=1200)
+            return shape_report(
+                temporary, mask=mask, limit=1200, columns=columns
+            )
 
     def _kept_statement_shape(self, artefact_id: int) -> None:
         """A kept statement's masked shape, at an address that stays put.
