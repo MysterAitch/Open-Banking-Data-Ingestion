@@ -225,6 +225,87 @@ class TestThePatternFeaturesAgainstKnownAnswers:
             f"{sorted(paired - planted)[:2]} (seed {SEED})"
         )
 
+    def test_TheRuleWritingWorklist_ShowsOneLinePerMerchantItCan(
+        self, corpus, tmp_path
+    ):
+        """Whether one merchant becomes one line of work, or several.
+
+        The generator records the INTENDED merchant beside every event for
+        exactly this: over real statements you can see that a worklist looks
+        tidy, but not whether its six Netflix rows became one entry or six.
+
+        Both directions are asserted, and the second is the one that costs real
+        money: a normaliser too weak makes somebody write six rules for one
+        subscription, and one too aggressive quietly files a supermarket and a
+        train fare under the same label.
+        """
+        from obdi.categorise import uncategorised_summary
+
+        directory, world, _ = corpus
+        store_path = tmp_path / "store.sqlite3"
+        self._imported(store_path, directory, world)
+
+        with Store(store_path) as store:
+            worklist = uncategorised_summary(store, limit=100)
+
+        # Group membership is not public, so over-merging is detected through
+        # what IS: a group holding more distinct descriptions than the merchant
+        # its example belongs to ever planted has swallowed another merchant's
+        # rows. Checking the label by eye would not catch this - the label is
+        # lossy by design and two merchants can share one.
+        planted_descriptions = {
+            merchant: {e.description for e in world.events if e.merchant == merchant}
+            for merchant in {e.merchant for e in world.events}
+        }
+        for group in worklist.groups:
+            owner = next(
+                (e.merchant for e in world.events if e.description == group.example),
+                None,
+            )
+            assert owner is not None, (
+                f"worklist group {group.label!r} has an example that was never "
+                f"planted: {group.example!r} (seed {SEED})"
+            )
+            assert group.distinct <= len(planted_descriptions[owner]), (
+                f"the line for {owner} holds {group.distinct} distinct descriptions "
+                f"but {owner} only ever produced {len(planted_descriptions[owner])} - "
+                f"another merchant's rows are filed under it, so a rule written "
+                f"here would mislabel them (seed {SEED})"
+            )
+
+        lines = {
+            merchant: sum(
+                1
+                for group in worklist.groups
+                if any(
+                    event.description == group.example and event.merchant == merchant
+                    for event in world.events
+                )
+            )
+            for merchant in {event.merchant for event in world.events}
+        }
+        # A reference number that changes every month is per-instance noise and
+        # must not split a merchant. These are the corpus's subscriptions.
+        for merchant in ("Netflix", "Spotify", "Thames Water", "TfL"):
+            assert lines[merchant] == 1, (
+                f"{merchant} occupies {lines[merchant]} worklist lines - its "
+                f"descriptors differ only in a reference number (seed {SEED})"
+            )
+
+        # A KNOWN AND ACCEPTED LIMIT, pinned so that changing it is a decision
+        # rather than a surprise. Tesco's descriptor carries a town that varies,
+        # which the stripping does not remove, so one shop occupies two lines.
+        # Not treated as a defect: the worklist's label is lossy but its example
+        # is matchable, and a rule written for the shop matches both - the cost
+        # is an extra line to read, not a wrong rule. Stripping trailing words
+        # would risk merging genuinely different merchants, which the assertion
+        # above says is the more expensive mistake.
+        assert lines["Tesco"] == 2, (
+            f"Tesco now occupies {lines['Tesco']} worklist lines rather than 2. "
+            f"If the stripping was widened deliberately, update this and check "
+            f"nothing over-merged (seed {SEED})"
+        )
+
     def test_TheReviewQueue_FlagsTheDuplicateAndNotTheStandingOrder(
         self, corpus, tmp_path
     ):
@@ -275,32 +356,49 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         """A delivery-level omission, which is the cheap half of the gap case:
         the statement exists and simply is not imported. What makes this
         checkable at all is that the corpus knows the month is missing - over
-        real data an empty month and an unimported one look identical."""
+        real data an empty month and an unimported one look identical.
+
+        THIS ASSERTS ON THE DETECTOR, not on the data. An earlier version
+        checked which months were present in the store, which proves the corpus
+        has a hole and says nothing about whether obdi reports one - and it was
+        described as though it did. Both directions are here now, and the
+        second is the one that keeps a report worth reading: a corpus imported
+        whole must produce NO gaps at all.
+        """
+        from obdi.coverage import gaps
         from obdi.ingest import reconcile_batch
         from obdi.parsers.uk_banks import detect
 
         directory, _world, _ = corpus
-        store_path = tmp_path / "store.sqlite3"
-
         payload = (directory / "synthetic-current.csv").read_bytes()
-        parser = detect(payload)
-        rows = list(parser.parse(payload, account_id="synthetic-current"))
+        rows = list(detect(payload).parse(payload, account_id="synthetic-current"))
         months = sorted({row.value_date.strftime("%Y-%m") for row in rows})
         skipped = months[len(months) // 2]
         kept = [row for row in rows if row.value_date.strftime("%Y-%m") != skipped]
+        assert len(kept) < len(rows), f"the month was not actually withheld (seed {SEED})"
 
-        with Store(store_path) as store:
+        whole = tmp_path / "whole.sqlite3"
+        with Store(whole) as store:
+            reconcile_batch(store, rows, digest="synthetic-whole")
+            complete = gaps(store.all_transactions())
+        assert complete == [], (
+            f"a corpus with nothing missing was reported as having "
+            f"{[g.month for g in complete]} missing (seed {SEED})"
+        )
+
+        partial = tmp_path / "partial.sqlite3"
+        with Store(partial) as store:
             reconcile_batch(store, kept, digest="synthetic-partial")
-            present = {
-                row.value_date.strftime("%Y-%m") for row in store.all_transactions()
-            }
+            reported = gaps(store.all_transactions())
 
-        assert skipped not in present, f"the month was not actually withheld (seed {SEED})"
-        assert len(present) == len(months) - 1
-        # The months either side ARE present, so this is a hole rather than a
-        # short history - which is the distinction any gap report has to make.
-        position = months.index(skipped)
-        assert months[position - 1] in present and months[position + 1] in present
+        assert [gap.month for gap in reported] == [skipped], (
+            f"withheld {skipped} and the detector reported "
+            f"{[g.month for g in reported]} (seed {SEED})"
+        )
+        # Uncontradicted, because only one source ever had it. The distinction
+        # matters: a gap another source can see is a fetch that failed, and one
+        # nobody can see is a month to go and ask the bank for.
+        assert reported[0].seen_in == ()
 
 
 if __name__ == "__main__":

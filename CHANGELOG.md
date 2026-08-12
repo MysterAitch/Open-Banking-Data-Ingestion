@@ -26,6 +26,40 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.204] - 2026-08-12
+
+### Fixed
+- The gap test asserted on the corpus rather than on the detector, and was
+  described as though it did the stronger thing. It checked which months were
+  present in the store after one was withheld - which proves the data has a
+  hole and says nothing about whether obdi reports one. It now calls
+  `coverage.gaps()` and asserts the gap names that month, and asserts the other
+  direction too: a corpus imported whole must report NO gaps. The second is what
+  keeps a coverage report worth reading, and nothing was checking it.
+
+### Added
+- The rule-writing worklist is now measured against the merchant intent the
+  generator has been recording since it was built and which nothing consumed.
+  Over real statements a worklist can be seen to look tidy, but not whether six
+  Netflix rows became one line of work or six.
+
+  Measured: subscriptions whose descriptors differ only by a changing reference
+  each occupy one line, and nothing over-merges. One shop occupies two lines
+  because its descriptor carries a town that varies and the stripping does not
+  remove it - recorded as an accepted limit rather than fixed, since the label
+  is lossy by design but the example beside it is matchable, so a rule written
+  for the shop still matches both. The cost is a line to read, not a wrong rule,
+  and widening the stripping would risk merging genuinely different merchants,
+  which is the more expensive mistake. Pinned so a future change is a decision.
+
+  Over-merging is detected through what the worklist actually exposes - a group
+  holding more distinct descriptions than its merchant ever produced - because
+  group membership is not public and judging the label by eye would miss it.
+  Proven by forcing a collision: the assertion names the merchant and shows its
+  counts. A first attempt at that proof merged nothing, since every planted
+  merchant is distinct within its first four characters, and would have been
+  read as the assertion failing to fire.
+
 ## [0.4.203] - 2026-08-12
 
 ### Added
