@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.202] - 2026-08-12
+
+### Added
+- A synthetic world generator, stage 1. Every feature that reads patterns across
+  a corpus - recurring payments, coverage gaps, transfer pairing, merchant
+  normalisation - can only be checked against real data by eye, because nobody
+  knows the right answer for a real bank export. This generates the world first,
+  derives the ledger from it, and writes a manifest beside the statements, so
+  what SHOULD be derived is decided in advance.
+
+  Two accounts over six months: a salary, five recurring commitments whose
+  amounts drift, and a monthly sweep to savings whose two legs are the same money
+  seen twice. Descriptors carry what real ones carry - a changing reference, a
+  card suffix, a location tail - because a generator emitting clean names would
+  flatter a normaliser rather than test it; the intended merchant is recorded
+  beside each event so the assertion can be about normalisation.
+
+  CSV only, deliberately: that import path already exists, so the whole pipeline
+  runs end to end without a document renderer. The seed is an input, is written
+  into the manifest first, and appears in every failure message that could depend
+  on generated content - a defect found here is worth nothing if the corpus
+  cannot be rebuilt.
+
+  It caught a fault in itself before touching the application: the returned
+  manifest held tuples while the file held lists, so asserting against the return
+  value was not asserting about what a later process would read - the exact drift
+  that writing the manifest to a file was meant to prevent.
+
+### Changed
+- `record_attempt` takes an injectable `now`, defaulting to the clock. The lease
+  tests wrote attempt rows directly only because there was no way to place one in
+  time, which is a gap in the door rather than a reason to go around it.
+
 ## [0.4.201] - 2026-08-12
 
 ### Added
