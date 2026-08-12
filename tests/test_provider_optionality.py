@@ -265,6 +265,33 @@ class TestWhatThePageSaysWhenThereIsNoProvider:
         page = self._page(tmp_path)
         assert 'action="/connect"' in page
 
+    def test_IndexPage_WhenNoProviderIsConfigured_RaisesNoAlarmAboutTheMissingSecret(
+        self, tmp_path, monkeypatch
+    ):
+        # The third surface, and the one that was missed. A deployment with no
+        # provider points at a secret file that was never written - correctly, since
+        # it holds no credentials - and the credential banner read that as a FAULT:
+        # "unreadable ... bank authorisation will fail until this is fixed", in red,
+        # on an instance where nothing is wrong and nothing is expected to work.
+        #
+        # Loud enough to send somebody hunting a deployment problem that does not
+        # exist, which is the precise failure the switched-off-must-look-switched-off
+        # rule exists to prevent.
+        _configure(monkeypatch, TRUELAYER_CLIENT_SECRET_FILE=str(tmp_path / "never-written"))
+        page = self._page(tmp_path, bank_authorisation=False)
+        assert "unreadable" not in page.lower(), "an absent provider reported as a fault"
+        assert "will fail until this is fixed" not in page.lower()
+
+    def test_IndexPage_WhenAProviderIsConfiguredButItsSecretIsGone_StillRaisesTheAlarm(
+        self, tmp_path, monkeypatch
+    ):
+        # The other half, and why this is not simply "hide the banner". A secret can
+        # go unreadable AFTER startup - rotated badly, unmounted - on a deployment
+        # that genuinely uses a provider. That is a real fault and must stay loud.
+        _configure(monkeypatch, TRUELAYER_CLIENT_SECRET_FILE=str(tmp_path / "never-written"))
+        page = self._page(tmp_path, bank_authorisation=True)
+        assert "unreadable" in page.lower()
+
     def test_ConnectRoute_WhenNoProviderIsConfigured_RefusesAndSaysWhy(self, tmp_path):
         # Reachable by a bookmark or a stale link even with the form gone, and a
         # bare traceback here would read as a fault rather than as a settled

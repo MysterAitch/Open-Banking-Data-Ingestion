@@ -1081,7 +1081,7 @@ def error_page(title: str, message_html: str) -> bytes:
     return render_page(title, f"{message_html}{HOME_LINK}")
 
 
-def _credential_banner() -> str:
+def _credential_banner(bank_authorisation: bool = True) -> str:
     """A prominent warning when the secret on disk cannot work, or empty.
 
     On the homepage rather than at startup, and a banner rather than a refusal:
@@ -1090,7 +1090,21 @@ def _credential_banner() -> str:
     But it must also not wait silently for the next authorisation to fail with
     a burnt single-use code. Checked at render, so it reflects the file as it
     is NOW - a fixed secret clears the banner on refresh, no restart.
+
+    SILENT WHERE NO PROVIDER IS CONFIGURED, and that took a screenshot to notice.
+    A deployment holding no credentials points at a secret file nobody ever wrote,
+    which this read as unreadable and announced in red as a fault that would break
+    bank authorisation - on an instance where nothing is wrong and nothing is
+    expected to work. Loud enough to send somebody hunting a deployment problem
+    that does not exist.
+
+    It stays loud in the case that matters, which is why this is a parameter and
+    not a deletion: a secret can go unreadable AFTER startup, on a deployment that
+    genuinely uses a provider - rotated badly, or a mount that vanished - and that
+    is a real fault arriving exactly when the banner is the only thing watching.
     """
+    if not bank_authorisation:
+        return ""
     try:
         value = read_secret("TRUELAYER_CLIENT_SECRET", required=False)
     except SecretError as exc:
@@ -2974,7 +2988,7 @@ def render_index(
             upload_labels = picker_labels(upload_labels, declared_accounts())
     upload_picker = account_picker(upload_labels)
     body = f"""
-{_credential_banner()}
+{_credential_banner(bank_authorisation)}
 {_rebuild_running_banner(rebuild_status, rebuild_busy_note)}
 {_backfill_running_banner(backfill_status)}
 {_connection_rows(store, rename_available=rename_connection is not None)}
