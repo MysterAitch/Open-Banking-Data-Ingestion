@@ -51,7 +51,7 @@ from .namespaces import UNASSIGNED_ACCOUNT
 from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import ActualAccountBinding, build_payload, unbound_accounts
-from .secrets import SecretError, read_secret
+from .secrets import SecretError, read_secret, truelayer_readiness
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -1030,28 +1030,41 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
     client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
     redirect_uri = os.getenv("TRUELAYER_REDIRECT_URI", "").strip()
-    if not client_id or not redirect_uri:
-        print(
-            "Set TRUELAYER_CLIENT_ID and TRUELAYER_REDIRECT_URI. The redirect URI must "
-            "be reachable from the phone AND registered with the provider byte for byte "
-            "- whatever hostname the phone's browser can actually reach.",
-            file=sys.stderr,
-        )
+
+    # A bank provider is optional. A half-configured one is not.
+    #
+    # Refusing to start without one was right while a bank feed was the only way
+    # data arrived. It stopped being right once statements, manual entry and file
+    # imports could carry a deployment on their own - and it made an instance that
+    # deliberately holds no credentials impossible to run at all, which is most of
+    # what a restore target or a synthetic environment IS. Validation of a provider
+    # that IS configured is unchanged: see truelayer_readiness for why intent is
+    # read from the identifiers rather than from the secret.
+    readiness = truelayer_readiness()
+    if readiness.state == "misconfigured":
+        print(readiness.problem, file=sys.stderr)
         return 2
 
-    # Validate at startup, but do not CACHE at startup: the value passed on is
-    # a reader, so a rotated secret takes effect at the next exchange with no
-    # restart. Startup still fails fast when no secret exists at all - serving
-    # a connect button that cannot possibly finish helps nobody - but a merely
-    # malformed one only warns, because the page's local duties (consent
-    # clocks, reconnect links) owe nothing to an online-only credential.
-    try:
+    bank_authorisation = readiness.usable
+    if not bank_authorisation:
+        # Said out loud, at startup. A running instance with a capability switched
+        # off must never be mistaken for a broken one, by a person or by a probe.
+        print(
+            "No bank provider is configured, so bank authorisation is unavailable. "
+            "Everything that does not need one - statements, imports, matching, "
+            "categorisation, coverage - is unaffected. Set TRUELAYER_CLIENT_ID, "
+            "TRUELAYER_REDIRECT_URI and the client secret to enable it.",
+            file=sys.stderr,
+        )
+
+    # Validated above, but not CACHED: the value passed on is a reader, so a
+    # rotated secret takes effect at the next exchange with no restart. A merely
+    # malformed one only warns, because the page's local duties (consent clocks,
+    # reconnect links) owe nothing to an online-only credential.
+    if bank_authorisation:
         startup_secret = read_secret("TRUELAYER_CLIENT_SECRET")
-    except SecretError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    for problem in shape_problems("TRUELAYER_CLIENT_SECRET", startup_secret):
-        print(f"WARNING: the TrueLayer secret {problem}", file=sys.stderr)
+        for problem in shape_problems("TRUELAYER_CLIENT_SECRET", startup_secret):
+            print(f"WARNING: the TrueLayer secret {problem}", file=sys.stderr)
 
     def current_secret() -> str:
         return read_secret("TRUELAYER_CLIENT_SECRET")

@@ -16,6 +16,7 @@ Nothing here logs or echoes a secret value.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -68,6 +69,80 @@ def read_secret(name: str, *, required: bool = True) -> str:
             f"or {name} to the value itself."
         )
     return ""
+
+
+@dataclass(frozen=True)
+class Readiness:
+    """Whether a provider is configured, and what is wrong if it is half done.
+
+    Three states, because two would force the interesting case into the wrong one:
+
+        ready         everything needed is present and readable
+        absent        nothing is configured - a decision, not a fault
+        misconfigured something is configured and something else is missing
+    """
+
+    state: str
+    problem: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        return self.state == "ready"
+
+
+def truelayer_readiness() -> Readiness:
+    """Decide whether bank authorisation can be offered, and say so precisely.
+
+    The rule is the one an MOT uses: if it is fitted, it has to work. Absent means
+    the deployment has said it does not want this, and everything that needs no bank
+    connection - statements, imports, matching, categorisation, coverage - carries
+    on without it.
+
+    INTENT IS READ FROM THE IDENTIFIERS, not from the secret. The client id and
+    redirect URI are inert on their own, they are what a person sets when deciding
+    to use a provider, and they live in plain configuration. The secret cannot serve
+    as the signal, because deployments point every instance at the same secret PATH
+    from one shared template - so the pointer's existence says nothing about intent,
+    and only the file behind it says the intent was acted on. Judging by the pointer
+    refuses to start an instance that was deliberately given no credentials at all.
+
+    Once the identifiers ARE set, the secret must be present and readable. A
+    half-applied rotation is a fault, and degrading quietly would surface it only
+    when somebody tried to authorise a bank - the worst possible moment to find out.
+    """
+    client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
+    redirect_uri = os.getenv("TRUELAYER_REDIRECT_URI", "").strip()
+
+    if not client_id and not redirect_uri:
+        return Readiness("absent")
+
+    missing = [
+        name
+        for name, value in (
+            ("TRUELAYER_CLIENT_ID", client_id),
+            ("TRUELAYER_REDIRECT_URI", redirect_uri),
+        )
+        if not value
+    ]
+    if missing:
+        return Readiness(
+            "misconfigured",
+            f"{' and '.join(missing)} is not set, but the other half of the "
+            "provider's configuration is. The redirect URI must be reachable from "
+            "the phone AND registered with the provider byte for byte. Set both to "
+            "use a bank connection, or neither to run without one.",
+        )
+
+    try:
+        read_secret("TRUELAYER_CLIENT_SECRET")
+    except SecretError as exc:
+        return Readiness(
+            "misconfigured",
+            f"{exc} The identifiers are set, so this deployment means to use a bank "
+            "connection - clear them both to run without one instead.",
+        )
+
+    return Readiness("ready")
 
 
 def describe_source(name: str) -> str:
