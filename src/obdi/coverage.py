@@ -896,9 +896,15 @@ class DateTransposition:
     right_date: date
 
     def describe(self) -> str:
+        # Through the shared formatter, like every other amount shown to a
+        # person. This line hand-rolled its own for a while and was the only
+        # bare number on the agreement page - leading it, directly above the
+        # same figure rendered as money by the row beneath. Caught by looking
+        # at the page rather than by any test.
         return (
-            f"{self.account_id}: {self.amount_minor / 100:,.2f} \"{self.description}\" "
-            f"dated {self.left_date} by {self.left} but {self.right_date} by {self.right}"
+            f"{self.account_id}: {format_amount(self.amount_minor)} "
+            f"\"{self.description}\" dated {self.left_date} by {self.left} "
+            f"but {self.right_date} by {self.right}"
         )
 
 

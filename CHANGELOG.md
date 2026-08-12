@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.210] - 2026-08-13
+
+### Fixed
+- The transposition alarm rendered its amount as a bare number while every
+  other amount on the same page went through the shared formatter. It read
+  `-44.83` directly above the same figure shown as `-£44.83` by the row
+  beneath it - and it is the line that LEADS the agreement page.
+
+  Found by looking at the page in a browser, not by any test. The formatter was
+  already imported in that module and used by every neighbouring line; this one
+  had hand-rolled its own since it was written.
+
+### Added
+- `scripts/dev_corpus_ui.py`: generate the corpus, land it, and serve it, in one
+  command. Two things are encoded because both had already cost time.
+
+  THE STORE IS BUILT THROUGH `import`. The reconcile path fills the derived
+  layer and not the raw artefact layer, the application rebuilds from raw at
+  startup, and a store built the short way is emptied the moment it is served -
+  measured at 70 rows to 0, reported as VANISHED. A script that gets this wrong
+  looks like a configuration problem, which is what it was blamed on twice.
+
+  THE PORT IS FIXED AT 38080 and deliberately unusual. Browser permissions are
+  granted per origin, so a port that moves means granting again every session;
+  8080 collides with everything, and this sits below the ephemeral range where
+  nothing will transiently take it.
+
+  It prints the manifest's expected answers - how many review flags and why,
+  and the planted date fault - BEFORE serving, so what the pages should show is
+  known before they are opened. Its own first run buffered that output behind
+  the import summaries, so it sets line buffering; a script whose commentary
+  arrives after the thing it comments on is not commentary.
+
 ## [0.4.209] - 2026-08-12
 
 ### Added

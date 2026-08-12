@@ -640,6 +640,16 @@ class TestTheAdversarialDeliveries:
         assert found[0].left_date.day == found[0].right_date.month
         assert found[0].left_date.month == found[0].right_date.day
 
+        # Rendered as money, like every other amount a person is shown. Found
+        # by LOOKING at the page: this line leads the agreement report and was
+        # the only amount on it without a currency symbol, sitting directly
+        # above the same figure rendered as -£44.83 by the row beneath it.
+        described = found[0].describe()
+        assert "£" in described, (
+            f"the alarm that leads the page renders its amount as a bare number: "
+            f"{described!r} (seed {SEED})"
+        )
+
     def test_AMisfiledStatement_IsAttributedToTheAccountItsRowsBelongTo(
         self, corpus, tmp_path
     ):
