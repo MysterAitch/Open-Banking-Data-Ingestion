@@ -38,13 +38,64 @@ class CodeHandler(Protocol):
     def __call__(self, code: str, state: str) -> str: ...
 
 
+def instance_identity() -> tuple[str, str]:
+    """(banner html, title prefix) identifying which instance is serving this.
+
+    Several instances of this application run side by side - a live one, a restore
+    target seeded from its backup, a disposable synthetic one - and they render
+    identically. Same layout, same buttons, same destructive controls. On a phone,
+    in a tab opened yesterday, the port is the only thing telling them apart, and
+    nobody reads the port.
+
+    THE LIVE INSTANCE SHOWS NOTHING, deliberately. It is the one used daily, and a
+    banner on every page there would be trained away within a day - taking the
+    other instance's banner with it. Absence on production is what gives presence
+    its weight.
+
+    AN UNIDENTIFIED INSTANCE SAYS SO, rather than assuming either. Claiming to be
+    live invites the mistake this exists to prevent; claiming to be a scratch copy
+    invites careless destruction on what might be the real thing. Not knowing is a
+    third answer, and it is the honest one.
+    """
+    label = os.getenv("OBDI_INSTANCE_LABEL", "").strip()
+    role = os.getenv("OBDI_INSTANCE_ROLE", "").strip().lower()
+
+    if role == "production":
+        return "", ""
+
+    frame = 'class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem"'
+
+    if not label and not role:
+        return (
+            f"<p {frame}><strong>Instance not identified.</strong> This deployment "
+            "does not say whether it holds real data. Set OBDI_INSTANCE_LABEL and "
+            "OBDI_INSTANCE_ROLE.</p>",
+            "unidentified",
+        )
+
+    shown = html.escape(label or "unnamed")
+    return (
+        f"<p {frame}><strong>{shown} - not production.</strong> This instance does "
+        "not hold the real data, and anything done here affects nothing else.</p>",
+        shown,
+    )
+
+
 def render_page(title: str, body: str) -> bytes:
     """A plain confirmation page.
 
     Deliberately styled to be unmistakable at a glance, because the failure
     mode being guarded against is someone assuming an authorisation worked when
     it did not, and only discovering it a quarter later.
+
+    Every page carries the instance identification rather than only the homepage:
+    the destructive controls are not all in one place, and a link opens wherever it
+    points.
     """
+    banner, prefix = instance_identity()
+    if prefix:
+        title = f"[{prefix}] {title}"
+        body = banner + body
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
