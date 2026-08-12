@@ -1,0 +1,91 @@
+# Changelog
+
+Newest first. One section per released version, dated, with the reason for the
+change rather than only its shape - six weeks later the question is always "why
+was this done", and the diff already answers "what".
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely:
+the same headings (Added / Changed / Fixed / Removed), the same newest-first
+order, the same `## [version] - date`. Deliberately simplified in two ways. There
+is no `Unreleased` section: this project tags several times a day, so anything
+unreleased is measured in minutes and lives in the working tree. There are no
+link-reference footers: they need maintaining and say nothing a tag name does not.
+
+Entries are sentences, not noun fragments. "Fixed refile" is a label; the point
+of the file is to carry the reasoning that made it a fix.
+
+A version reaches this file BEFORE its tag exists - the release commit carries
+its own entry. A guard refuses to create or push a tag whose version is not here,
+because a changelog written afterwards is written from the diff, which is exactly
+the information it was supposed to add to.
+
+**History before 0.4.187** is in the tags themselves, each of which carries a
+one-line subject:
+`git for-each-ref --sort=-creatordate refs/tags --format='%(refname:short) %(creatordate:short) %(contents:subject)'`.
+Transcribing those 200-odd lines here was considered and rejected: git already
+holds them verbatim, a copy can drift from the original, and a mechanical
+transcription would add no reasoning that the subjects do not already carry.
+
+## [0.4.193] - 2026-08-12
+
+### Fixed
+- Refiling a misfiled import now carries its derived rows to the corrected
+  account instead of leaving them behind. The page offers replaying an artefact
+  beside the button that refiles it, and that combination derived a second set of
+  rows under the new account while the first set stayed under the old one - the
+  same payment counted in two accounts, with no total anywhere disagreeing. Rows
+  move scoped by artefact digest, re-keyed through the same registry the account
+  rebind uses, so categorisations and review-queue entries travel with them.
+- Where the destination already holds the same payment (the statement re-imported
+  correctly before the misfile was tidied up), the duplicate is dropped rather
+  than stacked, and its annotations are offered to the survivor under the ordinary
+  provenance rank - so which copy happened to be misfiled no longer decides
+  whether a person's categorisation or a rule's survives.
+
+## [0.4.192] - 2026-08-12
+
+### Fixed
+- The previous tag pointed at a commit that could not build: a test was committed
+  without the module it tested. 0.4.191 is left tagged where it is, at an
+  unbuildable commit, rather than moved - a tag that changes meaning is worse than
+  one that is known to be bad.
+
+## [0.4.191] - 2026-08-12
+
+Superseded by 0.4.192; the tag exists but does not build.
+
+### Added
+- `dangling_annotations()` surfaced in `status` and `doctor`. An annotation
+  pointing at no transaction is invisible from every other angle - the row simply
+  reads as uncategorised - so nothing else would ever say the work was lost rather
+  than never done.
+
+## [0.4.190] - 2026-08-12
+
+### Changed
+- The build identifier in the version string is shortened at the commit hash
+  rather than by truncating the whole string, so a local-modification marker
+  survives instead of being cut off.
+
+## [0.4.189] - 2026-08-12
+
+### Fixed
+- The third surface that announced a missing bank provider as a fault on an
+  instance where nothing is wrong. An optional capability that is switched off has
+  to read as switched off on every surface, or the two that say so are undone by
+  the one that does not.
+
+## [0.4.188] - 2026-08-12
+
+### Changed
+- A switched-off capability looks switched off rather than missing: the page says
+  bank authorisation is not configured and that imports, categorisation and
+  coverage are unaffected, instead of showing a broken control.
+
+## [0.4.187] - 2026-08-12
+
+### Changed
+- The bank provider is optional. Unset entirely - absent or empty - reads as a
+  deliberate decision not to run it, and everything not involving it continues.
+  Partially configured still refuses loudly: a half-set credential is a mistake,
+  not a choice.
