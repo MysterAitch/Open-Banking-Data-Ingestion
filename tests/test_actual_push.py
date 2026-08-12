@@ -9,6 +9,7 @@ and the pending-bindings merge that closes the provisioning loop.
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from obdi.actual_push import (
     applier_heartbeat,
@@ -22,21 +23,40 @@ from obdi.actual_push import (
     queue_push,
     queued_requests,
 )
+from obdi.ingest import reconcile_batch
+from obdi.models import SourceTier, Transaction
 from obdi.replay import ActualAccountBinding
 from obdi.store import Store
 
 
 def _seed(store: Store, account_id: str, entity: str) -> None:
-    store.connection.execute(
-        "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-        "value_date, booking_date, description, source, currency, tier, "
-        "status, content_key, occurrence, first_seen_at, last_seen_at) "
-        "VALUES (?, ?, -100, '2026-07-01', '2026-07-01', 'X', 'truelayer', "
-        "'GBP', 'authoritative', 'booked', ?, 0, '2026-07-01T00:00:00', "
-        "'2026-07-01T00:00:00')",
-        (entity, account_id, f"ck-{entity}"),
+    """One transaction, landed THROUGH the application's own write door.
+
+    It used to be an INSERT, which is quicker to write and gives up the property
+    that makes it a test: a fixture built past the writer cannot notice the writer
+    and the reader disagreeing, which is frequently the only thing worth noticing.
+    That shortcut has been paid for here before - a counter of irreplaceable work
+    returned zero on every real store for two releases while its test passed,
+    because the fixture invented a provenance string the application never writes.
+    """
+    reconcile_batch(
+        store,
+        [
+            Transaction(
+                account_id=account_id,
+                amount_minor=-100,
+                currency="GBP",
+                value_date=date(2026, 7, 1),
+                booking_date=date(2026, 7, 1),
+                description="X",
+                source="truelayer",
+                source_id=entity,
+                tier=SourceTier.AUTHORITATIVE,
+                content_key=f"ck-{entity}",
+            )
+        ],
+        digest=f"digest-{entity}",
     )
-    store.connection.commit()
 
 
 class TestEnvelope:
