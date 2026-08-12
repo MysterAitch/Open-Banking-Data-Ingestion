@@ -13,25 +13,24 @@ from obdi.pending_lifecycle import resolve_vanished_pending
 from obdi.store import Store
 
 
-def _insert(store, entity_id, *, status, amount, description, value_date, source_id=None):
-    store.connection.execute(
-        "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-        "value_date, booking_date, description, source, currency, tier, "
-        "status, content_key, occurrence, source_id, first_seen_at, last_seen_at) "
-        "VALUES (?, 'halifax-current', ?, ?, ?, ?, 'truelayer', 'GBP', "
-        "'authoritative', ?, ?, 0, ?, '2026-08-01T00:00:00', '2026-08-01T00:00:00')",
-        (
-            entity_id,
-            amount,
-            value_date,
-            value_date,
-            description,
-            status,
-            f"key-{entity_id}",
-            source_id,
-        ),
+def _land(land, store, *, status, amount, description, value_date, source_id=None):
+    """One row through the write door, returning the id the application minted.
+
+    The ids are the substance here rather than bookkeeping: a pending row that
+    vanishes is resolved by matching it against a settlement, and the event
+    recorded afterwards names it. A fixture choosing its own ids could not have
+    noticed the writer and the reader disagreeing about which row was which.
+    """
+    from obdi.models import TransactionStatus
+
+    return land(
+        store,
+        description=description,
+        amount_minor=amount,
+        value_date=value_date,
+        source_id=source_id,
+        status=TransactionStatus(status),
     )
-    store.connection.commit()
 
 
 def _status(store, entity_id):
@@ -50,15 +49,17 @@ def _events(store):
 
 
 class TestVanishedPendingResolves:
-    def test_BusTapIn_SettledAtAmendedAmount_VoidedWithSettlementEvent(self, tmp_path):
+    def test_BusTapIn_SettledAtAmendedAmount_VoidedWithSettlementEvent(
+        self, tmp_path, land_transaction
+    ):
         with Store(tmp_path / "s.sqlite3") as store:
-            _insert(
-                store, "pend-1",
+            pending = _land(
+                land_transaction, store,
                 status="pending", amount=-1, source_id="tap-1",
                 description="TFL TRAVEL CH", value_date="2026-07-28",
             )
-            _insert(
-                store, "book-1",
+            settlement = _land(
+                land_transaction, store,
                 status="booked", amount=-275, source_id="settle-1",
                 description="TFL TRAVEL CHARGE", value_date="2026-07-30",
             )
@@ -70,14 +71,16 @@ class TestVanishedPendingResolves:
             )
 
             assert resolution.voided == 1 and resolution.settled == 1
-            assert _status(store, "pend-1") == "void"
-            assert _status(store, "book-1") == "booked"  # the real figure lives on
-            assert _events(store) == [("pending_settled", "pend-1")]
+            assert _status(store, pending) == "void"
+            assert _status(store, settlement) == "booked"  # the real figure lives on
+            assert _events(store) == [("pending_settled", pending)]
 
-    def test_FuelHold_ReleasedWithoutSettling_VoidedWithReleaseEvent(self, tmp_path):
+    def test_FuelHold_ReleasedWithoutSettling_VoidedWithReleaseEvent(
+        self, tmp_path, land_transaction
+    ):
         with Store(tmp_path / "s.sqlite3") as store:
-            _insert(
-                store, "pend-2",
+            hold = _land(
+                land_transaction, store,
                 status="pending", amount=-9900, source_id="hold-1",
                 description="SHELL PETROL PREAUTH", value_date="2026-07-25",
             )
@@ -89,13 +92,13 @@ class TestVanishedPendingResolves:
             )
 
             assert resolution.voided == 1 and resolution.released == 1
-            assert _status(store, "pend-2") == "void"
-            assert _events(store) == [("pending_released", "pend-2")]
+            assert _status(store, hold) == "void"
+            assert _events(store) == [("pending_released", hold)]
 
-    def test_StillPresentPending_IsLeftEntirelyAlone(self, tmp_path):
+    def test_StillPresentPending_IsLeftEntirelyAlone(self, tmp_path, land_transaction):
         with Store(tmp_path / "s.sqlite3") as store:
-            _insert(
-                store, "pend-3",
+            live = _land(
+                land_transaction, store,
                 status="pending", amount=-500, source_id="live-1",
                 description="COFFEE", value_date="2026-08-01",
             )
@@ -107,20 +110,22 @@ class TestVanishedPendingResolves:
             )
 
             assert resolution.voided == 0
-            assert _status(store, "pend-3") == "pending"
+            assert _status(store, live) == "pending"
             assert _events(store) == []
 
-    def test_OppositeSignBooked_IsNeverASettlementCounterpart(self, tmp_path):
+    def test_OppositeSignBooked_IsNeverASettlementCounterpart(
+        self, tmp_path, land_transaction
+    ):
         # A refund arriving near a vanished pending charge must not be
         # mistaken for its settlement: same merchant, opposite direction.
         with Store(tmp_path / "s.sqlite3") as store:
-            _insert(
-                store, "pend-4",
+            charge = _land(
+                land_transaction, store,
                 status="pending", amount=-1200, source_id="chg-1",
                 description="AMAZON", value_date="2026-07-28",
             )
-            _insert(
-                store, "book-4",
+            _land(
+                land_transaction, store,
                 status="booked", amount=1200, source_id="ref-1",
                 description="AMAZON REFUND", value_date="2026-07-29",
             )
@@ -132,12 +137,12 @@ class TestVanishedPendingResolves:
             )
 
             assert resolution.released == 1  # voided, but NOT settled-as-refund
-            assert _events(store) == [("pending_released", "pend-4")]
+            assert _events(store) == [("pending_released", charge)]
 
-    def test_RebuildPath_EmitsNoEvents(self, tmp_path):
+    def test_RebuildPath_EmitsNoEvents(self, tmp_path, land_transaction):
         with Store(tmp_path / "s.sqlite3") as store:
-            _insert(
-                store, "pend-5",
+            hold = _land(
+                land_transaction, store,
                 status="pending", amount=-9900, source_id="hold-2",
                 description="HOLD", value_date="2026-07-25",
             )
@@ -149,5 +154,5 @@ class TestVanishedPendingResolves:
                 emit_events=False,
             )
 
-            assert _status(store, "pend-5") == "void"
+            assert _status(store, hold) == "void"
             assert _events(store) == []

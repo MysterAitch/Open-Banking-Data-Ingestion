@@ -39,6 +39,75 @@ CONFIGURATION_PREFIXES = ("OBDI_", "TRUELAYER_", "STARLING_", "ACTUAL_", "EB_")
 KEEP = frozenset({"OBDI_TEST_LEDGER"})
 
 
+@pytest.fixture
+def land_transaction():
+    """Put one ordinary transaction in the store THROUGH THE WRITE DOOR.
+
+    Returns the entity id the application minted, which is the whole point: a
+    fixture that invents its own ids cannot detect the writer and the reader
+    disagreeing about identity, and identity is where this project's expensive
+    defects live. Entity ids fold in the account, the source, the content key and
+    the occurrence, and every one of the refile and rebind faults found so far
+    turned on that.
+
+    The content key is computed with the application's own function rather than
+    made up, for the same reason - a hand-written key is a second opinion about
+    what makes two rows the same payment.
+    """
+    from datetime import date as _date
+
+    from obdi.identity import content_key as compute_content_key
+    from obdi.ingest import reconcile_batch
+    from obdi.models import SourceTier, Transaction, TransactionStatus
+
+    def land(
+        store,
+        *,
+        description: str,
+        amount_minor: int = -1234,
+        account: str = "halifax-current",
+        value_date=None,
+        source: str = "truelayer",
+        source_id: str | None = None,
+        raw: dict | None = None,
+        digest: str = "fixture-digest",
+        tier: object = None,
+        status: object = None,
+    ) -> str:
+        # A string is accepted because most fixtures write dates that way, and
+        # making each one import date to use this would be friction pushing them
+        # back towards the raw insert this exists to replace.
+        when = value_date or _date(2026, 7, 1)
+        if isinstance(when, str):
+            when = _date.fromisoformat(when)
+        transaction = Transaction(
+            account_id=account,
+            amount_minor=amount_minor,
+            currency="GBP",
+            value_date=when,
+            booking_date=when,
+            description=description,
+            source=source,
+            source_id=source_id if source_id is not None else f"tl-{description}",
+            tier=tier or SourceTier.AUTHORITATIVE,
+            content_key=compute_content_key(
+                amount_minor=amount_minor, value_date=when, description=description
+            ),
+            raw=raw or {},
+            status=status or TransactionStatus.BOOKED,
+        )
+        reconcile_batch(store, [transaction], digest=digest)
+        # Read back rather than derived here: what the door decided is the answer,
+        # and recomputing it would be the same second opinion this avoids.
+        return next(
+            row.entity_id
+            for row in store.all_transactions()
+            if row.description == description and row.amount_minor == amount_minor
+        )
+
+    return land
+
+
 @pytest.fixture(scope="session")
 def configuration_prefixes() -> tuple[str, ...]:
     """The prefixes, as a fixture rather than an import.

@@ -115,21 +115,15 @@ UNCONVERTED = {
     ("test_connection_durability.py", "fetch_attempts"): "SHORTCUT: one of the two is "
     "a pre-mechanism store and belongs in JUSTIFIED; the other seeds an attempt on a "
     "current store, which every pull records through the ordinary path.",
-    ("test_history_boundary_survival.py", "transactions"): "SHORTCUT: ordinary account "
-    "history, which landing an artefact and replaying it produces.",
     ("test_leases.py", "fetch_attempts"): "SHORTCUT: scheduled and attended attempts "
     "are what the scheduler writes on every cycle.",
     ("test_leases.py", "review_queue"): "SHORTCUT: queue_for_review is the door, and "
     "these rows are what it writes.",
-    ("test_pending_lifecycle.py", "transactions"): "SHORTCUT: pending rows are produced "
-    "by landing a pending artefact and reconciling it.",
     ("test_rebuild.py", "transactions"): "NEEDS A RUN: rows under an account that no "
     "artefact supports, which is the vanished-accounts report's whole subject. "
     "Reachable only by removing the evidence behind existing rows - whether any door "
     "does that (absorption during a refile is the candidate) has not been "
     "established, and the answer decides whether this is a shortcut or the subject.",
-    ("test_review_report.py", "transactions"): "SHORTCUT: an ordinary transaction that "
-    "is then flagged through queue_for_review; only the seeding bypasses a door.",
     ("test_web.py", "transactions"): "SHORTCUT: ordinary rows, seeded to exercise "
     "rebinding.",
 }

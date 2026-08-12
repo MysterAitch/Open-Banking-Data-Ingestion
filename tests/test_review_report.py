@@ -9,31 +9,41 @@ from obdi.review_report import review_report
 from obdi.store import Store
 
 
-def _flag_transaction(store, entity_id, description, reason, category=None):
-    raw = json.dumps({"transaction_category": category}) if category else "{}"
-    store.connection.execute(
-        "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-        "value_date, booking_date, description, source, currency, tier, "
-        "status, content_key, occurrence, first_seen_at, last_seen_at, raw) "
-        "VALUES (?, 'halifax-current', -1200, '2026-07-01', '2026-07-01', "
-        "?, 'truelayer', 'GBP', 'authoritative', 'booked', ?, 0, "
-        "'2026-07-01T00:00:00', '2026-07-01T00:00:00', ?)",
-        (entity_id, description, f"key-{entity_id}", raw),
+def _flagged(land, store, description, reason, category=None):
+    """One ordinary transaction, landed through the door, then flagged.
+
+    The entity id is whatever the application minted rather than one this file
+    chose. Nothing here asserts on it - the rows only need to be distinct - but a
+    fixture that invents ids cannot notice the writer and the reader disagreeing
+    about identity, which is where this project's expensive defects have been.
+    """
+    entity = land(
+        store,
+        description=description,
+        raw={"transaction_category": category} if category else {},
+        # Distinct amounts so the matcher does not queue these for review by
+        # itself and win the one-row-per-transaction slot with its own reason.
+        amount_minor=-1200 - (len(description) * 7),
     )
-    store.connection.commit()
-    store.queue_for_review(entity_id, reason)
+    store.queue_for_review(entity, reason)
+    return entity
 
 
 class TestReviewReport:
-    def test_Report_CountsReasons_AndNamesDeclarationMatches(self, tmp_path):
+    def test_Report_CountsReasons_AndNamesDeclarationMatches(
+        self, tmp_path, land_transaction
+    ):
         with Store(tmp_path / "s.sqlite3") as store:
-            _flag_transaction(
-                store, "e-1", "NETFLIX.COM", "recurring-amount: seen 4 times"
+            _flagged(
+                land_transaction, store, "NETFLIX.COM", "recurring-amount: seen 4 times"
             )
-            _flag_transaction(
-                store, "e-2", "COUNCIL TAX SOUTHWARK", "recurring-amount: seen 12 times"
+            _flagged(
+                land_transaction,
+                store,
+                "COUNCIL TAX SOUTHWARK",
+                "recurring-amount: seen 12 times",
             )
-            _flag_transaction(store, "e-3", "COFFEE CORNER", "fuzzy-match: near miss")
+            _flagged(land_transaction, store, "COFFEE CORNER", "fuzzy-match: near miss")
             store.land_artefact(
                 artefact_for(
                     json.dumps(
@@ -63,19 +73,25 @@ class TestReviewReport:
 
 
 class TestBankCategories:
-    def test_Report_CountsBankLabelledRecurring_AsCalmCandidates(self, tmp_path):
+    def test_Report_CountsBankLabelledRecurring_AsCalmCandidates(
+        self, tmp_path, land_transaction
+    ):
         """Flags the bank itself labels DIRECT_DEBIT or STANDING_ORDER are
         expected payments by definition - the report quantifies how much
         of the queue they explain before any matcher change is made."""
         with Store(tmp_path / "s.sqlite3") as store:
-            _flag_transaction(
-                store, "e-1", "COUNCIL TAX", "recurring-amount", "DIRECT_DEBIT"
+            _flagged(
+                land_transaction, store, "COUNCIL TAX", "recurring-amount", "DIRECT_DEBIT"
             )
-            _flag_transaction(
-                store, "e-2", "SAVINGS SWEEP", "recurring-amount", "STANDING_ORDER"
+            _flagged(
+                land_transaction,
+                store,
+                "SAVINGS SWEEP",
+                "recurring-amount",
+                "STANDING_ORDER",
             )
-            _flag_transaction(store, "e-3", "COFFEE CORNER", "fuzzy-match", "PURCHASE")
-            _flag_transaction(store, "e-4", "MYSTERY SHOP", "fuzzy-match")
+            _flagged(land_transaction, store, "COFFEE CORNER", "fuzzy-match", "PURCHASE")
+            _flagged(land_transaction, store, "MYSTERY SHOP", "fuzzy-match")
 
             report = review_report(store)
 

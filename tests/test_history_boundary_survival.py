@@ -19,18 +19,16 @@ from obdi.cli import _apply_bind, _recorded_boundary
 from obdi.store import Store
 
 
-def _account_with_history(db: Path, account_id: str) -> None:
+def _account_with_history(db: Path, account_id: str, land) -> None:
+    """One ordinary payment under an account, through the write door.
+
+    Landed rather than inserted so the row carries the identity the application
+    mints. That matters more here than it looks: the act under test is a RENAME
+    of the account, and an entity id folds the account into itself - a
+    hand-written id would hide exactly the thing a rename has to get right.
+    """
     with Store(db) as store:
-        store.connection.execute(
-            "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-            "value_date, booking_date, description, source, currency, tier, "
-            "status, content_key, occurrence, first_seen_at, last_seen_at) "
-            "VALUES ('e-1', ?, -1250, '2026-07-01', '2026-07-01', "
-            "'Coffee', 'truelayer', 'GBP', 'authoritative', 'booked', "
-            "'ck-1', 0, '2026-07-01T00:00:00', '2026-07-01T00:00:00')",
-            (account_id,),
-        )
-        store.connection.commit()
+        land(store, description="Coffee", amount_minor=-1250, account=account_id)
 
 
 def _record_wall(db: Path, connection: str, keyed_to: str, when: str) -> None:
@@ -43,7 +41,7 @@ def _record_wall(db: Path, connection: str, keyed_to: str, when: str) -> None:
 
 class TestProviderWallSurvivesBinding:
     def test_ProviderWall_WhenTheAccountIsNamedAfterwards_IsStillReported(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, land_transaction
     ):
         """The live sequence: probe an unnamed account to its wall, then
         bind it. The wall was found and paid for - it must still be found
@@ -51,7 +49,7 @@ class TestProviderWallSurvivesBinding:
         db = tmp_path / "s.sqlite3"
         map_file = tmp_path / "accounts.json"
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_file))
-        _account_with_history(db, "truelayer:acct-9")
+        _account_with_history(db, "truelayer:acct-9", land_transaction)
         _record_wall(db, "halifax", "truelayer:acct-9", "2024-07-01")
 
         _apply_bind(
@@ -149,14 +147,14 @@ class TestProviderWallSurvivesBinding:
             )
 
     def test_ProviderWall_WhenTheAccountIsRenamedAgain_IsStillReported(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, land_transaction
     ):
         """Binding is revisable, and the second name must inherit the wall
         the same way the first did."""
         db = tmp_path / "s.sqlite3"
         map_file = tmp_path / "accounts.json"
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_file))
-        _account_with_history(db, "truelayer:acct-9")
+        _account_with_history(db, "truelayer:acct-9", land_transaction)
         _record_wall(db, "halifax", "truelayer:acct-9", "2024-07-01")
 
         _apply_bind(
@@ -180,7 +178,7 @@ class TestProviderWallSurvivesBinding:
 
 
     def test_ProviderWall_WhenTheAccountLosesTheNameItWasRecordedUnder_Travels(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, land_transaction
     ):
         """Renaming an already-named account retires the old canonical, and
         a retired name is reachable through no alias set - so the wall has
@@ -188,7 +186,7 @@ class TestProviderWallSurvivesBinding:
         db = tmp_path / "s.sqlite3"
         map_file = tmp_path / "accounts.json"
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_file))
-        _account_with_history(db, "halifax-current")
+        _account_with_history(db, "halifax-current", land_transaction)
         _record_wall(db, "halifax", "halifax-current", "2024-07-01")
         bound = AccountMap(
             [
@@ -208,14 +206,14 @@ class TestProviderWallSurvivesBinding:
             )
 
     def test_ProviderWall_WhenTheNewNameAlreadyHasOne_KeepsTheNewNamesAnswer(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, land_transaction
     ):
         """Carrying a fact forward must never overwrite one already recorded
         under the destination name."""
         db = tmp_path / "s.sqlite3"
         map_file = tmp_path / "accounts.json"
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_file))
-        _account_with_history(db, "truelayer:acct-9")
+        _account_with_history(db, "truelayer:acct-9", land_transaction)
         _record_wall(db, "halifax", "truelayer:acct-9", "2024-07-01")
         _record_wall(db, "halifax", "halifax-current", "2023-01-31")
 
