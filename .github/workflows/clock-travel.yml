@@ -1,0 +1,67 @@
+# The suite, run as if it were some months from now.
+#
+# It exists because of a defect that had nothing to do with the change that
+# exposed it: a fixture carrying the day's date passed for a week, then failed a
+# build of a commit that had passed six hours earlier on identical content. The
+# attempt it described had aged past a seven-day filter, so the row it drew
+# vanished. Nothing was flaky, and re-running would have "worked" for six hours.
+#
+# A fixture with a literal date is not the defect - a fixed date compared against
+# another fixed date is stable forever, and clearer than a computed one. The defect
+# is a literal measured against NOW, and that is not visible by reading, only by
+# moving the clock. So this moves the clock.
+#
+# NOT on every push. A failure here is a latent bomb rather than a regression in
+# the change under review, so blocking a pull request on somebody else's expiring
+# fixture would refuse correct work - the failure mode that gets a gate switched
+# off. It runs weekly, and on demand when somebody wants an answer now.
+name: clock travel
+
+on:
+  schedule:
+    # Early Monday, so a week's work is reviewed against the horizon before the
+    # next week's starts on top of it.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days into the future to run the suite"
+        required: false
+        default: "365"
+
+jobs:
+  travel:
+    runs-on: ubuntu-latest
+    strategy:
+      # Every horizon runs even when an earlier one fails: "it breaks at some
+      # point in the next year" is a much weaker answer than "it breaks at 31
+      # days and again at 365", and the second is what says how urgent it is.
+      fail-fast: false
+      matrix:
+        # Ageing out of a window is monotonic - a fixture outside a 7-day filter
+        # at +31 is still outside it at +365 - so these horizons are not about
+        # catching the same defect repeatedly. They are about window LENGTH: the
+        # short ones catch day and month filters, the long ones catch the
+        # year-wide asks this codebase is full of, and +1 catches anything that
+        # assumes the work happens on the day the fixture was written.
+        days: [1, 31, 90, 365]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install --quiet -e ".[dev]" time-machine
+      - name: Run the suite ${{ matrix.days }} day(s) from now
+        env:
+          OBDI_TRAVEL_DAYS: ${{ matrix.days }}
+        run: python -m pytest -q -p conftest_timetravel
+
+      # The instrument has to be shown capable of firing, or a clean sweep is not
+      # evidence of anything. This asserts the clock actually moved rather than
+      # trusting that the plugin loaded - the failure it guards against is a
+      # no-op probe reporting green across the whole matrix.
+      - name: Confirm the clock actually moved
+        if: always()
+        env:
+          OBDI_TRAVEL_DAYS: ${{ matrix.days }}
+        run: python -m pytest -q -p conftest_timetravel tests/test_clock_travel_probe.py

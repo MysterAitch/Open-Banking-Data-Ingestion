@@ -32,6 +32,13 @@ dev = [
     # downloaded separately (`playwright install chromium`), so a plain
     # `pip install .` must never pull it.
     "playwright>=1.62",
+    # Moves the clock so the suite can be run as if it were months from now. The
+    # defect it hunts is invisible to reading: a fixture carrying a literal date,
+    # measured against a window that starts at the current time, which passes
+    # until the day it silently stops. Optional at runtime and skipped when
+    # absent, so a plain `pip install .` never pulls it and the suite still runs
+    # without it - only the probe's own self-check goes quiet, and it says so.
+    "time-machine>=2.19",
 ]
 
 [project.scripts]
