@@ -39,7 +39,7 @@ from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import token_urlsafe
-from typing import ParamSpec, TypeVar
+from typing import NewType, ParamSpec, TypeVar
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord
@@ -58,8 +58,32 @@ from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
 from .web_accounts import NEW_ACCOUNT_FIELD, AccountPages, picker_labels
 
+#: A basename that has been through `_scratch_name` and is therefore safe to
+#: join onto a directory. The point is not the sanitising - that already
+#: existed - but that nothing MADE anyone use it: `Path(scratch) / filename`
+#: stayed an ordinary expression which any future edit could write again, and
+#: which no test could catch, because what it produces is a path rather than a
+#: failure.
+#:
+#: The alternative was tainting every value arriving from the web layer. A
+#: durability review costed that at ~95 edits across five files and established
+#: that it would not have caught this bug anyway: a NewType taint permits
+#: `Path(scratch) / tainted`, which is the shipped fault exactly. Narrowing the
+#: one function that owns the join covers every route to it, including routes
+#: nobody has written yet, for ten lines.
+ScratchName = NewType("ScratchName", str)
 
-def _scratch_name(filename: str) -> str:
+
+def _in_scratch(scratch: str, name: ScratchName) -> Path:
+    """The only way a name becomes a path inside the scratch directory.
+
+    Trivial by design. Its whole value is the type of its second argument, which
+    is why it exists rather than the join being written inline.
+    """
+    return Path(scratch) / name
+
+
+def _scratch_name(filename: str) -> ScratchName:
     """A safe basename for a file we are about to write to a scratch dir.
 
     An uploaded name is data from elsewhere and must never decide WHERE
@@ -79,7 +103,7 @@ def _scratch_name(filename: str) -> str:
     """
     last = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
     cleaned = last.strip().strip(".")
-    return cleaned or "statement.pdf"
+    return ScratchName(cleaned or "statement.pdf")
 
 
 def _report_slow_route(method: str, route: str, seconds: float) -> None:
@@ -4304,7 +4328,7 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
         with tempfile.TemporaryDirectory() as scratch:
             # Written to a temporary file because the readers take a path,
             # and removed on the way out: this page stores nothing.
-            temporary = Path(scratch) / _scratch_name(filename)
+            temporary = _in_scratch(scratch, _scratch_name(filename))
             temporary.write_bytes(payload)
             return shape_report(
                 temporary,

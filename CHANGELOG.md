@@ -26,6 +26,28 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.200] - 2026-08-12
+
+### Changed
+- An uploaded filename can no longer become a path by accident. The sanitiser
+  already existed; nothing made it compulsory, so `Path(scratch) / filename`
+  stayed an ordinary expression that any future edit could write again - and no
+  test could catch, because what it produces is a path rather than a failure.
+  The join now lives in one function whose argument type only `_scratch_name`
+  produces, so every route to the sink goes through it, including routes nobody
+  has written yet.
+
+  The alternative was costed and rejected in the durability review: tainting
+  every value arriving from the web layer is about 95 edits across five files,
+  and would not have caught this bug anyway - a `NewType` taint permits
+  `Path(scratch) / tainted`, which is the shipped fault exactly. Narrowing the
+  sink is ten lines.
+
+  The check is a type check, so the tests are too: they run the checker over a
+  probe that does the wrong thing and require it to complain. Proven by widening
+  the argument back to `str` and watching the case fail - the first red was for
+  the wrong reason (the function did not exist yet), which is not the same thing.
+
 ## [0.4.199] - 2026-08-12
 
 ### Added
