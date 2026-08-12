@@ -20,6 +20,8 @@ import os
 
 import pytest
 
+from obdi.store import Store
+
 
 def _configured(prefixes: tuple[str, ...]) -> dict[str, str]:
     return {
@@ -50,6 +52,42 @@ class TestTheEnvironmentATestSees:
         )
         load_dotenv(env_file)
         assert os.environ.get("OBDI_DB_PATH") == "/somewhere/real/store.sqlite3"
+
+    def test_ExercisingTheCommandLine_DoesNotLoadTheMachinesConfiguration(
+        self, tmp_path, monkeypatch
+    ):
+        """The hole clearing the variables leaves open.
+
+        main() calls load_dotenv(), so a test that runs a command re-loads the
+        file DURING the test - after the guard has cleared everything, and in
+        time for whatever that test does next.
+
+        The file is written HERE rather than relied upon, and the working
+        directory moved to it, so this fails the same way on a machine that has
+        no .env of its own - CI has none, which is how the original leak stayed
+        invisible there while being live locally.
+
+        Asserted on a variable the test never set. load_dotenv does not overwrite
+        what is already in the environment, so a variable the test DID set proves
+        nothing - which the first version of this test did, passing happily with
+        the guard removed.
+        """
+        from obdi import cli
+
+        store = tmp_path / "store.sqlite3"
+        Store(store).close()
+        (tmp_path / ".env").write_text(
+            "OBDI_ACCOUNT_MAP=/somebody/elses/accounts.json\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OBDI_DB_PATH", str(store))
+
+        cli.main(["status"])
+
+        assert "OBDI_ACCOUNT_MAP" not in os.environ, (
+            "running a command loaded configuration from a file beside the "
+            "working directory, and it will outlive this test"
+        )
 
     def test_TheTestAfterThat_SeesNoneOfIt(self):
         # Deliberately a separate test rather than a cleanup assertion inside the

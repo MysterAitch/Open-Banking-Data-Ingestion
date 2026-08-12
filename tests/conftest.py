@@ -61,3 +61,11 @@ def _no_ambient_configuration(monkeypatch) -> None:
             continue
         if name.startswith(CONFIGURATION_PREFIXES):
             monkeypatch.delenv(name, raising=False)
+
+    # Clearing the variables is not enough on its own: a test that exercises the
+    # command line re-loads the file MID-TEST, because main() calls load_dotenv()
+    # and that writes into the process environment. Neutralised here rather than
+    # in the application, where reading the environment is the point - a
+    # container is configured by env vars, and the file is a convenience for
+    # whoever is sitting at the machine. A test is neither.
+    monkeypatch.setattr("obdi.cli.load_dotenv", lambda *args, **kwargs: False)
