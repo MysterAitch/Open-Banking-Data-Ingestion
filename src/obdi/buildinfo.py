@@ -74,5 +74,19 @@ def describe() -> str:
             # a reader who is told that goes and looks; one told "0.1.0"
             # believes it.
             base = "version-unknown"
-    commit = os.environ.get("OBDI_BUILD_COMMIT", "").strip()[:32]
-    return f"{base}+{commit}" if commit else base
+    commit = os.environ.get("OBDI_BUILD_COMMIT", "").strip()
+    if not commit:
+        return base
+
+    # Shorten the COMMIT, not the whole string. The width was widened to 32 so a
+    # "+local-changes" suffix would survive - but the image build injects a
+    # full-length commit id, so the cut landed inside the id and discarded the
+    # suffix entirely. The width intended to preserve the marker was what removed
+    # it, on every real build, while the cases passed on a twelve-character
+    # stand-in short enough that truncation never bit.
+    #
+    # Twelve is the conventional short form and stays unambiguous for any real
+    # repository. The length is not cosmetic: a version nobody can read is one
+    # nobody compares against another, and comparing two of them is the whole use.
+    identifier, marker, suffix = commit.partition("+")
+    return f"{base}+{identifier[:12]}{marker}{suffix}"

@@ -50,6 +50,27 @@ class TestWhatVersionIsRunning:
 
         assert describe().endswith("abc123def456+local-changes")
 
+    def test_ARealLengthCommit_IsShortenedToSomethingReadable(self, monkeypatch):
+        # What the image build actually injects is a FULL-length commit id, and a
+        # version nobody can read is a version nobody checks - the string gets
+        # skimmed past instead of compared against another. Twelve characters is
+        # the conventional short form and stays unambiguous for any real repository.
+        monkeypatch.setenv("OBDI_BUILD_COMMIT", "b4e5ee8b93bb192d0d908b652e5ac2a50f707e16")
+
+        assert describe().endswith("+b4e5ee8b93bb")
+
+    def test_ARealLengthCommitFromAChangedTree_StillCarriesTheSuffix(self, monkeypatch):
+        # The case the fixtures above could not reach. Every existing one used a
+        # twelve-character stand-in, so truncation never bit - while a real
+        # forty-character id plus this suffix was cut INSIDE the id, silently
+        # discarding the marker the width had been widened to preserve. A fixture
+        # shorter than the real thing describes a world where the bug cannot occur.
+        monkeypatch.setenv(
+            "OBDI_BUILD_COMMIT", "b4e5ee8b93bb192d0d908b652e5ac2a50f707e16+local-changes"
+        )
+
+        assert describe().endswith("+b4e5ee8b93bb+local-changes")
+
     def test_NoCommit_LeavesTheVersionAlone_RatherThanInventingOne(
         self, monkeypatch
     ):
