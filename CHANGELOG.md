@@ -26,6 +26,36 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.199] - 2026-08-12
+
+### Added
+- `obdi restore`, the half of a backup that is only ever tested by doing it. The
+  nightly copy is verified against the live store at the moment it is taken,
+  which proves it holds every row and says nothing about whether it can become
+  the store again.
+
+  Shaped by who runs it and when - on a bad day, under pressure, by somebody not
+  at their best. Nothing is deleted: a store being replaced is moved aside as
+  `.replaced` and the result says where it went. A copy that cannot be trusted is
+  refused BEFORE anything is touched, because verifying afterwards means the
+  store is already gone when the bad news arrives. The `-wal` and `-shm`
+  sidecars travel with the database they belong to, which is the same family of
+  fault as copying the main file alone when taking a backup - already met here,
+  and measured at 600-750 missing rows while every ordinary check passed.
+
+  The restored file is opened through the application before the result comes
+  back, so what is reported is a store this release can USE rather than a file
+  that exists: a copy taken before a schema change has to come forward through
+  the migration ladder. Considered and rejected: a pure byte-for-byte restore
+  that touches nothing - cleaner, and it hands back a file whose usability is
+  exactly the question being asked.
+
+  The sidecar test passed with the sidecar handling disabled, and was rewritten.
+  SQLite rewrites a mismatched write-ahead log when it opens the database, so the
+  original assertion was satisfied for the wrong reason; it now asserts the
+  sidecars ended up beside the database they belong to, which nothing else
+  produces.
+
 ## [0.4.198] - 2026-08-12
 
 ### Changed

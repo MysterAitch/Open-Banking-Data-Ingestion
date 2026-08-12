@@ -3204,6 +3204,27 @@ def main(argv: list[str] | None = None) -> int:
         help="check an existing backup against the live store, table by table",
     )
     verify_command.add_argument("backup", help="path to a backup file to check")
+    restore_command = subcommands.add_parser(
+        "restore",
+        help=(
+            "make a backup the store again, keeping whatever was there - "
+            "the half of a backup that is only ever tested by doing it"
+        ),
+    )
+    restore_command.add_argument("backup", help="path to the backup to restore")
+    restore_command.add_argument(
+        "--to",
+        dest="destination",
+        help="where to restore it (defaults to the configured store path)",
+    )
+    restore_command.add_argument(
+        "--replace",
+        action="store_true",
+        help=(
+            "go ahead when a store is already there. It is moved aside, keeping "
+            "its name plus .replaced, and never deleted"
+        ),
+    )
     subcommands.add_parser(
         "duplication",
         help=(
@@ -3774,6 +3795,22 @@ def main(argv: list[str] | None = None) -> int:
             f"verified {len(counts)} tables, {sum(counts.values())} rows, "
             f"against {db_path}"
         )
+        return 0
+
+    if args.command == "restore":
+        from .restore import restore_backup
+
+        # Defaults to the configured store, because restoring somewhere else and
+        # then moving the file by hand is where the sidecars get left behind.
+        target = Path(args.destination) if args.destination else db_path
+        try:
+            outcome = restore_backup(
+                Path(args.backup), target, replace=bool(args.replace)
+            )
+        except BackupRefused as refusal:
+            print(f"RESTORE REFUSED: {refusal}", file=sys.stderr)
+            return 1
+        print(outcome.describe())
         return 0
 
     return 2
