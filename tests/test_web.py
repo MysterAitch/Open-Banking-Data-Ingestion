@@ -2907,9 +2907,26 @@ class TestFetchTimelineControls:
 
     @staticmethod
     def _attempt() -> dict[str, object]:
+        """A year-wide ask, made recently enough to survive the row filter.
+
+        Relative to now rather than a literal date, and that is a fix rather than a
+        preference. Written with the day's date in it, this fixture passed for a
+        week and then failed one morning in a build of a commit that had passed
+        hours earlier on identical content: the attempt had aged past the seven-day
+        row filter these tests use, so the row dropped out, the chart drew nothing,
+        and the annotation under test went with it.
+
+        What these tests need is a fixed RELATIONSHIP - an ask far wider than the
+        chart's span, made inside the row filter - and none of them care which day
+        it happened on. A literal date encodes that relationship as a coincidence
+        with an expiry date on it.
+        """
+        attempted = datetime.now(UTC) - timedelta(days=1)
+        asked_from = (attempted - timedelta(days=365)).date().isoformat()
+        asked_to = attempted.date().isoformat()
         return {
-            "attempted_at": "2026-08-05T06:00:00Z",
-            "asked": "from=2025-08-05&to=2026-08-05",
+            "attempted_at": attempted.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "asked": f"from={asked_from}&to={asked_to}",
             "source": "truelayer-booked",
             "outcome": "landed",
             "request_meta": "{}",
