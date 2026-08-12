@@ -26,6 +26,38 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.203] - 2026-08-12
+
+### Added
+- The generated corpus now plants the AMBIGUOUS case, which is what makes the
+  review queue judgeable rather than merely countable. Measured first: the corpus
+  as built produced no review flags at all, and that reads as a clean bill
+  without being one - the real store flags 419 of 662. The cause was cadence
+  rather than the drifting amounts first blamed. Two rows are only candidates for
+  each other within a seven-day window and every commitment planted was monthly,
+  so nothing was ever compared and the queue was never consulted.
+
+  Two shapes now, deliberately hard to tell apart. A weekly standing order at a
+  fixed amount and an identical reference, which must go quiet once its rhythm is
+  established; and one payment reported twice in the same statement, which must
+  not. A corpus holding only the first would reward a matcher that never flags
+  anything. The expected counts live in the manifest, not only in a test, so the
+  nightly job asserting from another process can hold obdi to them too.
+
+  Result: 2 flags from 75 rows, both correct - the standing order's second
+  instalment, which is the deliberate price of needing two priors to establish a
+  rhythm, and the duplicate.
+
+### Changed
+- The claim that series suppression saves "roughly fifty flags a year for one
+  commitment" was an estimate since it was written, and is now measured at 46.
+  Disabling the check against the corpus takes the queue from 2 flags to 25, of
+  which 24 are that single standing order, while the genuine duplicate stays
+  flagged in both runs - so the silence is not bought by going quiet in general.
+  The docstring carries the number and how to reproduce it. That run is also the
+  red proof: a test asserting a feature that can be disabled without moving the
+  number is not testing it.
+
 ## [0.4.202] - 2026-08-12
 
 ### Added

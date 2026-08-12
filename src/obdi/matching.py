@@ -134,6 +134,13 @@ def belongs_to_established_series(
     Deliberately conservative: it takes two priors to establish a series, so
     the second instalment is still flagged once. Confirming a commitment once
     is a reasonable price for silence thereafter.
+
+    THAT "ROUGHLY FIFTY" WAS AN ESTIMATE AND IS NOW MEASURED AT 46. Disabling
+    this function against the generated corpus - one weekly commitment over six
+    months - takes the review queue from 2 flags to 25, of which 24 are that
+    single standing order. The corpus also holds one payment genuinely reported
+    twice, and it stays flagged in both runs, so the silence bought here is not
+    bought by going quiet in general. Reproduce with test_synthetic_corpus.py.
     """
     same_shape = sorted(
         (

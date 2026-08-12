@@ -43,8 +43,17 @@ class TestTheGeneratedWorld:
         assert manifest["totals"]["events"] == len(world.events)
         # Six months, each with a salary, five commitments and a two-legged
         # sweep: the SHAPE is fixed even though the content moves with the seed.
-        assert manifest["totals"]["events"] == 6 * (1 + 5 + 2)
+        monthly = 6 * (1 + 5 + 2)
+        # Plus the planted ambiguity, which is deliberately NOT seeded - the
+        # review queue can only be judged against a fixed number of instalments.
+        ambiguity = manifest["ambiguity"]
+        planted = (
+            ambiguity["standing_order"]["instalments"]
+            + ambiguity["duplicate_report"]["copies"]
+        )
+        assert manifest["totals"]["events"] == monthly + planted
         assert manifest["totals"]["transfers"] == 6
+        assert planted > 3, "no ambiguity planted, so the review queue asserts nothing"
 
         on_disk = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
         assert on_disk == manifest, (
@@ -214,6 +223,50 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         assert paired == planted, (
             f"missed {sorted(planted - paired)[:2]}, invented "
             f"{sorted(paired - planted)[:2]} (seed {SEED})"
+        )
+
+    def test_TheReviewQueue_FlagsTheDuplicateAndNotTheStandingOrder(
+        self, corpus, tmp_path
+    ):
+        """The measurement the generator was built to make possible.
+
+        Over the real store 419 of 662 transactions are flagged, and that ratio
+        can be deplored and not judged: nobody knows which of the 419 were
+        right. Here the answer is planted. A weekly standing order must go quiet
+        after its rhythm is established, and a payment reported twice must not -
+        and a corpus containing only the first would reward a matcher that never
+        flags anything at all.
+        """
+        directory, world, manifest = corpus
+        store_path = tmp_path / "store.sqlite3"
+        self._imported(store_path, directory, world)
+
+        with Store(store_path) as store:
+            derived = store.all_transactions()
+            queued = store.review_queue()
+            described = {row.entity_id: row.description for row in derived}
+
+        flagged = [described.get(str(entry["entity_id"]), "?") for entry in queued]
+        expected = manifest["ambiguity"]
+
+        duplicate = expected["duplicate_report"]["description"]
+        assert flagged.count(duplicate) == expected["duplicate_report"]["expected_flags"], (
+            f"a payment reported twice was flagged {flagged.count(duplicate)} time(s), "
+            f"expected {expected['duplicate_report']['expected_flags']} - this is the "
+            f"case the queue exists for (seed {SEED})"
+        )
+
+        order = expected["standing_order"]
+        assert flagged.count(order["description"]) == order["expected_flags"], (
+            f"a standing order of {order['instalments']} instalments produced "
+            f"{flagged.count(order['description'])} flags, expected "
+            f"{order['expected_flags']}: {order['why']} (seed {SEED})"
+        )
+
+        assert len(queued) == expected["expected_flags_total"], (
+            f"{len(queued)} flags from {len(derived)} rows, expected "
+            f"{expected['expected_flags_total']} - the surplus were "
+            f"{sorted(set(flagged))} (seed {SEED})"
         )
 
     def test_AMonthNeverDelivered_ShowsAsAGapRatherThanAsQuiet(

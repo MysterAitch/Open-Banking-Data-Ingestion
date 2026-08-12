@@ -62,6 +62,14 @@ _MERCHANTS = [
 ]
 _TOWNS = ["LONDON", "READING", "BRISTOL", "LEEDS"]
 
+#: The ambiguous case, planted deliberately - see `_plant_ambiguity`. A weekly
+#: standing order at a FIXED amount and an IDENTICAL descriptor, because that is
+#: the only shape the review queue can be judged against. Its amount is chosen to
+#: sit outside every drifting commitment's range so the two cannot interfere.
+_STANDING_ORDER = (-2500, "GYM MEMBERSHIP SO REF 4471")
+#: A one-off reported twice in the same statement, at an amount nothing else uses.
+_DUPLICATE_REPORT = (-6789, "CARPET WORLD 8823 READING GB")
+
 
 @dataclass(frozen=True)
 class PlantedEvent:
@@ -183,7 +191,84 @@ def build_world(seed: int, months: int = 6) -> World:
             )
         )
 
+    _plant_ambiguity(world, rng, months)
     return world
+
+
+def _plant_ambiguity(world: World, rng: random.Random, months: int) -> None:
+    """The two shapes the review queue exists to tell apart.
+
+    WITHOUT THIS THE CORPUS SCORES A PERFECT ZERO AND MEANS NOTHING BY IT.
+    Measured 2026-08-12: the corpus as first built produced no review flags at
+    all, which reads as a clean bill and is not one. The matcher only considers
+    two rows ambiguous when they share an amount within a SEVEN DAY window, and
+    everything planted above is monthly - roughly thirty days apart, so no two
+    rows were ever candidates for each other and the queue was never consulted.
+    The drifting amounts were a second reason but not the operative one, and the
+    note in the vault said so wrongly until this was written.
+
+    So both shapes are planted here, and they are deliberately hard to tell
+    apart, because that is the entire difficulty:
+
+      A WEEKLY STANDING ORDER, fixed amount, identical reference, exactly seven
+      days apart. Every instalment after the first resembles a duplicate report
+      and the matcher must NOT say so - roughly fifty flags a year for one
+      commitment is what teaches a reader to ignore the queue. Two priors at a
+      consistent interval establish the rhythm, so the expected outcome is one
+      flag on the second instalment and silence for the remaining twenty-four.
+      That is a deliberate price, not a defect: confirming a commitment once.
+
+      ONE PAYMENT REPORTED TWICE in the same statement, identical in every
+      field. This one SHOULD be flagged. It is the case that makes suppressing
+      the standing order dangerous, and a corpus containing only the first shape
+      would reward a matcher that simply never flags anything.
+
+    The expected flag counts go in the manifest rather than only in a test, so
+    the nightly job asserting from another process can hold obdi to them too.
+    """
+    amount, description = _STANDING_ORDER
+    start = date(2026, 1, 5)
+    for week in range(_weekly_instalments(months)):
+        world.events.append(
+            PlantedEvent(
+                account="synthetic-current",
+                when=date.fromordinal(start.toordinal() + week * 7).isoformat(),
+                amount_minor=amount,
+                # Identical every week. A standing order quotes one reference
+                # for its life, which is exactly what makes it indistinguishable
+                # from a repeated report on the facts alone.
+                description=description,
+                merchant="Gym",
+                kind="standing-order",
+            )
+        )
+
+    amount, description = _DUPLICATE_REPORT
+    when = date(2026, 3, 11).isoformat()
+    for _ in range(2):
+        world.events.append(
+            PlantedEvent(
+                account="synthetic-current",
+                when=when,
+                amount_minor=amount,
+                description=description,
+                merchant="Carpet World",
+                kind="duplicate-report",
+            )
+        )
+    # Kept out of the seeded stream on purpose: this is the fixed part of the
+    # shape, so it must not move when the seed does.
+    del rng
+
+
+def _weekly_instalments(months: int) -> int:
+    """Enough to establish a rhythm and then some, without leaving the corpus.
+
+    Three is the minimum that means anything - the third is the first that CAN
+    be suppressed - so a short corpus still exercises the case rather than
+    silently skipping it.
+    """
+    return max(3, months * 4 + 1)
 
 
 def _statement_csv(world: World, account: str) -> str:
@@ -242,6 +327,31 @@ def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
         # decision to make this a file exists to prevent, arriving inside the
         # thing that implements it. Caught by the test that compares the two.
         "transfer_pairs": [list(pair) for pair in world.transfer_pairs],
+        # The planted ambiguity, with the RIGHT ANSWER stated. This is the part
+        # a real corpus can never supply: over real statements the number of
+        # review flags can be counted and not judged, because nobody knows which
+        # of them were correct. Here both mistakes are visible - a matcher that
+        # flags the whole standing order is noisy, and one that stays silent
+        # through the duplicate has bought that silence too cheaply.
+        "ambiguity": {
+            "standing_order": {
+                "description": _STANDING_ORDER[1],
+                "instalments": sum(1 for e in world.events if e.kind == "standing-order"),
+                "interval_days": 7,
+                "expected_flags": 1,
+                "why": (
+                    "two priors at a consistent interval establish the rhythm, so "
+                    "only the second instalment is genuinely undecidable"
+                ),
+            },
+            "duplicate_report": {
+                "description": _DUPLICATE_REPORT[1],
+                "copies": sum(1 for e in world.events if e.kind == "duplicate-report"),
+                "expected_flags": 1,
+                "why": "one payment reported twice is the case the queue exists for",
+            },
+            "expected_flags_total": 2,
+        },
         "totals": {
             "events": len(world.events),
             "transfers": len(world.transfer_pairs),
