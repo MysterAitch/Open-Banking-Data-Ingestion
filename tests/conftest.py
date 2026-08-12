@@ -39,6 +39,21 @@ CONFIGURATION_PREFIXES = ("OBDI_", "TRUELAYER_", "STARLING_", "ACTUAL_", "EB_")
 KEEP = frozenset({"OBDI_TEST_LEDGER"})
 
 
+@pytest.fixture(scope="session")
+def configuration_prefixes() -> tuple[str, ...]:
+    """The prefixes, as a fixture rather than an import.
+
+    `from tests.conftest import ...` works wherever the repository root happens
+    to be on sys.path and fails where it is not - it passed locally and broke
+    every collection in CI. pytest imports this file for its own reasons, so a
+    fixture is the one route that needs no path to resolve.
+
+    Session-scoped because it holds a constant, and because a module-scoped
+    fixture cannot depend on a function-scoped one.
+    """
+    return CONFIGURATION_PREFIXES
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_configuration(monkeypatch) -> None:
     for name in list(os.environ):

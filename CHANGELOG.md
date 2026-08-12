@@ -26,6 +26,20 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.196] - 2026-08-12
+
+### Fixed
+- The two new test modules imported `tests.conftest`, which resolves only where
+  the repository root happens to be on `sys.path`. It is locally and is not in
+  CI, so every collection there failed and 0.4.195 built nothing. The prefixes
+  now arrive as a fixture, which needs no path to resolve - pytest imports
+  conftest for its own reasons. Checked by collecting from a directory outside
+  the repository, which is the condition that broke.
+
+  Second CI-only failure of the day, and the same shape as the first: a local run
+  that cannot see what CI sees is not verification, it is a rehearsal on a
+  different stage.
+
 ## [0.4.195] - 2026-08-12
 
 ### Removed

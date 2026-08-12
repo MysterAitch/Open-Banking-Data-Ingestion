@@ -19,20 +19,19 @@ from __future__ import annotations
 import os
 
 import pytest
-from tests.conftest import CONFIGURATION_PREFIXES
 
 
-def _configured() -> dict[str, str]:
+def _configured(prefixes: tuple[str, ...]) -> dict[str, str]:
     return {
         name: value
         for name, value in os.environ.items()
-        if name.startswith(CONFIGURATION_PREFIXES)
+        if name.startswith(prefixes)
     }
 
 
 class TestTheEnvironmentATestSees:
-    def test_ATest_SeesNoConfigurationItDidNotSetItself(self):
-        leaked = _configured()
+    def test_ATest_SeesNoConfigurationItDidNotSetItself(self, configuration_prefixes):
+        leaked = _configured(configuration_prefixes)
         assert not leaked, (
             f"the environment carries configuration this test did not set: "
             f"{sorted(leaked)}. A test reading those is measuring the machine."

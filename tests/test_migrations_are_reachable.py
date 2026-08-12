@@ -29,7 +29,6 @@ import sqlite3
 import tempfile
 
 import pytest
-from tests.conftest import CONFIGURATION_PREFIXES
 
 from obdi.store import Store
 
@@ -94,7 +93,7 @@ def _schema_text(connection: sqlite3.Connection) -> str:
 
 
 @pytest.fixture(scope="module")
-def fired() -> dict[str, set[str]]:
+def fired(configuration_prefixes) -> dict[str, set[str]]:
     """Which shipped shapes each migration actually changed.
 
     Every migration is wrapped for the duration, and a change is either DDL (the
@@ -134,7 +133,7 @@ def fired() -> dict[str, set[str]]:
     ambient = {
         name: os.environ.pop(name)
         for name in list(os.environ)
-        if name.startswith(CONFIGURATION_PREFIXES)
+        if name.startswith(configuration_prefixes)
     }
     try:
         for snapshot in SHIPPED_SHAPES:
