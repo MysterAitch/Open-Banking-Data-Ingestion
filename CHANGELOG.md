@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.211] - 2026-08-13
+
+### Fixed
+- Every corpus test built its store by calling the reconcile function directly,
+  which fills the derived layer and leaves the raw artefact layer empty. The
+  application rebuilds from raw at startup, so those stores are EMPTIED the
+  moment they are served - measured by loading one into the running app: 70 rows
+  to 0, reported as "VANISHED - check problems and layer 0".
+
+  Eighteen green tests were describing a store shape the application destroys.
+  The assertions were not wrong, and the matching logic was genuinely exercised,
+  but "the corpus imports to 69 rows" was not a claim about anything obdi can
+  hold. They now import through the same door a person uses.
+
+  A withheld month is now a real partial STATEMENT with those rows absent,
+  rather than a filtered row list, so it goes through that door like any other
+  file - which is also what a month that was never delivered actually looks like.
+
+  Caller-invented digests are gone with it: each artefact carries the digest of
+  its own bytes, so two different files are two artefacts without anybody
+  saying so, and two deliveries of the same file are one.
+
+### Added
+- `test_TheCorpus_SurvivesARebuild`, asserting the property that had been failing
+  silently: a rebuild must leave the store where it found it, replaying one
+  artefact per imported statement and emptying no account. Proven capable of
+  failing - built the old way, the same rebuild takes 75 rows to 0 and replays
+  nothing, because there is nothing in layer 0 to replay.
+
 ## [0.4.210] - 2026-08-13
 
 ### Fixed

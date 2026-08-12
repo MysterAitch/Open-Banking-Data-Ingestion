@@ -20,11 +20,50 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
 from obdi.store import Store
 from obdi.synthetic import build_world, write_corpus
+
+
+def land(store_path, path, account: str):
+    """Import one artefact through the door a person uses.
+
+    NOT the reconcile function directly, which every test here used until
+    2026-08-13. That path fills the derived layer and leaves the raw artefact
+    layer empty; the application rebuilds from raw at startup; so a store built
+    the short way is EMPTIED the moment it is served. Measured by loading this
+    corpus into the running app: 70 rows to 0, reported as "VANISHED - check
+    problems and layer 0".
+
+    The assertions were not wrong - the matching logic was genuinely exercised -
+    but they described a store shape the application destroys, and no test here
+    could have noticed. Importing the file means what is asserted is a store the
+    app can actually hold, and it is what makes test_TheCorpus_SurvivesARebuild
+    meaningful rather than tautological.
+    """
+    from obdi.ingest import import_file
+
+    with Store(store_path) as store:
+        return import_file(store, Path(path), account_id=account)
+
+
+def statement_without(source: Path, month: str, destination: Path) -> Path:
+    """The same statement with one month's rows removed.
+
+    A real partial artefact rather than a filtered row list, so it can go
+    through the import door like any other file - which is the point: a month
+    that was never delivered arrives as a file that does not contain it.
+    """
+    lines = source.read_text(encoding="utf-8").splitlines()
+    header, rows = lines[0], lines[1:]
+    year, number = month.split("-")
+    kept = [row for row in rows if f"/{number}/{year}" not in row.split(",")[0]]
+    destination.write_text("\n".join([header, *kept]) + "\n", encoding="utf-8")
+    return destination
+
 
 SEED = 20260812
 
@@ -95,15 +134,8 @@ class TestTheGeneratedWorld:
 class TestWhatTheApplicationDerivesFromIt:
     def _import(self, store_path, directory, world) -> None:
         """Every statement through the ordinary import path."""
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
-
         for account in world.accounts:
-            payload = (directory / f"{account}.csv").read_bytes()
-            parser = detect(payload)
-            rows = list(parser.parse(payload, account_id=account))
-            with Store(store_path) as store:
-                reconcile_batch(store, rows, digest=f"synthetic-{account}")
+            land(store_path, directory / f"{account}.csv", account)
 
     def test_EveryPlantedEvent_ArrivesExactlyOnce(self, corpus, tmp_path):
         directory, world, manifest = corpus
@@ -128,6 +160,50 @@ class TestWhatTheApplicationDerivesFromIt:
             f"{sorted(arrived - planted)[:3]} and {sorted(planted - arrived)[:3]} "
             f"(seed {SEED})"
         )
+
+    def test_TheCorpus_SurvivesARebuild(self, corpus, tmp_path):
+        """The property that failed silently until the app was actually run.
+
+        obdi rebuilds the derived layers from raw at startup. A store whose raw
+        layer is empty therefore rebuilds to NOTHING - and every test in this
+        file built its store by calling the reconcile function directly, which
+        fills the derived layer and leaves layer 0 empty. Serving one of them
+        emptied it: 70 rows to 0, reported as VANISHED.
+
+        Nothing here could have noticed, because nothing here rebuilt. So this
+        asserts the survival directly rather than trusting that importing
+        through the door is enough - the door could change.
+        """
+        from obdi.rebuild import rebuild_from_raw
+
+        directory, world, manifest = corpus
+        store_path = tmp_path / "store.sqlite3"
+        self._import(store_path, directory, world)
+
+        with Store(store_path) as store:
+            before = len(store.all_transactions())
+            report = rebuild_from_raw(store)
+            after = len(store.all_transactions())
+
+        assert before == manifest["totals"]["events"], (
+            f"the corpus did not land before the rebuild was even tried "
+            f"(seed {SEED})"
+        )
+        assert report.artefacts_replayed == len(world.accounts), (
+            f"the rebuild replayed {report.artefacts_replayed} artefact(s) from a "
+            f"store built by importing {len(world.accounts)} - the raw layer is "
+            f"not being written (seed {SEED})"
+        )
+        assert after == before, (
+            f"a rebuild took the store from {before} rows to {after}. "
+            f"{report.account_changes} (seed {SEED})"
+        )
+        vanished = {
+            account: change
+            for account, change in report.account_changes.items()
+            if change[1] == 0 and change[0] > 0
+        }
+        assert not vanished, f"accounts emptied by the rebuild: {vanished} (seed {SEED})"
 
     def test_ImportingTheSameCorpusTwice_AddsNothing(self, corpus, tmp_path):
         """The property every real import depends on, checkable here because the
@@ -181,15 +257,8 @@ class TestThePatternFeaturesAgainstKnownAnswers:
     """
 
     def _imported(self, store_path, directory, world):
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
-
         for account in world.accounts:
-            payload = (directory / f"{account}.csv").read_bytes()
-            parser = detect(payload)
-            rows = list(parser.parse(payload, account_id=account))
-            with Store(store_path) as store:
-                reconcile_batch(store, rows, digest=f"synthetic-{account}")
+            land(store_path, directory / f"{account}.csv", account)
 
     def test_TransferPairing_FindsExactlyThePairsThatWerePlanted(
         self, corpus, tmp_path
@@ -367,29 +436,30 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         whole must produce NO gaps at all.
         """
         from obdi.coverage import gaps
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
 
-        directory, _world, _ = corpus
-        payload = (directory / "synthetic-current.csv").read_bytes()
-        rows = list(detect(payload).parse(payload, account_id="synthetic-current"))
-        months = sorted({row.value_date.strftime("%Y-%m") for row in rows})
+        directory, world, _ = corpus
+        statement = directory / "synthetic-current.csv"
+        months = sorted(
+            {e.when[:7] for e in world.events if e.account == "synthetic-current"}
+        )
         skipped = months[len(months) // 2]
-        kept = [row for row in rows if row.value_date.strftime("%Y-%m") != skipped]
-        assert len(kept) < len(rows), f"the month was not actually withheld (seed {SEED})"
+        partial = statement_without(statement, skipped, tmp_path / "partial.csv")
+        assert len(partial.read_text().splitlines()) < len(
+            statement.read_text().splitlines()
+        ), f"the month was not actually withheld (seed {SEED})"
 
         whole = tmp_path / "whole.sqlite3"
+        land(whole, statement, "synthetic-current")
         with Store(whole) as store:
-            reconcile_batch(store, rows, digest="synthetic-whole")
             complete = gaps(store.all_transactions())
         assert complete == [], (
             f"a corpus with nothing missing was reported as having "
             f"{[g.month for g in complete]} missing (seed {SEED})"
         )
 
-        partial = tmp_path / "partial.sqlite3"
-        with Store(partial) as store:
-            reconcile_batch(store, kept, digest="synthetic-partial")
+        withheld = tmp_path / "withheld.sqlite3"
+        land(withheld, partial, "synthetic-current")
+        with Store(withheld) as store:
             reported = gaps(store.all_transactions())
 
         assert [gap.month for gap in reported] == [skipped], (
@@ -411,13 +481,11 @@ class TestTheAdversarialDeliveries:
     happened rather than something imaginable.
     """
 
-    def _land(self, store_path, payload: bytes, account: str, digest: str) -> None:
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
-
-        rows = list(detect(payload).parse(payload, account_id=account))
-        with Store(store_path) as store:
-            reconcile_batch(store, rows, digest=digest)
+    def _land(self, store_path, path, account: str, _unused: str = "") -> None:
+        """Through the import door. The digest is the artefact's own, computed
+        from its bytes, rather than a label the caller invents - which is what
+        makes two deliveries of the same file the same artefact."""
+        land(store_path, path, account)
 
     def test_TwoStatementsWhoseMonthsOverlap_LeaveTheSameRowsAsOneWholePeriod(
         self, corpus, tmp_path
@@ -455,8 +523,7 @@ class TestTheAdversarialDeliveries:
         )
 
         whole = tmp_path / "whole.sqlite3"
-        payload = (directory / "synthetic-current.csv").read_bytes()
-        self._land(whole, payload, "synthetic-current", "whole")
+        self._land(whole, directory / "synthetic-current.csv", "synthetic-current")
         with Store(whole) as store:
             expected = {
                 (row.value_date.isoformat(), row.amount_minor, row.description)
@@ -466,14 +533,10 @@ class TestTheAdversarialDeliveries:
 
         split = tmp_path / "split.sqlite3"
         for delivery in overlapping:
-            self._land(
-                split,
-                (directory / delivery["name"]).read_bytes(),
-                delivery["deliver_as"],
-                # A different digest each, because they ARE different artefacts -
-                # giving them one digest would hide the case being tested.
-                digest=delivery["name"],
-            )
+            # Each file carries its own digest, computed from its bytes, so two
+            # genuinely different artefacts are two artefacts without anybody
+            # having to say so - and two deliveries of the SAME file are one.
+            self._land(split, directory / delivery["name"], delivery["deliver_as"])
         with Store(split) as store:
             landed = store.all_transactions()
             actual = {
@@ -525,17 +588,9 @@ class TestTheAdversarialDeliveries:
 
         store_path = tmp_path / "store.sqlite3"
         self._land(
-            store_path,
-            (directory / "synthetic-current.csv").read_bytes(),
-            "synthetic-current",
-            digest="first-source",
+            store_path, directory / "synthetic-current.csv", "synthetic-current"
         )
-        self._land(
-            store_path,
-            (directory / second["name"]).read_bytes(),
-            "synthetic-current",
-            digest="second-source",
-        )
+        self._land(store_path, directory / second["name"], "synthetic-current")
 
         with Store(store_path) as store:
             derived = [
@@ -611,17 +666,9 @@ class TestTheAdversarialDeliveries:
         )
         store_path = tmp_path / "store.sqlite3"
         self._land(
-            store_path,
-            (directory / "synthetic-current.csv").read_bytes(),
-            "synthetic-current",
-            digest="first-source",
+            store_path, directory / "synthetic-current.csv", "synthetic-current"
         )
-        self._land(
-            store_path,
-            (directory / planted["name"]).read_bytes(),
-            "synthetic-current",
-            digest="transposed",
-        )
+        self._land(store_path, directory / planted["name"], "synthetic-current")
 
         with Store(store_path) as store:
             found = transpositions(store.all_transactions())
@@ -686,17 +733,9 @@ class TestTheAdversarialDeliveries:
         # compare. Leaving that out is how this test first failed.
         for account in (misfile["belongs_to"], misfile["deliver_as"]):
             self._land(
-                store_path,
-                (directory / f"{account}.csv").read_bytes(),
-                account,
-                digest=f"correctly-filed-{account}",
+                store_path, directory / f"{account}.csv", account
             )
-        self._land(
-            store_path,
-            (directory / misfile["name"]).read_bytes(),
-            misfile["deliver_as"],
-            digest="misfiled",
-        )
+        self._land(store_path, directory / misfile["name"], misfile["deliver_as"])
 
         with Store(store_path) as store:
             derived = store.all_transactions()
@@ -746,13 +785,11 @@ class TestTheReportAPersonActuallyReads:
     reassuring line means a check passed or never ran.
     """
 
-    def _land(self, store_path, payload: bytes, account: str, digest: str) -> None:
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
-
-        rows = list(detect(payload).parse(payload, account_id=account))
-        with Store(store_path) as store:
-            reconcile_batch(store, rows, digest=digest)
+    def _land(self, store_path, path, account: str, _unused: str = "") -> None:
+        """Through the import door. The digest is the artefact's own, computed
+        from its bytes, rather than a label the caller invents - which is what
+        makes two deliveries of the same file the same artefact."""
+        land(store_path, path, account)
 
     def _report_for(self, store_path):
         """Built exactly as the `coverage` command builds it.
@@ -787,13 +824,13 @@ class TestTheReportAPersonActuallyReads:
         store_path = tmp_path / "store.sqlite3"
         self._land(
             store_path,
-            (directory / "synthetic-current.csv").read_bytes(),
+            (directory / "synthetic-current.csv"),
             "synthetic-current",
             "first",
         )
         self._land(
             store_path,
-            (directory / planted["name"]).read_bytes(),
+            (directory / planted["name"]),
             "synthetic-current",
             "transposed",
         )
@@ -823,7 +860,7 @@ class TestTheReportAPersonActuallyReads:
         store_path = tmp_path / "store.sqlite3"
         self._land(
             store_path,
-            (directory / "synthetic-current.csv").read_bytes(),
+            (directory / "synthetic-current.csv"),
             "synthetic-current",
             "only",
         )
@@ -883,7 +920,7 @@ class TestTheReportAPersonActuallyReads:
 
         # The second source covers the whole period, so it can see that month.
         self._land(
-            store_path, (directory / second["name"]).read_bytes(), "synthetic-current", "second"
+            store_path, (directory / second["name"]), "synthetic-current", "second"
         )
 
         with Store(store_path) as store:
