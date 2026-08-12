@@ -172,7 +172,7 @@ class TestWhenTheStatementWasAlreadyImportedCorrectly:
         # survivor carries a rule's. Rank decides, as it does everywhere else -
         # the alternative is that which copy happened to be misfiled decides.
         store_path = tmp_path / "store.sqlite3"
-        misfiled, correct = self._both_landed(store_path)
+        misfiled, _correct = self._both_landed(store_path)
 
         with Store(store_path) as store:
             filed = {row.account_id: row.entity_id for row in store.all_transactions()}

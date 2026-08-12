@@ -26,6 +26,23 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.194] - 2026-08-12
+
+### Fixed
+- The lint errors that stopped 0.4.193 building, so its changes are actually
+  published: a suppression comment placed on the second line of an implicitly
+  concatenated string (the rule anchors on the first, so it read as unused), and
+  an unpacked variable a test never used.
+
+  Worth recording why they reached CI at all rather than being caught locally.
+  The three gates were run as `pytest ... | tail && ruff check . | tail && mypy |
+  tail`, and a pipeline exits with its LAST stage's status - so `tail` reported
+  success for all three. Two of them had not run at all: `ruff` and `mypy` are
+  not on PATH in that shell and need `python -m`, and their "command not found"
+  went into the same `tail`. The chain was built to keep output short and
+  destroyed the only signal it existed to carry. A summarised gate is not a
+  checked gate.
+
 ## [0.4.193] - 2026-08-12
 
 ### Fixed

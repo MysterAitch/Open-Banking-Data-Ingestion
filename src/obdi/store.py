@@ -1529,8 +1529,11 @@ class Store:
             else (old_account_id, artefact_digest)
         )
         rows = self.connection.execute(
-            "SELECT entity_id, source, source_id, content_key, occurrence, "
-            f"artefact_digest FROM transactions WHERE account_id = ?{scope}",  # noqa: S608
+            # The suppression sits on the FIRST line of the string, which is where
+            # the rule anchors an implicit concatenation - on the second it reads
+            # as unused and fails the lint instead.
+            "SELECT entity_id, source, source_id, content_key, occurrence, "  # noqa: S608
+            f"artefact_digest FROM transactions WHERE account_id = ?{scope}",
             parameters,
         ).fetchall()
         moves = []
