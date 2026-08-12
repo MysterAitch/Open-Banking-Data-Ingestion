@@ -118,7 +118,7 @@ py -3.14 -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -e ".[dev]"    # Windows
 # source .venv/bin/activate && pip install -e ".[dev]"   # POSIX
 
-./.venv/Scripts/python.exe -m pytest       # 56 tests, no credentials needed
+./.venv/Scripts/python.exe -m pytest       # no credentials needed
 ./.venv/Scripts/python.exe -m ruff check .
 ```
 
@@ -478,11 +478,18 @@ a reachable Actual server to verify against, so it is deliberately unwritten
 rather than shipped unverified — plus MQTT events and a review interface for
 the flagged-but-undecided queue.
 
-Assurance: 304 tests, `mypy --strict` clean, `ruff` clean under a widened rule
-set including annotations, security, timezone and pathlib families. An
+Assurance: `pytest` green, `mypy --strict` clean, `ruff` clean under a widened
+rule set including annotations, security, timezone and pathlib families. An
 adversarial multi-lens review found 33 defects in an earlier state of this code
 that had 189 tests passing, four of them silent data loss; all are fixed and
 covered by regression tests that name the scenario rather than the mechanism.
+
+The number of tests is deliberately not stated. It was, twice, and both figures
+rotted within weeks - a stale count is worse than none, because it answers the
+question and sends the reader away satisfied. The two figures above survive
+because they are dated claims about a past state rather than a description of
+now: 189 tests passing beside four silent data-loss defects is the point, and
+that does not decay.
 
 `scripts/check_uk_coverage.py` answers the outstanding design question — whether
 Enable Banking actually carries your banks.

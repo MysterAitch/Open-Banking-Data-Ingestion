@@ -71,13 +71,29 @@ The store and the connection file move as plain files; nothing re-derives from
 scratch and no re-authorisation is needed.
 
 1. Stop anything that writes: the scheduler, and any command mid-run.
-2. Copy `store.sqlite3` and `accounts.json` into the data volume.
-3. Copy `connections.json` into the credentials volume, and the token files into
-   the secrets volume.
+2. Take the store with `obdi backup <destination>` and move THAT file, rather
+   than copying `store.sqlite3` yourself. This is not a style preference - see
+   below.
+3. Copy `accounts.json` into the data volume, `connections.json` into the
+   credentials volume, and the token files into the secrets volume.
 4. Bring it up and check `obdi connections` reports the same consent clocks. If
    it reports none, the connection store is in the wrong place.
 
 Consent clocks keep running across the move; it does not reset them.
+
+**Why not simply copy the file.** The store runs with write-ahead logging, so
+recently committed rows live in the `-wal` sidecar until a checkpoint folds them
+back in. Copying `store.sqlite3` alone leaves them there - measured here at 600 to
+750 committed rows short on every trial, and every one of those short copies
+passed SQLite's own `integrity_check`. The copy is not corrupt. It is valid,
+openable, and quietly missing the newest work, which is the worst of the available
+failures because nothing about it looks wrong until the day you need it.
+
+`obdi backup` takes the copy through the application and refuses to hand you one
+whose row counts do not match the live store, table by table; `obdi verify-backup`
+re-checks a copy you already have. If you must move files by hand, take
+`store.sqlite3`, `store.sqlite3-wal` and `store.sqlite3-shm` together with every
+writer stopped - but prefer the command, which checks its own work.
 
 **Regenerating beats copying** where you can. Provider secrets can usually be
 re-issued in a console, and bank connections re-authorised from a phone in a
