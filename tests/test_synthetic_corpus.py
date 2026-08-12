@@ -161,5 +161,94 @@ class TestWhatTheApplicationDerivesFromIt:
         assert sum(row.amount_minor for row in moved) == 0
 
 
+class TestThePatternFeaturesAgainstKnownAnswers:
+    """The reason the generator exists.
+
+    Over real statements these can be checked by eye and nothing else, because
+    nobody knows how many internal transfers a real corpus contains. Here the
+    answer was decided before the data was written, so a detector finding five or
+    seven is wrong in a way real data cannot reveal.
+    """
+
+    def _imported(self, store_path, directory, world):
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
+        for account in world.accounts:
+            payload = (directory / f"{account}.csv").read_bytes()
+            parser = detect(payload)
+            rows = list(parser.parse(payload, account_id=account))
+            with Store(store_path) as store:
+                reconcile_batch(store, rows, digest=f"synthetic-{account}")
+
+    def test_TransferPairing_FindsExactlyThePairsThatWerePlanted(
+        self, corpus, tmp_path
+    ):
+        """Not "some pairs" - THESE pairs. The manifest names all six, so both
+        halves of the failure are visible: a pairing that misses one, and a
+        pairing that invents one out of two unrelated payments that happen to
+        offset."""
+        from obdi.ingest import pair_transfers_across_store
+
+        directory, world, manifest = corpus
+        store_path = tmp_path / "store.sqlite3"
+        self._imported(store_path, directory, world)
+
+        with Store(store_path) as store:
+            found = pair_transfers_across_store(store)
+            by_entity = {
+                row.entity_id: row.description for row in store.all_transactions()
+            }
+            paired = {
+                tuple(sorted((by_entity[debit], by_entity[credit])))
+                for debit, credit in store.connection.execute(
+                    "SELECT debit_entity_id, credit_entity_id FROM transfer_pairs"
+                )
+            }
+
+        planted = {tuple(sorted(pair)) for pair in manifest["transfer_pairs"]}
+        assert found == len(planted), (
+            f"planted {len(planted)} transfers, the pass confirmed {found} "
+            f"(seed {SEED})"
+        )
+        assert paired == planted, (
+            f"missed {sorted(planted - paired)[:2]}, invented "
+            f"{sorted(paired - planted)[:2]} (seed {SEED})"
+        )
+
+    def test_AMonthNeverDelivered_ShowsAsAGapRatherThanAsQuiet(
+        self, corpus, tmp_path
+    ):
+        """A delivery-level omission, which is the cheap half of the gap case:
+        the statement exists and simply is not imported. What makes this
+        checkable at all is that the corpus knows the month is missing - over
+        real data an empty month and an unimported one look identical."""
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
+        directory, _world, _ = corpus
+        store_path = tmp_path / "store.sqlite3"
+
+        payload = (directory / "synthetic-current.csv").read_bytes()
+        parser = detect(payload)
+        rows = list(parser.parse(payload, account_id="synthetic-current"))
+        months = sorted({row.value_date.strftime("%Y-%m") for row in rows})
+        skipped = months[len(months) // 2]
+        kept = [row for row in rows if row.value_date.strftime("%Y-%m") != skipped]
+
+        with Store(store_path) as store:
+            reconcile_batch(store, kept, digest="synthetic-partial")
+            present = {
+                row.value_date.strftime("%Y-%m") for row in store.all_transactions()
+            }
+
+        assert skipped not in present, f"the month was not actually withheld (seed {SEED})"
+        assert len(present) == len(months) - 1
+        # The months either side ARE present, so this is a hole rather than a
+        # short history - which is the distinction any gap report has to make.
+        position = months.index(skipped)
+        assert months[position - 1] in present and months[position + 1] in present
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
