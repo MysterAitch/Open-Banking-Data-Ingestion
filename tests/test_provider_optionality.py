@@ -214,5 +214,64 @@ class TestWhatServeDoesWithEachOfThose:
         assert code == 0
 
 
+class TestWhatThePageSaysWhenThereIsNoProvider:
+    """A capability that is switched off must LOOK switched off.
+
+    The failure being avoided is a page that simply omits the way in. Somebody
+    arriving at it cannot tell the difference between "this deployment does not do
+    banks" and "the bank section is broken today" - and the second reading is the
+    one people act on, by restarting things that were never wrong.
+    """
+
+    @staticmethod
+    def _page(tmp_path, path: str = "/", **overrides) -> str:
+        import threading
+        from http.server import HTTPServer
+
+        import httpx
+
+        from obdi.connections import ConnectionStore
+        from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+
+        config = WebConfig(
+            client_id=overrides.pop("client_id", "client-1"),
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri=overrides.pop("redirect_uri", "https://obdi.example.com/callback"),
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            **overrides,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            return httpx.get(f"http://127.0.0.1:{httpd.server_port}{path}").text
+        finally:
+            httpd.shutdown()
+
+    def test_IndexPage_WhenNoProviderIsConfigured_SaysSoRatherThanOmittingTheSection(
+        self, tmp_path
+    ):
+        page = self._page(tmp_path, bank_authorisation=False)
+        assert "bank authorisation" in page.lower()
+        assert "not configured" in page.lower()
+
+    def test_IndexPage_WhenNoProviderIsConfigured_OffersNoWayToStartOne(self, tmp_path):
+        page = self._page(tmp_path, bank_authorisation=False)
+        assert 'action="/connect"' not in page, "a form that cannot possibly complete"
+
+    def test_IndexPage_WhenAProviderIsConfigured_StillOffersToAddABank(self, tmp_path):
+        page = self._page(tmp_path)
+        assert 'action="/connect"' in page
+
+    def test_ConnectRoute_WhenNoProviderIsConfigured_RefusesAndSaysWhy(self, tmp_path):
+        # Reachable by a bookmark or a stale link even with the form gone, and a
+        # bare traceback here would read as a fault rather than as a settled
+        # configuration.
+        page = self._page(tmp_path, path="/connect?name=test", bank_authorisation=False)
+        assert "not configured" in page.lower()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

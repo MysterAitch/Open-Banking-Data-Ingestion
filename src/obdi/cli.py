@@ -2558,6 +2558,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         client_id=client_id,
         client_secret=current_secret,
         redirect_uri=redirect_uri,
+        # Carried to the page so an unconfigured provider is STATED there rather
+        # than inferred from an absent form - the difference between a deployment
+        # that does not do banks and one whose bank section is broken today.
+        bank_authorisation=bank_authorisation,
         connection_store=ConnectionStore(store_path),
         start_backfill=start_backfill,
         preflight=preflight,

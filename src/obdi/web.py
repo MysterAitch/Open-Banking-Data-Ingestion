@@ -323,6 +323,16 @@ class WebConfig:
     #: that no backfill ran, rather than implying one did.
     start_backfill: Callable[[str, str | None], bool] | None = None
 
+    #: Whether a bank provider is configured at all. False makes the page SAY that
+    #: bank authorisation is unavailable rather than quietly omitting the way in.
+    #: A missing section reads as a fault, and somebody acts on that reading by
+    #: restarting things that were never wrong - so the difference between "this
+    #: deployment does not do banks" and "the bank part is broken today" has to be
+    #: on the page. Defaults True, so every existing caller keeps the behaviour it
+    #: was written against and only a deployment that deliberately configured no
+    #: provider passes False.
+    bank_authorisation: bool = True
+
     #: Ran between the connect click and the redirect to the bank, returning
     #: human-readable concerns; empty means clear. Injected like the backfill
     #: hook, so this module stays ignorant of doctors and providers and a test
@@ -2030,6 +2040,35 @@ def _probe_result_html(report: object) -> str:
     )
 
 
+def _add_a_bank_section(available: bool) -> str:
+    """The way in to a bank authorisation, or a plain statement that there is none.
+
+    When no provider is configured the section STAYS, and says so. Omitting it
+    would be tidier and worse: a person arriving at the page cannot tell a
+    deployment that does not do banks from one whose bank section is broken today,
+    and the second reading is the one people act on - by restarting a service that
+    was never wrong. The wording names the cause and the remedy, so the page
+    answers the question instead of prompting a search through configuration.
+    """
+    if not available:
+        return (
+            "<h2>Add a bank</h2>\n"
+            '<p style="opacity:.8">Bank authorisation is <strong>not configured</strong> '
+            "on this instance, so there is no bank to add and no feed to expect. "
+            "Statements, imports, categorisation and coverage are unaffected.</p>\n"
+            '<p style="opacity:.7;font-size:.9rem">Set a provider client id, its '
+            "redirect URI and its secret to enable it.</p>"
+        )
+    return """<h2>Add a bank</h2>
+<form action="/connect" method="get">
+  <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
+  <p><button class="button" type="submit"
+     style="border:0;width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
+</form>
+<p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
+a new name would create a second connection to the same bank.</p>"""
+
+
 def _probe_section_html(
     available: bool,
     probe_suggestions: Callable[[], list[object]] | None,
@@ -2919,6 +2958,9 @@ def render_index(
     backfill_status: Callable[[], dict[str, object]] | None = None,
     feed_warnings: Callable[[], list[str]] | None = None,
     declared_accounts: Callable[[], list[AccountRecord]] | None = None,
+    #: Defaults True so every existing caller is unchanged; only a deployment with
+    #: no provider configured at all passes False, and then the page says so.
+    bank_authorisation: bool = True,
 ) -> bytes:
     # The import form picks its destination FIRST (the preview verifies
     # the file against what that account already holds), so the picker's
@@ -2966,14 +3008,7 @@ anything is stored.</p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
 </form>
-<h2>Add a bank</h2>
-<form action="/connect" method="get">
-  <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
-  <p><button class="button" type="submit"
-     style="border:0;width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
-</form>
-<p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
-a new name would create a second connection to the same bank.</p>
+{_add_a_bank_section(bank_authorisation)}
 {_probe_section_html(starling_probe_available, probe_suggestions)}
 {_danger_zone(rebuild_available, forget_available, rebuild_status, recent_rebuilds)}
 """
@@ -3189,6 +3224,7 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             render_began = time.perf_counter()
             page = render_index(
                 self.bound_config.connection_store,
+                bank_authorisation=self.bound_config.bank_authorisation,
                 holdings=timed("holdings", self.bound_config.holdings),
                 provider_knowledge=timed(
                     "provider_knowledge", self.bound_config.provider_knowledge
@@ -3783,6 +3819,21 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
         self._respond(200, render_page("Account", body))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
+        # Reachable by a bookmark or an old link long after the form stopped being
+        # offered, and a settled configuration must not present as a fault: without
+        # this the request runs on into provider code with no client id and fails
+        # somewhere that reads like a bug.
+        if not self.bound_config.bank_authorisation:
+            self._respond(
+                501,
+                error_page(
+                    "Bank authorisation is not configured",
+                    "<p>This instance has no bank provider configured, so there is "
+                    "nothing to authorise against. Statements, imports, "
+                    "categorisation and coverage are unaffected.</p>",
+                ),
+            )
+            return
         checker = self.bound_config.update_in_progress
         if checker is not None:
             in_progress = False
