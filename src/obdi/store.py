@@ -1667,6 +1667,49 @@ class Store:
                 (new_id, row["kind"], row["value"], row["provenance"], _stamp_now()),
             )
 
+    def orphaned_entity_rows(self) -> dict[str, int]:
+        """Rows keyed to a transaction that no longer exists, per column.
+
+        Six tables hang off a transaction's identity, and each holds something
+        somebody decided: a categorisation, a review verdict, a confirmed
+        transfer pair, an unsent event. When the transaction goes, what was
+        attached to it is invisible from every other angle - the account simply
+        reads as uncategorised, unflagged, unpaired - so nothing else would ever
+        say the work was lost rather than never done.
+
+        Driven by the same registry that carries these rows across an account
+        rename, rather than by a list here. A table added to that registry
+        tomorrow is checked by this without anyone remembering it exists, which
+        is the whole reason the registry is the registry. Only annotations were
+        counted before, which was where the first defect happened to be found
+        rather than the shape of the problem.
+
+        `transactions.entity_id` is excluded and everything else included:
+        a transaction's own id is what the others are compared AGAINST.
+        `matched_entity_id` IS included - it points at another transaction, and
+        a match naming a row that has gone is a claim nothing can check.
+        """
+        from .namespaces import ENTITY_KEYED_TABLES
+
+        counts: dict[str, int] = {}
+        for table, columns in ENTITY_KEYED_TABLES.items():
+            for column in columns:
+                if table == "transactions" and column == "entity_id":
+                    continue
+                # Interpolated because neither a table nor a column can be a
+                # bound parameter. Both come from a module constant, never from
+                # input, and are checked anyway so the safety is a property of
+                # the code rather than a claim about where the values came from.
+                if not (table.isidentifier() and column.isidentifier()):
+                    raise ValueError(f"unsafe identifier: {table}.{column}")
+                row = self.connection.execute(
+                    f"SELECT COUNT(*) AS orphans FROM {table} "  # noqa: S608
+                    f"WHERE {column} IS NOT NULL AND {column} != '' "
+                    f"AND {column} NOT IN (SELECT entity_id FROM transactions)"
+                ).fetchone()
+                counts[f"{table}.{column}"] = int(row["orphans"]) if row else 0
+        return counts
+
     def dangling_annotations(self) -> int:
         """Annotations whose entity id matches no transaction.
 

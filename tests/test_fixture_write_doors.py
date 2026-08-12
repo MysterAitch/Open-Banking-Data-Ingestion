@@ -48,6 +48,10 @@ JUSTIFIED = {
     "two canonical accounts at one Actual account are pruned, so those rows never "
     "meet in one envelope. The refusal is belt and braces over money and stays; the "
     "state it refuses has to be planted",
+    ("test_orphaned_entity_rows.py", "transactions"): "removes a transaction from "
+    "under the work attached to it, which is the orphan state itself - nothing "
+    "outside a rebuild deletes a transaction, and a check for a state nothing "
+    "produces still has to be shown working on one",
     ("test_connection_attribution.py", "obdi_meta"): "builds a store predating "
     "connection attribution, to prove the migration",
     ("test_connection_attribution.py", "raw_artefacts"): "same old-store fixture",

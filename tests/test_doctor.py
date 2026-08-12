@@ -349,5 +349,7 @@ class TestCollisionChecksReadTheLiveStore:
             "sources are registered",
             "connection ids are unshared",
             "accounts are named, not referenced",
-            "annotations point at transactions that exist",
+            # Widened from annotations alone to every table keyed to a
+            # transaction, which is why the name changed with it.
+            "work attached to transactions points at transactions that exist",
         }

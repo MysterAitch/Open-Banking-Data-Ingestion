@@ -77,9 +77,13 @@ class TestWhereLostHandWorkIsReported:
         assert "annotation" in printed
         assert "1" in printed
 
-    def test_Status_WhenNothingIsStranded_StillReportsTheZero(self, tmp_path, capsys, monkeypatch):
+    def test_Status_WhenNothingIsStranded_StillReportsTheZeroAndItsDenominator(
+        self, tmp_path, capsys, monkeypatch
+    ):
         # A count worth printing at zero. The reader learns that the check RAN,
         # which is the difference between "nothing is lost" and "nothing looked".
+        # The denominator carries that: at zero there are no per-table lines to
+        # print, so without it the line is a bare 0 that proves nothing.
         from obdi import cli
 
         db = tmp_path / "store.sqlite3"
@@ -90,7 +94,10 @@ class TestWhereLostHandWorkIsReported:
         cli.main(["status"])
         printed = capsys.readouterr().out.lower()
 
-        assert "annotation" in printed
+        assert "stranded work" in printed
+        assert "entity-keyed columns" in printed, (
+            f"the zero says nothing about what was checked: {printed}"
+        )
 
     def test_Doctor_WhenAnAnnotationPointsAtNothing_ReportsItAsAFault(self, tmp_path):
         from obdi.doctor import collision_checks
@@ -100,7 +107,10 @@ class TestWhereLostHandWorkIsReported:
             _strand_an_annotation(store)
             findings = collision_checks(store)
 
-        stranded = [f for f in findings if "annotation" in f.name.lower()]
+        # Matched on the subject rather than on the word "annotation": the check
+        # was widened to every table keyed to a transaction, and these scenarios
+        # are about annotations being one of them rather than the only one.
+        stranded = [f for f in findings if "points at transactions that exist" in f.name]
         assert stranded, f"doctor said nothing about it: {[f.name for f in findings]}"
         assert not stranded[0].ok
         assert "1" in stranded[0].detail
@@ -116,7 +126,10 @@ class TestWhereLostHandWorkIsReported:
             _one_transaction(store)
             findings = collision_checks(store)
 
-        stranded = [f for f in findings if "annotation" in f.name.lower()]
+        # Matched on the subject rather than on the word "annotation": the check
+        # was widened to every table keyed to a transaction, and these scenarios
+        # are about annotations being one of them rather than the only one.
+        stranded = [f for f in findings if "points at transactions that exist" in f.name]
         assert stranded, "the check must report even when it finds nothing"
         assert stranded[0].ok
 

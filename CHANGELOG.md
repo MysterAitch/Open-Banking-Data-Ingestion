@@ -26,6 +26,29 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.198] - 2026-08-12
+
+### Changed
+- The stranded-work check covers every table keyed to a transaction, not only
+  annotations. Six tables hang off a transaction's identity and each holds
+  something somebody decided - a categorisation, a review verdict, a confirmed
+  transfer pair, an unsent event. Only the first was counted, which was where the
+  first defect happened to be found rather than the shape of the problem. Driven
+  by the registry that already carries these rows across an account rename, so a
+  table added to it tomorrow is checked without anyone remembering this exists.
+- `status` and the doctor NAME the table holding the orphans rather than
+  reporting a total. A lost categorisation and a lost review verdict are
+  recovered differently, and one line reading "3" sends the reader hunting
+  through six tables.
+
+  Opened by the previous release rather than closed by it: keeping resolved review
+  rows across a rebuild made "a row outliving what it judged" a state worth
+  counting, and nothing counted it.
+
+  The zero carries its denominator - "0 across 6 entity-keyed columns" - because
+  at zero there are no per-table lines to print, and a bare 0 cannot tell
+  "nothing is lost" from "nothing looked".
+
 ## [0.4.197] - 2026-08-12
 
 ### Fixed

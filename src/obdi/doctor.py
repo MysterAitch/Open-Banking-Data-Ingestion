@@ -336,24 +336,36 @@ def collision_checks(
     # The count itself has existed and been tested since it was written, and
     # nothing ever called it - the same fault as a guard that is never registered,
     # and unnoticed for precisely the reason it was built: the symptom is silence.
-    stranded = 0
-    with contextlib.suppress(Exception):
-        stranded = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM annotations "
-                "WHERE entity_id NOT IN (SELECT entity_id FROM transactions)"
-            ).fetchone()[0]
-        )
+    #
+    # Every table keyed to a transaction, not only annotations. Annotations were
+    # where the first one was found, and writing the check for that instance
+    # rather than for the class left a review verdict, a confirmed transfer pair
+    # and an unsent event able to go the same way unremarked. The registry that
+    # carries these rows across an account rename already knows the full set.
+    orphans: dict[str, int] = {}
+    # Reached the same way as `connection` above: this takes a plain object so
+    # that the doctor does not import the store, and so a caller passing
+    # something store-shaped still gets every check it can answer.
+    count_orphans = getattr(store, "orphaned_entity_rows", None)
+    if callable(count_orphans):
+        with contextlib.suppress(Exception):
+            orphans = dict(count_orphans())
+    lost = {column: count for column, count in orphans.items() if count}
     results.append(
         CheckResult(
-            name="annotations point at transactions that exist",
-            ok=stranded == 0,
+            name="work attached to transactions points at transactions that exist",
+            ok=not lost,
             detail=(
-                "no stranded annotations"
-                if stranded == 0
-                else f"{stranded} annotation(s) point at no transaction - hand-applied "
-                "work whose row has gone. Nothing else reports this: those rows now "
-                "read as merely uncategorised"
+                f"nothing stranded across {len(orphans)} entity-keyed column(s)"
+                if not lost
+                # Named per table rather than totalled: the number says how much
+                # was lost, the name says what KIND of work it was, and they
+                # imply different remedies.
+                else "; ".join(
+                    f"{count} in {column}" for column, count in sorted(lost.items())
+                )
+                + " - each names a transaction that no longer exists, so the work "
+                "reads as never done rather than lost"
             ),
         )
     )

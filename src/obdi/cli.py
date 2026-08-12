@@ -3735,7 +3735,22 @@ def main(argv: list[str] | None = None) -> int:
             # Printed at zero as well. A count that appears only when it is bad
             # leaves the reader unable to tell "nothing is lost" from "nothing
             # looked", and this figure exists precisely to tell those apart.
-            print(f"  {'stranded annotations':<24} {store.dangling_annotations()}")
+            #
+            # Every entity-keyed table, named where a count is non-zero. The
+            # total alone would say how much work was lost without saying what
+            # KIND - a lost categorisation and a lost review verdict are
+            # recovered differently, and one line that reads "3" sends the
+            # reader hunting through six tables for them.
+            stranded = store.orphaned_entity_rows()
+            # With its denominator: "0" alone cannot distinguish nothing lost
+            # from nothing looked at, and this figure exists to tell those apart.
+            print(
+                f"  {'stranded work':<24} {sum(stranded.values())} "
+                f"(across {len(stranded)} entity-keyed columns)"
+            )
+            for column, count in sorted(stranded.items()):
+                if count:
+                    print(f"    {column:<22} {count}")
         return 0
 
     if args.command == "backup":
