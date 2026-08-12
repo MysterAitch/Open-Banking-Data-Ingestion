@@ -1501,8 +1501,14 @@ class Store:
         self.connection.commit()
         return cursor.rowcount
 
-    def _remap_entity_ids(self, old_account_id: str, new_account_id: str) -> int:
-        """Rewrite every entity id an account rename will change.
+    def _entity_moves(
+        self,
+        old_account_id: str,
+        new_account_id: str,
+        *,
+        artefact_digest: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Every (new id, old id) an account change re-mints.
 
         The new id is COMPUTED, not guessed: the id is a pure function of
         the account, the source, the sighting key and the artefact digest,
@@ -1510,14 +1516,22 @@ class Store:
         here is the same value the next rebuild will mint from the raw
         evidence, and the store agrees with itself both before and after
         that rebuild.
+
+        `artefact_digest` narrows the rename to the rows one artefact
+        first supported, which is what refiling a single misfiled import
+        moves. Without it, the whole account moves - the rebind case.
         """
         from .identity import entity_id_for
-        from .namespaces import ENTITY_KEYED_TABLES
 
+        scope = "" if artefact_digest is None else " AND artefact_digest = ?"
+        parameters: tuple[str, ...] = (
+            (old_account_id,) if artefact_digest is None
+            else (old_account_id, artefact_digest)
+        )
         rows = self.connection.execute(
             "SELECT entity_id, source, source_id, content_key, occurrence, "
-            "artefact_digest FROM transactions WHERE account_id = ?",
-            (old_account_id,),
+            f"artefact_digest FROM transactions WHERE account_id = ?{scope}",  # noqa: S608
+            parameters,
         ).fetchall()
         moves = []
         for row in rows:
@@ -1533,6 +1547,17 @@ class Store:
             )
             if new_id != str(row["entity_id"]):
                 moves.append((new_id, str(row["entity_id"])))
+        return moves
+
+    def _apply_entity_moves(self, moves: list[tuple[str, str]]) -> int:
+        """Re-key every table that records an entity id, from one registry.
+
+        The registry is the single place that knows which tables hang off a
+        transaction's identity, so a table added later is carried by this
+        rename without anyone remembering it exists.
+        """
+        from .namespaces import ENTITY_KEYED_TABLES
+
         if not moves:
             return 0
         for table, columns in ENTITY_KEYED_TABLES.items():
@@ -1549,6 +1574,108 @@ class Store:
                     moves,
                 )
         return len(moves)
+
+    def _remap_entity_ids(self, old_account_id: str, new_account_id: str) -> int:
+        """Re-mint every entity id under an account being renamed."""
+        return self._apply_entity_moves(
+            self._entity_moves(old_account_id, new_account_id)
+        )
+
+    def _move_derived_rows(
+        self, artefact_digest: str, old_account_id: str, new_account_id: str
+    ) -> int:
+        """Carry ONE artefact's derived rows to its corrected filing.
+
+        Refiling changes where evidence is filed. Without this the rows it
+        produced stay under the old account and the replay offered beside
+        the refile button mints a second set under the new one, so the same
+        payment is counted under both - which reads as an account that
+        gained money it never received. Scoped by digest on purpose: rows
+        another artefact first supported belong to that artefact's filing,
+        and refiling this one says nothing about those.
+
+        Where the destination already holds the same payment - the
+        recovery-by-reimport case, where the statement was imported again
+        correctly before the misfile was corrected - the duplicate is
+        dropped rather than stacked on its twin, and anything it carried is
+        offered to the survivor under the ordinary rank rule, so a person's
+        categorisation is never quietly displaced by a rule's.
+        """
+        from .namespaces import ENTITY_KEYED_TABLES
+
+        moves = self._entity_moves(
+            old_account_id, new_account_id, artefact_digest=artefact_digest
+        )
+        if not moves:
+            return 0
+        self._apply_entity_moves(moves)
+        self.connection.executemany(
+            "UPDATE transactions SET account_id = ? WHERE entity_id = ?",
+            [(new_account_id, new_id) for new_id, _old in moves],
+        )
+        for new_id, old_id in moves:
+            leftover = self.connection.execute(
+                "SELECT 1 FROM transactions WHERE entity_id = ?", (old_id,)
+            ).fetchone()
+            if leftover is None:
+                continue
+            self._offer_annotations(old_id, new_id)
+            # transactions is handled by hand rather than through the
+            # registry: matched_entity_id is a REFERENCE to another row, so
+            # deleting by it would destroy the transaction that merely
+            # pointed at this one. Every other entity-keyed column names
+            # the row it belongs to, and a row keyed to a payment that no
+            # longer exists has nothing left to say.
+            self.connection.execute(
+                "UPDATE transactions SET matched_entity_id = NULL "
+                "WHERE matched_entity_id = ?",
+                (old_id,),
+            )
+            self.connection.execute(
+                "DELETE FROM transactions WHERE entity_id = ?", (old_id,)
+            )
+            for table, columns in ENTITY_KEYED_TABLES.items():
+                if table == "transactions":
+                    continue
+                for column in columns:
+                    if not (table.isidentifier() and column.isidentifier()):
+                        raise ValueError(f"unsafe identifier: {table}.{column}")
+                    self.connection.execute(
+                        f"DELETE FROM {table} WHERE {column} = ?",  # noqa: S608
+                        (old_id,),
+                    )
+        return len(moves)
+
+    def _offer_annotations(self, old_id: str, new_id: str) -> None:
+        """Hand a discarded duplicate's annotations to the row that survives.
+
+        Offered rather than applied: the store already has one rule for two
+        claims about the same payment - provenance rank - and a merge that
+        invented a second would decide by which copy happened to be the
+        duplicate. Nothing is committed here; the caller's transaction
+        carries it.
+        """
+        for row in self.connection.execute(
+            "SELECT kind, value, provenance FROM annotations WHERE entity_id = ?",
+            (old_id,),
+        ).fetchall():
+            existing = self.connection.execute(
+                "SELECT provenance FROM annotations WHERE entity_id = ? AND kind = ?",
+                (new_id, row["kind"]),
+            ).fetchone()
+            if existing is not None and provenance_rank(
+                str(row["provenance"])
+            ) < stored_provenance_rank(str(existing["provenance"])):
+                continue
+            self.connection.execute(
+                "INSERT INTO annotations "
+                "(entity_id, kind, value, provenance, annotated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(entity_id, kind) DO UPDATE SET "
+                "value = excluded.value, provenance = excluded.provenance, "
+                "annotated_at = excluded.annotated_at",
+                (new_id, row["kind"], row["value"], row["provenance"], _stamp_now()),
+            )
 
     def dangling_annotations(self) -> int:
         """Annotations whose entity id matches no transaction.
@@ -1661,9 +1788,15 @@ class Store:
         statement that arrived under a folder path and again bare still
         reports both after being assigned to its account.
 
-        Returns the old account_ref, or None if no such artefact. Derived
-        rows are NOT touched here: a rebuild replays layer 0 through the
-        corrected filing, which is the whole point of having one.
+        The rows already derived from these bytes travel with the filing.
+        They were left behind once, on the reasoning that a rebuild replays
+        layer 0 through the corrected filing - true, but the page offers
+        replaying THIS artefact right beside the refile button, and that
+        path derives a second set under the new account while the first
+        set sits under the old one. The same payment then appears in two
+        accounts, which no total anywhere says is wrong.
+
+        Returns the old account_ref, or None if no such artefact.
         """
         if not self.connection.in_transaction:
             self.connection.execute("BEGIN IMMEDIATE")
@@ -1677,6 +1810,10 @@ class Store:
             return None
         old_ref = str(row["account_ref"])
         stamp = datetime.now().astimezone().isoformat()
+        if new_account_ref != old_ref:
+            # Before the filing moves, while the rows can still be found
+            # under the old one.
+            self._move_derived_rows(str(row["digest"]), old_ref, new_account_ref)
         # The whole key, not part of it: bytes that reached the target
         # through a DIFFERENT pipe are a different artefact and the move
         # would not collide with them, so absorbing into one would destroy
