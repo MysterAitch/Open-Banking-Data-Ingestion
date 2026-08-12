@@ -40,6 +40,14 @@ TESTS = pathlib.Path(__file__).parent
 JUSTIFIED = {
     ("test_artefact_origins.py", "raw_artefacts"): "upgrade tests: the pre-upgrade "
     "duplicate shape cannot be produced by the current writer",
+    ("test_actual_push.py", "transactions"): "two rows sharing one imported id "
+    "(content key plus occurrence), which the doors prevent twice over - measured "
+    "2026-08-12, not reasoned. Within one account the reconciler numbers a repeated "
+    "content key 0 then 1, so its ids differ; ACROSS accounts they genuinely collide, "
+    "because content keys deliberately exclude the account - but bindings that point "
+    "two canonical accounts at one Actual account are pruned, so those rows never "
+    "meet in one envelope. The refusal is belt and braces over money and stays; the "
+    "state it refuses has to be planted",
     ("test_connection_attribution.py", "obdi_meta"): "builds a store predating "
     "connection attribution, to prove the migration",
     ("test_connection_attribution.py", "raw_artefacts"): "same old-store fixture",
@@ -82,18 +90,41 @@ JUSTIFIED = {
 # drift from the reader without anything noticing. Converting one proved the shape
 # works (test_actual_push.py went through `reconcile_batch` with no loss of what its
 # tests assert), so these are unfinished work rather than an accepted design.
+# Each entry states its DISPOSITION first, because "unconverted" ran together two
+# unrelated things and the difference decides what to do. A shortcut gets
+# converted. A state no door can produce belongs in JUSTIFIED - and finding one
+# is worth more than the conversion, because it means the code handling that
+# state may have nothing left to handle. That is how a migration nothing could
+# reach was found on 2026-08-12, and the same question is owed to every entry
+# here rather than assumed away.
+#
+# SHORTCUT      the state is ordinary; the door produces it; convert.
+# NEEDS A RUN   whether the door can produce it is a question for an experiment,
+#               not for reading. Until one is done this stays a residual, and
+#               guessing either way would file the work wrongly.
+DISPOSITIONS = ("SHORTCUT:", "NEEDS A RUN:")
+
 UNCONVERTED = {
-    ("test_actual_push.py", "transactions"): "one inline insert remains, in the "
-    "duplicate-imported-id case",
-    ("test_connection_durability.py", "fetch_attempts"): "one is a pre-mechanism store "
-    "(justified); the other seeds an attempt on a current store and is not",
-    ("test_history_boundary_survival.py", "transactions"): "seeds account history",
-    ("test_leases.py", "fetch_attempts"): "seeds scheduled and attended attempts",
-    ("test_leases.py", "review_queue"): "seeds queue rows to test commit and rollback",
-    ("test_pending_lifecycle.py", "transactions"): "seeds pending rows",
-    ("test_rebuild.py", "transactions"): "seeds rows for the vanished-accounts report",
-    ("test_review_report.py", "transactions"): "flags a transaction directly",
-    ("test_web.py", "transactions"): "seeds rows for the rebinding cases",
+    ("test_connection_durability.py", "fetch_attempts"): "SHORTCUT: one of the two is "
+    "a pre-mechanism store and belongs in JUSTIFIED; the other seeds an attempt on a "
+    "current store, which every pull records through the ordinary path.",
+    ("test_history_boundary_survival.py", "transactions"): "SHORTCUT: ordinary account "
+    "history, which landing an artefact and replaying it produces.",
+    ("test_leases.py", "fetch_attempts"): "SHORTCUT: scheduled and attended attempts "
+    "are what the scheduler writes on every cycle.",
+    ("test_leases.py", "review_queue"): "SHORTCUT: queue_for_review is the door, and "
+    "these rows are what it writes.",
+    ("test_pending_lifecycle.py", "transactions"): "SHORTCUT: pending rows are produced "
+    "by landing a pending artefact and reconciling it.",
+    ("test_rebuild.py", "transactions"): "NEEDS A RUN: rows under an account that no "
+    "artefact supports, which is the vanished-accounts report's whole subject. "
+    "Reachable only by removing the evidence behind existing rows - whether any door "
+    "does that (absorption during a refile is the candidate) has not been "
+    "established, and the answer decides whether this is a shortcut or the subject.",
+    ("test_review_report.py", "transactions"): "SHORTCUT: an ordinary transaction that "
+    "is then flagged through queue_for_review; only the seeding bypasses a door.",
+    ("test_web.py", "transactions"): "SHORTCUT: ordinary rows, seeded to exercise "
+    "rebinding.",
 }
 
 
@@ -156,10 +187,33 @@ def test_TheUnconvertedFixtures_AreStillCountedRatherThanForgotten(capsys):
     )
 
     with capsys.disabled():
+        shortcuts = sum(
+            1 for reason in UNCONVERTED.values() if reason.startswith("SHORTCUT:")
+        )
         print(
             f"\n  fixture write doors: {len(JUSTIFIED)} justified bypasses, "
-            f"{len(UNCONVERTED)} awaiting conversion"
+            f"{len(UNCONVERTED)} awaiting conversion "
+            f"({shortcuts} shortcuts, {len(UNCONVERTED) - shortcuts} needing a run)"
         )
+
+
+def test_EveryUnconvertedFixture_SaysWhatWouldSettleIt():
+    """A residual list decays into a shrug unless each line says what to do.
+
+    Two dispositions, and the difference is the point: a shortcut is work, while
+    a state no door can produce is a FINDING - it means whatever handles that
+    state may have nothing left to handle. Running those together is how a
+    migration that no store could reach survived until somebody measured it.
+    """
+    vague = sorted(
+        key
+        for key, reason in UNCONVERTED.items()
+        if not reason.startswith(DISPOSITIONS)
+    )
+    assert not vague, (
+        f"These say they are unconverted without saying what would settle it: {vague}. "
+        f"Begin each with one of {DISPOSITIONS}."
+    )
 
 
 if __name__ == "__main__":
