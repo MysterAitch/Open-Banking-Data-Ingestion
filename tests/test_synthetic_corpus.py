@@ -585,6 +585,61 @@ class TestTheAdversarialDeliveries:
             f"never showed, found {shifted} (seed {SEED})"
         )
 
+    def test_ADayMonthTransposition_IsNamedWithBothDates(self, corpus, tmp_path):
+        """The corruption every other check here is blind to.
+
+        The amount is right, the payee is right, and the date is a perfectly
+        real date - so moving a payment between months changes neither the count
+        nor the sum, and count-and-total checks pass while the data is
+        systematically wrong. Only two sources dating the same payment
+        differently can reveal it, which is why this was unreachable until the
+        corpus had a second door.
+
+        The planted answer is exact, so both failures are visible: missing the
+        transposition, and inventing one from two ordinary payments whose dates
+        happen to mirror. The second is not hypothetical - the detector's own
+        comment records a road charge paid on 01-04 AND 04-01 flooding it with
+        six lines of coincidence on first firing.
+        """
+        from obdi.coverage import transpositions
+
+        directory, _world, manifest = corpus
+        planted = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if "transposed" in delivery["fault"]
+        )
+        store_path = tmp_path / "store.sqlite3"
+        self._land(
+            store_path,
+            (directory / "synthetic-current.csv").read_bytes(),
+            "synthetic-current",
+            digest="first-source",
+        )
+        self._land(
+            store_path,
+            (directory / planted["name"]).read_bytes(),
+            "synthetic-current",
+            digest="transposed",
+        )
+
+        with Store(store_path) as store:
+            found = transpositions(store.all_transactions())
+
+        assert len(found) == 1, (
+            f"planted exactly one transposition and the detector reported "
+            f"{[t.describe() for t in found]} (seed {SEED})"
+        )
+        # Both dates must appear in the report. A finding that names only one is
+        # not actionable: the whole question is which of two real dates is right.
+        both = {found[0].left_date.isoformat(), found[0].right_date.isoformat()}
+        assert all(day in planted["fault"] for day in both), (
+            f"the detector reported {sorted(both)}, which are not the dates the "
+            f"manifest planted: {planted['fault']} (seed {SEED})"
+        )
+        assert found[0].left_date.day == found[0].right_date.month
+        assert found[0].left_date.month == found[0].right_date.day
+
     def test_AMisfiledStatement_IsAttributedToTheAccountItsRowsBelongTo(
         self, corpus, tmp_path
     ):

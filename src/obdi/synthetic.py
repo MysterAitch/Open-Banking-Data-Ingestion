@@ -463,6 +463,52 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
         )
     )
 
+    # THE QUIETEST CORRUPTION AVAILABLE, as its own delivery rather than folded
+    # into the clean second source above. A transposed pair is ~30 days apart,
+    # far outside the window in which two rows can be recognised as one payment,
+    # so it deliberately does NOT merge - it stays as two rows for the detector
+    # to name. Folding it into the ordinary second source would therefore break
+    # the merge assertion for a reason that has nothing to do with merging.
+    #
+    # Only days 1 to 12 can transpose at all; 13 upwards parses identically
+    # either way. So the event is chosen for that, not taken at random, and the
+    # manifest records which one so the assertion can be exact rather than "some
+    # transposition was found".
+    transposable = next(
+        (
+            event
+            for event in sorted(second_source, key=lambda e: e.when)
+            if 1 <= date.fromisoformat(event.when).day <= 12
+            and date.fromisoformat(event.when).day != date.fromisoformat(event.when).month
+        ),
+        None,
+    )
+    if transposable is not None:
+        original = date.fromisoformat(transposable.when)
+        swapped = date(original.year, original.day, original.month)
+        transposed_rows = [
+            replace(event, when=swapped.isoformat())
+            if event is transposable
+            else event
+            for event in second_source
+        ]
+        name = "synthetic-current-transposed.csv"
+        (out_dir / name).write_text(_monzo_csv(transposed_rows), encoding="utf-8")
+        deliveries.append(
+            Delivery(
+                name=name,
+                belongs_to="synthetic-current",
+                deliver_as="synthetic-current",
+                covers=(_months_of(transposed_rows)[0], _months_of(transposed_rows)[-1]),
+                fault=(
+                    f"day/month transposed on one row: "
+                    f"{transposable.description} dated {original.isoformat()} by the "
+                    f"first source and {swapped.isoformat()} here"
+                ),
+                rows=len(transposed_rows),
+            )
+        )
+
     savings = [e for e in world.events if e.account == "synthetic-savings"]
     name = "synthetic-savings-misfiled.csv"
     (out_dir / name).write_text(_monzo_csv(savings), encoding="utf-8")

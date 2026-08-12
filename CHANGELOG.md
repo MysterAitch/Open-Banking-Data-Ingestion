@@ -26,6 +26,34 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.208] - 2026-08-12
+
+### Added
+- A day/month transposition is planted, and the detector names it with both
+  dates. This is the corruption every other check here is blind to: the amount
+  is right, the payee is right, and the date is a perfectly real date, so moving
+  a payment between months changes neither the count nor the sum. Count-and-total
+  checks pass while the data is systematically wrong. It was unreachable until
+  the corpus had a second door, because only two sources dating one payment
+  differently can reveal it.
+
+  The planted row is CHOSEN rather than taken at random: only days 1 to 12 can
+  transpose at all, since 13 upwards parses identically either way. It lands as
+  2026-01-03 against 2026-03-01, both real dates.
+
+  Kept as its own delivery rather than folded into the ordinary second source. A
+  transposed pair is about thirty days apart, far outside the window in which two
+  rows can be recognised as one payment, so it deliberately does not merge -
+  folding it in would break the merge assertion for a reason that has nothing to
+  do with merging.
+
+  Asserted as exactly one finding, so both failures are visible: missing it, and
+  inventing one from two ordinary payments whose dates happen to mirror. The
+  second is not hypothetical - the detector's own comment records a road charge
+  paid on 01-04 AND 04-01 flooding it with six lines of coincidence when it first
+  fired. Both dates must appear in the report, since the whole question is which
+  of two real dates is correct.
+
 ## [0.4.207] - 2026-08-12
 
 ### Added
