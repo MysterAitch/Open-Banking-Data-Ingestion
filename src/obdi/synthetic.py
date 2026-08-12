@@ -47,7 +47,7 @@ import io
 import json
 import random
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -423,6 +423,46 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
     # first source filed under a sibling account. Delivered in the same format
     # it would simply be more rows from the same door, and nothing could
     # disagree with it - which is exactly what was measured before this existed.
+    # THE ORDINARY MULTI-SOURCE CASE, which is not the misfile below: one
+    # account described by two doors reporting the SAME payments. This is what
+    # the matcher exists for, so it is the strongest thing the corpus can
+    # assert - the events must MERGE rather than double.
+    #
+    # Two deliberate disagreements, because two identical files would test
+    # nothing the duplicate case did not. One event settles a day late, inside
+    # the fuzzy window, so it must still be recognised as the same payment; one
+    # is absent entirely, which is what a feed gap looks like and must be
+    # reported rather than quietly absorbed.
+    second_source = []
+    withheld: PlantedEvent | None = None
+    for index, event in enumerate(sorted(current, key=lambda e: e.when)):
+        if event.kind == "standing-order" and withheld is None:
+            withheld = event
+            continue
+        if index == len(current) // 2:
+            settled = date.fromisoformat(event.when).toordinal() + 1
+            second_source.append(
+                replace(event, when=date.fromordinal(settled).isoformat())
+            )
+            continue
+        second_source.append(event)
+
+    name = "synthetic-current-second-source.csv"
+    (out_dir / name).write_text(_monzo_csv(second_source), encoding="utf-8")
+    deliveries.append(
+        Delivery(
+            name=name,
+            belongs_to="synthetic-current",
+            deliver_as="synthetic-current",
+            covers=(_months_of(second_source)[0], _months_of(second_source)[-1]),
+            fault=(
+                "a second door onto the same account: one payment settles a day "
+                "later than the first source shows it, and one is missing"
+            ),
+            rows=len(second_source),
+        )
+    )
+
     savings = [e for e in world.events if e.account == "synthetic-savings"]
     name = "synthetic-savings-misfiled.csv"
     (out_dir / name).write_text(_monzo_csv(savings), encoding="utf-8")

@@ -19,6 +19,7 @@ defect found here is worth nothing if the corpus cannot be rebuilt.
 from __future__ import annotations
 
 import json
+from collections import Counter
 
 import pytest
 
@@ -490,6 +491,98 @@ class TestTheAdversarialDeliveries:
             f"{expected_count} from the whole period - the overlap was "
             f"{'double counted' if len(landed) > expected_count else 'swallowed'} "
             f"(seed {SEED})"
+        )
+
+    def test_TheSameAccountFromTwoSources_MergesRatherThanDoubles(
+        self, corpus, tmp_path
+    ):
+        """The strongest thing this corpus can assert, because it is the
+        matcher's entire purpose.
+
+        Two doors onto one account report the same payments. If they double, the
+        household's spending is overstated by a whole statement; if they
+        over-merge, real payments vanish. The planted answer is exact: the same
+        number of entities as the account has events, no matter how many sources
+        described them.
+
+        Two disagreements are deliberately planted, because two identical files
+        would test nothing the duplicate case did not - one payment settles a
+        day later in the second source and must still be recognised as the same
+        payment, and one is missing entirely, which is what a feed gap looks
+        like.
+        """
+        directory, world, manifest = corpus
+        second = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if "second door" in delivery["fault"]
+        )
+        planted = [e for e in world.events if e.account == "synthetic-current"]
+        assert second["rows"] < len(planted), (
+            f"the second source holds {second['rows']} of {len(planted)} rows, so "
+            f"nothing was withheld and the feed gap is not planted (seed {SEED})"
+        )
+
+        store_path = tmp_path / "store.sqlite3"
+        self._land(
+            store_path,
+            (directory / "synthetic-current.csv").read_bytes(),
+            "synthetic-current",
+            digest="first-source",
+        )
+        self._land(
+            store_path,
+            (directory / second["name"]).read_bytes(),
+            "synthetic-current",
+            digest="second-source",
+        )
+
+        with Store(store_path) as store:
+            derived = [
+                row
+                for row in store.all_transactions()
+                if row.account_id == "synthetic-current"
+            ]
+
+        sources = {row.source for row in derived}
+        assert len(sources) > 1, (
+            f"only {sources} landed, so the two sources were not both imported "
+            f"and merging is not being tested (seed {SEED})"
+        )
+        assert len(derived) == len(planted), (
+            f"{len(planted)} payments described by two sources became "
+            f"{len(derived)} rows. "
+            + (
+                "They doubled, so spending is overstated by a whole statement"
+                if len(derived) > len(planted)
+                else "Real payments were swallowed as duplicates"
+            )
+            + f" (seed {SEED})"
+        )
+
+        # The count alone cannot tell a merge from a second import that landed
+        # nothing: both give 69. This is the discriminator - the second source
+        # supplied the current facts for rows the first source had already
+        # placed, so most entities now carry ITS name.
+        by_source = Counter(row.source for row in derived)
+        assert by_source["monzo-csv"] > 1, (
+            f"the second source contributed nothing - entities are {dict(by_source)}, "
+            f"so this counted a merge that never happened (seed {SEED})"
+        )
+
+        # The payment that settles a day late is ONE entity carrying the settled
+        # date, not two rows a day apart. Asserted on the pair rather than the
+        # count, because a matcher that dropped the later sighting entirely
+        # would also leave 69 rows.
+        shifted = [
+            row.value_date.isoformat()
+            for row in derived
+            if row.value_date.isoformat()
+            not in {event.when for event in planted}
+        ]
+        assert len(shifted) == 1, (
+            f"expected exactly one payment to carry a date the first source "
+            f"never showed, found {shifted} (seed {SEED})"
         )
 
     def test_AMisfiledStatement_IsAttributedToTheAccountItsRowsBelongTo(

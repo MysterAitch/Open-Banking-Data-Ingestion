@@ -26,6 +26,27 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.207] - 2026-08-12
+
+### Added
+- The strongest assertion the corpus can carry: one account described by TWO
+  doors reporting the same payments must MERGE rather than double. If they
+  double, spending is overstated by a whole statement; if they over-merge, real
+  payments vanish. The planted answer is exact - the same number of entities as
+  the account has events, however many sources described them - and it holds.
+
+  Two disagreements are planted deliberately, because two identical files would
+  test nothing the duplicate case did not. One payment settles a day later in
+  the second source and must still be recognised as the same payment; one is
+  absent entirely, which is what a feed gap looks like.
+
+  Measured rather than inferred from the count, which cannot tell a merge from a
+  second import that landed nothing - both give 69. The second source parsed 68
+  rows and reported inserted=0, matched=68, and the entities now carry its name
+  where it supplied the current facts. The late-settling payment is one entity
+  holding the settled date, which is asserted directly, since a matcher that
+  discarded the later sighting entirely would also leave 69 rows.
+
 ## [0.4.206] - 2026-08-12
 
 ### Added
