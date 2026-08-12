@@ -137,6 +137,50 @@ class TestWhatSurvivesARefile:
         )
 
 
+class TestTheSequenceThePageInstructs:
+    """The page tells you to refile and then rebuild from raw, and that is the
+    sequence the durability panel reproduced: the category was gone afterwards
+    and one annotation was left pointing at nothing.
+
+    A rebuild wipes the derived layer and re-mints every entity id from the raw
+    evidence, so an annotation only survives if it was already moved to the id
+    the rebuild is about to produce. That is why the refile COMPUTES the new ids
+    rather than inventing them - the value it writes is the value the rebuild
+    will arrive at independently.
+    """
+
+    def test_RefilingThenRebuilding_KeepsTheCategoryOnTheCorrectedRow(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        store_path = tmp_path / "store.sqlite3"
+        with Store(store_path) as store:
+            _land_under(store, "halifax-current")
+            artefact_id = _artefact_id(store)
+        _replay(store_path, artefact_id)
+
+        with Store(store_path) as store:
+            entity = store.all_transactions()[0].entity_id
+            store.annotate(entity, "category", "Coffee", provenance="human")
+            store.refile_artefact(artefact_id, "halifax-reward")
+
+        with Store(store_path) as store:
+            rebuild_from_raw(store)
+
+        with Store(store_path) as store:
+            rows = store.all_transactions()
+            categories = store.annotations("category")
+            stranded = store.dangling_annotations()
+
+        assert stranded == 0, f"{stranded} annotation(s) left pointing at nothing"
+        assert [row.account_id for row in rows] == ["halifax-reward"], (
+            f"the rebuild left the payment filed under {[r.account_id for r in rows]}"
+        )
+        assert categories.get(rows[0].entity_id) == ("Coffee", "human"), (
+            "the hand-entered category did not survive the sequence the page "
+            f"itself instructs: {categories}"
+        )
+
+
 class TestWhenTheStatementWasAlreadyImportedCorrectly:
     """The recovery people actually reach for first: import it again under the
     right account, then tidy up the misfiled copy. Both copies have derived

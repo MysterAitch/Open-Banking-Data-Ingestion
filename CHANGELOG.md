@@ -26,6 +26,37 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.195] - 2026-08-12
+
+### Removed
+- The migration adding `request_meta` and `record_count` to `raw_artefacts`. Not
+  unused - **unreachable**. `_migrate_raw_artefact_key` runs earlier in the ladder
+  and rebuilds that table onto its CURRENT shape, which includes both columns, and
+  the only store that skips the rebuild is one already keyed the current way,
+  which by then also has them. Measured against all eighteen shipped shapes,
+  eight of which lack the columns: it changed none of them.
+
+### Added
+- `tests/test_migrations_are_reachable.py`. Every migration must either change one
+  of the shipped shapes or be registered with the reason it cannot - three are,
+  because they act on rows or on a file while the shape corpus carries neither.
+  The register is checked for staleness in both directions, so an exemption
+  cannot outlive its reason. Shown to fail before being believed: a migration that
+  could never fire was added deliberately and the suite named it and both
+  remedies.
+- `tests/conftest.py` clears obdi's configuration from the environment before
+  every test, and `tests/test_suite_runs_against_itself.py` proves it. `main()`
+  calls `load_dotenv()`, which writes into the process environment and outlives
+  the test that caused it - so on a developer machine every test after the first
+  command-line test inherited real configuration, including the path to the real
+  store. Found because the new migration probe read a real accounts file and
+  reported an unreachable migration as reachable. CI, having no `.env`, was
+  already running a different suite from the one run locally.
+- A scenario covering the sequence the page actually instructs - refile, then
+  rebuild from raw - which is how the durability panel originally reproduced the
+  lost-category defect. All five refile scenarios were confirmed to fail with the
+  fix disabled, one of them reporting the panel's own symptom.
+
 ## [0.4.194] - 2026-08-12
 
 ### Fixed

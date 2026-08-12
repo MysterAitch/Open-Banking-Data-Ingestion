@@ -649,7 +649,6 @@ class Store:
         self._migrate_transaction_tier_and_occurrence()
         self._migrate_sighting_artefact_digest()
         self._migrate_valuation_income_columns()
-        self._migrate_request_meta_column()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
         self._migrate_starling_connection_id()
@@ -809,30 +808,18 @@ class Store:
             )
             self.connection.commit()
 
-    def _migrate_request_meta_column(self) -> None:
-        """Add the request-circumstances column to stores created before it.
-
-        ALTER ADD COLUMN with a default is safe and a no-op after the first
-        run. Pre-existing artefacts keep an empty value, which is itself
-        honest: their circumstances were not recorded at the time.
-        """
-        columns = [
-            row["name"]
-            for row in self.connection.execute("PRAGMA table_info(raw_artefacts)")
-        ]
-        if "request_meta" not in columns:
-            self.connection.execute(
-                "ALTER TABLE raw_artefacts ADD COLUMN request_meta TEXT NOT NULL DEFAULT ''"
-            )
-        if "record_count" not in self._table_columns("raw_artefacts"):
-            self.connection.execute(
-                "ALTER TABLE raw_artefacts ADD COLUMN record_count INTEGER"
-            )
-            self.connection.commit()
+    # The request_meta and record_count columns had their own migration here. It
+    # was removed as unreachable, not as unused: _migrate_raw_artefact_key runs
+    # earlier in the ladder and REBUILDS raw_artefacts onto its current shape,
+    # which includes both columns, and the only store that skips that rebuild is
+    # one already keyed the current way - which every shape carrying the current
+    # key also carries these columns. Proven against all eighteen shipped shapes,
+    # eight of which lack the columns: the migration changed none of them.
+    # tests/test_migrations_are_reachable.py keeps that property honest.
 
     def _migrate_attempt_artefact_column(self) -> None:
-        """Add the artefact link to ledgers created before it - same ALTER
-        pattern as request_meta; earlier rows keep an honest empty value."""
+        """Add the artefact link to ledgers created before it - the ALTER
+        pattern; earlier rows keep an honest empty value."""
         columns = [
             row["name"]
             for row in self.connection.execute("PRAGMA table_info(fetch_attempts)")
