@@ -3211,6 +3211,14 @@ def main(argv: list[str] | None = None) -> int:
             "the half of a backup that is only ever tested by doing it"
         ),
     )
+    export_declared_command = subcommands.add_parser(
+        "export-declared",
+        help=(
+            "write out the layer no fetch can recreate - categories, declared "
+            "accounts, review decisions - keyed so it survives a rebuild"
+        ),
+    )
+    export_declared_command.add_argument("directory", help="where to write the export")
     restore_command.add_argument("backup", help="path to the backup to restore")
     restore_command.add_argument(
         "--to",
@@ -3795,6 +3803,14 @@ def main(argv: list[str] | None = None) -> int:
             f"verified {len(counts)} tables, {sum(counts.values())} rows, "
             f"against {db_path}"
         )
+        return 0
+
+    if args.command == "export-declared":
+        from .export_declared import export_declared
+
+        with Store(db_path) as store:
+            exported = export_declared(store, Path(args.directory))
+        print(exported.describe())
         return 0
 
     if args.command == "restore":

@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.201] - 2026-08-12
+
+### Added
+- `obdi export-declared`, the missing mirror of the raw export. Layer 0 - the
+  recoverable layer, which the bank still holds - has had a filesystem
+  projection for a long time. The layer no amount of fetching recreates
+  (categories somebody typed, accounts somebody declared, review decisions
+  somebody made) had none.
+
+  Keyed on **content identity plus occurrence, never entity id**, and that is
+  the substance rather than a detail. An entity id folds in the account and the
+  artefact that first carried the row, so it is re-minted by every rebuild and
+  every corrected filing - this project's own documentation says as much where
+  it explains why entity ids are unfit for export, while the annotation layer is
+  keyed on exactly that internally, which is the root of the two detachment
+  defects fixed earlier today. A scenario proves the point directly: export,
+  rebuild, and the exported keys still identify the rebuilt rows.
+
+  Orphaned work is exported and marked. An annotation whose transaction has gone
+  is the most at-risk thing in the store - invisible everywhere else, because
+  the row simply reads as uncategorised - so dropping it would discard precisely
+  what the export exists to preserve. Unresolved review flags are NOT exported:
+  those are claims the current rules make, and the rules will make them again.
+
+  The rebuild scenario passed vacuously at first, because the fixture built
+  derived rows without any layer 0 to replay - so the rebuild emptied the store
+  and an empty set contained no counter-example. It now lands a real artefact,
+  and asserts both sides are non-empty before comparing them.
+
 ## [0.4.200] - 2026-08-12
 
 ### Changed

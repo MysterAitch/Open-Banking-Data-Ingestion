@@ -91,9 +91,24 @@ failures because nothing about it looks wrong until the day you need it.
 
 `obdi backup` takes the copy through the application and refuses to hand you one
 whose row counts do not match the live store, table by table; `obdi verify-backup`
-re-checks a copy you already have. If you must move files by hand, take
+re-checks a copy you already have. **`obdi restore <backup> --to <path>`** turns
+one back into a store, which is the half that is only ever tested by doing it: it
+refuses an untrustworthy copy before touching anything, moves any existing store
+aside as `.replaced` rather than deleting it, takes the `-wal` and `-shm`
+sidecars with the database they belong to, and opens the result through the
+application so what it reports is a store this release can use rather than a file
+that exists. Add `--replace` to go ahead when something is already there. If you must move files by hand, take
 `store.sqlite3`, `store.sqlite3-wal` and `store.sqlite3-shm` together with every
 writer stopped - but prefer the command, which checks its own work.
+
+**One layer regenerates and one does not, and only the second needs you.** Raw
+artefacts can be fetched again and statements re-imported; `obdi export-raw`
+projects them onto the filesystem for eyes and ordinary tools. Categories you
+typed, accounts you declared and review decisions you made cannot be recreated by
+any amount of fetching - the evidence behind a review decision is precisely what
+could not settle itself. `obdi export-declared <dir>` writes that layer out,
+keyed on content identity rather than on entity ids, which are re-minted by every
+rebuild. Worth running before anything drastic, and cheap enough to run often.
 
 **Regenerating beats copying** where you can. Provider secrets can usually be
 re-issued in a console, and bank connections re-authorised from a phone in a

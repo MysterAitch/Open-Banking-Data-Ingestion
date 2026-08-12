@@ -48,6 +48,9 @@ JUSTIFIED = {
     "two canonical accounts at one Actual account are pruned, so those rows never "
     "meet in one envelope. The refusal is belt and braces over money and stays; the "
     "state it refuses has to be planted",
+    ("test_export_declared.py", "transactions"): "removes a transaction from under "
+    "an annotation, to prove the export carries work that has lost its row - which "
+    "is the work most at risk and invisible from every other angle",
     ("test_orphaned_entity_rows.py", "transactions"): "removes a transaction from "
     "under the work attached to it, which is the orphan state itself - nothing "
     "outside a rebuild deletes a transaction, and a check for a state nothing "
