@@ -26,6 +26,30 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.197] - 2026-08-12
+
+### Fixed
+- A rebuild no longer destroys review decisions. It wiped the whole review queue,
+  including rows a person had already judged - and it is encouraged after every
+  refile and runs by itself after every deploy, so those decisions were being
+  discarded routinely and silently. A resolved entry is the one thing in the
+  derived layer that replaying raw evidence cannot reproduce: the evidence is
+  exactly what was ambiguous, which is why it was queued for a person at all.
+  Re-adjudication is no substitute either, since it is not idempotent.
+
+  UNRESOLVED entries are still wiped and re-raised, deliberately: an unjudged
+  flag is a claim the current rules make about the current evidence, so keeping
+  it would preserve doubts the rules have since learned to settle and the queue
+  could only ever grow. Safe because entity ids are deterministic - a rebuild
+  re-mints exactly the ids it wiped, so a kept row still names the transaction it
+  judged.
+
+### Changed
+- The rebuild's danger-zone copy says what SURVIVES, not only that layer 0 is
+  untouched. Reassuring the reader about the raw artefacts and leaving everything
+  else unsaid invited the wrong inference at the door of the one operation that
+  deletes derived rows wholesale.
+
 ## [0.4.196] - 2026-08-12
 
 ### Fixed

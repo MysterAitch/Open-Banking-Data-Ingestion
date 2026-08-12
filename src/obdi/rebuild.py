@@ -310,7 +310,21 @@ def rebuild_from_raw(
     invalidate_fingerprint(store)
     store.connection.execute("DELETE FROM transactions")
     store.connection.execute("DELETE FROM transaction_sources")
-    store.connection.execute("DELETE FROM review_queue")
+    # UNRESOLVED only. An unjudged flag is a claim the current rules make about
+    # the current evidence, so re-deriving it is right: keeping it would
+    # preserve doubts the rules have since learned to settle, and the queue
+    # could only ever grow. A RESOLVED one is the opposite - it is the single
+    # thing here that replaying raw evidence cannot reproduce, because the
+    # evidence is exactly what was ambiguous. Wiping the table discarded those
+    # silently, after an operation the page encourages following every refile
+    # and which also runs by itself after every deploy. Re-adjudication is no
+    # substitute: it is not idempotent, so a second pass can reach a different
+    # answer from the one a person gave.
+    #
+    # Safe because entity ids are deterministic - the rebuild re-mints exactly
+    # the ids it wiped, so a kept row still names the transaction it judged.
+    # That is the property annotations already rely on.
+    store.connection.execute("DELETE FROM review_queue WHERE resolved_at IS NULL")
     store.connection.commit()
 
     artefact_rows = store.connection.execute(

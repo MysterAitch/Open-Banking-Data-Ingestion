@@ -2191,6 +2191,16 @@ def _danger_zone(
             "duplicated or misfiled rows; identities are content-keyed, so "
             "downstream imports dedupe cleanly. Runs in the background - "
             "the result appears here.</p>"
+            # Says what SURVIVES, not only what is safe. The previous copy
+            # reassured the reader that layer 0 is untouched and left every
+            # other question open, at the door of the one operation that
+            # deletes derived rows wholesale - so the reader had to guess
+            # about the two things here that no replay can reproduce.
+            "<p class=\"muted\">Your own work is kept: categories and payees "
+            "you have set, and review decisions you have already made. "
+            "Unresolved review flags are raised again by the current rules "
+            "rather than carried over, so a flag the rules have since learned "
+            "to settle does not come back.</p>"
             + checkbox
             + f'<p><button class="button" type="submit" {button_style}>'
             "Rebuild from raw</button></p></form>"
