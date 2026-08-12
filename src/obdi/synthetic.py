@@ -332,6 +332,39 @@ def _months_of(events: Iterable[PlantedEvent]) -> list[str]:
     return sorted({event.when[:7] for event in events})
 
 
+def _monzo_csv(events: Iterable[PlantedEvent]) -> str:
+    """The same events as a Monzo export - a SECOND source for the same rows.
+
+    Not because the household banks with Monzo, but because obdi already reads
+    this format and a corpus with one source cannot exercise anything that
+    compares sources. That is a real ceiling and not a small one: sibling
+    attribution, destination doubt, date transpositions, export drift and stale
+    feeds all work by disagreement between two doors onto the same account.
+
+    The two formats differ in EVIDENCE, not only in name, which is the point.
+    This one carries a stable transaction id per row and the Starling export
+    does not, so the pair exercises the matcher's tier logic rather than merely
+    giving it two spellings of the same thing.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["Transaction ID", "Date", "Amount", "Description", "Name"])
+    for index, event in enumerate(sorted(events, key=lambda e: e.when)):
+        when = date.fromisoformat(event.when).strftime("%d/%m/%Y")
+        writer.writerow(
+            [
+                # Stable across regenerations of the same seed, because a
+                # source id that moved would make re-import look like new data.
+                f"tx_{event.account}_{index:04d}",
+                when,
+                f"{event.amount_minor / 100:.2f}",
+                event.description,
+                event.merchant,
+            ]
+        )
+    return buffer.getvalue()
+
+
 def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
     """The adversarial deliveries, written beside the clean corpus.
 
@@ -384,9 +417,15 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
             )
         )
 
+    # In the OTHER format, which is what makes the misfile detectable at all.
+    # A file uploaded against the wrong account is a second source landing where
+    # it does not belong, and the detection is that its rows match rows the
+    # first source filed under a sibling account. Delivered in the same format
+    # it would simply be more rows from the same door, and nothing could
+    # disagree with it - which is exactly what was measured before this existed.
     savings = [e for e in world.events if e.account == "synthetic-savings"]
     name = "synthetic-savings-misfiled.csv"
-    (out_dir / name).write_text(_csv_of(savings), encoding="utf-8")
+    (out_dir / name).write_text(_monzo_csv(savings), encoding="utf-8")
     deliveries.append(
         Delivery(
             name=name,

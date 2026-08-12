@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.206] - 2026-08-12
+
+### Added
+- The corpus now emits a SECOND source, which lifts the single-source ceiling
+  recorded one release ago. The misfiled statement is written as a Monzo export
+  rather than a second copy of the first format - not because the household
+  banks with Monzo, but because a file uploaded against the wrong account IS a
+  second source arriving where it does not belong. Delivered in the same format
+  it would just be more rows from the same door, with nothing able to disagree
+  with it, which is exactly what was measured before.
+
+  The two formats differ in EVIDENCE and not only in name: this one carries a
+  stable transaction id per row where the first does not, so the pair exercises
+  the matcher's tier logic rather than giving it two spellings of one thing.
+
+  The misfile is now DETECTED and attributed: all six rows landed against the
+  wrong account are matched to the rows the other source filed under the account
+  they belong to, same dates and same amounts. That is the shape of a real
+  incident here - a mis-tapped picker put 1,571 statement rows in the wrong
+  space and every rebuild re-derived them wrong until they were refiled - and it
+  is now reproducible from a seed.
+
+  The assertion is on the EVIDENCE rather than on a count: every attribution
+  must name the account whose rows these actually are. A number that moved
+  proves nothing about whether it moved for the right reason.
+
+### Fixed
+- The misfile test first failed because its own setup landed the arriving source
+  but not the destination account's own statement, leaving one source in the
+  account and nothing to disagree with. It now asserts the account holds more
+  than one source before asking whether they disagree - a precondition that,
+  left implicit, makes the whole test vacuous the moment the setup drifts.
+
 ## [0.4.205] - 2026-08-12
 
 ### Added

@@ -492,28 +492,24 @@ class TestTheAdversarialDeliveries:
             f"(seed {SEED})"
         )
 
-    def test_AMisfiledStatement_LandsWhereItWasSentAndIsNotYetDetectable(
+    def test_AMisfiledStatement_IsAttributedToTheAccountItsRowsBelongTo(
         self, corpus, tmp_path
     ):
-        """The misfile lands, and this corpus CANNOT yet catch it. Both halves
-        are asserted, because the second is a limit worth pinning.
+        """A mis-tapped picker once put 1,571 statement rows in the wrong space,
+        and every rebuild re-derived them wrong until they were refiled.
 
-        A mis-tapped picker once put 1,571 statement rows in the wrong space,
-        and every rebuild re-derived them wrong until they were refiled. obdi
-        cannot tell from the file alone - nothing in a CSV says which account it
-        belongs to - so detection comes from noticing that the rows just landed
-        match rows ANOTHER SOURCE filed somewhere else.
+        obdi cannot tell from the file alone - nothing in a CSV says which
+        account it belongs to. The detection is that the rows which landed match
+        rows ANOTHER SOURCE filed under a sibling account, which is why the
+        misfiled artefact is written in the second format: a file uploaded
+        against the wrong account IS a second source arriving where it does not
+        belong. Delivered in the same format it would just be more rows from the
+        same door, with nothing able to disagree with it.
 
-        That is precisely what this corpus cannot supply: every statement it
-        writes is a Starling export, so there is one source and the sibling
-        attribution has nothing to compare against. Measured, not assumed: the
-        agreement pass over a store holding both the correct copy and the
-        misfiled one returns nothing at all.
-
-        So the artefact is planted and the gap is recorded here rather than in a
-        note nobody reads next to a test that quietly passes. Emitting one
-        account in a second format - the app already reads Monzo and Amex CSV -
-        is what closes it, and is the queued next step.
+        The assertion is on the EVIDENCE, not on a count. A number that moved
+        proves nothing about whether it moved for the right reason, and the
+        attribution carries the sibling account and the matched date precisely
+        so a nonsense match announces itself.
         """
         from obdi.coverage import agreements
 
@@ -525,15 +521,18 @@ class TestTheAdversarialDeliveries:
         )
         store_path = tmp_path / "store.sqlite3"
 
-        # Correctly first: without a correct copy elsewhere the misfile is
-        # genuinely undetectable rather than merely undetected, and the two are
-        # different claims.
-        self._land(
-            store_path,
-            (directory / f"{misfile['belongs_to']}.csv").read_bytes(),
-            misfile["belongs_to"],
-            digest="correctly-filed",
-        )
+        # Both accounts' own statements first. The correct copy elsewhere is
+        # what makes the misfile detectable rather than merely undetected, and
+        # the destination's own rows are what the arriving source disagrees
+        # WITH - without them there is one source in the account and nothing to
+        # compare. Leaving that out is how this test first failed.
+        for account in (misfile["belongs_to"], misfile["deliver_as"]):
+            self._land(
+                store_path,
+                (directory / f"{account}.csv").read_bytes(),
+                account,
+                digest=f"correctly-filed-{account}",
+            )
         self._land(
             store_path,
             (directory / misfile["name"]).read_bytes(),
@@ -543,20 +542,40 @@ class TestTheAdversarialDeliveries:
 
         with Store(store_path) as store:
             derived = store.all_transactions()
-            found = agreements(derived)
 
-        wrong_account = [
-            row for row in derived if row.account_id == misfile["deliver_as"]
-        ]
-        assert len(wrong_account) >= misfile["rows"], (
+        landed = [row for row in derived if row.account_id == misfile["deliver_as"]]
+        assert len(landed) >= misfile["rows"], (
             f"the misfiled statement did not land against {misfile['deliver_as']} "
             f"at all, so there is nothing to detect (seed {SEED})"
         )
-        assert found == [], (
-            f"the agreement pass now reports {len(found)} finding(s) from a "
-            f"single-source corpus. If a second source was added, this test has "
-            f"become the wrong shape - assert that the misfile is DETECTED "
-            f"(seed {SEED})"
+        sources = {row.source for row in landed}
+        assert len(sources) > 1, (
+            f"{misfile['deliver_as']} holds only {sources}, so nothing can "
+            f"disagree with the misfiled rows (seed {SEED})"
+        )
+
+        siblings = {
+            source: [misfile["belongs_to"], misfile["deliver_as"]]
+            for source in {row.source for row in derived}
+        }
+        found = agreements(derived, sibling_accounts=siblings)
+
+        attributed = [
+            attribution
+            for agreement in found
+            for attribution in agreement.attributed
+            if attribution.sibling_account == misfile["belongs_to"]
+        ]
+        assert attributed, (
+            f"{misfile['rows']} rows landed against {misfile['deliver_as']} while "
+            f"identical rows sat under {misfile['belongs_to']}, and nothing was "
+            f"attributed there. Agreements found: {found} (seed {SEED})"
+        )
+        # Every attribution names the account its row really belongs to - the
+        # check that this found the misfile rather than some other disagreement.
+        assert all(
+            attribution.sibling_account == misfile["belongs_to"]
+            for attribution in attributed
         )
 
 
