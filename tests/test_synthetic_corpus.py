@@ -401,5 +401,164 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         assert reported[0].seen_in == ()
 
 
+class TestTheAdversarialDeliveries:
+    """Layer 4: the same rows arriving badly.
+
+    Every case here is a RE-delivery of rows the corpus already holds, so they
+    cost an import rather than a generation - which is why the adversarial half
+    of the generator is the cheap half. Each maps to something that has actually
+    happened rather than something imaginable.
+    """
+
+    def _land(self, store_path, payload: bytes, account: str, digest: str) -> None:
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
+        rows = list(detect(payload).parse(payload, account_id=account))
+        with Store(store_path) as store:
+            reconcile_batch(store, rows, digest=digest)
+
+    def test_TwoStatementsWhoseMonthsOverlap_LeaveTheSameRowsAsOneWholePeriod(
+        self, corpus, tmp_path
+    ):
+        """The case the clean corpus cannot produce, and the one that pays for
+        occurrence numbering.
+
+        Every row in the shared months arrives twice, from the same source, at
+        the same amount and date - which is exactly the shape a genuine repeated
+        payment takes, so a matcher cannot tell them apart on the facts. The
+        right answer is known and exact: the same rows as importing the whole
+        period once. Too few means real payments were swallowed as duplicates;
+        too many means the overlap was counted twice.
+        """
+        directory, world, manifest = corpus
+        overlapping = [
+            delivery
+            for delivery in manifest["deliveries"]
+            if "overlaps" in delivery["fault"]
+        ]
+        assert len(overlapping) == 2, (
+            f"expected two overlapping halves, the manifest describes "
+            f"{len(overlapping)} (seed {SEED})"
+        )
+        # Without this the test can pass while testing nothing: two halves that
+        # happen not to share any rows are just a whole period in two files, and
+        # the assertions below would hold trivially.
+        delivered = sum(delivery["rows"] for delivery in overlapping)
+        whole_rows = sum(
+            1 for event in world.events if event.account == "synthetic-current"
+        )
+        assert delivered > whole_rows, (
+            f"the two halves deliver {delivered} rows for a {whole_rows}-row "
+            f"account, so nothing is actually delivered twice (seed {SEED})"
+        )
+
+        whole = tmp_path / "whole.sqlite3"
+        payload = (directory / "synthetic-current.csv").read_bytes()
+        self._land(whole, payload, "synthetic-current", "whole")
+        with Store(whole) as store:
+            expected = {
+                (row.value_date.isoformat(), row.amount_minor, row.description)
+                for row in store.all_transactions()
+            }
+            expected_count = len(store.all_transactions())
+
+        split = tmp_path / "split.sqlite3"
+        for delivery in overlapping:
+            self._land(
+                split,
+                (directory / delivery["name"]).read_bytes(),
+                delivery["deliver_as"],
+                # A different digest each, because they ARE different artefacts -
+                # giving them one digest would hide the case being tested.
+                digest=delivery["name"],
+            )
+        with Store(split) as store:
+            landed = store.all_transactions()
+            actual = {
+                (row.value_date.isoformat(), row.amount_minor, row.description)
+                for row in landed
+            }
+
+        assert actual == expected, (
+            f"overlapping deliveries derived different rows than one whole "
+            f"period: missing {sorted(expected - actual)[:2]}, extra "
+            f"{sorted(actual - expected)[:2]} (seed {SEED})"
+        )
+        assert len(landed) == expected_count, (
+            f"{len(landed)} rows from two overlapping statements against "
+            f"{expected_count} from the whole period - the overlap was "
+            f"{'double counted' if len(landed) > expected_count else 'swallowed'} "
+            f"(seed {SEED})"
+        )
+
+    def test_AMisfiledStatement_LandsWhereItWasSentAndIsNotYetDetectable(
+        self, corpus, tmp_path
+    ):
+        """The misfile lands, and this corpus CANNOT yet catch it. Both halves
+        are asserted, because the second is a limit worth pinning.
+
+        A mis-tapped picker once put 1,571 statement rows in the wrong space,
+        and every rebuild re-derived them wrong until they were refiled. obdi
+        cannot tell from the file alone - nothing in a CSV says which account it
+        belongs to - so detection comes from noticing that the rows just landed
+        match rows ANOTHER SOURCE filed somewhere else.
+
+        That is precisely what this corpus cannot supply: every statement it
+        writes is a Starling export, so there is one source and the sibling
+        attribution has nothing to compare against. Measured, not assumed: the
+        agreement pass over a store holding both the correct copy and the
+        misfiled one returns nothing at all.
+
+        So the artefact is planted and the gap is recorded here rather than in a
+        note nobody reads next to a test that quietly passes. Emitting one
+        account in a second format - the app already reads Monzo and Amex CSV -
+        is what closes it, and is the queued next step.
+        """
+        from obdi.coverage import agreements
+
+        directory, _world, manifest = corpus
+        misfile = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if delivery["belongs_to"] != delivery["deliver_as"]
+        )
+        store_path = tmp_path / "store.sqlite3"
+
+        # Correctly first: without a correct copy elsewhere the misfile is
+        # genuinely undetectable rather than merely undetected, and the two are
+        # different claims.
+        self._land(
+            store_path,
+            (directory / f"{misfile['belongs_to']}.csv").read_bytes(),
+            misfile["belongs_to"],
+            digest="correctly-filed",
+        )
+        self._land(
+            store_path,
+            (directory / misfile["name"]).read_bytes(),
+            misfile["deliver_as"],
+            digest="misfiled",
+        )
+
+        with Store(store_path) as store:
+            derived = store.all_transactions()
+            found = agreements(derived)
+
+        wrong_account = [
+            row for row in derived if row.account_id == misfile["deliver_as"]
+        ]
+        assert len(wrong_account) >= misfile["rows"], (
+            f"the misfiled statement did not land against {misfile['deliver_as']} "
+            f"at all, so there is nothing to detect (seed {SEED})"
+        )
+        assert found == [], (
+            f"the agreement pass now reports {len(found)} finding(s) from a "
+            f"single-source corpus. If a second source was added, this test has "
+            f"become the wrong shape - assert that the misfile is DETECTED "
+            f"(seed {SEED})"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

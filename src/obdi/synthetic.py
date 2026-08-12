@@ -46,6 +46,7 @@ import csv
 import io
 import json
 import random
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
@@ -272,7 +273,12 @@ def _weekly_instalments(months: int) -> int:
 
 
 def _statement_csv(world: World, account: str) -> str:
-    """One account's events as a Starling personal export.
+    """One account's whole period as a Starling personal export."""
+    return _csv_of(e for e in world.events if e.account == account)
+
+
+def _csv_of(events: Iterable[PlantedEvent]) -> str:
+    """Events as a Starling personal export.
 
     That format because the application already reads it, which is the point of
     stage 1: the whole pipeline runs without a document renderer existing.
@@ -280,9 +286,7 @@ def _statement_csv(world: World, account: str) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(["Date", "Counter Party", "Reference", "Type", "Amount (GBP)"])
-    for event in sorted(
-        (e for e in world.events if e.account == account), key=lambda e: e.when
-    ):
+    for event in sorted(events, key=lambda e: e.when):
         when = date.fromisoformat(event.when).strftime("%d/%m/%Y")
         writer.writerow(
             [
@@ -294,6 +298,106 @@ def _statement_csv(world: World, account: str) -> str:
             ]
         )
     return buffer.getvalue()
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """One artefact as it would actually arrive, and what is wrong with it.
+
+    Layer 4 of the design: which files get imported, in what order, and with
+    what mistakes. These are RE-deliveries of rows that already exist, so each
+    costs an import rather than a generation - which is why the adversarial
+    cases are the cheap part of the generator rather than the expensive one.
+
+    `belongs_to` and `deliver_as` are separate on purpose. When they differ the
+    artefact is being imported against the wrong account, which is not a
+    hypothetical: a mis-tapped picker put 1,571 statement rows in the wrong
+    space, and every rebuild re-derived them wrong until they were refiled.
+    """
+
+    name: str
+    #: The account whose rows the file actually holds.
+    belongs_to: str
+    #: The account it is delivered against. Differs from `belongs_to` only for
+    #: the misfile case.
+    deliver_as: str
+    #: Inclusive month bounds, as they would appear on a statement header.
+    covers: tuple[str, str]
+    #: What is wrong with this delivery, or "" when nothing is.
+    fault: str
+    rows: int
+
+
+def _months_of(events: Iterable[PlantedEvent]) -> list[str]:
+    return sorted({event.when[:7] for event in events})
+
+
+def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
+    """The adversarial deliveries, written beside the clean corpus.
+
+    Deliberately NOT folded into the clean statements: a test that wants the
+    honest corpus must be able to get it, and a corpus that is always damaged
+    can only measure damage. These are extra files a test opts into.
+
+    Two faults are planted, chosen because neither can be produced by the clean
+    corpus and both have cost real money here:
+
+      OVERLAPPING PERIODS. Two statements covering ranges that share months.
+      Every row in the shared months arrives twice, from the same source, at the
+      same amount and date - which is precisely the shape a genuine repeated
+      payment takes. Occurrence numbering is what separates them, and this is
+      the only case in the corpus that exercises it. The right answer is exact:
+      importing both must leave the same rows as importing the whole period once.
+
+      A MISFILED STATEMENT. One account's file delivered against another. obdi
+      cannot know from the file alone, which is the point - the detection has to
+      come from noticing that the rows it landed match rows another source filed
+      somewhere else.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    deliveries: list[Delivery] = []
+
+    current = [e for e in world.events if e.account == "synthetic-current"]
+    months = _months_of(current)
+    # A two-month overlap rather than one, so the shared region contains more
+    # than a single statement boundary - a one-month overlap can be got right by
+    # accident by anything that special-cases the first and last row.
+    first_half = months[: len(months) // 2 + 1]
+    second_half = months[len(months) // 2 - 1 :]
+
+    for label, span in (("early", first_half), ("late", second_half)):
+        rows = [e for e in current if e.when[:7] in span]
+        name = f"synthetic-current-{label}.csv"
+        (out_dir / name).write_text(_csv_of(rows), encoding="utf-8")
+        deliveries.append(
+            Delivery(
+                name=name,
+                belongs_to="synthetic-current",
+                deliver_as="synthetic-current",
+                covers=(span[0], span[-1]),
+                fault=(
+                    "overlaps the other half of this account by "
+                    f"{len(set(first_half) & set(second_half))} month(s)"
+                ),
+                rows=len(rows),
+            )
+        )
+
+    savings = [e for e in world.events if e.account == "synthetic-savings"]
+    name = "synthetic-savings-misfiled.csv"
+    (out_dir / name).write_text(_csv_of(savings), encoding="utf-8")
+    deliveries.append(
+        Delivery(
+            name=name,
+            belongs_to="synthetic-savings",
+            deliver_as="synthetic-current",
+            covers=(_months_of(savings)[0], _months_of(savings)[-1]),
+            fault="delivered against synthetic-current, whose rows these are not",
+            rows=len(savings),
+        )
+    )
+    return deliveries
 
 
 def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
@@ -311,6 +415,8 @@ def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
         (out_dir / name).write_text(_statement_csv(world, account), encoding="utf-8")
         files[account] = name
 
+    deliveries = write_deliveries(world, out_dir)
+
     manifest: dict[str, object] = {
         # First, because it is the first thing anybody investigating needs.
         "seed": world.seed,
@@ -320,6 +426,19 @@ def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
         ),
         "accounts": world.accounts,
         "files": files,
+        # The clean statements above are what a well-behaved bank sends. These
+        # are the same rows arriving badly, and a test opts into them - a corpus
+        # that is always damaged can only ever measure damage.
+        #
+        # `covers` is flattened to a list for the same reason transfer_pairs is:
+        # JSON has no tuple, so a tuple here and a list on disk would mean an
+        # assertion against the returned manifest is not an assertion about what
+        # the nightly job reads. That exact drift appeared once already, in the
+        # commit that introduced the manifest.
+        "deliveries": [
+            {**asdict(delivery), "covers": list(delivery.covers)}
+            for delivery in deliveries
+        ],
         "events": [asdict(event) for event in world.events],
         # As LISTS, matching what comes back out of the file. A tuple here and a
         # list on disk means an assertion against the returned manifest is not an

@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.205] - 2026-08-12
+
+### Added
+- Generator stage 3, the adversarial deliveries: the same rows arriving badly.
+  These are re-deliveries of rows the corpus already holds, so each costs an
+  import rather than a generation - which is why the adversarial half of the
+  generator is the cheap half. They are written beside the clean statements and
+  a test opts in, deliberately: a corpus that is always damaged can only measure
+  damage.
+
+  TWO STATEMENTS WHOSE MONTHS OVERLAP, which the clean corpus cannot produce and
+  which is what pays for occurrence numbering. Every row in the shared months
+  arrives twice, from the same source, at the same amount and date - exactly the
+  shape a genuine repeated payment takes, so nothing can separate them on the
+  facts. The right answer is exact and known: the same rows as importing the
+  whole period once. Too few means real payments were swallowed as duplicates,
+  too many means the overlap was counted twice. Passes. The test also asserts
+  the halves genuinely share rows, since two halves that happen not to overlap
+  would satisfy everything else trivially while testing nothing.
+
+  A MISFILED STATEMENT - one account's file delivered against another. This is
+  planted and lands, and the test asserts it CANNOT currently be detected.
+
+### Fixed
+- Recorded a measured limit rather than leaving it to be discovered: the corpus
+  writes every statement as one issuer's export, so it has a single source, and
+  every detector that compares SOURCES is unreachable from it - the agreement
+  pass and sibling attribution, destination doubt, date transpositions. Proven
+  rather than assumed: a store holding both the correct copy of a statement and
+  the same rows misfiled against another account returns nothing at all from the
+  agreement pass, because there is no sibling to disagree with it.
+
+  Pinned by a test whose failure message says to change its shape when a second
+  source arrives, so the limit cannot quietly outlive itself. Closing it means
+  emitting one account in a second format, which the app already reads.
+
 ## [0.4.204] - 2026-08-12
 
 ### Fixed
