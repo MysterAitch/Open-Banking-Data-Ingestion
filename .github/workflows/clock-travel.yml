@@ -1,4 +1,4 @@
-# The suite, run as if it were some months from now.
+# The suite, run as if it were some other date.
 #
 # It exists because of a defect that had nothing to do with the change that
 # exposed it: a fixture carrying the day's date passed for a week, then failed a
@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Days into the future to run the suite"
+        description: "Days into the future to run the suite (offset legs only)"
         required: false
         default: "365"
 
@@ -33,35 +33,63 @@ jobs:
   travel:
     runs-on: ubuntu-latest
     strategy:
-      # Every horizon runs even when an earlier one fails: "it breaks at some
-      # point in the next year" is a much weaker answer than "it breaks at 31
-      # days and again at 365", and the second is what says how urgent it is.
+      # Every leg runs even when an earlier one fails: "it breaks at 31 days and
+      # again at a year" says how urgent it is, and "something breaks" does not.
       fail-fast: false
       matrix:
-        # Ageing out of a window is monotonic - a fixture outside a 7-day filter
-        # at +31 is still outside it at +365 - so these horizons are not about
-        # catching the same defect repeatedly. They are about window LENGTH: the
-        # short ones catch day and month filters, the long ones catch the
-        # year-wide asks this codebase is full of, and +1 catches anything that
-        # assumes the work happens on the day the fixture was written.
-        days: [1, 31, 90, 365]
+        # Two kinds of destination, because they reach different faults.
+        #
+        # OFFSETS catch things that EXPIRE. Ageing out is monotonic - a fixture
+        # outside a seven-day filter at 31 days is still outside it at a year - so
+        # these do not repeat one another; they differ by the window LENGTH they
+        # can reach. The long one is deliberately awkward rather than round: ten
+        # years and change puts several annual boundaries behind it, the part-year
+        # lands in a different month of the year, and the trailing days shift the
+        # day of the month and the day of the week too. One leg, several
+        # anticipated thresholds - and if it trips, which one it was becomes the
+        # investigation rather than the assumption.
+        #
+        # ABSOLUTE destinations catch calendar FEATURES, which no offset can reach
+        # reliably: where an offset lands depends on the day it was launched, so it
+        # can only arrive on a leap day or a clock change by coincidence. They are
+        # also reproducible - the same leg means the same instant every week.
+        include:
+          - { label: "tomorrow", days: 1 }
+          - { label: "a month", days: 31 }
+          - { label: "a quarter", days: 90 }
+          - { label: "a year", days: 365 }
+          - { label: "ten years and a bit", days: 3928 }
+          - { label: "leap day", to: "2028-02-29T12:00:00Z" }
+          - { label: "the last hour of a year", to: "2027-12-31T23:30:00Z" }
+          # The two UK clock changes, verified against the calendar rather than
+          # assumed: the last Sunday of March and of October 2027. Times chosen to
+          # sit inside the hour that repeats or never happens.
+          - { label: "clocks go forward", to: "2027-03-28T00:30:00Z" }
+          - { label: "clocks go back", to: "2027-10-31T01:30:00Z" }
+          # A 31st, with a 28-day month next. Naive "same day next month"
+          # arithmetic fails here and nowhere else.
+          - { label: "month end before a short month", to: "2027-01-31T12:00:00Z" }
+    name: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - run: pip install --quiet -e ".[dev]" time-machine
-      - name: Run the suite ${{ matrix.days }} day(s) from now
-        env:
-          OBDI_TRAVEL_DAYS: ${{ matrix.days }}
-        run: python -m pytest -q -p conftest_timetravel
+      - run: pip install --quiet -e ".[dev]"
 
       # The instrument has to be shown capable of firing, or a clean sweep is not
-      # evidence of anything. This asserts the clock actually moved rather than
-      # trusting that the plugin loaded - the failure it guards against is a
-      # no-op probe reporting green across the whole matrix.
+      # evidence of anything. This runs FIRST: it asserts the clock actually moved
+      # to where this leg said, so a no-op probe cannot report green across the
+      # whole matrix. Running it after the suite would let a whole green run be
+      # reported before anybody learned it meant nothing.
       - name: Confirm the clock actually moved
-        if: always()
         env:
           OBDI_TRAVEL_DAYS: ${{ matrix.days }}
+          OBDI_TRAVEL_TO: ${{ matrix.to }}
         run: python -m pytest -q -p conftest_timetravel tests/test_clock_travel_probe.py
+
+      - name: Run the suite at ${{ matrix.label }}
+        env:
+          OBDI_TRAVEL_DAYS: ${{ matrix.days }}
+          OBDI_TRAVEL_TO: ${{ matrix.to }}
+        run: python -m pytest -q -p conftest_timetravel
