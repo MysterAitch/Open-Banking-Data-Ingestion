@@ -727,5 +727,181 @@ class TestTheAdversarialDeliveries:
         )
 
 
+class TestTheReportAPersonActuallyReads:
+    """Every detector underneath this is now checked against a known answer.
+    The page a person opens was not.
+
+    These are not assertions about formatting. Each one is a claim the reader
+    acts on: what to look at first, what to go and fetch, and whether a
+    reassuring line means a check passed or never ran.
+    """
+
+    def _land(self, store_path, payload: bytes, account: str, digest: str) -> None:
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
+        rows = list(detect(payload).parse(payload, account_id=account))
+        with Store(store_path) as store:
+            reconcile_batch(store, rows, digest=digest)
+
+    def _report_for(self, store_path):
+        """Built exactly as the `coverage` command builds it.
+
+        BY SIGHTING, not by stored row. The stored source is last-writer-wins
+        after a merge, so grouping stored rows by source undercounts every
+        payment a second source corroborated and then reports the shortfall as
+        missing months. A test that assembled the page its own way would be
+        asserting about a page the command never produces - which is what this
+        first did, and two of these tests passed that way.
+        """
+        from obdi.coverage import agreements, coverage, gaps, report, transpositions
+
+        with Store(store_path) as store:
+            held = store.transactions_by_sighting()
+        return report(coverage(held), agreements(held), gaps(held), transpositions(held))
+
+    def test_ATransposition_IsPutAboveEverythingElse(self, corpus, tmp_path):
+        """Ordering is the finding here, not decoration.
+
+        A transposition is the one thing on this page that every other check
+        passes while it is true - the counts tally and the totals agree - so a
+        reader who meets it after two screens of healthy figures has already
+        been told the data is fine.
+        """
+        directory, _world, manifest = corpus
+        planted = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if "transposed" in delivery["fault"]
+        )
+        store_path = tmp_path / "store.sqlite3"
+        self._land(
+            store_path,
+            (directory / "synthetic-current.csv").read_bytes(),
+            "synthetic-current",
+            "first",
+        )
+        self._land(
+            store_path,
+            (directory / planted["name"]).read_bytes(),
+            "synthetic-current",
+            "transposed",
+        )
+
+        page = self._report_for(store_path)
+
+        assert "DATES DISAGREE" in page, (
+            f"a planted transposition does not appear on the report at all "
+            f"(seed {SEED})"
+        )
+        assert page.index("DATES DISAGREE") < page.index("What the store holds"), (
+            "the transposition is reported BELOW the healthy figures, so a reader "
+            f"meets it after being reassured (seed {SEED})"
+        )
+
+    def test_OneSourceOnly_SaysNothingWasComparedRatherThanNoDisagreements(
+        self, corpus, tmp_path
+    ):
+        """The difference between a check that passed and one that never ran.
+
+        A single source cannot be compared with anything. Reporting that as
+        agreement would hand the reader confidence drawn from a comparison that
+        did not happen - which is the same fault as a green test that never
+        exercised its subject.
+        """
+        directory, _world, _ = corpus
+        store_path = tmp_path / "store.sqlite3"
+        self._land(
+            store_path,
+            (directory / "synthetic-current.csv").read_bytes(),
+            "synthetic-current",
+            "only",
+        )
+
+        page = self._report_for(store_path)
+
+        assert "nothing was compared" in page, (
+            f"a single-source store does not say so plainly (seed {SEED})"
+        )
+        assert "No disagreements" not in page
+
+    def test_ASourcesCoverageMonths_CanIncludeAMonthItNeverReported(
+        self, corpus, tmp_path
+    ):
+        """A LIMIT, pinned because it is invisible and it weakens gap detection.
+
+        The coverage page is built from the per-sighting view, which lists each
+        payment once per source that observed it. But a sighting carries the
+        STORED row's date, and after a merge the stored date is whichever source
+        supplied the current facts. So a payment one source saw in March, dated
+        a day later by another, counts towards the FIRST source's April.
+
+        The consequence is not cosmetic. Gap detection asks which months a
+        source has nothing for, and a month can be filled on its behalf by a
+        date it never reported - so a real hole can be masked. Measured here:
+        every April row is withheld from the first source, and its coverage
+        months still include April.
+
+        Recorded as a limit rather than a fix because which date a sighting
+        should carry is a design question, not an oversight - the merged date is
+        arguably the payment's true date, and the answer decides what the
+        coverage page means. The test asserts the CURRENT behaviour so a change
+        to it is deliberate.
+        """
+        directory, _world, manifest = corpus
+        second = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if "second door" in delivery["fault"]
+        )
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
+        store_path = tmp_path / "store.sqlite3"
+        # A hole in the MIDDLE of the first source's period, not a short tail.
+        # A source that simply stopped has no enclosed month and is correctly
+        # not reported - an account falling out of use is the truth, not a gap.
+        # Getting that wrong is how this test first failed.
+        payload = (directory / "synthetic-current.csv").read_bytes()
+        rows = list(detect(payload).parse(payload, account_id="synthetic-current"))
+        months = sorted({row.value_date.strftime("%Y-%m") for row in rows})
+        withheld = months[len(months) // 2]
+        kept = [row for row in rows if row.value_date.strftime("%Y-%m") != withheld]
+        assert len(kept) < len(rows)
+        with Store(store_path) as store:
+            reconcile_batch(store, kept, digest="first-with-a-hole")
+
+        # The second source covers the whole period, so it can see that month.
+        self._land(
+            store_path, (directory / second["name"]).read_bytes(), "synthetic-current", "second"
+        )
+
+        with Store(store_path) as store:
+            held = store.transactions_by_sighting()
+
+        months_seen: dict[str, set[str]] = {}
+        for row in held:
+            months_seen.setdefault(row.source, set()).add(
+                row.value_date.strftime("%Y-%m")
+            )
+        assert len(months_seen) > 1, (
+            f"only {set(months_seen)} sighted, so nothing is being tested "
+            f"(seed {SEED})"
+        )
+        assert withheld not in {
+            row.value_date.strftime("%Y-%m") for row in kept
+        }, f"{withheld} was not actually withheld (seed {SEED})"
+
+        # The behaviour, stated as it is. If this ever fails because the month
+        # is now absent, the per-sighting view began carrying each source's OWN
+        # observed date - which is an improvement, and this test should become
+        # an assertion that a withheld month shows up as a contradicted gap.
+        assert withheld in months_seen["starling-csv"], (
+            f"starling-csv no longer claims {withheld}, a month it never "
+            f"reported. If that is deliberate, this test should now assert the "
+            f"gap is DETECTED rather than masked (seed {SEED})"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

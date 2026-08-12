@@ -26,6 +26,45 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.209] - 2026-08-12
+
+### Added
+- The coverage page itself is now asserted against a known corpus. Every
+  detector underneath it had been checked and the thing a person actually opens
+  had not. These are not assertions about formatting - each is a claim the
+  reader acts on.
+
+  A transposition must appear ABOVE the healthy figures, because it is the one
+  finding on the page that every other check passes while it is true: a reader
+  who meets it after two screens of tallying counts has already been reassured.
+
+  A single-source store must say "nothing was compared" rather than reporting
+  agreement, because confidence drawn from a comparison that never ran is the
+  same fault as a green test that never exercised its subject.
+
+### Fixed
+- The report tests first assembled the page from `all_transactions()`, which the
+  code explicitly documents as the wrong input - the stored source is
+  last-writer-wins, so grouping stored rows by source undercounts every payment
+  a second source corroborated. Two of the tests PASSED that way, against a page
+  the command never produces. They now build it exactly as the `coverage`
+  command does, by sighting.
+
+### Known limit
+- A source's coverage months can include a month it never reported, which masks
+  real gaps. A sighting carries the STORED row's date, and after a merge that is
+  whichever source supplied the current facts - so a payment the first source
+  saw in March, dated a day later by the second, counts towards the first
+  source's April. Measured: every April row withheld from one source, and its
+  coverage months still contain April, so the contradicted-gap section never
+  appears for a gap that genuinely exists.
+
+  Pinned by a test rather than fixed, because which date a sighting should carry
+  is a design question and not an oversight: the merged date is arguably the
+  payment's true date, while coverage is arguably a question about what each
+  source DELIVERED. The test's failure message says what to assert instead once
+  that is settled.
+
 ## [0.4.208] - 2026-08-12
 
 ### Added
