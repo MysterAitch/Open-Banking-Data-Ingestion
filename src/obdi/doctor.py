@@ -326,4 +326,35 @@ def collision_checks(
             ),
         )
     )
+
+    # Hand-work that has been LOST, which is the quietest fault this store can
+    # have. An annotation whose transaction no longer exists looks like nothing at
+    # all from every other angle: the row simply reads as uncategorised, which is
+    # exactly what a row nobody has reached yet looks like. Only this count tells
+    # those two apart.
+    #
+    # The count itself has existed and been tested since it was written, and
+    # nothing ever called it - the same fault as a guard that is never registered,
+    # and unnoticed for precisely the reason it was built: the symptom is silence.
+    stranded = 0
+    with contextlib.suppress(Exception):
+        stranded = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM annotations "
+                "WHERE entity_id NOT IN (SELECT entity_id FROM transactions)"
+            ).fetchone()[0]
+        )
+    results.append(
+        CheckResult(
+            name="annotations point at transactions that exist",
+            ok=stranded == 0,
+            detail=(
+                "no stranded annotations"
+                if stranded == 0
+                else f"{stranded} annotation(s) point at no transaction - hand-applied "
+                "work whose row has gone. Nothing else reports this: those rows now "
+                "read as merely uncategorised"
+            ),
+        )
+    )
     return results

@@ -340,4 +340,14 @@ class TestCollisionChecksReadTheLiveStore:
             results = collision_checks(store, ["halifax", "starling-truelayer"])
 
         assert all(check.ok for check in results)
-        assert len(results) == 3
+        # Named rather than counted. Every check must report on a coherent store,
+        # rather than only the unhappy ones speaking up - that is what lets a
+        # reader tell "nothing is wrong" from "nothing looked". A bare number told
+        # whoever broke it that something had changed but not WHICH check went
+        # missing, and a check quietly dropping out is the failure worth catching.
+        assert {check.name for check in results} == {
+            "sources are registered",
+            "connection ids are unshared",
+            "accounts are named, not referenced",
+            "annotations point at transactions that exist",
+        }

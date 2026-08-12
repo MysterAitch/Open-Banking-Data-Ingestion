@@ -18,6 +18,11 @@ so that a new bypass is a decision somebody made rather than a shortcut nobody s
 The unconverted ones are counted out loud rather than blessed: they are a residual,
 and a residual that is not counted becomes a state of affairs.
 
+Covers inserts, deletes and updates. Deletes and updates matter as much: removing a
+transaction from under an annotation, or rewinding a migration marker, produces a
+state the application cannot reach - which is legitimate when that state is the
+subject, and invisible otherwise.
+
 Run: python tests/test_fixture_write_doors.py
 """
 
@@ -48,6 +53,28 @@ JUSTIFIED = {
     ("test_schema_migrations.py", "transaction_sources"): "a store predating artefact "
     "links",
     ("test_schema_migrations.py", "valuations"): "a store predating income entitlements",
+    # Deletes and updates, added once the scanner covered them too. Every one
+    # constructs a state the application prevents, which is the state under test:
+    # rewinding a migration marker so the upgrade runs again, corrupting a copy so
+    # verification has something to catch, vanishing one side of a pair.
+    ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
+    "upgrade path to run",
+    ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "
+    "first-party id sweep",
+    ("test_backup.py", "transactions"): "removes rows FROM A COPY so verification has a "
+    "real short copy to refuse - the whole subject of the case",
+    ("test_dangling_annotations_surface.py", "transactions"): "removes the transaction "
+    "under an annotation, which is the orphan state the writer prevents and the "
+    "detector exists to find",
+    ("test_declared_accounts.py", "obdi_meta"): "rewinds the marker, and renames in the "
+    "store to diverge it from the file on purpose",
+    ("test_provenance.py", "obdi_meta"): "rewinds the marker so the recompute runs",
+    ("test_provenance.py", "transactions"): "mismatched keys as a pre-change store held "
+    "them",
+    ("test_schema_migrations.py", "obdi_meta"): "marker manipulation, to prove "
+    "attribution does not re-run on every open",
+    ("test_transfer_split.py", "transactions"): "vanishes one side of a pair, which is "
+    "the case name",
 }
 
 # Convenience bypasses: the row could have been landed through the writer, and was
@@ -81,9 +108,10 @@ def _bypasses() -> list[tuple[str, str, str]]:
             continue
         lines = path.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines):
-            if "INSERT INTO" not in line:
+            written = re.search(r"(?:INSERT INTO|DELETE FROM|UPDATE) ([a-z_]+)", line)
+            if written is None:
                 continue
-            table = (re.search(r"INSERT INTO ([a-z_]+)", line) or [None, "?"])[1]
+            table = written.group(1)
             enclosing = ""
             for back in range(index, max(0, index - 60), -1):
                 named = re.match(r"\s*def (\w+)", lines[back])

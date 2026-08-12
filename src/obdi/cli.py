@@ -3726,6 +3726,16 @@ def main(argv: list[str] | None = None) -> int:
             print("not restorable by any rebuild:")
             for what, count in store.irreplaceable().items():
                 print(f"  {what:<24} {count}")
+            # Beside them, because it is the same question asked backwards: those
+            # count hand-work that exists, this counts hand-work that has been
+            # LOST. An annotation pointing at no transaction is invisible from
+            # every other angle - the row just looks uncategorised, which is
+            # indistinguishable from one nobody has reached yet.
+            #
+            # Printed at zero as well. A count that appears only when it is bad
+            # leaves the reader unable to tell "nothing is lost" from "nothing
+            # looked", and this figure exists precisely to tell those apart.
+            print(f"  {'stranded annotations':<24} {store.dangling_annotations()}")
         return 0
 
     if args.command == "backup":
