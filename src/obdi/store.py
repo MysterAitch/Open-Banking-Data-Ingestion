@@ -1370,12 +1370,20 @@ class Store:
         error_code: str = "",
         detail: str = "",
         artefact_digest: str = "",
+        now: datetime | None = None,
     ) -> None:
         """One row per ask, whatever the answer.
 
         Written for refusals as much as successes: the refusal row carries
         the window asked and the provider's code, which is the raw material
         of both the quota model and the ceiling-probe protocol.
+
+        `now` is injectable for the same reason it is on the consent and lease
+        checks: WHEN an attempt happened is what the scheduler's spacing rule
+        reads, so a test about that rule has to place attempts in time. Without
+        it those tests wrote their rows straight into the table, which is how a
+        fixture ends up unable to notice the writer and the reader disagreeing.
+        Defaults to the clock, so no caller outside a test passes it.
         """
         self.connection.execute(
             "INSERT INTO fetch_attempts (attempted_at, source, connection_id, "
@@ -1383,7 +1391,7 @@ class Store:
             "detail, artefact_digest) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                datetime.now(UTC).isoformat(),
+                (now or datetime.now(UTC)).isoformat(),
                 source,
                 connection_id,
                 account_ref,

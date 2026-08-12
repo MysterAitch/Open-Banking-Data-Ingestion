@@ -61,20 +61,31 @@ class TestScheduledPullGate:
     unattended fetch against a roughly four-per-day cap."""
 
     def _store_with_scheduled_attempt(self, tmp_path, attempted_at):
+        """One scheduled attempt, placed in time, through the write door.
+
+        The door stamps the clock by default and takes an injected `now` for
+        exactly this case: the rule under test is about WHEN the last scheduled
+        cycle ran, so the attempt has to be placed rather than merely made. That
+        absence is why this used to write the row itself - the bypass existed
+        because the door offered no way to say when, which is a gap in the door
+        rather than a reason to go round it.
+        """
         import json as _json
+        from datetime import datetime
 
         from obdi.store import Store
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO fetch_attempts (attempted_at, source, "
-                "connection_id, account_ref, asked, request_meta, outcome) "
-                "VALUES (?, 'truelayer', 'halifax', 'acc', 'window', ?, "
-                "'landed')",
-                (attempted_at, _json.dumps({"trigger": "scheduled"})),
+            store.record_attempt(
+                source="truelayer",
+                connection_id="halifax",
+                account_ref="acc",
+                asked="window",
+                request_meta=_json.dumps({"trigger": "scheduled"}),
+                outcome="landed",
+                now=datetime.fromisoformat(attempted_at),
             )
-            store.connection.commit()
         return db
 
     def test_RecentScheduledCycle_SkipsInsteadOfSpendingQuota(
@@ -136,17 +147,17 @@ class TestScheduledPullGate:
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO fetch_attempts (attempted_at, source, "
-                "connection_id, account_ref, asked, request_meta, outcome) "
-                "VALUES (?, 'truelayer', 'halifax', 'acc', 'window', ?, "
-                "'landed')",
-                (
-                    "2026-08-02T11:59:00+00:00",
-                    _json.dumps({"trigger": "attended"}),
-                ),
+            # An ATTENDED pull a minute ago: recent, and irrelevant to the
+            # scheduler's spacing rule, which is the distinction under test.
+            store.record_attempt(
+                source="truelayer",
+                connection_id="halifax",
+                account_ref="acc",
+                asked="window",
+                request_meta=_json.dumps({"trigger": "attended"}),
+                outcome="landed",
+                now=datetime.fromisoformat("2026-08-02T11:59:00+00:00"),
             )
-            store.connection.commit()
 
         now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC)
         assert scheduled_pull_skip_reason(db, now=now) is None
@@ -279,7 +290,6 @@ class TestTransientBlocksAreWaitedOut:
         self, tmp_path, monkeypatch
     ):
         import json as _json
-        from datetime import UTC, datetime
 
         from obdi.cli import _await_scheduled_clearance
         from obdi.store import Store
@@ -288,17 +298,16 @@ class TestTransientBlocksAreWaitedOut:
         monkeypatch.setenv("OBDI_PULL_INTERVAL_SECONDS", "21600")
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO fetch_attempts (attempted_at, source, "
-                "connection_id, account_ref, asked, request_meta, outcome) "
-                "VALUES (?, 'truelayer', 'halifax', 'acc', "
-                "'window', ?, 'landed')",
-                (
-                    datetime.now(UTC).isoformat(),
-                    _json.dumps({"trigger": "scheduled"}),
-                ),
+            # Just now, so the spacing rule is inside its window. The default
+            # clock is exactly right here, which is why no time is injected.
+            store.record_attempt(
+                source="truelayer",
+                connection_id="halifax",
+                account_ref="acc",
+                asked="window",
+                request_meta=_json.dumps({"trigger": "scheduled"}),
+                outcome="landed",
             )
-            store.connection.commit()
 
         def explode(_seconds):
             raise AssertionError("a spacing skip must not wait")
@@ -394,10 +403,10 @@ class TestStoreExitDiscipline:
 
         db = tmp_path / "s.sqlite3"
         with pytest.raises(RuntimeError, match="mid-block failure"), Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO review_queue (entity_id, reason, created_at) "
-                "VALUES ('e-1', 'test', '2026-08-03T00:00:00')"
-            )
+            # Through the door, which deliberately does NOT commit - it leaves
+            # the write in flight for the block to settle, and work in flight is
+            # exactly the state this scenario is about.
+            store.queue_for_review("e-1", "test")
             raise RuntimeError("mid-block failure")
 
         with Store(db) as store:
@@ -411,10 +420,7 @@ class TestStoreExitDiscipline:
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO review_queue (entity_id, reason, created_at) "
-                "VALUES ('e-1', 'test', '2026-08-03T00:00:00')"
-            )
+            store.queue_for_review("e-1", "test")
 
         with Store(db) as store:
             rows = store.connection.execute(

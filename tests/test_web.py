@@ -1930,7 +1930,7 @@ class TestBindingFromThePage:
         assert calls == [("e9f8", "halifax-current")]
         assert "947 stored row(s) moved" in page
 
-    def test_Bind_MovesRowsBeforePersistingTheName(self, tmp_path):
+    def test_Bind_MovesRowsBeforePersistingTheName(self, tmp_path, land_transaction):
         """A fresh bind: rows keyed by the qualified fallback id move to
         the chosen canonical and the map records the binding."""
         import json as _json
@@ -1941,16 +1941,16 @@ class TestBindingFromThePage:
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-                "value_date, booking_date, description, source, currency, tier, "
-                "status, content_key, occurrence, first_seen_at, last_seen_at) "
-                "VALUES ('e-1', 'starling:uid-1', -100, '2026-07-01', "
-                "'2026-07-01', 'X', 'starling', 'GBP', 'authoritative', "
-                "'booked', 'ck-1', 0, '2026-07-01T00:00:00', "
-                "'2026-07-01T00:00:00')"
+            # Landed through the door, so the row carries the id the application
+            # mints - which a bind RE-MINTS, because an entity id folds in the
+            # account. A hand-written id would hide the one thing this is about.
+            land_transaction(
+                store,
+                description="X",
+                amount_minor=-100,
+                account="starling:uid-1",
+                source="starling",
             )
-            store.connection.commit()
         map_file = tmp_path / "accounts.json"
 
         moved = _apply_bind(
@@ -1966,7 +1966,9 @@ class TestBindingFromThePage:
             ).fetchall()
         assert [r[0] for r in rows] == ["starling-bills"]
 
-    def test_Bind_AfterEarlierHalfAppliedBind_RescuesTheStrandedRows(self, tmp_path):
+    def test_Bind_AfterEarlierHalfAppliedBind_RescuesTheStrandedRows(
+        self, tmp_path, land_transaction
+    ):
         """The failure the lock left behind: the map says "starling-bills"
         but the rows still sit under the qualified ref. Re-pressing Bind
         (same name or a new one) must move the stranded rows, not no-op
@@ -1977,16 +1979,13 @@ class TestBindingFromThePage:
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:
-            store.connection.execute(
-                "INSERT INTO transactions (entity_id, account_id, amount_minor, "
-                "value_date, booking_date, description, source, currency, tier, "
-                "status, content_key, occurrence, first_seen_at, last_seen_at) "
-                "VALUES ('e-1', 'starling:uid-1', -100, '2026-07-01', "
-                "'2026-07-01', 'X', 'starling', 'GBP', 'authoritative', "
-                "'booked', 'ck-1', 0, '2026-07-01T00:00:00', "
-                "'2026-07-01T00:00:00')"
+            land_transaction(
+                store,
+                description="X",
+                amount_minor=-100,
+                account="starling:uid-1",
+                source="starling",
             )
-            store.connection.commit()
         map_file = tmp_path / "accounts.json"
         half_applied = AccountMap(
             [
@@ -2010,7 +2009,7 @@ class TestBindingFromThePage:
         assert [r[0] for r in rows] == ["starling-bills"]
 
     def test_Bind_OntoADuplicatedTarget_ExplainsTheCureInsteadOfARawConstraint(
-        self, tmp_path
+        self, tmp_path, land_transaction
     ):
         """Seen live: binding a ref whose rows also exist under the target
         (two label eras) tripped the uniqueness constraint and showed raw
@@ -2024,18 +2023,18 @@ class TestBindingFromThePage:
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:
+            # The same payment under two account names - the two label eras
+            # whose collision is the subject. Landed through the door, so the
+            # ids are the ones a bind would actually have to reconcile.
             for account in ("starling:uid-1", "starling-space-bills"):
-                store.connection.execute(
-                    "INSERT INTO transactions (entity_id, account_id, "
-                    "amount_minor, value_date, booking_date, description, "
-                    "source, source_id, currency, tier, status, content_key, "
-                    "occurrence, first_seen_at, last_seen_at) "
-                    "VALUES (?, ?, -100, '2026-07-01', '2026-07-01', 'X', "
-                    "'starling', 'feed-1', 'GBP', 'authoritative', 'booked', "
-                    "?, 0, '2026-07-01T00:00:00', '2026-07-01T00:00:00')",
-                    (f"e-{account}", account, f"ck-{account}"),
+                land_transaction(
+                    store,
+                    description="X",
+                    amount_minor=-100,
+                    account=account,
+                    source="starling",
+                    source_id="feed-1",
                 )
-            store.connection.commit()
         map_file = tmp_path / "accounts.json"
 
         with pytest.raises(ValueError, match="Rebuild from raw"):
