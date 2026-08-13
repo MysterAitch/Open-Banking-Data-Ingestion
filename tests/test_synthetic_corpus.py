@@ -1123,6 +1123,45 @@ class TestTheReportAPersonActuallyReads:
         )
         assert "No disagreements" not in page
 
+    def test_AMonthNobodyHas_ReadsAsQuietRatherThanAsAFileToFetch(
+        self, corpus, tmp_path
+    ):
+        """The other absence, and the opposite advice.
+
+        A month one source lacks and another holds is a file to go and fetch.
+        A month NO source has is most likely the truth - the account was quiet -
+        and telling somebody to download it sends them after nothing. The
+        detector separates the two; this asserts the PAGE does, because the
+        distinction only pays off in the words a person reads.
+
+        Its sibling below covers the contradicted case, and both are needed: a
+        report that says "fetch this" for every absence trains its reader to
+        ignore it, and one that says "probably quiet" for every absence hides
+        the fetchable ones.
+        """
+        directory, world, _manifest = corpus
+        statement = directory / "synthetic-current.csv"
+        months = sorted(
+            {e.when[:7] for e in world.events if e.account == "synthetic-current"}
+        )
+        withheld = months[len(months) // 2]
+        partial = statement_without(statement, withheld, tmp_path / "quiet.csv")
+
+        store_path = tmp_path / "store.sqlite3"
+        land(store_path, partial, "synthetic-current")
+
+        page = self._report_for(store_path)
+
+        assert "Empty months, but NO source has data for them" in page, (
+            f"a month absent from the only source is not reported as an "
+            f"uncontradicted gap (seed {SEED})"
+        )
+        assert "most likely the account was simply quiet" in page
+        assert "Download those months and import them" not in page, (
+            f"the page tells the reader to fetch a month no source has - there "
+            f"is nothing to fetch (seed {SEED})"
+        )
+
     def test_AMonthOneSourceWithheld_IsReportedAsAFileToFetch(
         self, corpus, tmp_path
     ):

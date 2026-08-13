@@ -26,6 +26,24 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.218] - 2026-08-13
+
+### Added
+- The coverage report's OTHER absence is now asserted: a month no source has
+  must read as "most likely the account was simply quiet" and must NOT tell the
+  reader to download it, because there is nothing to download.
+
+  The detector has always separated contradicted gaps from uncontradicted ones
+  and a test covered that. Nothing checked that the PAGE gives the opposite
+  ADVICE for each, which is where the distinction actually pays off: a report
+  that says "fetch this" for every absence trains its reader to ignore it, and
+  one that says "probably quiet" for every absence hides the fetchable ones.
+
+  Not planted as a genuinely eventless month in the world - it is produced by
+  importing a statement with one month removed into a single-source account,
+  which is the same situation obdi sees. Nothing in the generated world has a
+  month with zero events, and that residue is recorded rather than implied.
+
 ## [0.4.217] - 2026-08-13
 
 ### Added
