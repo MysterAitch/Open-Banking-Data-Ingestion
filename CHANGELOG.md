@@ -26,6 +26,44 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.219] - 2026-08-13
+
+### Changed
+- `build_web_config(db_path)` is split out of `_serve`, so the pages' data can
+  be tested. Every hook the interface reads was defined inside the function
+  that starts the server, and there was no way to call one: a test could only
+  reimplement a hook and assert against its own copy, which tests the copy.
+
+  That is not theoretical. The account page's shape panel counted each merged
+  payload once per source that had seen it, and the bug was found by reading a
+  rendered page and fixed by reading a page again - because the test that
+  should have caught it could not be written. One such test WAS written during
+  that fix, recognised as a test of its own copy, and deleted.
+
+  The split is clean: nothing in the config body referenced the host or the
+  port, and the two early returns became `None` with the caller turning that
+  into its exit code. What remains in `_serve` is binding a socket, which a
+  test could not meaningfully assert about anyway.
+
+- The rebuild-on-deploy check moved from the config body into `_serve`, where
+  "startup" actually means starting the server. A builder that silently
+  launches a rebuild thread is a surprise to every caller, and it was measured
+  as one: the first test to call the builder raced that thread and read an
+  account mid-wipe, passing alone and failing in the full suite. The server's
+  behaviour is unchanged - the check still runs at startup, a few lines later.
+
+### Added
+- `test_page_data.py`: the first assertions about what a page will SAY, made by
+  calling the hook it reads rather than by rendering it. Four to begin with -
+  the shape panel summarises one item per merged transaction and not one per
+  sighting, it still names every source that contributed, an account nothing
+  has landed for is absent rather than an empty shell, and a deployment missing
+  its connection store is refused rather than half-served.
+
+  These are assertions about data, not markup. A page's layout still needs a
+  browser; the numbers on it do not, and the numbers are where the arithmetic
+  mistakes live.
+
 ## [0.4.218] - 2026-08-13
 
 ### Added

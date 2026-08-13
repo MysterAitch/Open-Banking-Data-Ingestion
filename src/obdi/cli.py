@@ -1022,11 +1022,24 @@ def extend_bounds(
     return since, until
 
 
-def _serve(host: str, port: int, db_path: Path) -> int:
+def build_web_config(db_path: Path) -> WebConfig | None:
+    """Everything the pages read, wired to a store - without serving it.
+
+    SEPARATE FROM SERVING SO THE PAGES' DATA CAN BE TESTED. Every hook the
+    interface reads is defined in here, and while this function also started
+    the server there was no way to call one: a test could only reimplement the
+    hook and assert against its own copy, which is a test of the copy. That is
+    how a wrong denominator survived on the account page - the shape panel
+    counted each merged payload once per sighting - until somebody read the
+    rendered page and noticed.
+
+    Returns None when the deployment is not configured enough to serve, having
+    said which part is missing; the caller turns that into an exit code.
+    """
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if not store_path:
         print("Set OBDI_CONNECTION_STORE to the token store path.", file=sys.stderr)
-        return 2
+        return None
 
     client_id = os.getenv("TRUELAYER_CLIENT_ID", "").strip()
     redirect_uri = os.getenv("TRUELAYER_REDIRECT_URI", "").strip()
@@ -1043,7 +1056,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     readiness = truelayer_readiness()
     if readiness.state == "misconfigured":
         print(readiness.problem, file=sys.stderr)
-        return 2
+        return None
 
     bank_authorisation = readiness.usable
     if not bank_authorisation:
@@ -2232,35 +2245,6 @@ def _serve(host: str, port: int, db_path: Path) -> int:
     def rebuild_derived() -> str:
         return start_background_rebuild(db_path)
 
-    # Rebuild-on-deploy: rebuild triggers are code changes, and code
-    # changes arrive by deploy - so the check belongs at startup, not in
-    # anyone's memory. A mismatch starts the ordinary background rebuild
-    # behind the ordinary banner; the lease protocol already arbitrates
-    # against pulls and second presses; web start is never blocked. A
-    # plain restart of unchanged code matches the stamp and does nothing.
-    try:
-        with Store(db_path) as _fp_store:
-            stale = fingerprint.rebuild_needed(_fp_store)
-        if stale:
-            print(
-                "startup: derived data was built by different code - "
-                f"rebuilding: {start_background_rebuild(db_path)}",
-                flush=True,
-            )
-        else:
-            # Said out loud on purpose: a silent match is
-            # indistinguishable in the logs from the check never having
-            # run, and this check exists to kill exactly that ambiguity.
-            print(
-                "startup: derived data current (code fingerprint match)",
-                flush=True,
-            )
-    except Exception as exc:
-        # Never let the freshness check keep the service down: serving
-        # stale-derived data with the banner absent is bad; not serving
-        # at all is worse.
-        print(f"startup: rebuild-on-deploy check failed: {exc}", flush=True)
-
     def rebuild_status() -> dict[str, object]:
         return rebuild_status_for(db_path)
 
@@ -2571,7 +2555,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
         with Store(db_path) as store:
             return store.declare_account(record)
 
-    config = WebConfig(
+    return WebConfig(
         client_id=client_id,
         client_secret=current_secret,
         redirect_uri=redirect_uri,
@@ -2649,7 +2633,55 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             db_path, name, code, detail
         ),
     )
-    print(f"Serving on http://{host}:{port} - redirecting to {redirect_uri}")
+
+
+def _serve(host: str, port: int, db_path: Path) -> int:
+    """Build the pages' wiring, then serve it.
+
+    Deliberately thin: everything worth asserting about a page's DATA lives in
+    build_web_config, which a test can call. What remains here is the part a
+    test cannot meaningfully make claims about anyway - binding a socket.
+    """
+    config = build_web_config(db_path)
+    if config is None:
+        return 2
+
+    # Rebuild-on-deploy: rebuild triggers are code changes, and code changes
+    # arrive by deploy - so the check belongs at startup, not in anyone's
+    # memory. A mismatch starts the ordinary background rebuild behind the
+    # ordinary banner; the lease protocol already arbitrates against pulls and
+    # second presses; web start is never blocked. A plain restart of unchanged
+    # code matches the stamp and does nothing.
+    #
+    # It lives HERE rather than in build_web_config because STARTUP means
+    # starting the server. Building the wiring is not startup, and a builder
+    # that silently launches a rebuild thread is a surprise to every caller -
+    # measured as one: the first test to call the builder raced that thread and
+    # read an account mid-wipe, passing alone and failing in the full suite.
+    try:
+        with Store(db_path) as _fp_store:
+            stale = fingerprint.rebuild_needed(_fp_store)
+        if stale:
+            print(
+                "startup: derived data was built by different code - "
+                f"rebuilding: {start_background_rebuild(db_path)}",
+                flush=True,
+            )
+        else:
+            # Said out loud on purpose: a silent match is indistinguishable in
+            # the logs from the check never having run, and this check exists
+            # to kill exactly that ambiguity.
+            print(
+                "startup: derived data current (code fingerprint match)",
+                flush=True,
+            )
+    except Exception as exc:
+        # Never let the freshness check keep the service down: serving
+        # stale-derived data with the banner absent is bad; not serving at all
+        # is worse.
+        print(f"startup: rebuild-on-deploy check failed: {exc}", flush=True)
+
+    print(f"Serving on http://{host}:{port} - redirecting to {config.redirect_uri}")
     if host not in ("127.0.0.1", "localhost"):
         # Binding wider puts a page that can start bank authorisations onto the
         # network. Exposure belongs to the layer in front, not to this process.
