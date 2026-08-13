@@ -172,6 +172,48 @@ class TestLedgerMarkersSurvive:
         assert "21.72" not in masked
         assert "GB" in masked
 
+    def test_AMarkerPrintedAgainstTheFigure_IsStillLegible(self):
+        """The protection above only worked when the issuer left a space.
+
+        A Halifax-family statement prints `123.45CR`. Words are matched as runs
+        of letters AND digits, so that tokenises as `123` and `45CR`; `45CR` is
+        not purely alphabetic, fails the furniture test, and masks to `99XX`.
+        The one fact the exception exists to preserve was destroyed in exactly
+        the layout that needs it, and the masked page could not say whether a
+        row was money in or money out. Seen on the live instance's artefacts
+        351-359.
+        """
+        masked = mask_line("29th Jun Direct Payment 123.45CR")
+
+        assert masked.endswith("CR"), (
+            f"the credit marker was masked away: {masked!r} - a payment now "
+            "reads the same as a purchase"
+        )
+        assert "123.45" not in masked, "the amount must still be masked"
+
+    def test_AReferenceThatMixesLettersAndDigits_IsStillMaskedEntirely(self):
+        """The alternative case, and the reason the fix must be narrow.
+
+        Mixed tokens are references - card numbers, authorisation codes - and
+        the module is explicit that they never survive. Peeling a trailing
+        alphabetic tail off every mixed token would start disclosing them, so
+        only a listed ledger marker is allowed through.
+        """
+        masked = mask_line("29th Jun PAYPAL DAP90481679 GB 12.34")
+
+        assert "DAP" not in masked
+        assert "90481679" not in masked
+
+    def test_ATrailingTailThatIsNotAMarker_StaysMasked(self):
+        """A two-letter tail is only preserved when it is a marker we listed.
+
+        Without this, any digits-then-letters token would leak its letters,
+        which is the disclosure the whole module exists to prevent.
+        """
+        masked = mask_line("29th Jun SOME SHOP 12.34ZQ")
+
+        assert "ZQ" not in masked
+
 
 class TestLayoutExtraction:
     """A statement is a table, and a table needs its horizontal positions.

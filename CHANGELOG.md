@@ -26,6 +26,28 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.225] - 2026-08-13
+
+### Fixed
+- **The masked statement shape destroyed the credit marker whenever an issuer
+  printed it against the figure.** `FURNITURE` lists `cr` and `dr` precisely
+  because masking them made a credit indistinguishable from a country code, and
+  getting that wrong inverts every payment on a statement. That protection only
+  ever worked when the issuer left a space: words are matched as runs of letters
+  AND digits, so `123.45CR` tokenises as `123` and `45CR`, and `45CR` is not
+  purely alphabetic, fails the furniture test, and masks to `99XX`. The one fact
+  the exception exists to preserve was lost in exactly the layout that needs it.
+
+  Found by reading real statements through the shape route added in 0.4.224 -
+  nine of the live instance's statements print it that way, and their masked
+  pages could not say whether a row was money in or money out.
+
+  The fix is deliberately narrow: only a listed marker glued to digits comes
+  through, never a country code and never an arbitrary alphabetic tail. Peeling
+  the tail off every mixed token would start disclosing the reference tokens
+  (`DAP90481679`) that the module is explicit about masking entirely - which is
+  asserted both ways, along with a two-letter tail that is not a marker.
+
 ## [0.4.224] - 2026-08-13
 
 ### Added

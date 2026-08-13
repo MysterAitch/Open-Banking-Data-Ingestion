@@ -76,6 +76,13 @@ _MONTHS = frozenset(
 
 _WORD = re.compile(r"[0-9A-Za-z]+")
 
+#: Digits carrying a ledger marker with no space between them - `45CR` from
+#: `123.45CR`. Listed markers ONLY, and never the country codes: a country code
+#: glued to a figure has no meaning to preserve, while allowing any alphabetic
+#: tail through would start disclosing the reference tokens the module exists to
+#: mask.
+_GLUED_MARKER = re.compile(r"^(\d+)(CR|DR)$", re.I)
+
 
 def shareable(lines: list[MaskedText]) -> str:
     """The door values pass through on their way to anyone else.
@@ -108,6 +115,14 @@ def mask_line(line: str) -> MaskedText:
             word.casefold() in FURNITURE or word.casefold() in _MONTHS
         ):
             return word
+        # A marker printed against the figure, which the alphabetic test above
+        # cannot see: `123.45CR` tokenises as `123` and `45CR`, and `45CR` is
+        # not alphabetic, so the whole protection lapsed in exactly the layout
+        # that needs it. Observed on a real issuer's statements, where the
+        # masked page could not say whether a row was money in or money out.
+        glued = _GLUED_MARKER.match(word)
+        if glued:
+            return _mask_word(glued.group(1)) + glued.group(2)
         return _mask_word(word)
 
     return MaskedText(_WORD.sub(replace, line))
