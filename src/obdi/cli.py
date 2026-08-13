@@ -43,7 +43,7 @@ from .coverage import (
     transpositions,
 )
 from .coverage import report as coverage_report
-from .doctor import live_checks, report, run_checks, shape_problems
+from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .money import parse_amount
@@ -3790,6 +3790,48 @@ def main(argv: list[str] | None = None) -> int:
             known = list(ConnectionStore(store_path).load()) if store_path else []
             with Store(db_path) as store:
                 results = results + collision_checks(store, known)
+        # The deploy gate, and deliberately NOT inside the suppression above. A
+        # converge asserts the container is healthy and running the right image
+        # and says nothing about the rebuild the deploy triggers afterwards, so
+        # two deploys once reported success over a store serving nothing. A
+        # check that VANISHES when it cannot run would restore exactly that:
+        # doctor would exit 0 having never looked, and silence would again be
+        # indistinguishable from success. Unable-to-check is a failure here.
+        from .doctor import rebuild_check
+
+        try:
+            # A rebuild in flight has not written its row yet, so the newest
+            # record is the PREVIOUS run - usually a success. Reporting that
+            # would pass the deploy on stale evidence, which is worse than not
+            # looking, so an unfinished rebuild is reported as not-yet-known
+            # and a caller that gates on this retries until it settles.
+            in_flight = rebuild_in_progress_note(Path(db_path))
+            if in_flight:
+                results.append(
+                    CheckResult(
+                        name="last rebuild",
+                        ok=False,
+                        detail=(
+                            f"not yet known - {in_flight}. The newest record is "
+                            "the run BEFORE this one, so passing on it would "
+                            "report the wrong rebuild"
+                        ),
+                    )
+                )
+            else:
+                with Store(db_path) as store:
+                    results.append(rebuild_check(store.recent_rebuild_runs(limit=1)))
+        except Exception as exc:
+            results.append(
+                CheckResult(
+                    name="last rebuild",
+                    ok=False,
+                    detail=(
+                        f"could not be checked, which is not the same as fine: "
+                        f"{exc}"
+                    ),
+                )
+            )
         if getattr(args, "live", False):
             results += live_checks()
         print(report(results))

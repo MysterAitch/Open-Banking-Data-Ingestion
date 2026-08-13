@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -247,6 +247,73 @@ def report(results: list[CheckResult]) -> str:
         "All checks passed." if not failures else f"{failures} check(s) failed - see above."
     )
     return "\n".join(lines)
+
+
+def rebuild_check(runs: Sequence[Mapping[str, object]]) -> CheckResult:
+    """Did the last rebuild work? The deploy gates on this.
+
+    A converge asserts the container is healthy, runs the expected image and
+    reports its version. It says nothing about the rebuild the deploy itself
+    triggers, which starts afterwards in the background - so on 2026-08-13 two
+    deploys reported complete success while the instance rebuilt into an empty
+    derived layer, and it was found two and a quarter hours later by eye.
+
+    Reporting that to a phone is the WEAKEST available place to catch it. This
+    is the strongest: `doctor` exits non-zero on any failed check, a converge
+    runs it, and the deploy refuses to finish.
+
+    STRICT ON PURPOSE - any failed rebuild fails, not only one that emptied the
+    store. A check earns relaxation from evidence that its strictness costs
+    more than it catches; starting lenient pays for that calibration with an
+    incident instead. The detail separates an emptied store from a partial one,
+    because severity is what a reader needs even when the verdict is the same.
+
+    Only the latest run counts. A failure already recovered from must not fail
+    every later deploy, which is how a gate gets routed around rather than
+    fixed.
+    """
+    if not runs:
+        return CheckResult(
+            name="last rebuild",
+            ok=True,
+            detail=(
+                "no rebuild recorded yet - a fresh store rather than a healthy "
+                "one, and the two are different states"
+            ),
+        )
+    latest = runs[0]
+    finished = str(latest.get("finished_at") or "")
+    build = str(latest.get("build") or "unknown build")
+    # The stored columns are nullable and arrive as `object`, and a run that
+    # died before counting anything stored None rather than 0 - which is why
+    # `or 0` is here rather than a cast that would raise on it.
+    replayed = int(str(latest.get("artefacts_replayed") or 0))
+    resolved = int(str(latest.get("transactions") or 0))
+    if latest.get("ok"):
+        return CheckResult(
+            name="last rebuild",
+            ok=True,
+            detail=(
+                f"succeeded at {finished} ({build}): {replayed:,} artefact(s) "
+                f"replayed, {resolved:,} row resolutions"
+            ),
+        )
+    reason = str(latest.get("summary") or "").strip() or "no reason recorded"
+    if not replayed and not resolved:
+        state = (
+            "the derived layer is EMPTY - a rebuild wipes before replaying and "
+            "this run replayed nothing"
+        )
+    else:
+        state = (
+            f"it replayed {replayed:,} artefact(s) before failing, so the store "
+            "holds part of its data and looks healthy"
+        )
+    return CheckResult(
+        name="last rebuild",
+        ok=False,
+        detail=f"FAILED at {finished} ({build}): {state}. {reason}",
+    )
 
 
 def collision_checks(

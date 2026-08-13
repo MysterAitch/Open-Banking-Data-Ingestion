@@ -26,6 +26,45 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.230] - 2026-08-13
+
+### Added
+- **`doctor` now reports the last rebuild, so a deploy can refuse to finish on
+  a failed one.** The converge asserts the container is healthy, runs the
+  expected image and reports its version - and says nothing about the rebuild
+  the deploy itself triggers, which starts afterwards in the background. On
+  2026-08-13 two converges reported complete success while the instance rebuilt
+  into an empty derived layer.
+
+  0.4.229 announced that to a notification channel. **That is the weakest of the
+  available places to catch it**; the strongest is the deploy, where somebody is
+  already watching and the run can be refused. `doctor` already exits non-zero
+  on any failed check and its own comment says a deploy gates on that code, so
+  the gate needed no new interface - only the fact.
+
+  **Strict by default:** any failed rebuild fails the check, including one that
+  failed partway and left the store looking healthy. The detail separates the
+  two, because severity is what a reader needs even when the verdict is the
+  same. A check earns relaxation from evidence that its strictness costs more
+  than it catches; starting lenient pays for that calibration with an incident.
+
+### Fixed
+- **Two ways the new gate could have passed while knowing nothing**, both found
+  by writing the tests before believing the wiring:
+  - The block it joins is wrapped in `contextlib.suppress(Exception)`, so an
+    unreadable store removed the check entirely and `doctor` exited 0 having
+    never looked. Unable-to-check is now a FAILING result naming what stopped
+    it. (The test that caught this passed its exit-code assertion by accident -
+    an unrelated pre-existing failure made the code 1 anyway - and it was the
+    detail assertion that exposed the vanished check.)
+  - A rebuild in flight has not written its row, so the newest record is the run
+    BEFORE the deploy - usually a success. Reporting that would pass the deploy
+    on evidence about the wrong rebuild, and most confidently in exactly the
+    situation the gate exists for. An unfinished rebuild is now reported as "not
+    yet known", and a caller that gates on it retries until it settles. Proved
+    by disabling the branch and watching the check report `419 artefact(s)
+    replayed` from the previous release as evidence for a rebuild still running.
+
 ## [0.4.229] - 2026-08-13
 
 ### Added
