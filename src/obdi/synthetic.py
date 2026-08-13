@@ -89,6 +89,11 @@ _DUPLICATE_REPORT = (-6789, "CARPET WORLD 8823 READING GB")
 #: statement, and named here so the test and the writer agree on it.
 _WRAPPED_STATEMENT = "synthetic-card-wrapped.pdf"
 
+#: The same statement split across two pages, with the furniture a real issuer
+#: repeats at the top of each - including the brought-forward line, which
+#: carries the RUNNING figure on page two rather than the month's opening.
+_MULTIPAGE_STATEMENT = "synthetic-card-two-pages.pdf"
+
 
 @dataclass(frozen=True)
 class PlantedEvent:
@@ -481,6 +486,32 @@ def write_card_statements(world: World, out_dir: Path) -> list[dict[str, object]
             head, _, amount = wrapped[row].rpartition("    ")
             wrapped[row : row + 1] = [head, f"           {amount}"]
             (out_dir / _WRAPPED_STATEMENT).write_bytes(build_pdf(wrapped))
+
+            # THE SAME MONTH ACROSS TWO PAGES, with the furniture a real issuer
+            # repeats: the bank's registered office, the statement date, and a
+            # brought-forward line carrying the RUNNING figure. That last one
+            # is the trap - it is not the month's opening, and a reader taking
+            # the last occurrence starts the month from the wrong position.
+            split_at = 4 + (len(within) // 2)
+            carried = opening - sum(
+                event.amount_minor for event in within[: split_at - 4]
+            )
+            first = list(lines[:split_at])
+            first[1] = first[1].replace("Page No: 1 / 1", "Page No: 1 / 2")
+            second = [
+                lines[0],
+                lines[1].replace("Page No: 1 / 1", "Page No: 2 / 2"),
+                "Balance brought forward from previous statement"
+                f"          {_pounds(carried)}",
+                *lines[split_at:],
+            ]
+            # Stated as explicit pages rather than a page size: the break falls
+            # after a particular row, and a statement whose furniture says
+            # "1 / 2" while the file holds three pages is a corpus disagreeing
+            # with itself.
+            (out_dir / _MULTIPAGE_STATEMENT).write_bytes(
+                build_pdf([], page_groups=[first, second])
+            )
         statements.append(
             {
                 "name": name,

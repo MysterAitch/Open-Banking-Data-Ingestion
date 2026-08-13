@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.222] - 2026-08-13
+
+### Fixed
+- **A multi-page statement started the month from the wrong balance.** A real
+  issuer repeats its header at the top of every page, brought-forward line
+  included - and on page two that line carries the RUNNING figure rather than
+  the month's opening. The reader overwrote on every match, so the last page's
+  carried total became the statement's opening position. Measured on a
+  generated two-page statement: opening read 130.96 where the statement opened
+  at 100.96. The first occurrence now wins.
+
+  No row was lost and no total was wrong, which is what made it worth chasing:
+  it made the statement's own arithmetic disagree with itself, so the fault
+  would have surfaced as "this statement does not reconcile" and sent somebody
+  hunting a missing transaction that does not exist.
+
+### Added
+- A generated two-page statement, with the furniture a real issuer repeats, so
+  the fix above has a permanent test: the same month across two pages must read
+  identically to the same month on one - same opening, same closing, same rows -
+  and must still reconcile with itself.
+
+- `build_pdf(page_groups=...)` states pages explicitly, because real page breaks
+  are UNEVEN and a fixed page size cannot express one. The first attempt at this
+  statement used `per_page` and produced a file whose furniture said "page 1 of
+  2" while the file held three pages - a corpus disagreeing with itself.
+
 ## [0.4.221] - 2026-08-13
 
 ### Added

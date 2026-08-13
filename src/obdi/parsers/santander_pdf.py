@@ -112,8 +112,21 @@ def read_statement(lines: list[str]) -> StatementReading:
 
         opening = _OPENING.search(line)
         if opening:
+            # THE FIRST ONE WINS, because a multi-page statement repeats this
+            # line at the top of every page carrying the RUNNING figure rather
+            # than the statement's opening. Overwriting took the last page's
+            # carried total as the month's starting position: measured on a
+            # two-page statement, the opening read 130.96 where the statement
+            # opened at 100.96.
+            #
+            # No row is lost and no total is wrong, which is what makes it
+            # worth a comment - it makes the statement's own arithmetic
+            # disagree with itself, and so discredits the one check that needs
+            # nothing but the file to run.
+            #
             # Stated as owed; held as the negative position it is.
-            reading.opening_balance_minor = -_minor(opening.group(1))
+            if reading.opening_balance_minor is None:
+                reading.opening_balance_minor = -_minor(opening.group(1))
             continue
         closing = _CLOSING.search(line)
         if closing:

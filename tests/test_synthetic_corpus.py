@@ -678,6 +678,51 @@ class TestTheGeneratedStatements:
             f"so the file carries no evidence of the loss (seed {SEED})"
         )
 
+    def test_TheSameMonthAcrossTwoPages_ReadsTheSameAsOnOne(self, corpus):
+        """Page furniture must not be mistaken for the statement's own figures.
+
+        A real issuer repeats its header at the top of every page, including a
+        brought-forward line - and on page two that line carries the RUNNING
+        figure, not the month's opening. Taking the last occurrence started the
+        month from the wrong position: measured at 130.96 where the statement
+        opened at 100.96.
+
+        No row was lost and no total was wrong, which is exactly why it is
+        worth a test. It made the statement's own arithmetic disagree with
+        itself, discrediting the one check that needs nothing but the file -
+        so the fault would have surfaced as "this statement does not
+        reconcile" and sent somebody looking for a missing transaction that
+        does not exist.
+        """
+        from obdi.parsers.santander_pdf import read_statement
+        from obdi.statement_shape import pdf_lines
+        from obdi.synthetic import _MULTIPAGE_STATEMENT
+
+        directory, _world, manifest = corpus
+
+        def reading(name: str):
+            return read_statement([str(line) for line in pdf_lines(directory / name)])
+
+        single = reading(manifest["statements"][1]["name"])
+        paged = reading(_MULTIPAGE_STATEMENT)
+
+        assert paged.opening_balance_minor == single.opening_balance_minor, (
+            f"the two-page statement opens at {paged.opening_balance_minor} and "
+            f"the same month on one page opens at {single.opening_balance_minor} "
+            f"- a carried figure is being read as the opening (seed {SEED})"
+        )
+        assert paged.closing_balance_minor == single.closing_balance_minor
+        assert len(paged.transactions) == len(single.transactions), (
+            f"{len(paged.transactions)} rows across two pages against "
+            f"{len(single.transactions)} on one - the repeated header is being "
+            f"read as a transaction, or a row is lost at the break (seed {SEED})"
+        )
+
+        moved = sum(row.amount_minor for row in paged.transactions)
+        assert paged.opening_balance_minor + moved == paged.closing_balance_minor, (
+            f"the two-page statement does not reconcile with itself (seed {SEED})"
+        )
+
     def test_ABalanceCarriedForward_IsWhereTheLastStatementClosed(self, corpus):
         """Consecutive statements agree with each other, which a single one
         cannot show. A month that opens somewhere other than where the last

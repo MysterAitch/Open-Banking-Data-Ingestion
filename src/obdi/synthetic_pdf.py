@@ -14,14 +14,26 @@ reads a real one, and the generator feeds it a world built from a seed.
 from __future__ import annotations
 
 
-def build_pdf(lines: list[str], *, per_page: int = 0) -> bytes:
+def build_pdf(
+    lines: list[str],
+    *,
+    per_page: int = 0,
+    page_groups: list[list[str]] | None = None,
+) -> bytes:
     """A valid PDF containing `lines`, on one page or several.
 
-    `per_page` splits the lines across pages; the default keeps everything on
-    one, which is what every existing caller wants. Multi-page exists because
-    the faults that broke real parsers live at page boundaries - a statement
-    whose sections restart their numbering, a total repeated as a carried
-    figure on the next page - and none of them can be generated on one page.
+    The default keeps everything on one page, which is what every existing
+    caller wants. Multi-page exists because the faults that broke real parsers
+    live at page boundaries - a statement whose sections restart their
+    numbering, a total repeated as a carried figure on the next page - and none
+    of them can be generated on one page.
+
+    Two ways to split, because real page breaks are UNEVEN. `per_page` is the
+    convenient one for a file whose contents do not care where the break falls.
+    `page_groups` states the pages explicitly, and is what a statement needs: a
+    page break sits after a particular row, and a generated statement whose
+    furniture says "page 1 of 2" while the file holds three pages is a corpus
+    disagreeing with itself.
 
     Offsets are computed rather than guessed, because a PDF without a correct
     xref is not a PDF.
@@ -40,11 +52,12 @@ def build_pdf(lines: list[str], *, per_page: int = 0) -> bytes:
     one column. That is a real constraint on which issuer a generated statement
     can imitate, not an oversight.
     """
-    pages = (
-        [lines[at : at + per_page] for at in range(0, len(lines), per_page)]
-        if per_page and lines
-        else [lines]
-    )
+    if page_groups is not None:
+        pages = list(page_groups)
+    elif per_page and lines:
+        pages = [lines[at : at + per_page] for at in range(0, len(lines), per_page)]
+    else:
+        pages = [lines]
 
     # Object numbering: 1 catalogue, 2 pages, then a page and a content stream
     # per page, then the font last. Computed rather than written out, because a
