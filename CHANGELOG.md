@@ -26,6 +26,18 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.223] - 2026-08-13
+
+### Fixed
+- The corpus demo server never landed the card, so the account reachable ONLY
+  by statement - the whole reason it exists - was absent from every page, and
+  the surfaces that read a statement's balances and terms had nothing to show.
+  It now lands the statements too, taken from the manifest rather than a fixed
+  list, so a corpus that grows a month does not silently stop being covered.
+
+  Confirmed on the page: `synthetic-card via santander-cc-pdf, 29 transactions`,
+  which is the planted count of 24 spends and 5 payments.
+
 ## [0.4.222] - 2026-08-13
 
 ### Fixed

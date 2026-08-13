@@ -59,6 +59,13 @@ LANDINGS = [
     ("synthetic-current-transposed.csv", "synthetic-current"),
 ]
 
+#: The card's statements are landed too, taken from the manifest rather than
+#: listed here: there is one a month, so a fixed list would silently stop
+#: covering the corpus the moment its length changed. Without them the demo
+#: shows no card at all - an account reachable only by statement, which is the
+#: whole reason it exists - and the pages that read a statement's balances and
+#: terms have nothing to display.
+
 
 def isolated(root: Path) -> dict[str, str]:
     """An environment that CANNOT reach a real connection or credential.
@@ -146,7 +153,14 @@ def main() -> int:
         world = build_world(seed=arguments.seed, months=arguments.months)
         manifest = write_corpus(world, root / "corpus")
         print(f"corpus: seed {arguments.seed}, {manifest['totals']['events']} events")
-        for filename, account in LANDINGS:
+        landings = [
+            *LANDINGS,
+            *(
+                (statement["name"], statement["account"])
+                for statement in manifest["statements"]
+            ),
+        ]
+        for filename, account in landings:
             run(store, "import", str(root / "corpus" / filename), "--account", account)
         expected = manifest["ambiguity"]["expected_flags_total"]
         print(f"\nthe manifest says to expect {expected} review flag(s):")
