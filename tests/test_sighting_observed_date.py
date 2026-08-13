@@ -134,5 +134,61 @@ class TestUpgradingAStoreThatPredatesTheColumn:
         )
 
 
+class TestAStoreThatWasAlreadyStamped:
+    """The case this file did not have, and the incident it cost.
+
+    Every fixture above builds a store with NO `obdi_meta` table, so the version
+    gate always finds a mismatch and every migration runs. A real store is
+    STAMPED - it has been opened by a previous release and carries that
+    release's version - and `_prepare` does nothing at all when the stamp equals
+    SCHEMA_VERSION.
+
+    So when 0.4.212 added the column and left SCHEMA_VERSION at 8, these tests
+    stayed green and every existing store skipped the migration for ever. The
+    live instance rebuilt into an empty derived layer twice on 2026-08-13 and
+    failed on the first insert with "no column named observed_date".
+    """
+
+    @pytest.fixture
+    def stamped_at_the_shipped_version(self, tmp_path):
+        """The old shape, carrying the version the release that shipped it used.
+
+        Eight is written out rather than read from SCHEMA_VERSION, and that is
+        the point: it is the number a real store on disk actually carries. Read
+        from the constant, this fixture would follow the code and stop
+        describing any store that exists.
+        """
+        path = tmp_path / "stamped.sqlite3"
+        connection = sqlite3.connect(path)
+        connection.executescript(OLD_SCHEMA)
+        connection.executescript(
+            "CREATE TABLE obdi_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        )
+        connection.execute(
+            "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', '8')"
+        )
+        connection.commit()
+        connection.close()
+        return path
+
+    def test_AStampedStore_StillGetsTheColumn_AndAcceptsAnImport(
+        self, stamped_at_the_shipped_version
+    ):
+        """What a person meets: they upgrade, and the next import works.
+
+        The whole incident in one assertion. It fails on any release that adds a
+        column to the sighting table without moving the version past the stamp
+        above.
+        """
+        with Store(stamped_at_the_shipped_version) as store:
+            store.record_source(_transaction("entity-3", date(2026, 7, 8)))
+            observed = store.connection.execute(
+                "SELECT observed_date FROM transaction_sources WHERE entity_id = ?",
+                ("entity-3",),
+            ).fetchone()
+
+        assert observed["observed_date"] == "2026-07-08"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

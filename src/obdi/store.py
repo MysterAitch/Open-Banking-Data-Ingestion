@@ -46,7 +46,16 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: the ONLY thing that makes an open do work, so a store at this version
 #: opens without writing - which is what lets the page render while a
 #: fetch holds the write lock.
-SCHEMA_VERSION = 8
+#:
+#: 8 -> 9: `observed_date` arrived on transaction_sources at 0.4.212 with a
+#: migration and its own tests, and this line was not touched. Every store
+#: already stamped 8 therefore skipped the migration for ever, while a store
+#: created fresh was fine because the column is in SCHEMA - so the suite
+#: stayed green and the live instance rebuilt twice into an empty derived
+#: layer, failing on the first insert with "no column named observed_date".
+#: SCHEMA_SHAPE below makes forgetting this a test failure rather than an
+#: incident; see tests/test_schema_version_gate.py.
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, source): the bytes, the account they are
@@ -368,6 +377,90 @@ CREATE TABLE IF NOT EXISTS declared_account_rates (
 TABLE_NAMES: tuple[str, ...] = tuple(
     re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA)
 )
+
+
+def schema_shape() -> dict[str, list[str]]:
+    """Every table SCHEMA builds, and the columns each ends up with.
+
+    Derived by building the schema rather than by reading it, so a column
+    added inside any CREATE TABLE appears here without anything being kept in
+    step by hand. Compared against SCHEMA_SHAPE by a test whose only job is to
+    fail when the two disagree.
+    """
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript(SCHEMA)
+        tables = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        return {
+            table: sorted(
+                str(column[1])
+                for column in connection.execute(f"PRAGMA table_info({table})")
+            )
+            for table in tables
+        }
+    finally:
+        connection.close()
+
+
+#: The shape SCHEMA_VERSION above describes. Pinned deliberately by hand: the
+#: point is that changing the schema makes a test fail until somebody bumps the
+#: version and repins, because the version is what decides whether an existing
+#: store runs its migrations at all. Derived automatically it would agree with
+#: itself for ever and catch nothing.
+SCHEMA_SHAPE: dict[str, list[str]] = {
+    'annotations': ['annotated_at', 'entity_id', 'kind', 'provenance', 'value'],
+    'artefact_origins': ['account_ref', 'digest', 'first_seen_at', 'origin', 'source'],
+    'declared_account_limits': [
+        'amount_minor', 'kind', 'position', 'stable_id', 'window_from', 'window_to',
+    ],
+    'declared_account_rates': [
+        'annual_percent', 'kind', 'position', 'stable_id', 'window_from', 'window_to',
+    ],
+    'declared_accounts': [
+        'closed', 'declared_at', 'kind', 'label', 'opened', 'parent', 'ref',
+        'stable_id',
+    ],
+    'events': ['created_at', 'entity_id', 'id', 'kind', 'payload', 'published_at'],
+    'fetch_attempts': [
+        'account_ref', 'artefact_digest', 'asked', 'attempted_at', 'connection_id',
+        'detail', 'error_code', 'http_status', 'outcome', 'request_meta', 'source',
+    ],
+    'obdi_meta': ['key', 'value'],
+    'provider_facts': ['connection_id', 'fact', 'observed_at', 'source', 'value'],
+    'raw_artefacts': [
+        'account_ref', 'connection_id', 'digest', 'fetched_at', 'media_type',
+        'origin', 'payload', 'record_count', 'request_meta', 'source',
+    ],
+    'rebuild_runs': [
+        'artefacts_replayed', 'artefacts_skipped', 'build', 'finished_at', 'id',
+        'kind', 'ok', 'records_total', 'started_at', 'summary', 'timings',
+        'transactions', 'transfers_paired',
+    ],
+    'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
+    'transaction_sources': [
+        'artefact_digest', 'entity_id', 'first_seen_at', 'observed_date', 'source',
+        'source_id',
+    ],
+    'transactions': [
+        'account_id', 'amount_minor', 'artefact_digest', 'booking_date',
+        'content_key', 'counterparty', 'currency', 'description', 'entity_id',
+        'first_seen_at', 'is_internal_transfer', 'last_seen_at', 'match_tier',
+        'matched_entity_id', 'occurrence', 'raw', 'source', 'source_id', 'status',
+        'tier', 'value_date',
+    ],
+    'transfer_pairs': ['credit_entity_id', 'debit_entity_id'],
+    'valuations': [
+        'annual_income_minor', 'asset_id', 'currency', 'document_ref',
+        'ingested_at', 'kind', 'observed_at', 'source', 'unit_price_minor',
+        'units', 'value_minor',
+    ],
+}
 
 
 def table_ddl(table: str) -> str:

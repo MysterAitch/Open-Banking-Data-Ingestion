@@ -46,6 +46,14 @@ JUSTIFIED = {
     "the migration nothing to do. Every other test builds through the schema in force, "
     "so none of them reaches this migration at all, and a migration reachable only on "
     "a real store at upgrade time is the kind that fails there and nowhere else",
+    ("test_sighting_observed_date.py", "obdi_meta"): "a store STAMPED at the version a "
+    "previous release wrote. Nothing stamps a version except _prepare, and _prepare "
+    "stamps the CURRENT one - so a store carrying an OLDER stamp cannot be produced by "
+    "the application at all. The gap is not academic: an unstamped fixture runs every "
+    "migration, a stamped one runs none, and on 2026-08-13 that difference was the "
+    "whole incident - the observed_date migration was skipped on every real store while "
+    "the unstamped fixtures above passed, and the live instance rebuilt twice into an "
+    "empty derived layer before anybody noticed",
     ("test_actual_push.py", "transactions"): "two rows sharing one imported id "
     "(content key plus occurrence), which the doors prevent twice over - measured "
     "2026-08-12, not reasoned. Within one account the reconciler numbers a repeated "

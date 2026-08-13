@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.227] - 2026-08-13
+
+### Fixed
+- **A migration nobody's store ever ran, and a live instance with no
+  transactions for two hours.** 0.4.212 gave sightings an `observed_date`, wrote
+  the migration for it, added 138 lines of tests, and left `SCHEMA_VERSION` at
+  8. `_prepare` does work only when a store's stamped version differs from
+  `SCHEMA_VERSION`, so every store that already existed skipped the migration
+  permanently. A store created fresh was fine - the column is in `SCHEMA` - so
+  the whole suite stayed green.
+
+  What it cost: the live instance rebuilt at 11:14 and again at 12:14 on
+  2026-08-13. A rebuild wipes the derived layer before replaying, so each run
+  wiped it and then failed on the first insert with `table transaction_sources
+  has no column named observed_date`. Its categorise page read "2768 of 0
+  eligible transaction(s) carry a category" - 2,768 human answers surviving
+  against zero transactions. Nothing was lost, because layer 0 replays; nothing
+  worked either.
+
+  `SCHEMA_VERSION` is now 9, which is the fix: an existing store finds a
+  mismatch, runs the migration and gains the column.
+
+### Added
+- **`SCHEMA_SHAPE`, and a test that fails when the schema changes without the
+  version moving.** The comment on `SCHEMA_VERSION` already said to bump it when
+  `SCHEMA` changes; a comment cannot enforce anything, and this is the same
+  instruction with teeth. The pin records every table and column the schema
+  builds, and is deliberately maintained by hand - derived automatically it
+  would agree with itself for ever and catch nothing.
+
+  Proved both directions rather than asserted: a column added to `SCHEMA`
+  temporarily makes the guard fail and name the column; reverting
+  `SCHEMA_VERSION` to 8 temporarily makes the new upgrade test fail with the
+  live instance's exact error.
+
+- **The upgrade test that was missing.** Every fixture in
+  `test_sighting_observed_date.py` built a store with no `obdi_meta` table, so
+  the version gate always found a mismatch and every migration ran. Real stores
+  are STAMPED. `TestAStoreThatWasAlreadyStamped` builds the old shape carrying
+  version 8 - written out as a literal, not read from the constant, because it
+  is what a store on disk actually holds - and asserts an import still works.
+
 ## [0.4.226] - 2026-08-13
 
 ### Fixed
