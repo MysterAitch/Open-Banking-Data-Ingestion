@@ -1996,11 +1996,19 @@ def _rebuild_history_html(
             duration = f"{span.total_seconds():,.0f}s"
         records = run.get("records_total")
         transactions = run.get("transactions")
+        # Both figures measure REPLAY WORK, and neither is a holding. An arrow
+        # between them said otherwise: `43,015 records -> 46,640` reads as
+        # "became 46,640 transactions", and the store it was rendered from held
+        # 8,760, with 17,219 sightings behind them. The second figure counts a
+        # resolution per record processed, so a payment reported by five
+        # overlapping fetches is counted five times - which is why it can
+        # EXCEED the record count and still be right. Naming them is the whole
+        # fix; the arithmetic was never wrong.
         volume = ""
         if isinstance(records, int):
-            volume = f"{records:,} records"
+            volume = f"{records:,} records read"
             if isinstance(transactions, int):
-                volume += f" -> {transactions:,}"
+                volume += f", {transactions:,} row resolutions"
         timings = run.get("timings")
         slowest = ""
         if isinstance(timings, dict) and timings:
@@ -2020,10 +2028,16 @@ def _rebuild_history_html(
     return (
         "<h3>Recent rebuilds</h3>"
         '<div style="overflow-x:auto"><table>'
-        "<tr><th></th><th>finished</th><th>took</th><th>volume</th>"
+        "<tr><th></th><th>finished</th><th>took</th><th>replay work</th>"
         "<th>slowest phase</th><th>build</th></tr>"
         + "".join(rows)
         + "</table></div>"
+        # Said beside the numbers rather than in a note elsewhere, because the
+        # comparison that misled was made ON this table.
+        '<p class="muted">What the replay did, not what the store holds. A '
+        "payment several artefacts report is resolved once per report, so "
+        "resolutions run well ahead of the transactions that survive merging."
+        "</p>"
     )
 
 

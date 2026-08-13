@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.228] - 2026-08-13
+
+### Fixed
+- **The rebuild history's headline figure read as a transaction count and was
+  5.3x the real one.** The panel showed `43,015 records -> 46,640` under a
+  column headed "volume". An arrow between two counts asserts that the first
+  became the second, so it read as "43,015 records became 46,640 transactions".
+  The store it was rendered from held **8,760** transactions, with **17,219**
+  sightings behind them. The figure is neither: it counts a resolution per
+  record processed, so a payment reported by five overlapping fetches is counted
+  five times - which is why it can exceed the record count and still be right.
+
+  Both numbers are honest measures of REPLAY WORK. The arithmetic was never
+  wrong; the labelling was. The column is now "replay work", the figures read
+  `43,015 records read, 46,640 row resolutions`, and a line beneath the table
+  says these are what the replay did rather than what the store holds - placed
+  there because the comparison that misled is the one made on this table.
+
+  Found while verifying the recovery from the 0.4.227 incident, which is the
+  only reason it surfaced: no two of those three numbers had ever been on screen
+  together. Same family as the account-page shape panel fixed in 0.4.216.
+
+  A run that recorded no counts still shows none rather than `0 records read` -
+  asserted, because a failed rebuild is exactly the row somebody reads after an
+  incident, and "read nothing" is a stronger claim than "did not get far enough
+  to say".
+
 ## [0.4.227] - 2026-08-13
 
 ### Fixed
