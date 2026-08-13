@@ -1494,9 +1494,23 @@ def _serve(host: str, port: int, db_path: Path) -> int:
 
         mark = _time.perf_counter()
         with Store(db_path) as store:
-            held = store.transactions_by_sighting()
+            # TWO VIEWS, deliberately, because this panel answers two questions
+            # and they have different denominators. The SHAPE is of the merged
+            # layer, which the page says it is, so it is computed over merged
+            # rows - one item per transaction. The SOURCE LIST is a per-sighting
+            # question ("which pipes contributed"), and the merged row's source
+            # is last-writer-wins, so that comes from the sighting view.
+            #
+            # Shaping over sightings instead counted every merged payload once
+            # per source that saw it: 137 items over 70 distinct payloads for
+            # one account, so every field's count was inflated and an item
+            # carried one source's NAME beside another's verbatim record. It is
+            # also strictly more work on a page that once took 45 seconds.
+            merged = store.all_transactions()
+            sighted = store.transactions_by_sighting()
         mark = _timed_phase("sightings", mark)
-        rows = [t for t in held if t.account_id == ref]
+        rows = [t for t in merged if t.account_id == ref]
+        contributing = sorted({t.source for t in sighted if t.account_id == ref})
         if not rows:
             return None
         items = []
@@ -1557,7 +1571,10 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             # The headline is transactions, never sightings - a payment
             # seen by two pipes is one payment.
             "count": breakdown.get("transactions", len(rows)),
-            "sources": sorted({t.source for t in rows}),
+            # From the sightings, not from `rows`: a merged row keeps one
+            # source, so counting them here would report a single pipe for an
+            # account two pipes cover.
+            "sources": contributing,
             "breakdown": breakdown,
             "summary": shape_summary,
             "details": details,

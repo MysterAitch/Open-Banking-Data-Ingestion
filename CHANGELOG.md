@@ -26,6 +26,38 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.216] - 2026-08-13
+
+### Fixed
+- The account page's shape panel counted every merged payload once per source
+  that saw it. Measured on one account: 137 items over 70 transactions, so
+  every field's count was inflated by the number of pipes that had seen the
+  row, and a single item carried one source's NAME beside another source's
+  verbatim record.
+
+  The panel answers two questions with different denominators, and both were
+  being taken from the same view. The SHAPE is of the merged layer - the page
+  says so in its own text - so it is now computed over merged rows. The SOURCE
+  LIST is a per-sighting question, because a merged row keeps one source after
+  matching, so that still comes from the sighting view. The provenance section
+  below it continues to report 137 sightings, which is where that number
+  belongs.
+
+  Also strictly less work on a page that once took 45 seconds: 70 items and
+  29,231 bytes rendered where it previously built 137 and 57,376.
+
+  Verified by reading the page before and after rather than by a test, because
+  the hook is a closure inside the serve function and cannot be called - a
+  test would have had to reimplement it and assert against the copy. That
+  testability gap is filed rather than papered over.
+
+### Changed
+- An earlier note in this file and in the vault said this panel "exists to show
+  what each provider sends" and got that wrong. It makes no such claim: it
+  states that it shows the merged layer, and per-source truth belongs to the
+  artefact page, which summarises one payload and is correct. The over-read is
+  corrected where it was written.
+
 ## [0.4.215] - 2026-08-13
 
 ### Added
