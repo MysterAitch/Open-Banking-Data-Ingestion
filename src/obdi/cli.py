@@ -3309,6 +3309,12 @@ def main(argv: list[str] | None = None) -> int:
         "network call; only an explicit invalid_client counts against them)",
     )
 
+    subcommands.add_parser(
+        "rebuild-status",
+        help="did the last rebuild work? Exit 0 succeeded or none yet, 1 "
+        "failed, 2 still running - for a deploy to gate on",
+    )
+
     categorise_command = subcommands.add_parser(
         "categorise",
         help="apply the category/payee rules in bulk (annotations survive "
@@ -3772,6 +3778,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+
+    if args.command == "rebuild-status":
+        # One question, one exit code, because a deploy gates on it. The first
+        # attempt at that gate used `doctor`, which carries this answer AND
+        # every other check - so the disposable instance, which has no
+        # credentials by design, failed on two missing secrets and blocked the
+        # converge. It converges first as the canary, so the live instance
+        # never updated. A gate reading a broader signal than its question is
+        # a false positive waiting to happen, and one that blocks a deploy
+        # costs more than the noise it was guarding against.
+        from .doctor import rebuild_check
+
+        in_flight = rebuild_in_progress_note(Path(db_path))
+        if in_flight:
+            print(
+                f"last rebuild: not yet known - {in_flight}. The newest record "
+                "is the run BEFORE this one"
+            )
+            return 2
+        with Store(db_path) as store:
+            rebuilt = rebuild_check(store.recent_rebuild_runs(limit=1))
+        print(f"last rebuild: {rebuilt.detail}")
+        return 0 if rebuilt.ok else 1
 
     if args.command == "doctor":
         # Deliberately the whole report, pass or fail, on stdout. A deploy gates

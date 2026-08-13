@@ -26,6 +26,40 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.231] - 2026-08-13
+
+### Added
+- **`obdi rebuild-status`: one question, one exit code.** 0 when the last
+  rebuild succeeded or none has run, 1 when it FAILED, 2 when one is in flight
+  so the answer is not yet known. Two and one are distinguished because they
+  call for different things - retry versus stop.
+
+### Fixed
+- **The deploy gate added in 0.4.230 blocked production deploys, and the
+  rebuild was fine.** The converge was made to fail when `obdi doctor` exited
+  non-zero, reasoning that doctor now carries the rebuild's outcome. It does -
+  along with every other check. The disposable instance has **no credentials by
+  design**, so doctor failed on two missing secrets, the canary instance failed,
+  and because it converges first the live instance never updated at all.
+
+  Its own output said so plainly: `ok  last rebuild: succeeded`, beside
+  `FAIL secret TRUELAYER_CLIENT_SECRET`. The gate was reading a broader signal
+  than the question it was asking, which is a false positive waiting to happen -
+  and one that stops a deploy costs more than the noise it was meant to catch.
+  The converge now gates on `rebuild-status` instead, and a test pins the
+  regression: missing credentials must not affect it.
+
+  The wider lesson, since a check going in strict was deliberate: **strict is
+  about the threshold on the question you are asking, not about how much you
+  read to answer it.** Starting strict was right. Answering the wrong question
+  strictly was not, and no amount of relaxing the threshold would have fixed it.
+
+  The separate exit codes exist so a caller can **retry only where waiting can
+  change the answer.** The failing converge retried thirty times over a missing
+  credential file that was never going to appear - two and a half minutes to
+  reach a conclusion available on the first attempt, with the real reason buried
+  under thirty identical lines. In flight is the only state worth waiting on.
+
 ## [0.4.230] - 2026-08-13
 
 ### Added
