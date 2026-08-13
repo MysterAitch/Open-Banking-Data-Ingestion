@@ -486,6 +486,84 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         assert reported[0].seen_in == ()
 
 
+class TestAFileThatCorroboratesItself:
+    """The balance walk, which had never run against known data.
+
+    Every other check in obdi needs a second source to disagree with. This one
+    asks whether the file's own arithmetic holds - each row's balance being the
+    previous one plus that row's amount - and answers from nothing else. It also
+    settles the SIGN CONVENTION from evidence: a chain that only closes when the
+    amounts are negated says the issuer writes them the other way round.
+
+    Both were unreachable until the corpus carried a balance column, and neither
+    is reachable from a PDF at all: the structural read those checks consume is
+    unavailable for that format, so a statement's opening and closing balances
+    do not feed them. That was measured after being assumed wrongly.
+    """
+
+    def _verdicts(self, directory, manifest, name: str = ""):
+        from obdi.parsers.uk_banks import detect
+        from obdi.verification import verify_export
+
+        delivery = next(
+            item for item in manifest["deliveries"] if "corroborate itself" in item["fault"]
+        )
+        payload = (directory / (name or delivery["name"])).read_bytes()
+        parsed = list(detect(payload).parse(payload, account_id="synthetic-current"))
+        return {
+            verdict.name: verdict
+            for verdict in verify_export(payload, parsed, delivery["name"])
+        }, delivery
+
+    def test_ABalanceCarryingExport_PassesEveryCheckOnItsOwn(self, corpus):
+        directory, _world, manifest = corpus
+
+        verdicts, delivery = self._verdicts(directory, manifest)
+
+        walk = verdicts["balance walk"]
+        assert walk.ok, f"{walk.detail} (seed {SEED})"
+        # One step between each pair of rows: a file of N rows offers N-1
+        # chances for the arithmetic to disagree, and all of them are taken.
+        assert f"{delivery['rows'] - 1} balance step(s)" in walk.detail, (
+            f"expected {delivery['rows'] - 1} steps from {delivery['rows']} rows, "
+            f"got {walk.detail!r} (seed {SEED})"
+        )
+        # The convention is a FINDING, not configuration - this is the only
+        # place obdi decides which way round an issuer writes its amounts.
+        assert "amounts as-is" in walk.detail, walk.detail
+
+        sign = verdicts["sign"]
+        assert sign.ok, f"{sign.detail} (seed {SEED})"
+        assert verdicts["structure"].ok and verdicts["dates"].ok
+
+    def test_ASingleWrongBalance_BreaksTheWalk(self, corpus, tmp_path):
+        """The red proof, kept rather than run once.
+
+        A check that has never failed has not been checked, and this one is
+        arithmetic over a file that was built to be consistent - exactly the
+        shape that passes for the wrong reason. So one balance is corrupted by
+        a pound and the walk must notice.
+        """
+        directory, _world, manifest = corpus
+        delivery = next(
+            item for item in manifest["deliveries"] if "corroborate itself" in item["fault"]
+        )
+        lines = (directory / delivery["name"]).read_text(encoding="utf-8").splitlines()
+        columns = lines[10].split(",")
+        columns[-1] = f"{float(columns[-1]) + 1:.2f}"
+        lines[10] = ",".join(columns)
+        broken = tmp_path / "broken.csv"
+        broken.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        verdicts, _ = self._verdicts(tmp_path, manifest, name="broken.csv")
+
+        assert verdicts["balance walk"].ok is False, (
+            f"a balance moved by a pound and the walk still passed: "
+            f"{verdicts['balance walk'].detail!r} (seed {SEED})"
+        )
+        assert "break" in verdicts["balance walk"].detail
+
+
 class TestTheGeneratedStatements:
     """PDFs, because a statement carries what no export does.
 

@@ -503,6 +503,44 @@ def _months_of(events: Iterable[PlantedEvent]) -> list[str]:
     return sorted({event.when[:7] for event in events})
 
 
+def _csv_with_running_balance(events: Iterable[PlantedEvent], opening: int) -> str:
+    """The same export, plus the running balance some issuers include.
+
+    THE ONLY ARTEFACT HERE THAT CAN CORROBORATE ITSELF. Every other check in
+    obdi needs a second source to disagree with; the balance walk asks whether
+    the file's own arithmetic holds - each row's balance being the previous one
+    plus that row's amount - and answers from nothing but the file.
+
+    It also settles the SIGN CONVENTION from evidence rather than from
+    configuration: a walk that only closes when the amounts are negated says
+    the issuer writes them the other way round. That question is decided wrongly
+    in silence by every other route, so it is worth a file that can answer it.
+
+    The export this imitates carries no balance column, which is why it is a
+    separate delivery rather than a change to that writer - a generator that
+    quietly improves the format it is imitating is not imitating it.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(
+        ["Date", "Counter Party", "Reference", "Type", "Amount (GBP)", "Balance (GBP)"]
+    )
+    balance = opening
+    for event in sorted(events, key=lambda e: e.when):
+        balance += event.amount_minor
+        writer.writerow(
+            [
+                date.fromisoformat(event.when).strftime("%d/%m/%Y"),
+                event.merchant,
+                event.description,
+                "FASTER PAYMENT" if event.kind == "transfer" else "CARD PAYMENT",
+                f"{event.amount_minor / 100:.2f}",
+                f"{balance / 100:.2f}",
+            ]
+        )
+    return buffer.getvalue()
+
+
 def _monzo_csv(events: Iterable[PlantedEvent]) -> str:
     """The same events as a Monzo export - a SECOND source for the same rows.
 
@@ -679,6 +717,29 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
                 rows=len(transposed_rows),
             )
         )
+
+    # The same account's rows with a running balance, so the file can be
+    # checked against itself. Opening is arbitrary but must be REAL: a walk
+    # that starts at zero and goes negative still walks, but it does not look
+    # like an account anybody holds.
+    opening = 150000
+    name = "synthetic-current-with-balances.csv"
+    (out_dir / name).write_text(
+        _csv_with_running_balance(current, opening), encoding="utf-8"
+    )
+    deliveries.append(
+        Delivery(
+            name=name,
+            belongs_to="synthetic-current",
+            deliver_as="synthetic-current",
+            covers=(months[0], months[-1]),
+            fault=(
+                "nothing wrong with it: it carries a running balance, so it can "
+                "corroborate itself where the ordinary export cannot"
+            ),
+            rows=len(current),
+        )
+    )
 
     savings = [e for e in world.events if e.account == "synthetic-savings"]
     name = "synthetic-savings-misfiled.csv"

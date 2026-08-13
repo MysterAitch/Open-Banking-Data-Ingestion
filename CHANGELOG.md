@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.215] - 2026-08-13
+
+### Added
+- A balance-carrying export, which turns on two checks that had never run
+  against known data - and this time the route was read from the code before
+  being built rather than assumed and corrected afterwards.
+
+  THE BALANCE WALK is the only check here that asks whether a file corroborates
+  ITSELF. Every other one needs a second source to disagree with; this asks
+  whether each row's balance is the previous one plus that row's amount, and
+  answers from nothing but the file. Measured on the corpus: 68 steps verified,
+  0 breaks.
+
+  THE SIGN CHECK came with it, and was silently unreachable for the same reason
+  - it reads the same chain. It is the only place obdi decides which way round
+  an issuer writes its amounts FROM EVIDENCE rather than from configuration,
+  reporting the convention it found ("amounts as-is") and corroborating the
+  parser's net against the balances'.
+
+  Written as a separate delivery rather than by adding a column to the existing
+  writer: that one imitates a real export which carries no balance, and a
+  generator that quietly improves the format it is imitating is not imitating
+  it.
+
+- `test_ASingleWrongBalance_BreaksTheWalk`, which keeps the red proof rather
+  than running it once. Arithmetic over a file built to be consistent is
+  exactly the shape that passes for the wrong reason, so one balance is
+  corrupted by a pound and the walk must notice.
+
 ## [0.4.214] - 2026-08-13
 
 ### Added
