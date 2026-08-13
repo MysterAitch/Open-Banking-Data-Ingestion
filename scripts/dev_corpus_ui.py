@@ -33,6 +33,7 @@ to a scratch path outside the repository.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -59,11 +60,50 @@ LANDINGS = [
 ]
 
 
+def isolated(root: Path) -> dict[str, str]:
+    """An environment that CANNOT reach a real connection or credential.
+
+    The repository carries a gitignored .env which the command line loads
+    automatically, and it names the live connection store, the live account map
+    and the paths to real credentials. Passing --db redirects the transactions
+    and nothing else, so a demo served without this shows synthetic rows beside
+    REAL connection names - and its "reconnect" button starts a real
+    authorisation against a real bank. Found by looking at the page: a
+    connection nothing in the corpus could explain was sitting at the top of it.
+
+    So every path the app reads is pointed at the scratch directory, and the
+    credentials are overwritten with values that cannot work. Nothing here
+    should be able to contact a bank even if a button is pressed by accident.
+    `capture_screens.py` has done this since it was written; this did not.
+    """
+    return {
+        **os.environ,
+        "OBDI_DB_PATH": str(root / "store.sqlite3"),
+        "OBDI_CONNECTION_STORE": str(root / "connections.json"),
+        "OBDI_ACCOUNT_MAP": str(root / "accounts.json"),
+        "OBDI_RAW_DIR": str(root / "raw"),
+        # Present but useless. Absent would send the app down its
+        # not-configured path, which is a different page from the one being
+        # looked at; wrong is more faithful than missing here.
+        "TRUELAYER_CLIENT_ID": "dev-corpus",
+        "TRUELAYER_CLIENT_SECRET": "dev-corpus",
+        "TRUELAYER_CLIENT_SECRET_FILE": "",
+        "TRUELAYER_REDIRECT_URI": "http://127.0.0.1/callback",
+        "STARLING_PERSONAL_ACCESS_TOKEN_FILE": "",
+        "ACTUAL_SERVER_URL": "",
+        "ACTUAL_PASSWORD_FILE": "",
+        "ACTUAL_SYNC_ID": "",
+        "EB_APPLICATION_ID": "",
+        "EB_PRIVATE_KEY_PATH": "",
+    }
+
+
 def run(store: Path, *arguments: str) -> None:
     """One obdi command, through the same door a person uses."""
     completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
         [sys.executable, "-m", "obdi.cli", "--db", str(store), *arguments],
         cwd=str(REPO),
+        env=isolated(store.parent),
         check=False,
     )
     if completed.returncode != 0:

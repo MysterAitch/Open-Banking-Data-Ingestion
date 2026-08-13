@@ -26,6 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.213] - 2026-08-13
+
+### Fixed
+- **The corpus demo server could reach real bank connections.** `--db` redirects
+  the transactions and NOTHING else, and the repository carries a gitignored
+  `.env` that the command line loads automatically - naming the live connection
+  store, the live account map and the paths to real credentials. So a demo
+  served for looking at synthetic data showed a REAL connection at the top of
+  the page, and its "Reconnect" button would have started a genuine
+  authorisation against a real bank.
+
+  Found by looking at the page: a connection appeared that nothing in the corpus
+  could explain. Nothing in the transaction data was wrong, which is what makes
+  it the kind of fault only the running application shows.
+
+  The dev script now builds an isolated environment - every path pointed at its
+  scratch directory, every credential overwritten with a value that cannot work
+  - so the instance cannot contact a bank even if a button is pressed by
+  accident. `capture_screens.py` has done this since it was written; this had
+  simply not followed it.
+
+  Checked as a class rather than an instance: of the four scripts, two build
+  isolated environments and two deliberately use the real configuration because
+  they are probes against live providers, which is correct for what they are.
+
 ## [0.4.212] - 2026-08-13
 
 ### Fixed
