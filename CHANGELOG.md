@@ -26,6 +26,29 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.226] - 2026-08-13
+
+### Fixed
+- **A gap that did not exist, believed for weeks because no test called the door
+  that closes it.** The corpus test for a wrapped descriptor stated in its own
+  docstring that obdi does not check a PDF against its declared balances, so the
+  evidence of a lost row "sits unread". It has been read at import all along:
+  `PdfStatementParser.parse` refuses a statement whose rows do not carry its
+  opening balance to its closing one, naming the discrepancy and the row count.
+  Every test in that file read the parser DIRECTLY, so the gate's behaviour was
+  never asserted and the wrong claim in the docstring was never contradicted.
+
+  Nothing changes in what obdi does. What changes is that it is now pinned:
+  `test_AStatementMissingARow_IsRefused_RatherThanImportedShort` drives the real
+  import door, asserts the wrapped statement is refused with a message that
+  names the discrepancy, and asserts the intact statement of the same month goes
+  through - so a refusal-of-everything cannot pass for a working gate. Proved it
+  can fail by pointing it at the intact statement first.
+
+  This mattered beyond the docstring: it was the load-bearing claim under the
+  decision not to teach the readers to join continuation lines, and that decision
+  was recorded before the claim was checked.
+
 ## [0.4.225] - 2026-08-13
 
 ### Fixed

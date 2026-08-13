@@ -640,10 +640,15 @@ class TestTheGeneratedStatements:
         halves, because the second is what makes the first fixable: the walk
         holds for the intact statement and breaks for the wrapped one.
 
-        What obdi does NOT do is check that for a PDF. The balance walk consumes
-        a structural read that only CSV has, so this evidence sits unread. That
-        is a limit rather than a defect in this test, and it is pinned here so
-        it cannot quietly become untrue.
+        This reads the parser DIRECTLY, which is deliberate: it pins what the
+        reading contains, before any gate has an opinion about it. What obdi
+        does with that evidence is asserted separately, in
+        `test_AStatementMissingARow_IsRefused_RatherThanImportedShort` - and it
+        has to be, because an earlier version of this docstring claimed the
+        evidence sat unread for PDFs and was wrong. It sits unread by the
+        BALANCE WALK, which needs a structural read only CSV has; the parser's
+        own gate reads it at import and refuses. A test that never called that
+        door could not tell the two apart.
         """
         from obdi.parsers.santander_pdf import read_statement
         from obdi.statement_shape import pdf_lines
@@ -677,6 +682,47 @@ class TestTheGeneratedStatements:
             f"a row vanished and the statement's own balances still reconcile, "
             f"so the file carries no evidence of the loss (seed {SEED})"
         )
+
+    def test_AStatementMissingARow_IsRefused_RatherThanImportedShort(self, corpus):
+        """What the evidence above is actually FOR, at the door a person uses.
+
+        The test above proves a lost row breaks the statement's own arithmetic.
+        This proves obdi acts on that: the wrapped statement is refused, and the
+        intact statement of the same month goes through. Without both, "the file
+        carries the evidence" is a fact about the file rather than a property of
+        the system - and for a while it was believed to be exactly that, because
+        every test read the parser directly and none called `parse`.
+
+        Refusing is the right answer and not an obviously safe one: it means a
+        statement obdi cannot fully read contributes NOTHING rather than most of
+        itself. That is the trade the raw layer exists to make survivable - the
+        bytes are kept, so a better parser reads them later without the document
+        being fetched again.
+        """
+        from obdi.parsers.base import ParseError
+        from obdi.parsers.uk_banks import detect
+        from obdi.synthetic import _WRAPPED_STATEMENT
+
+        directory, _world, manifest = corpus
+        intact = manifest["statements"][1]["name"]
+
+        def imported(name: str) -> list[object]:
+            payload = (directory / name).read_bytes()
+            return list(detect(payload).parse(payload, account_id="synthetic-card"))
+
+        assert imported(intact), (
+            f"the intact statement imported nothing, so refusing the wrapped one "
+            f"would prove only that the parser refuses everything (seed {SEED})"
+        )
+
+        with pytest.raises(ParseError) as refusal:
+            imported(_WRAPPED_STATEMENT)
+
+        # The message has to name the discrepancy, or a person meeting it cannot
+        # tell a lost row from a credit read as a spend - which is the whole
+        # reason the gate reports rather than merely refusing.
+        assert "opening balance" in str(refusal.value)
+        assert "unexplained" in str(refusal.value)
 
     def test_TheSameMonthAcrossTwoPages_ReadsTheSameAsOnOne(self, corpus):
         """Page furniture must not be mistaken for the statement's own figures.
