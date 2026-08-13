@@ -38,9 +38,13 @@ transcription would add no reasoning that the subjects do not already carry.
   purely alphabetic, fails the furniture test, and masks to `99XX`. The one fact
   the exception exists to preserve was lost in exactly the layout that needs it.
 
-  Found by reading real statements through the shape route added in 0.4.224 -
-  nine of the live instance's statements print it that way, and their masked
-  pages could not say whether a row was money in or money out.
+  Found by reading real statements through the shape route added in 0.4.224.
+  **Fifteen of the live instance's thirty-one statements print it that way**,
+  across two unrelated issuer families - a credit union and a credit card - and
+  their masked pages could not say whether a row was money in or money out. The
+  release commit said nine and named one family; that figure was estimated from
+  the statements read closely rather than counted, and counting it afterwards
+  moved it. Corrected here because the changelog is the copy that gets read.
 
   The fix is deliberately narrow: only a listed marker glued to digits comes
   through, never a country code and never an arbitrary alphabetic tail. Peeling
