@@ -3640,6 +3640,7 @@ def main(argv: list[str] | None = None) -> int:
             Finding,
             consent_rung,
             disk_finding,
+            empty_rebuild_finding,
             process,
             refusal_trends,
             send_heartbeat,
@@ -3650,6 +3651,13 @@ def main(argv: list[str] | None = None) -> int:
         with Store(db_path) as store:
             held = store.transactions_by_sighting()
             attempts = store.attempts(limit=1000)
+            rebuilds = store.recent_rebuild_runs(limit=1)
+        # First, because an empty derived layer makes every finding below it
+        # meaningless: no sightings means no stale feeds and no coverage, so a
+        # silent store would otherwise look like a quiet one.
+        emptied = empty_rebuild_finding(rebuilds)
+        if emptied is not None:
+            findings.append(emptied)
         watched = _scheduled_sources()
         if watched:
             findings += [

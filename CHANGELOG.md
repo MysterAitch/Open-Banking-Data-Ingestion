@@ -26,6 +26,44 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.229] - 2026-08-13
+
+### Added
+- **A rebuild that leaves the store empty now says so.** On 2026-08-13 the live
+  instance rebuilt into nothing twice. Both runs were recorded correctly and
+  both were rendered on the home page, and nobody was told - the empty layer was
+  found two and a quarter hours later by somebody reading that page for an
+  unrelated reason. Rendering evidence is not the same as telling anyone, and a
+  rebuild is precisely the operation nobody watches.
+
+  A rebuild wipes the derived layer before replaying, so "failed having replayed
+  nothing" is the state where the instance serves NOTHING, and it is read
+  straight off the run record with no judgement. It cannot false-positive. The
+  message carries the reason the run recorded and the build that produced it,
+  because a person woken by this needs to know whether to redeploy or restore -
+  and an alarm saying only "the rebuild failed" sends them to the page they were
+  not reading.
+
+  It rides the existing edge protocol, so a second failure does not re-announce
+  and a later success resolves it with no code for either. It is placed FIRST
+  among the findings: an empty derived layer makes the ones below it
+  meaningless, since no sightings means no stale feeds and no coverage - a
+  silent store would otherwise look like a quiet one.
+
+  **A rebuild that fails PARTWAY is deliberately not covered**, and that is
+  pinned by a test rather than left to be discovered. It leaves most of the data
+  and looks healthy, which arguably makes it worse; deciding it needs a
+  comparison against what the store held before, and a rebuild may legitimately
+  reduce counts by deduplicating or refiling. That threshold is a choice
+  somebody has to make, and inferring it here is how an alarm starts crying wolf
+  and gets muted.
+
+  Driven through `obdi alert` itself, not only against the finding builder -
+  the same day a gate was found working while a docstring claimed otherwise
+  because every test called the parser directly and none called the door. The
+  wiring was removed temporarily to watch the command-level test fail; it
+  printed "no findings", which is the incident's silence exactly.
+
 ## [0.4.228] - 2026-08-13
 
 ### Fixed

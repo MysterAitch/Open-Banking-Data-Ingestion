@@ -213,6 +213,59 @@ def disk_finding(data_dir: Path) -> Finding | None:
     )
 
 
+def empty_rebuild_finding(
+    runs: Sequence[Mapping[str, object]],
+) -> Finding | None:
+    """The last rebuild wiped the derived layer and then failed.
+
+    A rebuild empties the derived layer before replaying, so a run that failed
+    having replayed nothing leaves the instance serving NOTHING. That is the
+    one rebuild outcome needing no judgement to classify, and it is read
+    straight off the run record.
+
+    Measured on 2026-08-13: the live instance rebuilt into nothing twice, both
+    runs recorded correctly and both rendered on the home page, and the empty
+    layer was found two and a quarter hours later by somebody reading that page
+    for another reason. Rendering evidence is not the same as telling anyone,
+    and a rebuild is the operation nobody watches.
+
+    A rebuild that fails PARTWAY is deliberately not covered. It leaves most of
+    the data and looks healthy, which arguably makes it worse - but deciding it
+    needs a comparison against what the store held before, and a rebuild can
+    legitimately reduce counts by deduplicating or refiling. That threshold is
+    somebody's to choose, and choosing it here by inference is how an alarm
+    starts crying wolf and gets muted.
+
+    Only the newest run decides: a failure already recovered from is history.
+    Resolution needs no code - the finding simply stops being produced, and the
+    edge protocol announces that.
+    """
+    if not runs:
+        return None
+    latest = runs[0]
+    if latest.get("ok"):
+        return None
+    # None rather than 0 is what the real rows held: the run died before it
+    # could count anything. Reading a missing count as "not empty" would have
+    # missed the incident this exists for.
+    replayed = latest.get("artefacts_replayed") or 0
+    resolved = latest.get("transactions") or 0
+    if replayed or resolved:
+        return None
+    reason = str(latest.get("summary") or "").strip() or "no reason recorded"
+    build = str(latest.get("build") or "unknown build")
+    finished = str(latest.get("finished_at") or "")
+    return Finding(
+        key="rebuild:empty",
+        message=(
+            f"the derived layer is EMPTY - the rebuild at {finished} wiped it "
+            f"and then failed, replaying nothing ({build}): {reason}. The raw "
+            "artefacts are untouched, so a rebuild that gets past this replays "
+            "them"
+        ),
+    )
+
+
 @dataclass
 class _Announced:
     """What the state file remembers per key: the rung a finding was last
