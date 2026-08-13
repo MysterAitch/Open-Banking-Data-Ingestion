@@ -741,6 +741,28 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
         )
     )
 
+    # THE SAME BYTES UNDER THE NAME A BROWSER GIVES A SECOND DOWNLOAD. Not a
+    # regenerated copy: the bytes are read back from the file just written, so
+    # the digests cannot differ for any reason the test would then have to
+    # explain. Re-downloading a statement is something a person does by
+    # accident constantly, and the right answer is one artefact that knows both
+    # of its names rather than two artefacts holding the same evidence.
+    name = "synthetic-current (1).csv"
+    (out_dir / name).write_bytes((out_dir / "synthetic-current.csv").read_bytes())
+    deliveries.append(
+        Delivery(
+            name=name,
+            belongs_to="synthetic-current",
+            deliver_as="synthetic-current",
+            covers=(months[0], months[-1]),
+            fault=(
+                "byte-identical to synthetic-current.csv under the name a second "
+                "download gets: one artefact, two names, no new rows"
+            ),
+            rows=len(current),
+        )
+    )
+
     savings = [e for e in world.events if e.account == "synthetic-savings"]
     name = "synthetic-savings-misfiled.csv"
     (out_dir / name).write_text(_monzo_csv(savings), encoding="utf-8")

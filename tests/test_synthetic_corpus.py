@@ -69,11 +69,21 @@ def statement_without(source: Path, month: str, destination: Path) -> Path:
 SEED = 20260812
 
 
-@pytest.fixture
-def corpus(tmp_path):
+@pytest.fixture(scope="module")
+def corpus(tmp_path_factory):
+    """Built once for the module, because nothing here writes into it.
+
+    Every test reads the corpus and writes its STORE into its own tmp_path, so
+    they cannot see each other. Rebuilding per test was costing 24 world
+    generations and 144 PDF renders for a directory none of them modify - which
+    took this file from under two seconds to thirteen when the statements
+    landed. If a test ever needs to alter an artefact it must copy it out
+    first, exactly as the withheld-month and corrupted-balance cases already do.
+    """
+    directory = tmp_path_factory.mktemp("corpus-module") / "corpus"
     world = build_world(seed=SEED, months=6)
-    manifest = write_corpus(world, tmp_path / "corpus")
-    return tmp_path / "corpus", world, manifest
+    manifest = write_corpus(world, directory)
+    return directory, world, manifest
 
 
 class TestTheGeneratedWorld:
@@ -880,6 +890,62 @@ class TestTheAdversarialDeliveries:
         assert "£" in described, (
             f"the alarm that leads the page renders its amount as a bare number: "
             f"{described!r} (seed {SEED})"
+        )
+
+    def test_OneFileUnderTwoNames_IsOneArtefactThatKnowsBoth(
+        self, corpus, tmp_path
+    ):
+        """A second download, which a person produces by accident constantly.
+
+        The browser appends "(1)" and the bytes are identical. The right answer
+        is ONE artefact that knows both of its names - not two artefacts holding
+        the same evidence, and not a second copy of every row. Both halves
+        matter: collapsing to one artefact is what keeps the evidence single,
+        and keeping both names is what lets somebody recognise the file they
+        have on disk.
+        """
+        directory, _world, manifest = corpus
+        copy = next(
+            delivery
+            for delivery in manifest["deliveries"]
+            if "second download" in delivery["fault"]
+        )
+        original = directory / "synthetic-current.csv"
+        assert (directory / copy["name"]).read_bytes() == original.read_bytes(), (
+            f"the copy is not byte-identical, so any digest result below would "
+            f"be explained by the bytes rather than by the naming (seed {SEED})"
+        )
+
+        store_path = tmp_path / "store.sqlite3"
+        first = land(store_path, original, "synthetic-current")
+        again = land(store_path, directory / copy["name"], "synthetic-current")
+
+        assert first.artefact_new and not again.artefact_new, (
+            f"the same bytes under a second name landed as a new artefact "
+            f"(seed {SEED})"
+        )
+        assert again.inserted == 0 and again.matched == first.inserted, (
+            f"a re-download added {again.inserted} row(s) and matched "
+            f"{again.matched} of {first.inserted} (seed {SEED})"
+        )
+
+        with Store(store_path) as store:
+            artefacts = store.connection.execute(
+                "SELECT digest FROM raw_artefacts"
+            ).fetchall()
+            names = {
+                row["origin"]
+                for row in store.connection.execute(
+                    "SELECT origin FROM artefact_origins"
+                )
+            }
+
+        assert len(artefacts) == 1, (
+            f"{len(artefacts)} artefacts hold the same bytes (seed {SEED})"
+        )
+        assert names == {original.name, copy["name"]}, (
+            f"the artefact knows {sorted(names)} rather than both names it "
+            f"arrived under (seed {SEED})"
         )
 
     def test_AMisfiledStatement_IsAttributedToTheAccountItsRowsBelongTo(

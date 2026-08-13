@@ -26,6 +26,32 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.217] - 2026-08-13
+
+### Added
+- The last cheap adversarial delivery: the same bytes under the name a browser
+  gives a second download. Re-downloading a statement is something a person
+  does by accident constantly, and the right answer is ONE artefact that knows
+  both of its names - not two artefacts holding the same evidence, and not a
+  second copy of every row.
+
+  The behaviour already worked and had never been asserted against a known
+  corpus. Both halves are now pinned: the second import is not a new artefact
+  and inserts nothing, and the store holds one artefact carrying both names.
+  The copy is made by reading the bytes back from the file just written rather
+  than regenerating them, so a digest result cannot be explained by the bytes.
+
+### Changed
+- The corpus fixture builds once per module instead of once per test. Nothing
+  in the file writes into the corpus - every test writes its store into its own
+  temporary directory - so 24 world generations and 144 PDF renders were being
+  done for a directory none of them modify.
+
+  Wall-clock is not quoted: three runs of this file on the same machine and
+  code gave 13.3s, 19.5s and 7.5s, which is too noisy to claim a speedup from.
+  What is structural rather than measured: pytest now reports one setup entry
+  instead of twenty-four, and one build cannot be slower than twenty-four.
+
 ## [0.4.216] - 2026-08-13
 
 ### Fixed
