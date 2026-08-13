@@ -26,6 +26,29 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.221] - 2026-08-13
+
+### Added
+- The PDF writer emits multiple pages when asked (`per_page`), which unblocks
+  the rest of stage 4: the faults that broke real parsers live at page
+  boundaries - sections that restart their numbering, a total repeated as a
+  carried figure on the next page - and none can be generated on one page.
+
+  Object numbering and the cross-reference table are now COMPUTED from the page
+  count rather than written out, because a file whose Kids array disagrees with
+  its objects is one no reader will open. The single-page default is unchanged
+  and is what every existing caller gets.
+
+- `test_synthetic_pdf.py`, giving the writer its own tests now that it is `src`
+  code rather than a test helper. A malformed PDF fails in a way that looks
+  like a parser bug - the reader returns nothing, and the file that produced
+  nothing is the last place anybody looks - so this asserts what a reader gets
+  back rather than what was written.
+
+  Page sizes either side of the line count are parametrised deliberately: one
+  page exactly, and one more page than there are lines to fill it, are where an
+  off-by-one in the computed numbering hides.
+
 ## [0.4.220] - 2026-08-13
 
 ### Added

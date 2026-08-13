@@ -14,8 +14,14 @@ reads a real one, and the generator feeds it a world built from a seed.
 from __future__ import annotations
 
 
-def build_pdf(lines: list[str]) -> bytes:
-    """A valid single-page PDF containing `lines`.
+def build_pdf(lines: list[str], *, per_page: int = 0) -> bytes:
+    """A valid PDF containing `lines`, on one page or several.
+
+    `per_page` splits the lines across pages; the default keeps everything on
+    one, which is what every existing caller wants. Multi-page exists because
+    the faults that broke real parsers live at page boundaries - a statement
+    whose sections restart their numbering, a total repeated as a carried
+    figure on the next page - and none of them can be generated on one page.
 
     Offsets are computed rather than guessed, because a PDF without a correct
     xref is not a PDF.
@@ -34,19 +40,37 @@ def build_pdf(lines: list[str]) -> bytes:
     one column. That is a real constraint on which issuer a generated statement
     can imitate, not an oversight.
     """
-    drawn = "\n".join(
-        f"BT /F1 12 Tf 50 {700 - index * 20} Td ({line}) Tj ET"
-        for index, line in enumerate(lines)
+    pages = (
+        [lines[at : at + per_page] for at in range(0, len(lines), per_page)]
+        if per_page and lines
+        else [lines]
     )
-    stream = drawn.encode("latin-1")
+
+    # Object numbering: 1 catalogue, 2 pages, then a page and a content stream
+    # per page, then the font last. Computed rather than written out, because a
+    # multi-page file whose Kids array disagrees with its objects is a file no
+    # reader will open, and the single-page version could hard-code them.
+    font_number = 3 + 2 * len(pages)
+    kids = b" ".join(b"%d 0 R" % (3 + 2 * index) for index in range(len(pages)))
     objects = [
         b"<</Type/Catalog/Pages 2 0 R>>",
-        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R"
-        b"/Resources<</Font<</F1 5 0 R>>>>>>",
-        b"<</Length %d>>stream\n%s\nendstream" % (len(stream), stream),
-        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+        b"<</Type/Pages/Kids[%s]/Count %d>>" % (kids, len(pages)),
     ]
+    for index, page in enumerate(pages):
+        drawn = "\n".join(
+            f"BT /F1 12 Tf 50 {700 - row * 20} Td ({line}) Tj ET"
+            for row, line in enumerate(page)
+        )
+        stream = drawn.encode("latin-1")
+        objects.append(
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents %d 0 R"
+            b"/Resources<</Font<</F1 %d 0 R>>>>>>" % (4 + 2 * index, font_number)
+        )
+        objects.append(
+            b"<</Length %d>>stream\n%s\nendstream" % (len(stream), stream)
+        )
+    objects.append(b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>")
+
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
