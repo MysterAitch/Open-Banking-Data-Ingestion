@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.214] - 2026-08-13
+
+### Added
+- Generator stage 2: PDF statements, and with them a credit card - the only
+  account in the corpus a feed cannot reach. Statements carry what exports do
+  not (the opening and closing position, the credit limit), and until now the
+  corpus had no artefact of that kind at all.
+
+  The card format is CHOSEN, not arbitrary. It is line-oriented, so the PDF
+  writer's one-text-run-per-line model can render it; a column-positional
+  issuer decides debit from credit by which column a number sits in and could
+  not be rendered at all. That is a property of the writer and is now written
+  down beside it. The card also states balances as amounts OWED - the negation
+  of the house convention - so the corpus exercises a sign inversion that no
+  same-signed account would.
+
+  The balances are arithmetic rather than decoration: each statement opens
+  where the last closed, and the payment clears the PREVIOUS month rather than
+  the current one, so the balances do not collapse to zero every month. Both
+  properties are asserted.
+
+- `synthetic_pdf.py`: the PDF writer, moved from the test tree where it had six
+  callers, because a module under `src` cannot import from `tests` and two PDF
+  writers would drift. `test_statement_shape` re-exports it, so the move cost
+  one line rather than six edits.
+
+- `World.csv_accounts` and `csv_events`. Not every account has a feed, and code
+  walking "every account" to open a CSV was looking for a file the generator
+  deliberately never writes. The distinction is real rather than a quirk: a
+  household routinely has an account whose only route in is a PDF.
+
+### Fixed
+- A claim I had made and not checked: that stage 2 would exercise the balance
+  walk, on the reasoning that statements carry balances and CSVs do not.
+  Measured against a generated statement, the preview still reports "balance
+  walk n/a - no running-balance column". Reading the check rather than assuming
+  it: it needs STRUCTURAL rows each carrying a per-row balance, and the
+  structural read is unavailable for PDFs entirely - so the walk is unreachable
+  by any PDF, and opening and closing balances do not feed it. Of the four
+  checks on that panel, only "dates" fires for a PDF. The route to the balance
+  walk is a CSV carrying a balance column, which is queued.
+
 ## [0.4.213] - 2026-08-13
 
 ### Fixed

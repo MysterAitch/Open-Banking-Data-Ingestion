@@ -18,6 +18,7 @@ defect found here is worth nothing if the corpus cannot be rebuilt.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections import Counter
 from pathlib import Path
@@ -91,7 +92,12 @@ class TestTheGeneratedWorld:
             ambiguity["standing_order"]["instalments"]
             + ambiguity["duplicate_report"]["copies"]
         )
-        assert manifest["totals"]["events"] == monthly + planted
+        # And the card, which no CSV reports: four spends a month, plus a
+        # payment in every month after the first, since the first has nothing
+        # yet to clear.
+        card = sum(1 for event in world.events if event.account == "synthetic-card")
+        assert card == 6 * 4 + 5
+        assert manifest["totals"]["events"] == monthly + planted + card
         assert manifest["totals"]["transfers"] == 6
         assert planted > 3, "no ambiguity planted, so the review queue asserts nothing"
 
@@ -134,11 +140,14 @@ class TestTheGeneratedWorld:
 class TestWhatTheApplicationDerivesFromIt:
     def _import(self, store_path, directory, world) -> None:
         """Every statement through the ordinary import path."""
-        for account in world.accounts:
+        # The CSV accounts only. The card is reached by statement alone, which
+        # is what it exists to exercise, so walking every account and opening a
+        # .csv would look for a file the generator deliberately never writes.
+        for account in world.csv_accounts:
             land(store_path, directory / f"{account}.csv", account)
 
     def test_EveryPlantedEvent_ArrivesExactlyOnce(self, corpus, tmp_path):
-        directory, world, manifest = corpus
+        directory, world, _manifest = corpus
         store_path = tmp_path / "store.sqlite3"
 
         self._import(store_path, directory, world)
@@ -146,11 +155,13 @@ class TestWhatTheApplicationDerivesFromIt:
         with Store(store_path) as store:
             derived = store.all_transactions()
 
-        assert len(derived) == manifest["totals"]["events"], (
-            f"planted {manifest['totals']['events']} events and derived "
+        # The CSV corpus only: this imports the exports, and the card arrives
+        # by statement in TestTheGeneratedStatements instead.
+        assert len(derived) == len(world.csv_events), (
+            f"planted {len(world.csv_events)} events reachable by CSV and derived "
             f"{len(derived)} (seed {SEED})"
         )
-        planted = {(e.account, e.when, e.amount_minor) for e in world.events}
+        planted = {(e.account, e.when, e.amount_minor) for e in world.csv_events}
         arrived = {
             (row.account_id, row.value_date.isoformat(), row.amount_minor)
             for row in derived
@@ -176,7 +187,7 @@ class TestWhatTheApplicationDerivesFromIt:
         """
         from obdi.rebuild import rebuild_from_raw
 
-        directory, world, manifest = corpus
+        directory, world, _manifest = corpus
         store_path = tmp_path / "store.sqlite3"
         self._import(store_path, directory, world)
 
@@ -185,14 +196,14 @@ class TestWhatTheApplicationDerivesFromIt:
             report = rebuild_from_raw(store)
             after = len(store.all_transactions())
 
-        assert before == manifest["totals"]["events"], (
+        assert before == len(world.csv_events), (
             f"the corpus did not land before the rebuild was even tried "
             f"(seed {SEED})"
         )
-        assert report.artefacts_replayed == len(world.accounts), (
+        assert report.artefacts_replayed == len(world.csv_accounts), (
             f"the rebuild replayed {report.artefacts_replayed} artefact(s) from a "
-            f"store built by importing {len(world.accounts)} - the raw layer is "
-            f"not being written (seed {SEED})"
+            f"store built by importing {len(world.csv_accounts)} - the raw layer "
+            f"is not being written (seed {SEED})"
         )
         assert after == before, (
             f"a rebuild took the store from {before} rows to {after}. "
@@ -209,7 +220,7 @@ class TestWhatTheApplicationDerivesFromIt:
         """The property every real import depends on, checkable here because the
         right answer is known: the same statement arriving again is the same
         payments, not more of them."""
-        directory, world, manifest = corpus
+        directory, world, _manifest = corpus
         store_path = tmp_path / "store.sqlite3"
 
         self._import(store_path, directory, world)
@@ -217,9 +228,9 @@ class TestWhatTheApplicationDerivesFromIt:
 
         with Store(store_path) as store:
             derived = store.all_transactions()
-        assert len(derived) == manifest["totals"]["events"], (
+        assert len(derived) == len(world.csv_events), (
             f"a second import of the same corpus produced {len(derived)} rows from "
-            f"{manifest['totals']['events']} events (seed {SEED})"
+            f"{len(world.csv_events)} events (seed {SEED})"
         )
 
     def test_TheTransfersMoney_IsNotCountedAsSpending(self, corpus, tmp_path):
@@ -257,7 +268,10 @@ class TestThePatternFeaturesAgainstKnownAnswers:
     """
 
     def _imported(self, store_path, directory, world):
-        for account in world.accounts:
+        # The CSV accounts only. The card is reached by statement alone, which
+        # is what it exists to exercise, so walking every account and opening a
+        # .csv would look for a file the generator deliberately never writes.
+        for account in world.csv_accounts:
             land(store_path, directory / f"{account}.csv", account)
 
     def test_TransferPairing_FindsExactlyThePairsThatWerePlanted(
@@ -470,6 +484,99 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         # matters: a gap another source can see is a fetch that failed, and one
         # nobody can see is a month to go and ask the bank for.
         assert reported[0].seen_in == ()
+
+
+class TestTheGeneratedStatements:
+    """PDFs, because a statement carries what no export does.
+
+    The CSV accounts exercise matching and coverage. They cannot exercise the
+    things a statement exists for - the opening and closing position, the
+    credit limit - and they cannot exercise the balance walk at all: against
+    every CSV here that check reports "n/a, no running-balance column", which is
+    honest and is not coverage.
+    """
+
+    def test_EveryStatement_StatesBalancesThatWalk(self, corpus):
+        """The check no CSV in this corpus can feed.
+
+        A statement corroborates ITSELF: opening, plus everything that moved,
+        equals closing. Nothing outside the file is needed, which is exactly
+        what makes it worth having - a file that cannot be checked against
+        anything else can still be checked against its own arithmetic.
+        """
+        from obdi.parsers.santander_pdf import read_statement
+        from obdi.statement_shape import pdf_lines
+
+        directory, _world, manifest = corpus
+        statements = manifest["statements"]
+        assert len(statements) == 6, (
+            f"expected a statement a month, the manifest describes "
+            f"{len(statements)} (seed {SEED})"
+        )
+
+        for planted in statements:
+            reading = read_statement(
+                [str(line) for line in pdf_lines(directory / planted["name"])]
+            )
+            assert reading.transactions, (
+                f"{planted['name']} produced no transactions - it did not parse "
+                f"(seed {SEED})"
+            )
+            # Stated as OWED and held as the negative position it is, which is
+            # the inversion a reader has to undo and the reason a card was
+            # chosen for this rather than another current account.
+            assert reading.opening_balance_minor == -planted["opening_owed_minor"]
+            assert reading.closing_balance_minor == -planted["closing_owed_minor"]
+
+            moved = sum(row.amount_minor for row in reading.transactions)
+            assert reading.opening_balance_minor + moved == reading.closing_balance_minor, (
+                f"{planted['name']} does not walk: opens "
+                f"{reading.opening_balance_minor}, moves {moved}, closes "
+                f"{reading.closing_balance_minor} (seed {SEED})"
+            )
+
+    def test_ABalanceCarriedForward_IsWhereTheLastStatementClosed(self, corpus):
+        """Consecutive statements agree with each other, which a single one
+        cannot show. A month that opens somewhere other than where the last
+        closed is the shape of a missing statement."""
+        _directory, _world, manifest = corpus
+        statements = manifest["statements"]
+
+        for earlier, later in itertools.pairwise(statements):
+            assert later["opening_owed_minor"] == earlier["closing_owed_minor"], (
+                f"{later['month']} opens at {later['opening_owed_minor']} but "
+                f"{earlier['month']} closed at {earlier['closing_owed_minor']} "
+                f"(seed {SEED})"
+            )
+        assert any(s["closing_owed_minor"] for s in statements), (
+            f"every statement closes at zero, so the walk is over a column of "
+            f"zeroes and proves nothing (seed {SEED})"
+        )
+
+    def test_TheCardStatements_ImportThroughTheOrdinaryDoor(self, corpus, tmp_path):
+        """The extraction path end to end, which only a PDF reaches."""
+        directory, world, manifest = corpus
+        store_path = tmp_path / "store.sqlite3"
+        for planted in manifest["statements"]:
+            land(store_path, directory / planted["name"], "synthetic-card")
+
+        with Store(store_path) as store:
+            derived = [
+                row for row in store.all_transactions()
+                if row.account_id == "synthetic-card"
+            ]
+
+        planted_rows = [e for e in world.events if e.account == "synthetic-card"]
+        assert len(derived) == len(planted_rows), (
+            f"planted {len(planted_rows)} card rows and derived {len(derived)} "
+            f"(seed {SEED})"
+        )
+        # A spend leaves the account and a payment arrives, in the house
+        # convention - the statement prints both as positive numbers and marks
+        # only one, so getting this wrong inverts the whole account.
+        assert sum(1 for row in derived if row.amount_minor > 0) == sum(
+            1 for event in planted_rows if event.amount_minor > 0
+        )
 
 
 class TestTheAdversarialDeliveries:

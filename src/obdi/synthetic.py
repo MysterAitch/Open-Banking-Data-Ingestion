@@ -51,6 +51,8 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
+from .synthetic_pdf import build_pdf
+
 #: Merchants a household actually repeats, with the shapes their descriptors
 #: take. The tail is what makes a normaliser earn its keep: a reference number
 #: that changes every month, a card suffix, a location.
@@ -68,6 +70,17 @@ _TOWNS = ["LONDON", "READING", "BRISTOL", "LEEDS"]
 #: the only shape the review queue can be judged against. Its amount is chosen to
 #: sit outside every drifting commitment's range so the two cannot interfere.
 _STANDING_ORDER = (-2500, "GYM MEMBERSHIP SO REF 4471")
+
+#: What a household puts on a card, as a statement would print it. The trailing
+#: country code is what a real card statement carries and is also a trap the
+#: parser documents: the token before the amount is either a credit marker or a
+#: country code, and that single distinction decides the sign of the row.
+_CARD_SPEND = [
+    ("Coffee Republic", "COFFEE REPUBLIC {town} GB", -385),
+    ("Trainline", "TRAINLINE.COM {ref} GB", -2340),
+    ("Waterstones", "WATERSTONES {ref} {town} GB", -1899),
+    ("Amazon", "AMAZON.CO.UK {ref} LUXEMBOURG LU", -4750),
+]
 #: A one-off reported twice in the same statement, at an amount nothing else uses.
 _DUPLICATE_REPORT = (-6789, "CARPET WORLD 8823 READING GB")
 
@@ -99,6 +112,25 @@ class World:
     seed: int
     accounts: list[str]
     events: list[PlantedEvent] = field(default_factory=list)
+
+    @property
+    def csv_accounts(self) -> list[str]:
+        """Accounts a FEED reports, which is not all of them.
+
+        The card is reached only by statement - that is the point of it, since
+        a statement carries balances and terms no export does. Anything walking
+        "every account" and opening a CSV wants this list, and the distinction
+        is real rather than a quirk of the generator: a household routinely has
+        an account whose only route in is a PDF.
+        """
+        return [account for account in self.accounts if account != "synthetic-card"]
+
+    @property
+    def csv_events(self) -> list[PlantedEvent]:
+        """Events reachable through a CSV, for assertions about that corpus."""
+        return [
+            event for event in self.events if event.account in set(self.csv_accounts)
+        ]
 
     @property
     def transfer_pairs(self) -> list[tuple[str, str]]:
@@ -192,8 +224,76 @@ def build_world(seed: int, months: int = 6) -> World:
             )
         )
 
+    _plant_card(world, rng, months)
     _plant_ambiguity(world, rng, months)
     return world
+
+
+def _plant_card(world: World, rng: random.Random, months: int) -> None:
+    """A credit card, because a statement carries what no feed does.
+
+    The CSV accounts above exercise matching and coverage. They cannot exercise
+    the things a STATEMENT is for and an export is not - the opening and
+    closing balances, the credit limit, the interest rate - and they cannot
+    exercise the balance walk, which is the check that asks whether a file
+    corroborates ITSELF. Against the CSV corpus that check reports "n/a: no
+    running-balance column" every time, which is honest and is not coverage.
+
+    A card is chosen over another current account for two reasons. Its
+    statement format is line-oriented, so it can be rendered by a writer that
+    puts one text run per line - a column-positional issuer could not be, and
+    that is a property of the renderer rather than a preference. And its
+    statement states balances as amounts OWED, the negation of the house
+    convention, so the corpus exercises a sign inversion that a same-signed
+    account never would.
+
+    Amounts here are in the HOUSE convention - a spend is negative. The
+    statement writer negates them back, which is the direction a real reader
+    has to get right.
+    """
+    world.accounts.append("synthetic-card")
+    for index in range(months):
+        year = 2026 - (1 if index >= 8 else 0)
+        month = ((index + 1) % 12) or 12
+        for merchant, template, base in _CARD_SPEND:
+            day = rng.randint(2, 24)
+            world.events.append(
+                PlantedEvent(
+                    account="synthetic-card",
+                    when=date(year, month, day).isoformat(),
+                    amount_minor=base - rng.randint(0, 400),
+                    description=template.format(
+                        ref=rng.randint(10000, 99999), town=rng.choice(_TOWNS)
+                    ),
+                    merchant=merchant,
+                    kind="card-spend",
+                )
+            )
+        # The payment clears what was owed at the LAST statement, not what has
+        # been spent since - which is how a card actually works and is what
+        # leaves a non-zero balance to carry forward. Clearing the current
+        # month instead would close every statement at zero, and a balance walk
+        # over a column of zeroes proves nothing about the walk.
+        if index:
+            previous = f"{year:04d}-{month - 1:02d}" if month > 1 else f"{year - 1}-12"
+            world.events.append(
+                PlantedEvent(
+                    account="synthetic-card",
+                    when=date(year, month, 26).isoformat(),
+                    amount_minor=abs(
+                        sum(
+                            event.amount_minor
+                            for event in world.events
+                            if event.account == "synthetic-card"
+                            and event.when[:7] == previous
+                            and event.kind == "card-spend"
+                        )
+                    ),
+                    description="PAYMENT RECEIVED - THANK YOU",
+                    merchant="Card payment",
+                    kind="card-payment",
+                )
+            )
 
 
 def _plant_ambiguity(world: World, rng: random.Random, months: int) -> None:
@@ -298,6 +398,77 @@ def _csv_of(events: Iterable[PlantedEvent]) -> str:
             ]
         )
     return buffer.getvalue()
+
+
+def _ordinal(day: int) -> str:
+    """11th, 12th and 13th are the ones a naive rule gets wrong."""
+    if 11 <= day <= 13:
+        return f"{day}th"
+    return f"{day}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th') }".replace(" ", "")
+
+
+def _pounds(minor: int) -> str:
+    return f"{abs(minor) / 100:,.2f}"
+
+
+def write_card_statements(world: World, out_dir: Path) -> list[dict[str, object]]:
+    """One PDF statement per month, in a line-oriented card issuer's layout.
+
+    STATED AS OWED, which is the negation of the house convention and the
+    whole reason this is worth generating: a spend prints as a positive number
+    with a country code after the description, a payment prints positive with
+    CR, and a reader that gets that single distinction wrong inverts the
+    account. The events carry house signs; this negates them back, which is the
+    direction a real parser has to undo.
+
+    The balances are ARITHMETIC, not decoration. Each statement opens where the
+    last closed and closes at opening plus the month's movements, so the file
+    corroborates itself - which is what the balance walk checks and what no CSV
+    in this corpus can offer, since none carries a running balance.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    events = sorted(
+        (e for e in world.events if e.account == "synthetic-card"), key=lambda e: e.when
+    )
+    statements: list[dict[str, object]] = []
+    owed = 0
+    for month in sorted({event.when[:7] for event in events}):
+        within = [event for event in events if event.when[:7] == month]
+        opening = owed
+        lines = [
+            "Santander UK plc. Registered Office: 2 Triton Square",
+            f"Statement Date: {_ordinal(28)} {date.fromisoformat(month + '-01').strftime('%B')} "
+            f"{month[:4]}      Page No: 1 / 1",
+            "Account credit limit:            3,000.00",
+            f"Balance brought forward from previous statement          {_pounds(opening)}",
+        ]
+        for event in within:
+            when = date.fromisoformat(event.when)
+            marker = "CR " if event.amount_minor > 0 else ""
+            lines.append(
+                f"{_ordinal(when.day)} {when.strftime('%b')}    "
+                f"{event.description}    {marker}{_pounds(event.amount_minor)}"
+            )
+            # Owed rises with a spend and falls with a payment, which is the
+            # opposite of the house sign - hence the subtraction.
+            owed -= event.amount_minor
+        lines.append(f"Your new balance:                                        {_pounds(owed)}")
+
+        name = f"synthetic-card-{month}.pdf"
+        (out_dir / name).write_bytes(build_pdf(lines))
+        statements.append(
+            {
+                "name": name,
+                "account": "synthetic-card",
+                "month": month,
+                "opening_owed_minor": opening,
+                "closing_owed_minor": owed,
+                "rows": len(within),
+            }
+        )
+    return statements
 
 
 @dataclass(frozen=True)
@@ -536,9 +707,16 @@ def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
 
     files = {}
     for account in world.accounts:
+        # The card is a PDF issuer, not a CSV one. Writing it both ways would
+        # make the corpus claim a feed exists where the whole point is that it
+        # does not - a statement is the only route to that account.
+        if account == "synthetic-card":
+            continue
         name = f"{account}.csv"
         (out_dir / name).write_text(_statement_csv(world, account), encoding="utf-8")
         files[account] = name
+
+    statements = write_card_statements(world, out_dir)
 
     deliveries = write_deliveries(world, out_dir)
 
@@ -551,6 +729,11 @@ def write_corpus(world: World, out_dir: Path) -> dict[str, object]:
         ),
         "accounts": world.accounts,
         "files": files,
+        # PDF statements, with the balances they state. A statement carries
+        # what no export does - the opening and closing position, the credit
+        # limit - so these are the only artefacts here that can corroborate
+        # themselves, and the only ones the balance walk can read.
+        "statements": statements,
         # The clean statements above are what a well-behaved bank sends. These
         # are the same rows arriving badly, and a test opts into them - a corpus
         # that is always damaged can only ever measure damage.

@@ -17,48 +17,11 @@ import pytest
 
 from obdi.statement_shape import mask_line, pdf_lines, shape_report
 
-
-def build_pdf(lines: list[str]) -> bytes:
-    """A valid single-page PDF containing `lines` - entirely invented
-    figures, so the end-to-end path is exercised with no real statement
-    anywhere in the repository. Offsets are computed rather than guessed,
-    because a PDF without a correct xref is not a PDF.
-
-    Objects are delimited by newlines. Without them `endstream` runs
-    straight into `endobj`, a strict reader lexes the pair as one token,
-    never closes the stream, and reports a page with no content at all.
-    That is a malformed file rather than a quirk to work around - and a
-    lenient reader accepting it is what let this fixture pass for valid.
-    A fixture only one reader accepts tests that reader's tolerance."""
-    drawn = "\n".join(
-        f"BT /F1 12 Tf 50 {700 - index * 20} Td ({line}) Tj ET"
-        for index, line in enumerate(lines)
-    )
-    stream = drawn.encode("latin-1")
-    objects = [
-        b"<</Type/Catalog/Pages 2 0 R>>",
-        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R"
-        b"/Resources<</Font<</F1 5 0 R>>>>>>",
-        b"<</Length %d>>stream\n%s\nendstream" % (len(stream), stream),
-        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
-    ]
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = []
-    for number, body in enumerate(objects, start=1):
-        offsets.append(len(out))
-        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
-    xref_at = len(out)
-    out += b"xref\n0 %d\n" % (len(objects) + 1)
-    out += b"0000000000 65535 f \n"
-    for offset in offsets:
-        out += b"%010d 00000 n \n" % offset
-    out += b"trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % (
-        len(objects) + 1,
-        xref_at,
-    )
-    return bytes(out)
-
+# Re-exported where six test modules already import it from. The
+# implementation moved to src on 2026-08-13 because the synthetic world
+# generator needs it and a module under src cannot import from tests; keeping
+# the name here means that move cost one line rather than six edits.
+from obdi.synthetic_pdf import build_pdf
 
 FAKE_PDF = build_pdf(
     [
