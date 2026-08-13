@@ -40,6 +40,12 @@ TESTS = pathlib.Path(__file__).parent
 JUSTIFIED = {
     ("test_artefact_origins.py", "raw_artefacts"): "upgrade tests: the pre-upgrade "
     "duplicate shape cannot be produced by the current writer",
+    ("test_sighting_observed_date.py", "transaction_sources"): "a sighting table with "
+    "no observed_date column, which is exactly what the CURRENT writer cannot make - "
+    "the door produces the new shape, so recording a sighting through it would leave "
+    "the migration nothing to do. Every other test builds through the schema in force, "
+    "so none of them reaches this migration at all, and a migration reachable only on "
+    "a real store at upgrade time is the kind that fails there and nowhere else",
     ("test_actual_push.py", "transactions"): "two rows sharing one imported id "
     "(content key plus occurrence), which the doors prevent twice over - measured "
     "2026-08-12, not reasoned. Within one account the reconciler numbers a repeated "

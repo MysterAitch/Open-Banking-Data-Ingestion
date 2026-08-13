@@ -238,6 +238,15 @@ CREATE TABLE IF NOT EXISTS transaction_sources (
     -- transaction row's own digest is last-writer-wins and cannot. This
     -- traversal is what confidence in a derived record rests on.
     artefact_digest TEXT NOT NULL DEFAULT '',
+    -- The date THIS source gave the payment, which is not the date on the
+    -- transaction row: that one is last-writer-wins after supersession, for
+    -- exactly the reason the digest above is. Coverage asks what each source
+    -- DELIVERED, and answering from the merged date credits a source with
+    -- months it never reported - measured against a corpus with a month
+    -- deliberately withheld, where it masked the gap entirely.
+    -- Empty means the sighting predates this column, and the reader falls back
+    -- to the merged date rather than inventing one.
+    observed_date TEXT NOT NULL DEFAULT '',
     first_seen_at TEXT NOT NULL,
     PRIMARY KEY (entity_id, source, artefact_digest)
 );
@@ -549,8 +558,8 @@ _UPSERT_TRANSACTION_SQL = """
 
 _RECORD_SOURCE_SQL = """
     INSERT INTO transaction_sources
-        (entity_id, source, source_id, artefact_digest, first_seen_at)
-    VALUES (?,?,?,?,?)
+        (entity_id, source, source_id, artefact_digest, observed_date, first_seen_at)
+    VALUES (?,?,?,?,?,?)
     ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
 """
 
@@ -648,6 +657,7 @@ class Store:
         self._migrate_raw_artefact_key()
         self._migrate_transaction_tier_and_occurrence()
         self._migrate_sighting_artefact_digest()
+        self._migrate_sighting_observed_date()
         self._migrate_valuation_income_columns()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
@@ -758,6 +768,31 @@ class Store:
             return
         self.connection.executescript(
             _rebuild_table_script("transaction_sources", set(columns))
+        )
+
+    def _migrate_sighting_observed_date(self) -> None:
+        """Give sightings the date their own source reported.
+
+        Without this the sighting INSERT names a column that is not there, so
+        the first import after an upgrade fails at the write door - the same
+        failure the artefact-digest migration above exists to prevent, for the
+        same reason.
+
+        Existing rows keep an empty date, and that is the honest value: their
+        sighting really was recorded before anyone kept the date it carried.
+        Readers fall back to the merged date for those, which is the old
+        behaviour, so an unmigrated history degrades to what it always did
+        rather than vanishing from the coverage report. Backfilling from the
+        raw artefact by digest is possible and deliberately not done here: it
+        re-parses every payload to improve a report, and the rows that matter
+        are the ones arriving from now on.
+        """
+        if "observed_date" in self._table_columns("transaction_sources"):
+            return
+        self.connection.executescript(
+            _rebuild_table_script(
+                "transaction_sources", set(self._table_columns("transaction_sources"))
+            )
         )
 
     def _migrate_valuation_income_columns(self) -> None:
@@ -2296,6 +2331,11 @@ class Store:
             transaction.source,
             transaction.source_id,
             transaction.artefact_digest,
+            # THIS observation's date, captured before any merge can overwrite
+            # it on the transaction row. Recorded here because coverage asks
+            # what each source delivered, and the row's own date answers a
+            # different question once a second source has superseded it.
+            transaction.value_date.isoformat(),
             now,
         )
         if self._batch is not None:
@@ -2441,20 +2481,45 @@ class Store:
         disagreement, found twice by review because the first fix wired only
         the write side.
 
+        EACH SIGHTING ALSO CARRIES ITS OWN DATE, for the same reason it carries
+        its own source: the stored `value_date` is last-writer-wins too, so a
+        payment one source dated in March and another dated a day later counts
+        towards the FIRST source's April. That credits a source with months it
+        never reported, and it masked a real gap - measured against a corpus
+        with a month deliberately withheld, where the report's "go and fetch
+        this file" section never appeared.
+
         Rows with no sighting records (data predating the provenance table)
         fall back to their stored source, so old stores degrade to the previous
-        behaviour rather than vanishing from the report.
+        behaviour rather than vanishing from the report. Sightings recorded
+        before the date column fall back the same way, for the same reason.
         """
-        sightings: dict[str, list[str]] = {}
+        sightings: dict[str, dict[str, str]] = {}
         for row in self.connection.execute(
-            "SELECT DISTINCT entity_id, source FROM transaction_sources ORDER BY source"
+            "SELECT entity_id, source, MIN(observed_date) AS observed_date "
+            "FROM transaction_sources GROUP BY entity_id, source ORDER BY source"
         ):
-            sightings.setdefault(row["entity_id"], []).append(row["source"])
+            sightings.setdefault(row["entity_id"], {})[row["source"]] = (
+                row["observed_date"] or ""
+            )
 
         expanded = []
         for transaction in self.all_transactions():
-            for source in sightings.get(transaction.entity_id) or [transaction.source]:
-                expanded.append(replace(transaction, source=source))
+            seen = sightings.get(transaction.entity_id) or {
+                transaction.source: transaction.value_date.isoformat()
+            }
+            for source, observed in seen.items():
+                expanded.append(
+                    replace(
+                        transaction,
+                        source=source,
+                        value_date=(
+                            date.fromisoformat(observed)
+                            if observed
+                            else transaction.value_date
+                        ),
+                    )
+                )
         return expanded
 
     def upsert_transaction(

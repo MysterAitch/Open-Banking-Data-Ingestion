@@ -26,6 +26,63 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.212] - 2026-08-13
+
+### Fixed
+- A source was credited with months it never reported, which MASKED REAL GAPS.
+  The per-sighting view carried the stored row's date, and that date is
+  last-writer-wins after a merge - so a payment the first source saw in March,
+  dated a day later by the second, counted towards the first source's April.
+
+  The consequence was not cosmetic. Gap detection asks which months a source has
+  nothing for, so a hole could be filled on a source's behalf by a date it never
+  reported. Measured against a corpus with every April row withheld from one
+  source: the report's "another source has data for these months - download them
+  and import them" section never appeared for a gap that was really there.
+
+  `transaction_sources` now records `observed_date` beside the source, the id
+  and the artefact digest - the date THAT source gave the payment. The reasoning
+  is the table's own: it exists because merged rows are last-writer-wins, which
+  is exactly what the date is, and it had simply been left out.
+
+  Sightings recorded before the column keep an empty date and readers fall back
+  to the merged date, so an unmigrated history degrades to the previous
+  behaviour rather than vanishing from the report. Backfilling from raw payloads
+  by digest is possible and deliberately not done: it re-parses every artefact
+  to improve a report, and the rows that matter arrive from now on.
+
+  This touches every cross-source reader at once - coverage, agreements,
+  transpositions, stale feeds - because all of them read dates from that view.
+  The full reasoning, including three rejected alternatives, is recorded in the
+  vault as "A sighting carries the date its source observed".
+
+### Added
+- `test_sighting_observed_date.py`: the upgrade path, which nothing else could
+  reach. Every other test builds a store through the schema in force, so none of
+  them exercises a migration at all - and a migration reachable only on a real
+  store at upgrade time is the kind that fails there and nowhere else.
+
+  Three cases: opening a store that predates the column adds it and keeps the
+  sighting it was repairing; the write door works afterwards, which is the
+  failure the migration exists to prevent (the INSERT names a column that is not
+  there, so the first import after an upgrade dies at the door); and a sighting
+  with no recorded date falls back to the merged date rather than vanishing from
+  the report or being given a date nobody observed.
+
+  Its fixture builds the old table with raw SQL and is declared in the
+  write-door register accordingly. That is the register's own stated exemption -
+  a shape the current writer cannot produce - and it is the whole reason the
+  fixture is worth having: recording a sighting through the door would produce
+  the new table and leave the migration nothing to do.
+
+### Changed
+- `test_ASourcesCoverageMonths_CanIncludeAMonthItNeverReported` pinned the old
+  behaviour and said in its failure message what to assert once this landed. It
+  now does exactly that, as
+  `test_AMonthOneSourceWithheld_IsReportedAsAFileToFetch`: the withheld month is
+  absent from the source that withheld it, present in the source that has it,
+  and reported as CONTRADICTED rather than as a quiet month.
+
 ## [0.4.211] - 2026-08-13
 
 ### Fixed

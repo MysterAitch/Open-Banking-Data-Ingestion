@@ -872,37 +872,35 @@ class TestTheReportAPersonActuallyReads:
         )
         assert "No disagreements" not in page
 
-    def test_ASourcesCoverageMonths_CanIncludeAMonthItNeverReported(
+    def test_AMonthOneSourceWithheld_IsReportedAsAFileToFetch(
         self, corpus, tmp_path
     ):
-        """A LIMIT, pinned because it is invisible and it weakens gap detection.
+        """The case a coverage report exists for, and it was masked until
+        2026-08-13.
 
-        The coverage page is built from the per-sighting view, which lists each
-        payment once per source that observed it. But a sighting carries the
-        STORED row's date, and after a merge the stored date is whichever source
-        supplied the current facts. So a payment one source saw in March, dated
-        a day later by another, counts towards the FIRST source's April.
+        The page is built from the per-sighting view, which lists each payment
+        once per source that observed it. That view used to carry the STORED
+        date, which is last-writer-wins after a merge - so a payment the first
+        source saw in March, dated a day later by the second, counted towards
+        the FIRST source's April. A source was credited with months it never
+        reported, and a real hole disappeared.
 
-        The consequence is not cosmetic. Gap detection asks which months a
-        source has nothing for, and a month can be filled on its behalf by a
-        date it never reported - so a real hole can be masked. Measured here:
-        every April row is withheld from the first source, and its coverage
-        months still include April.
-
-        Recorded as a limit rather than a fix because which date a sighting
-        should carry is a design question, not an oversight - the merged date is
-        arguably the payment's true date, and the answer decides what the
-        coverage page means. The test asserts the CURRENT behaviour so a change
-        to it is deliberate.
+        Now each sighting carries its own observed date, so the withheld month
+        is absent from the source that withheld it, present in the source that
+        has it, and reported as CONTRADICTED - which is what turns "a month is
+        empty" into "go and fetch this file". The distinction is the whole
+        point: a month every source agrees is empty is most likely the truth.
         """
+        from obdi.coverage import gaps
+        from obdi.ingest import reconcile_batch
+        from obdi.parsers.uk_banks import detect
+
         directory, _world, manifest = corpus
         second = next(
             delivery
             for delivery in manifest["deliveries"]
             if "second door" in delivery["fault"]
         )
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
 
         store_path = tmp_path / "store.sqlite3"
         # A hole in the MIDDLE of the first source's period, not a short tail.
@@ -935,18 +933,33 @@ class TestTheReportAPersonActuallyReads:
             f"only {set(months_seen)} sighted, so nothing is being tested "
             f"(seed {SEED})"
         )
-        assert withheld not in {
-            row.value_date.strftime("%Y-%m") for row in kept
-        }, f"{withheld} was not actually withheld (seed {SEED})"
 
-        # The behaviour, stated as it is. If this ever fails because the month
-        # is now absent, the per-sighting view began carrying each source's OWN
-        # observed date - which is an improvement, and this test should become
-        # an assertion that a withheld month shows up as a contradicted gap.
-        assert withheld in months_seen["starling-csv"], (
-            f"starling-csv no longer claims {withheld}, a month it never "
-            f"reported. If that is deliberate, this test should now assert the "
-            f"gap is DETECTED rather than masked (seed {SEED})"
+        # A source is credited only with the months it actually reported. This
+        # asserted the OPPOSITE until 2026-08-13, when sightings began carrying
+        # their own observed date: before that a payment the first source saw in
+        # March, dated a day later by the second, counted towards the first
+        # source's April, and the gap below was masked entirely.
+        assert withheld not in months_seen["starling-csv"], (
+            f"starling-csv is credited with {withheld}, a month it never "
+            f"reported - so its sightings are carrying the merged date again "
+            f"(seed {SEED})"
+        )
+        assert withheld in months_seen["monzo-csv"], (
+            f"the second source should hold {withheld}, or there is no "
+            f"contradiction to find (seed {SEED})"
+        )
+
+        # And the gap is now REPORTED, with the source that contradicts it
+        # named - which is what turns "a month is empty" into "fetch this file".
+        contradicted = [gap for gap in gaps(held) if gap.month == withheld]
+        assert contradicted, (
+            f"{withheld} is missing from one source and present in another, and "
+            f"no gap was reported: {[(g.source, g.month) for g in gaps(held)]} "
+            f"(seed {SEED})"
+        )
+        assert any(gap.contradicted for gap in contradicted), (
+            f"the gap for {withheld} was reported as unwitnessed, so it reads as "
+            f"a quiet month rather than a file to fetch (seed {SEED})"
         )
 
 
