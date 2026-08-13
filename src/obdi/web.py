@@ -3706,6 +3706,7 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
             "<h2>Computed shape</h2>"
             + _shape_html(summary)
+            + self._layout_offer(artefact_id, str(detail.get("media_type", "")))
             + (
                 '<form method="post" action="/replay-artefact">'
                 f'<input type="hidden" name="id" value="{artefact_id}">'
@@ -3737,6 +3738,29 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             "View payload</a></p>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
+
+    def _layout_offer(self, artefact_id: int, media_type: str) -> str:
+        """The question the computed-shape panel above cannot answer.
+
+        That panel describes PARSED RECORDS, and `rawview.summarise` returns
+        no fields for anything that is not JSON - so every kept PDF statement
+        reads "0 item(s)" beside its size, which looks like a fault and is
+        really a different question at a different address. Drawn only for a
+        PDF because the reader answers "could not be read as a PDF" for
+        anything else, and a link whose only outcome is that message is worse
+        than no link.
+        """
+        if media_type != "application/pdf" or self.bound_config.statement_payload is None:
+            return ""
+        return (
+            "<h2>Statement layout</h2>"
+            "<p>A statement's records are not in its bytes the way an export's "
+            "are, so the panel above has nothing to count. Its LAYOUT can be "
+            "read instead - column order, header wording, date format - with "
+            "every value masked.</p>"
+            f'<p><a class="button" href="/statement-shape?artefact={artefact_id}">'
+            "Read this statement's layout (values masked)</a></p>"
+        )
 
     def _refile_artefact(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.refile_artefact

@@ -2482,6 +2482,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             "origin": row["origin"],
             "origins": origins,
             "request_meta": _json.loads(row["request_meta"]) if row["request_meta"] else {},
+            # Carried as well as summarised, because `summarise` reports
+            # fields only for JSON: the media type is the one fact on this
+            # detail that can tell a page a document has a LAYOUT worth
+            # offering rather than records worth counting.
+            "media_type": row["media_type"],
             "summary": summarise(row["payload"], row["media_type"]),
         }
         if with_payload:

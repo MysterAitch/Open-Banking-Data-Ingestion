@@ -26,6 +26,32 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.224] - 2026-08-13
+
+### Added
+- **A kept statement's layout can be reached from the statement itself.** The
+  raw layer keeps a PDF's bytes precisely so a better parser can read them
+  later, but the only route to a statement's LAYOUT was the upload form - so
+  the person holding a dozen kept statements had to find the original files and
+  send them again, which is the one thing keeping the bytes was meant to make
+  unnecessary. The artefact page now offers `/statement-shape?artefact=N`,
+  masked, for anything held as a PDF.
+
+  The address itself already worked; nothing linked to it. What the artefact
+  page showed instead was its computed-shape panel reporting `0 item(s)` beside
+  a 160 KB statement, which reads as data loss and is really a category error:
+  that panel describes parsed records, and `rawview.summarise` returns fields
+  only for JSON, so every PDF in the store has always read as empty there. The
+  offer is drawn only for a PDF, because the reader answers "could not be read
+  as a PDF" for anything else and a link whose only outcome is that message is
+  worse than no link.
+
+  Masked only, and asserted as such: a link is a thing that gets followed by
+  something other than a person. Verified over HTTP against a store built by
+  the ordinary import door - the statement's page offers it, the CSV's page
+  does not, and the followed link shows masked figures with no payee in them.
+  The negative was proved by removing the media-type gate and watching it fail.
+
 ## [0.4.223] - 2026-08-13
 
 ### Fixed
