@@ -623,6 +623,61 @@ class TestTheGeneratedStatements:
                 f"{reading.closing_balance_minor} (seed {SEED})"
             )
 
+    def test_AWrappedDescriptor_LosesTheWholeRow_AndTheStatementSaysSo(
+        self, corpus
+    ):
+        """The quirk that breaks real parsers, and the evidence that catches it.
+
+        A long payee name occupies two lines on a real statement. Neither half
+        matches a transaction pattern on its own - the first has no amount, the
+        second has no date - so the row is not truncated, it DISAPPEARS. That is
+        the worst shape a parsing fault can take: the rows that remain look
+        perfectly reasonable, and nothing counts what was offered, because the
+        structural read that counts CSV rows is unavailable for PDFs.
+
+        THE FILE STILL CARRIES THE EVIDENCE. The statement states what it should
+        sum to, so a lost row breaks its own arithmetic - and this asserts both
+        halves, because the second is what makes the first fixable: the walk
+        holds for the intact statement and breaks for the wrapped one.
+
+        What obdi does NOT do is check that for a PDF. The balance walk consumes
+        a structural read that only CSV has, so this evidence sits unread. That
+        is a limit rather than a defect in this test, and it is pinned here so
+        it cannot quietly become untrue.
+        """
+        from obdi.parsers.santander_pdf import read_statement
+        from obdi.statement_shape import pdf_lines
+        from obdi.synthetic import _WRAPPED_STATEMENT
+
+        directory, _world, manifest = corpus
+
+        def reading(name: str):
+            return read_statement([str(line) for line in pdf_lines(directory / name)])
+
+        intact = reading(manifest["statements"][1]["name"])
+        wrapped = reading(_WRAPPED_STATEMENT)
+
+        assert len(wrapped.transactions) < len(intact.transactions), (
+            f"the wrapped statement parsed {len(wrapped.transactions)} rows "
+            f"against {len(intact.transactions)} intact - nothing was lost, so "
+            f"this asserts nothing (seed {SEED})"
+        )
+        # Lost rather than truncated: no row carries the head of the split
+        # descriptor with the amount attached to it.
+        assert not any(
+            row.description.endswith("SARL") for row in wrapped.transactions
+        ), "a half-descriptor was parsed as a transaction"
+
+        def walks(statement) -> bool:
+            moved = sum(row.amount_minor for row in statement.transactions)
+            return statement.opening_balance_minor + moved == statement.closing_balance_minor
+
+        assert walks(intact), f"the intact statement does not walk (seed {SEED})"
+        assert not walks(wrapped), (
+            f"a row vanished and the statement's own balances still reconcile, "
+            f"so the file carries no evidence of the loss (seed {SEED})"
+        )
+
     def test_ABalanceCarriedForward_IsWhereTheLastStatementClosed(self, corpus):
         """Consecutive statements agree with each other, which a single one
         cannot show. A month that opens somewhere other than where the last

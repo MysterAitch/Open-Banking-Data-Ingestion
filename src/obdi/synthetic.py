@@ -84,6 +84,11 @@ _CARD_SPEND = [
 #: A one-off reported twice in the same statement, at an amount nothing else uses.
 _DUPLICATE_REPORT = (-6789, "CARPET WORLD 8823 READING GB")
 
+#: A statement whose first transaction's descriptor wraps onto a second line -
+#: the quirk that breaks real parsers. Written once, from the second month's
+#: statement, and named here so the test and the writer agree on it.
+_WRAPPED_STATEMENT = "synthetic-card-wrapped.pdf"
+
 
 @dataclass(frozen=True)
 class PlantedEvent:
@@ -458,6 +463,24 @@ def write_card_statements(world: World, out_dir: Path) -> list[dict[str, object]
 
         name = f"synthetic-card-{month}.pdf"
         (out_dir / name).write_bytes(build_pdf(lines))
+
+        # THE SAME STATEMENT WITH ONE DESCRIPTOR WRAPPED, written once so the
+        # quirk that broke real parsers has a generated case. A long payee name
+        # occupies two lines on a real statement, and neither half matches a
+        # transaction pattern on its own: the first has no amount, the second
+        # has no date. The row is not truncated, it DISAPPEARS.
+        #
+        # Its closing balance is deliberately left as it was, because that is
+        # the whole point: the statement still states what it should sum to, so
+        # the file carries the evidence that a row went missing.
+        if statements and not (out_dir / _WRAPPED_STATEMENT).exists():
+            wrapped = list(lines)
+            # The first transaction line, split before its amount - which is
+            # where a real statement wraps, since the amount is last.
+            row = 4
+            head, _, amount = wrapped[row].rpartition("    ")
+            wrapped[row : row + 1] = [head, f"           {amount}"]
+            (out_dir / _WRAPPED_STATEMENT).write_bytes(build_pdf(wrapped))
         statements.append(
             {
                 "name": name,

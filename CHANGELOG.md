@@ -26,6 +26,32 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.220] - 2026-08-13
+
+### Added
+- Generator stage 4 begins with the quirk that actually loses data: a statement
+  whose descriptor WRAPS onto a second line. A long payee name occupies two
+  lines on a real statement, and neither half matches the transaction pattern
+  alone - the first has no amount, the second has no date - so the row is not
+  truncated, it disappears. Measured: 5 rows intact, 4 wrapped, the amount gone.
+
+  That is the worst shape a parsing fault takes, because the rows that remain
+  look reasonable and nothing counts what the file offered: `rows_offered` is
+  incremented only by the CSV reader, so the "N of M rows in the file" warning
+  cannot fire for a statement at all.
+
+  THE FILE ALREADY CARRIES THE EVIDENCE, and the test asserts both halves: a
+  statement states what it should sum to, so the intact one's opening plus
+  movements equals its stated closing and the wrapped one's does not. obdi does
+  not read that evidence for PDFs - the balance walk consumes a structural read
+  only CSV has - so the limit is pinned rather than left to be rediscovered.
+
+  Not fixed here. Three routes exist and each has a different failure mode; the
+  one that joins continuation lines can invent transactions rather than lose
+  them, which is worse. Whether real statements in this estate wrap at all is
+  unknown and nothing here can check it - the corpus proves only that IF a
+  descriptor wraps, the row is lost.
+
 ## [0.4.219] - 2026-08-13
 
 ### Changed
