@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.233] - 2026-08-14
+
+### Fixed
+- **`recover-spaces` offered the main account as a deleted Space**, found on its
+  first run against real data. It reported `Current (GBP)`, 1,028 transfers,
+  running to 2026-08-01 - the live current account, not a Space and not
+  archived.
+
+  A main account's own ledger is a CATEGORY too: the accounts payload gives it
+  a `defaultCategory` uid. So a transfer seen from the SPACE side names the main
+  account with `counterPartyType: CATEGORY`, identically to the way a
+  transfer seen from the main side names a Space. `counterPartyType` alone
+  cannot tell them apart.
+
+  Those uids are now read from the `starling-accounts` artefacts and excluded -
+  by uid, not by name, because `Current (GBP)` is a label somebody could change
+  or a Space could borrow. Every accounts artefact is read rather than only the
+  newest, so an account closed years ago stays excluded from the old transfers
+  that still mention it.
+
+  **Reporting rather than declaring by default is what caught this.** `--apply`
+  would have created a duplicate account for the current account, in a store of
+  real financial history, from an inference. The two-step was argued for on
+  principle when nothing had gone wrong yet; it paid for itself on the first
+  real run.
+
+  Pinned at both levels: the rule excludes when told, and `recover` reads the
+  accounts artefact so it gets told. Removing the second made the store-level
+  test reproduce the live symptom exactly.
+
+### Known limits (unchanged, restated because the numbers are now real)
+- Against the live store this finds **two** archived Spaces - `Rent`
+  (2019-02-04 to 2022-02-10, 522 transfers) and `Mum's bedroom tax`
+  (2022-01-01 to 2022-11-28, 132 transfers). The Starling app shows **four**
+  archived. The two it cannot see never moved money, exactly as the command
+  says on every run.
+- The `Rent` span is corroborated at both ends by evidence outside obdi: the
+  end date matches a transaction visible in the app's own archived-Space view,
+  and the start matches the earliest unexplained row on the agreements page.
+  That is as close to confirmation as an inferred date can get here, since
+  statements never show Space transfers at all.
+
 ## [0.4.232] - 2026-08-14
 
 ### Added

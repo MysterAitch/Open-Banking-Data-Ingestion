@@ -96,6 +96,24 @@ def recover(store: object) -> list[HistoricalSpace]:
             if isinstance(goal, dict) and goal.get("savingsGoalUid"):
                 current.add(str(goal["savingsGoalUid"]))
 
+    # A main account's own ledger is a CATEGORY, so without these it is
+    # indistinguishable from a Space in a space-side feed item - see
+    # historical_spaces. Every accounts artefact is read, not just the newest:
+    # an account closed years ago still appears in old transfers, and its
+    # category must stay excluded.
+    main_categories: set[str] = set()
+    for row in connection.execute(
+        "SELECT payload FROM raw_artefacts WHERE source = 'starling-accounts'"
+    ):
+        try:
+            decoded = json.loads(row["payload"])
+        except (ValueError, TypeError):
+            continue
+        accounts = decoded.get("accounts") if isinstance(decoded, dict) else None
+        for account in accounts if isinstance(accounts, list) else []:
+            if isinstance(account, dict) and account.get("defaultCategory"):
+                main_categories.add(str(account["defaultCategory"]))
+
     items: list[Mapping[str, object]] = []
     for row in connection.execute(
         "SELECT payload FROM raw_artefacts WHERE source = 'starling-feed'"
@@ -107,7 +125,11 @@ def recover(store: object) -> list[HistoricalSpace]:
         feed = decoded.get("feedItems") if isinstance(decoded, dict) else None
         items.extend(item for item in (feed or []) if isinstance(item, dict))
 
-    return historical_spaces(feed_items=items, current_space_uids=current)
+    return historical_spaces(
+        feed_items=items,
+        current_space_uids=current,
+        main_account_categories=main_categories,
+    )
 
 
 def canonical_ref(name: str, *, uid: str) -> str:
@@ -194,6 +216,7 @@ def historical_spaces(
     *,
     feed_items: Iterable[Mapping[str, object]],
     current_space_uids: set[str],
+    main_account_categories: set[str] | None = None,
 ) -> list[HistoricalSpace]:
     """Spaces the feed moved money through that no longer exist.
 
@@ -202,9 +225,18 @@ def historical_spaces(
     that matter here (a rename, a merchant, a missing uid) are awkward to
     produce through a real fetch and trivial to write down.
 
+    `main_account_categories` are the `defaultCategory` uids from the accounts
+    payload. A main account's own ledger is a CATEGORY too, so a transfer seen
+    from the SPACE side names the main account exactly as a Space transfer
+    names a Space - and the first run against real data duly offered
+    "Current (GBP)", 1,028 transfers and still active, as a deleted Space.
+    Excluded by uid rather than by name, because the name is a label somebody
+    could change or a Space could borrow.
+
     Ordered by first movement, so the oldest Space - most likely the one whose
     absence has been puzzling somebody longest - is read first.
     """
+    excluded = current_space_uids | (main_account_categories or set())
     seen: dict[str, _Accumulating] = {}
     for item in feed_items:
         if str(item.get("counterPartyType", "")).upper() != SPACE_COUNTERPARTY:
@@ -225,7 +257,7 @@ def historical_spaces(
         (
             record.settled(uid)
             for uid, record in seen.items()
-            if uid not in current_space_uids
+            if uid not in excluded
         ),
         key=lambda space: (space.first_seen, space.uid),
     )

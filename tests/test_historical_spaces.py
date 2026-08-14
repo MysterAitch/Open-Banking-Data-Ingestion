@@ -155,6 +155,29 @@ class TestRecoveringSpacesFromTheFeed:
         assert found[0].last_seen == date(2022, 11, 30)
         assert found[0].transfers == 3
 
+    def test_TheMainAccountIsNotMistakenForASpace(self):
+        """The false positive that reached real data on 2026-08-14.
+
+        A main account's own ledger is a CATEGORY too - `defaultCategory` on
+        the accounts payload - so a transfer seen from the SPACE side names the
+        main account with counterPartyType CATEGORY, identically to a Space.
+        The first run against the live store duly reported 'Current (GBP)',
+        1,028 transfers, still active: the current account, offered as a
+        deleted Space.
+
+        Excluded by uid rather than by name, because 'Current (GBP)' is a
+        label a person could rename or a Space could borrow.
+        """
+        main_category = "ma1n0000-0000-4000-8000-00000000000a"
+
+        found = historical_spaces(
+            feed_items=[_transfer(main_category, "Current (GBP)", "2025-06-01")],
+            current_space_uids=set(),
+            main_account_categories={main_category},
+        )
+
+        assert found == []
+
     def test_OrdinarySpending_IsNotMistakenForASpace(self):
         """counterPartyType is the discriminator. A merchant has a uid and a
         name too, and treating those as Spaces would declare an account per
@@ -314,6 +337,68 @@ class TestReadingItOutOfAStore:
         assert found[0].first_seen == date(2021, 6, 1)
         assert found[0].last_seen == date(2022, 11, 30)
         assert found[0].transfers == 2
+
+    def test_TheMainAccountsOwnCategory_IsExcludedFromTheStoreToo(self, tmp_path):
+        """The false positive as it actually arrived: through the store.
+
+        The rule-level test proves the exclusion works when told; this proves
+        the accounts artefact is READ so it gets told. Without it `recover`
+        offered the current account as a deleted Space against real data, with
+        1,028 transfers and an end date of last week.
+        """
+        import json
+        from datetime import UTC, datetime
+
+        from obdi.models import RawArtefact
+        from obdi.spaces import recover
+        from obdi.store import Store
+
+        main_category = "ma1n0000-0000-4000-8000-00000000000a"
+        path = tmp_path / "with-accounts.sqlite3"
+        with Store(path) as store:
+            for source, body, name in (
+                (
+                    "starling-accounts",
+                    {
+                        "accounts": [
+                            {
+                                "accountUid": "acct-uid",
+                                "name": "Personal",
+                                "defaultCategory": main_category,
+                            }
+                        ]
+                    },
+                    "accounts",
+                ),
+                (
+                    "starling-feed",
+                    {
+                        "feedItems": [
+                            _transfer(main_category, "Current (GBP)", "2025-06-01"),
+                            _transfer(RENT_UID, "Rent", "2021-06-01"),
+                        ]
+                    },
+                    "feed",
+                ),
+            ):
+                store.land_artefact(
+                    RawArtefact(
+                        source=source,
+                        account_ref="starling-personal",
+                        fetched_at=datetime.now(UTC),
+                        media_type="application/json",
+                        digest=f"digest-{name}",
+                        payload=json.dumps(body).encode(),
+                        origin=name,
+                    )
+                )
+
+        with Store(path) as store:
+            found = recover(store)
+
+        assert [space.name for space in found] == ["Rent"], (
+            "the main account was offered as a deleted Space"
+        )
 
     def test_AStoreWithNoStarlingArtefacts_FindsNothingRatherThanFailing(
         self, tmp_path
