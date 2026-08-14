@@ -200,6 +200,18 @@ class AccountRecord:
     parent: AccountRef | None = None
     opened: date | None = None
     closed: date | None = None
+    #: HOW `opened` and `closed` came to be known. Empty when a person stated
+    #: them, which is every account declared by hand. An account recovered
+    #: from evidence fills it in, because its dates BOUND its life rather than
+    #: dating it: the first and last movement through a deleted Starling Space
+    #: say when money last moved, not when the Space was created or removed.
+    #:
+    #: Kept as its own field rather than a note in the label so it stays
+    #: queryable and survives a rename - and because for Spaces there is no
+    #: way to check it later. Starling's statements do not show Space
+    #: transfers at all (confirmed against 2019 and 2026 statements), so an
+    #: inferred date here can never be corroborated against a document.
+    date_basis: str = ""
     limits: tuple[LimitWindow, ...] = field(default=())
     rates: tuple[RateWindow, ...] = field(default=())
     #: The stable identity, present once the account is in the store.

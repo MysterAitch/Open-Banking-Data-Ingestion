@@ -3309,6 +3309,18 @@ def main(argv: list[str] | None = None) -> int:
         "network call; only an explicit invalid_client counts against them)",
     )
 
+    spaces_command = subcommands.add_parser(
+        "recover-spaces",
+        help="declare accounts for Starling Spaces the feed used but the "
+        "savings-goals endpoint no longer returns (a deleted or folded Space)",
+    )
+    spaces_command.add_argument(
+        "--apply",
+        action="store_true",
+        help="declare them; without this it only reports what it found, "
+        "because declaring creates accounts from an inference",
+    )
+
     subcommands.add_parser(
         "rebuild-status",
         help="did the last rebuild work? Exit 0 succeeded or none yet, 1 "
@@ -3777,6 +3789,93 @@ def main(argv: list[str] | None = None) -> int:
                 transpositions(held),
             )
         )
+        return 0
+
+    if args.command == "recover-spaces":
+        from .accounts import AccountRef
+        from .spaces import canonical_ref, recover
+
+        with Store(db_path) as store:
+            found = recover(store)
+            declared = store.declared_accounts()
+        # Said on every run, found or not. This recovers Spaces from the
+        # movements they made, so a Space that never moved money leaves no
+        # trace to recover - and one exists: an archived Starling Space called
+        # Rent with zero transactions and a zero balance. Reporting a count
+        # without this line would imply a completeness the method cannot have.
+        print(
+            "Recovered from feed movements, so a Space that never moved money "
+            "cannot appear here - only an API listing of archived Spaces "
+            "could find one.\n"
+        )
+        if not found:
+            print(
+                "no historical Spaces found - every Space the feed moved money "
+                "through is still returned by the savings-goals endpoint"
+            )
+            return 0
+        # Refs already spoken for, so a re-run keeps each Space's own name and
+        # two Spaces that shared a name stay apart. Existing accounts map to
+        # no uid, which reserves their ref without claiming it for anybody.
+        already = {str(record.ref) for record in declared}
+        for space in found:
+            ref = canonical_ref(space.name, uid=space.uid)
+            # Two Spaces may legitimately end up displaying the same name, so
+            # a renamed one says what it used to be called. Renaming a Space
+            # is rare enough that nobody remembers doing it, which is what
+            # makes a silent duplicate a puzzle rather than a fact.
+            former = (
+                f" (previously {', '.join(space.also_known_as)})"
+                if space.also_known_as
+                else ""
+            )
+            span = f"{space.first_seen.isoformat()} .. {space.last_seen.isoformat()}"
+            seen_before = " [already declared]" if ref in already else ""
+            print(
+                f"{ref}  '{space.name}'{former}  {span}  "
+                f"{space.transfers:,} transfer(s){seen_before}"
+            )
+            if not args.apply:
+                continue
+            with Store(db_path) as store:
+                store.declare_account(
+                    AccountRecord(
+                        ref=AccountRef(ref),
+                        kind="starling-space",
+                        # The span is IN the label, not only in the record,
+                        # because two Spaces can share a name without either
+                        # having been renamed - Starling archives rather than
+                        # deletes, and this account really does hold two
+                        # archived Spaces both called Rent. Labelled by name
+                        # alone they would be indistinguishable in every
+                        # picker, and "previously known as" does not help when
+                        # neither was ever called anything else. The dates are
+                        # what tell them apart.
+                        label=(
+                            f"{space.name} (starling space, "
+                            f"{space.first_seen.isoformat()} to "
+                            f"{space.last_seen.isoformat()}){former}"
+                        ),
+                        opened=space.first_seen,
+                        closed=space.last_seen,
+                        # Said in the record itself, because these dates BOUND
+                        # the Space's life rather than dating it, and Starling
+                        # statements never show Space transfers - so nothing
+                        # will ever corroborate them.
+                        date_basis=(
+                            "inferred from the first and last movement in the "
+                            "feed; not the dates the Space was created or "
+                            "removed, and no statement can confirm them"
+                        ),
+                    )
+                )
+        if args.apply:
+            print(f"\n{len(found)} Space(s) declared, dates marked inferred")
+        else:
+            print(
+                f"\n{len(found)} Space(s) found. Nothing was declared - "
+                "re-run with --apply to create these accounts"
+            )
         return 0
 
     if args.command == "rebuild-status":

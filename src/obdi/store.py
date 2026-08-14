@@ -55,7 +55,12 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: layer, failing on the first insert with "no column named observed_date".
 #: SCHEMA_SHAPE below makes forgetting this a test failure rather than an
 #: incident; see tests/test_schema_version_gate.py.
-SCHEMA_VERSION = 9
+#:
+#: 9 -> 10: `date_basis` on declared_accounts, so an account recovered from
+#: evidence can say its dates were inferred. The guard added at 9 caught this
+#: change on its first real use, named the column, and refused until this line
+#: moved - which is the whole of what it was built to do.
+SCHEMA_VERSION = 10
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, source): the bytes, the account they are
@@ -340,6 +345,14 @@ CREATE TABLE IF NOT EXISTS declared_accounts (
     parent      TEXT,
     opened      TEXT,
     closed      TEXT,
+    -- HOW opened and closed came to be known, empty when a person stated
+    -- them. An account recovered from evidence carries dates that BOUND its
+    -- life rather than dating it - the first and last movement through a
+    -- deleted Starling Space say when money last moved, not when the Space
+    -- was made or removed. Storing the basis beside the dates is the
+    -- difference between a record and a guess wearing a record's clothes,
+    -- and it is queryable, which a note in the label would not be.
+    date_basis  TEXT NOT NULL DEFAULT '',
     declared_at TEXT NOT NULL
 );
 
@@ -423,8 +436,8 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'annual_percent', 'kind', 'position', 'stable_id', 'window_from', 'window_to',
     ],
     'declared_accounts': [
-        'closed', 'declared_at', 'kind', 'label', 'opened', 'parent', 'ref',
-        'stable_id',
+        'closed', 'date_basis', 'declared_at', 'kind', 'label', 'opened',
+        'parent', 'ref', 'stable_id',
     ],
     'events': ['created_at', 'entity_id', 'id', 'kind', 'payload', 'published_at'],
     'fetch_attempts': [
@@ -751,6 +764,7 @@ class Store:
         self._migrate_transaction_tier_and_occurrence()
         self._migrate_sighting_artefact_digest()
         self._migrate_sighting_observed_date()
+        self._migrate_declared_account_date_basis()
         self._migrate_valuation_income_columns()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
@@ -886,6 +900,21 @@ class Store:
             _rebuild_table_script(
                 "transaction_sources", set(self._table_columns("transaction_sources"))
             )
+        )
+
+    def _migrate_declared_account_date_basis(self) -> None:
+        """Give declared accounts a place to say where their dates came from.
+
+        Existing rows keep an empty basis, which is the honest value: every
+        account declared before this column existed had its dates typed in by
+        a person, and an empty basis means exactly that. Only accounts
+        recovered from evidence fill it in.
+        """
+        if "date_basis" in self._table_columns("declared_accounts"):
+            return
+        self.connection.execute(
+            "ALTER TABLE declared_accounts ADD COLUMN date_basis TEXT NOT NULL "
+            "DEFAULT ''"
         )
 
     def _migrate_valuation_income_columns(self) -> None:
@@ -1077,11 +1106,12 @@ class Store:
         try:
             self.connection.execute(
                 "INSERT INTO declared_accounts (stable_id, ref, kind, label, "
-                "parent, opened, closed, declared_at) VALUES (?,?,?,?,?,?,?,?) "
+                "parent, opened, closed, date_basis, declared_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(stable_id) DO UPDATE SET ref = excluded.ref, "
                 "kind = excluded.kind, label = excluded.label, "
                 "parent = excluded.parent, opened = excluded.opened, "
-                "closed = excluded.closed",
+                "closed = excluded.closed, date_basis = excluded.date_basis",
                 (
                     stable_id,
                     stored.ref,
@@ -1090,6 +1120,7 @@ class Store:
                     stored.parent,
                     stored.opened.isoformat() if stored.opened else None,
                     stored.closed.isoformat() if stored.closed else None,
+                    stored.date_basis,
                     _stamp_now(),
                 ),
             )
@@ -1174,8 +1205,8 @@ class Store:
             )
         records = []
         for row in self.connection.execute(
-            "SELECT stable_id, ref, kind, label, parent, opened, closed "
-            "FROM declared_accounts ORDER BY ref"
+            "SELECT stable_id, ref, kind, label, parent, opened, closed, "
+            "date_basis FROM declared_accounts ORDER BY ref"
         ):
             stable_id = AccountId(str(row["stable_id"]))
             records.append(
@@ -1190,6 +1221,7 @@ class Store:
                     ),
                     opened=_read_date(row["opened"]),
                     closed=_read_date(row["closed"]),
+                    date_basis=str(row["date_basis"] or ""),
                     limits=tuple(limits.get(stable_id, ())),
                     rates=tuple(rates.get(stable_id, ())),
                     stable_id=stable_id,

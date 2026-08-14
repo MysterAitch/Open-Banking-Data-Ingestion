@@ -26,6 +26,54 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.232] - 2026-08-14
+
+### Added
+- **`obdi recover-spaces`: Starling Spaces the feed used and the savings-goals
+  endpoint no longer returns.** Spaces become accounts from that endpoint, which
+  answers "what exists NOW" - so an archived Space can never appear, and its
+  transfers sit in the feed with no account to hold the opposite leg. On the
+  live instance that is 212 unexplained one-sided rows against one source and
+  163 against another.
+
+  **The evidence was already on disk.** Every feed item is stored whole on the
+  transaction it produced, and a Space transfer carries `counterPartyType:
+  CATEGORY` with the Space's own uid and name. Recovery is a replay over layer
+  0 - no re-fetch, no bank call, no consent. This is the case the raw layer was
+  built for.
+
+  Reports by default; `--apply` declares. Declaring creates accounts in a real
+  store from an inference, which is the wrong thing to do as a side effect of
+  running a command once.
+
+- **`date_basis` on declared accounts**, so an account recovered from evidence
+  says where its dates came from. First and last movement BOUND a Space's life;
+  they do not date it. A Space created in January and first used in March reads
+  as March, and nothing can ever correct that - Starling's statements do not
+  show Space transfers at all, confirmed against 2019 and 2026 statements, so
+  no document exists to check an inferred date against.
+
+### Fixed
+- **Identity by uid, not by name** - and this is not theoretical: the account
+  holds two archived Spaces BOTH called `Rent`. Starling archives rather than
+  deletes, so a name can be reused freely. The canonical ref carries a uid
+  fragment, which makes the back-fill idempotent by construction and keeps two
+  same-named Spaces apart. The first design suffixed on collision instead and
+  had to recognise its own previous declarations to do it - the idempotence
+  test caught it minting a second account on the second run.
+- **Same-named Spaces are tellable apart**, because two accounts labelled `Rent`
+  would be indistinguishable in every picker. The label carries the date span,
+  and a renamed Space also carries `previously ...`. Neither of the two Rents
+  was renamed, so the span is what separates them.
+
+### Known limits, stated by the command itself on every run
+- **A Space that never moved money cannot be recovered.** One of the two
+  archived `Rent` Spaces has zero transactions and a zero balance, so no feed
+  item names it and no replay can find it. Only an API listing of archived
+  Spaces could, which is now its own task. The command prints this whether or
+  not it finds anything, because a count without it implies a completeness the
+  method cannot have.
+
 ## [0.4.231] - 2026-08-13
 
 ### Added
