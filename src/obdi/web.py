@@ -53,6 +53,7 @@ from .money import format_amount
 from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
+from .spaces import RECOVERY_BOUND
 from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
@@ -422,6 +423,15 @@ class WebConfig:
     #: person is present and waiting, honest because it stops the moment the
     #: provider says stop and never replays unattended.
     extend_max: Callable[..., str] | None = None
+    #: Starling Spaces that existed once and do not exist now, recovered from
+    #: the movements they made. REPORT ONLY - reading this changes nothing,
+    #: which is what lets the page be opened without deciding anything.
+    historical_spaces: Callable[[], list[dict[str, object]]] | None = None
+    #: Declare the recovered Spaces as accounts. Separate from the report on
+    #: purpose: this one writes accounts into a store of real financial
+    #: history, and the first run of the recovery offered the live current
+    #: account as a deleted Space. Returns the refs it created.
+    declare_spaces: Callable[[], list[str]] | None = None
     #: The merged layer summarised per account - the same computed-shape
     #: analysis as an artefact, over what the store believes after matching.
     account_shape: Callable[..., dict[str, object] | None] | None = None
@@ -985,6 +995,99 @@ def _agreements_html(entries: object) -> str:
                     f"<ul>{bucket_html}</ul></li>"
                 )
             parts.append(f"<ul>{side_html}</ul>")
+    return "".join(parts)
+
+
+def _spaces_html(spaces: list[dict[str, object]]) -> str:
+    """Starling Spaces recovered from the feed, and the offer to declare them.
+
+    SEPARATED FROM THE ACTION ON PURPOSE. Declaring writes accounts into a
+    store of real financial history, and the first live run of this recovery
+    offered the current account - 1,028 transfers, still active - as a deleted
+    Space. Reporting first turned that from a silent duplicate into a line
+    somebody read, so the page shows the evidence and the button is a separate
+    press.
+
+    The offer is split by BEHAVIOUR rather than shown-and-disabled: a control
+    that is present but inert teaches the reader that pressing it does nothing,
+    which is exactly the lesson to avoid on the one control here that writes.
+    """
+    undeclared = [space for space in spaces if not space.get("declared")]
+    parts: list[str] = [
+        # Said whether anything was found or not - a count without it implies a
+        # completeness this method cannot have. Two of the four archived Spaces
+        # on the live account never moved money and cannot appear here.
+        f'<p class="muted">{html.escape(RECOVERY_BOUND)}</p>'
+    ]
+    if not spaces:
+        parts.append(
+            "<p>no historical Spaces found - every Space the feed moved money "
+            "through is still returned by the savings-goals endpoint.</p>"
+        )
+        return "".join(parts)
+
+    parts.append(
+        '<p class="warn">The dates below are <strong>inferred</strong> from the '
+        "first and last movement through each Space. They bound its life rather "
+        "than dating it: a Space created in January and first used in March "
+        "reads as March here, and no Starling statement shows Space transfers, "
+        "so nothing will ever corroborate them.</p>"
+    )
+    parts.append(
+        "<table><tr><th>Space</th><th>Canonical name</th>"
+        "<th>First .. last movement</th><th>Transfers</th><th></th></tr>"
+    )
+    for space in spaces:
+        aka = space.get("also_known_as") or []
+        former = (
+            " <span class=\"muted\">(previously "
+            + html.escape(", ".join(str(name) for name in aka))
+            + ")</span>"
+            if isinstance(aka, list) and aka
+            else ""
+        )
+        state = (
+            '<span class="muted">already declared</span>'
+            if space.get("declared")
+            else ""
+        )
+        # Narrowed rather than coerced: the count is the evidence a reader
+        # judges the span by, so a value that is not a number is worth showing
+        # as absent instead of quietly becoming zero.
+        raw_transfers = space.get("transfers")
+        transfers = (
+            f"{raw_transfers:,}" if isinstance(raw_transfers, int) else "unknown"
+        )
+        parts.append(
+            "<tr>"
+            f"<td>{html.escape(str(space.get('name', '')))}{former}</td>"
+            f"<td><code>{html.escape(str(space.get('ref', '')))}</code></td>"
+            f"<td>{html.escape(str(space.get('first_seen', '')))} .. "
+            f"{html.escape(str(space.get('last_seen', '')))}</td>"
+            f"<td>{transfers}</td>"
+            f"<td>{state}</td>"
+            "</tr>"
+        )
+    parts.append("</table>")
+
+    if not undeclared:
+        parts.append(
+            "<p>Every recovered Space is already declared. Nothing to do - "
+            "re-running the recovery mints no new accounts, because each ref "
+            "is derived from the Space's own uid.</p>"
+        )
+        return "".join(parts)
+
+    noun = "account" if len(undeclared) == 1 else "accounts"
+    parts.append(
+        '<form method="post" action="/declare-spaces">'
+        f"<p>Creating these adds <strong>{len(undeclared)} {noun}</strong> to "
+        "the registry, with their dates marked as inferred. It is safe to "
+        "repeat: refs derive from each Space's uid, so a second press creates "
+        "nothing further.</p>"
+        f'<button type="submit">Declare {len(undeclared)} {noun}</button>'
+        "</form>"
+    )
     return "".join(parts)
 
 
@@ -3055,6 +3158,7 @@ def render_index(
 <p><a class="button" href="/attempts">Fetch attempts</a>
 <a class="button" href="/fetch-timeline">Fetch timeline</a></p>
 <p><a class="button" href="/agreements">Cross-source agreement report</a></p>
+<p><a class="button" href="/spaces">Historical Starling Spaces (recovered)</a></p>
 <p><a class="button" href="/review">Categorise (uncategorised worklist)</a></p>
 <p><a class="button" href="/statement-shape">Statement shape (PDF layout, values masked)</a></p>
 <p><a class="button" href="/review-report">Review queue report</a></p>
@@ -3214,6 +3318,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             return
         if route == "/agreements":
             self._agreements_page()
+            return
+        if route == "/spaces":
+            self._spaces_page()
             return
         if route == "/statement-shape":
             params = parse_qs(parsed.query)
@@ -3535,6 +3642,56 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             )
         parts.append(HOME_LINK)
         self._respond(200, render_page("Cross-source agreement", "".join(parts)))
+
+    def _spaces_page(self) -> None:
+        """Starling Spaces the feed remembers and the bank no longer lists.
+
+        A GET that changes nothing, so it can be opened and read without
+        deciding anything - which is the point of separating it from the
+        declaration.
+        """
+        hook = self.bound_config.historical_spaces
+        if hook is None:
+            self._respond(
+                404, error_page("Not available", "<p>No Space recovery wired.</p>")
+            )
+            return
+        parts = [_spaces_html(hook()), HOME_LINK]
+        self._respond(200, render_page("Historical Starling Spaces", "".join(parts)))
+
+    def _declare_spaces(self) -> None:
+        """Create accounts for the recovered Spaces.
+
+        The only writing path here, and deliberately a POST reached from the
+        page that showed the evidence rather than a link anybody could follow.
+        Safe to repeat: each ref derives from the Space's own uid, so a second
+        press declares nothing further.
+        """
+        hook = self.bound_config.declare_spaces
+        if hook is None:
+            self._respond(
+                404, error_page("Not available", "<p>No Space recovery wired.</p>")
+            )
+            return
+        created = hook()
+        noun = "account" if len(created) == 1 else "accounts"
+        body = (
+            f"<p>Declared <strong>{len(created)} {noun}</strong>, dates marked "
+            "as inferred.</p>"
+            if created
+            else "<p>Nothing to declare - every recovered Space already has an "
+            "account.</p>"
+        )
+        rows = "".join(f"<li><code>{html.escape(ref)}</code></li>" for ref in created)
+        listing = f"<ul>{rows}</ul>" if rows else ""
+        self._respond(
+            200,
+            render_page(
+                "Spaces declared",
+                f'{body}{listing}<p><a href="/spaces">Back to the Spaces'
+                f"</a></p>{HOME_LINK}",
+            ),
+        )
 
     def _attempts(self) -> None:
         hook = self.bound_config.attempts_index
@@ -4890,6 +5047,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             return
         if route == "/statement-shape-disclose":
             self._statement_shape_disclose()
+            return
+        if route == "/declare-spaces":
+            self._declare_spaces()
             return
         if route == "/review-apply":
             self._review_apply()

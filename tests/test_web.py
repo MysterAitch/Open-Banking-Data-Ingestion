@@ -14,7 +14,14 @@ import httpx
 import pytest
 
 from obdi.connections import ConnectionStore, build_connection
-from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig, render_index
+from obdi.spaces import RECOVERY_BOUND
+from obdi.web import (
+    AuthorisationSession,
+    ConnectionHandler,
+    WebConfig,
+    _spaces_html,
+    render_index,
+)
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
 
@@ -3390,3 +3397,89 @@ class TestTheSharedAccountPicker:
         assert "Personal (starling)" in markup
         assert 'name="account_other"' in markup
         assert "or type the correct canonical" in markup
+
+
+class TestTheRecoveredSpacesPage:
+    """Spaces that existed once, shown before anything is declared.
+
+    The command could already do this, and deliberately would not have been
+    enough. Declaring writes accounts into a store of real financial history,
+    and the recovery's first live run offered the current account as a deleted
+    Space - so the decision belongs on a page that shows the evidence, not
+    behind a flag typed into a shell.
+    """
+
+    def _space(self, **overrides) -> dict:
+        space: dict = {
+            "ref": "starling-space-rent-20336886",
+            "name": "Rent",
+            "first_seen": "2019-02-04",
+            "last_seen": "2022-02-10",
+            "transfers": 522,
+            "also_known_as": [],
+            "declared": False,
+        }
+        space.update(overrides)
+        return space
+
+    def test_SpacesPage_WhenSpacesFound_ShowsEachWithTheEvidenceBehindIt(self):
+        # A count on its own is a claim. The transfer count and the span are
+        # what let somebody judge whether to accept it: twenty transfers over
+        # four years and a single transfer are the same SHAPE of evidence at
+        # very different confidences.
+        markup = _spaces_html([self._space()])
+
+        assert "Rent" in markup
+        assert "starling-space-rent-20336886" in markup
+        assert "2019-02-04" in markup
+        assert "2022-02-10" in markup
+        assert "522" in markup
+
+    def test_SpacesPage_Always_SaysWhatTheMethodCannotSee(self):
+        # Two of the four archived Spaces on the live account never moved
+        # money and are permanently invisible here. A page reporting "2 found"
+        # without saying so implies a completeness it does not have.
+        assert RECOVERY_BOUND in _spaces_html([self._space()])
+        assert RECOVERY_BOUND in _spaces_html([])
+
+    def test_SpacesPage_WhenDatesShown_MarksThemInferred(self):
+        # These bound the Space's life rather than dating it, and no statement
+        # will ever corroborate them - the reason date_basis exists at all.
+        markup = _spaces_html([self._space()])
+
+        assert "inferred" in markup.lower()
+
+    def test_SpacesPage_WhenNothingFound_SaysSoAndOffersNoAction(self):
+        markup = _spaces_html([])
+
+        assert "no historical Spaces" in markup
+        assert "<form" not in markup
+
+    def test_SpacesPage_WhenEverythingAlreadyDeclared_OffersNoAction(self):
+        # Split by the behaviour seam rather than showing a button that would
+        # do nothing: a control that is present but inert is worse than absent,
+        # because pressing it teaches the reader the wrong thing.
+        markup = _spaces_html([self._space(declared=True)])
+
+        assert "<form" not in markup
+        assert "already declared" in markup
+
+    def test_SpacesPage_WhenSomeUndeclared_ActionSaysHowManyItWillCreate(self):
+        markup = _spaces_html([self._space(), self._space(declared=True)])
+
+        assert "<form" in markup
+        assert "1 account" in markup
+
+    def test_SpacesPage_WhenSpaceWasRenamed_ShowsWhatItUsedToBeCalled(self):
+        markup = _spaces_html([self._space(also_known_as=["Rent 2021"])])
+
+        assert "Rent 2021" in markup
+        assert "previously" in markup
+
+    def test_SpacesPage_WhenNameCarriesMarkup_IsEscaped(self):
+        # The name comes from the bank, so it is somebody else's input on a
+        # page rendered in the browser holding the session.
+        markup = _spaces_html([self._space(name="<script>x</script>")])
+
+        assert "<script>x</script>" not in markup
+        assert "&lt;script&gt;" in markup

@@ -28,6 +28,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+from .accounts import AccountRecord, AccountRef
+
 #: Every recovered Space's canonical name starts here, so they group together
 #: when read and none can be mistaken for a bank's own account.
 REF_PREFIX = "starling-space"
@@ -39,6 +41,18 @@ _UNSAFE = re.compile(r"[^a-z0-9]+")
 #: payees carry a uid and a name too, so this is the only field that separates
 #: "money moved into my Rent pot" from "money went to a coffee shop".
 SPACE_COUNTERPARTY = "CATEGORY"
+
+
+#: The limit of what this method can see, said wherever a count is reported.
+#: Recovery replays MOVEMENTS, so a Space that never moved money leaves nothing
+#: to recover - and one exists: an archived Starling Space called Rent with zero
+#: transactions. A count without this line implies a completeness the method
+#: cannot have. Kept here rather than in each surface because two copies of a
+#: caveat is one copy that can quietly stop matching what the code does.
+RECOVERY_BOUND = (
+    "Recovered from feed movements, so a Space that never moved money cannot "
+    "appear here - only an API listing of archived Spaces could find one."
+)
 
 
 @dataclass(frozen=True)
@@ -152,6 +166,52 @@ def canonical_ref(name: str, *, uid: str) -> str:
     slug = _UNSAFE.sub("-", name.strip().casefold()).strip("-") or "unnamed"
     fingerprint = _UNSAFE.sub("", uid.casefold())[:8] or "nouid"
     return f"{REF_PREFIX}-{slug}-{fingerprint}"
+
+
+def former_names_note(space: HistoricalSpace) -> str:
+    """" (previously X, Y)" when a Space was renamed, and nothing when it was not.
+
+    Empty for a Space that kept its name, because "previously" against one that
+    never changed would be a fabricated history - and this is exactly the field
+    a reader trusts to explain why two accounts show the same name.
+    """
+    if not space.also_known_as:
+        return ""
+    return f" (previously {', '.join(space.also_known_as)})"
+
+
+def account_for(space: HistoricalSpace) -> AccountRecord:
+    """The declared account a recovered Space becomes.
+
+    ONE definition, because there are now two ways to declare one - the command
+    and the web page - and a label that drifted on one path would still produce
+    a plausible account on both. Nothing would look wrong; the two surfaces
+    would simply disagree about what a Space is called.
+
+    The span goes in the LABEL and not only in the record, because two Spaces
+    can share a name without either having been renamed. Starling archives
+    rather than deletes, and this account really does hold two archived Spaces
+    both called Rent: labelled by name alone they are indistinguishable in every
+    picker, and "previously known as" does not help when neither was ever called
+    anything else. The dates are what tell them apart.
+    """
+    span = f"{space.first_seen.isoformat()} to {space.last_seen.isoformat()}"
+    former = former_names_note(space)
+    return AccountRecord(
+        ref=AccountRef(canonical_ref(space.name, uid=space.uid)),
+        kind="starling-space",
+        label=f"{space.name} (starling space, {span}){former}",
+        opened=space.first_seen,
+        closed=space.last_seen,
+        # Said in the record itself, because these dates BOUND the Space's life
+        # rather than dating it, and Starling statements never show Space
+        # transfers - so nothing will ever corroborate them.
+        date_basis=(
+            "inferred from the first and last movement in the feed; not the "
+            "dates the Space was created or removed, and no statement can "
+            "confirm them"
+        ),
+    )
 
 
 @dataclass

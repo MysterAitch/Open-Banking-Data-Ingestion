@@ -26,6 +26,57 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.234] - 2026-08-15
+
+### Added
+- **The recovered Spaces are reviewable on a page, and declaring them is a press
+  on it.** The command could already do both, and that was deliberately not
+  enough: declaring writes accounts into a store of real financial history, and
+  the previous release exists because the recovery's first live run offered the
+  current account as a deleted Space. A decision of that shape belongs where the
+  evidence is visible, not behind a flag typed into a shell.
+
+  `GET /spaces` reports and changes nothing, so it can be opened and read
+  without deciding anything. Each Space is shown with the evidence a reader
+  judges it by - the transfer count and the span - because twenty transfers
+  across four years and a single transfer are the same SHAPE of evidence at very
+  different confidences. The dates are marked **inferred** on the page as well
+  as in the record: they bound a Space's life rather than dating it, and no
+  Starling statement will ever corroborate them. `POST /declare-spaces` is the
+  only writing path, reached from the page that showed the evidence.
+
+  The offer is split by BEHAVIOUR rather than shown-and-disabled: with nothing
+  to declare there is no form at all and the page says so instead. A control
+  that is present but inert teaches the reader that pressing it does nothing,
+  which is the wrong lesson on the one control here that writes.
+
+### Changed
+- **The account a recovered Space becomes is defined once**, in `spaces.py`, and
+  both the command and the page ask for it. It was built inline in the command,
+  which was fine while the command was the only way to declare one. A second
+  surface makes that the shape where a label drifts on one path and not the
+  other - and the drift would be invisible, because both paths would keep
+  producing a plausible account. The caveat about what the recovery cannot see
+  moved with it, for the same reason: a count reported in two places must not be
+  qualified in only one.
+
+### Fixed
+- **The shipped schema shapes stopped one release before `declared_accounts`
+  existed**, so the migration adding `date_basis` to that table had nothing in
+  the corpus to act on and was excused in the reachability register as stale
+  rather than unnecessary. Shape 19 captures v0.4.231 - `declared_accounts`
+  present, `date_basis` absent, exactly the state the live store was in - and
+  the register entry is deleted rather than reworded, as it asked to be.
+
+  The shape was taken by building a store with that release's own code in an
+  empty directory and reading its schema back, then PROVED faithful by comparing
+  tables, columns, types, nullability and defaults against it. That comparison
+  was itself checked against the previous shape, which it correctly rejects. It
+  also caught a column nobody had mentioned: `transaction_sources` gained
+  `observed_date` between the two releases, and assembling the shape by eye from
+  the expected diff would have produced a fixture quietly wrong in a way no test
+  could see.
+
 ## [0.4.233] - 2026-08-14
 
 ### Fixed

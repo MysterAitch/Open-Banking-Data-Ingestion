@@ -2504,6 +2504,53 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return list(coverage(store.transactions_by_sighting()))
 
+    def historical_spaces_report() -> list[dict[str, object]]:
+        """Recovered Spaces, with whether each already has an account.
+
+        Read-only. The declaration is a separate hook reached by POST, because
+        this one writes accounts into a store of real financial history and
+        the recovery's first live run offered the current account as a deleted
+        Space - reporting first is what turned that into a line somebody read.
+        """
+        from .spaces import account_for, recover
+
+        with Store(db_path) as store:
+            found = recover(store)
+            already = {str(record.ref) for record in store.declared_accounts()}
+        return [
+            {
+                "ref": str(account_for(space).ref),
+                "name": space.name,
+                "first_seen": space.first_seen.isoformat(),
+                "last_seen": space.last_seen.isoformat(),
+                "transfers": space.transfers,
+                "also_known_as": list(space.also_known_as),
+                "declared": str(account_for(space).ref) in already,
+            }
+            for space in found
+        ]
+
+    def declare_spaces() -> list[str]:
+        """Declare every recovered Space that has no account yet.
+
+        Idempotent by construction rather than by remembering: each ref derives
+        from the Space's own uid, so a second press recomputes the same names
+        and declares nothing new.
+        """
+        from .spaces import account_for, recover
+
+        created: list[str] = []
+        with Store(db_path) as store:
+            found = recover(store)
+            already = {str(record.ref) for record in store.declared_accounts()}
+            for space in found:
+                record = account_for(space)
+                if str(record.ref) in already:
+                    continue
+                store.declare_account(record)
+                created.append(str(record.ref))
+        return created
+
     def agreement_report() -> dict[str, object]:
         """The standing cross-source review, computed fresh on request.
 
@@ -2574,6 +2621,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         holdings=holdings,
         feed_warnings=feed_warnings,
         agreement_report=agreement_report,
+        historical_spaces=historical_spaces_report,
+        declare_spaces=declare_spaces,
         extendables=extendables,
         extend_window=extend_window,
         artefact_index=artefact_index,
@@ -3792,22 +3841,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "recover-spaces":
-        from .accounts import AccountRef
-        from .spaces import canonical_ref, recover
+        from .spaces import (
+            RECOVERY_BOUND,
+            account_for,
+            former_names_note,
+            recover,
+        )
 
         with Store(db_path) as store:
             found = recover(store)
             declared = store.declared_accounts()
-        # Said on every run, found or not. This recovers Spaces from the
-        # movements they made, so a Space that never moved money leaves no
-        # trace to recover - and one exists: an archived Starling Space called
-        # Rent with zero transactions and a zero balance. Reporting a count
-        # without this line would imply a completeness the method cannot have.
-        print(
-            "Recovered from feed movements, so a Space that never moved money "
-            "cannot appear here - only an API listing of archived Spaces "
-            "could find one.\n"
-        )
+        # Said on every run, found or not, because a count without it implies a
+        # completeness this method cannot have. The sentence and its reasoning
+        # live beside the recovery in spaces.py, so the web page that reports
+        # the same numbers cannot drift from it.
+        print(f"{RECOVERY_BOUND}\n")
         if not found:
             print(
                 "no historical Spaces found - every Space the feed moved money "
@@ -3819,16 +3867,14 @@ def main(argv: list[str] | None = None) -> int:
         # no uid, which reserves their ref without claiming it for anybody.
         already = {str(record.ref) for record in declared}
         for space in found:
-            ref = canonical_ref(space.name, uid=space.uid)
-            # Two Spaces may legitimately end up displaying the same name, so
-            # a renamed one says what it used to be called. Renaming a Space
-            # is rare enough that nobody remembers doing it, which is what
-            # makes a silent duplicate a puzzle rather than a fact.
-            former = (
-                f" (previously {', '.join(space.also_known_as)})"
-                if space.also_known_as
-                else ""
-            )
+            # The record is built by spaces.account_for, not here: the web page
+            # declares the same thing, and a label assembled twice is a label
+            # that drifts on one path while both keep producing something
+            # plausible. Its reasoning - why the span is in the label, why the
+            # dates say they are inferred - lives with it.
+            record = account_for(space)
+            ref = str(record.ref)
+            former = former_names_note(space)
             span = f"{space.first_seen.isoformat()} .. {space.last_seen.isoformat()}"
             seen_before = " [already declared]" if ref in already else ""
             print(
@@ -3838,37 +3884,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.apply:
                 continue
             with Store(db_path) as store:
-                store.declare_account(
-                    AccountRecord(
-                        ref=AccountRef(ref),
-                        kind="starling-space",
-                        # The span is IN the label, not only in the record,
-                        # because two Spaces can share a name without either
-                        # having been renamed - Starling archives rather than
-                        # deletes, and this account really does hold two
-                        # archived Spaces both called Rent. Labelled by name
-                        # alone they would be indistinguishable in every
-                        # picker, and "previously known as" does not help when
-                        # neither was ever called anything else. The dates are
-                        # what tell them apart.
-                        label=(
-                            f"{space.name} (starling space, "
-                            f"{space.first_seen.isoformat()} to "
-                            f"{space.last_seen.isoformat()}){former}"
-                        ),
-                        opened=space.first_seen,
-                        closed=space.last_seen,
-                        # Said in the record itself, because these dates BOUND
-                        # the Space's life rather than dating it, and Starling
-                        # statements never show Space transfers - so nothing
-                        # will ever corroborate them.
-                        date_basis=(
-                            "inferred from the first and last movement in the "
-                            "feed; not the dates the Space was created or "
-                            "removed, and no statement can confirm them"
-                        ),
-                    )
-                )
+                store.declare_account(record)
         if args.apply:
             print(f"\n{len(found)} Space(s) declared, dates marked inferred")
         else:

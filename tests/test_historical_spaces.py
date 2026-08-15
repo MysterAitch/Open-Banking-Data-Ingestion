@@ -31,7 +31,7 @@ from datetime import date
 
 import pytest
 
-from obdi.spaces import historical_spaces
+from obdi.spaces import HistoricalSpace, account_for, canonical_ref, historical_spaces
 
 BILLS_UID = "b1115000-0000-4000-8000-000000000001"
 RENT_UID = "5e117000-0000-4000-8000-000000000002"
@@ -533,6 +533,76 @@ class TestTheCommand:
 
         with Store(store_with_a_deleted_space) as store:
             assert len(store.declared_accounts()) == 1
+
+
+class TestTheAccountARecoveredSpaceBecomes:
+    """One definition of what a recovered Space turns into.
+
+    The command built this record inline, which was fine while the command was
+    the only way to declare one. A second surface makes that the shape where a
+    label drifts on one path and not the other - and the drift would be
+    invisible, because both paths would still produce a plausible account. So
+    the record is built in one place and both callers ask for it.
+    """
+
+    def _space(self, **overrides) -> HistoricalSpace:
+        fields: dict = {
+            "uid": RENT_UID,
+            "name": "Rent",
+            "first_seen": date(2019, 2, 4),
+            "last_seen": date(2022, 2, 10),
+            "transfers": 522,
+        }
+        fields.update(overrides)
+        return HistoricalSpace(**fields)
+
+    def test_RecoveredSpace_WhenMadeAnAccount_IsRefdByItsCanonicalName(self):
+        record = account_for(self._space())
+        assert str(record.ref) == canonical_ref("Rent", uid=RENT_UID)
+
+    def test_RecoveredSpace_WhenMadeAnAccount_MarksItsDatesInferred(self):
+        # The whole reason date_basis exists: these dates bound the Space's
+        # life and no statement will ever corroborate them, so an account
+        # carrying them silently would claim more than is known.
+        record = account_for(self._space())
+        assert record.opened == date(2019, 2, 4)
+        assert record.closed == date(2022, 2, 10)
+        assert "inferred" in record.date_basis
+        assert "movement" in record.date_basis
+
+    def test_RecoveredSpace_WhenMadeAnAccount_CarriesItsSpanInTheLabel(self):
+        # In the LABEL, not only the record: two Spaces can share a name
+        # without either having been renamed, and the dates are what tell them
+        # apart in a picker that shows labels and nothing else.
+        record = account_for(self._space())
+        assert "2019-02-04" in record.label
+        assert "2022-02-10" in record.label
+
+    def test_RenamedSpace_WhenMadeAnAccount_LabelSaysWhatItWasCalledBefore(self):
+        record = account_for(self._space(also_known_as=("Rent 2021",)))
+        assert "previously Rent 2021" in record.label
+
+    def test_SpaceNeverRenamed_WhenMadeAnAccount_LabelClaimsNoFormerName(self):
+        # The opposite case, because "previously" on a Space that was never
+        # renamed would be a fabricated history.
+        assert "previously" not in account_for(self._space()).label
+
+    def test_TwoSpacesSharingAName_WhenMadeAccounts_DifferInBothRefAndLabel(self):
+        # The real case: this account holds two archived Starling Spaces both
+        # called Rent, neither ever renamed. Same name, different lives.
+        first = account_for(self._space())
+        second = account_for(
+            self._space(
+                uid=BILLS_UID,
+                first_seen=date(2023, 1, 1),
+                last_seen=date(2023, 6, 1),
+            )
+        )
+        assert first.ref != second.ref
+        assert first.label != second.label
+
+    def test_RecoveredSpace_WhenMadeAnAccount_IsKindedAsASpace(self):
+        assert account_for(self._space()).kind == "starling-space"
 
 
 if __name__ == "__main__":
