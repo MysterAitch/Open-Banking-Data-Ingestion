@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.235] - 2026-08-15
+
+### Fixed
+- **A good backup was destroyed and a deploy failed, over one row.** MEASURED on
+  the live instance: the converge to 0.4.234 passed every check, a restarted
+  worker logged one fetch attempt, and the backup ten seconds later was refused
+  for `fetch_attempts: source 801, copy 800`. The unverified copy was deleted -
+  correct - and the whole play failed, which was not: the copy was a faithful
+  snapshot that had passed its own integrity check.
+
+  The verification compared the copy against the source **as it stood
+  afterwards**, which for a store under continuous write asks whether the copy
+  matches a moving target rather than whether it captured the source at the
+  instant it was taken. `fetch_attempts` is precisely the table that gains a row
+  seconds after a deploy.
+
+  `take_backup` now reads the source on BOTH sides of the copy and accepts a
+  count that lies between the two readings - any value in that band is
+  consistent with a snapshot taken inside the window. **Nothing is weakened**: a
+  truncated copy still falls below the band, a copy of something else still
+  rises above it, and when the store is quiet the two readings are equal and
+  this is exactly the old exact-match check. Proven by disabling the comparison
+  and watching five tests go red, two of which predate this change.
+
+  `verify_copy` keeps its strict behaviour when given no earlier reading, which
+  is what the standalone `verify-backup` command needs: a backup checked long
+  afterwards must not be given the benefit of a band nobody measured.
+
+  `BackupResult` now carries `source_advanced` - which tables the source gained
+  rows in during the copy, and how many - reported rather than merely tolerated,
+  because a nightly run that starts showing movement is saying something writes
+  at 03:21 that did not used to.
+
 ## [0.4.234] - 2026-08-15
 
 ### Added

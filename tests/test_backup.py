@@ -240,3 +240,137 @@ def test_Verification_WhenTheCopyIsNotADatabase_FailsRatherThanRaising(tmp_path:
         verify_copy(live, rubbish)
 
     assert "not-a-database" in str(refusal.value)
+
+
+class TestACopyTakenWhileTheStoreIsBeingWritten:
+    """A snapshot of a moving store is still a snapshot.
+
+    MEASURED 2026-08-15 on the live instance: a converge finished, the scheduler
+    restarted and logged one fetch attempt, and the backup that ran ten seconds
+    later was refused for `fetch_attempts: source 801, copy 800`. The copy was
+    deleted and the deploy failed - over a copy that was perfectly good and had
+    passed its own integrity check.
+
+    The check compared the copy against the source AS IT WAS AFTERWARDS, which
+    for a store under continuous write asks whether the copy matches a moving
+    target. The question it needs is whether the copy faithfully captured the
+    source at the instant it was taken, and reading the source on BOTH sides of
+    the copy bounds that instant without weakening anything.
+    """
+
+    def test_Copy_WhenSourceGrewDuringTheCopy_IsAcceptedWithinTheObservedBand(
+        self, tmp_path: Path
+    ) -> None:
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "copy.sqlite3"
+        take_backup(live, copy)
+
+        before = _row_counts(live)
+        _store_with_work(live, rows=6, prefix="later")
+
+        # The copy sits at the lower edge of the band: it holds what the source
+        # held when it was taken, and the source has moved on since.
+        assert verify_copy(live, copy, source_before=before) == before
+
+    def test_Copy_WhenShorterThanBothReadings_IsStillRefused(
+        self, tmp_path: Path
+    ) -> None:
+        # The band must not become a licence. A copy below everything the source
+        # was ever observed to hold is the truncation this module exists for.
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=4)
+        copy = tmp_path / "copy.sqlite3"
+        take_backup(live, copy)
+
+        _store_with_work(live, rows=6, prefix="later")
+        after = _row_counts(live)
+
+        # As if the source already held its later totals before the copy was
+        # taken, which puts this copy below the whole band.
+        with pytest.raises(BackupRefused) as refusal:
+            verify_copy(live, copy, source_before=after)
+
+        assert "transactions" in str(refusal.value)
+
+    def test_Copy_WhenHoldingMoreThanTheSourceEverHeld_IsRefused(
+        self, tmp_path: Path
+    ) -> None:
+        # The other edge, and the one a naive "a copy may be smaller" rule
+        # misses: a copy holding rows the source never had is not a stale
+        # snapshot, it is a copy of something else. Built from two stores
+        # because that is what the case actually is - an earlier attempt
+        # inflated the band instead and proved only that the band works.
+        fuller = tmp_path / "fuller.sqlite3"
+        _store_with_work(fuller, rows=16)
+        copy = tmp_path / "copy.sqlite3"
+        take_backup(fuller, copy)
+
+        smaller = tmp_path / "smaller.sqlite3"
+        _store_with_work(smaller, rows=4)
+
+        with pytest.raises(BackupRefused) as refusal:
+            verify_copy(smaller, copy, source_before=_row_counts(smaller))
+
+        assert "transactions" in str(refusal.value)
+
+    def test_VerifyCopy_WhenGivenNoEarlierReading_StillDemandsAnExactMatch(
+        self, tmp_path: Path
+    ) -> None:
+        # The standalone verify-backup command has no "before" to work with, so
+        # its strictness must be untouched by any of this.
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "copy.sqlite3"
+        take_backup(live, copy)
+
+        _store_with_work(live, rows=3, prefix="later")
+
+        with pytest.raises(BackupRefused):
+            verify_copy(live, copy)
+
+    def test_Backup_WhenSourceIsQuiet_ClaimsNoMovementAtAll(
+        self, tmp_path: Path
+    ) -> None:
+        # The nightly case: nothing writes at 03:21, the band collapses to a
+        # point, and the result must not imply movement that did not happen.
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+
+        result = take_backup(live, tmp_path / "copy.sqlite3")
+
+        assert result.source_advanced == {}
+        assert "advanced" not in result.describe()
+
+    def test_Backup_WhenSourceMovesDuringTheCopy_NamesTheTableAndTheDelta(
+        self, tmp_path: Path
+    ) -> None:
+        # Evidence rather than a verdict: "the source advanced" is unactionable,
+        # while the table and the amount let a reader judge whether the writer
+        # was the expected one.
+        from obdi import backup as backup_module
+
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        real_counts = backup_module._counts
+        seen: list[str] = []
+
+        def counting(path: Path, *, what: str) -> dict[str, int]:
+            if what == "the source" and not seen:
+                seen.append(what)
+                counts = real_counts(path, what=what)
+                # A row lands between the two source readings, which is exactly
+                # what a restarted worker does seconds after a deploy.
+                _store_with_work(live, rows=2, prefix="racer")
+                return counts
+            return real_counts(path, what=what)
+
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(backup_module, "_counts", counting)
+        try:
+            result = take_backup(live, tmp_path / "copy.sqlite3")
+        finally:
+            monkey.undo()
+
+        assert result.source_advanced
+        assert "advanced" in result.describe()

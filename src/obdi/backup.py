@@ -23,7 +23,7 @@ checked before it is trusted.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .store import TABLE_NAMES
@@ -46,6 +46,11 @@ class BackupResult:
     destination: Path
     row_counts: dict[str, int]
     bytes_written: int
+    #: Tables the SOURCE gained rows in while the copy was being taken, and by
+    #: how many. Empty is the ordinary case and means the store was quiet.
+    #: Reported rather than merely tolerated: a nightly run that starts showing
+    #: movement is telling you something writes at 03:21 that did not use to.
+    source_advanced: dict[str, int] = field(default_factory=dict)
 
     @property
     def tables_verified(self) -> int:
@@ -62,15 +67,23 @@ class BackupResult:
         that reports 12 of 12 tables and 4,812 rows can be compared against
         what you expected to see.
         """
-        return "\n".join(
-            [
-                f"backed up   {self.source}",
-                f"to          {self.destination}",
-                f"verified    {self.tables_verified} of {len(TABLE_NAMES)} tables, "
-                f"{self.rows_verified} rows",
-                f"size        {self.bytes_written} bytes",
-            ]
-        )
+        lines = [
+            f"backed up   {self.source}",
+            f"to          {self.destination}",
+            f"verified    {self.tables_verified} of {len(TABLE_NAMES)} tables, "
+            f"{self.rows_verified} rows",
+            f"size        {self.bytes_written} bytes",
+        ]
+        if self.source_advanced:
+            moved = ", ".join(
+                f"{table} +{gained}"
+                for table, gained in sorted(self.source_advanced.items())
+            )
+            lines.append(
+                f"note        the source advanced while the copy was taken: {moved}. "
+                "The copy is a snapshot of the store before those rows landed."
+            )
+        return "\n".join(lines)
 
 
 def _counts(path: Path, *, what: str) -> dict[str, int]:
@@ -107,13 +120,37 @@ def _counts(path: Path, *, what: str) -> dict[str, int]:
         connection.close()
 
 
-def verify_copy(source: Path, copy: Path) -> dict[str, int]:
-    """Prove a copy holds every row the source holds. Refuse if it does not.
+def verify_copy(
+    source: Path, copy: Path, *, source_before: dict[str, int] | None = None
+) -> dict[str, int]:
+    """Prove a copy holds what the source held. Refuse if it does not.
 
     Returns the verified row counts, so the caller can report the evidence
     rather than a bare verdict. Both sides of any disagreement are named: a
-    detector that says only "mismatch" leaves the next person to re-derive
-    what it already knew.
+    detector that says only "mismatch" leaves the next person to re-derive what
+    it already knew.
+
+    `source_before` is the source's counts read BEFORE the copy was taken, and
+    it is what makes this safe on a store that is being written to. Without it
+    the comparison is against the source as it stands now, which asks whether
+    the copy matches a moving target rather than whether it faithfully captured
+    the source at the instant it was taken.
+
+    MEASURED 2026-08-15: a deploy finished, a restarted worker logged one fetch
+    attempt, and the backup ten seconds later was refused for
+    `fetch_attempts: source 801, copy 800`. The copy was good, had passed its
+    own integrity check, and was deleted anyway - taking the deploy with it.
+
+    Given both readings, a count is accepted when it lies BETWEEN them: any
+    value in that band is consistent with a snapshot taken somewhere inside the
+    window. Nothing is weakened. A truncated copy still falls below the band, a
+    copy of something else still rises above it, and when the store is quiet the
+    two readings are equal and this is exactly the old exact-match check.
+
+    Omitting `source_before` keeps that strict behaviour, which is what the
+    standalone verify-backup command wants: it has no earlier reading, and a
+    backup being checked long afterwards must not be given the benefit of a
+    band nobody measured.
     """
     if not copy.exists():
         raise BackupRefused(f"the copy does not exist: {copy}")
@@ -124,12 +161,18 @@ def verify_copy(source: Path, copy: Path) -> dict[str, int]:
 
     live = _counts(source, what="the source")
     held = _counts(copy, what="the copy")
+    earlier = live if source_before is None else source_before
 
-    short = [
-        f"  {table}: source {live[table]}, copy {held.get(table, 'absent')}"
-        for table in live
-        if held.get(table) != live[table]
-    ]
+    short: list[str] = []
+    for table, after in live.items():
+        was = earlier.get(table, after)
+        low, high = min(was, after), max(was, after)
+        got = held.get(table)
+        if got is not None and low <= got <= high:
+            continue
+        expected = f"{low}" if low == high else f"{low}..{high} while it was copied"
+        short.append(f"  {table}: source {expected}, copy {got if got is not None else 'absent'}")
+
     if short:
         raise BackupRefused(
             "the copy does not hold what the source holds, table by table:\n"
@@ -138,6 +181,15 @@ def verify_copy(source: Path, copy: Path) -> dict[str, int]:
             " the check that matters."
         )
     return held
+
+
+def _advanced(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """Tables the source gained rows in between two readings, and by how many."""
+    return {
+        table: after[table] - before[table]
+        for table in after
+        if after[table] > before.get(table, after[table])
+    }
 
 
 def _integrity(path: Path) -> str:
@@ -172,6 +224,12 @@ def take_backup(source: Path, destination: Path) -> BackupResult:
         )
     destination.parent.mkdir(parents=True, exist_ok=True)
 
+    # Read the source on BOTH sides of the copy, so the verification can tell a
+    # snapshot of a moving store from a truncated one. Reading only afterwards
+    # compares the copy against a target that may have moved since, which is how
+    # a good backup was refused - and a deploy failed - over a single row.
+    before = _counts(source, what="the source")
+
     # Read through a connection, not through the filesystem: this is what sees
     # the write-ahead log, and seeing it is the entire point.
     connection = sqlite3.connect(source)
@@ -184,7 +242,7 @@ def take_backup(source: Path, destination: Path) -> BackupResult:
         connection.close()
 
     try:
-        counts = verify_copy(source, destination)
+        counts = verify_copy(source, destination, source_before=before)
     except BackupRefused:
         # An unverified copy must not be left lying about looking like a backup.
         destination.unlink(missing_ok=True)
@@ -195,4 +253,5 @@ def take_backup(source: Path, destination: Path) -> BackupResult:
         destination=destination,
         row_counts=counts,
         bytes_written=destination.stat().st_size,
+        source_advanced=_advanced(before, _counts(source, what="the source")),
     )
