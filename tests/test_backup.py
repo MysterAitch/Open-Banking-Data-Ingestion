@@ -230,6 +230,146 @@ class TestTheCommandLineDoor:
         assert "transactions" in capsys.readouterr().err
 
 
+class TestCheckingABackupTakenLongAgo:
+    """The case the module's own docstring promised and did not deliver.
+
+    `verify_copy` compares a copy against the live store. For any backup not
+    taken moments ago that comparison is guaranteed to disagree, so the answer
+    it gives an archive is always "not trustworthy" - which is useless as a
+    trust signal and actively dangerous as a discard signal.
+
+    What CAN be said about a backup on its own: it opens, it passes its own
+    integrity check, it holds these tables and lacks those, and it contains
+    this many rows. What cannot be said, at all, from the file alone: whether
+    it holds everything the store held when it was taken. That is the claim
+    `take_backup` makes at the moment of copying and the reason verification
+    belongs there. This is why the standalone check is called INSPECT.
+    """
+
+    def test_InspectBackup_WhenTheStoreHasMovedOnEntirely_StillReportsWhatTheBackupHolds(
+        self, tmp_path: Path
+    ) -> None:
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "archive.sqlite3"
+        take_backup(live, copy)
+
+        _store_with_work(live, rows=40, prefix="months-of-later-work")
+
+        from obdi.backup import inspect_backup
+
+        found = inspect_backup(copy)
+
+        assert found.row_counts["transactions"] == 10
+        assert found.integrity == "ok"
+        assert found.bytes_held == copy.stat().st_size
+
+    def test_InspectBackup_StatesWhatItCannotKnow_RatherThanReadingAsAVerification(
+        self, tmp_path: Path
+    ) -> None:
+        """The bound is the point, so it is asserted rather than assumed.
+
+        Somebody reading "inspected 12 tables, 4,812 rows" will take it as
+        proof the backup is complete unless the report says otherwise, and
+        completeness is exactly the thing a lone file cannot testify to.
+        """
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "archive.sqlite3"
+        take_backup(live, copy)
+
+        from obdi.backup import inspect_backup
+
+        described = inspect_backup(copy).describe()
+
+        assert "cannot" in described.lower()
+        assert "verified" not in described.lower()
+
+    def test_InspectBackup_WhenTheBackupPredatesATable_NamesTheAbsence(
+        self, tmp_path: Path
+    ) -> None:
+        """An old backup legitimately lacks tables added since.
+
+        Reported as a named absence, not a crash and not silence: which tables
+        an archive predates is exactly what somebody restoring it needs to know
+        before they are surprised by it.
+        """
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=6)
+        copy = tmp_path / "before-that-table-existed.sqlite3"
+        take_backup(live, copy)
+
+        older = sqlite3.connect(copy)
+        older.execute("DROP TABLE review_queue")
+        older.commit()
+        older.close()
+
+        from obdi.backup import inspect_backup
+
+        found = inspect_backup(copy)
+
+        assert "review_queue" in found.tables_absent
+        assert "review_queue" not in found.row_counts
+        assert "review_queue" in found.describe()
+
+    def test_InspectBackup_WhenTheFileIsNotADatabase_RefusesAndNamesIt(
+        self, tmp_path: Path
+    ) -> None:
+        rubbish = tmp_path / "not-a-database.sqlite3"
+        rubbish.write_bytes(b"this is not a database")
+
+        from obdi.backup import inspect_backup
+
+        with pytest.raises(BackupRefused) as refusal:
+            inspect_backup(rubbish)
+
+        assert "not-a-database" in str(refusal.value)
+
+    def test_InspectBackup_WhenTheFileIsAbsent_RefusesAndNamesThePath(
+        self, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "never-taken.sqlite3"
+
+        from obdi.backup import inspect_backup
+
+        with pytest.raises(BackupRefused) as refusal:
+            inspect_backup(missing)
+
+        assert str(missing) in str(refusal.value)
+
+    def test_InspectBackup_WhenRunFromTheCommandLine_ReportsAndExitsZero(
+        self, tmp_path, capsys
+    ) -> None:
+        """The route somebody takes when deciding whether to keep an archive."""
+        from obdi.cli import main
+
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "archive.sqlite3"
+        take_backup(live, copy)
+
+        _store_with_work(live, rows=25, prefix="since")
+
+        assert main(["--db", str(live), "inspect-backup", str(copy)]) == 0
+
+        printed = capsys.readouterr().out
+        assert str(copy) in printed
+        assert "cannot" in printed.lower()
+
+    def test_InspectBackup_WhenTheFileIsRubbish_ExitsNonZeroAndSaysWhy(
+        self, tmp_path, capsys
+    ) -> None:
+        from obdi.cli import main
+
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=4)
+        rubbish = tmp_path / "not-a-database.sqlite3"
+        rubbish.write_bytes(b"this is not a database")
+
+        assert main(["--db", str(live), "inspect-backup", str(rubbish)]) == 1
+        assert "not-a-database" in capsys.readouterr().err
+
+
 def test_Verification_WhenTheCopyIsNotADatabase_FailsRatherThanRaising(tmp_path: Path) -> None:
     live = tmp_path / "store.sqlite3"
     _store_with_work(live)
@@ -341,6 +481,32 @@ class TestACopyTakenWhileTheStoreIsBeingWritten:
 
         assert result.source_advanced == {}
         assert "advanced" not in result.describe()
+
+    def test_VerifyCopy_WhenTheBackupIsMerelyOlder_SaysTheShortfallCouldBeEither(
+        self, tmp_path: Path
+    ) -> None:
+        """The refusal must not read as "your backup is corrupt".
+
+        A backup taken last month is short against today's store for the
+        entirely ordinary reason that a month happened. The counts CANNOT
+        distinguish that from a truncated copy - both lose the newest rows -
+        so the message has to say which two things it is unable to tell apart,
+        or a healthy archive gets thrown away on its evidence.
+        """
+        live = tmp_path / "store.sqlite3"
+        _store_with_work(live, rows=10)
+        copy = tmp_path / "last-month.sqlite3"
+        take_backup(live, copy)
+
+        _store_with_work(live, rows=6, prefix="later")
+
+        with pytest.raises(BackupRefused) as refusal:
+            verify_copy(live, copy)
+
+        message = str(refusal.value)
+        assert "transactions" in message
+        assert "older" in message.lower()
+        assert "inspect-backup" in message
 
     def test_Backup_WhenSourceMovesDuringTheCopy_NamesTheTableAndTheDelta(
         self, tmp_path: Path

@@ -15,9 +15,27 @@ both sides and refusing when they disagree.
 
 `VACUUM INTO` is the mechanism. It reads through an open connection, so it sees
 the WAL contents like any other reader, and it writes a fresh, defragmented
-database rather than a byte copy. The verification is separate and stands alone
-(`verify_copy`), because a backup taken months ago still needs a way to be
-checked before it is trusted.
+database rather than a byte copy.
+
+WHAT CAN BE PROVED, AND WHEN. `verify_copy` proves a copy holds what the source
+holds by counting both sides, so it is only meaningful while the source still
+holds what it held when the copy was taken - which in practice means at the
+moment of copying. This module used to claim that it also served "a backup taken
+months ago"; it never could. Against a store that has moved on, an archive is
+short by construction and the answer is always "not trustworthy", which is
+useless as a trust signal and dangerous as a discard signal.
+
+Worse, the two explanations for a shortfall are INDISTINGUISHABLE by counts. A
+copy that lost its write-ahead log is missing the newest rows; a backup taken
+last month is missing the newest rows. No comparison of totals can separate
+them, and a check that appeared to would be inventing a verdict. So the refusal
+names both readings rather than picking one.
+
+What an archive CAN be asked on its own is `inspect_backup`: does it open, does
+it pass its own integrity check, which tables does it hold and which does it
+predate, and how many rows are in each. That is a description, not a
+verification, and it says so - because "inspected 12 tables, 4,812 rows" reads
+as proof of completeness to anybody not told otherwise.
 """
 
 from __future__ import annotations
@@ -151,6 +169,11 @@ def verify_copy(
     standalone verify-backup command wants: it has no earlier reading, and a
     backup being checked long afterwards must not be given the benefit of a
     band nobody measured.
+
+    That strictness is also why this is the wrong question to ask of an archive.
+    See the module docstring: a backup that is merely old fails here for the
+    same reason a truncated one does, and the counts cannot tell you which.
+    `inspect_backup` is what an archive can answer on its own.
     """
     if not copy.exists():
         raise BackupRefused(f"the copy does not exist: {copy}")
@@ -164,12 +187,18 @@ def verify_copy(
     earlier = live if source_before is None else source_before
 
     short: list[str] = []
+    #: Every disagreement is the copy holding FEWER rows than the source ever
+    #: did. That is the one shape an older backup produces, so it is the one
+    #: shape where age has to be offered as an explanation.
+    all_below = True
     for table, after in live.items():
         was = earlier.get(table, after)
         low, high = min(was, after), max(was, after)
         got = held.get(table)
         if got is not None and low <= got <= high:
             continue
+        if got is None or got > high:
+            all_below = False
         expected = f"{low}" if low == high else f"{low}..{high} while it was copied"
         short.append(f"  {table}: source {expected}, copy {got if got is not None else 'absent'}")
 
@@ -179,8 +208,90 @@ def verify_copy(
             + "\n".join(short)
             + "\n\nintegrity_check passed on this copy, which is why it is not"
             " the check that matters."
+            + (_AGE_OR_TRUNCATION if all_below else "")
         )
     return held
+
+
+#: Appended when every disagreement is the copy being SHORT. Two explanations
+#: fit that equally, a lost write-ahead log and an ordinary passage of time, and
+#: no comparison of totals can separate them - both lose the newest rows. Said
+#: out loud because the alternative is somebody deleting a healthy archive on
+#: the strength of the word "REFUSED".
+_AGE_OR_TRUNCATION = (
+    "\n\nEvery difference here is the copy holding FEWER rows, which has two"
+    " explanations this check cannot tell apart: the copy lost rows it should"
+    " have had, or the copy is simply OLDER than the store and the store has"
+    " moved on since. Both lose the newest rows and nothing in the totals"
+    " distinguishes them. If this is an archive rather than a copy just taken,"
+    " this is the wrong question to ask of it - use inspect-backup, which"
+    " reports what the file holds without asking the live store anything."
+)
+
+
+@dataclass(frozen=True)
+class BackupInspection:
+    """What a backup file says about itself, with no reference to any store."""
+
+    path: Path
+    integrity: str
+    row_counts: dict[str, int]
+    #: Tables this package's schema defines that the file does not have. An
+    #: archive predating a table is the ordinary reason, and knowing WHICH ones
+    #: is what somebody restoring it needs before the absence surprises them.
+    tables_absent: list[str]
+    bytes_held: int
+
+    def describe(self) -> str:
+        """Every count beside its denominator, and the claim's limit stated.
+
+        The limit is not a footnote. A report reading "12 tables, 4,812 rows"
+        is taken as proof of completeness by anybody not explicitly told that
+        no file can testify to its own completeness - which is the whole
+        difference between this and what `take_backup` proves at copy time.
+        """
+        lines = [
+            f"inspected   {self.path}",
+            f"integrity   {self.integrity}",
+            f"holds       {len(self.row_counts)} of {len(TABLE_NAMES)} tables, "
+            f"{sum(self.row_counts.values())} rows",
+            f"size        {self.bytes_held} bytes",
+        ]
+        if self.tables_absent:
+            lines.append(
+                f"absent      {', '.join(self.tables_absent)} - this file predates them, "
+                "or they were dropped from it"
+            )
+        lines.append(
+            "limit       this describes the file; it CANNOT tell you whether the file "
+            "holds everything the store held when it was taken. Only the copy step can "
+            "know that, and it checks at the time."
+        )
+        return "\n".join(lines)
+
+
+def inspect_backup(path: Path) -> BackupInspection:
+    """Report what a backup holds, asking the live store nothing.
+
+    The check for an archive. `verify_copy` compares against a live source and
+    so can only ever refuse a backup older than the store's current state - see
+    the module docstring for why that refusal is unreadable rather than
+    informative. This makes the weaker claim that can actually be supported by
+    a file on its own, and names the weakness.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise BackupRefused(f"there is no backup to inspect at {path}")
+
+    integrity = _integrity(path)
+    counts = _counts(path, what="the backup")
+    return BackupInspection(
+        path=path,
+        integrity=integrity,
+        row_counts=counts,
+        tables_absent=[table for table in TABLE_NAMES if table not in counts],
+        bytes_held=path.stat().st_size,
+    )
 
 
 def _advanced(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:

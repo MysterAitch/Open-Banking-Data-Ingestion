@@ -3304,9 +3304,20 @@ def main(argv: list[str] | None = None) -> int:
     backup_command.add_argument("destination", help="path to write; must not already exist")
     verify_command = subcommands.add_parser(
         "verify-backup",
-        help="check an existing backup against the live store, table by table",
+        help=(
+            "check a JUST-TAKEN backup against the live store, table by table - "
+            "an older archive is short by construction and belongs to inspect-backup"
+        ),
     )
     verify_command.add_argument("backup", help="path to a backup file to check")
+    inspect_command = subcommands.add_parser(
+        "inspect-backup",
+        help=(
+            "report what a backup file holds, asking the live store nothing - "
+            "the check for an archive, which cannot prove its own completeness"
+        ),
+    )
+    inspect_command.add_argument("backup", help="path to a backup file to describe")
     restore_command = subcommands.add_parser(
         "restore",
         help=(
@@ -4051,6 +4062,18 @@ def main(argv: list[str] | None = None) -> int:
             f"verified {len(counts)} tables, {sum(counts.values())} rows, "
             f"against {db_path}"
         )
+        return 0
+
+    if args.command == "inspect-backup":
+        from .backup import inspect_backup
+
+        try:
+            print(inspect_backup(Path(args.backup)).describe())
+        except BackupRefused as refusal:
+            # Not "NOT TRUSTWORTHY": this command makes no trust claim either
+            # way, so a failure here means the file could not be READ at all.
+            print(f"BACKUP UNREADABLE: {refusal}", file=sys.stderr)
+            return 1
         return 0
 
     if args.command == "export-declared":

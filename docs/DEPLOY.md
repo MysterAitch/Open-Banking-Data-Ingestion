@@ -91,7 +91,14 @@ failures because nothing about it looks wrong until the day you need it.
 
 `obdi backup` takes the copy through the application and refuses to hand you one
 whose row counts do not match the live store, table by table; `obdi verify-backup`
-re-checks a copy you already have. **`obdi restore <backup> --to <path>`** turns
+re-runs that same comparison on a copy you already have, which only means
+anything while the store still holds what it held when the copy was taken. For
+an ARCHIVE, use **`obdi inspect-backup <file>`**: it reports what the file holds
+- integrity, tables present and absent, rows per table - and asks the live store
+nothing. It deliberately does not claim the file is complete, because no file can
+testify to that on its own. Do not read a `verify-backup` refusal on an old
+backup as corruption: a copy short by a month and a copy short by a lost
+write-ahead log look identical in the totals, and the refusal says so. **`obdi restore <backup> --to <path>`** turns
 one back into a store, which is the half that is only ever tested by doing it: it
 refuses an untrustworthy copy before touching anything, moves any existing store
 aside as `.replaced` rather than deleting it, takes the `-wal` and `-shm`

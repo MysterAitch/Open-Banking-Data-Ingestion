@@ -26,6 +26,50 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.236] - 2026-08-15
+
+### Added
+- **`obdi inspect-backup <file>` - the check an ARCHIVE can actually pass.** The
+  backup module has claimed since it was written that its verification "stands
+  alone, because a backup taken months ago still needs a way to be checked". It
+  never did. `verify_copy` counts the copy against the LIVE store, so any backup
+  older than the store's current state is short by construction and the answer is
+  always refusal - useless as a trust signal and actively dangerous as a discard
+  signal, since "BACKUP NOT TRUSTWORTHY" is what somebody reads before deleting
+  the thing.
+
+  `inspect-backup` asks the live store nothing. It reports whether the file
+  opens, its own integrity check, which tables it holds and which of this
+  package's tables it lacks (an archive predating a table is the ordinary
+  reason), and the rows in each. It deliberately does **not** say "verified":
+  the report ends with the limit stated in words, because "inspected 12 tables,
+  4,812 rows" reads as proof of completeness to anybody not told that no file
+  can testify to its own completeness. Only the copy step can know that, and it
+  checks at the time. The stated limit is asserted by a test, not left to
+  goodwill.
+
+### Fixed
+- **A refusal that could not be told apart from corruption now says so.** When
+  every disagreement is the copy holding FEWER rows, two explanations fit it
+  equally - the copy lost rows it should have had, or the copy is simply older
+  than the store. Both lose the newest rows, and **no comparison of totals can
+  separate them.** A discriminator was considered and rejected for exactly that
+  reason: it would have been inventing a verdict. So the refusal now names both
+  readings and points at `inspect-backup`, rather than letting the word REFUSED
+  do the reasoning.
+
+  This corrects a claim made in this file under 0.4.235, which said strict
+  behaviour "is what the standalone `verify-backup` command needs: a backup
+  checked long afterwards must not be given the benefit of a band nobody
+  measured". The strictness is right and is unchanged. The claim was wrong about
+  what it bought: strictness does not make an old backup checkable, it makes it
+  uncheckable in a way that reads as an accusation. Corrected forward rather than
+  edited above, per this file's own rule.
+
+  Proven by removing each new message and watching exactly the intended tests go
+  red - one for the ambiguity note, two for the stated limit - then restoring
+  them. Full suite, linter and type checker each run as their own command.
+
 ## [0.4.235] - 2026-08-15
 
 ### Fixed
