@@ -518,7 +518,13 @@ def to_card_transaction(record: JsonObject, *, account_id: str) -> Transaction:
     when = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
 
     description = text(record, "description")
-    merchant = text(record, "meta", "provider_merchant_name") if False else ""
+    # The merchant name is NESTED under meta, which `text` cannot reach - it
+    # takes a single key. An earlier version left that attempt in place behind
+    # `if False`, so the line read as the path being taken while always
+    # producing the empty default, and the three lines below did the real work.
+    # Dead code naming a real field is worse than none: it answers the reader's
+    # question, wrongly.
+    merchant = ""
     meta = record.get("meta")
     if isinstance(meta, dict):
         merchant = str(meta.get("provider_merchant_name", "") or "").strip()
