@@ -1,12 +1,29 @@
 """Starling Spaces that existed once, recovered from the feed that names them.
 
-A Space becomes an account from the `starling-spaces` artefacts, which are the
-savings-goals endpoint: they answer "what Spaces exist NOW". A Space that was
-deleted, or folded into another, can never appear there again - so its transfers
-survive in the feed with no account to hold the opposite leg, and read as
-unexplained one-sided rows. Measured on the live instance in August 2026: 212
-such rows against one source and 163 against another, the visible ones labelled
-'Rent', which is not among the four declared Spaces.
+A Space becomes an account from the `starling-spaces` artefacts, which are
+`GET /api/v2/account/{uid}/spaces`: they answer "what Spaces exist NOW". An
+archived Space can never appear there again - so its transfers survive in the
+feed with no account to hold the opposite leg, and read as unexplained one-sided
+rows. Measured on the live instance in August 2026: 212 such rows against one
+source and 163 against another, the visible ones labelled 'Rent', which is not
+among the four declared Spaces.
+
+WHY THAT ENDPOINT CANNOT ANSWER IT, measured from a landed artefact rather than
+assumed (2026-08-15). The stored response carries `savingsGoals` and
+`spendingSpaces`, and every goal has a `state`. It returned four goals, all
+`state: ACTIVE`, while the bank's own app showed those four plus four archived.
+So the endpoint does not return archived Spaces marked as such - it omits them
+entirely, and the `state` field it does carry has only ever been seen with one
+value. Whether some parameter or other endpoint would return them is NOT
+established: the developer portal is script-rendered and could not be read, and
+no published schema was found across four search angles.
+
+`spendingSpaces` is read by nothing here, and that currently costs nothing: the
+list is EMPTY on this account. It is left unparsed deliberately rather than
+guessed at - the entry shape is unknown because no sample exists, and Starling
+names the identifier differently across its space endpoints (`savingsGoalUid`,
+`spaceUid`, `categoryUid`). Code written against an imagined schema would look
+correct until the day it met a real one.
 
 THE EVIDENCE IS ALREADY ON DISK. Every feed item is stored whole on the
 transaction it produced, and a Space transfer carries `counterPartyType:
