@@ -58,22 +58,15 @@ DELIBERATELY_UNEXERCISED = {
         "store's shape, and gated on a completion marker so it runs at most "
         "once per store."
     ),
-    "declared_account_date_basis": (
-        "A DIFFERENT CATEGORY FROM THE ENTRIES ABOVE, and worth reading as such "
-        "rather than as one more exemption. Those act on ROWS, which the shipped "
-        "shapes deliberately carry none of. This one acts on SHAPE and would be "
-        "exercised normally - except that NO shipped shape has a "
-        "declared_accounts table at all. Shape 18's own header says it is 'the "
-        "shape in the wild immediately before declared accounts moved out of the "
-        "JSON file and into the store', so the history stops one release short "
-        "of the table this migration alters. The FIXTURE is stale, not the "
-        "migration: the live store holds declared_accounts without date_basis "
-        "right now and will run this on its next open. WHAT WOULD EXERCISE IT: "
-        "a shape 19 capturing the schema as it shipped at 0.4.231. Delete this "
-        "entry when that lands - a register that fills up with 'the shapes are "
-        "old' has stopped meaning anything."
-    ),
 }
+# `declared_account_date_basis` was registered here until shape 19 landed. It
+# was the only entry excused for the corpus being STALE rather than for acting
+# on rows - the shapes stopped one release before declared_accounts existed, so
+# a migration that alters that table had nothing to alter. Shape 19 captures
+# v0.4.231, which has declared_accounts and no date_basis, and the migration now
+# fires against it like any other. The entry is deleted rather than reworded,
+# exactly as it asked to be: a register that accumulates "the shapes are old"
+# has stopped meaning anything.
 
 
 def _migration_names() -> list[str]:
