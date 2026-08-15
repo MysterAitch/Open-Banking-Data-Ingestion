@@ -289,11 +289,23 @@ def accounts_page(records: list[AccountRecord], *, today: date) -> bytes:
     rows = "".join(_account_row(record, today) for record in records)
     return render_page(
         "Declared accounts",
+        # The last clause used to read "a statement can only be filed into one
+        # that has been declared", which is not what the code does:
+        # picker_labels MERGES declared accounts over the ones a provider has
+        # already mentioned, so a document can be filed into either. Saying
+        # otherwise on the page that teaches the concept is how somebody comes
+        # to believe an empty registry is blocking them.
         "<p>Which accounts exist, as declared by you. An account needs no "
         "feed to be real - a passbook, a mortgage and cash in a tin are "
-        "accounts, and a statement can only be filed into one that has "
-        "been declared.</p>"
-        + (rows or "<p>No accounts are declared yet.</p>")
+        "accounts, and declaring one lets a statement be filed into it even "
+        "though no provider has ever mentioned it. Accounts a provider HAS "
+        "mentioned can be filed into whether or not they are declared.</p>"
+        + (
+            rows
+            or "<p>No accounts are declared yet. Nothing is blocked by that: "
+            "accounts a provider has mentioned are already selectable "
+            "everywhere a document is filed.</p>"
+        )
         + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
         + '<p><a class="button" href="/">Back to connections</a></p>',
     )
