@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.238] - 2026-10-01
+
+### Fixed
+- **Scheduled pulls now ask for credit cards.** Previously cards were fetched
+  only on an attended deep pull, so three cards landed nothing for about sixty
+  days while the current accounts were pulled every six hours. Whether a provider
+  counts the extra calls against the same unattended allowance is not
+  established; refusals will show in the fetch ledger.
+
+### Added
+- **`coverage.silent_feeds`, not yet wired to anything.** It names a
+  single-source scheduled feed that nobody has successfully asked about for more
+  than three days, which the existing stale-feed check cannot see because it
+  needs a second source. Until an alert or a page calls it, a card going silent
+  is still not announced.
+
 ## [0.4.237] - 2026-10-01
 
 ### Fixed

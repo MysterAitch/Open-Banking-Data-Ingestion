@@ -397,11 +397,10 @@ def pull_truelayer(
                         f"{resolution.describe()}"
                     )
 
-    # Cards: a separate endpoint family, fetched on deep pulls only and
-    # LANDED WITHOUT PARSING. Card sign conventions are the classic silent
-    # corruption, so the evidence goes to layer 0 for inspection first;
-    # reconciliation into transactions follows once real payloads have
-    # confirmed the shapes. A refusal is noted, never fatal.
+    # Cards: a separate endpoint family, so no account pass ever reaches them.
+    # Every card window lands as raw evidence first, then parses through the
+    # sign-verifying mapper and reconciles like any other source.
+    # A refused card or card list is noted and ledgered, never fatal.
     if only_account and not matched_account:
         # A ref that matches no current account is tried as a CARD: cards
         # live in their own endpoint family, and the extend machinery
@@ -464,7 +463,16 @@ def pull_truelayer(
                 summary=summary,
             )
 
-    if deep:
+    # Deep pulls and routine cycles both walk every card; an explicit window
+    # or a single named account is a measured probe and spends nothing here.
+    # Cards were once deep-only, to spend no unattended quota on them, and
+    # three cards then went sixty days with nothing asking for them.
+    # The routine window is the account tier, so the cost is one list call per
+    # connection and one window call per card, each cycle.
+    # Whether a provider counts those against the same unattended allowance
+    # as the account asks is not established; the fetch ledger records each
+    # refusal, which is where the answer will show.
+    if deep or (routine and not only_account):
         try:
             cards, cards_body = truelayer.fetch_cards(
                 connection.access_token, psu_ip=psu_ip

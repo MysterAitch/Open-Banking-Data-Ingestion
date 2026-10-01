@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from itertools import combinations
 
 from .models import Transaction
@@ -703,6 +703,110 @@ def stale_feeds(
                         fresher_latest=best.latest,
                     )
                 )
+    return found
+
+
+#: How many days may pass with no successful ask of the provider before a
+#: single-source feed is called silent. Cycles run every six hours, so three
+#: days is a dozen missed cycles, well beyond one bad window or a weekend.
+SILENT_FEED_DAYS = 3
+
+
+@dataclass(frozen=True)
+class SilentFeed:
+    """A single-source scheduled feed nobody has successfully asked about.
+
+    Distinct from a quiet account: a rarely used card legitimately holds no
+    new rows, so row dates prove nothing about the feed. What proves it is
+    the fetch ledger, which says when the provider last answered for this
+    account. `last_landed` is None where the ledger holds no successful ask.
+    """
+
+    account_id: str
+    source: str
+    last_landed: datetime | None
+    latest_row: date
+    silent_days: int
+
+    def describe(self) -> str:
+        asked = (
+            f"the provider last answered for it on {self.last_landed.date()}"
+            if self.last_landed is not None
+            else "the fetch ledger holds no successful ask for it"
+        )
+        return (
+            f"{self.account_id}: the only feed is {self.source}, and {asked} "
+            f"(newest row {self.latest_row}) - {self.silent_days} days without "
+            "a successful ask; the feed may be dead"
+        )
+
+
+def silent_feeds(
+    rows: Sequence[SourceCoverage],
+    attempts: Sequence[Mapping[str, object]],
+    *,
+    watched: Collection[str],
+    now: datetime,
+    silent_days: int = SILENT_FEED_DAYS,
+    account_for_ref: Mapping[str, str] | None = None,
+) -> list[SilentFeed]:
+    """Single-source accounts whose scheduled feed has not landed for days.
+
+    The complement of `stale_feeds`, which needs a second witness to prove
+    a feed behind: an account with exactly one source has none, so this reads
+    the fetch ledger instead. `attempts` is the store's ledger (rows of
+    `Store.attempts()`); only LANDED asks count, from any trigger, because an
+    attended success is genuinely somebody having asked.
+    Refusals never reset the clock.
+
+    The account's freshest evidence is the newer of its last landed ask and
+    its newest row; a row can only have arrived through some ask, so it
+    stands in where the ledger is silent, and it is never the sole proof.
+    Accounts with several sources are left to `stale_feeds`, and sources not
+    in `watched` (files) are never expected to arrive on a schedule.
+
+    `account_for_ref` translates a ledger `account_ref` into the canonical
+    account id the rows carry, for accounts bound to a name; an unmapped ref
+    is taken as already canonical. A malformed ledger timestamp raises: a
+    ledger that cannot be read must not pass as a feed that is healthy.
+    Accounts that hold no rows at all are not reported, since their source
+    is unknown.
+    """
+    translate = account_for_ref or {}
+    last_landed: dict[str, datetime] = {}
+    for attempt in attempts:
+        if attempt.get("outcome") != "landed":
+            continue
+        ref = str(attempt.get("account_ref") or "")
+        account_id = translate.get(ref, ref)
+        stamp = datetime.fromisoformat(str(attempt.get("attempted_at") or ""))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=now.tzinfo)
+        if account_id not in last_landed or stamp > last_landed[account_id]:
+            last_landed[account_id] = stamp
+
+    by_account: dict[str, list[SourceCoverage]] = {}
+    for row in rows:
+        by_account.setdefault(row.account_id, []).append(row)
+
+    found = []
+    for account_id, members in sorted(by_account.items()):
+        if len(members) != 1 or members[0].source not in watched:
+            continue
+        only = members[0]
+        landed = last_landed.get(account_id)
+        freshest = max(only.latest, landed.date()) if landed else only.latest
+        quiet = (now.date() - freshest).days
+        if quiet > silent_days:
+            found.append(
+                SilentFeed(
+                    account_id=account_id,
+                    source=only.source,
+                    last_landed=landed,
+                    latest_row=only.latest,
+                    silent_days=quiet,
+                )
+            )
     return found
 
 

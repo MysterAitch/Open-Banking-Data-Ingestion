@@ -124,6 +124,25 @@ def configuration_prefixes() -> tuple[str, ...]:
 
 
 @pytest.fixture(autouse=True)
+def _no_card_list_over_the_network(monkeypatch) -> None:
+    """A routine TrueLayer pull asks for the card list, so a test that stubs
+    the accounts and transactions seams but not this one would make a real
+    request. A connection with no cards is the neutral answer; a test about
+    cards replaces it. A call carrying its own `client` is a test of the real
+    function against a fake transport, and passes straight through."""
+    from obdi.providers import truelayer
+
+    real = truelayer.fetch_cards
+
+    def guarded(*args, **kwargs):
+        if kwargs.get("client") is not None:
+            return real(*args, **kwargs)
+        return [], b'{"results": []}'
+
+    monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", guarded)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_configuration(monkeypatch) -> None:
     for name in list(os.environ):
         if name in KEEP:

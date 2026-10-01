@@ -13,8 +13,11 @@ was never going to match.
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import UTC, date, datetime
 from typing import ClassVar
+
+import pytest
 
 from obdi.coverage import (
     Agreement,
@@ -23,6 +26,7 @@ from obdi.coverage import (
     destination_doubt,
     export_drift,
     gaps,
+    silent_feeds,
     stale_feeds,
     transpositions,
 )
@@ -1032,6 +1036,159 @@ class TestStaleFeeds:
         rows = coverage([txn("starling", 1, -500, account="starling-personal")])
 
         assert stale_feeds(rows, watched={"starling"}) == []
+
+
+def landed(ref, when, *, source="truelayer-card-booked", trigger="scheduled",
+           outcome="landed"):
+    """One fetch-ledger row in the shape Store.attempts() returns."""
+    return {
+        "attempted_at": when,
+        "source": source,
+        "account_ref": ref,
+        "outcome": outcome,
+        "request_meta": json.dumps({"trigger": trigger}),
+    }
+
+
+class TestSilentFeeds:
+    """A single-source account going quiet at the FETCH level.
+
+    stale_feeds needs a second witness, and a credit card has exactly one, so
+    a dead card feed was invisible for sixty days. This detector reads the
+    fetch ledger instead: "the card had no transactions" is a normal quiet
+    account, "nobody has successfully asked the provider about it for days" is
+    a fault, and only the second is reported.
+
+    Known answers, decided before the first run, with now = 2026-01-20 and a
+    three-day threshold:
+      card-1  rows to 01-01, landed ask 01-19       quiet card, healthy feed
+      card-2  rows to 01-01, landed ask 01-05,
+              refusals since                         silent 15 days
+      card-3  rows to 01-01, never asked             silent 19 days, no ask
+    """
+
+    NOW = datetime(2026, 1, 20, 12, 0, tzinfo=UTC)
+    WATCHED: ClassVar[frozenset[str]] = frozenset({"starling", "truelayer"})
+
+    def _cards(self):
+        return coverage(
+            [
+                txn("truelayer", 1, -500, account="truelayer:card-1"),
+                txn("truelayer", 1, -500, account="truelayer:card-2"),
+                txn("truelayer", 1, -500, account="truelayer:card-3"),
+            ]
+        )
+
+    def _attempts(self):
+        return [
+            landed("truelayer:card-2", "2026-01-19T06:00:00+00:00", outcome="refused"),
+            landed("truelayer:card-2", "2026-01-18T06:00:00+00:00", outcome="refused"),
+            landed("truelayer:card-1", "2026-01-19T06:00:00+00:00"),
+            landed("truelayer:card-2", "2026-01-05T06:00:00+00:00"),
+        ]
+
+    def test_SilentFeeds_AQuietCardWithHealthyAsks_IsNotAFault(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        assert "truelayer:card-1" not in {feed.account_id for feed in found}
+
+    def test_SilentFeeds_ACardRefusedForWeeks_IsNamedWithItsLastSuccessfulAsk(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        silent = next(feed for feed in found if feed.account_id == "truelayer:card-2")
+        assert silent.last_landed == datetime(2026, 1, 5, 6, tzinfo=UTC)
+        assert silent.silent_days == 15
+        assert "2026-01-05" in silent.describe()
+        assert "truelayer:card-2" in silent.describe()
+
+    def test_SilentFeeds_ACardNeverAsked_IsNamedWithNoSuccessfulAskOnRecord(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        silent = next(feed for feed in found if feed.account_id == "truelayer:card-3")
+        assert silent.last_landed is None
+        assert silent.silent_days == 19
+        assert "no successful ask" in silent.describe()
+
+    def test_SilentFeeds_ExactlyTheKnownAnswers_AreReported(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        assert sorted(feed.account_id for feed in found) == [
+            "truelayer:card-2",
+            "truelayer:card-3",
+        ]
+
+    def test_SilentFeeds_ARecentRowWithNoLedgerEntries_IsNotAFault(self):
+        rows = coverage([txn("truelayer", 19, -500, account="truelayer:card-9")])
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AnAttendedSuccess_CountsAsSomebodyAsking(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-1", "2026-01-19T06:00:00+00:00", trigger="attended")]
+
+        assert silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AnotherAccountsSuccess_DoesNotRescueThisOne(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-2", "2026-01-19T06:00:00+00:00")]
+
+        found = silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
+
+        assert [feed.account_id for feed in found] == ["truelayer:card-1"]
+
+    def test_SilentFeeds_AnAccountWithTwoSources_IsLeftToStaleFeeds(self):
+        rows = coverage(
+            [
+                txn("truelayer", 1, -500, account="halifax-current"),
+                txn("halifax-qif", 1, -500, account="halifax-current"),
+            ]
+        )
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AFileOnlyAccount_IsNeverWatched(self):
+        rows = coverage([txn("halifax-qif", 1, -500, account="halifax-savings")])
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_ABoundAccount_IsMatchedThroughItsProviderRef(self):
+        rows = coverage([txn("truelayer", 1, -500, account="halifax-card")])
+        attempts = [landed("truelayer:card-1", "2026-01-19T06:00:00+00:00")]
+
+        unmapped = silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
+        mapped = silent_feeds(
+            rows,
+            attempts,
+            watched=self.WATCHED,
+            now=self.NOW,
+            account_for_ref={"truelayer:card-1": "halifax-card"},
+        )
+
+        assert [feed.account_id for feed in unmapped] == ["halifax-card"]
+        assert mapped == []
+
+    def test_SilentFeeds_TheThresholdIsStrict_ThreeDaysIsFineAndFourIsNot(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        three = [landed("truelayer:card-1", "2026-01-17T12:00:00+00:00")]
+        four = [landed("truelayer:card-1", "2026-01-16T12:00:00+00:00")]
+
+        assert silent_feeds(rows, three, watched=self.WATCHED, now=self.NOW) == []
+        assert len(silent_feeds(rows, four, watched=self.WATCHED, now=self.NOW)) == 1
+
+    def test_SilentFeeds_AMalformedLedgerTimestamp_FailsLoudly(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-1", "not a timestamp")]
+
+        with pytest.raises(ValueError):
+            silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
 
 
 class TestDestinationDoubt:
