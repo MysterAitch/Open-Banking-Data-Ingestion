@@ -502,6 +502,9 @@ class WebConfig:
     date_lag_text: Callable[[], str] | None = None
     #: Balance-walk integrity: bank running balances vs held transactions.
     balance_walk_text: Callable[[], str] | None = None
+    #: Rows sharing an identity, and payments with no row of their own.
+    #: Counts and account names only, by design of the report itself.
+    identity_health_text: Callable[[], str] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -3164,6 +3167,7 @@ def render_index(
 <p><a class="button" href="/review-report">Review queue report</a></p>
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
+<p><a class="button" href="/identity-health">Identity health (counts only)</a></p>
 <h2>Import a file</h2>
 <p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
 then verify the file against what that account already holds, before
@@ -3344,6 +3348,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             return
         if route == "/balance-walk":
             self._balance_walk()
+            return
+        if route == "/identity-health":
+            self._identity_health()
             return
         if route == "/artefacts":
             self._artefacts()
@@ -4900,6 +4907,32 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
         self._respond(200, render_page("Settlement lag", body))
+
+    def _identity_health(self) -> None:
+        hook = self.bound_config.identity_health_text
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        try:
+            text = hook()
+        except Exception as exc:
+            self._respond(
+                500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        body = (
+            "<h2>Identity health</h2>"
+            "<p>Two faults the merged layer cannot show from inside: rows "
+            "that share one identity, and payments folded into another "
+            "payment's row. Each source's own count of an account's "
+            "payments is set against the rows that hold them.</p>"
+            '<p class="muted">Counts and account names only - no amount, '
+            "payee or description appears here, so this page can be shown "
+            "to somebody who should not see the money.</p>"
+            f'<pre class="scroll" style="white-space:pre-wrap">'
+            f"{html.escape(text)}</pre>" + HOME_LINK
+        )
+        self._respond(200, render_page("Identity health", body))
 
     def _balance_walk(self) -> None:
         hook = self.bound_config.balance_walk_text

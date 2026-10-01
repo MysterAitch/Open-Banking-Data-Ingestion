@@ -17,8 +17,8 @@ Three behaviours of Actual's importer shape everything here.
 entirely and silently duplicates on any re-run.
 
 **`imported_id` is the idempotency key.** Transactions carrying the same one
-are never added twice. Ours is the canonical entity id, so a transaction keeps
-its identity across every replay.
+are never added twice. What ours is made of, and why it is not the entity id,
+is stated where it is built, in `to_actual_transaction`.
 
 **On a match, existing values win.** Actual preserves a payee, category or note
 you set by hand rather than overwriting it from the incoming record, and never

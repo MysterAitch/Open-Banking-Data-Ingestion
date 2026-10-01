@@ -240,7 +240,9 @@ def build_envelope(
     # Two store rows sharing one imported id would reach Actual as one row:
     # importTransactions treats the id as THE identity, so the second row is
     # silently absorbed and a real payment vanishes from the budget. Refuse
-    # loudly instead - the store has an identity fault a rebuild collapses.
+    # loudly instead. Ingest allocates occurrences so that this cannot arise
+    # (CandidateIndex.free_occurrence), which makes a refusal here evidence
+    # of rows written before that held, or of a door that bypasses it.
     for account_id, account_rows in payload.items():
         counted = Counter(
             str(row.get("imported_id"))
@@ -250,11 +252,22 @@ def build_envelope(
         duplicates = sorted(key for key, n in counted.items() if n > 1)
         if duplicates:
             shown = ", ".join(d[:24] + "..." for d in duplicates[:3])
+            # Named the way the reader knows it. Actual's own id is kept
+            # because it is what the applier's log and Actual itself use.
+            named = ", ".join(
+                f"{labels[binding.canonical_id]} ({binding.canonical_id})"
+                if labels.get(binding.canonical_id)
+                else binding.canonical_id
+                for binding in bindings
+                if binding.actual_account_id == account_id
+            )
             raise ValueError(
-                f"account {account_id} holds {len(duplicates)} duplicate "
-                "imported id(s) - two store rows share an identity, and "
-                "Actual would keep one and silently drop the other. Run "
-                f"'Rebuild from raw' to collapse them. First: {shown}"
+                f"{named or account_id} [Actual account {account_id}] holds "
+                f"{len(duplicates)} duplicate imported id(s) - two store rows "
+                "share an identity, and Actual would keep one and silently "
+                "drop the other. 'Rebuild from raw' renumbers them; a "
+                "duplicate that survives a rebuild is a defect worth "
+                f"reporting with this key. First: {shown}"
             )
     # Everything a person has NAMED deserves an Actual account - including
     # accounts holding nothing yet (bound means wanted; an empty account

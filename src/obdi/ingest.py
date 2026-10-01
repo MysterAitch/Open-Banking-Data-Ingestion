@@ -398,7 +398,11 @@ def _reconcile(
 
     if result.existing is not None:
         merged = supersede(result.existing, transaction)
-        merged = replace(merged, artefact_digest=digest)
+        merged = replace(
+            merged,
+            artefact_digest=digest,
+            occurrence=_occurrence_once_merged(result.existing, merged, existing),
+        )
         store.upsert_transaction(
             merged, match_tier=result.tier.value, matched_entity_id=result.existing.entity_id
         )
@@ -415,14 +419,18 @@ def _reconcile(
             summary.matched += 1
         return merged, result.existing.entity_id
 
+    occurrence = existing.free_occurrence(
+        transaction.account_id, transaction.content_key, wanted=transaction.occurrence
+    )
     fresh = replace(
         transaction,
+        occurrence=occurrence,
         entity_id=entity_id_for(
             account_id=transaction.account_id,
             source=transaction.source,
             source_id=transaction.source_id,
             content_key_value=transaction.content_key,
-            occurrence=transaction.occurrence,
+            occurrence=occurrence,
             first_artefact_digest=digest,
         ),
         artefact_digest=digest,
@@ -444,3 +452,26 @@ def _reconcile(
         summary.needs_review += 1
 
     return fresh, None
+
+
+def _occurrence_once_merged(
+    previous: Transaction, merged: Transaction, existing: CandidateIndex
+) -> int:
+    """The occurrence a held row carries after a later sighting of it.
+
+    `merged` arrives numbered by the batch that re-reported it, which says
+    where it sat in that response and nothing about the row's identity.
+    While the content is unchanged the number already held stands - the
+    upsert keeps it too, and the in-memory candidates must agree with what
+    is stored, or the next allocation is made against numbers nobody holds.
+    When the sighting changes the content the row has a new content key,
+    and needs a number no other row under that key is using.
+    """
+    if merged.content_key == previous.content_key:
+        return previous.occurrence
+    return existing.free_occurrence(
+        merged.account_id,
+        merged.content_key,
+        wanted=merged.occurrence,
+        excluding=previous.entity_id,
+    )

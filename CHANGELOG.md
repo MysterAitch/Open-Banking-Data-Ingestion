@@ -26,6 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.237] - 2026-10-01
+
+### Fixed
+- **Two identical payments no longer share one identity when they arrive in
+  separate provider responses.** Previously each response numbered its repeats
+  from zero, so the second of two same-day, same-price payments took the first's
+  number, and the push to Actual refused the pair. A rebuild could not repair it,
+  because a rebuild replays the same responses.
+- **The push refusal names the account by the name used here**, and no longer
+  advises a rebuild as though it collapsed anything.
+
+### Added
+- **Identity health: `obdi identity-health` and `/identity-health`.** Counts rows
+  sharing an identity, and payments a provider reported that have no row of their
+  own. Counts and account names only, so it can be read without seeing any money.
+  It exists to size a fault found while fixing the above: a settled payment is
+  overwritten when a different pending payment of the same amount arrives within
+  seven days from the same source. **That fault is not fixed in this release.**
+
+### Maintenance
+- **Tests:** the weekly clock-travel run failed its own self-check on every leg
+  from 17 August. The plugin published where it went under the `OBDI_` prefix,
+  which the suite clears before each test; it now uses a name outside that
+  namespace.
+
 ## [0.4.236] - 2026-08-15
 
 ### Added

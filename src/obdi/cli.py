@@ -2175,6 +2175,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return review_report(store).describe()
 
+    def identity_health_text() -> str:
+        from .identity_health import identity_health
+
+        with Store(db_path) as store:
+            return identity_health(store).describe()
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
 
@@ -2653,6 +2659,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
+        identity_health_text=identity_health_text,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,
@@ -3290,6 +3297,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     subcommands.add_parser(
+        "identity-health",
+        help="count rows sharing an identity, and payments a provider reported "
+        "that have no row of their own - counts and account names only",
+    )
+
+    subcommands.add_parser(
         "attempts",
         help="show the fetch-attempt ledger: every ask made of a provider",
     )
@@ -3795,6 +3808,14 @@ def main(argv: list[str] | None = None) -> int:
 
         with Store(db_path) as store:
             print(review_report(store).describe())
+        return 0
+    if args.command == "identity-health":
+        from .identity_health import identity_health
+
+        # Exits zero whatever it finds: this measures, and nothing gates on
+        # it until the numbers have shown what an acceptable answer is.
+        with Store(db_path) as store:
+            print(identity_health(store).describe())
         return 0
     if args.command == "rebuild":
         if not args.yes:

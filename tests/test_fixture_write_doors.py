@@ -55,13 +55,24 @@ JUSTIFIED = {
     "the unstamped fixtures above passed, and the live instance rebuilt twice into an "
     "empty derived layer before anybody noticed",
     ("test_actual_push.py", "transactions"): "two rows sharing one imported id "
-    "(content key plus occurrence), which the doors prevent twice over - measured "
-    "2026-08-12, not reasoned. Within one account the reconciler numbers a repeated "
-    "content key 0 then 1, so its ids differ; ACROSS accounts they genuinely collide, "
-    "because content keys deliberately exclude the account - but bindings that point "
-    "two canonical accounts at one Actual account are pruned, so those rows never "
-    "meet in one envelope. The refusal is belt and braces over money and stays; the "
-    "state it refuses has to be planted",
+    "(content key plus occurrence), which the doors now prevent twice over. Within "
+    "one account ingest allocates each occurrence against the rows already held; "
+    "ACROSS accounts they genuinely collide, because content keys deliberately "
+    "exclude the account - but bindings that point two canonical accounts at one "
+    "Actual account are pruned, so those rows never meet in one envelope. "
+    "CORRECTED 2026-10-01: this entry said the within-account half was 'measured "
+    "2026-08-12, not reasoned', and the measurement covered only repeats arriving in "
+    "ONE batch. Two identical payments in separate provider responses were both "
+    "numbered zero, the door DID produce the state, and the refusal - kept as belt "
+    "and braces - was the only thing that caught it. test_occurrence_allocation.py "
+    "holds the shapes that experiment did not try. The state has to be planted again "
+    "now that the allocation prevents it",
+    ("test_occurrence_allocation.py", "transactions"): "renumbers two rows onto one "
+    "occurrence to show the wording of the push refusal - the state the allocation "
+    "under test exists to prevent, so no door produces it",
+    ("test_identity_health.py", "transactions"): "the same planted state, for the "
+    "report that counts it: a detector for a state the door prevents still has to be "
+    "shown working on one",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",

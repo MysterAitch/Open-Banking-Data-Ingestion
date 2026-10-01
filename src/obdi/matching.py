@@ -301,6 +301,41 @@ class CandidateIndex:
             self._by_amount.get((account_id, amount_minor), [])
         )
 
+    def free_occurrence(
+        self, account_id: str, content_key: str, *, wanted: int, excluding: str = ""
+    ) -> int:
+        """The occurrence a row may take without sharing another row's identity.
+
+        Content key plus occurrence is the identity everything downstream is
+        keyed on, so within an account the pair must name exactly one row.
+        A batch numbers its own repeats from zero and knows nothing of rows
+        already held: two identical payments reported in separate responses
+        were both numbered zero, stayed two rows because the provider's ids
+        differed, and so reached the push to Actual sharing one imported id -
+        which no rebuild could repair, because a rebuild replays the same
+        batches.
+
+        `wanted` is honoured whenever it is free.
+        That keeps an id-less export merging occurrence for occurrence on
+        re-import, and leaves every identity already handed out untouched -
+        only a newcomer whose number is taken moves, to the lowest number
+        nobody holds.
+
+        `excluding` is the row being renumbered, when it is already held:
+        a row does not collide with itself.
+        """
+        taken = {
+            candidate.occurrence
+            for candidate in self.by_content_key(account_id, content_key)
+            if candidate.entity_id != excluding
+        }
+        if wanted not in taken:
+            return wanted
+        free = 0
+        while free in taken:
+            free += 1
+        return free
+
 
 def resolve(
     incoming: Transaction, existing: Sequence[Transaction] | CandidateIndex

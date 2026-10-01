@@ -1,0 +1,177 @@
+"""Whether every payment still has a row, and every row an identity of its own.
+
+Two faults in the merged layer are invisible from inside it. Two rows sharing
+one identity look like two ordinary rows. Two payments folded into one row
+look like one ordinary row. Neither raises a review flag, because both are
+recorded as the matcher doing its job.
+
+Both leave evidence elsewhere, and this module counts it. Identities are
+compared directly. Folding is read from the sightings: every provider id a
+row was ever sighted under is kept, so a row sighted under two settled ids
+from one source has absorbed a payment, and comparing the ids a source
+reported with the rows holding them gives the number that have no row of
+their own.
+
+It reports COUNTS AND ACCOUNT NAMES ONLY, deliberately. The question "is
+anything missing" can then be asked by somebody who may know that a fault
+exists without seeing the money it concerns, and the answer can be pasted
+into a note or a ticket as it stands.
+
+This module only reports. Whether a count is a fault in the matcher, and
+which rule should change, is decided from the number - the same order of
+operations as review_report.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .store import Store
+
+#: Artefact sources whose records name a payment by an id it will NOT keep.
+#: A pending snapshot's id is replaced when the payment settles, so one
+#: payment legitimately carries two ids, and counting the pending one would
+#: report every settled payment as two.
+#: Sources whose ids survive settlement need no entry: there a second id on
+#: one row is always a second payment.
+PENDING_SNAPSHOT_SOURCES = ("truelayer-pending",)
+
+
+@dataclass(frozen=True)
+class SharedIdentity:
+    """Rows in one account that cannot be told apart downstream."""
+
+    account_id: str
+    #: Distinct (content key, occurrence) pairs held by more than one row.
+    identities: int
+    #: The rows holding them.
+    rows: int
+
+
+@dataclass(frozen=True)
+class ProviderIdTally:
+    """One source's own count of an account's payments, against the rows."""
+
+    account_id: str
+    source: str
+    #: Distinct provider ids the source reported outside a pending snapshot.
+    reported: int
+    #: Distinct rows those ids are recorded against.
+    held: int
+    #: Rows recorded against more than one such id.
+    #: History rather than loss: a row keeps the ids it once absorbed even
+    #: after the absorbed payment has regained a row of its own.
+    absorbing_rows: int
+
+    @property
+    def folded(self) -> int:
+        """Payments the source reported that have no row of their own."""
+        return max(self.reported - self.held, 0)
+
+
+@dataclass
+class IdentityHealth:
+    shared: list[SharedIdentity] = field(default_factory=list)
+    tallies: list[ProviderIdTally] = field(default_factory=list)
+
+    @property
+    def folded(self) -> int:
+        return sum(tally.folded for tally in self.tallies)
+
+    def describe(self) -> str:
+        lines = ["Rows sharing an identity (content key + occurrence):"]
+        if not self.shared:
+            lines.append("  no rows share an identity")
+        for shared in self.shared:
+            lines.append(
+                f"  {shared.account_id}: {shared.identities} identity(ies) "
+                f"shared by {shared.rows} row(s)"
+            )
+
+        lines.append("")
+        lines.append("Provider ids reported, against the rows that hold them:")
+        if not self.tallies:
+            lines.append(
+                "  no provider ids are held, so there is nothing to compare - "
+                "this is not a pass"
+            )
+            return "\n".join(lines)
+        for tally in self.tallies:
+            line = (
+                f"  {tally.account_id} via {tally.source}: "
+                f"{tally.reported} reported, {tally.held} held"
+            )
+            if tally.folded:
+                line += f" - {tally.folded} with no row of their own"
+            if tally.absorbing_rows:
+                line += (
+                    f" ({tally.absorbing_rows} row(s) have been sighted under "
+                    "more than one id)"
+                )
+            lines.append(line)
+        if self.folded:
+            lines.append(
+                f"  TOTAL: {self.folded} payment(s) a provider reported have no "
+                "row of their own - folded into another row by the matcher"
+            )
+        else:
+            lines.append("  every provider id reported has a row of its own")
+        return "\n".join(lines)
+
+
+def identity_health(store: Store) -> IdentityHealth:
+    report = IdentityHealth()
+
+    shared = store.connection.execute(
+        "SELECT account_id, COUNT(*) AS identities, SUM(n) AS held FROM ("
+        "  SELECT account_id, COUNT(*) AS n FROM transactions "
+        "  WHERE content_key IS NOT NULL AND content_key != '' "
+        "  GROUP BY account_id, content_key, occurrence HAVING COUNT(*) > 1"
+        ") GROUP BY account_id ORDER BY account_id"
+    ).fetchall()
+    report.shared = [
+        SharedIdentity(
+            account_id=str(row["account_id"]),
+            identities=int(row["identities"]),
+            rows=int(row["held"]),
+        )
+        for row in shared
+    ]
+
+    placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
+    # One row per (transaction, source, provider id), pending snapshots set
+    # aside. Joined to transactions so a sighting whose row is gone counts on
+    # neither side: it would otherwise read as a payment reported and lost,
+    # which is the orphan check's finding and not this one's.
+    sighted = store.connection.execute(
+        "SELECT DISTINCT t.account_id AS account_id, s.source AS source, "  # noqa: S608
+        "       s.entity_id AS entity_id, s.source_id AS source_id "
+        "FROM transaction_sources s "
+        "JOIN transactions t ON t.entity_id = s.entity_id "
+        "WHERE s.source_id IS NOT NULL AND s.source_id != '' "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM raw_artefacts a "
+        "  WHERE a.digest = s.artefact_digest "
+        # Placeholders only - the interpolation builds "?,?", never data.
+        f"  AND a.source IN ({placeholders})"
+        ")",
+        PENDING_SNAPSHOT_SOURCES,
+    ).fetchall()
+
+    ids_by_row: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for row in sighted:
+        feed = (str(row["account_id"]), str(row["source"]))
+        ids_by_row.setdefault(feed, {}).setdefault(str(row["entity_id"]), set()).add(
+            str(row["source_id"])
+        )
+    report.tallies = [
+        ProviderIdTally(
+            account_id=account_id,
+            source=source,
+            reported=len(set().union(*rows.values())),
+            held=len(rows),
+            absorbing_rows=sum(1 for ids in rows.values() if len(ids) > 1),
+        )
+        for (account_id, source), rows in sorted(ids_by_row.items())
+    ]
+    return report
