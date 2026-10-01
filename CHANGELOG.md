@@ -26,6 +26,27 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.241] - 2026-10-02
+
+### Added
+- **An account ledger: `/ledger?ref=…&month=…`.** The first page that lists an
+  account's transactions. Each row shows every source that sighted it, and flags
+  what needs a second look: seen by one source where several feed the account,
+  transfers and unpaired transfer claims, open review flags, rows withheld from
+  Actual and why, rows sharing an identity, and rows that absorbed a second
+  provider id.
+- **The month's sum by the store's own rows is set beside what Actual would be
+  sent**, and the page says in words whether they differ.
+- **Values are masked however the page is fetched.** Digits show as 9 and
+  letters as X, with counts, dates, sources, directions, and flags real. The
+  values come back from the button on the page, are marked not to be kept, and
+  stay shown while moving between months.
+
+### Known limits
+- A settled row that a source reported once and then stopped reporting is not
+  detected yet, and the page says so. The Actual comparison is with what would be
+  sent now, not with what Actual holds.
+
 ## [0.4.240] - 2026-10-02
 
 ### Added

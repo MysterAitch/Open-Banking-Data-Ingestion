@@ -197,6 +197,38 @@ class TestMutatingRoutesRequireTheirOwnOrigin:
 
         assert response.status_code != 403
 
+    def test_EveryPostRouteTheHandlerDispatches_RefusesAPostDrivenByAnotherSite(
+        self, tmp_path
+    ):
+        """The routes are read out of the dispatcher rather than listed here, so a
+        POST route added later is covered the day it exists. /ledger is one: a
+        forged page must not be able to make the owner's own browser ask for
+        values."""
+        import inspect
+        import re
+
+        source = inspect.getsource(ConnectionHandler._dispatch_post)
+        routes = sorted(set(re.findall(r'route == "(/[a-z-]+)"', source)))
+        routes += re.findall(r'"(/extend[a-z-]*)"', source)
+        assert "/ledger" in routes, "the dispatcher no longer names the ledger route"
+        assert len(routes) > 10, f"read too few routes out of the dispatcher: {routes}"
+
+        httpd, base = self._server(tmp_path)
+        try:
+            statuses = {
+                route: httpx.post(
+                    f"{base}{route}",
+                    data={"ref": "x", "month": "2026-03"},
+                    headers={"Origin": "https://evil.example"},
+                    follow_redirects=False,
+                ).status_code
+                for route in routes
+            }
+        finally:
+            httpd.shutdown()
+
+        assert {route: code for route, code in statuses.items() if code != 403} == {}
+
     def test_APostWithNoOrigin_IsAccepted_BecauseItCannotBeForged(self, tmp_path):
         """Deliberate rather than an oversight: only a browser can be
         induced to submit somebody else's form, so a client sending no

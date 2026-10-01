@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NewType
 
+from .masking import mask_characters
 from .timings import Timings
 
 #: Text taken verbatim from a statement: payees, addresses, account
@@ -95,10 +96,12 @@ def shareable(lines: list[MaskedText]) -> str:
 
 
 def _mask_word(word: str) -> str:
-    """Digits to 9, letters to X preserving case - length and shape kept."""
-    return "".join(
-        "9" if char.isdigit() else ("X" if char.isupper() else "x") for char in word
-    )
+    """Digits to 9, letters to X preserving case - length and shape kept.
+
+    The character rule is shared with every other masked surface, so the
+    convention cannot drift between them.
+    """
+    return mask_characters(word)
 
 
 def mask_line(line: str) -> MaskedText:

@@ -47,6 +47,7 @@ from .coverage import report as coverage_report
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
+from .ledger import Ledger
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .probing import StepRefused, sca_note, walk_history
@@ -2388,6 +2389,19 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return balance_reconciliation(store).describe(masked=masked)
 
+    def ledger_data(ref: str, month: str) -> Ledger:
+        from .ledger import build_ledger
+
+        try:
+            label = display_labels().get(ref, "")
+        except Exception:
+            # A name is a convenience; the ledger must not depend on the
+            # provider-label scan succeeding.
+            label = ""
+        bound = ref in {binding.canonical_id for binding in _actual_bindings()}
+        with Store(db_path) as store:
+            return build_ledger(store, ref, month or None, bound=bound, label=label)
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
 
@@ -2868,6 +2882,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         review_report_text=review_report_text,
         identity_health_text=identity_health_text,
         balance_reconciliation_text=balance_reconciliation_text,
+        ledger_data=ledger_data,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,

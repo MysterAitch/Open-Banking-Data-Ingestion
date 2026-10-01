@@ -77,6 +77,10 @@ JUSTIFIED = {
     "the alert reports the push refusal and the shared identities it exists to "
     "catch, and that both findings clear once the rows are renumbered: a detector "
     "for a state the door prevents still has to be shown working on one",
+    ("test_ledger.py", "transactions"): "plants two rows on one identity so the ledger's "
+    "shared-identity flag has a row to mark - the state the allocation prevents, so no "
+    "door produces it, and a flag for it still has to be shown on one and absent from "
+    "the rows beside it",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",

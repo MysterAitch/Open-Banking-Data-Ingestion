@@ -139,19 +139,52 @@ def build_payload(
     payload: dict[str, list[dict[str, object]]] = defaultdict(list)
 
     for transaction in transactions:
-        # A voided pending row is history, not money: it either settled as
-        # a different row (already in the payload) or never happened.
-        if transaction.status is TransactionStatus.VOID:
-            continue
-        internal = transaction.is_internal_transfer or transaction.transfer_confirmed
-        if internal and not include_internal_transfers:
-            continue
         actual_account = by_canonical.get(transaction.account_id)
-        if actual_account is None:
+        # An unbound account is also a withheld reason; it is tested here so
+        # the type checker knows the destination exists below.
+        if actual_account is None or withheld_reason(
+            transaction,
+            bound=True,
+            include_internal_transfers=include_internal_transfers,
+        ):
             continue
         payload[actual_account].append(to_actual_transaction(transaction))
 
     return dict(payload)
+
+
+#: The reasons a row is kept out of the payload, as the words a reader sees.
+WITHHELD_VOID = "void"
+WITHHELD_TRANSFER_CONFIRMED = "internal transfer (confirmed)"
+WITHHELD_TRANSFER_CLAIMED = "internal transfer (unpaired claim)"
+WITHHELD_UNBOUND = "no Actual binding"
+
+
+def withheld_reason(
+    transaction: Transaction,
+    *,
+    bound: bool,
+    include_internal_transfers: bool = False,
+) -> str | None:
+    """Why this row is NOT sent to Actual, or None when it is.
+
+    The single statement of what the payload leaves out, shared by the
+    payload builder and by anything that must say what the builder would do
+    without building it. A copy of this rule elsewhere would agree until the
+    day somebody changed one.
+    """
+    # A voided pending row is history, not money: it either settled as
+    # a different row (already in the payload) or never happened.
+    if transaction.status is TransactionStatus.VOID:
+        return WITHHELD_VOID
+    if not include_internal_transfers:
+        if transaction.transfer_confirmed:
+            return WITHHELD_TRANSFER_CONFIRMED
+        if transaction.is_internal_transfer:
+            return WITHHELD_TRANSFER_CLAIMED
+    if not bound:
+        return WITHHELD_UNBOUND
+    return None
 
 
 def unbound_accounts(

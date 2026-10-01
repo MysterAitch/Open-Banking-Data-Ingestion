@@ -48,6 +48,7 @@ from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import SourceCoverage
 from .doctor import shape_problems
+from .ledger import Ledger
 from .logs import say
 from .money import format_amount
 from .namespaces import QUEUE_KINDS, validate_connection_name
@@ -58,6 +59,7 @@ from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
 from .web_accounts import NEW_ACCOUNT_FIELD, AccountPages, picker_labels
+from .web_ledger import LedgerPages
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
 #: join onto a directory. The point is not the sanitising - that already
@@ -509,6 +511,10 @@ class WebConfig:
     #: is whether to MASK the figures, and the page only passes False when
     #: the viewer asked for them.
     balance_reconciliation_text: Callable[[bool], str] | None = None
+    #: One account's ledger for a month ("" for the newest) as DATA, real
+    #: values included. Returning data rather than text is what lets the page
+    #: decide, in one place, whether a reader may see the values.
+    ledger_data: Callable[[str, str], Ledger] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -1512,7 +1518,9 @@ def _holdings_rows(
         items.append(
             f'<div class="row"{row_style}><strong>'
             f'<a href="/account?ref={quote(row.account_id)}">'
-            f"{title}</a></strong>"
+            f"{title}</a></strong> "
+            f'<a href="/ledger?ref={quote(row.account_id, safe="")}">'
+            "Ledger (transactions)</a>"
             " via "
             + html.escape(
                 _via_label(
@@ -3196,7 +3204,7 @@ anything is stored.</p>
 DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 
 
-class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
+class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
     #: Statements awaiting an explicit disclosure confirmation. Same
@@ -3309,6 +3317,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
 
         if route == "/account":
             self._account(params)
+            return
+        if route == "/ledger":
+            self._ledger_get(params)
             return
         if route == "/accounts":
             self._accounts_page()
@@ -5125,6 +5136,10 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
                     "obdi's own pages.</p>",
                 ),
             )
+            return
+        if route == "/ledger":
+            # A POST because showing values is a decision, not a link.
+            self._ledger_post(self._read_form())
             return
         if route == "/statement-held":
             self._statement_held()

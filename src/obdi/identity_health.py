@@ -163,43 +163,61 @@ def _folded_and_surplus(rows: dict[str, set[str]]) -> tuple[int, int]:
     return folded, surplus
 
 
-def identity_health(store: Store) -> IdentityHealth:
-    report = IdentityHealth()
+def shared_identity_groups(
+    store: Store, account_id: str | None = None
+) -> list[tuple[str, str, int, int]]:
+    """(account, content key, occurrence, rows) for every identity held twice.
 
-    shared = store.connection.execute(
-        "SELECT account_id, COUNT(*) AS identities, SUM(n) AS held FROM ("
-        "  SELECT account_id, COUNT(*) AS n FROM transactions "
-        "  WHERE content_key IS NOT NULL AND content_key != '' "
-        "  GROUP BY account_id, content_key, occurrence HAVING COUNT(*) > 1"
-        ") GROUP BY account_id ORDER BY account_id"
+    The one statement of what "sharing an identity" means, read by the report
+    below and by anything that must say which rows are affected. `account_id`
+    narrows the question to one account; None asks about all of them.
+    """
+    rows = store.connection.execute(
+        "SELECT account_id, content_key, occurrence, COUNT(*) AS n "
+        "FROM transactions "
+        "WHERE content_key IS NOT NULL AND content_key != '' "
+        "AND (? IS NULL OR account_id = ?) "
+        "GROUP BY account_id, content_key, occurrence HAVING COUNT(*) > 1 "
+        "ORDER BY account_id, content_key, occurrence",
+        (account_id, account_id),
     ).fetchall()
-    report.shared = [
-        SharedIdentity(
-            account_id=str(row["account_id"]),
-            identities=int(row["identities"]),
-            rows=int(row["held"]),
+    return [
+        (
+            str(row["account_id"]),
+            str(row["content_key"]),
+            int(row["occurrence"]),
+            int(row["n"]),
         )
-        for row in shared
+        for row in rows
     ]
 
+
+def provider_ids_by_row(
+    store: Store, account_id: str | None = None
+) -> dict[tuple[str, str], dict[str, set[str]]]:
+    """(account, source) -> entity id -> the provider ids that row holds.
+
+    One entry per (transaction, source, provider id), pending snapshots set
+    aside. Joined to transactions so a sighting whose row is gone counts on
+    neither side: it would otherwise read as a payment reported and lost,
+    which is the orphan check's finding and not this one's. A row holding
+    more than one id from one source has absorbed a payment.
+    """
     placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
-    # One row per (transaction, source, provider id), pending snapshots set
-    # aside. Joined to transactions so a sighting whose row is gone counts on
-    # neither side: it would otherwise read as a payment reported and lost,
-    # which is the orphan check's finding and not this one's.
     sighted = store.connection.execute(
         "SELECT DISTINCT t.account_id AS account_id, s.source AS source, "  # noqa: S608
         "       s.entity_id AS entity_id, s.source_id AS source_id "
         "FROM transaction_sources s "
         "JOIN transactions t ON t.entity_id = s.entity_id "
         "WHERE s.source_id IS NOT NULL AND s.source_id != '' "
+        "AND (? IS NULL OR t.account_id = ?) "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM raw_artefacts a "
         "  WHERE a.digest = s.artefact_digest "
         # Placeholders only - the interpolation builds "?,?", never data.
         f"  AND a.source IN ({placeholders})"
         ")",
-        PENDING_SNAPSHOT_SOURCES,
+        (account_id, account_id, *PENDING_SNAPSHOT_SOURCES),
     ).fetchall()
 
     ids_by_row: dict[tuple[str, str], dict[str, set[str]]] = {}
@@ -208,7 +226,21 @@ def identity_health(store: Store) -> IdentityHealth:
         ids_by_row.setdefault(feed, {}).setdefault(str(row["entity_id"]), set()).add(
             str(row["source_id"])
         )
-    for (account_id, source), rows in sorted(ids_by_row.items()):
+    return ids_by_row
+
+
+def identity_health(store: Store) -> IdentityHealth:
+    report = IdentityHealth()
+
+    by_account: dict[str, list[int]] = {}
+    for account_id, _key, _occurrence, held_rows in shared_identity_groups(store):
+        by_account.setdefault(account_id, []).append(held_rows)
+    report.shared = [
+        SharedIdentity(account_id=account_id, identities=len(held), rows=sum(held))
+        for account_id, held in sorted(by_account.items())
+    ]
+
+    for (account_id, source), rows in sorted(provider_ids_by_row(store).items()):
         folded, surplus = _folded_and_surplus(rows)
         report.tallies.append(
             ProviderIdTally(
