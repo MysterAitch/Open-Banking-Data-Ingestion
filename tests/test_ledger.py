@@ -309,17 +309,23 @@ class TestStatusAndTransfersAndReview:
 
 
 class TestWhatActualWouldBeSent:
-    def test_BoundAccount_WithholdsVoidAndBothKindsOfTransfer(self, household):
-        summary = ledger_of(household, bound=True).summary
+    def test_BoundAccount_WithholdsOnlyTheVoidRow_AndSendsBothKindsOfTransfer(
+        self, household
+    ):
+        """Eight rows in March, one of them void.
+        The confirmed transfer and the unpaired claim are sent like any other
+        row: leaving them out put the account's balance in Actual out by their
+        sum."""
+        ledger = ledger_of(household, bound=True)
+        summary = ledger.summary
+        rows = rows_by_description(ledger)
 
         assert summary is not None
-        assert summary.would_send == 5
-        assert summary.withheld == 3
-        assert dict(summary.withheld_by_reason) == {
-            "void": 1,
-            "internal transfer (confirmed)": 1,
-            "internal transfer (unpaired claim)": 1,
-        }
+        assert summary.would_send == 7
+        assert summary.withheld == 1
+        assert dict(summary.withheld_by_reason) == {"void": 1}
+        assert rows["TO SAVINGS"].withheld == ""
+        assert rows["TO SOMEWHERE"].withheld == ""
 
     def test_UnboundAccount_WithholdsEverything_NamingTheMissingBinding(self, household):
         summary = ledger_of(household, bound=False).summary
@@ -329,9 +335,7 @@ class TestWhatActualWouldBeSent:
         assert summary.withheld == 8
         assert dict(summary.withheld_by_reason) == {
             "void": 1,
-            "internal transfer (confirmed)": 1,
-            "internal transfer (unpaired claim)": 1,
-            "no Actual binding": 5,
+            "no Actual binding": 7,
         }
 
     def test_Rule_AgreesWithThePayloadBuilderForEveryRow(self, household):
@@ -349,16 +353,18 @@ class TestWhatActualWouldBeSent:
                 imported = f"{t.content_key}:{t.occurrence}"
                 assert (withheld_reason(t, bound=bound) is None) == (imported in sent), t
 
-    def test_Sums_StateWhetherTheStoreAndWhatIsSentDiffer(self, household):
+    def test_Sums_ForABoundAccountHoldingTransfers_AgreeBecauseTransfersAreSent(
+        self, household
+    ):
         summary = ledger_of(household, bound=True).summary
 
         assert summary is not None
         # Non-void rows: 250000 - (1250 + 73913 + 987 + 5000 + 3000 + 1111) = 164739
         assert summary.store_sum == Money(164739, "GBP")
-        # Without the two transfers (8000): 172739
-        assert summary.sent_sum == Money(172739, "GBP")
+        # The two transfers (8000) travel too, so what is sent is the same figure.
+        assert summary.sent_sum == Money(164739, "GBP")
         assert summary.store_direction == "in"
-        assert summary.sums_differ is True
+        assert summary.sums_differ is False
 
     def test_Sums_WhenNothingIsWithheld_Agree(self, tmp_path):
         path = tmp_path / "plain.sqlite3"
@@ -390,8 +396,8 @@ class TestWhatActualWouldBeSent:
         assert position.through == "2026-03-31"
         # March 164739, February -2000, the two January twins -100 and -101.
         assert position.store_balance == Money(162538, "GBP")
-        assert position.sent_balance == Money(170538, "GBP")
-        assert position.differs is True
+        assert position.sent_balance == Money(162538, "GBP")
+        assert position.differs is False
         # 7 non-void March rows + 1 February + 2 January.
         assert position.rows_counted == 10
 

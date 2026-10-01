@@ -1,10 +1,17 @@
 /**
  * Envelope handling, pure and separately testable.
  *
- * Two shapes arrive. Version 1 is the original flat payload:
+ * Three shapes arrive. The legacy one is the original flat payload:
  * { actualAccountId: [transactions] }. Version 2 wraps it and adds
  * provisioning: { version: 2, provision: [{canonical_id, label}],
- * accounts: {actualAccountId: [transactions]} }.
+ * accounts: {actualAccountId: [transactions]} }. Version 3 adds the
+ * confirmed transfer pairs to link once the rows are in:
+ * { version: 3, ..., transfers: [{debit: leg, credit: leg}] } where a leg is
+ * { account, imported_id, date, amount }.
+ *
+ * A declared version this file does not know is refused, never read as the
+ * legacy shape: that fallthrough would treat "version", "provision" and
+ * "accounts" as three Actual account ids.
  *
  * Provisioning exists so account creation is automated rather than
  * point-and-click: each provision entry becomes an Actual account, and the
@@ -13,8 +20,34 @@
  * account's transactions ride the following push, not this one.
  */
 
+const isLeg = (leg) =>
+  leg &&
+  typeof leg === 'object' &&
+  typeof leg.account === 'string' &&
+  leg.account &&
+  typeof leg.imported_id === 'string' &&
+  leg.imported_id &&
+  Number.isInteger(leg.amount);
+
+function parseTransfers(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((pair) => pair && isLeg(pair.debit) && isLeg(pair.credit))
+    .map((pair) => ({ debit: pair.debit, credit: pair.credit }));
+}
+
 export function parseEnvelope(payload) {
-  if (payload && typeof payload === 'object' && payload.version === 2) {
+  const declared =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload.version
+      : undefined;
+  if (declared !== undefined && declared !== 2 && declared !== 3) {
+    throw new Error(
+      `unsupported envelope version ${JSON.stringify(declared)} ` +
+        '(this applier reads 2 and 3) - applier and store are out of step',
+    );
+  }
+  if (declared === 2 || declared === 3) {
     const provision = Array.isArray(payload.provision) ? payload.provision : [];
     const accounts =
       payload.accounts && typeof payload.accounts === 'object'
@@ -31,13 +64,15 @@ export function parseEnvelope(payload) {
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),
       accounts,
+      transfers: declared === 3 ? parseTransfers(payload.transfers) : [],
     };
   }
-  // Version 1: the whole payload IS the accounts map.
+  // Legacy: the whole payload IS the accounts map.
   return {
     kind: 'push',
     provision: [],
     accounts: payload && typeof payload === 'object' ? payload : {},
+    transfers: [],
   };
 }
 

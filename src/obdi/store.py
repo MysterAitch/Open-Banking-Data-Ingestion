@@ -1486,6 +1486,16 @@ class Store:
             pairs,
         )
 
+    def confirmed_transfer_pairs(self) -> list[tuple[str, str]]:
+        """(debit entity, credit entity) for every pair the pairing pass proved."""
+        return [
+            (str(row[0]), str(row[1]))
+            for row in self.connection.execute(
+                "SELECT debit_entity_id, credit_entity_id FROM transfer_pairs "
+                "ORDER BY debit_entity_id"
+            )
+        ]
+
     def confirmed_transfer_entities(self) -> set[str]:
         return {
             str(value)

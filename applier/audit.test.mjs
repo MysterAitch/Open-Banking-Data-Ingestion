@@ -80,6 +80,7 @@ test('accounts existing in Actual but bound to nothing are named as strays', asy
       { id: 'act-1', name: 'halifax-current-account' },
       { id: 'act-stray', name: 'Mr Roger Howell (halifax)' },
     ],
+    getAccountBalance: async () => 0,
     getTransactions: async (id) =>
       id === 'act-stray'
         ? [
@@ -148,6 +149,49 @@ test('prune reports the foreign-id rows it deliberately left alone', async () =>
   assert.deepEqual(deleted, ['b']);
   assert.equal(report[0].removed, 1);
   assert.equal(report[0].foreign_ids, 1);
+});
+
+test('an orphan linked as a transfer is left in place and reported, never deleted', async () => {
+  // Deleting one leg of a linked pair makes Actual delete the other leg too,
+  // and the other leg is a row obdi still expects.
+  const { pruneAccounts } = await import('./audit.mjs');
+  const deleted = [];
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => [
+      { id: 'kept', imported_id: `${hex('1')}:0` },
+      { id: 'plain-orphan', imported_id: `${hex('e')}:0`, transfer_id: null },
+      { id: 'linked-orphan', imported_id: `${hex('f')}:0`, transfer_id: 'partner-row' },
+    ],
+    deleteTransaction: async (id) => deleted.push(id),
+  };
+
+  const report = await pruneAccounts(client, {
+    'act-1': [{ imported_id: `${hex('1')}:0` }],
+  });
+
+  assert.deepEqual(deleted, ['plain-orphan']);
+  assert.equal(report[0].removed, 1);
+  assert.equal(report[0].linked_left, 1);
+});
+
+test('prune says nothing about linked orphans when there are none', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => [
+      { id: 'kept', imported_id: `${hex('1')}:0`, transfer_id: 'its-partner' },
+      { id: 'plain-orphan', imported_id: `${hex('e')}:0` },
+    ],
+    deleteTransaction: async () => {},
+  };
+
+  const report = await pruneAccounts(client, {
+    'act-1': [{ imported_id: `${hex('1')}:0` }],
+  });
+
+  assert.equal(report[0].removed, 1);
+  assert.equal('linked_left' in report[0], false);
 });
 
 test('an empty expected set is refused, never pruned blind', async () => {

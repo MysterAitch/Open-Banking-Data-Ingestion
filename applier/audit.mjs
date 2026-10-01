@@ -20,6 +20,11 @@
  *             - the residue of a mis-binding, provably ours.
  * - human:    no imported_id; yours, counted only.
  * - diverged: expected and present, but amount or date differ.
+ *
+ * Beside the partition, each account carries its balance verdict (Actual's
+ * own figure against the sum of the expected rows), and the envelope's
+ * transfer pairs are judged linked, unlinked, or leg-missing by
+ * transfers.mjs, which the linking push shares.
  */
 
 export function partitionAccount(expectedRows, actualRows) {
@@ -92,6 +97,17 @@ export function summariseAudit(partition) {
   };
 }
 
+export async function readAccountRows(client, accountId) {
+  // Wide explicit bounds rather than trusting an unbounded default.
+  return client.getTransactions(accountId, '1900-01-01', '2999-12-31');
+}
+
+export function expectedBalance(expectedRows) {
+  // Integer minor units throughout: the expected balance is exactly the
+  // sum of what obdi says the account holds.
+  return expectedRows.reduce((sum, row) => sum + row.amount, 0);
+}
+
 export async function auditAccounts(client, accounts) {
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
@@ -103,7 +119,7 @@ export async function auditAccounts(client, accounts) {
   // them is the human's call.
   for (const account of known) {
     if (Object.prototype.hasOwnProperty.call(accounts, account.id)) continue;
-    const rows = await client.getTransactions(account.id, '1900-01-01', '2999-12-31');
+    const rows = await readAccountRows(client, account.id);
     report.push({
       account_id: account.id,
       name: account.name,
@@ -121,13 +137,19 @@ export async function auditAccounts(client, accounts) {
       });
       continue;
     }
-    // Wide explicit bounds rather than trusting an unbounded default.
-    const rows = await client.getTransactions(accountId, '1900-01-01', '2999-12-31');
+    const rows = await readAccountRows(client, accountId);
+    // The balance is Actual's own figure against the sum of the rows obdi
+    // expects. Rows the person entered by hand count in Actual's figure and
+    // not in the expected sum, so an account holding any differs by exactly
+    // their total; the partition above says whether that is the cause.
+    const expected = expectedBalance(expectedRows);
+    const actual = await client.getAccountBalance(accountId);
     report.push({
       account_id: accountId,
       name: nameOf.get(accountId),
       missing_account: false,
       ...summariseAudit(partitionAccount(expectedRows, rows)),
+      balance: { expected, actual, agrees: expected === actual },
     });
   }
   return report;
@@ -143,16 +165,31 @@ export function isObdiImportedId(value) {
   return typeof value === 'string' && OBDI_IMPORTED_ID.test(value);
 }
 
-export function choosePrunable(expectedIds, rows) {
-  // Only rows carrying one of OUR imported ids that the expected set no
-  // longer contains. An id that is not obdi-shaped is somebody else's
-  // bookkeeping and is treated exactly like no id at all: untouchable.
+function ourOrphans(expectedIds, rows) {
+  // Rows carrying one of OUR imported ids that the expected set no longer
+  // contains. An id that is not obdi-shaped is somebody else's bookkeeping
+  // and is treated exactly like no id at all: untouchable.
   // Split children ride with their parent.
   return rows
     .filter((row) => !row.is_child)
     .filter((row) => isObdiImportedId(row.imported_id))
-    .filter((row) => !expectedIds.has(row.imported_id))
+    .filter((row) => !expectedIds.has(row.imported_id));
+}
+
+export function choosePrunable(expectedIds, rows) {
+  // An orphan that is one leg of a linked transfer is NOT prunable.
+  // Deleting one leg makes Actual delete the other as well (measured on the
+  // pinned library, 26.7.0, where the partner vanished shortly after the
+  // delete resolved), and the other leg is a row obdi still expects.
+  // By the library's source a deleted row's imported id is still matched on
+  // import, so that row would not come back on the next push either.
+  return ourOrphans(expectedIds, rows)
+    .filter((row) => !row.transfer_id)
     .map((row) => ({ id: row.id, imported_id: row.imported_id }));
+}
+
+export function countLinkedOrphans(expectedIds, rows) {
+  return ourOrphans(expectedIds, rows).filter((row) => row.transfer_id).length;
 }
 
 export async function pruneAccounts(client, accounts) {
@@ -173,7 +210,7 @@ export async function pruneAccounts(client, accounts) {
       });
       continue;
     }
-    const rows = await client.getTransactions(accountId, '1900-01-01', '2999-12-31');
+    const rows = await readAccountRows(client, accountId);
     const prunable = choosePrunable(expectedIds, rows);
     for (const target of prunable) {
       await client.deleteTransaction(target.id);
@@ -190,6 +227,11 @@ export async function pruneAccounts(client, accounts) {
       // Say what was deliberately left alone - silence would read as
       // "nothing else was there".
       entry.foreign_ids = foreign;
+    }
+    const linked = countLinkedOrphans(expectedIds, rows);
+    if (linked > 0) {
+      // Left for the same reason, and said for the same reason.
+      entry.linked_left = linked;
     }
     report.push(entry);
   }

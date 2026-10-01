@@ -30,7 +30,8 @@ import { pathToFileURL } from 'node:url';
 import { auditAccounts, pruneAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
-import { applyAccounts, provisionAccounts, withBudget } from './lib.mjs';
+import { applyAccounts, linkTransfers, provisionAccounts, withBudget } from './lib.mjs';
+import { auditTransfers } from './transfers.mjs';
 
 const BASE = (process.env.OBDI_ACTUAL_DIR ?? '/data/actual').trim();
 const POLL_SECONDS = Number(process.env.OBDI_ACTUAL_POLL_SECONDS ?? '20');
@@ -51,19 +52,34 @@ async function readJsonOr(path, fallback) {
   }
 }
 
-async function processRequest(name) {
+// The one shape a refused or crashed request takes in the results
+// directory, so the page shows the reason rather than an unanswered request.
+export function failedResult(name, error) {
+  return {
+    ok: false,
+    request: name,
+    finished_at: new Date().toISOString(),
+    error: String(error?.message ?? error),
+  };
+}
+
+export async function processRequest(name) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
-  const { kind, provision, accounts } = parseEnvelope(payload);
+  const { kind, provision, accounts, transfers } = parseEnvelope(payload);
 
   if (kind === 'audit') {
-    const report = await withBudget((client) => auditAccounts(client, accounts));
+    const { report, pairs } = await withBudget(async (client) => ({
+      report: await auditAccounts(client, accounts),
+      pairs: await auditTransfers(client, transfers),
+    }));
     return {
       ok: true,
       kind: 'audit',
       request: name,
       finished_at: new Date().toISOString(),
       accounts: report,
+      transfers: pairs,
     };
   }
 
@@ -81,7 +97,8 @@ async function processRequest(name) {
   const outcome = await withBudget(async (client) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
-    return { provisioned, applied };
+    const linked = await linkTransfers(client, transfers);
+    return { provisioned, applied, linked };
   });
 
   if (outcome.provisioned.bindings.length) {
@@ -98,7 +115,12 @@ async function processRequest(name) {
     finished_at: new Date().toISOString(),
     added: outcome.applied.added,
     provisioned: outcome.provisioned.bindings.length,
-    lines: [...outcome.provisioned.lines, ...outcome.applied.lines],
+    transfers: outcome.linked.counts,
+    lines: [
+      ...outcome.provisioned.lines,
+      ...outcome.applied.lines,
+      ...outcome.linked.lines,
+    ],
   };
 }
 
@@ -160,12 +182,7 @@ async function tick() {
         stopKeepalive();
       }
     } catch (error) {
-      result = {
-        ok: false,
-        request: name,
-        finished_at: new Date().toISOString(),
-        error: String(error?.message ?? error),
-      };
+      result = failedResult(name, error);
     }
     await releaseLease(LOCKS, 'actual-apply');
     await rm(PROCESSING, { force: true });
@@ -176,7 +193,9 @@ async function tick() {
       line =
         result.kind === 'audit'
           ? `${name}: audited ${result.accounts.length} account(s)`
-          : `${name}: applied (${result.added} added, ${result.provisioned} provisioned)`;
+          : `${name}: applied (${result.added} added, ${result.provisioned} provisioned, ` +
+            `${result.transfers?.linked ?? 0} transfer(s) linked, ` +
+            `${result.transfers?.failed ?? 0} failed)`;
     }
     console.log(line);
   }

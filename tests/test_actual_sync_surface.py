@@ -109,11 +109,122 @@ class TestAuditEvidence:
         for imported_id in sampled_ids:
             assert imported_id in rendered, f"{imported_id} was computed and dropped"
 
-    def test_AuditReport_SampledAmounts_ReadAsMoneyNotAsMinorUnits(self):
+    def test_AuditReport_SampledAmounts_AreNeverShownInAnyForm(self):
+        """The page is served on a GET, and no GET shows a monetary value:
+        the orphan's date and identity say which row to look for."""
         rendered = web._actual_rows(lambda: [AUDIT_WITH_SAMPLES], True)
 
-        assert "12.34" in rendered
-        assert "-1234" not in rendered
+        assert "ck-ccc:0" in rendered
+        assert "2026-07-02" in rendered
+        for figure in ("12.34", "-1234", "1234", "£", "5.00", "5.50", "-500", "-550"):
+            assert figure not in rendered, f"{figure} reached the page"
+
+    def test_AuditReport_WhenAnAmountDiverged_SaysSoInWordsWithoutTheFigures(self):
+        rendered = web._actual_rows(lambda: [AUDIT_WITH_SAMPLES], True)
+
+        assert "ck-ddd:0" in rendered
+        assert "amount differs" in rendered
+
+
+def _balance_audit(*, agrees: bool, linked: int, pairs: int) -> dict[str, object]:
+    return {
+        "ok": True,
+        "kind": "audit",
+        "finished_at": "2026-09-09T13:00:00Z",
+        "accounts": [
+            {
+                "account_id": "act-main",
+                "name": "household-main",
+                "expected": 3,
+                "present": 3,
+                "human": 0,
+                "missing": 0,
+                "orphaned": 1,
+                "diverged": 0,
+                "duplicated": 0,
+                "orphaned_sample": [
+                    {"imported_id": "ck-orph:0", "date": "2026-08-05", "amount": -2955}
+                ],
+                # Distinctive on purpose: none of these may reach the page.
+                "balance": {"expected": 123456, "actual": 654321, "agrees": agrees},
+            }
+        ],
+        "transfers": {
+            "pairs": pairs,
+            "linked": linked,
+            "unlinked": pairs - linked,
+            "leg_missing": 0,
+            "by_account": {"act-main": {"pairs": pairs, "linked": linked}},
+        },
+    }
+
+
+class TestAuditBalanceAndPairs:
+    def test_AuditRow_WhenBalanceAgrees_SaysAgreesWithPairCountsAndNoFigures(self):
+        rendered = web._actual_rows(
+            lambda: [_balance_audit(agrees=True, linked=3, pairs=3)], True
+        )
+
+        assert "balance agrees" in rendered
+        assert "transfers linked 3 of 3 pair(s)" in rendered
+        for figure in ("123456", "1234.56", "654321", "6543.21", "2955", "29.55", "£"):
+            assert figure not in rendered, f"{figure} reached the page"
+
+    def test_AuditRow_WhenBalanceDiffers_SaysDiffersAndTheVerdictIsNotClean(self):
+        rendered = web._actual_rows(
+            lambda: [_balance_audit(agrees=False, linked=3, pairs=3)], True
+        )
+
+        assert "balance differs" in rendered
+        assert "audit: differences" in rendered
+        assert "audit clean" not in rendered
+        for figure in ("123456", "1234.56", "654321", "6543.21"):
+            assert figure not in rendered
+
+    def test_AuditRow_WhenAPairIsNotLinked_TheVerdictIsNotCleanEvenIfTheBalanceAgrees(self):
+        data = _balance_audit(agrees=True, linked=2, pairs=3)
+        data["accounts"][0]["orphaned"] = 0  # type: ignore[index]
+        data["accounts"][0]["orphaned_sample"] = []  # type: ignore[index]
+
+        rendered = web._actual_rows(lambda: [data], True)
+
+        assert "transfers linked 2 of 3 pair(s)" in rendered
+        assert "audit: differences" in rendered
+
+    def test_AuditRow_WhenEverythingAgreesAndEveryPairIsLinked_ReadsClean(self):
+        data = _balance_audit(agrees=True, linked=3, pairs=3)
+        data["accounts"][0]["orphaned"] = 0  # type: ignore[index]
+        data["accounts"][0]["orphaned_sample"] = []  # type: ignore[index]
+
+        rendered = web._actual_rows(lambda: [data], True)
+
+        assert "audit clean" in rendered
+
+    def test_AuditRow_FromAnApplierThatPredatesBalances_SaysNothingAboutThem(self):
+        rendered = web._actual_rows(lambda: [AUDIT_WITH_SAMPLES], True)
+
+        assert "balance agrees" not in rendered
+        assert "balance differs" not in rendered
+        assert "transfers linked" not in rendered
+
+    def test_PushRow_WhenTheApplierReportsLinking_ShowsCountsOnly(self):
+        rendered = web._result_row(
+            {
+                "ok": True,
+                "added": 4,
+                "provisioned": 0,
+                "finished_at": "2026-09-09T09:00:00Z",
+                "transfers": {
+                    "pairs": 5,
+                    "linked": 3,
+                    "already_linked": 1,
+                    "skipped": {"leg_missing": 1},
+                    "failed": 0,
+                },
+            }
+        )
+
+        assert "transfers: 3 linked, 1 already linked, 1 skipped, 0 failed" in rendered
 
     def test_AuditVerdict_WithADifferenceCategoryThePageDoesNotKnow_IsNotClean(self):
         """The applier chooses the category names on its own side of a

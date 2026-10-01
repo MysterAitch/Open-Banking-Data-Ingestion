@@ -28,6 +28,26 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.241] - 2026-10-02
 
+### Fixed
+- **Balances in Actual were wrong by the sum of each account's transfers.**
+  Movements between your own accounts were withheld from the push, so a main
+  account kept money it had moved out and a Space paid its bills with no top-ups
+  arriving. Both legs are now sent as rows, and each confirmed pair is then
+  linked as a transfer, so balances are right and income and spending are not
+  inflated.
+- **A transfer whose other side is not in Actual is sent as an ordinary row**
+  with a note saying so. Its account's balance is right; Actual's reports will
+  count it as income or spending.
+
+### Changed
+- **The audit says whether each account's balance in Actual agrees with what
+  obdi expects, and how many transfer pairs are linked.** Words and counts only.
+- **Orphan and mismatch samples on the home page no longer print amounts.**
+- **The applier refuses an envelope version it does not know.** Previously an
+  unknown version was read as a list of accounts.
+- **Pruning leaves an orphan that is one leg of a linked transfer, and says
+  so.** Deleting it would make Actual delete the other leg too.
+
 ### Added
 - **An account ledger: `/ledger?ref=…&month=…`.** The first page that lists an
   account's transactions. Each row shows every source that sighted it, and flags

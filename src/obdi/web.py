@@ -50,7 +50,6 @@ from .coverage import SourceCoverage
 from .doctor import shape_problems
 from .ledger import Ledger
 from .logs import say
-from .money import format_amount
 from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
@@ -2403,6 +2402,7 @@ def _push_result_row(result: dict[str, object]) -> str:
     detail = (
         f"{result.get('added', 0)} added, "
         f"{result.get('provisioned', 0)} account(s) provisioned"
+        f"{_push_transfer_note(result.get('transfers'))}"
         if ok
         else html.escape(str(result.get("error", "")))
     )
@@ -2410,6 +2410,29 @@ def _push_result_row(result: dict[str, object]) -> str:
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}'
         f'<br><span class="muted">{detail}</span></div>'
+    )
+
+
+def _count_of(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _push_transfer_note(transfers: object) -> str:
+    """What the push's linking step did, as counts and nothing else.
+
+    A result from an applier that predates linking carries no `transfers`
+    and says nothing about them, rather than claiming none were linked.
+    """
+    if not isinstance(transfers, dict):
+        return ""
+    skipped = transfers.get("skipped")
+    skipped_total = (
+        sum(_count_of(n) for n in skipped.values()) if isinstance(skipped, dict) else 0
+    )
+    return (
+        f", transfers: {_count_of(transfers.get('linked'))} linked, "
+        f"{_count_of(transfers.get('already_linked'))} already linked, "
+        f"{skipped_total} skipped, {_count_of(transfers.get('failed'))} failed"
     )
 
 
@@ -2485,7 +2508,14 @@ _AUDIT_NON_DIFFERENCE_KEYS = frozenset(
 _AUDIT_NAMED_DIFFERENCES = ("missing", "orphaned", "diverged", "duplicated")
 
 
-def _audit_differences(account: dict[str, object]) -> dict[str, object]:
+#: Differences the row words itself, so the generic "key value" tail
+#: must not repeat them.
+_AUDIT_WORDED_DIFFERENCES = frozenset({"balance", "unlinked_transfers"})
+
+
+def _audit_differences(
+    account: dict[str, object], pairs: tuple[int, int] | None = None
+) -> dict[str, object]:
     """Every key in an account's audit line that reports a difference.
 
     Read from the result rather than from a list of the categories known
@@ -2494,6 +2524,11 @@ def _audit_differences(account: dict[str, object]) -> dict[str, object]:
     of must read as a difference to look at, never as a clean audit. A
     difference is a flag that is true or a count that is not zero;
     samples are the evidence for a count, not a category of their own.
+
+    The balance is a nested verdict and the transfer pairs are counted
+    beside the account rather than in it, so each is lifted here: a
+    balance that disagrees, or a pair not yet linked, must not leave the
+    verdict clean.
     """
     differences: dict[str, object] = {}
     for key, value in account.items():
@@ -2504,7 +2539,22 @@ def _audit_differences(account: dict[str, object]) -> dict[str, object]:
                 differences[key] = value
         elif isinstance(value, int | float) and value:
             differences[key] = value
+    balance = account.get("balance")
+    if isinstance(balance, dict) and balance.get("agrees") is False:
+        differences["balance"] = "differs"
+    if pairs is not None and pairs[1] > pairs[0]:
+        differences["unlinked_transfers"] = pairs[1] - pairs[0]
     return differences
+
+
+def _account_pairs(result: dict[str, object], account_id: object) -> tuple[int, int] | None:
+    """(linked, total) transfer pairs touching one account, if the applier said."""
+    transfers = result.get("transfers")
+    by_account = transfers.get("by_account") if isinstance(transfers, dict) else None
+    entry = by_account.get(str(account_id)) if isinstance(by_account, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    return _count_of(entry.get("linked")), _count_of(entry.get("pairs"))
 
 
 def _audit_sample_entry(item: object) -> str:
@@ -2514,22 +2564,37 @@ def _audit_sample_entry(item: object) -> str:
     for key, value in item.items():
         if isinstance(value, dict):
             inner = ", ".join(
-                _audit_sample_field(sub_key, sub_value)
-                for sub_key, sub_value in value.items()
+                text
+                for text in (
+                    _audit_sample_field(sub_key, sub_value)
+                    for sub_key, sub_value in value.items()
+                )
+                if text
             )
             parts.append(f"{html.escape(str(key))}({inner})")
         else:
-            parts.append(_audit_sample_field(str(key), value))
+            text = _audit_sample_field(str(key), value)
+            if text:
+                parts.append(text)
+    actual, store = item.get("actual"), item.get("store")
+    if (
+        isinstance(actual, dict)
+        and isinstance(store, dict)
+        and actual.get("amount") != store.get("amount")
+    ):
+        # Said in words: the figures themselves are not shown on a page
+        # that is served on a GET.
+        parts.append("amount differs")
     return " ".join(parts)
 
 
 def _audit_sample_field(key: str, value: object) -> str:
-    # Actual holds amounts in minor units and the budget file is
-    # single-currency, so a bare integer here reads as pence dressed as
-    # pounds. Ids and dates are what a person searches on, so they are
-    # shown bare; anything else is labelled with the key it arrived under.
-    if key == "amount" and isinstance(value, int) and not isinstance(value, bool):
-        return html.escape(format_amount(value))
+    # No amount is ever rendered here - this section is served on a GET,
+    # and no GET shows a monetary value. Ids and dates are what a person
+    # searches on, so they are shown bare; anything else is labelled with
+    # the key it arrived under.
+    if key == "amount":
+        return ""
     if key in {"imported_id", "date"}:
         return html.escape(str(value))
     return f"{html.escape(key)} {html.escape(str(value))}"
@@ -2588,13 +2653,17 @@ def _audit_result_row(result: dict[str, object]) -> str:
 
     badge = (
         '<span class="pill pill-bad">audit: differences</span>'
-        if any(_audit_differences(a) for a in accounts)
+        if any(
+            _audit_differences(a, _account_pairs(result, a.get("account_id")))
+            for a in accounts
+        )
         else '<span class="pill pill-ok">audit clean</span>'
     )
     lines = []
     for account in accounts:
         name = html.escape(str(account.get("name") or account.get("account_id", "")))
-        differences = _audit_differences(account)
+        pairs = _account_pairs(result, account.get("account_id"))
+        differences = _audit_differences(account, pairs)
         if account.get("missing_account"):
             lines.append(
                 f'<span class="warn">{name}: account missing from Actual '
@@ -2618,16 +2687,38 @@ def _audit_result_row(result: dict[str, object]) -> str:
             f"duplicated {account.get('duplicated', 0)}"
         )
         unnamed = [
-            key for key in sorted(differences) if key not in _AUDIT_NAMED_DIFFERENCES
+            key
+            for key in sorted(differences)
+            if key not in _AUDIT_NAMED_DIFFERENCES
+            and key not in _AUDIT_WORDED_DIFFERENCES
         ]
         if unnamed:
             detail += ", " + ", ".join(
                 f"{html.escape(key)} {html.escape(str(differences[key]))}"
                 for key in unnamed
             )
+        balance = account.get("balance")
+        if isinstance(balance, dict):
+            # Words only: the figures behind the verdict are not shown on
+            # a page served on a GET.
+            detail += (
+                ", balance agrees"
+                if balance.get("agrees") is True
+                else ", balance differs"
+            )
+        if pairs is not None:
+            detail += f", transfers linked {pairs[0]} of {pairs[1]} pair(s)"
         css = "warn" if differences else "muted"
         lines.append(f'<span class="{css}">{name}: {detail}</span>')
         lines.extend(_audit_sample_lines(account))
+    totals = result.get("transfers")
+    if isinstance(totals, dict):
+        lines.append(
+            f'<span class="muted">transfer pairs: {_count_of(totals.get("pairs"))} '
+            f'in all, {_count_of(totals.get("linked"))} linked, '
+            f'{_count_of(totals.get("unlinked"))} unlinked, '
+            f'{_count_of(totals.get("leg_missing"))} with a leg missing</span>'
+        )
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}<br>'
         + "<br>".join(lines)

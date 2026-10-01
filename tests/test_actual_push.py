@@ -72,7 +72,7 @@ class TestEnvelope:
                 {"halifax-reward": "Reward (halifax)"},
             )
 
-        assert envelope["version"] == 2
+        assert envelope["version"] == 3
         assert list(envelope["accounts"].keys()) == ["act-1"]
         # The NAMED unbound account is provisioned with its label; the
         # source-qualified fallback is not - nobody has named it yet, and

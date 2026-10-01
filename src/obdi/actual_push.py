@@ -21,8 +21,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .replay import ActualAccountBinding, build_payload, unbound_accounts
+from .replay import (
+    ActualAccountBinding,
+    build_payload,
+    build_transfer_pairs,
+    unbound_accounts,
+)
 from .store import Store
+
+# Version 3 added `transfers` beside `accounts`. The applier refuses any
+# version it does not know, so a change here ships with its applier.
+ENVELOPE_VERSION = 3
 
 
 class DuplicateImportedIdError(ValueError):
@@ -312,7 +321,14 @@ def build_envelope(
         }
         for canonical in sorted(label_of)
     ]
-    return {"version": 2, "provision": provision, "accounts": payload}
+    return {
+        "version": ENVELOPE_VERSION,
+        "provision": provision,
+        "accounts": payload,
+        "transfers": build_transfer_pairs(
+            transactions, bindings, store.confirmed_transfer_pairs()
+        ),
+    }
 
 
 def build_audit_envelope(
@@ -325,10 +341,19 @@ def build_audit_envelope(
     included even when empty - an empty account can still hold orphans on
     the Actual side, and those are precisely what the audit exists to see.
     """
-    accounts = build_payload(store.all_transactions(), bindings)
+    transactions = store.all_transactions()
+    accounts = build_payload(transactions, bindings)
     for binding in bindings:
         accounts.setdefault(binding.actual_account_id, [])
-    return {"version": 2, "kind": "audit", "accounts": accounts}
+    return {
+        "version": ENVELOPE_VERSION,
+        "kind": "audit",
+        "accounts": accounts,
+        # The pairs a push would link, so the audit can say whether they are.
+        "transfers": build_transfer_pairs(
+            transactions, bindings, store.confirmed_transfer_pairs()
+        ),
+    }
 
 
 def build_prune_envelope(

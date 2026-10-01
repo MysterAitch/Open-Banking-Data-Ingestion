@@ -179,23 +179,31 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
             "<th>Internal transfers, confirmed</th><td>1</td>",
             "<th>Internal transfers, claimed but unpaired</th><td>1</td>",
             "<th>Open review flags</th><td>1</td>",
-            "<th>Would be sent to Actual</th><td>5</td>",
+            "<th>Would be sent to Actual</th><td>7</td>",
         ):
             assert expected in page, expected
 
     def test_Page_StatesWhyRowsAreWithheld(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert (
-            "<th>Withheld from Actual</th><td>3 (internal transfer (confirmed): 1, "
-            "internal transfer (unpaired claim): 1, void: 1)</td>"
-        ) in page
+        assert "<th>Withheld from Actual</th><td>1 (void: 1)</td>" in page
 
-    def test_Page_SaysTheSumsAndThePositionsDifferWithoutGivingFigures(self, served):
-        page = get(served, ref=CURRENT, month="2026-03").text
+    def test_Page_ForAnUnboundAccount_SaysTheSumsAndPositionsDifferWithoutFigures(
+        self, served
+    ):
+        """Nothing of an unbound account is sent, so its sums cannot agree."""
+        page = get(served, ref="savings-account", month="2026-03").text
 
         assert "The two month sums differ." in page
         assert "The two positions differ." in page
+
+    def test_Page_ForABoundAccountHoldingTransfers_SaysTheSumsAgree(self, served):
+        """Transfers travel to Actual like any other row, so they no longer
+        open a gap between the store's figure and what is sent."""
+        page = get(served, ref=CURRENT, month="2026-03").text
+
+        assert "The two month sums agree." in page
+        assert "The two positions agree." in page
 
     def test_Page_SaysTheyAgreeWhenTheyDo(self, served):
         page = get(served, ref="plain", month="2026-03").text
@@ -221,11 +229,11 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
             ">transfer?<",
             ">review<",
             ">withheld from Actual: void<",
-            ">withheld from Actual: internal transfer (confirmed)<",
-            ">withheld from Actual: internal transfer (unpaired claim)<",
             ">absorbed 2 ids<",
         ):
             assert flag in page, flag
+        # A transfer is flagged as a transfer, and is not withheld for being one.
+        assert "withheld from Actual: internal transfer" not in page
 
     def test_Page_OmitsFlagsNoRowEarnsInThatMonth(self, served):
         january = get(served, ref=CURRENT, month="2026-01").text
@@ -339,7 +347,6 @@ class TestShowingValuesTakesAPost:
             "SALARY ZEBRA LTD",
             "kept apart by the same-source rule",
             "£1,647.39",
-            "£1,727.39",
         ):
             assert expected in page, expected
 
@@ -522,5 +529,5 @@ class TestWiring:
         unbound = config.ledger_data("savings-account", "2026-03")
 
         assert bound.actual_bound is True and unbound.actual_bound is False
-        assert bound.summary is not None and bound.summary.would_send == 5
+        assert bound.summary is not None and bound.summary.would_send == 7
         assert next(row.amount.minor for row in bound.rows if row.status == "booked") != 0

@@ -115,17 +115,23 @@ class TestGroupingByAccount:
 
 
 class TestInternalTransfers:
-    def test_Transfer_WhenReplayed_ExcludedByDefault(self):
-        # Counting both sides inflates spending and income alike.
+    def test_Transfer_WhenReplayed_SentAsAnOrdinaryRow(self):
+        # Withholding it left the account's balance out by the transfer; the
+        # pairing travels separately so the applier can link the rows.
         transfer = txn(is_internal_transfer=True)
-        assert build_payload([transfer], BINDINGS) == {}
-
-    def test_Transfer_WhenExplicitlyRequested_Included(self):
-        transfer = txn(is_internal_transfer=True)
-        payload = build_payload([transfer], BINDINGS, include_internal_transfers=True)
+        payload = build_payload([transfer], BINDINGS)
         assert len(payload["actual-acc-1"]) == 1
 
-    def test_Transfer_WhenIncluded_LabelledInNotes(self):
+    def test_Transfer_WhenConfirmedByPairing_SentAsAnOrdinaryRowToo(self):
+        transfer = txn(transfer_confirmed=True)
+        payload = build_payload([transfer], BINDINGS)
+        assert len(payload["actual-acc-1"]) == 1
+
+    def test_Transfer_WhenAccountUnbound_StillWithheldLikeAnyOtherRow(self):
+        transfer = txn(is_internal_transfer=True, account_id="unknown-account")
+        assert build_payload([transfer], BINDINGS) == {}
+
+    def test_Transfer_WhenReplayed_LabelledInNotes(self):
         transfer = txn(is_internal_transfer=True)
         assert "internal transfer" in to_actual_transaction(transfer)["notes"]
 

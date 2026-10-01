@@ -111,80 +111,118 @@ def _notes_for(transaction: Transaction) -> str:
     elif transaction.is_internal_transfer:
         # Claimed by the provider but the opposite side was never found in
         # the store - worth a distinct label, because the reader is exactly
-        # the person who can tell whether an account is missing.
+        # the person who can tell whether an account is missing. It stays an
+        # ordinary row in Actual, and this note is the only place it says so.
         parts.append("internal transfer (unpaired claim)")
     if transaction.status is TransactionStatus.PENDING:
         parts.append("pending")
     return " | ".join(parts)
 
 
-def build_payload(
-    transactions: list[Transaction],
-    bindings: list[ActualAccountBinding],
-    *,
-    include_internal_transfers: bool = False,
-) -> dict[str, list[dict[str, object]]]:
-    """Group transactions by Actual account, ready to import.
-
-    Internal transfers are excluded by default - whether the provider claimed
-    it or the pairing pass proved it; either kind of evidence suffices. They
-    are real movements between your own accounts, but counting both sides
-    inflates spending and income alike; Actual models them as its own transfer
-    type, which a flat import cannot express.
+def _sendable(
+    transactions: list[Transaction], bindings: list[ActualAccountBinding]
+) -> list[tuple[Transaction, str]]:
+    """Each transaction that reaches the budget, with its Actual account.
 
     Accounts with no binding are skipped rather than guessed at, because
     inventing a destination would scatter transactions into the wrong budget.
+    A voided pending row is history, not money: it either settled as a
+    different row (already here) or never happened.
     """
     by_canonical = {binding.canonical_id: binding.actual_account_id for binding in bindings}
-    payload: dict[str, list[dict[str, object]]] = defaultdict(list)
-
+    sendable: list[tuple[Transaction, str]] = []
     for transaction in transactions:
         actual_account = by_canonical.get(transaction.account_id)
         # An unbound account is also a withheld reason; it is tested here so
         # the type checker knows the destination exists below.
-        if actual_account is None or withheld_reason(
-            transaction,
-            bound=True,
-            include_internal_transfers=include_internal_transfers,
-        ):
+        if actual_account is None or withheld_reason(transaction, bound=True):
             continue
-        payload[actual_account].append(to_actual_transaction(transaction))
+        sendable.append((transaction, actual_account))
+    return sendable
 
+
+def build_payload(
+    transactions: list[Transaction],
+    bindings: list[ActualAccountBinding],
+) -> dict[str, list[dict[str, object]]]:
+    """Group transactions by Actual account, ready to import.
+
+    Movements between your own accounts go as ordinary rows, each with its
+    own imported id: omitting them leaves every account's balance out by the
+    sum of its transfers. A flat import cannot express Actual's transfer
+    type, so the pairing is sent separately (`build_transfer_pairs`) and
+    linked by the applier once the rows are in. Whether the provider claimed
+    the transfer or the pairing pass proved it, the row is sent and its note
+    says which.
+    """
+    payload: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for transaction, actual_account in _sendable(transactions, bindings):
+        payload[actual_account].append(to_actual_transaction(transaction))
     return dict(payload)
 
 
 #: The reasons a row is kept out of the payload, as the words a reader sees.
 WITHHELD_VOID = "void"
-WITHHELD_TRANSFER_CONFIRMED = "internal transfer (confirmed)"
-WITHHELD_TRANSFER_CLAIMED = "internal transfer (unpaired claim)"
 WITHHELD_UNBOUND = "no Actual binding"
 
 
-def withheld_reason(
-    transaction: Transaction,
-    *,
-    bound: bool,
-    include_internal_transfers: bool = False,
-) -> str | None:
+def withheld_reason(transaction: Transaction, *, bound: bool) -> str | None:
     """Why this row is NOT sent to Actual, or None when it is.
 
     The single statement of what the payload leaves out, shared by the
     payload builder and by anything that must say what the builder would do
     without building it. A copy of this rule elsewhere would agree until the
     day somebody changed one.
+
+    A movement between your own accounts is NOT a reason.
+    Withholding those left every account's balance in Actual out by the sum
+    of its transfers; they are sent as rows and linked afterwards.
     """
     # A voided pending row is history, not money: it either settled as
     # a different row (already in the payload) or never happened.
     if transaction.status is TransactionStatus.VOID:
         return WITHHELD_VOID
-    if not include_internal_transfers:
-        if transaction.transfer_confirmed:
-            return WITHHELD_TRANSFER_CONFIRMED
-        if transaction.is_internal_transfer:
-            return WITHHELD_TRANSFER_CLAIMED
     if not bound:
         return WITHHELD_UNBOUND
     return None
+
+
+def build_transfer_pairs(
+    transactions: list[Transaction],
+    bindings: list[ActualAccountBinding],
+    pairs: list[tuple[str, str]],
+) -> list[dict[str, object]]:
+    """The confirmed pairs whose two rows are both in the payload.
+
+    A pair is listed only when the applier will be able to find both rows:
+    each leg bound, to two DIFFERENT Actual accounts (one account cannot hold
+    a transfer to itself), and neither void. Anything short of that is not
+    listed - its row still travels as an ordinary row, so the balance is
+    right and the note says what it is. Only pairs the pairing pass PROVED
+    are linked; a provider's unpaired claim has no partner to link to.
+    """
+    held = {
+        transaction.entity_id: (transaction, actual_account)
+        for transaction, actual_account in _sendable(transactions, bindings)
+    }
+    listed: list[dict[str, object]] = []
+    for debit_id, credit_id in pairs:
+        debit = held.get(debit_id)
+        credit = held.get(credit_id)
+        if debit is None or credit is None or debit[1] == credit[1]:
+            continue
+        listed.append({"debit": _leg(*debit), "credit": _leg(*credit)})
+    return listed
+
+
+def _leg(transaction: Transaction, actual_account: str) -> dict[str, object]:
+    row = to_actual_transaction(transaction)
+    return {
+        "account": actual_account,
+        "imported_id": row["imported_id"],
+        "date": row["date"],
+        "amount": row["amount"],
+    }
 
 
 def unbound_accounts(

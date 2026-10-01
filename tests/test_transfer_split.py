@@ -12,7 +12,12 @@ confirmations live in their own table, written by the pairing pass alone.
 
 from obdi.ingest import pair_transfers_across_store, reconcile_batch, unconfirmed_transfers
 from obdi.providers.starling import to_transaction
-from obdi.replay import ActualAccountBinding, build_payload, to_actual_transaction
+from obdi.replay import (
+    ActualAccountBinding,
+    build_payload,
+    build_transfer_pairs,
+    to_actual_transaction,
+)
 from obdi.store import Store
 
 CURRENT = "starling-personal"
@@ -120,25 +125,40 @@ class TestClaimAndConfirmationAreSeparateFacts:
 
 
 class TestReplayHonoursBothKindsOfEvidence:
-    def test_Replay_WhenPairConfirmedButUnclaimed_BothSidesExcluded(self, tmp_path):
-        # The regression the split must not introduce: a transfer nobody
-        # claimed but pairing proved must still stay out of spending.
+    def test_Replay_WhenPairConfirmedButUnclaimed_BothSidesSentAndThePairListed(
+        self, tmp_path
+    ):
+        # A transfer nobody claimed but pairing proved is sent as two rows
+        # and listed as a pair, so the applier can link it.
         with _store_with(
             tmp_path, [(CURRENT, UNCLAIMED_OUT, "d1"), (SAVINGS, UNCLAIMED_IN, "d2")]
         ) as store:
             pair_transfers_across_store(store)
-            payload = build_payload(store.all_transactions(), BINDINGS)
+            transactions = store.all_transactions()
+            payload = build_payload(transactions, BINDINGS)
+            pairs = build_transfer_pairs(
+                transactions, BINDINGS, store.confirmed_transfer_pairs()
+            )
 
-            assert payload == {}
+            assert {account: len(rows) for account, rows in payload.items()} == {
+                "actual-current": 1,
+                "actual-savings": 1,
+            }
+            assert len(pairs) == 1
 
-    def test_Replay_WhenClaimUnpaired_StillExcludedOnTheProvidersWord(self, tmp_path):
+    def test_Replay_WhenClaimUnpaired_SentOnTheProvidersWordAndNoPairListed(self, tmp_path):
         with _store_with(tmp_path, [(CURRENT, CLAIMED_LONELY, "d1")]) as store:
             pair_transfers_across_store(store)
-            payload = build_payload(store.all_transactions(), BINDINGS)
+            transactions = store.all_transactions()
+            payload = build_payload(transactions, BINDINGS)
+            pairs = build_transfer_pairs(
+                transactions, BINDINGS, store.confirmed_transfer_pairs()
+            )
 
-            assert payload == {}
+            assert len(payload["actual-current"]) == 1
+            assert pairs == []
 
-    def test_Notes_WhenClaimUnpaired_SayTheExclusionRestsOnTheProvidersWordAlone(
+    def test_Notes_WhenClaimUnpaired_SayTheRowRestsOnTheProvidersWordAlone(
         self, tmp_path
     ):
         with _store_with(tmp_path, [(CURRENT, CLAIMED_LONELY, "d1")]) as store:

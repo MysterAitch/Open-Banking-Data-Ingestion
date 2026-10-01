@@ -30,6 +30,7 @@ from .accounts import (
     lifecycle_breach,
     read_registry_file,
 )
+from .actual_push import ENVELOPE_VERSION
 from .alerts import Finding
 from .backup import BackupRefused, take_backup, verify_copy
 from .connections import ConnectionStore
@@ -52,7 +53,12 @@ from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
-from .replay import ActualAccountBinding, build_payload, unbound_accounts
+from .replay import (
+    ActualAccountBinding,
+    build_payload,
+    build_transfer_pairs,
+    unbound_accounts,
+)
 from .secrets import SecretError, read_secret, truelayer_readiness
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
@@ -996,7 +1002,7 @@ def _push_actual(db_path: Path) -> int:
     return 0
 
 
-def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -> int:
+def _replay(db_path: Path, out: Path | None) -> int:
     bindings = _actual_bindings()
     if not bindings:
         print(
@@ -1008,13 +1014,23 @@ def _replay(db_path: Path, out: Path | None, include_internal_transfers: bool) -
 
     with Store(db_path) as store:
         transactions = store.all_transactions()
+        pairs = store.confirmed_transfer_pairs()
 
-    payload = build_payload(
-        transactions, bindings, include_internal_transfers=include_internal_transfers
-    )
+    payload = build_payload(transactions, bindings)
     missing = unbound_accounts(transactions, bindings)
 
-    rendered = json.dumps(payload, indent=2)
+    # The envelope shape, so the manual apply links transfers exactly as
+    # the queued push does; the flat map alone would leave each pair as two
+    # ordinary rows.
+    rendered = json.dumps(
+        {
+            "version": ENVELOPE_VERSION,
+            "provision": [],
+            "accounts": payload,
+            "transfers": build_transfer_pairs(transactions, bindings, pairs),
+        },
+        indent=2,
+    )
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(rendered, encoding="utf-8")
@@ -3431,12 +3447,6 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="write the payload here; omit to write to stdout",
     )
-    replay_command.add_argument(
-        "--include-internal-transfers",
-        action="store_true",
-        help="include movements between your own accounts (off by default: "
-        "counting both sides inflates spending and income alike)",
-    )
 
     serve_command = subcommands.add_parser(
         "serve", help="run the web interface for connecting banks from a phone"
@@ -3779,7 +3789,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command == "replay":
-        return _replay(db_path, args.out, args.include_internal_transfers)
+        return _replay(db_path, args.out)
 
     if args.command == "serve":
         return _serve(args.host, args.port, db_path)

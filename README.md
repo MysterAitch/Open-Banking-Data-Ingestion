@@ -329,9 +329,14 @@ obdi replay --out ./actual-import.json
 
 Accounts with no Actual binding are **not** replayed and are named in the
 output, because a budget quietly missing an account looks like missing spending.
-Internal transfers are excluded by default: both sides are real movements, but
-counting them inflates spending and income alike, and Actual models transfers
-as their own type which a flat import cannot express.
+Internal transfers are sent like any other row, because leaving them out makes
+every account's balance wrong by the sum of its transfers. Actual models
+transfers as their own type, which a flat import cannot express, so the
+confirmed pairs travel beside the rows and the applier links the two existing
+rows once both are in (it never creates a transfer by importing one, which
+double-counts a leg that is already there). An unpaired provider claim, or a
+pair whose other account is not bound, stays an ordinary row and its note says
+what it is.
 
 ### Why the payload rather than a direct write
 
