@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -3174,6 +3175,35 @@ def scheduled_pull_skip_reason(
         # The ladder is spending an attended SCA window on the same
         # accounts; its work is unrepeatable, a scheduled pull is not.
         return "a post-auth backfill is running - skipping this cycle"
+    spacing = _scheduled_spacing(db_path, now)
+    if spacing is not None and spacing.remaining_seconds > 0:
+        return (
+            f"last scheduled cycle ran {int(spacing.age_seconds // 60)} min ago "
+            f"(minimum spacing {spacing.min_interval // 60} min) - too soon to "
+            "pull again without spending extra bank quota"
+        )
+    return None
+
+
+@dataclass(frozen=True)
+class _Spacing:
+    """How long ago the last scheduled ask was, against the minimum spacing."""
+
+    age_seconds: float
+    min_interval: int
+
+    @property
+    def remaining_seconds(self) -> float:
+        return self.min_interval - self.age_seconds
+
+
+def _scheduled_spacing(db_path: Path, now: datetime | None = None) -> _Spacing | None:
+    """The spacing rule's two numbers, or None where the rule does not apply.
+
+    Measured from the attempt ledger, so it survives restarts by construction.
+    None when spacing is switched off, when nothing scheduled has ever been
+    asked, or when the ledger's stamp cannot be read.
+    """
     interval = int(os.getenv("OBDI_PULL_INTERVAL_SECONDS", "21600") or "21600")
     default_min = int(interval * 0.9)
     raw_min = os.getenv("OBDI_PULL_MIN_INTERVAL_SECONDS", "").strip()
@@ -3193,13 +3223,13 @@ def scheduled_pull_skip_reason(
     except ValueError:
         return None
     age = ((now or datetime.now(UTC)) - last).total_seconds()
-    if age < min_interval:
-        return (
-            f"last scheduled cycle ran {int(age // 60)} min ago (minimum "
-            f"spacing {int(min_interval // 60)} min) - skipping so restarts "
-            "and deploys never spend bank quota"
-        )
-    return None
+    return _Spacing(age_seconds=age, min_interval=min_interval)
+
+
+#: How long one step of waiting for the slot lasts.
+#: Short, so a stop signal, a deploy's lease, or a clock correction is met
+#: within a minute and not after hours.
+SLOT_POLL_SECONDS = 60
 
 
 def _await_scheduled_clearance(
@@ -3207,33 +3237,64 @@ def _await_scheduled_clearance(
     wait_seconds: int = 600,
     poll_seconds: int = 15,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], datetime] | None = None,
 ) -> str | None:
-    """Wait out TRANSIENT blocks before a scheduled cycle gives up.
+    """Wait until a scheduled cycle may pull, or give up with the reason.
 
-    A deploy or a rebuild holds its lease for minutes; the old behaviour
-    skipped the cycle and slept the full six hours - so every deploy cost
-    a cycle (observed live on the blank-slate boot, where the play's own
-    lease starved the first pull). Spacing skips return immediately: "not
-    due yet" deserves the long sleep, "blocked for a moment" does not.
-    Returns the final blocking reason, or None when clear to pull.
+    Two kinds of wait, and they compose.
+
+    A cycle that starts BEFORE ITS SLOT waits for the slot and then pulls.
+    The scheduler's loop sleeps a whole interval after every cycle, so a
+    cycle that merely gave up cost that whole interval: on 2026-10-01 a pull
+    at 18:45 and restarts for two deploys at 23:11 and 23:34 left the next
+    pull due at 05:34, nearly eleven hours later on a six-hour schedule, and
+    deploying often enough would have pulled nothing at all. Nothing is held
+    while waiting, so a deploy is never blocked by it. The cost is that the
+    rest of the cycle - the push and the alert - waits for the slot too.
+
+    A TRANSIENT block - a deploy, a rebuild, a backfill holding its lease for
+    minutes - is waited out within a budget, after which the cycle gives up
+    and returns the reason (observed live on the blank-slate boot, where the
+    play's own lease starved the first pull).
+
+    Returns None when clear to pull.
     """
     waited = 0
     announced = False
+    slot_announced = False
     while True:
-        reason = scheduled_pull_skip_reason(db_path)
+        now = clock() if clock is not None else None
+        reason = scheduled_pull_skip_reason(db_path, now=now)
         if reason is None:
             return None
-        transient = "in progress" in reason
-        if not transient or waited >= wait_seconds:
+        if "in progress" in reason or "is running" in reason:
+            if waited >= wait_seconds:
+                return reason
+            if not announced:
+                print(
+                    f"{reason} - waiting up to {wait_seconds // 60} min "
+                    "for it to clear"
+                )
+                announced = True
+            sleep(poll_seconds)
+            waited += poll_seconds
+            continue
+        spacing = _scheduled_spacing(db_path, now)
+        if spacing is None:
+            # A reason this loop has no way to wait for: give up, as before.
             return reason
-        if not announced:
+        if spacing.remaining_seconds <= 0:
+            # The slot opened between the two readings.
+            continue
+        if not slot_announced:
+            # Hours of silence from a container read as a hang.
             print(
-                f"{reason} - waiting up to {wait_seconds // 60} min "
-                "for it to clear"
+                f"{reason} - waiting {int(spacing.remaining_seconds // 60)} min "
+                "for the slot, then pulling, so this restart does not cost a "
+                "whole interval"
             )
-            announced = True
-        sleep(poll_seconds)
-        waited += poll_seconds
+            slot_announced = True
+        sleep(min(spacing.remaining_seconds, SLOT_POLL_SECONDS))
 
 
 def _pull_everything(db_path: Path, since: date | None) -> int:

@@ -256,9 +256,180 @@ class TestRebuildGuards:
         assert rebuild_in_progress_note(db) is None
 
 
+class _Clock:
+    """A clock the fake sleep moves, so hours of waiting cost nothing."""
+
+    def __init__(self, start: datetime) -> None:
+        self.now = start
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += timedelta(seconds=seconds)
+
+
+class TestAnEarlyScheduledPullWaitsForItsSlot:
+    """The scheduler's loop sleeps a whole interval after every cycle, so a
+    cycle that gives up because it started early costs that whole interval.
+
+    Measured on 2026-10-01: a pull at 18:45, restarts at 23:11 and 23:34 for
+    two deploys, and the next pull not due until 05:34 - nearly eleven hours
+    after the last, on a six-hour schedule. Deploys often enough and nothing
+    is ever pulled. Waiting for the slot inside the cycle is the one remedy
+    that does not need the loop itself to change.
+    """
+
+    def _db(self, tmp_path, monkeypatch, last_scheduled: str):
+        import json as _json
+        from datetime import datetime
+
+        from obdi.store import Store
+
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
+        monkeypatch.setenv("OBDI_PULL_INTERVAL_SECONDS", "21600")
+        monkeypatch.delenv("OBDI_PULL_MIN_INTERVAL_SECONDS", raising=False)
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            store.record_attempt(
+                source="truelayer",
+                connection_id="halifax",
+                account_ref="acc",
+                asked="window",
+                request_meta=_json.dumps({"trigger": "scheduled"}),
+                outcome="landed",
+                now=datetime.fromisoformat(last_scheduled),
+            )
+        return db
+
+    def test_PullFourHoursAfterTheLast_WaitsTheRemainingEightyFourMinutes_ThenProceeds(
+        self, tmp_path, monkeypatch
+    ):
+        """Six-hour interval, so the slot opens at 90% of it: 5 h 24 min.
+        Four hours have passed, leaving 84 minutes - 5,040 seconds."""
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 1, 22, 45, 0, tzinfo=UTC))
+
+        outcome = _await_scheduled_clearance(db, sleep=clock.sleep, clock=clock)
+
+        assert outcome is None
+        assert sum(clock.sleeps) == 5040
+        assert clock.now == datetime(2026, 10, 2, 0, 9, 0, tzinfo=UTC)
+
+    def test_Waiting_IsDoneInShortSteps_SoAStopOrADeployIsNoticedPromptly(
+        self, tmp_path, monkeypatch
+    ):
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 1, 22, 45, 0, tzinfo=UTC))
+
+        _await_scheduled_clearance(db, sleep=clock.sleep, clock=clock)
+
+        assert max(clock.sleeps) <= 60
+
+    def test_Waiting_HoldsNoLease_SoADeployIsNeverBlockedByIt(self, tmp_path, monkeypatch):
+        from datetime import UTC, datetime, timedelta
+
+        from obdi import leases
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 1, 22, 45, 0, tzinfo=UTC))
+        held_while_waiting = []
+
+        def sleep(seconds):
+            held_while_waiting.append(
+                leases.held(leases.locks_dir(db), "pull-cycle")
+            )
+            clock.now += timedelta(seconds=seconds)
+
+        _await_scheduled_clearance(db, sleep=sleep, clock=clock)
+
+        assert held_while_waiting and not any(held_while_waiting)
+
+    def test_Waiting_SaysOnceWhyTheCycleIsQuiet(self, tmp_path, monkeypatch, capsys):
+        """Hours of silence from a container read as a hang."""
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 1, 22, 45, 0, tzinfo=UTC))
+
+        _await_scheduled_clearance(db, sleep=clock.sleep, clock=clock)
+
+        printed = capsys.readouterr().out
+        assert printed.count("waiting") == 1
+        assert "84 min" in printed
+
+    def test_PullThatIsDue_DoesNotWaitAtAll(self, tmp_path, monkeypatch):
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 2, 0, 45, 0, tzinfo=UTC))
+
+        def explode(_seconds):
+            raise AssertionError("a pull that is due must not wait")
+
+        assert _await_scheduled_clearance(db, sleep=explode, clock=clock) is None
+
+    def test_DeployArrivingAsTheSlotOpens_IsThenWaitedOutLikeAnyOtherBlock(
+        self, tmp_path, monkeypatch
+    ):
+        """The slot wait and the transient wait compose: the slot opens while
+        a stack update holds its lease, the update finishes, the pull runs."""
+        from datetime import UTC, datetime
+
+        from obdi import leases
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        clock = _Clock(datetime(2026, 10, 2, 0, 8, 0, tzinfo=UTC))
+        locks = leases.locks_dir(db)
+        steps = []
+
+        def sleep(seconds):
+            steps.append(seconds)
+            clock.sleep(seconds)
+            if len(steps) == 1:
+                leases.acquire(locks, leases.STACK_UPDATE, "ansible", ttl_seconds=600)
+            if len(steps) == 3:
+                leases.release(locks, leases.STACK_UPDATE)
+
+        outcome = _await_scheduled_clearance(db, sleep=sleep, clock=clock)
+
+        assert outcome is None
+        assert len(steps) == 3
+
+    def test_WithSpacingSwitchedOff_NothingWaits(self, tmp_path, monkeypatch):
+        from datetime import UTC, datetime
+
+        from obdi.cli import _await_scheduled_clearance
+
+        db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
+        monkeypatch.setenv("OBDI_PULL_MIN_INTERVAL_SECONDS", "0")
+        clock = _Clock(datetime(2026, 10, 1, 18, 46, 0, tzinfo=UTC))
+
+        def explode(_seconds):
+            raise AssertionError("spacing is off")
+
+        assert _await_scheduled_clearance(db, sleep=explode, clock=clock) is None
+
+
 class TestTransientBlocksAreWaitedOut:
     """A deploy or rebuild holds its lease for minutes; the old behaviour
-    cost the whole six-hour cycle. Spacing skips keep the long sleep."""
+    cost the whole six-hour cycle."""
 
     def test_TransientLease_ClearsMidWait_AndThePullProceeds(
         self, tmp_path, monkeypatch
@@ -286,36 +457,30 @@ class TestTransientBlocksAreWaitedOut:
         assert outcome is None
         assert len(calls) == 2
 
-    def test_SpacingSkip_ReturnsImmediately_NoWaiting(
-        self, tmp_path, monkeypatch
-    ):
-        import json as _json
-
+    def test_RunningBackfill_IsWaitedOutToo_NotGivenUpOnAtOnce(self, tmp_path, monkeypatch):
+        """A backfill after authorising a bank takes minutes.
+        Giving up at once cost the cycle a whole interval, the same as a
+        deploy did."""
         from obdi.cli import _await_scheduled_clearance
+        from obdi.leases import acquire, release
         from obdi.store import Store
 
-        monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
-        monkeypatch.setenv("OBDI_PULL_INTERVAL_SECONDS", "21600")
+        locks = tmp_path / "locks"
+        monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
         db = tmp_path / "s.sqlite3"
-        with Store(db) as store:
-            # Just now, so the spacing rule is inside its window. The default
-            # clock is exactly right here, which is why no time is injected.
-            store.record_attempt(
-                source="truelayer",
-                connection_id="halifax",
-                account_ref="acc",
-                asked="window",
-                request_meta=_json.dumps({"trigger": "scheduled"}),
-                outcome="landed",
-            )
+        with Store(db):
+            pass
+        acquire(locks, "post-auth-backfill", "obdi-web", ttl_seconds=900)
 
-        def explode(_seconds):
-            raise AssertionError("a spacing skip must not wait")
+        calls = []
 
-        outcome = _await_scheduled_clearance(db, sleep=explode)
+        def fake_sleep(seconds):
+            calls.append(seconds)
+            if len(calls) == 3:
+                release(locks, "post-auth-backfill")
 
-        assert outcome is not None
-        assert "quota" in outcome
+        assert _await_scheduled_clearance(db, sleep=fake_sleep) is None
+        assert len(calls) == 3
 
     def test_TransientThatNeverClears_GivesUpAfterTheBudget(
         self, tmp_path, monkeypatch

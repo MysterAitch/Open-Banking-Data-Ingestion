@@ -39,6 +39,12 @@ transcription would add no reasoning that the subjects do not already carry.
   with a note saying so. Its account's balance is right; Actual's reports will
   count it as income or spending.
 
+- **A deploy no longer costs the scheduler a whole interval.** A scheduled pull
+  that starts before its slot now waits for the slot and then pulls. Previously
+  it gave up and the loop slept six hours from the restart: two deploys in one
+  evening left eleven hours between pulls. The push and alert that follow the
+  pull wait with it; "Push to Actual now" does not.
+
 ### Changed
 - **The audit says whether each account's balance in Actual agrees with what
   obdi expects, and how many transfer pairs are linked.** Words and counts only.
