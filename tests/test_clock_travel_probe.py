@@ -35,7 +35,7 @@ TRAVEL_REQUESTED = bool(
 
 @pytest.mark.skipif(not TRAVEL_REQUESTED, reason="no travel requested; nothing to verify")
 def test_ClockTravel_WhenTravelIsRequested_PutsTheClockWhereItSaidItWould():
-    published = os.environ.get("OBDI_TRAVEL_DESTINATION", "").strip()
+    published = os.environ.get("CLOCK_TRAVEL_DESTINATION", "").strip()
     assert published, (
         "travel was requested but the plugin published no destination, so it never "
         "ran. Load it with `-p conftest_timetravel`; every green result in this run "

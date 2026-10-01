@@ -41,7 +41,13 @@ import time_machine
 #: the clock moved WITHOUT recomputing this logic. A second implementation of "where
 #: should we be" is a second thing to get wrong, and it would agree with the first
 #: one precisely when both are wrong.
-DESTINATION_VAR = "OBDI_TRAVEL_DESTINATION"
+#:
+#: Deliberately NOT under the OBDI_ prefix. That namespace is the application's
+#: configuration, which the suite clears before every test and asserts no test
+#: can see. Published there, this was cleared before the self-check could read
+#: it, the check reported "the plugin never ran", and the weekly run failed
+#: every leg at that step from 2026-08-17 until somebody looked on 2026-10-01.
+DESTINATION_VAR = "CLOCK_TRAVEL_DESTINATION"
 
 
 def _destination() -> datetime | None:
