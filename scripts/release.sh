@@ -48,9 +48,19 @@ fi
 say "releasing $TAG at ${SHA:0:9}"
 
 # --- gates, judged by exit code only ---------------------------------------
+# The verdict is the exit code, never the output - but the output is KEPT, and
+# shown when a gate fails. Discarding it made a failure say only "re-run to see
+# why", and on 2026-10-02 the re-run passed: a suite that failed under machine
+# load took six minutes to not reproduce, and which test had failed was never
+# learnt. A failure that cannot be read is a failure that gets retried instead.
+GATE_LOG=$(mktemp)
 run_gate() {
   say "gate: $*"
-  "$@" >/dev/null 2>&1 || fail "gate failed: $* (re-run without the script to see why)"
+  if ! "$@" >"$GATE_LOG" 2>&1; then
+    say "--- last lines of the failed gate's output (all of it: $GATE_LOG)" >&2
+    tail -n 40 "$GATE_LOG" >&2
+    fail "gate failed: $*"
+  fi
 }
 PY=./.venv/Scripts/python.exe
 [ -x "$PY" ] || PY=python

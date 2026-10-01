@@ -505,6 +505,10 @@ class WebConfig:
     #: Rows sharing an identity, and payments with no row of their own.
     #: Counts and account names only, by design of the report itself.
     identity_health_text: Callable[[], str] | None = None
+    #: The store's rows against the bank's end-of-day balances. The argument
+    #: is whether to MASK the figures, and the page only passes False when
+    #: the viewer asked for them.
+    balance_reconciliation_text: Callable[[bool], str] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -3168,6 +3172,7 @@ def render_index(
 <p><a class="button" href="/date-lag">Settlement lag report</a></p>
 <p><a class="button" href="/balance-walk">Balance walk report</a></p>
 <p><a class="button" href="/identity-health">Identity health (counts only)</a></p>
+<p><a class="button" href="/balance-reconciliation">Balance reconciliation (figures masked)</a></p>
 <h2>Import a file</h2>
 <p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
 then verify the file against what that account already holds, before
@@ -3351,6 +3356,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             return
         if route == "/identity-health":
             self._identity_health()
+            return
+        if route == "/balance-reconciliation":
+            self._balance_reconciliation(masked=True)
             return
         if route == "/artefacts":
             self._artefacts()
@@ -4934,6 +4942,52 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
         )
         self._respond(200, render_page("Identity health", body))
 
+    def _balance_reconciliation(self, *, masked: bool) -> None:
+        """The report, masked when fetched and unmasked only when posted for.
+
+        No address shows a figure: a link can be followed, shared, cached,
+        and read by anything able to read a page, so the figures answer
+        only a request somebody made on purpose, and the answer is marked
+        not to be kept.
+        """
+        hook = self.bound_config.balance_reconciliation_text
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        try:
+            text = hook(masked)
+        except Exception as exc:
+            self._respond(
+                500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        showing = (
+            '<p class="muted">Showing the MASKED rendering: account names, '
+            "dates, and counts only.</p>"
+            '<form method="post" action="/balance-reconciliation">'
+            '<button class="button" type="submit" style="width:100%">'
+            "Show the figures</button></form>"
+            if masked
+            else '<p class="warn">Showing the UNMASKED rendering: balances and '
+            "differences are visible.</p>"
+            '<p><a class="button" href="/balance-reconciliation">'
+            "Back to the masked rendering</a></p>"
+        )
+        body = (
+            "<h2>Balance reconciliation</h2>"
+            "<p>For each account and day, the bank's closing balance is "
+            "derived from the running balances on its records without "
+            "assuming any order. The sum of the rows the store holds for "
+            "that day is set against the bank's movement, and each day's "
+            "closing balance against the next day's opening.</p>"
+            f"{showing}"
+            f'<pre class="scroll" style="white-space:pre-wrap">'
+            f"{html.escape(text)}</pre>" + HOME_LINK
+        )
+        self._respond(
+            200, render_page("Balance reconciliation", body), no_store=not masked
+        )
+
     def _balance_walk(self) -> None:
         hook = self.bound_config.balance_walk_text
         if hook is None:
@@ -5083,6 +5137,9 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             return
         if route == "/declare-spaces":
             self._declare_spaces()
+            return
+        if route == "/balance-reconciliation":
+            self._balance_reconciliation(masked=False)
             return
         if route == "/review-apply":
             self._review_apply()
@@ -5879,10 +5936,15 @@ class ConnectionHandler(AccountPages, BaseHTTPRequestHandler):
             ),
         )
 
-    def _respond(self, status: int, body: bytes) -> None:
+    def _respond(self, status: int, body: bytes, *, no_store: bool = False) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if no_store:
+            # A page showing unmasked figures must not be kept by the browser
+            # or anything between: the back button and a shared cache are both
+            # ways a posted-for answer becomes one nobody asked for.
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 

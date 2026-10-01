@@ -26,6 +26,36 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.240] - 2026-10-02
+
+### Added
+- **Balance reconciliation: `obdi balance-reconciliation` and
+  `/balance-reconciliation`.** For each account and day it sets the rows the store
+  holds against the bank's own end-of-day balances, derived from the running
+  balance on each record without assuming any order, and checks each day's close
+  against the next day's open. Accounts it cannot check are listed with the
+  reason, never shown as passing.
+- **Figures are shown only in answer to a request made on purpose.** The page is
+  masked however it is fetched; the figures come back from the button on it, and
+  that answer is marked not to be kept.
+
+### Fixed
+- **The identity-health report now says when a payment is held by two rows.** Its
+  first reading on the live store showed one account with more rows than the ids
+  its source had reported, and the report's summary line called that clean.
+  Folded and doubled payments are also counted within each connected group of
+  rows and ids, so one fault can no longer cancel the other in the totals.
+
+### Known limits
+- Cards and Starling accounts are listed as not checkable: a card's running
+  balance has no established meaning here, and Starling's feed carries no balance
+  per record. Nothing has yet been run against a real provider response.
+
+### Maintenance
+- **Release:** a failed gate now shows the end of its output. Previously it said
+  only to re-run, and a suite that failed under load passed on the re-run without
+  ever saying which test had failed.
+
 ## [0.4.239] - 2026-10-01
 
 ### Added

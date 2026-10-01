@@ -62,11 +62,10 @@ class ProviderIdTally:
     #: History rather than loss: a row keeps the ids it once absorbed even
     #: after the absorbed payment has regained a row of its own.
     absorbing_rows: int
-
-    @property
-    def folded(self) -> int:
-        """Payments the source reported that have no row of their own."""
-        return max(self.reported - self.held, 0)
+    #: Payments the source reported that have no row of their own.
+    folded: int = 0
+    #: Rows beyond the payments the source reported: a payment held twice.
+    surplus: int = 0
 
 
 @dataclass
@@ -77,6 +76,10 @@ class IdentityHealth:
     @property
     def folded(self) -> int:
         return sum(tally.folded for tally in self.tallies)
+
+    @property
+    def surplus(self) -> int:
+        return sum(tally.surplus for tally in self.tallies)
 
     def describe(self) -> str:
         lines = ["Rows sharing an identity (content key + occurrence):"]
@@ -103,6 +106,8 @@ class IdentityHealth:
             )
             if tally.folded:
                 line += f" - {tally.folded} with no row of their own"
+            if tally.surplus:
+                line += f" - {tally.surplus} more row(s) than ids"
             if tally.absorbing_rows:
                 line += (
                     f" ({tally.absorbing_rows} row(s) have been sighted under "
@@ -116,7 +121,46 @@ class IdentityHealth:
             )
         else:
             lines.append("  every provider id reported has a row of its own")
+        if self.surplus:
+            lines.append(
+                f"  TOTAL: {self.surplus} payment(s) are held by more than one "
+                "row - the same provider id is the only id of two rows, so the "
+                "payment is counted twice"
+            )
         return "\n".join(lines)
+
+
+def _folded_and_surplus(rows: dict[str, set[str]]) -> tuple[int, int]:
+    """How many payments lack a row, and how many rows are one too many.
+
+    Counted within each group of rows and ids that sightings connect, never
+    across the whole account: a payment folded away in March and a payment
+    held twice in June are two faults, and totals alone would let one hide
+    the other.
+    Within a group, more ids than rows is payments without a row of their
+    own, and more rows than ids is a payment held more than once.
+    """
+    group_of: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        while group_of.setdefault(node, node) != node:
+            group_of[node] = group_of[group_of[node]]
+            node = group_of[node]
+        return node
+
+    for entity, ids in rows.items():
+        for provider_id in ids:
+            group_of[find(f"row:{entity}")] = find(f"id:{provider_id}")
+
+    rows_in: dict[str, int] = {}
+    ids_in: dict[str, int] = {}
+    for node in list(group_of):
+        counted = rows_in if node.startswith("row:") else ids_in
+        root = find(node)
+        counted[root] = counted.get(root, 0) + 1
+    folded = sum(max(ids_in.get(root, 0) - held, 0) for root, held in rows_in.items())
+    surplus = sum(max(held - ids_in.get(root, 0), 0) for root, held in rows_in.items())
+    return folded, surplus
 
 
 def identity_health(store: Store) -> IdentityHealth:
@@ -164,14 +208,17 @@ def identity_health(store: Store) -> IdentityHealth:
         ids_by_row.setdefault(feed, {}).setdefault(str(row["entity_id"]), set()).add(
             str(row["source_id"])
         )
-    report.tallies = [
-        ProviderIdTally(
-            account_id=account_id,
-            source=source,
-            reported=len(set().union(*rows.values())),
-            held=len(rows),
-            absorbing_rows=sum(1 for ids in rows.values() if len(ids) > 1),
+    for (account_id, source), rows in sorted(ids_by_row.items()):
+        folded, surplus = _folded_and_surplus(rows)
+        report.tallies.append(
+            ProviderIdTally(
+                account_id=account_id,
+                source=source,
+                reported=len(set().union(*rows.values())),
+                held=len(rows),
+                absorbing_rows=sum(1 for ids in rows.values() if len(ids) > 1),
+                folded=folded,
+                surplus=surplus,
+            )
         )
-        for (account_id, source), rows in sorted(ids_by_row.items())
-    ]
     return report

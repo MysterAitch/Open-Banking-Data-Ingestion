@@ -106,10 +106,16 @@ class TestProviderIdsAgainstTheRowsThatHoldThem:
 
         assert report.tallies == [
             ProviderIdTally(
-                account_id=ACCOUNT, source="starling", reported=4, held=3, absorbing_rows=1
+                account_id=ACCOUNT,
+                source="starling",
+                reported=4,
+                held=3,
+                absorbing_rows=1,
+                folded=1,
             )
         ]
         assert report.folded == 1
+        assert report.surplus == 0
 
     def test_Report_WhenAFoldedPaymentLaterRegainedItsOwnRow_CountsNothingFolded(
         self, tmp_path
@@ -174,6 +180,98 @@ class TestProviderIdsAgainstTheRowsThatHoldThem:
                 absorbing_rows=0,
             )
         ]
+
+    def test_Report_WhenOnePaymentIsHeldByTwoRows_CountsOneRowTooMany(self, tmp_path):
+        """Three provider ids, four rows carrying them: one id is the only id
+        of two different rows, so one payment is held twice.
+
+        The fourth row begins as an export's row with no provider id, and is
+        then sighted by the feed under an id another row already holds - the
+        shape left when a row's provider id is lost to a second source and the
+        first source reports the payment again."""
+        exported = Transaction(
+            account_id=ACCOUNT,
+            amount_minor=-PRIVATE_MINOR,
+            currency="GBP",
+            description=PRIVATE_REFERENCE,
+            value_date=date(2026, 11, 20),
+            booking_date=date(2026, 11, 20),
+            source="qif",
+            source_id=None,
+            content_key="ck-held-twice",
+            tier=SourceTier.SYNTHETIC,
+            status=TransactionStatus.BOOKED,
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            reconcile_batch(store, [exported], digest="d-export")
+            second_row = next(t for t in store.all_transactions() if t.source == "qif")
+            store.record_source(
+                replace(
+                    second_row,
+                    source="starling",
+                    source_id="pay-1",
+                    artefact_digest="digest-of-the-response-re-reporting-pay-1",
+                )
+            )
+            store.connection.commit()
+            report = identity_health(store)
+            text = report.describe()
+
+        tally = next(t for t in report.tallies if t.source == "starling")
+        assert (tally.reported, tally.held) == (3, 4)
+        assert tally.surplus == 1
+        assert tally.folded == 0
+        assert report.surplus == 1
+        assert "1 more row(s) than ids" in text
+        assert "held by more than one row" in text
+
+    def test_Report_WhenOnePaymentIsFoldedAndAnotherHeldTwice_NeitherHidesTheOther(
+        self, tmp_path
+    ):
+        """Four ids and four rows: the totals agree, and both faults are there.
+        One row absorbed a payment that has no row of its own, and elsewhere
+        one payment is held by two rows."""
+        exported = Transaction(
+            account_id=ACCOUNT,
+            amount_minor=-PRIVATE_MINOR,
+            currency="GBP",
+            description=PRIVATE_REFERENCE,
+            value_date=date(2026, 11, 20),
+            booking_date=date(2026, 11, 20),
+            source="qif",
+            source_id=None,
+            content_key="ck-held-twice",
+            tier=SourceTier.SYNTHETIC,
+            status=TransactionStatus.BOOKED,
+        )
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            _fold_into(store, "pay-1", "pay-lost")
+            reconcile_batch(store, [exported], digest="d-export")
+            second_row = next(t for t in store.all_transactions() if t.source == "qif")
+            store.record_source(
+                replace(
+                    second_row,
+                    source="starling",
+                    source_id="pay-3",
+                    artefact_digest="digest-of-the-response-re-reporting-pay-3",
+                )
+            )
+            store.connection.commit()
+            report = identity_health(store)
+
+        tally = next(t for t in report.tallies if t.source == "starling")
+        assert (tally.reported, tally.held) == (4, 4)
+        assert (tally.folded, tally.surplus) == (1, 1)
+
+    def test_Report_WhenRowsAndIdsMatch_ReportsNoRowTooMany(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            report = identity_health(store)
+
+        assert report.surplus == 0
+        assert "more row(s) than ids" not in report.describe()
 
     def test_Report_ForASourceThatCarriesNoIds_SaysNothingAboutIt(self, tmp_path):
         """An export with no provider ids offers nothing to count, and a row

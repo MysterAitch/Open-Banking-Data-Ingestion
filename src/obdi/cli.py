@@ -2382,6 +2382,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return identity_health(store).describe()
 
+    def balance_reconciliation_text(masked: bool) -> str:
+        from .balance_reconciliation import balance_reconciliation
+
+        with Store(db_path) as store:
+            return balance_reconciliation(store).describe(masked=masked)
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
 
@@ -2861,6 +2867,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
         identity_health_text=identity_health_text,
+        balance_reconciliation_text=balance_reconciliation_text,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,
@@ -3503,6 +3510,17 @@ def main(argv: list[str] | None = None) -> int:
         "that have no row of their own - counts and account names only",
     )
 
+    reconciliation_command = subcommands.add_parser(
+        "balance-reconciliation",
+        help="compare the rows held with the bank's end-of-day balances; "
+        "figures are masked unless --show-values is given",
+    )
+    reconciliation_command.add_argument(
+        "--show-values",
+        action="store_true",
+        help="print balances and differences as well (private)",
+    )
+
     subcommands.add_parser(
         "attempts",
         help="show the fetch-attempt ledger: every ask made of a provider",
@@ -3972,6 +3990,14 @@ def main(argv: list[str] | None = None) -> int:
         # it until the numbers have shown what an acceptable answer is.
         with Store(db_path) as store:
             print(identity_health(store).describe())
+        return 0
+    if args.command == "balance-reconciliation":
+        from .balance_reconciliation import balance_reconciliation
+
+        # Measures only, like identity-health: the exit code never carries
+        # the verdict.
+        with Store(db_path) as store:
+            print(balance_reconciliation(store).describe(masked=not args.show_values))
         return 0
     if args.command == "rebuild":
         if not args.yes:
