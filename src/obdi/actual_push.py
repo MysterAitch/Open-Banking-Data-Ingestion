@@ -25,6 +25,20 @@ from .replay import ActualAccountBinding, build_payload, unbound_accounts
 from .store import Store
 
 
+class DuplicateImportedIdError(ValueError):
+    """The push was refused because two store rows share an imported id.
+
+    `str()` is the full refusal for the operator's log, including the start
+    of the offending key. `public` is the same refusal without that key: the
+    key is derived from the payment's content, so it stays out of anything
+    sent to a phone.
+    """
+
+    def __init__(self, message: str, *, public: str) -> None:
+        super().__init__(message)
+        self.public = public
+
+
 def write_map(map_path: Path, payload: dict[str, object]) -> None:
     """Temp-then-rename, the same discipline the queue files follow: a
     reader (or a crash) must never see a torn account map - it is the
@@ -261,13 +275,15 @@ def build_envelope(
                 for binding in bindings
                 if binding.actual_account_id == account_id
             )
-            raise ValueError(
+            head = (
                 f"{named or account_id} [Actual account {account_id}] holds "
                 f"{len(duplicates)} duplicate imported id(s) - two store rows "
                 "share an identity, and Actual would keep one and silently "
                 "drop the other. 'Rebuild from raw' renumbers them; a "
-                "duplicate that survives a rebuild is a defect worth "
-                f"reporting with this key. First: {shown}"
+                "duplicate that survives a rebuild is a defect worth reporting"
+            )
+            raise DuplicateImportedIdError(
+                f"{head} with this key. First: {shown}", public=f"{head}."
             )
     # Everything a person has NAMED deserves an Actual account - including
     # accounts holding nothing yet (bound means wanted; an empty account

@@ -73,6 +73,10 @@ JUSTIFIED = {
     ("test_identity_health.py", "transactions"): "the same planted state, for the "
     "report that counts it: a detector for a state the door prevents still has to be "
     "shown working on one",
+    ("test_alert_wiring.py", "transactions"): "the same planted state again, to show "
+    "the alert reports the push refusal and the shared identities it exists to "
+    "catch, and that both findings clear once the rows are renumbered: a detector "
+    "for a state the door prevents still has to be shown working on one",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",

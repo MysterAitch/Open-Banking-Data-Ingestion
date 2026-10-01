@@ -21,6 +21,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .coverage import SilentFeed
+    from .identity_health import SharedIdentity
 
 #: Below this many consecutive refusals, a streak is weather, not a trend.
 REFUSAL_TREND_MIN_CONSECUTIVE = 3
@@ -263,6 +268,133 @@ def empty_rebuild_finding(
             "artefacts are untouched, so a rebuild that gets past this replays "
             "them"
         ),
+    )
+
+
+def silent_feed_finding(feed: SilentFeed) -> Finding:
+    """One single-source scheduled feed nobody has successfully asked about.
+
+    Keyed by account and source so that a feed which recovers and goes quiet
+    again is a new announcement, and the message carries dates and names only.
+    """
+    return Finding(
+        key=f"silent-feed:{feed.account_id}:{feed.source}",
+        message=(
+            f"{feed.describe()}; check that the scheduled pull still asks for "
+            "it and that its connection is authorised - or, if the account "
+            "no longer exists, declare it closed and this stops"
+        ),
+    )
+
+
+def shared_identity_findings(shared: Sequence[SharedIdentity]) -> list[Finding]:
+    """One finding per account holding rows that cannot be told apart.
+
+    Any entry is a definite fault, not a measurement: the push refuses such
+    an account outright. The folded-payment count in the same report is NOT
+    read here, because it awaits a decision on what an acceptable figure is,
+    and alerting on it before then would be permanent noise.
+    """
+    return [
+        Finding(
+            key=f"shared-identity:{entry.account_id}",
+            message=(
+                f"{entry.account_id}: {entry.identities} identity(ies) shared by "
+                f"{entry.rows} rows - Actual would keep one row and drop the "
+                "rest. 'Rebuild from raw' renumbers them; a duplicate that "
+                "survives a rebuild is a defect worth reporting"
+            ),
+        )
+        for entry in shared
+    ]
+
+
+def push_refused_finding(reason: str) -> Finding:
+    """A push that cannot be built right now, with the refusal's own words.
+
+    `reason` must already be safe to send to a phone: the caller passes the
+    refusal's public text, never the operator's full log line.
+    """
+    return Finding(
+        key="push-refused",
+        message=f"the push to Actual cannot be built: {reason}",
+    )
+
+
+def check_failed_finding(name: str, error: Exception) -> Finding:
+    """A check that could not run is reported as itself, never as a pass.
+
+    Only the exception's type travels: its text may quote the input that
+    broke it, and the full text goes to the process log instead.
+    """
+    return Finding(
+        key=f"check-failed:{name}",
+        message=(
+            f"the {name} check could not run ({type(error).__name__}), so "
+            "that condition is unwatched until it does - see the alert log"
+        ),
+    )
+
+
+#: How long Actual may go without a successful apply before that is a finding.
+#: A push is queued every six-hourly cycle and the applier answers within
+#: minutes, so a healthy instance applies about four times a day. Twenty-four
+#: hours is four missed cycles in a row: long enough that one bad cycle or an
+#: applier restart cannot trip it, short enough that it speaks the next day,
+#: where the incident it exists for ran for seven weeks.
+ACTUAL_APPLY_STALE_HOURS = 24
+
+
+def _applied_at(result: Mapping[str, object]) -> datetime | None:
+    """When a result records an applied push, or None for anything else.
+
+    Audit and prune results are successes too, but they read Actual or delete
+    from it; only a result with no `kind` is a push that was applied.
+    """
+    if not result.get("ok") or result.get("kind"):
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(result.get("finished_at") or ""))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
+
+
+def stale_apply_finding(
+    results: Sequence[Mapping[str, object]],
+    *,
+    unreadable: int,
+    now: datetime,
+    applier_seen: str,
+    stale_hours: int = ACTUAL_APPLY_STALE_HOURS,
+) -> Finding | None:
+    """Nothing applied to Actual within the threshold.
+
+    Callers decide whether Actual is configured at all; this only judges the
+    record. Failed results are not read for their text, because an applier
+    error can quote anything it saw. `unreadable` counts result files that
+    could not be parsed: one of them may be the success being looked for, so
+    it is said aloud rather than silently skipped.
+    """
+    applied = [stamp for result in results if (stamp := _applied_at(result)) is not None]
+    newest = max(applied, default=None)
+    if newest is not None and now - newest <= timedelta(hours=stale_hours):
+        return None
+    when = (
+        f"nothing has been applied to Actual for {_span_text(now - newest)} "
+        f"(last applied {newest.strftime('%Y-%m-%dT%H:%M')}Z)"
+        if newest is not None
+        else "nothing has been applied to Actual: no applied push on record"
+    )
+    unread = f"; {unreadable} result file(s) could not be read" if unreadable else ""
+    seen = (
+        f"the applier was last seen at {applier_seen}"
+        if applier_seen
+        else "the applier has never been seen"
+    )
+    return Finding(
+        key="push-stale",
+        message=f"{when}{unread}; {seen} - check the applier container and the push log",
     )
 
 

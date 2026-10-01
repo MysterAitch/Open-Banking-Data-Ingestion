@@ -13,7 +13,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +30,7 @@ from .accounts import (
     lifecycle_breach,
     read_registry_file,
 )
+from .alerts import Finding
 from .backup import BackupRefused, take_backup, verify_copy
 from .connections import ConnectionStore
 from .coverage import (
@@ -255,11 +256,40 @@ def _actual_dir(db_path: Path) -> Path:
     return Path(configured) if configured else db_path.parent / "actual"
 
 
+def build_push_envelope(store: Store, map_path: Path) -> dict[str, object]:
+    """What a push would carry right now, built and handed back, never queued.
+
+    Shared by the push and by the alert's question "could a push be built?",
+    so the alert asks exactly what the push will ask. Reads the account map
+    and writes nothing; the merge and repair that precede a real push stay in
+    `queue_actual_push`, where writing is the point.
+    """
+    from .actual_push import build_envelope
+    from .labels import collect_display_labels
+
+    bindings = _actual_bindings()
+    connection_ids: list[str] = []
+    store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if store_path_env:
+        with contextlib.suppress(OSError, ValueError):
+            connection_ids = sorted(ConnectionStore(store_path_env).load())
+    named: set[str] = set()
+    with contextlib.suppress(OSError, ValueError):
+        raw_map = json.loads(map_path.read_text(encoding="utf-8"))
+        raw_bind = raw_map.get("bindings", []) if isinstance(raw_map, dict) else []
+        named = {
+            str(b.get("canonical_id"))
+            for b in raw_bind
+            if isinstance(b, dict) and b.get("canonical_id")
+        }
+    labels = collect_display_labels(store, _account_map(store), connection_ids)
+    return build_envelope(store, bindings, labels, named_canonicals=named)
+
+
 def queue_actual_push(db_path: Path) -> str:
     """The push, as one call returning its summary - shared by the CLI
     command and the web button so the two routes cannot drift."""
-    from .actual_push import build_envelope, merge_pending_bindings, queue_push
-    from .labels import collect_display_labels
+    from .actual_push import merge_pending_bindings, queue_push
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
         return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
@@ -286,26 +316,8 @@ def queue_actual_push(db_path: Path) -> str:
             "unique names (delete the shared account in Actual)"
         )
 
-    bindings = _actual_bindings()
-    connection_ids: list[str] = []
-    store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
-    if store_path_env:
-        with contextlib.suppress(OSError, ValueError):
-            connection_ids = sorted(ConnectionStore(store_path_env).load())
-    named: set[str] = set()
-    with contextlib.suppress(OSError, ValueError):
-        import json as _json
-
-        raw_map = _json.loads(Path(map_path_env).read_text(encoding="utf-8"))
-        raw_bind = raw_map.get("bindings", []) if isinstance(raw_map, dict) else []
-        named = {
-            str(b.get("canonical_id"))
-            for b in raw_bind
-            if isinstance(b, dict) and b.get("canonical_id")
-        }
     with Store(db_path) as store:
-        labels = collect_display_labels(store, _account_map(store), connection_ids)
-        envelope = build_envelope(store, bindings, labels, named_canonicals=named)
+        envelope = build_push_envelope(store, Path(map_path_env))
     queued = queue_push(envelope, actual_dir)
     raw_accounts = envelope.get("accounts")
     raw_provision = envelope.get("provision")
@@ -352,6 +364,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 
 if TYPE_CHECKING:
+    from .models import Transaction
     from .rebuild import RebuildReport
 
 
@@ -563,6 +576,194 @@ def _scheduled_sources() -> set[str]:
     if store_path and Path(store_path).exists() and ConnectionStore(store_path).load():
         watched.add("truelayer")
     return watched
+
+
+def _canonical_for_ref(account_map: AccountMap, ref: str) -> str:
+    """The canonical account a ledger `source:provider-id` ref lands under.
+
+    The same translation the rebuild applies to artefact refs, so ledger rows
+    and transaction rows name an account identically.
+    """
+    source, separator, provider_ref = ref.partition(":")
+    return str(account_map.resolve(source, provider_ref)) if separator else ref
+
+
+def _silent_feed_findings(
+    store: Store,
+    held: Sequence[Transaction],
+    watched: set[str],
+    now: datetime,
+) -> list[Finding]:
+    """Single-source scheduled feeds the provider has not answered for days.
+
+    An account holding no rows is invisible here, because its source is
+    unknown: a card that has never landed a row is reported by nobody.
+
+    An account DECLARED closed is left out.
+    Nothing asks about a closed account again, which is correct, so its
+    silence is permanent and a finding for it could never clear.
+    The registry is the one place a person can say so, and a closing date
+    still in the future excuses nothing.
+    """
+    from .alerts import silent_feed_finding
+    from .coverage import silent_feeds
+
+    if not watched:
+        return []
+    landed = store.last_landed_asks()
+    account_map = _account_map(store)
+    translate = {
+        str(ask["account_ref"]): _canonical_for_ref(account_map, str(ask["account_ref"]))
+        for ask in landed
+    }
+    closed = {
+        str(record.ref)
+        for record in store.declared_accounts()
+        if record.closed is not None and record.closed <= now.date()
+    }
+    return [
+        silent_feed_finding(feed)
+        for feed in silent_feeds(
+            coverage(held), landed, watched=watched, now=now, account_for_ref=translate
+        )
+        if feed.account_id not in closed
+    ]
+
+
+def _push_refusal_findings(db_path: Path, store: Store) -> list[Finding]:
+    """Whether a push could be built right now, asked without queueing one.
+
+    Silent where Actual is off, where a rebuild is replaying (the store is
+    half-populated and a push refuses to read it either), and where the build
+    succeeds. Only the duplicate-identity refusal and the missing map speak
+    here; any other exception propagates to be reported as a failed check.
+    """
+    from .actual_push import DuplicateImportedIdError
+    from .alerts import push_refused_finding
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        return []
+    if rebuild_in_progress_note(db_path):
+        return []
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path:
+        return [
+            push_refused_finding(
+                "ACTUAL_SYNC_ID is set but OBDI_ACCOUNT_MAP is not, so there are "
+                "no bindings to push through"
+            )
+        ]
+    try:
+        build_push_envelope(store, Path(map_path))
+    except DuplicateImportedIdError as refusal:
+        return [push_refused_finding(refusal.public)]
+    return []
+
+
+def _stale_apply_findings(db_path: Path, now: datetime) -> list[Finding]:
+    """Whether the applier has applied anything lately.
+
+    Silent unless Actual is configured AND bound: an instance with no Actual
+    is a deliberate configuration, and one mid-set-up has nothing to apply yet.
+    """
+    from .actual_push import applier_heartbeat, latest_results_with_totals
+    from .alerts import stale_apply_finding
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip() or not _actual_bindings():
+        return []
+    actual_dir = _actual_dir(db_path)
+    results, _total, unreadable = latest_results_with_totals(actual_dir, limit=sys.maxsize)
+    finding = stale_apply_finding(
+        results,
+        unreadable=len(unreadable),
+        now=now,
+        applier_seen=applier_heartbeat(actual_dir),
+    )
+    return [finding] if finding is not None else []
+
+
+def _guarded(name: str, check: Callable[[], list[Finding]]) -> list[Finding]:
+    """Run one check; if it cannot run, say so rather than skip it.
+
+    A check that raised would otherwise take the whole alert cycle down, or
+    be dropped and read as a pass. The full error goes to the process log.
+    """
+    from .alerts import check_failed_finding
+
+    try:
+        return check()
+    except Exception as error:
+        print(f"alert check '{name}' could not run: {error!r}", file=sys.stderr)
+        return [check_failed_finding(name, error)]
+
+
+def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> list[Finding]:
+    """Every condition the alert watches, evaluated against the store now.
+
+    Separate from the command so the findings can be tested without a
+    notification channel. Reads only: it never queues a push or writes to
+    the Actual directory or the account map.
+    """
+    from .alerts import (
+        consent_rung,
+        disk_finding,
+        empty_rebuild_finding,
+        refusal_trends,
+        shared_identity_findings,
+    )
+    from .identity_health import identity_health
+
+    now = now or datetime.now(UTC)
+    findings: list[Finding] = []
+    with Store(db_path) as store:
+        held = store.transactions_by_sighting()
+        attempts = store.attempts(limit=1000)
+        rebuilds = store.recent_rebuild_runs(limit=1)
+        watched = _scheduled_sources()
+        silent = _guarded(
+            "silent-feeds", lambda: _silent_feed_findings(store, held, watched, now)
+        )
+        refused = _guarded("push-build", lambda: _push_refusal_findings(db_path, store))
+        shared = _guarded(
+            "shared-identity",
+            lambda: shared_identity_findings(identity_health(store).shared),
+        )
+    # First, because an empty derived layer makes every finding below it
+    # meaningless: no sightings means no stale feeds and no coverage, so a
+    # silent store would otherwise look like a quiet one.
+    emptied = empty_rebuild_finding(rebuilds)
+    if emptied is not None:
+        findings.append(emptied)
+    if watched:
+        findings += [
+            Finding(f"stale-feed:{stale.account_id}:{stale.source}", stale.describe())
+            for stale in stale_feeds(coverage(held), watched=watched)
+        ]
+    findings += silent
+    findings += refusal_trends(attempts)
+    findings += refused
+    findings += _guarded("push-stale", lambda: _stale_apply_findings(db_path, now))
+    findings += shared
+    alert_store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if alert_store_path and Path(alert_store_path).exists():
+        for name, connection in ConnectionStore(alert_store_path).load().items():
+            remaining = connection.consent_days_remaining()
+            laddered = consent_rung(remaining)
+            if laddered is not None:
+                rung, label = laddered
+                findings.append(
+                    Finding(
+                        f"consent:{name}",
+                        f"connection '{name}': consent expires in "
+                        f"{remaining} day(s) - reconfirm at the bank "
+                        f"({label})",
+                        rung=rung,
+                    )
+                )
+    volume = disk_finding(Path(db_path).parent)
+    if volume is not None:
+        findings.append(volume)
+    return findings
 
 
 def _starling_token_present() -> bool:
@@ -3727,54 +3928,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "alert":
-        from .alerts import (
-            Finding,
-            consent_rung,
-            disk_finding,
-            empty_rebuild_finding,
-            process,
-            refusal_trends,
-            send_heartbeat,
-            send_ntfy,
-        )
+        from .alerts import process, send_heartbeat, send_ntfy
 
-        findings: list[Finding] = []
-        with Store(db_path) as store:
-            held = store.transactions_by_sighting()
-            attempts = store.attempts(limit=1000)
-            rebuilds = store.recent_rebuild_runs(limit=1)
-        # First, because an empty derived layer makes every finding below it
-        # meaningless: no sightings means no stale feeds and no coverage, so a
-        # silent store would otherwise look like a quiet one.
-        emptied = empty_rebuild_finding(rebuilds)
-        if emptied is not None:
-            findings.append(emptied)
-        watched = _scheduled_sources()
-        if watched:
-            findings += [
-                Finding(f"stale-feed:{stale.account_id}:{stale.source}", stale.describe())
-                for stale in stale_feeds(coverage(held), watched=watched)
-            ]
-        findings += refusal_trends(attempts)
-        alert_store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
-        if alert_store_path and Path(alert_store_path).exists():
-            for name, connection in ConnectionStore(alert_store_path).load().items():
-                remaining = connection.consent_days_remaining()
-                laddered = consent_rung(remaining)
-                if laddered is not None:
-                    rung, label = laddered
-                    findings.append(
-                        Finding(
-                            f"consent:{name}",
-                            f"connection '{name}': consent expires in "
-                            f"{remaining} day(s) - reconfirm at the bank "
-                            f"({label})",
-                            rung=rung,
-                        )
-                    )
-        volume = disk_finding(Path(db_path).parent)
-        if volume is not None:
-            findings.append(volume)
+        findings = collect_alert_findings(db_path)
         state_path = Path(
             os.getenv("OBDI_ALERT_STATE", "").strip()
             or Path(db_path).with_name("alert-state.json")

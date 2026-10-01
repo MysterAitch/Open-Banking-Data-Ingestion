@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.239] - 2026-10-01
+
+### Added
+- **The alert announces the two faults that ran for seven weeks unseen.** A
+  single-source scheduled feed with no successful ask for more than three days,
+  and a push to Actual that cannot be built or has applied nothing for a day. An
+  account declared closed is not reported as silent.
+- **Rows sharing an identity are announced per account.** The folded-payment
+  count from the same report is deliberately not, until a decision says what an
+  acceptable figure is.
+- **A check that cannot run says so** instead of passing in silence.
+
+### Changed
+- **The push refusal sent to a phone omits the start of the offending key**,
+  which is derived from the payment's content. The full text still goes to the log.
+
 ## [0.4.238] - 2026-10-01
 
 ### Fixed

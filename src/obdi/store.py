@@ -1590,6 +1590,29 @@ class Store:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def last_landed_asks(self) -> list[dict[str, object]]:
+        """The newest landed ask per ledger account ref, whatever the ledger's size.
+
+        Shaped as ledger rows so the silent-feed detector reads them as it
+        reads `attempts()`. A window over the newest rows cannot answer "when
+        did this account last land", because the account that matters is the
+        one whose last success is OLDER than every row in the window.
+        Timestamps are written by one function in one format, so the string
+        maximum is the chronological one.
+        """
+        rows = self.connection.execute(
+            "SELECT account_ref, MAX(attempted_at) AS attempted_at "
+            "FROM fetch_attempts WHERE outcome = 'landed' GROUP BY account_ref"
+        ).fetchall()
+        return [
+            {
+                "account_ref": row["account_ref"],
+                "attempted_at": row["attempted_at"],
+                "outcome": "landed",
+            }
+            for row in rows
+        ]
+
     def record_provider_fact(
         self, source: str, connection_id: str, fact: str, value: str
     ) -> None:
