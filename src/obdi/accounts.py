@@ -38,12 +38,17 @@ from __future__ import annotations
 
 import json
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import NewType
+from typing import TYPE_CHECKING, NewType
 
 from .errors import DataError
+
+if TYPE_CHECKING:  # pragma: no cover - imported for types alone
+    # store.py imports this module, so the store is named for the annotation
+    # only.
+    from .store import Store
 
 #: An account's stable identity: opaque, minted, never reused. Carries no
 #: meaning and is never shown to anyone.
@@ -300,6 +305,132 @@ def lifecycle_breach(dates: list[date], record: AccountRecord | None) -> str | N
                 f"({record.closed.isoformat()}) - is this the right account?"
             )
     return None
+
+
+#: Starts the registry's `date_basis` for a closing date drawn from the
+#: provider's Space listings. Defined once because the suggestion writes it and
+#: the archive rules recognise it, and two spellings would let a stale inference
+#: outlive the closure it described.
+ARCHIVE_BASIS_PREFIX = "inferred: no longer listed after "
+
+
+def closing_problem(opened: date | None, closed: date | None) -> str | None:
+    """Why a closing date cannot be right, or None. The one statement of the rule,
+    shared by the declare form and the archive toggle."""
+    if opened and closed and closed < opened:
+        return (
+            f"closed ({closed.isoformat()}) falls before opened "
+            f"({opened.isoformat()}) - one of the two dates is wrong"
+        )
+    return None
+
+
+class UnknownAccountError(DataError):
+    """Nothing is declared under the name and no row is held for it."""
+
+
+@dataclass(frozen=True)
+class ArchiveOutcome:
+    """What an archive or unarchive did, for the page that says so."""
+
+    record: AccountRecord
+    #: The registry held no entry before, so one was created.
+    declared_now: bool
+    #: Where the closing date came from: "stated", "newest row", or "today".
+    dated_by: str
+    #: What `closed` was before, so a reader sees whether a date was replaced.
+    previous_closed: date | None
+
+
+def _basis_after_archive(existing: str, stated_date: bool) -> str:
+    """The `date_basis` a closing leaves behind.
+
+    A stated date retires an earlier inference about the closing, but an
+    inference that may describe `opened` is left alone: the field is one note
+    about every date the record carries.
+    """
+    if stated_date and existing.startswith(ARCHIVE_BASIS_PREFIX):
+        return ""
+    return existing
+
+
+def archive_account(
+    store: Store,
+    ref: str,
+    *,
+    closed: date | None,
+    basis: str,
+    today: date,
+    label: str = "",
+) -> ArchiveOutcome:
+    """Mark an account archived by giving it a closing date.
+
+    An account is KNOWN when it is declared or holds rows; anything else is
+    refused rather than created, because the toggle is one tap and a mistyped
+    name would otherwise mint an account with nothing behind it. With no date,
+    the newest held row's date is used, or `today` where it holds none.
+    `basis` is empty for a date a person stated or accepted, and says what an
+    inference rested on otherwise. Other registry fields are kept as they are.
+    """
+    existing = store.declared_account(AccountRef(ref))
+    rows = store.transactions_for_account(ref)
+    if existing is None and not rows:
+        raise UnknownAccountError(
+            f"nothing is declared as '{ref}' and no rows are held for it, so there "
+            "is no such account to archive. Declare it first if it is real."
+        )
+    if closed is not None:
+        dated_by = "stated"
+    elif rows:
+        closed, dated_by = max(row.value_date for row in rows), "newest row"
+    else:
+        closed, dated_by = today, "today"
+    record = existing or AccountRecord(ref=AccountRef(ref), label=label)
+    problem = closing_problem(record.opened, closed)
+    if problem is not None:
+        raise DataError(problem)
+    archived = replace(
+        record,
+        closed=closed,
+        date_basis=(
+            basis
+            if basis
+            else _basis_after_archive(record.date_basis, dated_by == "stated")
+        ),
+    )
+    return ArchiveOutcome(
+        record=store.declare_account(archived),
+        declared_now=existing is None,
+        dated_by=dated_by,
+        previous_closed=record.closed,
+    )
+
+
+def unarchive_account(store: Store, ref: str) -> ArchiveOutcome:
+    """Clear an account's closing date and leave the rest of it as declared.
+
+    The `date_basis` goes too when it only described the closing: an inference
+    from the listings always does, and any basis does where no `opened` date
+    exists for it to be describing instead.
+    """
+    existing = store.declared_account(AccountRef(ref))
+    if existing is None:
+        raise UnknownAccountError(
+            f"nothing is declared as '{ref}', so it is not archived and there is "
+            "nothing to undo."
+        )
+    keep_basis = (
+        existing.date_basis
+        if existing.opened is not None
+        and not existing.date_basis.startswith(ARCHIVE_BASIS_PREFIX)
+        else ""
+    )
+    return ArchiveOutcome(
+        record=store.declare_account(replace(existing, closed=None, date_basis=keep_basis)),
+        declared_now=False,
+        dated_by="",
+        previous_closed=existing.closed,
+    )
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,7 @@ from .accounts import (
     AccountMap,
     AccountRecord,
     AccountRef,
+    ArchiveOutcome,
     lifecycle_breach,
     read_registry_file,
 )
@@ -61,6 +62,7 @@ from .replay import (
     unbound_accounts,
 )
 from .secrets import SecretError, read_secret, truelayer_readiness
+from .spaces import ArchiveNote
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -2406,6 +2408,51 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return balance_reconciliation(store).describe(masked=masked)
 
+    def archive_notes_for(store: Store, *, only: str | None = None) -> dict[str, ArchiveNote]:
+        from .spaces import archive_notes as read_archive_notes
+
+        account_map = _account_map(store)
+        return read_archive_notes(
+            store,
+            resolve=lambda source, provider_id: str(
+                account_map.resolve(source, provider_id)
+            ),
+            today=datetime.now(UTC).date(),
+            only=only,
+        )
+
+    def archive_notes() -> dict[str, ArchiveNote]:
+        with Store(db_path) as store:
+            return archive_notes_for(store)
+
+    def archive_account_hook(
+        ref: str, closed: date | None, basis: str
+    ) -> ArchiveOutcome:
+        """Archive one account, naming it as the pages already do if it is new."""
+        from .accounts import archive_account
+
+        try:
+            label = display_labels().get(ref, "")
+        except Exception:
+            # A name is a convenience; archiving must not depend on the
+            # provider-label scan succeeding.
+            label = ""
+        with Store(db_path) as store:
+            return archive_account(
+                store,
+                ref,
+                closed=closed,
+                basis=basis,
+                today=datetime.now(UTC).date(),
+                label=label,
+            )
+
+    def unarchive_account_hook(ref: str) -> ArchiveOutcome:
+        from .accounts import unarchive_account
+
+        with Store(db_path) as store:
+            return unarchive_account(store, ref)
+
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
 
@@ -2417,7 +2464,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             label = ""
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
         with Store(db_path) as store:
-            return build_ledger(store, ref, month or None, bound=bound, label=label)
+            return build_ledger(
+                store,
+                ref,
+                month or None,
+                bound=bound,
+                label=label,
+                archive=archive_notes_for(store, only=ref).get(ref),
+            )
 
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
@@ -2887,6 +2941,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         display_labels=display_labels,
         declared_accounts=declared_accounts,
         declare_account=declare_account,
+        archive_account=archive_account_hook,
+        unarchive_account=unarchive_account_hook,
+        archive_notes=archive_notes,
         account_feeders=account_feeders,
         push_actual=push_actual_hook,
         actual_status=actual_status,

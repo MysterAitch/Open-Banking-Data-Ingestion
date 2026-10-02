@@ -40,12 +40,19 @@ where names are least trustworthy of all.
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
-from .accounts import AccountRecord, AccountRef
+from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef
+from .masking import Structural
+from .models import Transaction, TransactionStatus
+
+if TYPE_CHECKING:  # pragma: no cover - imported for types alone
+    from .store import Store
 
 #: Every recovered Space's canonical name starts here, so they group together
 #: when read and none can be mistaken for a bank's own account.
@@ -108,8 +115,6 @@ def recover(store: object) -> list[HistoricalSpace]:
     already on disk, so this costs no bank call, no consent and no quota. It is
     also therefore safe to run repeatedly.
     """
-    import json
-
     connection = getattr(store, "connection", None)
     if connection is None:
         return []
@@ -338,3 +343,343 @@ def historical_spaces(
         ),
         key=lambda space: (space.first_seen, space.uid),
     )
+
+
+#: The source whose artefacts are the provider's Space listings.
+LISTING_SOURCE = "starling-spaces"
+
+#: The `kind` a recovered Space is declared under (see `account_for`).
+SPACE_KIND = "starling-space"
+
+_LISTING_REF_PREFIX = "starling:"
+
+
+@dataclass(frozen=True)
+class Listing:
+    """One stored response to "which Spaces does this account have now".
+
+    `uids` and `fetched` are None when the artefact could not be read as a
+    listing. Unreadable is not the same as empty: an empty list is the
+    provider saying "no Spaces", where an HTML error page says nothing about
+    Spaces at all, and reading the second as the first would suggest closing
+    every account at once.
+    """
+
+    #: The parent account the listing was asked of. Listings are only
+    #: comparable within one parent: a newer response for another account
+    #: says nothing about this account's Spaces.
+    stream: str
+    fetched: date | None
+    uids: frozenset[str] | None
+
+
+@dataclass(frozen=True)
+class SpaceListing:
+    """What the listings say about one Space, and the limit of what they say."""
+
+    uid: str
+    parent_uid: str
+    first_listed: date
+    last_listed: date
+    #: Present in the newest response for its parent. Only this decides
+    #: whether the Space is a candidate for archiving.
+    listed_now: bool
+    #: The first response after the last listing that omitted the Space. With
+    #: `last_listed` it BOUNDS when the Space stopped being listed: after the
+    #: one and by the other. None while the Space is still listed.
+    absent_since: date | None
+    #: How many of the newest responses in a row omit it. One response is a
+    #: weaker basis than five, and the person deciding sees which this is.
+    absent_responses: int
+    #: Responses BETWEEN its first and last listing that omitted it. A Space
+    #: that came back is a provider hiccup, never an archive.
+    skipped_responses: int
+
+    def basis_text(self) -> str:
+        return f"{ARCHIVE_BASIS_PREFIX}{self.last_listed.isoformat()}"
+
+
+@dataclass(frozen=True)
+class ListingReport:
+    #: Readable responses used, across every parent.
+    responses: int
+    spaces: tuple[SpaceListing, ...]
+    #: Responses that could not be read as a listing and were ignored.
+    unreadable: int = 0
+
+    @property
+    def has_listings(self) -> bool:
+        """False says there is no evidence at all - which must never read as
+        "nothing has been archived"."""
+        return self.responses > 0
+
+    def space(self, uid: str) -> SpaceListing | None:
+        listed = [space for space in self.spaces if space.uid == uid]
+        listed.sort(key=lambda space: (space.listed_now, space.last_listed))
+        return listed[-1] if listed else None
+
+    def suggested(self) -> tuple[SpaceListing, ...]:
+        return tuple(space for space in self.spaces if not space.listed_now)
+
+
+def _fetched_on(stamp: object) -> date | None:
+    try:
+        return datetime.fromisoformat(str(stamp)).date()
+    except ValueError:
+        return None
+
+
+def _listed_uids(payload: object) -> frozenset[str] | None:
+    try:
+        decoded = json.loads(payload if isinstance(payload, (str, bytes)) else b"")
+    except (ValueError, TypeError):
+        return None
+    goals = decoded.get("savingsGoals") if isinstance(decoded, dict) else None
+    if not isinstance(goals, list):
+        return None
+    return frozenset(
+        str(goal["savingsGoalUid"])
+        for goal in goals
+        if isinstance(goal, dict) and goal.get("savingsGoalUid")
+    )
+
+
+def read_listings(store: Store) -> list[Listing]:
+    """Every stored Space listing, oldest first, for every parent account.
+
+    Read-only, and a replay over artefacts already held. The store keeps one
+    artefact per distinct body, so an unchanged listing fetched again is not a
+    new row: what is read here is the sequence of CHANGES to the listing, which
+    is enough to see a Space leave and cannot see one that left and came back
+    to a byte-identical listing.
+    """
+    return [
+        Listing(
+            stream=str(row["account_ref"]).removeprefix(_LISTING_REF_PREFIX),
+            fetched=_fetched_on(row["fetched_at"]),
+            uids=_listed_uids(row["payload"]),
+        )
+        for row in store.connection.execute(
+            "SELECT account_ref, fetched_at, payload FROM raw_artefacts "
+            "WHERE source = ? ORDER BY fetched_at ASC, rowid ASC",
+            (LISTING_SOURCE,),
+        )
+    ]
+
+
+def listing_report(listings: Sequence[Listing]) -> ListingReport:
+    """Per Space: first and last listed, and where it stopped being listed.
+
+    `listings` are taken in the order given (arrival order). Within each
+    parent's responses only the NEWEST decides whether a Space is a candidate:
+    one absent from it and present earlier is suggested, and one absent from a
+    response in the middle but listed again later is not. A single omitted
+    response is what a provider fault looks like, and a fault must not be able
+    to close an account - so nothing here writes, and even a suggestion
+    carries how many responses it rests on.
+    """
+    readable = [
+        listing
+        for listing in listings
+        if listing.fetched is not None and listing.uids is not None
+    ]
+    streams: dict[str, list[Listing]] = {}
+    for listing in readable:
+        streams.setdefault(listing.stream, []).append(listing)
+
+    found: list[SpaceListing] = []
+    for stream, responses in streams.items():
+        newest = len(responses) - 1
+        uids = sorted({uid for response in responses for uid in response.uids or ()})
+        for uid in uids:
+            present = [
+                index
+                for index, response in enumerate(responses)
+                if uid in (response.uids or ())
+            ]
+            first, last = present[0], present[-1]
+            fetched_first = responses[first].fetched
+            fetched_last = responses[last].fetched
+            omitted_after = responses[last + 1].fetched if last < newest else None
+            if fetched_first is None or fetched_last is None:
+                continue  # unreachable: unreadable responses were filtered above
+            found.append(
+                SpaceListing(
+                    uid=uid,
+                    parent_uid=stream,
+                    first_listed=fetched_first,
+                    last_listed=fetched_last,
+                    listed_now=last == newest,
+                    absent_since=omitted_after,
+                    absent_responses=newest - last,
+                    skipped_responses=sum(
+                        1
+                        for index in range(first, last)
+                        if uid not in (responses[index].uids or ())
+                    ),
+                )
+            )
+    found.sort(key=lambda space: (space.parent_uid, space.first_listed, space.uid))
+    return ListingReport(
+        responses=len(readable),
+        spaces=tuple(found),
+        unreadable=len(listings) - len(readable),
+    )
+
+
+#: Said wherever a count of final movements is shown, in one place because
+#: the meaning of a zero and of a non-zero is the part a reader must not
+#: have to guess.
+FINAL_MOVEMENTS_MEANING = (
+    "A non-zero count means the parent account holds internal transfers dated "
+    "after this Space's newest held row whose other side is not held, which "
+    "may be the Space's last movements - never fetched, because it left the "
+    "listing before its own feed was asked again - or transfers to some other "
+    "account that is not held."
+)
+
+
+def final_movement_count(
+    parent_rows: Iterable[Transaction], *, paired: set[str], after: date
+) -> int:
+    """Parent-account internal-transfer legs with no held partner, after a date.
+
+    Void rows are excluded: a pending payment that vanished is not a movement.
+    `paired` is the set of entity ids that have a partner in the pairing table.
+    """
+    return sum(
+        1
+        for row in parent_rows
+        if row.is_internal_transfer
+        and row.status is not TransactionStatus.VOID
+        and row.entity_id not in paired
+        and row.value_date > after
+    )
+
+
+@dataclass(frozen=True)
+class ArchiveNote:
+    """What a page says beside an account that is, or looks, archived.
+
+    Every field is structure - dates, counts, and account names - so the note
+    reads the same on a masked page. No amount, description, or payee is
+    carried, which is what keeps the final-movement count safe to serve to a
+    reader who must not see values.
+    """
+
+    ref: Structural[str]
+    #: "archived" (the registry's closing date has passed) or "suggested" (the
+    #: listings say the provider dropped it and nobody has acted on that).
+    state: Structural[str]
+    closed: Structural[str]
+    #: The closing date was drawn from evidence rather than stated.
+    inferred: Structural[bool]
+    suggested_closed: Structural[str]
+    suggested_basis: Structural[str]
+    listing_note: Structural[str]
+    #: Whether the account is a Space, which is what the count below is about.
+    space: Structural[bool]
+    parent: Structural[str]
+    #: None when it could not be counted; `final_movements_unavailable` says why.
+    final_movements: Structural[int | None]
+    final_movements_unavailable: Structural[str]
+
+
+def _is_archived(record: AccountRecord | None, today: date) -> bool:
+    return record is not None and record.closed is not None and record.closed <= today
+
+
+def _listing_note(space: SpaceListing) -> str:
+    note = (
+        f"Last listed {space.last_listed.isoformat()}; the first listing without "
+        f"it was {space.absent_since.isoformat() if space.absent_since else 'unknown'}"
+        f", and the newest {space.absent_responses} "
+        f"listing{'s' if space.absent_responses != 1 else ''} omit it."
+    )
+    if space.skipped_responses:
+        note += (
+            f" It was also missing from {space.skipped_responses} earlier "
+            "listing(s) and came back each time."
+        )
+    return note
+
+
+def archive_notes(
+    store: Store,
+    *,
+    resolve: Callable[[str, str], str],
+    today: date,
+    only: str | None = None,
+) -> dict[str, ArchiveNote]:
+    """A note for each archived account and each Space the listings say left.
+
+    Accounts that are open and not suggested have no entry. `resolve` is the
+    account map's `resolve`, which turns a provider uid into the canonical
+    ref the rows are held under. A Space's PARENT is the registry's `parent`
+    when a person set it, otherwise the account whose listing named the Space
+    (the listing artefact's own account uid, resolved the same way). Nothing
+    is written.
+    """
+    declared = {str(record.ref): record for record in store.declared_accounts()}
+    report = listing_report(read_listings(store))
+    listed: dict[str, SpaceListing] = {}
+    for space in report.spaces:
+        ref = str(resolve("starling", space.uid))
+        if ref not in listed or space.listed_now:
+            listed[ref] = space
+
+    wanted = {ref for ref, record in declared.items() if _is_archived(record, today)}
+    wanted |= {ref for ref, space in listed.items() if not space.listed_now}
+    if only is not None:
+        wanted &= {only}
+
+    paired: set[str] | None = None
+    notes: dict[str, ArchiveNote] = {}
+    for ref in sorted(wanted):
+        record = declared.get(ref)
+        archived = _is_archived(record, today)
+        listing = listed.get(ref)
+        suggestion = listing if listing is not None and not listing.listed_now else None
+        if archived:
+            suggestion = None
+        is_space = listing is not None or (
+            record is not None
+            and (record.kind == SPACE_KIND or record.parent is not None)
+        )
+
+        parent = ""
+        movements: int | None = None
+        unavailable = ""
+        if is_space:
+            if record is not None and record.parent is not None:
+                parent = str(record.parent)
+            elif listing is not None:
+                parent = str(resolve("starling", listing.parent_uid))
+            rows = store.transactions_for_account(ref)
+            if not parent:
+                unavailable = "no parent account is known for it"
+            elif not rows:
+                unavailable = "it holds no rows, so there is no newest row to count after"
+            else:
+                if paired is None:
+                    paired = store.confirmed_transfer_entities()
+                movements = final_movement_count(
+                    store.transactions_for_account(parent),
+                    paired=paired,
+                    after=max(row.value_date for row in rows),
+                )
+
+        notes[ref] = ArchiveNote(
+            ref=ref,
+            state="archived" if archived else "suggested",
+            closed=record.closed.isoformat() if archived and record and record.closed else "",
+            inferred=bool(archived and record and record.date_basis),
+            suggested_closed=suggestion.last_listed.isoformat() if suggestion else "",
+            suggested_basis=suggestion.basis_text() if suggestion else "",
+            listing_note=_listing_note(suggestion) if suggestion else "",
+            space=is_space,
+            parent=parent,
+            final_movements=movements,
+            final_movements_unavailable=unavailable,
+        )
+    return notes

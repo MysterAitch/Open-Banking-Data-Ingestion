@@ -30,13 +30,20 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .accounts import AccountRecord, AccountRef
+from .accounts import (
+    AccountRecord,
+    AccountRef,
+    ArchiveOutcome,
+    UnknownAccountError,
+    closing_problem,
+)
 from .callback import render_page
 from .errors import DataError
 from .namespaces import validate_canonical_name
+from .spaces import FINAL_MOVEMENTS_MEANING
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -360,11 +367,9 @@ def account_from_form(fields: dict[str, str]) -> AccountRecord:
             )
     opened = _form_date(fields.get("opened", ""), "opened")
     closed = _form_date(fields.get("closed", ""), "closed")
-    if opened and closed and closed < opened:
-        raise ValueError(
-            f"closed ({closed.isoformat()}) falls before opened "
-            f"({opened.isoformat()}) - one of the two dates is wrong"
-        )
+    problem = closing_problem(opened, closed)
+    if problem is not None:
+        raise ValueError(problem)
     return AccountRecord(
         ref=AccountRef(ref),
         kind=fields.get("kind", "").strip(),
@@ -431,6 +436,153 @@ def unknown_account_page(
         + submit_button(proceed_label)
         + "</form>"
         + BACK_LINKS,
+    )
+
+
+#: The longest `date_basis` the archive form accepts. The field is written by a
+#: hidden input on the suggestion form, so a bound keeps a forged post from
+#: filing an essay into the registry.
+_MAX_BASIS = 200
+
+
+def archive_label(note: Any) -> str:
+    """The pill that names an archived account and says how its date is known."""
+    how = "inferred" if note.inferred else "stated"
+    return (
+        f'<span class="pill pill-quiet">archived {html.escape(note.closed)} '
+        f"({how})</span>"
+    )
+
+
+def _final_movements(note: Any) -> str:
+    if not note.space:
+        return ""
+    if note.final_movements is None:
+        return (
+            '<br><span class="muted">Final movements: not counted - '
+            f"{html.escape(note.final_movements_unavailable)}.</span>"
+        )
+    parent = f" in {html.escape(note.parent)}" if note.parent else ""
+    return (
+        f'<br><span class="muted">Final movements not held{parent}: '
+        f"<strong>{int(note.final_movements)}</strong>. "
+        f"{html.escape(FINAL_MOVEMENTS_MEANING)}</span>"
+    )
+
+
+def archive_controls(
+    ref: str, note: Any | None, *, offer: bool = True, with_date: bool = False
+) -> str:
+    """The archive toggle, the inferred suggestion, and the final-movement count.
+
+    `note` is an `ArchiveNote` or its disclosed view; None means the account is
+    open and nothing suggests otherwise. `offer` is False where the account
+    cannot be archived (an unknown reference). The date field is optional and
+    belongs to the roomier page, since the toggle defaults the date itself.
+    """
+    hidden = f'<input type="hidden" name="ref" value="{html.escape(ref)}">'
+    archived = note is not None and note.state == "archived"
+    if archived:
+        assert note is not None  # narrowed for the type checker by `archived`
+        return (
+            _final_movements(note)
+            + '<form method="post" action="/unarchive-account">'
+            + hidden
+            + submit_button("Unarchive")
+            + "</form>"
+        )
+    parts = ""
+    if note is not None and note.state == "suggested":
+        parts += (
+            '<br><span class="warn">The provider no longer lists this Space, '
+            "so it may be archived. Nothing has been changed.</span> "
+            f'<span class="muted">{html.escape(note.listing_note)}</span>'
+            + _final_movements(note)
+            + '<form method="post" action="/archive-account">'
+            + hidden
+            + f'<input type="hidden" name="closed" value="{html.escape(note.suggested_closed)}">'
+            + f'<input type="hidden" name="date_basis" value="{html.escape(note.suggested_basis)}">'
+            + submit_button(f"Archive as inferred ({note.suggested_closed})")
+            + "</form>"
+        )
+    if offer:
+        parts += (
+            '<form method="post" action="/archive-account">'
+            + hidden
+            + (
+                _date_field(
+                    "closed", None, "Archived on (optional - the newest row's date if empty)"
+                )
+                if with_date
+                else ""
+            )
+            + submit_button("Archive this account")
+            + "</form>"
+        )
+    return parts
+
+
+def _first(form: dict[str, list[str]], name: str) -> str:
+    return (form.get(name, [""])[0] or "").strip()
+
+
+def archived_page(outcome: ArchiveOutcome) -> bytes:
+    """What archiving changed, which date was used and why, and the way back."""
+    record = outcome.record
+    name = html.escape(record.label or str(record.ref))
+    source = {
+        "stated": "The date was the one given.",
+        "newest row": "No date was given, so the date of the newest row it holds was used.",
+        "today": "No date was given and it holds no rows, so today's date was used.",
+    }[outcome.dated_by]
+    declared = (
+        "<p>It was not in the registry, so it has been declared with only this "
+        "date set.</p>"
+        if outcome.declared_now
+        else ""
+    )
+    basis = (
+        f'<p class="muted">Recorded as: {html.escape(record.date_basis)}</p>'
+        if record.date_basis
+        else ""
+    )
+    undo = (
+        '<form method="post" action="/unarchive-account">'
+        f'<input type="hidden" name="ref" value="{html.escape(str(record.ref))}">'
+        + submit_button("Unarchive")
+        + "</form>"
+    )
+    return render_page(
+        "Account archived",
+        f'<p class="ok"><strong>{name}</strong> is archived as of '
+        f"{html.escape(record.closed.isoformat() if record.closed else '')}.</p>"
+        f"<p>{source}</p>{declared}{basis}{undo}"
+        + _ledger_link(str(record.ref))
+        + BACK_LINKS,
+    )
+
+
+def unarchived_page(outcome: ArchiveOutcome) -> bytes:
+    record = outcome.record
+    name = html.escape(record.label or str(record.ref))
+    said = (
+        f"It was archived as of {outcome.previous_closed.isoformat()}; that date has "
+        "been cleared and the rest of its declaration is unchanged."
+        if outcome.previous_closed
+        else "It was not archived, so nothing changed."
+    )
+    return render_page(
+        "Account unarchived",
+        f'<p class="ok"><strong>{name}</strong> is not archived.</p><p>{said}</p>'
+        + _ledger_link(str(record.ref))
+        + BACK_LINKS,
+    )
+
+
+def _ledger_link(ref: str) -> str:
+    return (
+        f'<p><a class="button" href="/ledger?ref={quote(ref, safe="")}">'
+        "Back to this account's ledger</a></p>"
     )
 
 
@@ -580,6 +732,75 @@ class AccountPages:
                 + BACK_LINKS,
             ),
         )
+
+    def _archive_account(self, form: dict[str, list[str]]) -> None:
+        """Archive an account: a closing date on it, declaring it if need be.
+
+        Reversible by `_unarchive_account`, so no confirmation is asked. The
+        date is validated here, where the person is looking at the form; which
+        accounts exist is the hook's question, since only the store knows.
+        """
+        hook = self.bound_config.archive_account
+        if hook is None:
+            self._respond(
+                404, refusal("Not available", "Archiving accounts is not wired.")
+            )
+            return
+        ref = _first(form, "ref")
+        if not ref:
+            self._respond(400, refusal("Not archived", "say which account to archive"))
+            return
+        try:
+            closed = _form_date(_first(form, "closed"), "closed")
+        except ValueError as exc:
+            self._respond(400, refusal("Not archived", str(exc)))
+            return
+        basis = _first(form, "date_basis")
+        if basis and closed is None:
+            self._respond(
+                400,
+                refusal(
+                    "Not archived",
+                    "an inferred basis needs the date it explains, and none was given",
+                ),
+            )
+            return
+        if len(basis) > _MAX_BASIS:
+            self._respond(
+                400,
+                refusal("Not archived", f"the basis is longer than {_MAX_BASIS} characters"),
+            )
+            return
+        try:
+            outcome = hook(ref, closed, basis)
+        except UnknownAccountError as exc:
+            self._respond(404, refusal("No such account", str(exc)))
+            return
+        except DataError as exc:
+            self._respond(400, refusal("Not archived", str(exc)))
+            return
+        self._respond(200, archived_page(outcome))
+
+    def _unarchive_account(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.unarchive_account
+        if hook is None:
+            self._respond(
+                404, refusal("Not available", "Unarchiving accounts is not wired.")
+            )
+            return
+        ref = _first(form, "ref")
+        if not ref:
+            self._respond(400, refusal("Not unarchived", "say which account to unarchive"))
+            return
+        try:
+            outcome = hook(ref)
+        except UnknownAccountError as exc:
+            self._respond(404, refusal("No such account", str(exc)))
+            return
+        except DataError as exc:
+            self._respond(400, refusal("Not unarchived", str(exc)))
+            return
+        self._respond(200, unarchived_page(outcome))
 
     def typed_account(self, typed: str) -> TypedAccount:
         """What is known about a typed name, on one read of the registry.

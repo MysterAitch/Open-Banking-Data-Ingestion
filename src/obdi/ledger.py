@@ -38,6 +38,7 @@ from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural
 from .models import Transaction, TransactionStatus
 from .replay import ReplayError, to_actual_transaction, withheld_reason
+from .spaces import ArchiveNote
 from .store import Store
 
 #: Statements issued for one account that holds rows: its rows, the pairing
@@ -176,6 +177,10 @@ class Ledger:
     summary: Structural[MonthSummary | None]
     position: Structural[Position | None]
     rows: Structural[tuple[LedgerRow, ...]]
+    #: Set when the account is archived or the provider's listings say its Space
+    #: has left. Handed in rather than read here, so a page still costs
+    #: QUERIES_PER_PAGE statements for the ledger proper.
+    archive: Structural[ArchiveNote | None] = None
 
 
 def parse_month(text: str) -> tuple[int, int]:
@@ -235,12 +240,25 @@ def build_ledger(
     *,
     bound: bool,
     label: str = "",
+    archive: ArchiveNote | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
 
     `bound` is whether the account has an Actual destination; it is passed in
-    because the bindings live in a file the store does not read.
+    because the bindings live in a file the store does not read. `archive` is
+    carried onto the result untouched.
     """
+    return replace(_ledger_for(store, ref, month, bound=bound, label=label), archive=archive)
+
+
+def _ledger_for(
+    store: Store,
+    ref: str,
+    month: str | None,
+    *,
+    bound: bool,
+    label: str,
+) -> Ledger:
     rows = store.transactions_for_account(ref)
     if not rows:
         declared = store.declared_account(AccountRef(ref)) is not None

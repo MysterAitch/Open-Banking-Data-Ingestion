@@ -22,7 +22,7 @@ from urllib.parse import quote
 from .callback import render_page
 from .ledger import QUERIES_PER_PAGE, Ledger, LedgerRequestError
 from .masking import Disclosed
-from .web_accounts import submit_button
+from .web_accounts import archive_controls, archive_label, submit_button
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -285,7 +285,7 @@ def _mode(view: Any, unmasked: bool) -> str:
     )
 
 
-def _header(view: Any) -> str:
+def _header(view: Any, *, archive_wired: bool) -> str:
     name = view.label or view.ref
     id_line = f'<br><span class="muted mono">{_esc(view.ref)}</span>' if view.label else ""
     fed = ", ".join(view.sources) or "none"
@@ -299,15 +299,27 @@ def _header(view: Any) -> str:
         if view.oldest_month
         else "No rows are held."
     )
+    archive = view.archive
+    archived = archive is not None and archive.state == "archived"
+    label = f" {archive_label(archive)}" if archived else ""
     return (
-        f"<p><strong>{_esc(name)}</strong>{id_line}<br>"
+        f"<p><strong>{_esc(name)}</strong>{label}{id_line}<br>"
         f"Fed by: {_esc(fed)}<br>This account is {_esc(binding)}.<br>{held}</p>"
+        + (
+            archive_controls(
+                view.ref, archive, offer=view.state != "unknown", with_date=True
+            )
+            if archive_wired
+            else ""
+        )
     )
 
 
-def render_ledger(ledger: Ledger, *, unmasked: bool) -> bytes:
+def render_ledger(
+    ledger: Ledger, *, unmasked: bool, archive_wired: bool = False
+) -> bytes:
     view = Disclosed(ledger, unmasked=unmasked)
-    body = _header(view)
+    body = _header(view, archive_wired=archive_wired)
 
     if view.state == "unknown":
         body += (
@@ -404,6 +416,10 @@ class LedgerPages:
             return
         self._respond(
             404 if ledger.state == "unknown" else 200,
-            render_ledger(ledger, unmasked=unmasked),
+            render_ledger(
+                ledger,
+                unmasked=unmasked,
+                archive_wired=self.bound_config.archive_account is not None,
+            ),
             no_store=unmasked,
         )

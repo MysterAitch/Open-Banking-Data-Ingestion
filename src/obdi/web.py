@@ -42,7 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, ParamSpec, TypeVar
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
-from .accounts import AccountRecord
+from .accounts import AccountRecord, ArchiveOutcome
 from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
@@ -53,11 +53,17 @@ from .logs import say
 from .namespaces import QUEUE_KINDS, validate_connection_name
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
-from .spaces import RECOVERY_BOUND
+from .spaces import RECOVERY_BOUND, ArchiveNote
 from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
-from .web_accounts import NEW_ACCOUNT_FIELD, AccountPages, picker_labels
+from .web_accounts import (
+    NEW_ACCOUNT_FIELD,
+    AccountPages,
+    archive_controls,
+    archive_label,
+    picker_labels,
+)
 from .web_ledger import LedgerPages
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
@@ -569,6 +575,13 @@ class WebConfig:
     #: to declare an account there is nothing to confirm against.
     declared_accounts: Callable[[], list[AccountRecord]] | None = None
     declare_account: Callable[[AccountRecord], AccountRecord] | None = None
+    #: Archive an account (reference, closing date or None, the basis of an
+    #: inferred date or "") and undo it. Both write the registry and nothing else.
+    archive_account: Callable[[str, date | None, str], ArchiveOutcome] | None = None
+    unarchive_account: Callable[[str], ArchiveOutcome] | None = None
+    #: A note for each archived account and each Space the provider's listings
+    #: say has left, keyed by reference. Read-only, counts and dates only.
+    archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -1393,6 +1406,7 @@ def _holdings_rows(
     account_feeders: Callable[[], dict[str, list[str]]] | None = None,
     source_connections: dict[tuple[str, str], list[str]] | None = None,
     feed_warnings: Callable[[], list[str]] | None = None,
+    archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None,
 ) -> str:
     """What the store holds, per account and source - or nothing, quietly.
 
@@ -1431,6 +1445,12 @@ def _holdings_rows(
             marks = account_timelines()
         except Exception:
             marks = {}
+    notes: dict[str, ArchiveNote] = {}
+    if archive_notes is not None:
+        try:
+            notes = archive_notes()
+        except Exception:
+            notes = {}
 
     def _mark(ref: str, key: str) -> date | None:
         value = marks.get(ref, {}).get(key)
@@ -1470,12 +1490,18 @@ def _holdings_rows(
             if label
             else ""
         )
+        note = notes.get(row.account_id)
         quiet = ""
-        if (today - row.latest).days > 365:
+        if note is not None and note.state == "archived":
+            quiet = f" {archive_label(note)}"
+        elif (today - row.latest).days > 365:
             quiet = (
                 f' <span class="pill pill-quiet">quiet since '
                 f"{row.latest.isoformat()}</span>"
             )
+        archive_form = (
+            archive_controls(row.account_id, note) if archive_notes is not None else ""
+        )
         dormant = (today - row.latest).days > 365
         strip = _timeline_strip(
             timeline_segments(
@@ -1529,7 +1555,7 @@ def _holdings_rows(
             )
             + f"{quiet}{sub}<br>"
             f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
-            f"{feeder_note}{bind_form}{strip}</div>"
+            f"{feeder_note}{bind_form}{strip}{archive_form}</div>"
         )
     # Accounts the store KNOWS about but holds nothing for must not vanish:
     # "this account exists, we asked back to 2020, nothing there" is a
@@ -3229,6 +3255,7 @@ def render_index(
     backfill_status: Callable[[], dict[str, object]] | None = None,
     feed_warnings: Callable[[], list[str]] | None = None,
     declared_accounts: Callable[[], list[AccountRecord]] | None = None,
+    archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None,
     #: Defaults True so every existing caller is unchanged; only a deployment with
     #: no provider configured at all passes False, and then the page says so.
     bank_authorisation: bool = True,
@@ -3251,7 +3278,7 @@ def render_index(
 {_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
 {_holdings_rows(holdings, display_labels, account_timelines, account_feeders,
-                source_connections, feed_warnings)}
+                source_connections, feed_warnings, archive_notes)}
 {_knowledge_rows(provider_knowledge)}
 {_scheduler_row(scheduler_heartbeat)}
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
@@ -3575,6 +3602,7 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
                 declared_accounts=timed(
                     "declared_accounts", self.bound_config.declared_accounts
                 ),
+                archive_notes=timed("archive_notes", self.bound_config.archive_notes),
             )
             render_seconds = time.perf_counter() - render_began
             threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
@@ -5259,6 +5287,12 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
 
         if route == "/save-account":
             self._save_account(self._read_form())
+            return
+        if route == "/archive-account":
+            self._archive_account(self._read_form())
+            return
+        if route == "/unarchive-account":
+            self._unarchive_account(self._read_form())
             return
         if route == "/upload":
             self._upload()

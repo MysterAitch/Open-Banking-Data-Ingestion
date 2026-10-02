@@ -55,6 +55,18 @@ transcription would add no reasoning that the subjects do not already carry.
   so.** Deleting it would make Actual delete the other leg too.
 
 ### Added
+- **An account can be marked archived, and unmarked, with one press.** Starling
+  stops listing an archived Space instead of saying it is archived, so such an
+  account read "quiet since" for ever and, since 0.4.239, raised a silent-feed
+  finding nothing could clear. The label now says archived, with its date, and
+  whether the date was stated or inferred.
+- **obdi suggests archiving where the evidence points that way, and never does it
+  itself.** A Space in earlier listings and absent from the newest is offered
+  with the date it was last listed. A Space missing from one response in the
+  middle of the sequence is not.
+- **A count of transfer legs with no partner, after an archived Space's last
+  row.** A Space emptied and archived between two pulls leaves its final
+  movements unfetched; this is the trace they leave in the parent account.
 - **An account ledger: `/ledger?ref=…&month=…`.** The first page that lists an
   account's transactions. Each row shows every source that sighted it, and flags
   what needs a second look: seen by one source where several feed the account,
