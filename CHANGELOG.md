@@ -26,6 +26,19 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.256] - 2026-10-02
+
+### Fixed
+- **Every page fits a 360-pixel phone.** The Actual audit's long identities, a
+  long statement file name, and a long refusal each pushed a page sideways; the
+  navigation took three rows before the page began. A browser test now loads
+  each page at that width.
+- **On the ledger only "Show values" is filled.** Archiving the account and
+  hiding values were styled as heavily as the primary action.
+- **A request refused as coming from another site receives its refusal.** The
+  refusal was sent without reading the request, which on Windows could reset
+  the connection instead; the test for it failed one run in three.
+
 ## [0.4.255] - 2026-10-02
 
 ### Added

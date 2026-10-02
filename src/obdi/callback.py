@@ -107,7 +107,12 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
 <style>
  :root {{ color-scheme: light dark; }}
  body {{ font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto;
-        padding: 0 1rem; line-height: 1.5; }}
+        padding: 0 1rem; line-height: 1.5; overflow-wrap: break-word; }}
+ /* A long unbroken identity wraps instead of widening the page. The
+    inherited break-word leaves a table's column sizing alone, so a wide
+    table still scrolls inside its own container; grid items need an
+    explicit zero minimum or their content sets the track's width. */
+ .accounts > *, .system > *, .facts > * {{ min-width: 0; }}
  h1 {{ font-size: 1.4rem; }}
  code {{ background: #8883; padding: .1rem .3rem; border-radius: .2rem; }}
  /* Tap targets sized for a thumb: this is used from a phone. */
@@ -134,6 +139,9 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
             background: transparent; color: #2563eb;
             border: 2px solid #2563eb; }}
  .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
+ /* A row's name and its onward link: the link moves to a line of its own
+    whole, rather than breaking beside a long name. */
+ .row-head {{ display: flex; flex-wrap: wrap; align-items: center; gap: 0 .9rem; }}
  table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
  th, td {{ padding: .45rem .5rem; text-align: left; border-bottom: 1px solid #8883;
           vertical-align: top; }}
@@ -163,8 +171,12 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
     button, so the page's own action stays the heaviest thing on it. */
  .sitenav ul {{ list-style: none; margin: 0 0 1rem; padding: 0; display: flex;
                flex-wrap: wrap; gap: .3rem; }}
- .sitenav a {{ display: flex; align-items: center; min-height: 44px; padding: 0 .6rem;
-              box-sizing: border-box; border-radius: .5rem; border: 1px solid #8886;
+ /* Each link grows to share its row, and the padding is the least that keeps
+    four links to a row at 360 pixels. */
+ .sitenav li {{ flex: 1 1 auto; }}
+ .sitenav a {{ display: flex; align-items: center; justify-content: center;
+              min-height: 44px; padding: 0 .35rem; box-sizing: border-box;
+              border-radius: .5rem; border: 1px solid #8886;
               color: inherit; text-decoration: none; }}
  .sitenav a[aria-current="page"] {{ background: #2563eb; border-color: #2563eb;
               color: #fff; font-weight: 600; }}

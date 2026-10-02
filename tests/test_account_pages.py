@@ -61,10 +61,12 @@ def assert_tap_targets_are_thumb_sized(markup: str) -> None:
         if 'class="tap"' in tag:
             # A link-styled button, as thumb-tall as the `tap` links beside it.
             continue
-        assert 'class="button"' in tag, f"not styled as a tap target: {tag}"
+        assert 'class="button"' in tag or 'class="button secondary"' in tag, (
+            f"not styled as a tap target: {tag}"
+        )
         assert "width:100%" in tag, f"not full width: {tag}"
     for tag in anchors:
-        assert 'class="button"' in tag or 'class="tap' in tag, (
+        assert 'class="button' in tag or 'class="tap' in tag, (
             f"not styled as a tap target: {tag}"
         )
 

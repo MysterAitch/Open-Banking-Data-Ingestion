@@ -89,8 +89,17 @@ _SUBMIT_ATTRS = (
 )
 
 
-def submit_button(label: str) -> str:
-    return f"<p><button {_SUBMIT_ATTRS}>{html.escape(label)}</button></p>"
+#: The outlined weight, for a submit that is not the page's primary action. The
+#: stylesheet's `secondary` class supplies the border, so none is set inline.
+_SECONDARY_SUBMIT_ATTRS = (
+    'class="button secondary" type="submit" '
+    'style="width:100%;font-size:inherit;cursor:pointer"'
+)
+
+
+def submit_button(label: str, *, secondary: bool = False) -> str:
+    attrs = _SECONDARY_SUBMIT_ATTRS if secondary else _SUBMIT_ATTRS
+    return f"<p><button {attrs}>{html.escape(label)}</button></p>"
 
 
 #: Both ways back from anywhere in this slice. A dead end on a phone means
@@ -521,7 +530,7 @@ def archive_controls(
                 if with_date
                 else ""
             )
-            + submit_button("Archive this account")
+            + submit_button("Archive this account", secondary=True)
             + "</form></details>"
         )
     return parts

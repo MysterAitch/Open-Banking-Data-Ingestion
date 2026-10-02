@@ -541,7 +541,8 @@ def _mode(view: Any, unmasked: bool) -> str:
             '<p class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
-            f'<p><a class="button" href="{_url("/ledger", ref=view.ref, month=view.month)}">'
+            f'<p><a class="button secondary" '
+            f'href="{_url("/ledger", ref=view.ref, month=view.month)}">'
             "Hide values (masked view)</a></p>"
         )
     return (

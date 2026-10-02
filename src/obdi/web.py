@@ -1615,12 +1615,12 @@ def _holdings_rows(
                 'type="submit">Bind</button></form>'
             )
         items.append(
-            f'<div class="row"{row_style}><strong>'
+            f'<div class="row"{row_style}><div class="row-head"><strong>'
             f'<a class="tap" href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong> "
-            f'<a class="tap" href="/ledger?ref={quote(row.account_id, safe="")}">'
-            "Ledger (transactions)</a>"
-            " via "
+            f'<a class="tap nowrap" href="/ledger?ref={quote(row.account_id, safe="")}">'
+            "Ledger (transactions)</a></div>"
+            "via "
             + html.escape(
                 _via_label(
                     row.source,

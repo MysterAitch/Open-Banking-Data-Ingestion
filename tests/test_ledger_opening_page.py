@@ -298,9 +298,11 @@ class TestOnlyShowValuesIsAPrimaryButton:
         page = lab.get().text
         primary = re.findall(r'<(?:a|button)[^>]*class="button"[^>]*>([^<]*)<', page)
 
-        # The archive control belongs to the account's own feature, not to this
-        # page's navigation, and is the one other action the header carries.
-        assert sorted(primary) == ["Archive this account", "Save stated balance", "Show values"]
+        # Archiving is consequential and done once in an account's life, so it
+        # is outlined (`secondary`) and never competes with the page's action.
+        assert sorted(primary) == ["Save stated balance", "Show values"]
+        assert 'class="button secondary" type="submit"' in page
+        assert "Archive this account</button>" in page
 
     def test_Masked_MonthLinksAreOrdinaryLinksAtTheTop(self, lab):
         page = lab.get(month="2026-04").text

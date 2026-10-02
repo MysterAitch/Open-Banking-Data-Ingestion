@@ -21,7 +21,8 @@ from contextvars import ContextVar
 #: (section, label, destination). The section is what `SECTION_OF_ROUTE` names.
 #: In order of use: what is read daily first, what is visited to repair last.
 #: The order is also what fits a phone: these eight wrap to two rows of four at
-#: 390 pixels, where the earlier order took three.
+#: 360 pixels (the stylesheet trims the links' padding to allow it), where the
+#: earlier order took three. The browser test in test_phone_layout.py holds it.
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("overview", "Overview", "/"),
     ("position", "Position", "/position"),
