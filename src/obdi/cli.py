@@ -3168,7 +3168,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             for gap in gaps(held)
             if gap.contradicted
         ]
-        transposed = [item.describe() for item in transpositions(held)]
+        transposed = [item.outline() for item in transpositions(held)]
         return {
             "accounts": [
                 {"account": account, "entries": entries}

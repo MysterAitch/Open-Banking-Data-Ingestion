@@ -52,6 +52,7 @@ from .coverage import SourceCoverage
 from .doctor import shape_problems
 from .ledger import Ledger
 from .logs import say
+from .masking import MASKED_TOTAL
 from .namespaces import (
     QUEUE_KINDS,
     UNASSIGNED_ACCOUNT,
@@ -1056,7 +1057,52 @@ def _insight_sections(summary: dict[str, object]) -> str:
     return "".join(parts)
 
 
-def _agreements_html(entries: object) -> str:
+def _agreement_row_text(item: object, *, masked: bool) -> str:
+    """One entry of a ledger bucket, as a reader may see it.
+
+    FIELD CLASSIFICATION, decided here and nowhere else. A row dict carries
+    `date` (structural: shown always), `amount` (a value: becomes the fixed
+    masked token while masked), and `description` (a value: omitted while
+    masked, never mimicked). Any other key on a row is unclassified and so
+    treated as a value: it is never rendered. A string entry is a count line
+    ("+N more not shown", "<account>: <count>") and is shown always.
+    """
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return "" if masked else str(item)
+    when = str(item.get("date", "unknown date"))
+    if masked:
+        return f"{when} {MASKED_TOTAL}"
+    return f"{when} {item.get('amount')} '{item.get('description')}'"
+
+
+def _transposition_text(item: object, *, masked: bool) -> str:
+    """One day/month transposition finding, as a reader may see it.
+
+    FIELD CLASSIFICATION: `account`, `left`, `right`, `left_date`, and
+    `right_date` are structural. `amount` and `description` are values and are
+    omitted while masked. A bare string is an unclassified line from a caller
+    that formatted its own, so it is treated as a value and withheld while
+    masked.
+    """
+    if isinstance(item, str):
+        if masked:
+            return "A finding from an older caller is withheld while values are masked."
+        return item
+    if not isinstance(item, dict):
+        return ""
+    where = (
+        f"dated {item.get('left_date', 'unknown date')} by {item.get('left', 'unknown')} "
+        f"but {item.get('right_date', 'unknown date')} by {item.get('right', 'unknown')}"
+    )
+    account = f"{item.get('account', 'unknown account')}: "
+    if masked:
+        return f"{account}{where}"
+    return f'{account}{item.get("amount")} "{item.get("description")}" {where}'
+
+
+def _agreements_html(entries: object, *, masked: bool) -> str:
     """Render agreement outlines as per-source ledgers.
 
     Accepts Agreement.outline() dicts, and falls back to a plain paragraph
@@ -1065,6 +1111,14 @@ def _agreements_html(entries: object) -> str:
     visibly sum to the side's total and every line names whose rows it
     counts - the two questions a flat prose line made the reader
     reconstruct forensically.
+
+    While `masked`, no sum of money, amount, or payee text is rendered. The
+    classification of each outline field is made in this function and in
+    `_agreement_row_text`: `sources`, `window`, `verdict`, `warn`, `note`,
+    `figures` (a pair of counts), and the bucket and side labels are
+    structural; `net_left` and `net_right` are sums of money and so values;
+    row entries follow `_agreement_row_text`. Any other key is unclassified
+    and is never rendered.
     """
     if not isinstance(entries, list):
         return ""
@@ -1076,11 +1130,18 @@ def _agreements_html(entries: object) -> str:
         if not isinstance(entry, dict):
             continue
         warn = ' class="warn"' if entry.get("warn") else ""
+        figures = str(entry.get("figures"))
+        if entry.get("net_left") is not None and entry.get("net_right") is not None:
+            figures += (
+                "; the nets were compared without being stated here"
+                if masked
+                else f"; net {entry.get('net_left')} vs {entry.get('net_right')}"
+            )
         parts.append(
             f"<p><strong>{html.escape(str(entry.get('sources')))}</strong> "
             f"[{html.escape(str(entry.get('window')))}]: "
             f"<strong{warn}>{html.escape(str(entry.get('verdict')))}</strong><br>"
-            f'<span class="muted">{html.escape(str(entry.get("figures")))}</span>'
+            f'<span class="muted">{html.escape(figures)}</span>'
             + (
                 f'<br><span class="muted">{html.escape(str(entry.get("note")))}</span>'
                 if entry.get("note")
@@ -1106,7 +1167,7 @@ def _agreements_html(entries: object) -> str:
                         inner = (
                             "<ul>"
                             + "".join(
-                                f"<li>{html.escape(str(item))}</li>"
+                                f"<li>{html.escape(_agreement_row_text(item, masked=masked))}</li>"
                                 for item in raw_items
                             )
                             + "</ul>"
@@ -3929,7 +3990,7 @@ class ConnectionHandler(
             self._attempts()
             return
         if route == "/agreements":
-            self._agreements_page()
+            self._agreements_page(masked=True)
             return
         if route == "/spaces":
             self._spaces_page()
@@ -4130,17 +4191,36 @@ class ConnectionHandler(
         )
         self._respond(200, render_page("Fetch timeline", body))
 
-    def _agreements_page(self) -> None:
+    def _agreements_page(self, *, masked: bool) -> None:
         """The standing cross-source review: the import-page verdicts,
         browsable any time - built for the bulk-import-then-review workflow,
         where reading every transient import result is exactly what nobody
-        does."""
+        does.
+
+        Masked when fetched and unmasked only when posted for, like
+        `_balance_reconciliation`: the nets, the amounts of the rows one
+        source alone holds, and their payees answer only a request somebody
+        made on purpose, and that answer is marked not to be kept.
+        """
         hook = self.bound_config.agreement_report
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
         report = hook()
+        showing = (
+            '<p class="muted">Showing the MASKED rendering: counts, source '
+            "names, account names, dates, and verdicts only.</p>"
+            '<form method="post" action="/agreements">'
+            '<button class="button" type="submit" style="width:100%">'
+            "Show values</button></form>"
+            if masked
+            else '<p class="warn">Showing the UNMASKED rendering: net totals, '
+            "amounts, and payee descriptions are visible.</p>"
+            '<p><a class="button" href="/agreements">'
+            "Back to the masked rendering</a></p>"
+        )
         parts: list[str] = [
+            showing,
             '<p class="muted">Every pair of sources that describes the same '
             "account, compared over the period they share. Each side is a "
             "ledger whose buckets sum to that side's own total. Alarms lead: "
@@ -4157,8 +4237,8 @@ class ConnectionHandler(
         if isinstance(raw_transposed, list) and raw_transposed:
             parts.append("<h2>Dates disagree - possible day/month transposition</h2>")
             parts += [
-                f'<p class="warn">{html.escape(str(line))}</p>'
-                for line in raw_transposed
+                f'<p class="warn">{html.escape(_transposition_text(item, masked=masked))}</p>'
+                for item in raw_transposed
             ]
         raw_missing = report.get("missing")
         if isinstance(raw_missing, list) and raw_missing:
@@ -4172,7 +4252,7 @@ class ConnectionHandler(
             if not isinstance(group, dict):
                 continue
             parts.append(f"<h2>{html.escape(str(group.get('account')))}</h2>")
-            parts.append(_agreements_html(group.get("entries")))
+            parts.append(_agreements_html(group.get("entries"), masked=masked))
             rendered_any = True
         if not rendered_any:
             parts.append(
@@ -4180,7 +4260,11 @@ class ConnectionHandler(
                 "source yet - nothing to compare.</p>"
             )
         parts.append(HOME_LINK)
-        self._respond(200, render_page("Cross-source agreement", "".join(parts)))
+        self._respond(
+            200,
+            render_page("Cross-source agreement", "".join(parts)),
+            no_store=not masked,
+        )
 
     def _spaces_page(self) -> None:
         """Starling Spaces the feed remembers and the bank no longer lists.
@@ -6202,6 +6286,9 @@ class ConnectionHandler(
         if route == "/review-report":
             self._review_report(masked=False)
             return
+        if route == "/agreements":
+            self._agreements_page(masked=False)
+            return
         if route == "/review-apply":
             self._review_apply()
             return
@@ -6540,7 +6627,9 @@ class ConnectionHandler(
         )
         raw_agreements = preview.get("agreement_preview")
         agreement_html = ""
-        rendered_agreements = _agreements_html(raw_agreements)
+        # Answers a POST (the upload), so its figures are the direct response
+        # to a deliberate request rather than something a link can reach.
+        rendered_agreements = _agreements_html(raw_agreements, masked=False)
         if rendered_agreements:
             agreement_html = (
                 f"<h2>Against what {html.escape(account)} already holds</h2>"
@@ -6663,7 +6752,7 @@ class ConnectionHandler(
         if isinstance(summary, dict):
             summary_html = (
                 f"<p>{html.escape(str(summary.get('summary')))}</p>"
-                + _agreements_html(summary.get("agreements"))
+                + _agreements_html(summary.get("agreements"), masked=False)
             )
         else:
             summary_html = "".join(

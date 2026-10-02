@@ -26,6 +26,13 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.260] - 2026-10-02
+
+### Fixed
+- **The agreements page no longer shows amounts, payees, or references on a
+  plain page load.** It printed sample rows and net figures in full; they now
+  appear only in answer to "Show values", like every other report.
+
 ## [0.4.259] - 2026-10-02
 
 ### Added

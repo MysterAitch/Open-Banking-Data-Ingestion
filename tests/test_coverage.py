@@ -776,7 +776,9 @@ class TestAgreementOutline:
         unexplained = next(
             bucket for bucket in sides[0]["buckets"] if "ONLY" in bucket["label"]
         )
-        assert any("NETFLIX" in item and "-£4.50" in item for item in unexplained["items"])
+        assert unexplained["items"] == [
+            {"date": "2026-01-04", "amount": "-£4.50", "description": "NETFLIX"}
+        ]
         # starling-csv's ledger: 3 = 2 matched + 1 attributed to a sibling.
         csv_labels = [bucket["label"] for bucket in sides[1]["buckets"]]
         assert csv_labels[0] == "2 matched with starling"

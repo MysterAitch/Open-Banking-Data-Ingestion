@@ -89,12 +89,21 @@ _UNEXPLAINED_SHOWN_OUTLINE = 10
 _LEGS_SHOWN_OUTLINE = 5
 
 
-def _row_items(rows: Sequence[UnexplainedRow], cap: int) -> list[str]:
-    """Row lines for a single side's bucket - no source suffix, the bucket's
-    label already names the side."""
+def _row_items(rows: Sequence[UnexplainedRow], cap: int) -> list[object]:
+    """Row entries for a single side's bucket - no source, the bucket's label
+    already names the side.
+
+    A row is a dict of separate fields, never one formatted line, so that the
+    page deciding what a reader may see can drop the amount and the payee
+    without parsing them back out of text. A string entry is a count line.
+    """
     ordered = sorted(rows, key=lambda r: (r.row_date, r.amount_minor, r.description))
-    items = [
-        f"{row.row_date} {format_amount(row.amount_minor)} '{row.description}'"
+    items: list[object] = [
+        {
+            "date": str(row.row_date),
+            "amount": format_amount(row.amount_minor),
+            "description": row.description,
+        }
         for row in ordered[:cap]
     ]
     if len(ordered) > len(items):
@@ -328,11 +337,11 @@ class Agreement:
             "verdict": verdict,
             "warn": warn,
             "note": note,
-            "figures": (
-                f"{self.left_count} vs {self.right_count} transactions; "
-                f"net {format_amount(self.left_net_minor)} vs "
-                f"{format_amount(self.right_net_minor)}"
-            ),
+            # Counts only. The nets are separate fields because a net is a sum
+            # of money and the page decides whether a reader sees it.
+            "figures": f"{self.left_count} vs {self.right_count} transactions",
+            "net_left": format_amount(self.left_net_minor),
+            "net_right": format_amount(self.right_net_minor),
             "sides": sides,
         }
 
@@ -1060,6 +1069,23 @@ class DateTransposition:
             f"\"{self.description}\" dated {self.left_date} by {self.left} "
             f"but {self.right_date} by {self.right}"
         )
+
+    def outline(self) -> dict[str, object]:
+        """The same finding as separate fields, for a page that masks values.
+
+        Plain data on purpose, like `Agreement.outline`: the amount and the
+        description are kept apart from the dates and sources so the page can
+        withhold the first two without parsing them out of a sentence.
+        """
+        return {
+            "account": self.account_id,
+            "amount": format_amount(self.amount_minor),
+            "description": self.description,
+            "left": self.left,
+            "left_date": str(self.left_date),
+            "right": self.right,
+            "right_date": str(self.right_date),
+        }
 
 
 def transpositions(transactions: Iterable[Transaction]) -> list[DateTransposition]:
