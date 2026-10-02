@@ -194,6 +194,8 @@ def _accounts_html(overview: Overview) -> str:
         accounts
         + '<p class="muted">Counts and dates only. Amounts are on each ledger, '
         "masked until asked for.</p>"
+        '<p><a class="tap" href="/position">Financial position</a> '
+        '<span class="muted">- what is held, in total and month by month</span></p>'
         "<details><summary>What each state means</summary>"
         f'<ul class="legend">{legend}</ul></details>'
     )

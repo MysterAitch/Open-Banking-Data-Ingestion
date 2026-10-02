@@ -35,6 +35,7 @@ its one weakness is; here it only joins the running position.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
@@ -285,6 +286,23 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
     )
 
 
+def running_balance(
+    opening_minor: int, rows: Iterable[Transaction], through: date | None = None
+) -> int:
+    """The balance by the store's own rows: the opening plus every non-void row.
+
+    Rows are counted when dated on or before `through` (all of them when None).
+    The ledger's running position and the position page both call this, so the
+    two cannot come to differ about what an account holds.
+    """
+    return opening_minor + sum(
+        t.amount_minor
+        for t in rows
+        if t.status is not TransactionStatus.VOID
+        and (through is None or t.value_date <= through)
+    )
+
+
 def parse_month(text: str) -> tuple[int, int]:
     found = _MONTH.match(text.strip())
     if found is None:
@@ -475,15 +493,14 @@ def _ledger_for(
 
     currency = rows[0].currency
     through = [pair for pair in built if pair[0].value_date <= last]
-    pos_store, pos_sent, counted = totals(through)
+    _, pos_sent, counted = totals(through)
     # The opening is the balance BEFORE the first row, so it belongs in every
     # running position. It reaches Actual only on a bound account, as the
     # payload's one extra row, so the sent figure takes it on the same terms.
     opening_minor = opening.opening_minor
-    if opening_minor is not None:
-        pos_store += opening_minor
-        if bound:
-            pos_sent += opening_minor
+    pos_store = running_balance(opening_minor or 0, rows, last)
+    if opening_minor is not None and bound:
+        pos_sent += opening_minor
     position = Position(
         through=last.isoformat(),
         rows_counted=counted,

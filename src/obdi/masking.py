@@ -5,6 +5,9 @@ The convention is the one `statement_shape` established: every digit becomes a
 PUNCTUATION survive and the value does not. A masked page can then describe the
 layout of what it holds without disclosing any of it.
 
+One kind of value is the exception, declared as `Total[...]`: a balance or a
+sum, whose length is the thing to hide. It is masked to a single fixed token.
+
 A record that a page renders is a dataclass whose fields are each either a
 VALUE or STRUCTURAL. Structure is declared once, in the field's type, as
 `Structural[...]`; a field declared any other way is a value. The page is
@@ -43,6 +46,25 @@ STRUCTURAL = _StructuralMarker()
 #: of sources and accounts, directions, and flags. Everything else is a value.
 Structural = Annotated[_T, STRUCTURAL]
 
+class _TotalMarker:
+    def __repr__(self) -> str:
+        return "TOTAL"
+
+
+TOTAL = _TotalMarker()
+
+#: A value whose SIZE is itself private: a balance, a subtotal, a net worth.
+#: Masking digit for digit would leave its number of digits on the page, and
+#: for a sum of money that is most of what there is to know about it.
+#: A single payment's shape says little; a total's shape says how much there
+#: is. So a total is masked to one fixed token, whatever it holds.
+Total = Annotated[_T, TOTAL]
+
+#: What every masked total reads as.
+#: Deliberately not a run of nines: on a page that masks digit for digit, a
+#: fixed "£9.99" would be read as a figure of that length.
+MASKED_TOTAL = "£•••"
+
 #: Currency symbols read as structure: which currency a figure is in does not
 #: disclose how much of it there is, and a masked figure without one cannot
 #: be told from a count.
@@ -80,15 +102,25 @@ def mask_text(text: str) -> str:
     return "".join(out)
 
 
-@cache
-def structural_field_names(record_type: type) -> frozenset[str]:
-    """The fields of a record that are shown while values are masked."""
+def _fields_marked(record_type: type, marker: object) -> frozenset[str]:
     hints = get_type_hints(record_type, include_extras=True)
     return frozenset(
         name
         for name, hint in hints.items()
-        if any(mark is STRUCTURAL for mark in getattr(hint, "__metadata__", ()))
+        if any(mark is marker for mark in getattr(hint, "__metadata__", ()))
     )
+
+
+@cache
+def structural_field_names(record_type: type) -> frozenset[str]:
+    """The fields of a record that are shown while values are masked."""
+    return _fields_marked(record_type, STRUCTURAL)
+
+
+@cache
+def total_field_names(record_type: type) -> frozenset[str]:
+    """The fields of a record whose size is hidden while values are masked."""
+    return _fields_marked(record_type, TOTAL)
 
 
 class Disclosed(Generic[_T]):
@@ -106,6 +138,7 @@ class Disclosed(Generic[_T]):
         self._unmasked = unmasked
         self._names = frozenset(f.name for f in fields(record))
         self._structural = structural_field_names(type(record))
+        self._totals = total_field_names(type(record))
 
     def __getattr__(self, name: str) -> Any:
         # Underscore names are this class's own state; answering them from the
@@ -116,7 +149,13 @@ class Disclosed(Generic[_T]):
         if name in self._structural:
             return self._wrapped(value)
         text = "" if value is None else str(value)
-        return text if self._unmasked else mask_text(text)
+        if self._unmasked:
+            return text
+        if name in self._totals:
+            # Empty stays empty: a total that is not known must not be
+            # dressed as one that is known and hidden.
+            return MASKED_TOTAL if text else ""
+        return mask_text(text)
 
     def _wrapped(self, value: Any) -> Any:
         if is_dataclass(value) and not isinstance(value, type):

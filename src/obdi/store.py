@@ -2786,6 +2786,22 @@ class Store:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def observed_valuations(self) -> list[dict[str, object]]:
+        """Every observation of every ASSET, oldest first within each asset.
+
+        The stated account balances that share the table are left out: they are
+        anchors for a ledger's opening balance and not things owned, so a caller
+        summing what is held must never meet them here.
+        """
+        rows = self.connection.execute(
+            "SELECT asset_id, kind, observed_at, value_minor, annual_income_minor, "
+            "currency, source, ingested_at "
+            "FROM valuations WHERE kind != ? "
+            "ORDER BY asset_id, observed_at, ingested_at",
+            (ACCOUNT_BALANCE_KIND,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_valuation_row(
         self,
         *,

@@ -28,7 +28,34 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.242] - 2026-10-02
 
+### Added
+- **A Position page: `/position`.** Each account's balance, each observed asset
+  at its latest value, a net worth, and a month-by-month history, reachable
+  from the navigation strip and the Overview. This is the first page that
+  answers "what is the position" and not "what arrived".
+- **An account with no opening balance is not counted, and the page says so.**
+  It is listed under "Not counted: no opening balance" with a link to state
+  one, and left out of every total: an unknown balance is not nil, and adding
+  it as nil would give a net worth that is wrong by an amount nobody can name.
+  The headline says how many accounts are counted and how many are not.
+- **Defined-benefit and state-pension entries are shown as income and never
+  added to net worth.** There is no agreed way to turn a promise of income into
+  a capital figure, so the page does not pick one.
+- **An account whose later balance checks differ is flagged and still counted**
+  at what its rows give, with a link to its ledger.
+- **The history chart is drawn only when values are shown.** The shape of a
+  net-worth line says how large the figures are relative to one another, so the
+  masked page draws none. Months before every counted item had a known figure
+  are marked partial, and the page names the month from which the history is
+  complete.
+- **A masked balance or total shows as one fixed token, whatever its size.**
+  Elsewhere masking keeps a value's length, which is harmless for one payment
+  and is most of the answer for a net worth: the number of digits. On the
+  Position page every figure is a total, so none keeps its length.
+
 ### Changed
+- **An account's balance on the Position page and its running position on the
+  ledger come from one function**, so the two pages cannot disagree.
 - **The home page is the Overview and nothing else.** Everything that used to
   sit beneath it has a page of its own: Bank connections, Actual sync, Coverage
   by source, Import, and Admin. The home page had grown by accretion until its

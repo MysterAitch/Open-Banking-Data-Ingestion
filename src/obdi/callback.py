@@ -196,6 +196,9 @@ def render_page(title: str, body: str) -> bytes:
  .anchors {{ list-style: none; margin: .5rem 0; padding: 0; }}
  .anchors li {{ padding: .5rem 0; border-bottom: 1px solid #8883; }}
  .anchors p {{ margin: .15rem 0; }}
+ /* The headline figure of a position, an account, or an asset. */
+ .figure {{ font-size: 1.35rem; font-weight: 700; margin: .3rem 0; }}
+ .chart {{ margin: .6rem 0; }}
  details summary {{ cursor: pointer; min-height: 44px; display: flex;
                    align-items: center; opacity: .75; }}
  /* The flex layout above removes the browser's own disclosure marker, so a

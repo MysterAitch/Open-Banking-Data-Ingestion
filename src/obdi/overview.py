@@ -473,7 +473,7 @@ def _order_items(items: Sequence[AttentionItem]) -> tuple[AttentionItem, ...]:
     )
 
 
-def _held_by_account(
+def held_by_account(
     store: Store,
 ) -> tuple[dict[str, tuple[int, date]], dict[str, set[str]]]:
     """Rows (void ones excluded, as the ledger excludes them), the newest
@@ -561,7 +561,7 @@ def build_overview(
         for ref in set(item.accounts):
             concerning[ref] += 1
 
-    held, sources = _held_by_account(store)
+    held, sources = held_by_account(store)
     last_asked: dict[str, datetime] = {}
     for ask in store.last_landed_asks():
         canonical = canonical_for_ref(str(ask["account_ref"]))

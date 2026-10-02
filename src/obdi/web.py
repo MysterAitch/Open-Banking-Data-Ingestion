@@ -54,6 +54,7 @@ from .logs import say
 from .namespaces import QUEUE_KINDS, validate_connection_name
 from .navigation import current_route
 from .overview import Overview
+from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 from .spaces import RECOVERY_BOUND, ArchiveNote
@@ -70,6 +71,7 @@ from .web_accounts import (
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_overview import overview_html
+from .web_position import PositionPages
 from .web_sections import (
     HOME_LINK,
     HookTimer,
@@ -530,6 +532,10 @@ class WebConfig:
     #: values included. Returning data rather than text is what lets the page
     #: decide, in one place, whether a reader may see the values.
     ledger_data: Callable[[str, str], Ledger] | None = None
+    #: Everything held and what it comes to, as DATA with real values, for the
+    #: same reason `ledger_data` is data: the page decides in one place whether
+    #: a reader may see them.
+    position_data: Callable[[], Position] | None = None
     #: State a balance for an account: (ref, day, amount, currency), all as
     #: typed. Raises a DataError whose text never quotes the amount.
     anchor_save: Callable[[str, str, str, str], None] | None = None
@@ -3427,7 +3433,12 @@ DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 
 
 class ConnectionHandler(
-    AccountPages, LedgerPages, IndexPages, SectionPages, BaseHTTPRequestHandler
+    AccountPages,
+    LedgerPages,
+    PositionPages,
+    IndexPages,
+    SectionPages,
+    BaseHTTPRequestHandler,
 ):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
@@ -3548,6 +3559,9 @@ class ConnectionHandler(
             return
         if route == "/ledger":
             self._ledger_get(params)
+            return
+        if route == "/position":
+            self._position_get()
             return
         if route == "/connections":
             self._connections_page()
@@ -5301,6 +5315,10 @@ class ConnectionHandler(
         if route == "/ledger":
             # A POST because showing values is a decision, not a link.
             self._ledger_post(self._read_form())
+            return
+        if route == "/position":
+            # A POST because showing values is a decision, not a link.
+            self._position_post()
             return
         if route == "/ledger-anchor":
             self._anchor_save_post(self._read_form())

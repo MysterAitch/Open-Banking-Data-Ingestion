@@ -54,6 +54,7 @@ from .ledger import Ledger
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import Overview, OverviewCache, build_overview
+from .position import Position
 from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import (
@@ -2481,6 +2482,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 archive=archive_notes_for(store, only=ref).get(ref),
             )
 
+    def position_data() -> Position:
+        from .position import read_position  # deferred like the other data hooks
+
+        try:
+            labels = display_labels()
+        except Exception:
+            # A name is a convenience; the position must not depend on the
+            # provider-label scan succeeding.
+            labels = {}
+        with Store(db_path) as store:
+            return read_position(store, labels=labels, today=datetime.now(UTC).date())
+
     def anchor_save(ref: str, day: str, amount: str, currency: str) -> None:
         from .balance_anchors import record_stated_anchor
 
@@ -3014,6 +3027,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         identity_health_text=identity_health_text,
         balance_reconciliation_text=balance_reconciliation_text,
         ledger_data=ledger_data,
+        position_data=position_data,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,
         categorise_overview=categorise_overview,

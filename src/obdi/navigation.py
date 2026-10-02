@@ -22,6 +22,7 @@ from contextvars import ContextVar
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("overview", "Overview", "/"),
     ("accounts", "Accounts", "/#accounts"),
+    ("position", "Position", "/position"),
     ("connections", "Connections", "/connections"),
     ("actual", "Actual", "/actual"),
     ("reports", "Reports", "/reports"),
@@ -37,6 +38,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/account": "accounts",
     "/accounts": "accounts",
     "/ledger": "accounts",
+    "/position": "position",
     "/declare-account": "accounts",
     "/edit-account": "accounts",
     "/coverage": "accounts",

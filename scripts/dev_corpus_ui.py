@@ -85,6 +85,12 @@ def isolated(root: Path) -> dict[str, str]:
     """
     return {
         **os.environ,
+        # This checkout's code, not whichever copy the interpreter's editable
+        # install points at: a demo served from a worktree showed the main
+        # checkout's pages, and a page under development was a 404.
+        "PYTHONPATH": os.pathsep.join(
+            [str(REPO / "src"), *filter(None, [os.environ.get("PYTHONPATH")])]
+        ),
         "OBDI_DB_PATH": str(root / "store.sqlite3"),
         "OBDI_CONNECTION_STORE": str(root / "connections.json"),
         "OBDI_ACCOUNT_MAP": str(root / "accounts.json"),
@@ -103,6 +109,55 @@ def isolated(root: Path) -> dict[str, str]:
         "EB_APPLICATION_ID": "",
         "EB_PRIVATE_KEY_PATH": "",
     }
+
+
+def seed_position(store_path: Path) -> None:
+    """Invented balances and assets, so `/position` has something to show.
+
+    The current account is given a stated balance and then a later one that
+    does not match its rows, so the page shows a counted account flagged for
+    differing checks. The savings account is deliberately left with no balance
+    stated, so the page shows an account that is not counted. The two assets
+    start in different months, so the history has a partial period before both
+    are observed. Every figure is invented.
+    """
+    from datetime import date
+
+    from obdi.balance_anchors import record_stated_anchor
+    from obdi.store import Store
+    from obdi.valuations import Asset, AssetKind, record_observation
+
+    with Store(store_path) as store:
+        record_stated_anchor(store, "synthetic-current", "2026-03-31", "2310.45")
+        record_stated_anchor(store, "synthetic-current", "2026-06-30", "3055.10")
+        pension = Asset("demo-workplace-pension", AssetKind.DEFINED_CONTRIBUTION)
+        for when, pounds in (
+            (date(2026, 1, 31), 18200),
+            (date(2026, 2, 28), 18650),
+            (date(2026, 3, 31), 18140),
+            (date(2026, 4, 30), 19020),
+            (date(2026, 5, 31), 19480),
+            (date(2026, 6, 30), 19910),
+        ):
+            record_observation(
+                store, pension, observed_at=when, source="statement", value_minor=pounds * 100
+            )
+        fund = Asset("demo-index-fund", AssetKind.INVESTMENT)
+        for when, pounds in (
+            (date(2026, 3, 31), 6400),
+            (date(2026, 5, 31), 6950),
+            (date(2026, 6, 30), 6720),
+        ):
+            record_observation(
+                store, fund, observed_at=when, source="statement", value_minor=pounds * 100
+            )
+        record_observation(
+            store,
+            Asset("demo-state-pension", AssetKind.STATE_PENSION),
+            observed_at=date(2026, 6, 1),
+            source="forecast",
+            annual_income_minor=1150000,
+        )
 
 
 def run(store: Path, *arguments: str) -> None:
@@ -162,6 +217,7 @@ def main() -> int:
         ]
         for filename, account in landings:
             run(store, "import", str(root / "corpus" / filename), "--account", account)
+        seed_position(store)
         expected = manifest["ambiguity"]["expected_flags_total"]
         print(f"\nthe manifest says to expect {expected} review flag(s):")
         for planted in ("standing_order", "duplicate_report"):
@@ -178,6 +234,7 @@ def main() -> int:
     print(f"  http://127.0.0.1:{arguments.port}/            connections")
     print(f"  http://127.0.0.1:{arguments.port}/review      the rule-writing worklist")
     print(f"  http://127.0.0.1:{arguments.port}/agreements  cross-source agreement")
+    print(f"  http://127.0.0.1:{arguments.port}/position    balances, assets, net worth")
     print("\nCtrl-C to stop.\n")
     run(store, "serve", "--port", str(arguments.port))
     return 0
