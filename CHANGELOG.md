@@ -26,6 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.242] - 2026-10-02
+
+### Changed
+- **The home page is the Overview and nothing else.** Everything that used to
+  sit beneath it has a page of its own: Bank connections, Actual sync, Coverage
+  by source, Import, and Admin. The home page had grown by accretion until its
+  first screen was a Reconnect button for every bank and the thing being looked
+  for was somewhere below; it now carries no forms at all, and ends in a System
+  strip of five facts - scheduler, Actual, connections, rebuild, build - each a
+  link to where it is dealt with.
+- **A consent shows the date it expires, not only the days left**, and Reconnect
+  is the heavy button only when the consent is inside its first alert window or
+  has expired. Before, every bank offered an equally loud Reconnect every day.
+- **"Authorised 85183 min ago" reads "authorised 59 days 3 hours ago".**
+- **Actual sync leads with two lines**: the newest push and the newest audit.
+  The roster, the prune form, and the explanation are folded beneath, and the
+  roster opens by itself when an account needs a name before it can sync.
+- **Occasional controls are folded**: renaming a connection, extending history,
+  archiving an account. What they act on stays visible; the form appears when
+  asked for.
+- **A result page leads back to the page the button was on**, and to the
+  Overview. Previously every result led only to the home page.
+- **Folds show a marker.** The stylesheet had removed the browser's own, so a
+  folded section read as a plain sentence.
+
 ## [0.4.241] - 2026-10-02
 
 ### Fixed

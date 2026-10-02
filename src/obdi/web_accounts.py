@@ -44,6 +44,7 @@ from .callback import render_page
 from .errors import DataError
 from .namespaces import validate_canonical_name
 from .spaces import FINAL_MOVEMENTS_MEANING
+from .web_sections import back_link, referring_page
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -530,8 +531,11 @@ def _first(form: dict[str, list[str]], name: str) -> str:
     return (form.get(name, [""])[0] or "").strip()
 
 
-def archived_page(outcome: ArchiveOutcome) -> bytes:
-    """What archiving changed, which date was used and why, and the way back."""
+def archived_page(outcome: ArchiveOutcome, back: str = "") -> bytes:
+    """What archiving changed, which date was used and why, and the way back.
+
+    `back` is the way back to the page the press came from, if one is known.
+    """
     record = outcome.record
     name = html.escape(record.label or str(record.ref))
     source = {
@@ -562,11 +566,12 @@ def archived_page(outcome: ArchiveOutcome) -> bytes:
         f"{html.escape(record.closed.isoformat() if record.closed else '')}.</p>"
         f"<p>{source}</p>{declared}{basis}{undo}"
         + _ledger_link(str(record.ref))
+        + back
         + BACK_LINKS,
     )
 
 
-def unarchived_page(outcome: ArchiveOutcome) -> bytes:
+def unarchived_page(outcome: ArchiveOutcome, back: str = "") -> bytes:
     record = outcome.record
     name = html.escape(record.label or str(record.ref))
     said = (
@@ -579,6 +584,7 @@ def unarchived_page(outcome: ArchiveOutcome) -> bytes:
         "Account unarchived",
         f'<p class="ok"><strong>{name}</strong> is not archived.</p><p>{said}</p>'
         + _ledger_link(str(record.ref))
+        + back
         + BACK_LINKS,
     )
 
@@ -606,6 +612,18 @@ class AccountPages:
 
     def _respond(self, status: int, body: bytes) -> None:
         raise NotImplementedError
+
+    def _referer(self) -> str | None:
+        """Supplied by the handler this is composed into."""
+        raise NotImplementedError
+
+    def _back_to_pressed_page(self) -> str:
+        """Back to the page the archive toggle was pressed on, else coverage.
+
+        The toggle sits on the coverage rows and on the ledger, and only the
+        coverage rows are a page this module can name, so that is the default.
+        """
+        return back_link(referring_page(self._referer(), "/coverage"))
 
     def declared_accounts(self) -> list[AccountRecord]:
         hook = self.bound_config.declared_accounts
@@ -783,7 +801,7 @@ class AccountPages:
         except DataError as exc:
             self._respond(400, refusal("Not archived", str(exc)))
             return
-        self._respond(200, archived_page(outcome))
+        self._respond(200, archived_page(outcome, back=self._back_to_pressed_page()))
 
     def _unarchive_account(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.unarchive_account
@@ -804,7 +822,7 @@ class AccountPages:
         except DataError as exc:
             self._respond(400, refusal("Not unarchived", str(exc)))
             return
-        self._respond(200, unarchived_page(outcome))
+        self._respond(200, unarchived_page(outcome, back=self._back_to_pressed_page()))
 
     def typed_account(self, typed: str) -> TypedAccount:
         """What is known about a typed name, on one read of the registry.

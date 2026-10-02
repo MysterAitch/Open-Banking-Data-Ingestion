@@ -167,11 +167,10 @@ class Lab:
     def home_row(self, ref: str) -> str:
         """The holdings row for one account, so assertions cannot be satisfied
         by a neighbouring row."""
-        page = self.get("/").text
-        # The Overview above names every account too, with its own ledger
-        # link; the holdings rows are the ones inside their own section.
-        assert '<section id="held">' in page, "the holdings section has lost its anchor"
-        page = page.split('<section id="held">', 1)[1]
+        # The Overview names every account too, with its own ledger link, so
+        # the rows are read from the coverage page that holds only them.
+        page = self.get("/coverage").text
+        assert "Held so far" in page, "the coverage page has lost its holdings"
         marker = f"/ledger?ref={quote(ref, safe='')}"
         pieces = page.split('<div class="row"')
         rows = [piece for piece in pieces if marker in piece]
@@ -626,6 +625,7 @@ class TestTheSuggestionFromTheListings:
 
         for _ in range(2):
             lab.get("/")
+            lab.get("/coverage")
             lab.get("/ledger", ref=BILLS, month="2026-05")
             lab.get("/ledger", ref=QUIET)
 
@@ -665,6 +665,7 @@ class TestFinalMovementsArePresentOnlyAsACount:
     def test_Pages_CarryNoAmountOrDescriptionOfTheCountedLegs(self, lab):
         pages = [
             lab.get("/").text,
+            lab.get("/coverage").text,
             lab.get("/ledger", ref=BILLS, month="2026-05").text,
             lab.get("/ledger", ref=QUIET).text,
             lab.archive(BILLS).text,

@@ -156,13 +156,13 @@ class TestEachKindOfFindingIsLinkedToWhereItIsDealtWith:
                 ("acct-silent",),
             ),
             ("shared-identity:acct-current", NOW, "/identity-health", ("acct-current",)),
-            ("push-refused", NOW, "/#actual", ()),
-            ("push-stale", NOW, "/#actual", ()),
-            ("rebuild:empty", NOW, "/#admin", ()),
-            ("check-failed:push-build", NOW, "/#admin", ()),
-            ("consent:halifax", SOON, "/#connections", ()),
-            ("disk:data", SOON, "/#admin", ()),
-            ("something-new:x", NOW, "/#admin", ()),
+            ("push-refused", NOW, "/actual", ()),
+            ("push-stale", NOW, "/actual", ()),
+            ("rebuild:empty", NOW, "/admin", ()),
+            ("check-failed:push-build", NOW, "/admin", ()),
+            ("consent:halifax", SOON, "/connections", ()),
+            ("disk:data", SOON, "/admin", ()),
+            ("something-new:x", NOW, "/admin", ()),
         ],
     )
     def test_Finding_OfThisKind_LinksToTheRightPlaceAtTheRightSeverity(
@@ -346,7 +346,7 @@ class TestTheOverviewsOwnChecks:
         (item,) = assemble(household, rebuild_status=status).items
 
         assert item.message.startswith(message_start)
-        assert item.href == "/#admin"
+        assert item.href == "/admin"
         assert "/private/path" not in item.message
 
     @pytest.mark.parametrize(

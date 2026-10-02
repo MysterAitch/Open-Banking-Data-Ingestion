@@ -27,7 +27,7 @@ import stat
 import tempfile
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from .jsontypes import JsonObject, text, whole_number
@@ -81,6 +81,16 @@ class Connection:
         if expires is None:
             return None
         return (expires - (now or datetime.now(UTC))).days
+
+    def consent_expires_on(self) -> date | None:
+        """The calendar day the consent lapses, in UTC.
+
+        Read from the same stamp as `consent_days_remaining`, so the date a
+        person puts in a calendar and the count of days beside it cannot
+        disagree.
+        """
+        expires = self._parse(self.consent_expires_at)
+        return None if expires is None else expires.astimezone(UTC).date()
 
     def consent_needs_attention(self, *, now: datetime | None = None) -> bool:
         expires = self._parse(self.consent_expires_at)

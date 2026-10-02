@@ -22,6 +22,7 @@ from obdi.web import (
     _spaces_html,
     render_index,
 )
+from obdi.web_sections import render_connections, render_coverage
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
 
@@ -69,13 +70,13 @@ class TestAuthorisationState:
 
 class TestIndexPage:
     def test_Page_WhenNoConnections_SaysSoRatherThanShowingAnEmptyList(self, tmp_path):
-        page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
+        page = render_connections(ConnectionStore(tmp_path / "c.json")).decode()
         assert "No banks connected yet" in page
 
     def test_Page_WhenConsentHealthy_ShowsDaysRemaining(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
         store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
-        assert "89 days left" in render_index(store).decode()
+        assert "89 days left" in render_connections(store).decode()
 
     def test_Page_WhenConsentNearlyExpired_FlaggedProminently(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
@@ -85,7 +86,7 @@ class TestIndexPage:
                 connection_id="halifax", provider="p", token_response=TOKENS, now=old
             )
         )
-        page = render_index(store).decode()
+        page = render_connections(store).decode()
         assert "expires in" in page and "warn" in page
 
     def test_Page_WhenConsentExpired_ShownAsExpired(self, tmp_path):
@@ -96,7 +97,7 @@ class TestIndexPage:
                 connection_id="halifax", provider="p", token_response=TOKENS, now=old
             )
         )
-        assert "expired" in render_index(store).decode()
+        assert "expired" in render_connections(store).decode()
 
     def test_Page_WhenRendered_SizedForAPhone(self, tmp_path):
         # It exists to be used from a phone; without a viewport it renders
@@ -108,7 +109,7 @@ class TestIndexPage:
         # A new name would silently create a second connection to one bank.
         store = ConnectionStore(tmp_path / "c.json")
         store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
-        assert "/connect?name=halifax" in render_index(store).decode()
+        assert "/connect?name=halifax" in render_connections(store).decode()
 
 
 @pytest.fixture
@@ -167,7 +168,7 @@ class TestRouting:
 
     def test_UnknownPath_WhenRequested_NotFound(self, server):
         base, _, _ = server
-        assert httpx.get(f"{base}/admin").status_code == 404
+        assert httpx.get(f"{base}/no-such-page").status_code == 404
 
 
 class TestDeepHistoryIsFetchedWhileItIsStillReachable:
@@ -381,16 +382,14 @@ class TestTheHomepageShowsWhatIsHeld:
             )
         ]
 
-        page = render_index(
-            ConnectionStore(tmp_path / "c.json"), holdings=lambda: holdings
-        ).decode()
+        page = render_coverage(holdings=lambda: holdings).decode()
 
         assert "halifax-current" in page
         assert "1,042" in page
         assert "2024-08-02" in page and "2026-08-01" in page
 
     def test_Index_WithNoHoldingsHook_RendersExactlyAsBefore(self, tmp_path):
-        page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
+        page = render_coverage().decode()
 
         assert "Held so far" not in page
 
@@ -415,8 +414,7 @@ class TestTheHomepageShowsWhatIsHeld:
             "behind a live witness; the feed may be stuck"
         )
 
-        page = render_index(
-            ConnectionStore(tmp_path / "c.json"),
+        page = render_coverage(
             holdings=lambda: holdings,
             feed_warnings=lambda: [warning],
         ).decode()
@@ -430,12 +428,12 @@ class TestTheHomepageShowsWhatIsHeld:
         def boom():
             raise RuntimeError("store locked")
 
-        page = render_index(ConnectionStore(tmp_path / "c.json"), holdings=boom).decode()
+        page = render_coverage(holdings=boom).decode()
 
-        # A reporting extra must never take down the page that manages
-        # connections - the store may legitimately be mid-write during a
-        # backfill, which is exactly when someone is refreshing.
-        assert "Needs attention" in page
+        # A reporting extra must never take down the page - the store may
+        # legitimately be mid-write during a backfill, which is exactly when
+        # someone is refreshing.
+        assert "<h1>" in page and "Coverage by source" in page
 
 
 class TestTheAuthorisersAddressIsTheRealOne:
@@ -530,7 +528,7 @@ class TestExtendingHistoryFromThePage:
             lambda **_: "",
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -711,7 +709,7 @@ class TestExtendingHistoryFromThePage:
             lambda **_: "",
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -740,7 +738,7 @@ class TestExtendingHistoryFromThePage:
             lambda **_: "",
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -850,7 +848,7 @@ class TestProbingGuidanceOnThePage:
             ],
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -872,7 +870,7 @@ class TestProbingGuidanceOnThePage:
             ],
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -1218,7 +1216,7 @@ class TestDangerZone:
             tmp_path, rebuild=lambda: "replayed", forget=lambda: 0
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/admin").text
         finally:
             httpd.shutdown()
 
@@ -1229,7 +1227,7 @@ class TestDangerZone:
 
         httpd, base = self._server(tmp_path)
         try:
-            bare = httpx.get(base).text
+            bare = httpx.get(f"{base}/admin").text
         finally:
             httpd.shutdown()
         assert "Danger zone" not in bare
@@ -1910,7 +1908,7 @@ class TestBindingFromThePage:
             lambda *_: "",
         )
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/connections").text
         finally:
             httpd.shutdown()
 
@@ -2216,7 +2214,7 @@ class TestNamesLeadAndDormancySpeaks:
 
         httpd, base = self._server(tmp_path, lambda: rows, lambda: labels)
         try:
-            page = httpx.get(base).text
+            page = httpx.get(f"{base}/coverage").text
         finally:
             httpd.shutdown()
 
@@ -2361,7 +2359,7 @@ class TestUploadingAFileFromThePage:
             labels={"halifax-current": "Current (halifax)"},
         )
         try:
-            index = httpx.get(f"{base}/").text
+            index = httpx.get(f"{base}/import").text
             page = httpx.post(
                 f"{base}/upload",
                 data={"account": "halifax-current"},
@@ -2370,7 +2368,7 @@ class TestUploadingAFileFromThePage:
         finally:
             httpd.shutdown()
 
-        # The destination is chosen FIRST, on the index form.
+        # The destination is chosen FIRST, on the import page's form.
         assert "Current (halifax)" in index
         assert previews == [(b"Date,Amount\n", "statement.csv", "halifax-current")]
         assert confirms == []  # nothing landed from a preview
@@ -3039,12 +3037,12 @@ class TestHealthzAndRenderTiming:
 
         httpd, base = self._server(tmp_path, holdings=slow_holdings)
         try:
-            assert httpx.get(f"{base}/", timeout=10).status_code == 200
+            assert httpx.get(f"{base}/coverage", timeout=10).status_code == 200
         finally:
             httpd.shutdown()
 
         out = capsys.readouterr().out
-        assert "web timing: / rendered in" in out
+        assert "web timing: /coverage rendered in" in out
         assert "holdings" in out
 
     def test_AFastIndexRender_StaysQuiet(self, tmp_path, capsys):

@@ -287,7 +287,7 @@ class TestDeclaringAnAccount:
         # precisely so a statement can be filed into it.
         lab.post("/save-account", {"ref": "piggy-bank", "label": "Piggy bank"})
 
-        assert '<option value="piggy-bank">Piggy bank</option>' in lab.get("/").text
+        assert '<option value="piggy-bank">Piggy bank</option>' in lab.get("/import").text
 
     def test_DeclaringAnAccount_MakesItSelectableOnTheStatementAssignForm(self, lab):
         lab.post("/save-account", {"ref": "piggy-bank", "label": "Piggy bank"})

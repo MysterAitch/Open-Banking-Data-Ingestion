@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Callable
 from http.server import HTTPServer
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -102,7 +104,7 @@ class TestNeedsAttention:
         assert "2 things need attention." in page
         assert page.index("acct-silent: gone quiet") < page.index("the data volume is 91% full")
         assert 'href="/account?ref=acct-silent"' in page
-        assert 'href="/#admin"' in page
+        assert 'href="/admin"' in page
         assert "Data at risk" in page and "Will break soon" in page
 
     def test_Home_WhenACheckCouldNotRun_SaysThatCheckDidNotRunAndCountsOnlyThoseThatDid(
@@ -308,41 +310,46 @@ class TestNoFigureReachesTheOverview:
 
 
 class TestTheExistingSectionsRemain:
-    def test_Home_EveryExistingSection_IsStillPresentUnderItsAnchor(self, tmp_path, household):
-        page = home(
-            tmp_path,
-            lambda fresh: assemble(household),
-            rebuild_derived=lambda: "started",
-            forget_actual=lambda: 0,
-            push_actual=lambda: "queued",
-            actual_status=lambda: [],
-        )
+    """Each section that left the home page is on the page that now carries it."""
 
-        for anchor in (
-            "attention", "accounts", "connections", "held", "actual", "extend",
-            "reports-and-evidence", "import", "add-bank", "admin",
-        ):
-            assert f'id="{anchor}"' in page, anchor
-        assert "Import a file" in page
-        assert "Danger zone" in page
-        assert "Rebuild from raw" in page
-        assert "Preview import" in page
+    HOOKS: ClassVar[dict[str, Callable[[], object]]] = {
+        "rebuild_derived": lambda: "started",
+        "forget_actual": lambda: 0,
+        "push_actual": lambda: "queued",
+        "actual_status": lambda: [],
+    }
 
-    def test_Home_ReportAndEvidenceButtons_CollapseToTwoLinksToTheIndexes(
+    def test_Pages_EveryExistingSection_IsPresentOnThePageThatNowCarriesIt(
+        self, tmp_path, household
+    ):
+        def page_at(path):
+            return home(tmp_path, lambda fresh: assemble(household), path=path, **self.HOOKS)
+
+        assert "Import a file" in page_at("/import")
+        assert "Preview import" in page_at("/import")
+        assert "Danger zone" in page_at("/admin")
+        assert "Rebuild from raw" in page_at("/admin")
+        assert "Add a bank" in page_at("/connections")
+        assert "Push to Actual now" in page_at("/actual")
+
+    def test_Home_ReportAndEvidenceAreReachedFromTheStripAndNotListedOnTheHomePage(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
-        body = page.split('id="reports-and-evidence"')[1].split("</section>")[0]
+        strip = re.search(r'<nav class="sitenav".*?</nav>', page, re.S).group(0)
+        body = page.replace(strip, "")
 
-        assert 'href="/reports"' in body and 'href="/evidence"' in body
+        assert 'href="/reports"' in strip and 'href="/evidence"' in strip
+        for route in ("/reports", "/evidence"):
+            assert f'href="{route}"' not in body
         for route in ("/agreements", "/date-lag", "/balance-walk", "/artefacts", "/attempts"):
             assert f'href="{route}"' not in body
 
-    def test_RenderIndex_CalledDirectlyWithoutAnOverview_StillRendersEverySection(self, tmp_path):
+    def test_RenderIndex_CalledDirectlyWithoutAnOverview_StillRendersBothHalves(self, tmp_path):
         page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
 
         assert "no Overview wired" in page
-        assert 'id="connections"' in page and 'id="admin"' in page
+        assert 'id="attention"' in page and 'id="system"' in page
 
 
 @pytest.mark.parametrize("path", ["/reports", "/evidence"])

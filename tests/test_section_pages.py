@@ -1,0 +1,692 @@
+"""The pages that used to be sections of the home page, and the home page that remains.
+
+Expected content is stated from the design - what each page is for, what it
+leads with, what sits behind a fold, where a result page sends a person back -
+and every invented figure is distinctive so that an amount reaching a page
+cannot hide among ordinary digits.
+"""
+
+from __future__ import annotations
+
+import re
+import threading
+from datetime import UTC, date, datetime, timedelta
+from http.server import HTTPServer
+
+import httpx
+import pytest
+
+from obdi.alerts import CONSENT_RUNGS
+from obdi.connections import Connection, ConnectionStore
+from obdi.coverage import SourceCoverage
+from obdi.probing import elapsed_words, sca_note
+from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
+from test_navigation import get_routes
+
+#: Only a first-rung consent gets the heavy Reconnect button.
+FIRST_RUNG_DAYS = max(threshold for threshold, _, _ in CONSENT_RUNGS)
+
+AMOUNT_ONE = "987654321"
+AMOUNT_TWO = "424242424"
+
+#: Every control the old home page carried, by the form action or link it posted to.
+MOVED_FORM_ACTIONS = (
+    "/push-actual",
+    "/audit-actual",
+    "/prune-actual",
+    "/rename-connection",
+    "/rebuild-derived",
+    "/forget-actual-bindings",
+    "/starling-probe",
+    "/upload",
+    "/bind",
+    "/extend",
+    "/extend-max",
+    "/connect",
+    "/archive-account",
+)
+
+
+@pytest.fixture(autouse=True)
+def live_instance(monkeypatch):
+    monkeypatch.setenv("OBDI_INSTANCE_LABEL", "obdi")
+    monkeypatch.setenv("OBDI_INSTANCE_ROLE", "production")
+
+
+def connection(name: str, *, expires_in: timedelta) -> Connection:
+    return Connection(
+        connection_id=name,
+        provider="p",
+        refresh_token="r",
+        consent_expires_at=(datetime.now(UTC) + expires_in).isoformat(),
+    )
+
+
+@pytest.fixture
+def serve(tmp_path):
+    servers: list[HTTPServer] = []
+
+    def start(connections: tuple[Connection, ...] = (), **hooks) -> str:
+        store = ConnectionStore(tmp_path / f"c{len(servers)}.json")
+        for one in connections:
+            store.put(one)
+        config = WebConfig(
+            client_id="c",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=store,
+            **hooks,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers.append(httpd)
+        return f"http://127.0.0.1:{httpd.server_port}"
+
+    yield start
+    for httpd in servers:
+        httpd.shutdown()
+
+
+def fetch(base: str, path: str) -> str:
+    response = httpx.get(f"{base}{path}", timeout=20)
+    assert response.status_code == 200, (path, response.status_code)
+    return response.text
+
+
+def inside_details(page: str, needle: str) -> bool:
+    """Is the first occurrence of `needle` within an open `<details>` element?"""
+    before = page[: page.index(needle)]
+    return len(re.findall(r"<details\b", before)) > before.count("</details>")
+
+
+def current_section(page: str) -> list[str]:
+    return re.findall(r'aria-current="page">([A-Za-z]+)<', page)
+
+
+def coverage_rows() -> list[SourceCoverage]:
+    return [
+        SourceCoverage(
+            account_id="halifax-current",
+            source="truelayer",
+            count=12,
+            earliest=date(2026, 1, 1),
+            latest=date(2026, 2, 1),
+            inflow_minor=1,
+            outflow_minor=1,
+            with_durable_id=12,
+        )
+    ]
+
+
+def results() -> list[dict[str, object]]:
+    return [
+        {
+            "kind": "audit",
+            "ok": True,
+            "finished_at": "2026-10-01T13:00:00Z",
+            "accounts": [
+                {
+                    "account_id": "alpha-id",
+                    "name": "Alpha Current",
+                    "expected": 10,
+                    "present": 10,
+                    "missing": 0,
+                    "orphaned": 0,
+                    "human": 0,
+                    "diverged": 0,
+                    "duplicated": 0,
+                    "balance": {"agrees": True, "store_minor": int(AMOUNT_ONE)},
+                },
+                {
+                    "account_id": "beta-id",
+                    "name": "Beta Savings",
+                    "expected": 10,
+                    "present": 9,
+                    "missing": 1,
+                    "orphaned": 0,
+                    "human": 0,
+                    "diverged": 0,
+                    "duplicated": 0,
+                    "missing_sample": [
+                        {
+                            "imported_id": "obdi-beta-1",
+                            "date": "2026-09-01",
+                            "amount": -int(AMOUNT_TWO),
+                        }
+                    ],
+                    "balance": {"agrees": False, "store_minor": int(AMOUNT_TWO)},
+                },
+            ],
+        },
+        {
+            "kind": "push",
+            "ok": True,
+            "finished_at": "2026-10-01T12:00:00Z",
+            "added": 3,
+            "provisioned": 0,
+        },
+    ]
+
+
+class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
+    @pytest.mark.parametrize(
+        ("path", "section", "fragment"),
+        [
+            ("/connections", "Connections", "Add a bank"),
+            ("/actual", "Actual", "Push to Actual now"),
+            ("/coverage", "Accounts", "Held so far"),
+            ("/import", "Accounts", "Preview import"),
+            ("/admin", "Admin", "Danger zone"),
+        ],
+    )
+    def test_Page_WhenFullyWired_RendersItsSectionsAndMarksItsNavigationEntry(
+        self, serve, path, section, fragment
+    ):
+        base = serve(
+            (connection("halifax", expires_in=timedelta(days=60)),),
+            holdings=coverage_rows,
+            push_actual=lambda: "queued",
+            actual_status=lambda: results(),
+            rebuild_derived=lambda: "started",
+            forget_actual=lambda: 0,
+            rename_connection=lambda a, b: "",
+        )
+
+        page = fetch(base, path)
+
+        assert fragment in page
+        assert current_section(page) == [section]
+        assert page.index('<p class="lede">') < page.index(fragment)
+
+    def test_CoveragePage_SaysInOneSentenceHowItDiffersFromTheAccountCards(self, serve):
+        page = fetch(serve(holdings=coverage_rows), "/coverage")
+
+        assert "Coverage by source" in page
+        assert "one row for each source feeding an account" in page
+        assert "one card per account" in page
+
+    def test_ImportPage_ExplainsBothDoorsAndLinksTheStatementUpload(self, serve):
+        page = fetch(serve(), "/import")
+
+        assert "Bank CSV or QIF exports" in page
+        assert "PDF statement is kept as evidence" in page
+        assert 'href="/statement-shape"' in page
+
+    def test_AdminPage_OrdersTheDangerZoneThenTheRecordThenTheProbe(self, serve):
+        base = serve(
+            rebuild_derived=lambda: "started",
+            forget_actual=lambda: 0,
+            recent_rebuilds=lambda: [
+                {
+                    "ok": True,
+                    "started_at": "2026-10-01T10:00:00Z",
+                    "finished_at": "2026-10-01T10:01:00Z",
+                }
+            ],
+            starling_probe=lambda cutoff: None,
+        )
+
+        page = fetch(base, "/admin")
+
+        assert (
+            page.index("Danger zone")
+            < page.index("Recent rebuilds")
+            < page.index("Starling changesSince probe")
+        )
+        assert inside_details(page, "Starling changesSince probe")
+        assert not inside_details(page, "Rebuild from raw")
+
+
+class TestTheHomePageIsTheOverviewAndNothingElse:
+    def test_Home_WithEverythingWired_CarriesNoneOfTheMovedForms(self, serve):
+        base = serve(
+            (connection("halifax", expires_in=timedelta(days=60)),),
+            holdings=coverage_rows,
+            push_actual=lambda: "queued",
+            audit_actual=lambda: "queued",
+            prune_actual=lambda: "queued",
+            actual_status=lambda: results(),
+            rebuild_derived=lambda: "started",
+            forget_actual=lambda: 0,
+            rename_connection=lambda a, b: "",
+            starling_probe=lambda cutoff: None,
+            preview_upload=lambda *a: {},
+            extendables=lambda: [
+                ExtendableAccount(
+                    connection="halifax", provider_ref="e9f8", display="Current", earliest=None
+                )
+            ],
+        )
+
+        page = fetch(base, "/")
+
+        assert "<form" not in page
+        for action in MOVED_FORM_ACTIONS:
+            assert f'action="{action}"' not in page, action
+        assert "Everything else, by section" not in page
+        assert 'id="attention"' in page and 'id="accounts"' in page
+
+    def test_Home_CarriesFiveFactsEachLinkingToThePageThatOwnsIt(self, serve):
+        page = fetch(serve(), "/")
+
+        facts = re.findall(r'<li class="fact"><a class="tap" href="([^"]+)"', page)
+        assert facts == ["/connections", "/actual", "/connections", "/admin", "/admin"]
+
+    def test_Home_AccountsSection_LinksToCoverageDeclaredImportAndCategorise(self, serve):
+        accounts = fetch(serve(), "/").split('id="accounts"')[1]
+
+        for href in ("/coverage", "/accounts", "/import", "/review"):
+            assert f'href="{href}"' in accounts, href
+
+    def test_SystemStrip_StatesTheFactsFromTheirHooks(self, serve):
+        soon = connection("halifax", expires_in=timedelta(days=40))
+        later = connection("monzo", expires_in=timedelta(days=80))
+        base = serve(
+            (later, soon),
+            actual_status=lambda: [
+                {"kind": "push", "ok": False, "finished_at": "2026-10-01T12:00:00Z", "error": "x"}
+            ],
+            rebuild_status=lambda: {
+                "state": "done",
+                "ok": False,
+                "finished_at": "2026-09-30T08:00:00Z",
+            },
+            scheduler_heartbeat=lambda: {
+                "at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                "interval_seconds": 21600,
+            },
+        )
+
+        strip = fetch(base, "/").split('id="system"')[1]
+
+        assert "last push FAILED 2026-10-01 12:00Z" in strip
+        assert "last rebuild FAILED, 2026-09-30 08:00Z" in strip
+        assert "2 banks connected" in strip
+        expires = (datetime.now(UTC) + timedelta(days=40)).date().isoformat()
+        assert f"soonest consent expires {expires}" in strip
+        assert "scheduler last completed a cycle" in strip
+
+    def test_SystemStrip_WithNothingWired_SaysSoRatherThanGoingMissing(self, serve):
+        strip = fetch(serve(), "/").split('id="system"')[1]
+
+        assert "no scheduler cycle recorded" in strip
+        assert "not wired on this instance" in strip
+        assert "no banks connected" in strip
+        assert "no rebuild recorded" in strip
+
+    def test_SlowHomeRender_NamesTheHookThatWasSlow(self, serve, monkeypatch, capsys):
+        import time
+
+        monkeypatch.setenv("OBDI_WEB_SLOW_RENDER_SECS", "0.01")
+
+        def slow():
+            time.sleep(0.05)
+            return []
+
+        fetch(serve(actual_status=slow), "/")
+
+        out = capsys.readouterr().out
+        assert "web timing: / rendered in" in out and "actual_status" in out
+
+    def test_SlowSectionPage_NamesItsRouteAndHook(self, serve, monkeypatch, capsys):
+        import time
+
+        monkeypatch.setenv("OBDI_WEB_SLOW_RENDER_SECS", "0.01")
+
+        def slow():
+            time.sleep(0.05)
+            return []
+
+        fetch(serve(actual_status=slow), "/actual")
+
+        out = capsys.readouterr().out
+        assert "web timing: /actual rendered in" in out and "actual_status" in out
+
+
+class TestConsentRowsSayWhenAndWeighReconnectByUrgency:
+    def test_Row_WithAMonthLeft_ShowsTheExpiryDateAndOffersReconnectAsSecondary(self, serve):
+        span = timedelta(days=30, hours=1)
+        expires = datetime.now(UTC) + span
+        page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
+
+        assert f"30 days left - expires on {expires.date().isoformat()}" in page
+        assert '<a class="button secondary" href="/connect?name=halifax">' in page
+
+    def test_Row_AtTheFirstAlertRung_OffersReconnectAsPrimary(self, serve):
+        span = timedelta(days=FIRST_RUNG_DAYS, hours=1)
+        expires = datetime.now(UTC) + span
+        page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
+
+        assert f"expires in {FIRST_RUNG_DAYS} days on {expires.date().isoformat()}" in page
+        assert '<a class="button" href="/connect?name=halifax">' in page
+
+    def test_Row_OneDayOutsideTheFirstAlertRung_StillOffersReconnectAsSecondary(self, serve):
+        span = timedelta(days=FIRST_RUNG_DAYS + 1, hours=1)
+        page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
+
+        assert '<a class="button secondary" href="/connect?name=halifax">' in page
+
+    def test_Row_WhenExpired_OffersReconnectAsPrimaryAndSaysWhenItLapsed(self, serve):
+        lapsed = datetime.now(UTC) - timedelta(days=3)
+        page = fetch(serve((connection("halifax", expires_in=timedelta(days=-3)),)), "/connections")
+
+        assert f"expired on {lapsed.date().isoformat()} - reconnect now" in page
+        assert '<a class="button" href="/connect?name=halifax">' in page
+
+    def test_Row_WithNoConsentClock_SaysSoInsteadOfPrintingNoneDays(self, serve):
+        store_connection = Connection(connection_id="starlingish", provider="p", refresh_token="r")
+        page = fetch(serve((store_connection,)), "/connections")
+
+        assert "no consent expiry recorded" in page
+        assert "None days" not in page
+
+    def test_RenameForm_IsBehindADisclosure(self, serve):
+        page = fetch(
+            serve(
+                (connection("halifax", expires_in=timedelta(days=60)),),
+                rename_connection=lambda a, b: "",
+            ),
+            "/connections",
+        )
+
+        assert inside_details(page, 'action="/rename-connection"')
+        assert not inside_details(page, "Reconnect halifax")
+
+
+class TestElapsedTimeReadsInDaysAndHours:
+    def test_AuthorisedMonthsAgo_SaysDaysAndHoursNotFiveFigureMinutes(self):
+        note = sca_note(
+            authorised_at=datetime.now(UTC) - timedelta(minutes=85183),
+            window_minutes=None,
+            refusal_seen=False,
+        )
+
+        assert "authorised 59 days 3 hours ago" in note
+        assert "85183" not in note
+
+    @pytest.mark.parametrize(
+        ("minutes", "said"),
+        [(0, "0 min"), (5, "5 min"), (89, "89 min"), (120, "2 hours"), (2 * 1440, "2 days"),
+         (2 * 1440 + 60, "2 days 1 hours")],
+    )
+    def test_Words_AcrossEachBand(self, minutes, said):
+        assert elapsed_words(minutes) == said
+
+    def test_WindowLongClosed_SaysSinceAuthorisationInDays(self):
+        note = sca_note(
+            authorised_at=datetime.now(UTC) - timedelta(days=10),
+            window_minutes=5,
+            refusal_seen=False,
+        )
+
+        assert "10 days since authorisation" in note
+
+
+class TestExtendHistoryKeepsTheStateOutsideTheFold:
+    def _stale_account(self) -> ExtendableAccount:
+        return ExtendableAccount(
+            connection="halifax",
+            provider_ref="e9f8",
+            display="Current Account",
+            earliest=date(2024, 8, 2),
+            covered_to=datetime.now(UTC).date() - timedelta(days=9),
+        )
+
+    def test_Buttons_AreBehindADisclosurePerAccount(self, serve):
+        page = fetch(serve(extendables=lambda: [self._stale_account()]), "/connections")
+
+        for days in (1, 7, 30, 90, 365, 730):
+            assert inside_details(page, f'name="days" value="{days}"')
+        assert inside_details(page, "Extend as far as possible")
+
+    def test_CoverageLineAndStaleMarker_StayVisibleOutsideTheFold(self, serve):
+        page = fetch(serve(extendables=lambda: [self._stale_account()]), "/connections")
+
+        assert not inside_details(page, "covered to ")
+        assert not inside_details(page, "stale: 9 days behind")
+
+    def test_ResultPageAfterAPress_KeepsTheButtonsOpenForPressingAgain(self, serve):
+        base = serve(
+            extendables=lambda: [self._stale_account()], extend_window=lambda **_: "landed 3"
+        )
+
+        page = httpx.post(
+            f"{base}/extend", data={"connection": "halifax", "account": "e9f8", "days": "7"}
+        ).text
+
+        assert "<details open><summary>Extend this account's history" in page
+
+
+class TestActualLeadsWithTheTwoLineSummaryAndPrintsNoAmount:
+    def test_Summary_LeadsBeforeAnyControlOrDetail(self, serve):
+        page = fetch(
+            serve(push_actual=lambda: "q", audit_actual=lambda: "q", actual_status=results),
+            "/actual",
+        )
+
+        assert "The last push was applied 2026-10-01 12:00Z" in page
+        assert "found differences in 1 of 2 accounts" in page
+        assert page.index("The last push was applied") < page.index('action="/push-actual"')
+        assert page.index("found differences in 1 of 2 accounts") < page.index("Per-account detail")
+
+    def test_EachAuditsPerAccountDetail_IsBehindADisclosure(self, serve):
+        page = fetch(serve(push_actual=lambda: "q", actual_status=results), "/actual")
+
+        assert inside_details(page, "Alpha Current: expected 10")
+        assert inside_details(page, "Beta Savings: expected 10")
+        assert not inside_details(page, "audit: differences</span>")
+
+    def test_Page_PrintsNoAmountNorTheFiguresBehindABalanceVerdict(self, serve):
+        page = fetch(
+            serve(push_actual=lambda: "q", audit_actual=lambda: "q", actual_status=results),
+            "/actual",
+        )
+
+        assert AMOUNT_ONE not in page and AMOUNT_TWO not in page
+        assert "amount" not in page.lower().replace("amounts are shown", "")
+
+    def test_Summary_WhenTheNewestPushFailed_SaysSoAndNamesTheLastThatApplied(self, serve):
+        history = [
+            {"kind": "push", "ok": False, "finished_at": "2026-10-02T09:00:00Z", "error": "boom"},
+            {"kind": "push", "ok": True, "finished_at": "2026-10-01T12:00:00Z", "added": 1},
+        ]
+
+        page = fetch(serve(push_actual=lambda: "q", actual_status=lambda: history), "/actual")
+
+        assert "The newest push failed 2026-10-02 09:00Z" in page
+        assert "The last push that applied was 2026-10-01 12:00Z" in page
+
+    def test_Summary_WithNothingRecorded_SaysSoForBoth(self, serve):
+        page = fetch(serve(push_actual=lambda: "q", actual_status=lambda: []), "/actual")
+
+        assert "No push has been recorded." in page
+        assert "No audit has been run." in page
+
+    def test_Summary_WhenTheResultsCannotBeRead_SaysUnreadableAndStillRenders(self, serve):
+        def boom():
+            raise RuntimeError("results directory locked")
+
+        page = fetch(serve(push_actual=lambda: "q", actual_status=boom), "/actual")
+
+        assert "could not be read" in page
+        assert "results directory locked" not in page
+        assert "Push to Actual now" in page
+
+    def test_Page_WhenNothingIsWired_SaysSo(self, serve):
+        page = fetch(serve(), "/actual")
+
+        assert "The Actual sync is not wired on this instance" in page
+
+    def test_Prune_IsBehindADisclosure(self, serve):
+        page = fetch(serve(prune_actual=lambda: "q", push_actual=lambda: "q"), "/actual")
+
+        assert inside_details(page, 'action="/prune-actual"')
+
+
+class TestPagesTolerateHooksAsTheHomePageDid:
+    def test_Connections_WhenAHookRaises_ThePageStillRendersWithoutThatPart(self, serve):
+        def boom():
+            raise RuntimeError("locked")
+
+        page = fetch(
+            serve(starling_status=boom, provider_knowledge=boom, extendables=boom), "/connections"
+        )
+
+        assert "Banks and their consent" in page
+
+    def test_Admin_WhenTheRebuildHistoryHookRaises_ThePageStillRenders(self, serve):
+        def boom():
+            raise RuntimeError("locked")
+
+        page = fetch(serve(rebuild_derived=lambda: "x", recent_rebuilds=boom), "/admin")
+
+        assert "Danger zone" in page and "Recent rebuilds" not in page
+
+    def test_Admin_WhenNothingIsWired_SaysSo(self, serve):
+        assert "Rebuild and forget is not wired" in fetch(serve(), "/admin")
+
+    def test_Coverage_WhenNothingIsHeld_SaysSo(self, serve):
+        assert "Coverage is not wired on this instance, or has nothing to show" in fetch(
+            serve(), "/coverage"
+        )
+
+
+class TestControlsAreThumbSized:
+    PAGES = ("/", "/connections", "/actual", "/coverage", "/import", "/admin")
+
+    def test_EveryButtonAndLink_IsAButtonOrATapTarget(self, serve):
+        base = serve(
+            (connection("halifax", expires_in=timedelta(days=60)),),
+            holdings=coverage_rows,
+            push_actual=lambda: "q",
+            audit_actual=lambda: "q",
+            actual_status=results,
+            rebuild_derived=lambda: "x",
+            forget_actual=lambda: 0,
+            rename_connection=lambda a, b: "",
+            starling_probe=lambda c: None,
+            archive_notes=lambda: {},
+            extendables=lambda: [
+                ExtendableAccount(
+                    connection="halifax", provider_ref="e9f8", display="Current", earliest=None
+                )
+            ],
+        )
+        for path in self.PAGES:
+            page = re.sub(r"<nav .*?</nav>", "", fetch(base, path), flags=re.S)
+            for tag in re.findall(r"<button[^>]*>", page):
+                assert 'class="button' in tag or "form button" in tag, (path, tag)
+            for tag in re.findall(r"<a [^>]*>", page):
+                assert 'class="button' in tag or 'class="tap' in tag, (path, tag)
+
+    def test_Stylesheet_FloorsEveryButtonAtFortyFourPixels(self, serve):
+        css = fetch(serve(), "/")
+
+        rules = re.findall(r"a\.button, button\.button \{[^}]*\}", css)
+        assert any("min-height: 44px" in rule for rule in rules)
+
+
+class TestEveryResultPageOffersTheWayBackToWhereItCameFrom:
+    @pytest.fixture
+    def wired(self, serve):
+        return serve(
+            push_actual=lambda: "queued",
+            audit_actual=lambda: "queued",
+            prune_actual=lambda: "queued",
+            rename_connection=lambda a, b: f"renamed {a}",
+            rebuild_derived=lambda: "started",
+            forget_actual=lambda: 2,
+            bind_account=lambda a, c: f"bound {a}",
+            extendables=lambda: [],
+            extend_window=lambda **_: "landed",
+            preview_upload=lambda *a: {},
+        )
+
+    def way_back_names(self, response: httpx.Response, page: str, label: str) -> None:
+        assert f'href="{page}">{label}</a>' in response.text
+        assert 'href="/">Back to overview</a>' in response.text
+
+    @pytest.mark.parametrize(
+        ("path", "data", "page", "label"),
+        [
+            ("/push-actual", {}, "/actual", "Back to Actual sync"),
+            ("/audit-actual", {}, "/actual", "Back to Actual sync"),
+            ("/prune-actual", {"confirm": "yes"}, "/actual", "Back to Actual sync"),
+            ("/prune-actual", {}, "/actual", "Back to Actual sync"),
+            (
+                "/rename-connection",
+                {"old_name": "a", "new_name": "b"},
+                "/connections",
+                "Back to bank connections",
+            ),
+            ("/rename-connection", {}, "/connections", "Back to bank connections"),
+            (
+                "/extend",
+                {"connection": "halifax", "account": "x", "days": "7"},
+                "/connections",
+                "Back to bank connections",
+            ),
+            ("/rebuild-derived", {"confirm": "yes"}, "/admin", "Back to admin"),
+            ("/rebuild-derived", {}, "/admin", "Back to admin"),
+            ("/forget-actual-bindings", {"confirm": "yes"}, "/admin", "Back to admin"),
+            ("/forget-actual-bindings", {}, "/admin", "Back to admin"),
+            ("/upload", {}, "/import", "Back to import"),
+        ],
+    )
+    def test_Post_AnswersWithTheWayBackToTheOriginatingPage(
+        self, wired, path, data, page, label
+    ):
+        response = httpx.post(f"{wired}{path}", data=data, timeout=20)
+
+        self.way_back_names(response, page, label)
+
+    def test_Post_WhenTheHookRaises_StillOffersTheWayBack(self, serve):
+        def boom():
+            raise RuntimeError("queue directory missing")
+
+        response = httpx.post(f"{serve(push_actual=boom)}/push-actual", timeout=20)
+
+        assert response.status_code == 500
+        self.way_back_names(response, "/actual", "Back to Actual sync")
+
+    @pytest.mark.parametrize(
+        ("referer_path", "page", "label"),
+        [
+            ("/actual", "/actual", "Back to Actual sync"),
+            ("/connections", "/connections", "Back to bank connections"),
+            ("/coverage", "/coverage", "Back to coverage by source"),
+            (None, "/coverage", "Back to coverage by source"),
+            ("/somewhere-unknown", "/coverage", "Back to coverage by source"),
+        ],
+    )
+    def test_Bind_SendsBackToThePageItWasPressedOnElseCoverage(
+        self, wired, referer_path, page, label
+    ):
+        headers = {"Referer": f"{wired}{referer_path}"} if referer_path else {}
+
+        response = httpx.post(
+            f"{wired}/bind", data={"account": "a", "canonical": "b"}, headers=headers, timeout=20
+        )
+
+        self.way_back_names(response, page, label)
+
+    def test_Bind_WithAForeignRefererHost_OnlyEverChoosesAmongOurOwnLinks(self, wired):
+        response = httpx.post(
+            f"{wired}/bind",
+            data={"account": "a", "canonical": "b"},
+            headers={"Referer": "https://evil.example/actual"},
+            timeout=20,
+        )
+
+        assert "evil.example" not in response.text
+        self.way_back_names(response, "/actual", "Back to Actual sync")
+
+
+class TestNavigationCoversTheNewRoutes:
+    def test_Dispatcher_KnowsEveryPageTheStripAndTheAccountsSectionLinkTo(self):
+        routes = set(get_routes())
+
+        assert {"/connections", "/actual", "/coverage", "/import", "/admin"} <= routes

@@ -39,10 +39,11 @@ from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import token_urlsafe
-from typing import NewType, ParamSpec, TypeVar
+from typing import NewType
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord, ArchiveOutcome
+from .alerts import consent_rung
 from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
@@ -69,6 +70,14 @@ from .web_accounts import (
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_overview import overview_html
+from .web_sections import (
+    HOME_LINK,
+    HookTimer,
+    SectionPages,
+    referring_page,
+    system_strip_html,
+    way_back,
+)
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
 #: join onto a directory. The point is not the sanitising - that already
@@ -138,9 +147,6 @@ def _report_slow_route(method: str, route: str, seconds: float) -> None:
             threshold=f"{threshold:.2f}",
         )
 
-
-_HookParams = ParamSpec("_HookParams")
-_HookReturn = TypeVar("_HookReturn")
 
 # A person walking to another room mid-authorisation is normal; a state hanging
 # around for hours is not.
@@ -610,43 +616,55 @@ def _connection_rows(store: ConnectionStore, rename_available: bool = False) -> 
     rows = []
     for connection in connections:
         days = connection.consent_days_remaining()
-        if connection.consent_expired():
-            state = '<span class="bad">expired - reconnect now</span>'
-        elif connection.consent_needs_attention():
-            state = f'<span class="warn">expires in {days} days</span>'
+        expiry = connection.consent_expires_on()
+        on = f" on {expiry.isoformat()}" if expiry else ""
+        if days is None:
+            state = '<span class="muted">no consent expiry recorded</span>'
+        elif connection.consent_expired():
+            state = f'<span class="bad">expired{on} - reconnect now</span>'
+        elif connection.consent_needs_attention() or consent_rung(days) is not None:
+            state = f'<span class="warn">expires in {days} days{on}</span>'
         else:
-            state = f'<span class="ok">{days} days left</span>'
+            state = f'<span class="ok">{days} days left - expires{on}</span>'
         display = html.escape(connection.connection_id)
         # Escaping protects the page but not the query string. An unencoded
         # ampersand or hash truncates the name in the link, so the reconnect
         # would target a DIFFERENT connection - and using a name that does not
         # already exist silently creates a second connection to one bank.
         target = quote(connection.connection_id, safe="")
+        # Reconnect is the page's heaviest control only when the alert ladder
+        # has begun for this consent; before that it is still thumb-sized, but
+        # a column of identical blue buttons would bury the one that matters.
+        weight = "button" if consent_rung(days) is not None else "button secondary"
         rename = (
+            '<details><summary>Rename this connection</summary>'
             '<form method="post" action="/rename-connection" '
             'style="margin:.4rem 0 0">'
             f'<input type="hidden" name="old_name" value="{display}">'
             '<label style="display:block;font-size:.85rem" class="muted">'
-            "Rename this connection (the name is obdi's label, not the "
-            "bank's - it moves everywhere at once)"
+            "The name is obdi's label, not the bank's - it moves everywhere at once"
             f'<input name="new_name" value="{display}" '
             'style="width:100%;font-size:1rem;min-height:44px;box-sizing:border-box">'
             "</label>"
             '<button class="button" type="submit" style="border:0;width:100%;'
             'min-height:44px;font-size:inherit;cursor:pointer;'
-            'background:#8882;color:inherit">Rename</button></form>'
+            'background:#8882;color:inherit">Rename</button></form></details>'
             if rename_available
             else ""
         )
         rows.append(
             f'<div class="row"><strong>{display}</strong><br>{state}'
-            f'<br><a class="button" href="/connect?name={target}">Reconnect {display}</a>'
+            f'<br><a class="{weight}" href="/connect?name={target}">Reconnect {display}</a>'
             f"{rename}</div>"
         )
     return "".join(rows)
 
 
-HOME_LINK = '<p><a class="button" href="/">Back to overview</a></p>'
+#: The way back from a result page to the page its action came from, then the Overview.
+BACK_TO_CONNECTIONS = way_back("/connections")
+BACK_TO_ACTUAL = way_back("/actual")
+BACK_TO_ADMIN = way_back("/admin")
+BACK_TO_IMPORT = way_back("/import")
 
 #: What the provider's own OAuth codes mean, in words. Deliberately
 #: describes the CLASS of cause rather than asserting which one occurred -
@@ -716,7 +734,7 @@ def _auth_failure_body(name: str, code: str, described: str) -> str:
         'the <a href="/attempts">fetch attempts</a> ledger, so this answer '
         "survives the page.</p>"
     )
-    return "".join(lines) + HOME_LINK
+    return "".join(lines) + BACK_TO_CONNECTIONS
 
 
 def _short_ref(ref: str) -> str:
@@ -1237,14 +1255,15 @@ _REMEDIES = {
 }
 
 
-def error_page(title: str, message_html: str) -> bytes:
+def error_page(title: str, message_html: str, back: str = HOME_LINK) -> bytes:
     """An error page that always offers the way back.
 
     Read on a phone mid-flow, a dead-end error page forces editing the address
     bar to recover - the exact friction this interface exists to remove, at the
-    moment the reader is most likely to retry.
+    moment the reader is most likely to retry. `back` is the way back to the
+    page the action came from (see `way_back`), which also carries the Overview.
     """
-    return render_page(title, f"{message_html}{HOME_LINK}")
+    return render_page(title, f"{message_html}{back}")
 
 
 def _credential_banner(bank_authorisation: bool = True) -> str:
@@ -1513,6 +1532,8 @@ def _holdings_rows(
                 f' <span class="pill pill-quiet">quiet since '
                 f"{row.latest.isoformat()}</span>"
             )
+        # The control folds its own occasional forms and leaves a suggestion
+        # from the listings in the open; see `archive_controls`.
         archive_form = (
             archive_controls(row.account_id, note) if archive_notes is not None else ""
         )
@@ -1556,9 +1577,9 @@ def _holdings_rows(
             )
         items.append(
             f'<div class="row"{row_style}><strong>'
-            f'<a href="/account?ref={quote(row.account_id)}">'
+            f'<a class="tap" href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong> "
-            f'<a href="/ledger?ref={quote(row.account_id, safe="")}">'
+            f'<a class="tap" href="/ledger?ref={quote(row.account_id, safe="")}">'
             "Ledger (transactions)</a>"
             " via "
             + html.escape(
@@ -2245,7 +2266,7 @@ def _probe_result_html(report: object) -> str:
         '<p class="muted">Every response above was landed in layer 0 with its '
         "asked-for cutoff recorded, so this experiment is replayable "
         "evidence, not a screenshot.</p>"
-        + HOME_LINK
+        + BACK_TO_ADMIN
     )
 
 
@@ -2759,10 +2780,12 @@ def _audit_result_row(result: dict[str, object]) -> str:
             f'{_count_of(totals.get("unlinked"))} unlinked, '
             f'{_count_of(totals.get("leg_missing"))} with a leg missing</span>'
         )
+    # The verdict is the row; the per-account lines are the evidence for it.
     return (
-        f'<div class="row"><strong>{stamp}Z</strong> {badge}<br>'
+        f'<div class="row"><strong>{stamp}Z</strong> {badge}'
+        f"<details><summary>Per-account detail ({len(accounts)} accounts)</summary>"
         + "<br>".join(lines)
-        + "</div>"
+        + "</details></div>"
     )
 
 
@@ -2886,9 +2909,10 @@ def _actual_rows(
     actual_heartbeat: Callable[[], str] | None = None,
     prune_available: bool = False,
 ) -> str:
-    """The budget sync, visible and pressable: the per-account plan first
-    (what a push would do and why), then the button, then results newest
-    first."""
+    """The budget sync, visible and pressable: the two-line state first (the
+    last push, the newest audit), then what is in flight, then the buttons
+    (the push the heaviest), then the latest results, then the roster and the
+    destructive prune folded away as reference and rarely-used controls."""
     if actual_status is None and not push_available:
         return ""
     roster_html = ""
@@ -2898,7 +2922,7 @@ def _actual_rows(
         except Exception:
             roster = []
         if roster:
-            roster_html = "".join(_roster_row(entry) for entry in roster)
+            roster_html = _roster_block(roster)
     queued_html = ""
     if actual_queue is not None:
         try:
@@ -2936,12 +2960,19 @@ def _actual_rows(
         queued_html += _applier_liveness(
             heartbeat, len(queued), datetime.now(UTC)
         )
-    results = []
+    results: list[dict[str, object]] = []
+    summary_html = ""
     if actual_status is not None:
         try:
             results = actual_status()
+            summary_html = _actual_summary(results)
         except Exception:
             results = []
+            summary_html = (
+                '<p><span class="pill pill-bad">unreadable</span> The latest '
+                "results could not be read, so the last push and the newest "
+                "audit cannot be summarised.</p>"
+            )
     rows = [_result_row(result) for result in results]
     button = (
         '<form method="post" action="/push-actual">'
@@ -2961,6 +2992,7 @@ def _actual_rows(
         else ""
     )
     prune_button = (
+        "<details><summary>Remove orphaned imports from Actual</summary>"
         '<form method="post" action="/prune-actual">'
         '<label style="display:block;margin:.35rem 0">'
         '<input type="checkbox" name="confirm" value="yes" required> '
@@ -2969,12 +3001,12 @@ def _actual_rows(
         '<p><button class="button" type="submit" '
         'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
         'background:#dc262622;color:#b91c1c">'
-        "Remove orphaned imports</button></p></form>"
+        "Remove orphaned imports</button></p></form></details>"
         if prune_available
         else ""
     )
-    return (
-        "<h2>Actual sync</h2>"
+    explanation = (
+        "<details><summary>How the sync works</summary>"
         "<p>Pushes run through the applier container: bound accounts import, "
         "named accounts are created in Actual automatically (empty ones "
         "included) and their transactions ride the next push. The applier "
@@ -2982,15 +3014,119 @@ def _actual_rows(
         "queues a push after each pull cycle, every six hours.</p>"
         "<p>The audit reads each bound account back from Actual and "
         "reports differences without changing anything - rows without an "
-        "imported id are yours and are only counted.</p>"
-        + roster_html
+        "imported id are yours and are only counted.</p></details>"
+    )
+    return (
+        summary_html
+        + queued_html
         + button
         + audit_button
+        + ("<h3>Latest results</h3>" + "".join(rows) if rows else "")
+        + (
+            '<p><a class="tap" href="/actual-history">Full sync history</a></p>'
+            if rows
+            else ""
+        )
+        + roster_html
         + prune_button
-        + queued_html
-        + "".join(rows)
-        + ('<p><a href="/actual-history">Full sync history</a></p>' if rows else "")
+        + explanation
     )
+
+
+def _roster_block(roster: list[dict[str, object]]) -> str:
+    """The per-account plan, folded, with its tally outside the fold.
+
+    Left open when an account has no name, because that row carries the form
+    that unblocks it and a folded form is one nobody finds.
+    """
+    needs_name = [e for e in roster if e.get("state") not in {"syncing", "provision"}]
+    syncing = sum(1 for e in roster if e.get("state") == "syncing")
+    provision = sum(1 for e in roster if e.get("state") == "provision")
+    tally = f"{syncing} syncing, {provision} created on the next push"
+    if needs_name:
+        tally += f", {len(needs_name)} not synced - need a name"
+    return (
+        f"<details{' open' if needs_name else ''}>"
+        f"<summary>Accounts and what a push does to them ({tally})</summary>"
+        + "".join(_roster_row(entry) for entry in roster)
+        + "</details>"
+    )
+
+
+def _newest_of_kind(
+    results: list[dict[str, object]], kind: str
+) -> dict[str, object] | None:
+    """The newest result of one kind; an unnamed kind is a push, as in `_result_row`."""
+    matching = [r for r in results if (str(r.get("kind", "")) or "push") == kind]
+    return max(matching, key=lambda r: str(r.get("finished_at", "")), default=None)
+
+
+def _stamp_z(result: dict[str, object]) -> str:
+    return html.escape(str(result.get("finished_at", ""))[:16].replace("T", " ")) + "Z"
+
+
+def _actual_summary(results: list[dict[str, object]]) -> str:
+    """Two lines a person can read at a glance: the last push, the newest audit.
+
+    Counts and words only. A GET never shows an amount, and the audit's
+    per-account detail lives behind a fold on its own row.
+    """
+    push = _newest_of_kind(results, "push")
+    if push is None:
+        first = '<p><span class="pill pill-quiet">no push yet</span> No push has been recorded.</p>'
+    elif push.get("ok"):
+        first = (
+            f'<p><span class="pill pill-ok">push applied</span> The last push '
+            f"was applied {_stamp_z(push)}.</p>"
+        )
+    else:
+        applied = next(
+            (
+                r
+                for r in sorted(
+                    results, key=lambda r: str(r.get("finished_at", "")), reverse=True
+                )
+                if (str(r.get("kind", "")) or "push") == "push" and r.get("ok")
+            ),
+            None,
+        )
+        earlier = (
+            f" The last push that applied was {_stamp_z(applied)}."
+            if applied is not None
+            else " No push has ever applied."
+        )
+        first = (
+            f'<p><span class="pill pill-bad">push failed</span> The newest push '
+            f"failed {_stamp_z(push)}.{earlier}</p>"
+        )
+    audit = _newest_of_kind(results, "audit")
+    if audit is None:
+        second = '<p><span class="pill pill-quiet">no audit yet</span> No audit has been run.</p>'
+    elif not audit.get("ok"):
+        second = (
+            f'<p><span class="pill pill-bad">audit failed</span> The newest audit '
+            f"failed {_stamp_z(audit)}.</p>"
+        )
+    else:
+        raw = audit.get("accounts")
+        accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+        differing = sum(
+            1
+            for a in accounts
+            if _audit_differences(a, _account_pairs(audit, a.get("account_id")))
+        )
+        if differing:
+            second = (
+                f'<p><span class="pill pill-bad">audit: differences</span> The newest '
+                f"audit ({_stamp_z(audit)}) found differences in {differing} of "
+                f"{len(accounts)} accounts.</p>"
+            )
+        else:
+            second = (
+                f'<p><span class="pill pill-ok">audit clean</span> The newest audit '
+                f"({_stamp_z(audit)}) found no differences in {len(accounts)} accounts.</p>"
+            )
+    return f'<div class="leadlines">{first}{second}</div>'
 
 
 def _knowledge_rows(
@@ -3114,13 +3250,21 @@ def _extend_rows(
             f'padding:.5rem .8rem;border:0;cursor:pointer" type="submit">'
             f"Extend as far as possible</button></form>"
         )
-        controls = f"{buttons}{max_button}"
+        # The coverage line stays outside the fold because it is the state;
+        # the seven buttons are the rarely-used act. A result page after a
+        # press keeps them open, since probing is press, read, press again.
+        opened = " open" if only_ref is not None else ""
+        controls = (
+            f"<details{opened}><summary>Extend this account's history</summary>"
+            f"{buttons}{max_button}</details>"
+        )
         if account.boundary:
             controls = (
                 f'<p class="ok">Boundary reached: the provider refuses anything '
                 f"earlier than {account.boundary.isoformat()} - probing is "
                 f"de-emphasised, not forbidden.</p>"
-                f"<details><summary>Probe anyway</summary>{controls}</details>"
+                f"<details{opened}><summary>Probe anyway</summary>"
+                f"{buttons}{max_button}</details>"
             )
         note = (
             f'<br><span style="opacity:.75">{html.escape(account.auth_note)}</span>'
@@ -3242,105 +3386,36 @@ def account_picker(
 
 def render_index(
     store: ConnectionStore,
-    holdings: Callable[[], list[SourceCoverage]] | None = None,
-    provider_knowledge: Callable[[], list[dict[str, object]]] | None = None,
-    extendables: Callable[[], list[ExtendableAccount]] | None = None,
-    starling_status: Callable[[], dict[str, object] | None] | None = None,
-    display_labels: Callable[[], dict[str, str]] | None = None,
-    account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
-    account_feeders: Callable[[], dict[str, list[str]]] | None = None,
-    push_actual: Callable[[], str] | None = None,
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
-    actual_roster: Callable[[], list[dict[str, object]]] | None = None,
-    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
-    audit_actual: Callable[[], str] | None = None,
-    prune_actual: Callable[[], str] | None = None,
-    rename_connection: Callable[[str, str], str] | None = None,
-    actual_heartbeat: Callable[[], str] | None = None,
-    rebuild_available: bool = False,
-    forget_available: bool = False,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     rebuild_busy_note: Callable[[], str | None] | None = None,
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
-    source_connections: dict[tuple[str, str], list[str]] | None = None,
-    starling_probe_available: bool = False,
-    probe_suggestions: Callable[[], list[object]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
-    feed_warnings: Callable[[], list[str]] | None = None,
-    declared_accounts: Callable[[], list[AccountRecord]] | None = None,
-    archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None,
     #: Defaults True so every existing caller is unchanged; only a deployment with
     #: no provider configured at all passes False, and then the page says so.
     bank_authorisation: bool = True,
     overview: Callable[[bool], Overview] | None = None,
     fresh_overview: bool = False,
 ) -> bytes:
-    # The import form picks its destination FIRST (the preview verifies
-    # the file against what that account already holds), so the picker's
-    # options are needed here rather than on the confirm page.
-    upload_labels: dict[str, str] = {}
-    if display_labels is not None:
-        with contextlib.suppress(Exception):
-            upload_labels = display_labels()
-    if declared_accounts is not None:
-        with contextlib.suppress(Exception):
-            upload_labels = picker_labels(upload_labels, declared_accounts())
-    upload_picker = account_picker(upload_labels)
-    # Everything below the Overview is the page as it was, wrapped in anchored
-    # sections so the navigation can reach it. Each will move onto its own page.
+    """The home page: the Overview, then the System strip, and nothing else.
+
+    No forms live here. Everything a person does is on a page of its own,
+    reached from the navigation strip; the banners stay because a secret that
+    cannot work, a rebuild mid-replay, and a backfill racing its window are
+    each a reason to look before doing anything anywhere.
+    """
     body = f"""
 {_credential_banner(bank_authorisation)}
 {_rebuild_running_banner(rebuild_status, rebuild_busy_note)}
-{_backfill_running_banner(backfill_status)}
-{overview_html(overview, fresh=fresh_overview)}
-<div class="overview"><h2 id="sections">Everything else, by section</h2>
-<p class="muted">Connections and consent, what is held per source, Actual sync, extend
-history, reports and evidence, import, and admin. Each will get a page of its own.</p></div>
-<section id="connections">
-{_connection_rows(store, rename_available=rename_connection is not None)}
-{_starling_row(starling_status)}
-</section>
-<section id="held">
-{_holdings_rows(holdings, display_labels, account_timelines, account_feeders,
-                source_connections, feed_warnings, archive_notes)}
-{_knowledge_rows(provider_knowledge)}
-{_scheduler_row(scheduler_heartbeat)}
-</section>
-<section id="actual">
-{_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
-              audit_available=audit_actual is not None,
-              actual_heartbeat=actual_heartbeat,
-              prune_available=prune_actual is not None)}
-</section>
-<section id="extend">
-{_extend_rows(extendables)}
-</section>
-<section id="reports-and-evidence">
-<p><a class="button" href="/reports">Reports</a></p>
-<p><a class="button" href="/evidence">Evidence</a></p>
-<p><a class="button" href="/accounts">Declared accounts</a></p>
-<p><a class="button" href="/review">Categorise (uncategorised worklist)</a></p>
-</section>
-<section id="import">
-<h2>Import a file</h2>
-<p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
-then verify the file against what that account already holds, before
-anything is stored.</p>
-<form action="/upload" method="post" enctype="multipart/form-data">
-  {upload_picker}
-  <p><input type="file" name="statement" required></p>
-  <p><button class="button" type="submit"
-     style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
-</form>
-</section>
-<section id="add-bank">
-{_add_a_bank_section(bank_authorisation)}
-</section>
-<section id="admin">
-{_probe_section_html(starling_probe_available, probe_suggestions)}
-{_danger_zone(rebuild_available, forget_available, rebuild_status, recent_rebuilds)}
-</section>
+{_backfill_running_banner(backfill_status)}{overview_html(overview, fresh=fresh_overview)}
+{system_strip_html(
+    store,
+    scheduler_heartbeat=scheduler_heartbeat,
+    actual_status=actual_status,
+    rebuild_status=rebuild_status,
+    recent_rebuilds=recent_rebuilds,
+)}
 """
     return render_page("Overview", body)
 
@@ -3351,7 +3426,9 @@ anything is stored.</p>
 DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 
 
-class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHandler):
+class ConnectionHandler(
+    AccountPages, LedgerPages, IndexPages, SectionPages, BaseHTTPRequestHandler
+):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
     #: Statements awaiting an explicit disclosure confirmation. Same
@@ -3472,6 +3549,21 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         if route == "/ledger":
             self._ledger_get(params)
             return
+        if route == "/connections":
+            self._connections_page()
+            return
+        if route == "/actual":
+            self._actual_page()
+            return
+        if route == "/coverage":
+            self._coverage_page()
+            return
+        if route == "/import":
+            self._import_page()
+            return
+        if route == "/admin":
+            self._admin_page()
+            return
         if route == "/reports":
             self._reports_index()
             return
@@ -3548,117 +3640,26 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             return
         if route == "/":
             # Every hook individually timed, and a slow render publishes
-            # its own cost breakdown to the log. Three refuted theories
-            # (locks, raw-JSON parsing, provider calls) proved nobody can
-            # guess where 40 seconds lives - the page must say.
-            hook_seconds: dict[str, float] = {}
-
-            def timed(
-                name: str, hook: Callable[_HookParams, _HookReturn] | None
-            ) -> Callable[_HookParams, _HookReturn] | None:
-                if hook is None:
-                    return None
-                bound = hook
-
-                def call(
-                    *args: _HookParams.args, **kwargs: _HookParams.kwargs
-                ) -> _HookReturn:
-                    began = time.perf_counter()
-                    try:
-                        return bound(*args, **kwargs)
-                    finally:
-                        hook_seconds[name] = (
-                            hook_seconds.get(name, 0.0) + time.perf_counter() - began
-                        )
-
-                return call
-
-            render_began = time.perf_counter()
+            # its own cost breakdown to the log (see HookTimer).
+            timer = HookTimer()
+            config = self.bound_config
             page = render_index(
-                self.bound_config.connection_store,
-                bank_authorisation=self.bound_config.bank_authorisation,
-                holdings=timed("holdings", self.bound_config.holdings),
-                provider_knowledge=timed(
-                    "provider_knowledge", self.bound_config.provider_knowledge
+                config.connection_store,
+                bank_authorisation=config.bank_authorisation,
+                actual_status=timer.wrap("actual_status", config.actual_status),
+                rebuild_status=timer.wrap("rebuild_status", config.rebuild_status),
+                rebuild_busy_note=timer.wrap(
+                    "rebuild_busy_note", config.rebuild_busy_note
                 ),
-                extendables=timed("extendables", self.bound_config.extendables),
-                starling_status=timed(
-                    "starling_status", self.bound_config.starling_status
+                recent_rebuilds=timer.wrap("recent_rebuilds", config.recent_rebuilds),
+                scheduler_heartbeat=timer.wrap(
+                    "scheduler_heartbeat", config.scheduler_heartbeat
                 ),
-                display_labels=timed(
-                    "display_labels", self.bound_config.display_labels
-                ),
-                account_timelines=timed(
-                    "account_timelines", self.bound_config.account_timelines
-                ),
-                account_feeders=timed(
-                    "account_feeders", self.bound_config.account_feeders
-                ),
-                push_actual=self.bound_config.push_actual,
-                actual_status=timed("actual_status", self.bound_config.actual_status),
-                actual_roster=timed("actual_roster", self.bound_config.actual_roster),
-                actual_queue=timed("actual_queue", self.bound_config.actual_queue),
-                audit_actual=self.bound_config.audit_actual,
-                prune_actual=self.bound_config.prune_actual,
-                rename_connection=self.bound_config.rename_connection,
-                actual_heartbeat=timed(
-                    "actual_heartbeat", self.bound_config.actual_heartbeat
-                ),
-                rebuild_available=self.bound_config.rebuild_derived is not None,
-                forget_available=self.bound_config.forget_actual is not None,
-                rebuild_status=timed(
-                    "rebuild_status", self.bound_config.rebuild_status
-                ),
-                rebuild_busy_note=timed(
-                    "rebuild_busy_note", self.bound_config.rebuild_busy_note
-                ),
-                recent_rebuilds=timed(
-                    "recent_rebuilds", self.bound_config.recent_rebuilds
-                ),
-                source_connections=(
-                    connections_hook()
-                    if (
-                        connections_hook := timed(
-                            "source_connections", self.bound_config.source_connections
-                        )
-                    )
-                    is not None
-                    else None
-                ),
-                starling_probe_available=self.bound_config.starling_probe is not None,
-                probe_suggestions=timed(
-                    "probe_suggestions", self.bound_config.probe_suggestions
-                ),
-                feed_warnings=timed(
-                    "feed_warnings", self.bound_config.feed_warnings
-                ),
-                scheduler_heartbeat=timed(
-                    "scheduler_heartbeat", self.bound_config.scheduler_heartbeat
-                ),
-                backfill_status=timed(
-                    "backfill_status", self.bound_config.backfill_status
-                ),
-                declared_accounts=timed(
-                    "declared_accounts", self.bound_config.declared_accounts
-                ),
-                archive_notes=timed("archive_notes", self.bound_config.archive_notes),
-                overview=timed("overview", self.bound_config.overview),
+                backfill_status=timer.wrap("backfill_status", config.backfill_status),
+                overview=timer.wrap("overview", config.overview),
                 fresh_overview=params.get("fresh", [""])[0] == "1",
             )
-            render_seconds = time.perf_counter() - render_began
-            threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
-            if render_seconds >= threshold:
-                slowest = sorted(
-                    hook_seconds.items(), key=lambda kv: kv[1], reverse=True
-                )[:8]
-                accounted = sum(hook_seconds.values())
-                print(
-                    f"web timing: / rendered in {render_seconds:.2f}s - "
-                    + ", ".join(f"{name} {secs:.2f}s" for name, secs in slowest)
-                    + f" (hooks total {accounted:.2f}s; the remainder is "
-                    "templating and store-free work)",
-                    flush=True,
-                )
+            timer.report("/")
             self._respond(200, page)
         elif route == "/connect":
             self._connect(params)
@@ -5395,7 +5396,12 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
 
         hook = self.bound_config.extend_max if walk else self.bound_config.extend_window
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Extension is not wired.</p>"))
+            self._respond(
+                404,
+                error_page(
+                    "Not available", "<p>Extension is not wired.</p>", BACK_TO_CONNECTIONS
+                ),
+            )
             return
 
         connection = (form.get("connection", [""])[0] or "").strip()
@@ -5407,7 +5413,11 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         if not connection or not account or (not walk and days <= 0):
             self._respond(
                 400,
-                error_page("Bad request", "<p>Connection, account and days required.</p>"),
+                error_page(
+                    "Bad request",
+                    "<p>Connection, account and days required.</p>",
+                    BACK_TO_CONNECTIONS,
+                ),
             )
             return
 
@@ -5441,6 +5451,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "Could not extend",
                     refusal_html(exc)
                     + _extend_rows(self.bound_config.extendables, only_ref=account),
+                    BACK_TO_CONNECTIONS,
                 ),
             )
             return
@@ -5452,7 +5463,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "Window extended",
                 f"<p>{rendered}</p>"
                 + _extend_rows(self.bound_config.extendables, only_ref=account)
-                + HOME_LINK,
+                + BACK_TO_CONNECTIONS,
             ),
         )
 
@@ -5463,13 +5474,20 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         # Refused before the body is read: an unwired door should not cost
         # a phone the upload of five megabytes it will not use.
         if self.bound_config.preview_upload is None:
-            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Uploads are not wired.</p>", BACK_TO_IMPORT),
+            )
             return
         length = int(self.headers.get("Content-Length") or 0)
         if length > 5 * 1024 * 1024:
             self._respond(
                 413,
-                error_page("Too large", "<p>Bank exports are small; this is not one.</p>"),
+                error_page(
+                    "Too large",
+                    "<p>Bank exports are small; this is not one.</p>",
+                    BACK_TO_IMPORT,
+                ),
             )
             return
         try:
@@ -5478,7 +5496,11 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             )
         except Exception as exc:
             self._respond(
-                400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
+                400, error_page(
+                    "Could not read the file",
+                    f"<p>{html.escape(str(exc))}</p>",
+                    BACK_TO_IMPORT,
+                )
             )
             return
         # Destination FIRST: the preview verifies the file against what
@@ -5494,6 +5516,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "<p>Pick the account this statement belongs to (or type a "
                     "canonical name) before uploading - the preview verifies "
                     "the file against what that account already holds.</p>",
+                    BACK_TO_IMPORT,
                 ),
             )
             return
@@ -5520,20 +5543,30 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         in a form and a form cannot carry a file back.
         """
         if self.bound_config.preview_upload is None:
-            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Uploads are not wired.</p>", BACK_TO_IMPORT),
+            )
             return
         token = (form.get("token", [""])[0] or "").strip()
         typed = (form.get("account_other", [""])[0] or "").strip()
         picked = (form.get("account", [""])[0] or "").strip()
         if not token or not (typed or picked):
             self._respond(
-                400, error_page("Bad request", "<p>A held file and an account are needed.</p>")
+                400,
+                error_page(
+                    "Bad request",
+                    "<p>A held file and an account are needed.</p>",
+                    BACK_TO_IMPORT,
+                ),
             )
             return
         try:
             payload, filename, _ = self.uploads.claim(token)
         except KeyError as exc:
-            self._respond(410, error_page("Upload expired", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(410, error_page(
+                    "Upload expired", f"<p>{html.escape(str(exc))}</p>", BACK_TO_IMPORT
+                ))
             return
         account = self.chosen_account(
             typed=typed,
@@ -5553,13 +5586,20 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         """Parse without landing, and offer the single confirm button."""
         hook = self.bound_config.preview_upload
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Uploads are not wired.</p>", BACK_TO_IMPORT),
+            )
             return
         try:
             preview = hook(payload, filename, account)
         except Exception as exc:
             self._respond(
-                400, error_page("Could not read the file", f"<p>{html.escape(str(exc))}</p>")
+                400, error_page(
+                    "Could not read the file",
+                    f"<p>{html.escape(str(exc))}</p>",
+                    BACK_TO_IMPORT,
+                )
             )
             return
         doubt_messages = []
@@ -5660,14 +5700,17 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             )
             + '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            f"Import into {html.escape(account)}</button></p></form>" + HOME_LINK
+            f"Import into {html.escape(account)}</button></p></form>" + BACK_TO_IMPORT
         )
         self._respond(200, render_page("Preview import", body))
 
     def _upload_confirm(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.confirm_upload
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Uploads are not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Uploads are not wired.</p>", BACK_TO_IMPORT),
+            )
             return
         token = (form.get("token", [""])[0] or "").strip()
         account = (
@@ -5675,12 +5718,19 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             or (form.get("account", [""])[0] or "").strip()
         )
         if not token or not account:
-            self._respond(400, error_page("Bad request", "<p>Token and account required.</p>"))
+            self._respond(
+                400,
+                error_page(
+                    "Bad request", "<p>Token and account required.</p>", BACK_TO_IMPORT
+                ),
+            )
             return
         try:
             payload, filename, doubted = self.uploads.claim(token)
         except KeyError as exc:
-            self._respond(410, error_page("Upload expired", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(410, error_page(
+                    "Upload expired", f"<p>{html.escape(str(exc))}</p>", BACK_TO_IMPORT
+                ))
             return
         if doubted and form.get("override") != ["yes"]:
             # The claim consumed the stash, so hand back a fresh token with
@@ -5703,7 +5753,8 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "Import here anyway - I have checked the destination</label>"
                     '<p><button class="button" type="submit" '
                     'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-                    f"Import into {html.escape(account)}</button></p></form>" + HOME_LINK,
+                    f"Import into {html.escape(account)}</button></p></form>"
+                    + BACK_TO_IMPORT,
                 ),
             )
             return
@@ -5711,7 +5762,10 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             summary = hook(payload, filename, account)
         except Exception as exc:
             self._respond(
-                500, error_page("Import failed", f"<p>{html.escape(str(exc))}</p>")
+                500,
+                error_page(
+                    "Import failed", f"<p>{html.escape(str(exc))}</p>", BACK_TO_IMPORT
+                ),
             )
             return
         print(f"web import: {filename} -> {account}", file=sys.stderr)
@@ -5741,7 +5795,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         )
         self._respond(
             200,
-            render_page("Imported", summary_html + another + HOME_LINK),
+            render_page("Imported", summary_html + another + BACK_TO_IMPORT),
         )
 
     def _starling_probe(self, params: dict[str, list[str]]) -> None:
@@ -5753,6 +5807,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 error_page(
                     "Probe unavailable",
                     "<p>The web process has no Starling token configured.</p>",
+                    BACK_TO_ADMIN,
                 ),
             )
             return
@@ -5760,21 +5815,26 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         if not cutoff:
             self._respond(
                 400,
-                error_page("Missing cutoff", "<p>Choose or enter a cutoff.</p>"),
+                error_page(
+                    "Missing cutoff", "<p>Choose or enter a cutoff.</p>", BACK_TO_ADMIN
+                ),
             )
             return
         try:
             report = probe(cutoff)
         except ValueError as exc:
             self._respond(
-                400, error_page("Bad cutoff", f"<p>{html.escape(str(exc))}</p>")
+                400,
+                error_page(
+                    "Bad cutoff", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ADMIN
+                ),
             )
             return
         except Exception as exc:
             self._respond(
                 502,
                 error_page(
-                    "Probe failed", f"<p>{html.escape(str(exc))}</p>"
+                    "Probe failed", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ADMIN
                 ),
             )
             return
@@ -5784,12 +5844,20 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
     def _push_actual(self) -> None:
         hook = self.bound_config.push_actual
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Push is not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Push is not wired.</p>", BACK_TO_ACTUAL),
+            )
             return
         try:
             summary = hook()
         except Exception as exc:
-            self._respond(500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
+            )
             return
         print(f"actual push queued via page: {summary}", file=sys.stderr)
         self._respond(
@@ -5798,20 +5866,28 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "Push queued",
                 f"<p>{html.escape(summary)}</p>"
                 "<p>The applier container picks requests up within its poll "
-                "interval; results appear in the Actual sync section on the "
-                "home page.</p>" + HOME_LINK,
+                "interval; results appear on the Actual sync page.</p>"
+                + BACK_TO_ACTUAL,
             ),
         )
 
     def _audit_actual(self) -> None:
         hook = self.bound_config.audit_actual
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Audit is not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Audit is not wired.</p>", BACK_TO_ACTUAL),
+            )
             return
         try:
             summary = hook()
         except Exception as exc:
-            self._respond(500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
+            )
             return
         print(f"actual audit queued via page: {summary}", file=sys.stderr)
         self._respond(
@@ -5820,29 +5896,38 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "Audit queued",
                 f"<p>{html.escape(summary)}</p>"
                 "<p>Read-only: the applier reads each bound account back "
-                "from Actual and reports differences in the Actual sync "
-                "section - nothing is changed on either side.</p>" + HOME_LINK,
+                "from Actual and reports differences on the Actual sync "
+                "page - nothing is changed on either side.</p>" + BACK_TO_ACTUAL,
             ),
         )
 
     def _rename_connection(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.rename_connection
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            self._respond(
+                404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_CONNECTIONS)
+            )
             return
         old_name = (form.get("old_name", [""])[0] or "").strip()
         new_name = (form.get("new_name", [""])[0] or "").strip()
         if not old_name or not new_name:
             self._respond(
                 400,
-                error_page("Name required", "<p>Both names are needed.</p>"),
+                error_page(
+                    "Name required", "<p>Both names are needed.</p>", BACK_TO_CONNECTIONS
+                ),
             )
             return
         try:
             summary = hook(old_name, new_name)
         except Exception as exc:
             self._respond(
-                400, error_page("Could not rename", f"<p>{html.escape(str(exc))}</p>")
+                400,
+                error_page(
+                    "Could not rename",
+                    f"<p>{html.escape(str(exc))}</p>",
+                    BACK_TO_CONNECTIONS,
+                ),
             )
             return
         self._respond(
@@ -5853,14 +5938,16 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "<p>The bank was not contacted: a name is obdi's label for a "
                 "connection, so renaming moves the label and leaves every "
                 "payload, digest and account reference exactly as landed.</p>"
-                + HOME_LINK,
+                + BACK_TO_CONNECTIONS,
             ),
         )
 
     def _prune_actual(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.prune_actual
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            self._respond(
+                404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_ACTUAL)
+            )
             return
         if form.get("confirm") != ["yes"]:
             self._respond(
@@ -5869,6 +5956,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "Not confirmed",
                     "<p>Pruning deletes rows from Actual (only ones carrying "
                     "obdi's imported ids). Tick the confirmation box.</p>",
+                    BACK_TO_ACTUAL,
                 ),
             )
             return
@@ -5876,7 +5964,10 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             summary = hook()
         except Exception as exc:
             self._respond(
-                500, error_page("Could not queue", f"<p>{html.escape(str(exc))}</p>")
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
             )
             return
         self._respond(
@@ -5888,15 +5979,18 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "ever considered - rows without an imported id, and rows "
                 "imported by Actual itself (file imports, bank sync), are "
                 "never touched. An account with an empty expected set is "
-                "skipped rather than pruned blind. Results appear in the "
-                "Actual sync section.</p>" + HOME_LINK,
+                "skipped rather than pruned blind. Results appear on the "
+                "Actual sync page.</p>" + BACK_TO_ACTUAL,
             ),
         )
 
     def _rebuild_derived(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.rebuild_derived
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Rebuild is not wired.</p>"))
+            self._respond(
+                404,
+                error_page("Not available", "<p>Rebuild is not wired.</p>", BACK_TO_ADMIN),
+            )
             return
         if form.get("confirm") != ["yes"]:
             self._respond(
@@ -5905,6 +5999,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "Not confirmed",
                     "<p>Rebuilding wipes the derived transaction layer. Tick "
                     "the confirmation box to proceed.</p>",
+                    BACK_TO_ADMIN,
                 ),
             )
             return
@@ -5917,7 +6012,10 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "the store is busy (a scheduled pull is writing) - "
                     "try again in a moment"
                 )
-            self._respond(500, error_page("Rebuild failed", f"<p>{html.escape(message)}</p>"))
+            self._respond(
+                500,
+                error_page("Rebuild failed", f"<p>{html.escape(message)}</p>", BACK_TO_ADMIN),
+            )
             return
         print(f"rebuild via page: {summary}", file=sys.stderr)
         self._respond(
@@ -5926,14 +6024,16 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 "Rebuild",
                 f"<p>{html.escape(summary)}</p>"
                 "<p>Raw artefacts are untouched; every derived row is "
-                "replayed through the current account map and rules.</p>" + HOME_LINK,
+                "replayed through the current account map and rules.</p>" + BACK_TO_ADMIN,
             ),
         )
 
     def _forget_actual(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.forget_actual
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            self._respond(
+                404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_ADMIN)
+            )
             return
         if form.get("confirm") != ["yes"]:
             self._respond(
@@ -5942,13 +6042,19 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                     "Not confirmed",
                     "<p>Tick the confirmation box to drop the Actual account "
                     "links.</p>",
+                    BACK_TO_ADMIN,
                 ),
             )
             return
         try:
             count = hook()
         except Exception as exc:
-            self._respond(500, error_page("Could not forget", f"<p>{html.escape(str(exc))}</p>"))
+            self._respond(
+                500,
+                error_page(
+                    "Could not forget", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ADMIN
+                ),
+            )
             return
         self._respond(
             200,
@@ -5957,7 +6063,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 f"<p>Dropped {count} link(s). The account names are kept; "
                 "the next push will re-provision by name - existing "
                 "same-named accounts in Actual are reused, and imports "
-                "dedupe by imported id.</p>" + HOME_LINK,
+                "dedupe by imported id.</p>" + BACK_TO_ADMIN,
             ),
         )
 
@@ -5968,15 +6074,22 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         repeating the extend section here made a naming action look like a
         fetching context, and the home page is one tap away.
         """
+        # Bind forms sit on three pages (coverage, Actual, extend history), so
+        # the way back is the page the press came from, and coverage when the
+        # browser did not say.
+        back = way_back(referring_page(self._referer(), "/coverage"))
         hook = self.bound_config.bind_account
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Binding is not wired.</p>"))
+            self._respond(
+                404, error_page("Not available", "<p>Binding is not wired.</p>", back)
+            )
             return
         account = (form.get("account", [""])[0] or "").strip()
         canonical = (form.get("canonical", [""])[0] or "").strip()
         if not account or not canonical:
             self._respond(
-                400, error_page("Bad request", "<p>Account and name required.</p>")
+                400,
+                error_page("Bad request", "<p>Account and name required.</p>", back),
             )
             return
         try:
@@ -5984,7 +6097,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         except Exception as exc:
             self._respond(
                 400,
-                error_page("Could not bind", f"<p>{html.escape(str(exc))}</p>"),
+                error_page("Could not bind", f"<p>{html.escape(str(exc))}</p>", back),
             )
             return
         print(f"bound via page: {account} -> {canonical}", file=sys.stderr)
@@ -5992,9 +6105,13 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             200,
             render_page(
                 "Account bound",
-                f"<p>{html.escape(summary)}</p>" + HOME_LINK,
+                f"<p>{html.escape(summary)}</p>" + back,
             ),
         )
+
+    def _referer(self) -> str | None:
+        """The page the request was made from, as the browser reported it."""
+        return self.headers.get("Referer")
 
     def _requester_address(self) -> str | None:
         """The pressing device's address: forwarded first, never loopback."""
@@ -6025,6 +6142,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
                 error_page(
                     "Authorisation failed",
                     _auth_failure_body(name, error, described),
+                    back="",
                 ),
             )
             return
@@ -6118,7 +6236,7 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
             render_page(
                 f"Connected {name}",
                 f"<p>Consent lasts {days} days and cannot be extended by software.</p>"
-                f"{note}" + HOME_LINK,
+                f"{note}" + BACK_TO_CONNECTIONS,
             ),
         )
 

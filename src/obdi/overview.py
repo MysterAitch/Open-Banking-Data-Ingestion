@@ -32,12 +32,11 @@ from .alerts import Finding
 from .coverage import SILENT_FEED_DAYS
 from .store import Store
 
-#: Where a person goes to act on each part of the home page. Anchors are
-#: declared once, here, because the navigation strip and the items below must
-#: agree about them.
-CONNECTIONS_HREF = "/#connections"
-ACTUAL_HREF = "/#actual"
-ADMIN_HREF = "/#admin"
+#: Where a person goes to act on each kind of attention item. Declared once,
+#: here, because the navigation strip and the items below must agree about them.
+CONNECTIONS_HREF = "/connections"
+ACTUAL_HREF = "/actual"
+ADMIN_HREF = "/admin"
 ACCOUNTS_HREF = "/#accounts"
 
 #: Severity bands. Lower is more urgent, and the order is the page's order.

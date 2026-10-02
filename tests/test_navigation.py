@@ -89,9 +89,22 @@ class TestEveryPageCarriesTheStrip:
         page = httpx.get(f"{base}/", timeout=20).text
 
         anchors = [href.split("#")[1] for _, _, href in DESTINATIONS if "#" in href]
-        assert anchors == ["accounts", "connections", "actual", "admin"]
+        assert anchors == ["accounts"], "every other destination is a page of its own"
         for anchor in anchors:
             assert f'id="{anchor}"' in page, anchor
+
+    def test_Destinations_ConnectionsActualAndAdmin_AreTheirOwnPages(self):
+        hrefs = {key: href for key, _, href in DESTINATIONS}
+
+        assert hrefs["connections"] == "/connections"
+        assert hrefs["actual"] == "/actual"
+        assert hrefs["admin"] == "/admin"
+
+    def test_NoPage_LinksToAnAnchorThatNoLongerExists(self, base):
+        for route in get_routes():
+            page = httpx.get(f"{base}{route}", timeout=20).text
+            for gone in ("/#connections", "/#actual", "/#admin"):
+                assert gone not in page, (route, gone)
 
     def test_RenderPageCalledDirectly_CarriesTheStripBeforeTheHeading(self):
         page = render_page("Anything", "<p>x</p>").decode()
@@ -116,6 +129,12 @@ class TestTheCurrentSectionIsMarked:
             ("/evidence", "Evidence"),
             ("/attempts", "Evidence"),
             ("/spaces", "Evidence"),
+            ("/connections", "Connections"),
+            ("/actual", "Actual"),
+            ("/admin", "Admin"),
+            ("/coverage", "Accounts"),
+            ("/import", "Accounts"),
+            ("/review", "Accounts"),
         ],
     )
     def test_Page_InASection_MarksOnlyThatDestinationCurrent(self, base, route, label):
@@ -124,12 +143,21 @@ class TestTheCurrentSectionIsMarked:
         assert re.findall(r'aria-current="page">([A-Za-z]+)<', strip) == [label]
 
     def test_PageInNoSection_MarksNothingCurrent(self, base):
-        assert "aria-current" not in strip_of(httpx.get(f"{base}/review", timeout=20).text)
+        # The OAuth callback answers a bare visit with a refusal page that
+        # belongs to no section.
+        assert "aria-current" not in strip_of(httpx.get(f"{base}/callback", timeout=20).text)
 
     def test_Mark_DoesNotLeakFromOneRequestToTheNext(self, base):
         httpx.get(f"{base}/reports", timeout=20)
 
-        assert "aria-current" not in strip_of(httpx.get(f"{base}/review", timeout=20).text)
+        assert "aria-current" not in strip_of(httpx.get(f"{base}/callback", timeout=20).text)
+
+    def test_EveryGetRoutePageThatIsReachedFromTheStrip_MarksItsOwnSection(self, base):
+        for key, label, href in DESTINATIONS:
+            if "#" in href:
+                continue
+            strip = strip_of(httpx.get(f"{base}{href}", timeout=20).text)
+            assert re.findall(r'aria-current="page">([A-Za-z]+)<', strip) == [label], key
 
     def test_EveryRouteNamedInTheSectionTable_IsARouteTheDispatcherKnows(self):
         assert set(SECTION_OF_ROUTE) - set(get_routes()) - {"/"} == set()

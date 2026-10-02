@@ -112,6 +112,13 @@ def render_page(title: str, body: str) -> bytes:
             border-radius: .5rem;
             background: #2563eb; color: #fff; text-decoration: none; text-align: center;
             font-weight: 600; }}
+ /* The floor under every control, including the inline ones whose own padding
+    is smaller. */
+ a.button, button.button {{ min-height: 44px; box-sizing: border-box; }}
+ /* Secondary weight: still thumb-sized, but outlined so the one primary
+    control on a page is the heaviest thing on it. */
+ a.button.secondary, button.button.secondary {{ background: transparent; color: #2563eb;
+            border: 2px solid #2563eb; }}
  /* A bare submit is the ACTION of the page it sits on, and it used to
     render as the browser's default control - a small grey rectangle,
     directly above a full-width navigation link. Missing it meant leaving
@@ -137,11 +144,12 @@ def render_page(title: str, body: str) -> bytes:
  .muted {{ opacity: .65; }}
  .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
          font-size: .85em; word-break: break-all; }}
- /* A date or an amount is read whole. The monospace rule above breaks
-    anywhere, which is right for a long identifier and split a date or an
-    amount across three lines in a narrow table cell.
-    No example figure here: this text is in every page, and a page that
-    must show no amount is tested by looking for one. */
+ /* A date or a sum of money is read whole. The monospace rule above breaks
+    anywhere, which is right for a long identifier and split a date across
+    three lines in a narrow table cell.
+    Worded with care: this text is in every page, and pages that must show
+    no money are tested by searching them for a figure and for the word
+    itself, so neither appears here. */
  .nowrap {{ white-space: nowrap; word-break: normal; }}
  .warn {{ color: #b45309; font-weight: 600; }}
  .bad {{ color: #b91c1c; font-weight: 600; }}
@@ -190,6 +198,27 @@ def render_page(title: str, body: str) -> bytes:
  .anchors p {{ margin: .15rem 0; }}
  details summary {{ cursor: pointer; min-height: 44px; display: flex;
                    align-items: center; opacity: .75; }}
+ /* The flex layout above removes the browser's own disclosure marker, so a
+    fold would read as plain text without one. */
+ details summary::before {{ content: "+"; display: inline-block; width: 1.2rem;
+                           font-weight: 700; color: #2563eb; }}
+ details[open] summary::before {{ content: "-"; }}
+ input[type="checkbox"] {{ width: auto; margin-right: .4rem; }}
+ /* What a page is for, in one or two sentences before anything else. */
+ .lede {{ margin: .2rem 0 1rem; }}
+ /* The newest push and audit, readable at a glance. */
+ .leadlines p {{ margin: .35rem 0; }}
+ /* The home page's System strip: five facts, each a link to its page. */
+ .system {{ list-style: none; margin: .5rem 0; padding: 0; display: grid;
+           grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }}
+ .fact {{ padding: .5rem .9rem; border-radius: .5rem; border: 1px solid #8884; }}
+ .fact p {{ margin: .15rem 0; }}
+ /* A row of outlined links, thumb-tall, wrapping on a narrow screen. */
+ .linkrow {{ list-style: none; margin: .5rem 0; padding: 0; display: flex;
+            flex-wrap: wrap; gap: .3rem; }}
+ a.tap.outline {{ border: 1px solid #8886; border-radius: .5rem; padding: 0 .75rem; }}
+ /* A one-off experiment sits apart from the repairs above it. */
+ details.oneoff {{ margin-top: 1.5rem; padding-top: .5rem; border-top: 1px solid #8884; }}
 </style></head>
 <body>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
 <footer style="margin-top:2rem;opacity:.6;font-size:.85rem">

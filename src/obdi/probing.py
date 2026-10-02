@@ -80,6 +80,22 @@ def walk_history(
     return transcript, "cap"
 
 
+def elapsed_words(minutes: float) -> str:
+    """A span of minutes as a person would say it: minutes, hours, or days.
+
+    A bare minute count past a few hours cannot be read ("85183 min ago"), and
+    an authorisation is routinely months old by the time anyone looks.
+    """
+    whole = max(0, round(minutes))
+    if whole < 90:
+        return f"{whole} min"
+    if whole < 48 * 60:
+        return f"{round(whole / 60)} hours"
+    days, remainder = divmod(whole, 24 * 60)
+    hours = remainder // 60
+    return f"{days} days" if hours == 0 else f"{days} days {hours} hours"
+
+
 def sca_note(
     *,
     authorised_at: datetime | None,
@@ -104,7 +120,7 @@ def sca_note(
     elapsed = (moment - authorised_at).total_seconds() / 60
     if window_minutes is None:
         return (
-            f"authorised {elapsed:.0f} min ago - this provider's deep-history "
+            f"authorised {elapsed_words(elapsed)} ago - this provider's deep-history "
             "window length is not yet known"
         )
     remaining = window_minutes - elapsed
@@ -114,7 +130,7 @@ def sca_note(
             f"of the provider's {window_minutes}"
         )
     return (
-        f"deep-history window likely closed ({elapsed:.0f} min since "
+        f"deep-history window likely closed ({elapsed_words(elapsed)} since "
         f"authorisation, provider allows {window_minutes}) - re-authorise "
         "to probe further"
     )

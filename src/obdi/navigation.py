@@ -2,9 +2,8 @@
 
 The destinations are a fixed, small set that says how the site is organised:
 what is up to date, what is held, how it arrives, where it goes, how it is
-checked, and the controls that can hurt. Four of them are anchors on the home
-page while their sections are still there; each will become a page of its own
-without the strip changing shape.
+checked, and the controls that can hurt. Every one is a page of its own except
+Accounts, which is the second section of the Overview.
 
 NAVIGATION LINKS ARE NOT BUTTONS. A button is the action a page exists for, and
 the page's own buttons are full width so that doing and leaving are told apart
@@ -23,11 +22,11 @@ from contextvars import ContextVar
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("overview", "Overview", "/"),
     ("accounts", "Accounts", "/#accounts"),
-    ("connections", "Connections", "/#connections"),
-    ("actual", "Actual", "/#actual"),
+    ("connections", "Connections", "/connections"),
+    ("actual", "Actual", "/actual"),
     ("reports", "Reports", "/reports"),
     ("evidence", "Evidence", "/evidence"),
-    ("admin", "Admin", "/#admin"),
+    ("admin", "Admin", "/admin"),
 )
 
 #: The section a route belongs to, where the route is a page of its own.
@@ -40,8 +39,14 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/ledger": "accounts",
     "/declare-account": "accounts",
     "/edit-account": "accounts",
+    "/coverage": "accounts",
+    "/import": "accounts",
+    "/review": "accounts",
     "/connect": "connections",
+    "/connections": "connections",
+    "/actual": "actual",
     "/actual-history": "actual",
+    "/admin": "admin",
     "/reports": "reports",
     "/agreements": "reports",
     "/identity-health": "reports",

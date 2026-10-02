@@ -486,7 +486,7 @@ class TestWiring:
 
     def test_HomePage_LinksEachHeldAccountToItsLedger_BesideTheShapeLink(self, tmp_path):
         from obdi.coverage import SourceCoverage
-        from obdi.web import render_index
+        from obdi.web_sections import render_coverage
 
         holdings = [
             SourceCoverage(
@@ -500,9 +500,7 @@ class TestWiring:
                 with_durable_id=3,
             )
         ]
-        page = render_index(
-            ConnectionStore(tmp_path / "c.json"), holdings=lambda: holdings
-        ).decode()
+        page = render_coverage(holdings=lambda: holdings).decode()
 
         assert 'href="/account?ref=halifax-current"' in page
         assert 'href="/ledger?ref=halifax-current"' in page

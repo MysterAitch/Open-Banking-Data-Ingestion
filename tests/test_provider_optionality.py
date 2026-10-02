@@ -253,16 +253,17 @@ class TestWhatThePageSaysWhenThereIsNoProvider:
     def test_IndexPage_WhenNoProviderIsConfigured_SaysSoRatherThanOmittingTheSection(
         self, tmp_path
     ):
-        page = self._page(tmp_path, bank_authorisation=False)
+        page = self._page(tmp_path, path="/connections", bank_authorisation=False)
         assert "bank authorisation" in page.lower()
         assert "not configured" in page.lower()
 
     def test_IndexPage_WhenNoProviderIsConfigured_OffersNoWayToStartOne(self, tmp_path):
-        page = self._page(tmp_path, bank_authorisation=False)
-        assert 'action="/connect"' not in page, "a form that cannot possibly complete"
+        for path in ("/", "/connections"):
+            page = self._page(tmp_path, path=path, bank_authorisation=False)
+            assert 'action="/connect"' not in page, "a form that cannot possibly complete"
 
     def test_IndexPage_WhenAProviderIsConfigured_StillOffersToAddABank(self, tmp_path):
-        page = self._page(tmp_path)
+        page = self._page(tmp_path, path="/connections")
         assert 'action="/connect"' in page
 
     def test_IndexPage_WhenNoProviderIsConfigured_RaisesNoAlarmAboutTheMissingSecret(
@@ -278,9 +279,10 @@ class TestWhatThePageSaysWhenThereIsNoProvider:
         # exist, which is the precise failure the switched-off-must-look-switched-off
         # rule exists to prevent.
         _configure(monkeypatch, TRUELAYER_CLIENT_SECRET_FILE=str(tmp_path / "never-written"))
-        page = self._page(tmp_path, bank_authorisation=False)
-        assert "unreadable" not in page.lower(), "an absent provider reported as a fault"
-        assert "will fail until this is fixed" not in page.lower()
+        for path in ("/", "/connections"):
+            page = self._page(tmp_path, path=path, bank_authorisation=False)
+            assert "unreadable" not in page.lower(), "an absent provider reported as a fault"
+            assert "will fail until this is fixed" not in page.lower()
 
     def test_IndexPage_WhenAProviderIsConfiguredButItsSecretIsGone_StillRaisesTheAlarm(
         self, tmp_path, monkeypatch
@@ -289,8 +291,9 @@ class TestWhatThePageSaysWhenThereIsNoProvider:
         # go unreadable AFTER startup - rotated badly, unmounted - on a deployment
         # that genuinely uses a provider. That is a real fault and must stay loud.
         _configure(monkeypatch, TRUELAYER_CLIENT_SECRET_FILE=str(tmp_path / "never-written"))
-        page = self._page(tmp_path, bank_authorisation=True)
-        assert "unreadable" in page.lower()
+        for path in ("/", "/connections"):
+            page = self._page(tmp_path, path=path, bank_authorisation=True)
+            assert "unreadable" in page.lower(), path
 
     def test_ConnectRoute_WhenNoProviderIsConfigured_RefusesAndSaysWhy(self, tmp_path):
         # Reachable by a bookmark or a stale link even with the form gone, and a

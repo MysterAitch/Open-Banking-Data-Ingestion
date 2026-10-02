@@ -199,6 +199,24 @@ def _accounts_html(overview: Overview) -> str:
     )
 
 
+#: Where a person goes from the Accounts cards: (destination, label).
+#: Coverage is per source and the cards are per account, which is why both exist.
+ACCOUNT_LINKS: tuple[tuple[str, str], ...] = (
+    ("/coverage", "Coverage by source"),
+    ("/accounts", "Declared accounts"),
+    ("/import", "Import"),
+    ("/review", "Categorise"),
+)
+
+
+def _account_links_html() -> str:
+    links = "".join(
+        f'<li><a class="tap outline" href="{_esc(href)}">{_esc(label)}</a></li>'
+        for href, label in ACCOUNT_LINKS
+    )
+    return f'<ul class="linkrow">{links}</ul>'
+
+
 def _notice(message: str) -> str:
     return (
         '<ol class="attention"><li class="now">'
@@ -237,6 +255,6 @@ def overview_html(
         '<div class="overview">'
         '<section id="attention"><h2>Needs attention</h2>'
         f"{attention}</section>"
-        f'<section id="accounts"><h2>Accounts</h2>{accounts}</section>'
+        f'<section id="accounts"><h2>Accounts</h2>{accounts}{_account_links_html()}</section>'
         "</div>"
     )

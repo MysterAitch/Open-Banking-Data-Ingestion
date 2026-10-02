@@ -14,7 +14,8 @@ import httpx
 import pytest
 
 from obdi.connections import ConnectionStore, build_connection
-from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig, render_index
+from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+from obdi.web_sections import render_connections
 
 TOKENS = {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
 
@@ -54,7 +55,7 @@ class TestConnectionNamesRoundTripSafely:
         store = ConnectionStore(tmp_path / "c.json")
         store.put(build_connection(connection_id="m&s bank", provider="p", token_response=TOKENS))
 
-        page = render_index(store).decode()
+        page = render_connections(store).decode()
 
         assert "name=m%26s" in page
         assert "name=m&s" not in page
@@ -64,12 +65,12 @@ class TestConnectionNamesRoundTripSafely:
         store.put(
             build_connection(connection_id="virgin money", provider="p", token_response=TOKENS)
         )
-        assert "virgin%20money" in render_index(store).decode()
+        assert "virgin%20money" in render_connections(store).decode()
 
     def test_Link_WhenNameIsOrdinary_LeftReadable(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
         store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
-        assert "name=halifax" in render_index(store).decode()
+        assert "name=halifax" in render_connections(store).decode()
 
 
 @pytest.fixture
