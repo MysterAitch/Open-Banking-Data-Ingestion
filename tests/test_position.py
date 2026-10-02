@@ -33,6 +33,8 @@ minor units (pence), and today is 2026-10-02.
 
     unanchored one row, 2026-03-01 +888.88, and nothing states a balance: UNKNOWN.
 
+        MOVED       +88,888 since 2026-03-01 (its one row). Nothing before it.
+
     work-pension  defined contribution: 2026-02-28 10,000.00; 2026-05-31 12,000.00
     house         property: 2026-04-15 250,000.00
     state-pension-forecast  state pension, 11,500.00 a year       (income, not wealth)
@@ -55,6 +57,20 @@ HISTORY (six counted items: four accounts and two assets)
              + 543,210 + 105,000 + 25,000,000  = 26,728,210 6 of 6  COMPLETE FROM HERE
     2026-05 .. 2026-10  26,935,987                        6 of 6
     eleven points, 2025-12 to 2026-10
+
+PROVISIONAL (each unknown opening taken as nil; the known figures above stay as they are)
+    total now  26,935,987 + 88,888                          = 27,024,875
+    month-ends  2025-12 .. 2026-02  as known (unanchored has no row yet)
+                2026-03  1,725,555 + 88,888                 = 1,814,443
+                2026-04  26,728,210 + 88,888                = 26,817,098
+                2026-10  27,024,875
+
+    plus `late` (uncounted): rows 2026-04-01 -999.00 VOID, 2026-05-10 -200.00,
+    2026-06-01 +50.00 PENDING. Void is never counted, pending is.
+        moved   -20,000 + 5,000                             = -15,000, first row 2026-05-10
+        total now  27,024,875 - 15,000                      = 27,009,875
+        2026-04  26,817,098 (void row before its first live row changes nothing)
+        2026-05  26,935,987 + 88,888 - 20,000               = 27,004,875
 """
 
 from __future__ import annotations
@@ -383,6 +399,164 @@ class TestDegenerateHistories:
         assert shown.net_worth is not None
         assert shown.net_worth.minor == -5000
         assert shown.net_direction == "out"
+
+
+def provisional(position: Position, label: str) -> int:
+    return next(p for p in position.provisional_history if p.month == label).total.minor
+
+
+def with_late_account(store: Store) -> None:
+    household(store)
+    land(
+        store,
+        "d-late",
+        txn("late", "src-a", "l0", D(2026, 4, 1), -999, "VANISHED", status=TransactionStatus.VOID),
+        txn("late", "src-a", "l1", D(2026, 5, 10), -20000, "OUT"),
+        txn("late", "src-a", "l2", D(2026, 6, 1), 5000, "SETTLING",
+            status=TransactionStatus.PENDING),
+    )
+
+
+class TestWhatAnUncountedAccountHasMoved:
+    def test_Account_ShowsItsMovementAndTheDateOfItsFirstRow(self, position):
+        [unknown] = position.uncounted
+
+        assert unknown.moved is not None
+        assert unknown.moved.minor == 88888
+        assert unknown.moved_direction == "in"
+        assert unknown.first_row == "2026-03-01"
+        assert unknown.balance is None, "a movement is never a balance"
+
+    def test_AccountWithNoRows_HasNoMovementAndNoFirstRow(self, store):
+        household(store)
+        store.declare_account(AccountRecord(ref=AccountRef("dormant"), label="Dormant"))
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        dormant = account(shown, "dormant")
+        assert dormant.moved is None
+        assert dormant.first_row == ""
+        assert dormant.moved_direction == ""
+
+    def test_VoidRowsNeverMoveItAndPendingRowsDo(self, store):
+        with_late_account(store)
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        late = account(shown, "late")
+        assert late.moved is not None
+        assert late.moved.minor == -15000
+        assert late.moved_direction == "out"
+        assert late.first_row == "2026-05-10", "the void row of 04-01 is not its first row"
+
+    def test_ACountedAccount_HasNoMovementFigure(self, position):
+        assert account(position, "everyday").moved is None
+
+
+class TestTheProvisionalTotal:
+    def test_Total_IsTheKnownNetWorthPlusTheUncountedMovement(self, position):
+        assert position.provisional_total is not None
+        assert position.provisional_total.minor == 27024875
+        assert position.provisional_direction == "in"
+
+    def test_TheKnownFiguresAreUntouchedByIt(self, position):
+        assert position.net_worth is not None
+        assert position.net_worth.minor == 26935987
+        assert group(position, "in").subtotal.minor == 655987
+        assert group(position, "out").subtotal.minor == -90000
+        assert group(position, "archived").subtotal.minor == 170000
+        assert position.assets_subtotal.minor == 26200000
+        assert position.history[-1].net_worth.minor == 26935987
+        assert (position.accounts_counted, position.accounts_uncounted) == (4, 1)
+
+    def test_TwoUncountedAccounts_AddTheirMovementsAndLeaveTheKnownFiguresAlone(self, store):
+        with_late_account(store)
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        assert shown.accounts_uncounted == 2
+        assert shown.provisional_total is not None
+        assert shown.provisional_total.minor == 27009875
+        assert shown.net_worth is not None
+        assert shown.net_worth.minor == 26935987
+        assert group(shown, "in").subtotal.minor == 655987
+
+    def test_WhenEveryAccountIsCounted_NothingIsProvisional(self, store):
+        household(store)
+        record_stated_anchor(store, "unanchored", "2026-03-31", "1000.00")
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        assert shown.provisional_total is None
+        assert shown.provisional_direction == ""
+        assert shown.provisional_history == ()
+
+    def test_WhenNothingIsCounted_ThereIsNoNetWorthButThereIsAProvisionalTotal(self, store):
+        land(store, "d", txn("only", "src-a", "o1", D(2026, 3, 1), 12345, "ROW"))
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        assert shown.net_worth is None
+        assert shown.history == ()
+        assert shown.provisional_total is not None
+        assert shown.provisional_total.minor == 12345
+
+    def test_AnUncountedAccountWithNoRows_AddsNothingButIsStillAnUnknownOpening(self, store):
+        household(store)
+        store.declare_account(AccountRecord(ref=AccountRef("dormant"), label="Dormant"))
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        assert shown.accounts_uncounted == 2
+        assert shown.provisional_total is not None
+        assert shown.provisional_total.minor == 27024875
+
+
+class TestTheProvisionalHistory:
+    @pytest.mark.parametrize(
+        ("label", "total"),
+        [
+            ("2025-12", 150000),
+            ("2026-02", 1093456),
+            ("2026-03", 1814443),
+            ("2026-04", 26817098),
+            ("2026-10", 27024875),
+        ],
+    )
+    def test_MonthEnd_IsTheKnownFigureAndTheMovementUpToThen(self, position, label, total):
+        assert provisional(position, label) == total
+
+    def test_AnUncountedAccount_ContributesNothingBeforeItsFirstRow(self, position):
+        # Its first row is 2026-03-01, so February's figure is the known one.
+        assert provisional(position, "2026-02") == month(position, "2026-02").net_worth.minor
+
+    def test_TwoUncountedAccounts_EachContributeFromTheirOwnFirstRow(self, store):
+        with_late_account(store)
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        assert provisional(shown, "2026-04") == 26817098
+        assert provisional(shown, "2026-05") == 27004875
+        assert provisional(shown, "2026-10") == 27009875
+
+    def test_TheKnownSeries_IsExactlyAsItWas(self, position):
+        assert [p.net_worth.minor for p in position.history] == [
+            150000, 170000, 1093456, 1725555, 26728210, *[26935987] * 6,
+        ]
+        assert position.complete_from == "2026-04"
+
+    def test_TheNewestPoint_IsTheProvisionalTotal(self, position):
+        assert position.provisional_total is not None
+        assert position.provisional_history[-1].total.minor == position.provisional_total.minor
+
+    def test_WhenNothingIsCounted_TheHistoryRunsFromTheFirstRow(self, store):
+        land(store, "d", txn("only", "src-a", "o1", D(2026, 3, 1), 12345, "ROW"))
+
+        shown = read_position(store, labels={}, today=TODAY)
+
+        months = [p.month for p in shown.provisional_history]
+        assert (months[0], months[-1], len(months)) == ("2026-03", "2026-10", 8)
+        assert {p.total.minor for p in shown.provisional_history} == {12345}
 
 
 class TestThePureCore:

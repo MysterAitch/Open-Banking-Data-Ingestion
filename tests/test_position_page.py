@@ -25,7 +25,7 @@ from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.masking import MASKED_TOTAL
-from obdi.position import AssetInput, Observation, build_position
+from obdi.position import AccountInput, AssetInput, Observation, build_position
 from obdi.store import Store
 from obdi.valuations import Asset, AssetKind, record_observation
 from obdi.web import AuthorisationSession, ConnectionHandler
@@ -41,7 +41,21 @@ SECRET_FIGURES = (
     "11,500.00", "1150000", "6,123.45", "612345", "5,555.55", "555555",
     "17,255.55", "1725555", "267,282.10", "26728210", "10,934.56", "1093456",
     "888.88", "88888", "1,500.00", "150000", "1,111.11", "111111",
+    # The provisional figures: the total, and its month-ends from March and April.
+    "270,248.75", "27024875", "18,144.43", "1814443", "268,170.98", "26817098",
 )
+
+PROVISIONAL_SENTENCE = re.compile(r"<p[^>]*>(<strong>)?Provisional, counting every account.*?</p>")
+
+
+def provisional_paragraph(page: str) -> str:
+    found = PROVISIONAL_SENTENCE.search(page)
+    assert found, "the provisional total is not on the page"
+    return found.group(0)
+
+
+def chart_series(page: str) -> set[str]:
+    return set(re.findall(r'data-series="(\w+)"', page))
 
 EVIL = MappingProxyType({"Origin": "https://evil.example"})
 
@@ -226,7 +240,8 @@ class TestShowingValues:
         page = lab.show_values().text
 
         assert "lowest £1,500.00" in page
-        assert "highest £269,359.87" in page
+        # The scale covers both lines, so its top is the provisional total's.
+        assert "highest £270,248.75" in page
         assert "latest £269,359.87" in page
 
     def test_Post_FromAnotherSite_IsRefusedAndShowsNothing(self, lab):
@@ -256,8 +271,13 @@ class TestWhatIsNotCounted:
     def test_ItsRowsAreInNoTotal(self, lab):
         page = lab.show_values().text
 
-        assert "£888.88" not in page
-        assert "£269,359.87" in page
+        # Its +888.88 appears as a movement, and in no real figure.
+        headline = page.split("<h2>Net worth</h2>")[1].split("<h2>")[0]
+        assert 'in credit <span class="mono nowrap">£269,359.87</span>' in headline
+        assert "£270,248.75" not in headline.split("Provisional")[0]
+        assert page.count("£269,359.87") >= 1
+        accounts = page.split("<h2>Accounts</h2>")[1].split("<h2>Not counted")[0]
+        assert "£888.88" not in accounts and "£270,248.75" not in accounts
 
     def test_StatingABalanceForIt_MovesItIntoTheTotalAndRemovesTheHeading(self, lab):
         with Store(lab.db) as store:
@@ -344,9 +364,14 @@ class TestDegenerateCases:
         assert "No net worth is shown." in page
         assert "Counts 0 accounts of 2 and 0 assets." in page
         assert "2 accounts are not counted" in page
-        assert "£123.45" not in page and "£543.21" not in page
-        assert "<svg" not in page
         assert "Nothing is counted" in page
+        headline = page.split("<h2>Net worth</h2>")[1].split("<h2>")[0]
+        assert 'class="figure"' not in headline, "no net worth is stated"
+        # 123.45 + 543.21 = 666.66, each opening taken as nil.
+        assert "in credit" in provisional_paragraph(page)
+        assert "£666.66" in provisional_paragraph(page)
+        assert "2 unknown opening balances" in provisional_paragraph(page)
+        assert chart_series(page) == {"provisional"}
 
     def test_OnlyUncountedAccounts_PresentNoZeroAsANetWorth(self, tmp_path, monkeypatch):
         from test_ledger import land, txn
@@ -456,6 +481,213 @@ class TestChartEdgeCases:
 
         assert page.count('class="pill pill-warn"') == 2, "July and August are partial"
         assert "complete from <strong>2026-09</strong>" in page
+
+
+def every_account_counted(store: Store) -> None:
+    household(store)
+    record_stated_anchor(store, "unanchored", "2026-03-31", "1000.00")
+
+
+class TestWhatAnUncountedAccountHasMoved:
+    def test_Post_ShowsTheMovementWordedSoItCannotBeReadAsABalance(self, lab):
+        page = lab.show_values().text
+        card = page.split("<h2>Not counted: no opening balance</h2>")[1].split("<h2>")[0]
+
+        assert (
+            'Moved: in <span class="mono nowrap">£888.88</span> since 2026-03-01 '
+            "(its first row here). Its balance is this plus an opening balance that is "
+            "not known." in card
+        )
+        assert "in credit" not in card and "Balance" not in card
+
+    def test_Get_MasksTheMovementToTheFixedTokenAndKeepsTheDate(self, lab):
+        card = lab.get().text.split("<h2>Not counted: no opening balance</h2>")[1].split("<h2>")[0]
+
+        assert f'Moved: in <span class="mono nowrap">{MASKED_TOTAL}</span> since 2026-03-01' in card
+
+    def test_AnAccountWithNoRows_ShowsNoMovementLine(self, tmp_path, monkeypatch):
+        def dormant(store: Store) -> None:
+            household(store)
+            store.declare_account(AccountRecord(ref=AccountRef("dormant"), label="Dormant"))
+
+        httpd, lab = serve(tmp_path, monkeypatch, dormant)
+        try:
+            page = lab.show_values().text
+        finally:
+            httpd.shutdown()
+
+        assert page.count("Moved: ") == 1, "only unanchored has moved"
+        assert "2 accounts are not counted" in page
+        assert "2 unknown opening balances" in provisional_paragraph(page)
+
+
+class TestTheProvisionalTotalOnThePage:
+    def test_Post_SitsBelowTheRealNetWorthWithItsCaveat(self, lab):
+        page = lab.show_values().text
+        headline = page.split("<h2>Net worth</h2>")[1].split("<h2>")[0]
+
+        assert headline.index("£269,359.87") < headline.index("Provisional, counting every account")
+        assert (
+            'Provisional, counting every account: in credit <span class="mono nowrap">'
+            "£270,248.75</span>. This takes 1 unknown opening balance as nil, so it is off by "
+            "whatever that account held before its history began. The movement is real; "
+            "the level is not." in provisional_paragraph(page)
+        )
+
+    def test_Post_TheRealNetWorthAndSubtotalsAreUnchanged(self, lab):
+        page = lab.show_values().text
+
+        assert "in credit <span class=\"mono nowrap\">£269,359.87</span>" in page
+        assert "Counts 4 accounts of 5 and 2 assets." in page
+        assert "1 account is not counted" in page
+        for figure in ("£6,559.87", "£900.00", "£1,700.00", "£262,000.00"):
+            assert figure in page, figure
+
+    def test_Caveat_NamesTheCountOfUnknownOpeningsAndSaysNil(self, lab):
+        sentence = provisional_paragraph(lab.show_values().text)
+
+        assert "1 unknown opening balance" in sentence
+        assert "nil" in sentence
+
+    def test_Get_MasksTheProvisionalTotalButKeepsItsCaveat(self, lab):
+        sentence = provisional_paragraph(lab.get().text)
+
+        assert MASKED_TOTAL in sentence
+        assert "1 unknown opening balance" in sentence and "nil" in sentence
+
+    @pytest.mark.parametrize(
+        "query", ["values=1", "unmask=1", "show=1", "unmasked=true", "masked=0"]
+    )
+    def test_Get_WithAnyParameterOneMightTry_MasksEveryProvisionalFigureAndDrawsNoChart(
+        self, lab, query
+    ):
+        key, value = query.split("=")
+
+        page = lab.get(**{key: value}).text
+
+        assert_no_secret(page, where=query)
+        assert MASKED_TOTAL in provisional_paragraph(page)
+        assert "<svg" not in page and chart_series(page) == set()
+
+    def test_Post_MonthTableGainsAProvisionalColumnWithTheWorkedFigures(self, lab):
+        page = lab.show_values().text
+        table = page.split("<table>")[1].split("</table>")[0]
+
+        assert "Provisional total" in table
+        for figure in ("£18,144.43", "£268,170.98", "£270,248.75"):
+            assert figure in table, figure
+        assert "complete from <strong>2026-04</strong>" in page
+        assert "6 of 6" in table and "5 of 6" in table
+
+    def test_Get_MonthTableColumnIsMasked(self, lab):
+        table = lab.get().text.split("<table>")[1].split("</table>")[0]
+
+        assert "Provisional total" in table
+        assert table.count(MASKED_TOTAL) >= 22, "both columns, eleven months each"
+
+    def test_Post_ChartDrawsTwoDistinguishableSeriesAndALegendSaying(self, lab):
+        page = lab.show_values().text
+
+        assert chart_series(page) == {"known", "provisional"}
+        known = re.search(r'<polyline[^>]*data-series="known"[^>]*>', page)
+        dotted = re.search(r'<polyline[^>]*data-series="provisional"[^>]*>', page)
+        assert known and dotted
+        assert 'stroke-dasharray="1 5"' in dotted.group(0), "dotted, not dashed"
+        assert 'stroke-dasharray="1 5"' not in known.group(0)
+        assert "The solid blue line is the net worth that is known" in page
+        assert "The dotted line is the provisional total" in page
+        assert (
+            "The provisional line's shape shows real movement; its height is offset by the "
+            "unknown opening balances." in page
+        )
+
+    def test_Post_ChartWithNothingCounted_DrawsTheProvisionalLineAlone(self, tmp_path, monkeypatch):
+        from test_ledger import land, txn
+
+        def one_row(store: Store) -> None:
+            land(store, "d", txn("a1", "s", "1", date(2026, 3, 1), 12345, "ROW"))
+
+        httpd, lab = serve(tmp_path, monkeypatch, one_row)
+        try:
+            page = lab.show_values().text
+        finally:
+            httpd.shutdown()
+
+        assert chart_series(page) == {"provisional"}
+        assert "The solid blue line" not in page
+        assert "highest" in page or "all months £123.45" in page
+
+
+class TestNothingProvisionalWhenEveryAccountIsCounted:
+    def test_Page_NeverMentionsAProvisionalFigureColumnOrLine(self, tmp_path, monkeypatch):
+        httpd, lab = serve(tmp_path, monkeypatch, every_account_counted)
+        try:
+            masked, shown = lab.get().text, lab.show_values().text
+        finally:
+            httpd.shutdown()
+
+        for page in (masked, shown):
+            assert "provisional" not in page.lower()
+            assert "Moved: " not in page
+            assert "unknown opening" not in page
+        assert chart_series(shown) == {"known"}
+        assert "£270,359.87" in shown
+
+
+class TestTheLimitsAndTheAnswerAboutOlderStatements:
+    def test_Page_SaysAProvisionalFigureTreatsUnknownOpeningsAsNil(self, lab):
+        page = lab.get().text
+        limits = page.split("What this page does not check")[1]
+
+        assert "provisional figure treats unknown opening balances as nil" in limits
+
+    def test_Page_SaysStatingABalanceFixesItAtThatDateSoOlderStatementsStayRight(self, lab):
+        page = lab.get().text
+
+        assert (
+            "Stating a balance for a date fixes the balance at that date, so importing older "
+            "statements later does not make it wrong: the opening balance moves back in time "
+            "and is re-derived from the same stated figure." in page
+        )
+
+
+class TestTheChartsProvisionalEdgeCases:
+    TODAY = date(2026, 10, 2)
+
+    def rendered(self, *rows_sets: list[tuple[date, int]]) -> str:
+        from obdi.balance_anchors import derive_opening
+        from test_ledger import txn
+
+        inputs = []
+        for index, spec in enumerate(rows_sets):
+            rows = tuple(
+                txn(f"u{index}", "s", f"{index}-{n}", day, minor, "ROW")
+                for n, (day, minor) in enumerate(spec)
+            )
+            ref = f"u{index}"
+            inputs.append(
+                AccountInput(ref, ref.upper(), "", False, derive_opening(ref, [], rows), rows)
+            )
+        return render_position(build_position(inputs, [], today=self.TODAY), unmasked=True).decode()
+
+    def test_OnePointOfProvisional_IsADotAndNotADivisionByZero(self):
+        page = self.rendered([(date(2026, 10, 1), 4242)])
+
+        assert "<circle" in page
+        assert "<polyline" not in page
+        assert "nan" not in page.lower().replace("financial", "")
+
+    def test_AllEqualProvisionalValues_IsAFlatLine(self):
+        page = self.rendered([(date(2026, 8, 5), 5000)])
+
+        assert "<polyline" in page
+        assert "all months £50.00" in page
+
+    def test_AProvisionalRangeCrossingZero_DrawsANilBaseline(self):
+        page = self.rendered([(date(2026, 8, 5), -5000), (date(2026, 9, 5), 9000)])
+
+        assert ">nil</text>" in page
+        assert "lowest -£50.00" in page
 
 
 class TestAnUnwiredDeployment:

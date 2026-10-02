@@ -15,6 +15,13 @@ knows. It is listed under its own heading and is left out of every total,
 because a zero summed in would be a confident wrong number. The headline says
 how many accounts are counted and how many are not.
 
+WHAT IS KNOWN OF AN UNKNOWN BALANCE is how far it has moved: the sum of its
+non-void rows, which needs no opening balance. That movement is shown beside
+the account and is never called a balance. A PROVISIONAL total adds every such
+movement to the known net worth, which takes each unknown opening as nil: its
+shape is real and its level is not, so it exists only beside the real figure
+and only while some account is uncounted.
+
 ONE BALANCE, TWO PAGES. An account's balance is `ledger.running_balance`, the
 function the ledger's running position uses, so the two pages cannot disagree.
 
@@ -122,8 +129,16 @@ class AccountPosition:
     rows_through: Structural[str]
     rows_through_age_days: Structural[int]
     rows: Structural[int]
+    #: The first non-void row's date, ISO, or "" when the account holds none.
+    first_row: Structural[str]
+    #: Which way an uncounted account has moved, or "" when it is counted or has no rows.
+    moved_direction: Structural[str]
     #: None whenever the balance is not known.
     balance: Total[Money | None]
+    #: The sum of the non-void rows of an account whose balance is not known:
+    #: how far it has moved since its history began, and never a balance.
+    #: None when the account is counted or holds no rows.
+    moved: Total[Money | None]
 
 
 @dataclass(frozen=True)
@@ -168,6 +183,14 @@ class MonthPoint:
 
 
 @dataclass(frozen=True)
+class ProvisionalPoint:
+    month: Structural[str]
+    direction: Structural[str]
+    #: The known net worth at the month-end plus what each uncounted account had moved.
+    total: Total[Money]
+
+
+@dataclass(frozen=True)
 class Position:
     as_of: Structural[str]
     accounts_total: Structural[int]
@@ -186,10 +209,18 @@ class Position:
     history: Structural[tuple[MonthPoint, ...]]
     #: The first month that includes every item counted today, or "".
     complete_from: Structural[str]
+    #: One point per month while any account is uncounted, else empty. It starts
+    #: with the earliest known figure or uncounted row, so it exists even when
+    #: nothing is counted.
+    provisional_history: Structural[tuple[ProvisionalPoint, ...]]
+    provisional_direction: Structural[str]
 
     #: None when nothing at all is counted.
     net_worth: Total[Money | None]
     assets_subtotal: Total[Money]
+    #: The net worth with every unknown opening balance taken as nil. None when
+    #: no account is uncounted, so it is never shown beside a complete figure.
+    provisional_total: Total[Money | None]
 
 
 def _month_label(day: date) -> str:
@@ -242,6 +273,9 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
         else None
     )
     later = [r for r in opening.readings if r.agrees is not None]
+    # The same rows as the balance, so the two can only differ by the opening.
+    moved_minor = running_balance(0, item.rows) if balance_minor is None and live else None
+    first = min((t.value_date for t in live), default=None)
     return (
         AccountPosition(
             ref=item.ref,
@@ -256,7 +290,10 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
             rows_through=newest.isoformat() if newest else "",
             rows_through_age_days=(today - newest).days if newest else 0,
             rows=len(live),
+            first_row=first.isoformat() if first else "",
+            moved_direction=direction_of(moved_minor) if moved_minor is not None else "",
             balance=Money(balance_minor, CURRENCY) if balance_minor is not None else None,
+            moved=Money(moved_minor, CURRENCY) if moved_minor is not None else None,
         ),
         balance_minor,
     )
@@ -355,6 +392,43 @@ def _history(
     return tuple(points), complete
 
 
+def _provisional_history(
+    known: Sequence[MonthPoint],
+    movers: Sequence[AccountInput],
+    today: date,
+) -> tuple[ProvisionalPoint, ...]:
+    """Known net worth plus each uncounted account's movement, at every month-end.
+
+    An uncounted account adds nothing before its first row, and every unknown
+    opening is taken as nil, so this is a shape and never a level.
+    """
+    cumulatives = [_Cumulative(0, item.rows) for item in movers]
+    starts = [
+        t.value_date
+        for item in movers
+        for t in item.rows
+        if t.status is not TransactionStatus.VOID
+    ]
+    if known:
+        year, month = (int(part) for part in known[0].month.split("-"))
+        starts.append(date(year, month, 1))
+    if not starts:
+        return ()
+    known_by_month = {p.month: p.net_worth.minor for p in known}
+    last_month = _month_label(today)
+    points = []
+    for year, month in _months(min(min(starts), today), today):
+        label = f"{year:04d}-{month:02d}"
+        cut = None if label == last_month else _month_end(year, month)
+        total = known_by_month.get(label, 0) + sum(c.through(cut) for c in cumulatives)
+        points.append(
+            ProvisionalPoint(
+                month=label, direction=direction_of(total), total=Money(total, CURRENCY)
+            )
+        )
+    return tuple(points)
+
+
 def build_position(
     accounts: Sequence[AccountInput], assets: Sequence[AssetInput], *, today: date
 ) -> Position:
@@ -362,6 +436,7 @@ def build_position(
     positioned = [(item, *_account_position(item, today)) for item in accounts]
     counted = [(item, view, minor) for item, view, minor in positioned if minor is not None]
     uncounted = tuple(view for _, view, minor in positioned if minor is None)
+    movers = [item for item, _, minor in positioned if minor is None]
 
     held: list[AssetPosition] = []
     entitlements: list[Entitlement] = []
@@ -403,6 +478,8 @@ def build_position(
         series_by_asset,
         today,
     )
+    moved_total = sum(view.moved.minor for view in uncounted if view.moved is not None)
+    provisional = net + moved_total
     return Position(
         as_of=today.isoformat(),
         accounts_total=len(accounts),
@@ -418,8 +495,11 @@ def build_position(
         entitlements=tuple(sorted(entitlements, key=lambda e: e.asset_id)),
         history=history,
         complete_from=complete,
+        provisional_history=_provisional_history(history, movers, today) if movers else (),
+        provisional_direction=direction_of(provisional) if movers else "",
         net_worth=None if nothing else Money(net, CURRENCY),
         assets_subtotal=Money(assets_total, CURRENCY),
+        provisional_total=Money(provisional, CURRENCY) if movers else None,
     )
 
 

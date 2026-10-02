@@ -26,6 +26,20 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.248] - 2026-10-02
+
+### Added
+- **The Position page shows what is known about an account with no opening
+  balance**: how far it has moved since its first row, worded so it cannot be
+  read as a balance. Previously such an account showed nothing.
+- **A provisional total sits beside the net worth**, counting every account and
+  taking unknown opening balances as nil. It says so each time it appears, and
+  disappears once every account is counted. The net worth itself is unchanged.
+- **The month table and the chart carry a provisional line.** Its shape is real
+  movement; its height is offset by the unknown opening balances.
+- **The page says that a stated balance does not go stale**: importing older
+  statements later moves the opening balance back in time and re-derives it.
+
 ## [0.4.247] - 2026-10-02
 
 ### Maintenance
