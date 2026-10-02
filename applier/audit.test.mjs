@@ -210,6 +210,145 @@ test('an empty expected set is refused, never pruned blind', async () => {
 });
 
 
+// A client holding a fixed set of rows that records every delete.
+function pruneClient(rows) {
+  const deleted = [];
+  let reads = 0;
+  return {
+    deleted,
+    reads: () => reads,
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => {
+      reads += 1;
+      return rows;
+    },
+    deleteTransaction: async (id) => deleted.push(id),
+  };
+}
+
+const THREE_OURS = () => [
+  { id: 'a', imported_id: `${hex('a')}:0` },
+  { id: 'b', imported_id: `${hex('b')}:0` },
+  { id: 'c', imported_id: `${hex('c')}:0` },
+  { id: 'linked', imported_id: `${hex('d')}:0`, transfer_id: 'partner' },
+  { id: 'child', imported_id: `${hex('e')}:0`, is_child: true },
+  { id: 'foreign', imported_id: 'FITID-1' },
+  { id: 'hand', imported_id: null },
+];
+
+test('an empty expected set named in clear_empty removes only obdi-shaped unlinked rows', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = pruneClient(THREE_OURS());
+
+  const report = await pruneAccounts(client, { 'act-1': [] }, { clear_empty: { 'act-1': 3 } });
+
+  assert.deepEqual(client.deleted, ['a', 'b', 'c']);
+  assert.equal(report[0].removed, 3);
+  assert.equal(report[0].linked_left, 1);
+  assert.equal(report[0].foreign_ids, 1);
+});
+
+test('an empty expected set not named in clear_empty is skipped with the original wording', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = pruneClient(THREE_OURS());
+
+  const report = await pruneAccounts(client, { 'act-1': [] }, { clear_empty: {}, confirmed: { 'act-1': 9 } });
+
+  assert.equal(report[0].skipped, 'expected set empty - refusing to prune blind');
+  assert.deepEqual(client.deleted, []);
+  assert.equal(client.reads(), 0);
+});
+
+test('a confirmed count below what the account holds deletes nothing and says both numbers', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = pruneClient(THREE_OURS());
+
+  const report = await pruneAccounts(client, { 'act-1': [] }, { clear_empty: { 'act-1': 2 } });
+
+  assert.deepEqual(client.deleted, []);
+  assert.equal(report[0].refused, 'holds 3, more than the 2 confirmed - run the audit again');
+  assert.equal(report[0].holds, 3);
+  assert.equal(report[0].confirmed, 2);
+  assert.equal('removed' in report[0], false);
+});
+
+test('a confirmed count that is not a positive whole number deletes nothing and is refused', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  for (const bad of [0, -3, 2.5, '3', null, NaN]) {
+    const client = pruneClient(THREE_OURS());
+
+    const report = await pruneAccounts(client, { 'act-1': [] }, { clear_empty: { 'act-1': bad } });
+
+    assert.deepEqual(client.deleted, [], String(bad));
+    assert.match(report[0].refused, /not a positive whole number/, String(bad));
+  }
+});
+
+test('the check and the deletes use one read of the account', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = pruneClient(THREE_OURS());
+
+  await pruneAccounts(client, { 'act-1': [] }, { clear_empty: { 'act-1': 3 } });
+
+  assert.equal(client.reads(), 1);
+});
+
+test('a clearing request leaves every account it does not name alone', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = {
+    ...pruneClient(THREE_OURS()),
+    getAccounts: async () => [
+      { id: 'act-1', name: 'one' },
+      { id: 'act-2', name: 'two' },
+    ],
+  };
+
+  const report = await pruneAccounts(
+    client,
+    { 'act-1': [], 'act-2': [{ imported_id: `${hex('9')}:0` }] },
+    { clear_empty: { 'act-1': 3 } },
+  );
+
+  assert.deepEqual(report.map((e) => e.account_id), ['act-1']);
+});
+
+test('an ordinary account refuses when the orphans exceed the count shown, and prunes otherwise', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const keep = [{ imported_id: `${hex('1')}:0` }];
+
+  const over = pruneClient(THREE_OURS());
+  const refused = await pruneAccounts(over, { 'act-1': keep }, { confirmed: { 'act-1': 2 } });
+  assert.deepEqual(over.deleted, []);
+  assert.equal(refused[0].holds, 3);
+  assert.equal(refused[0].confirmed, 2);
+
+  const within = pruneClient(THREE_OURS());
+  const pruned = await pruneAccounts(within, { 'act-1': keep }, { confirmed: { 'act-1': 3 } });
+  assert.deepEqual(within.deleted, ['a', 'b', 'c']);
+  assert.equal(pruned[0].removed, 3);
+
+  const unshown = pruneClient(THREE_OURS());
+  const asBefore = await pruneAccounts(unshown, { 'act-1': keep }, {});
+  assert.deepEqual(unshown.deleted, ['a', 'b', 'c']);
+  assert.equal('refused' in asBefore[0], false);
+});
+
+test('a malformed confirmed count on an ordinary account refuses rather than pruning', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  for (const bad of ['3', 2.5, null]) {
+    const client = pruneClient(THREE_OURS());
+
+    const report = await pruneAccounts(
+      client,
+      { 'act-1': [{ imported_id: `${hex('1')}:0` }] },
+      { confirmed: { 'act-1': bad } },
+    );
+
+    assert.deepEqual(client.deleted, [], String(bad));
+    assert.ok(report[0].refused, String(bad));
+  }
+});
+
 test('a duplicate row sharing one imported id is counted, not collapsed', async () => {
   const { partitionAccount, summariseAudit } = await import('./audit.mjs');
   const expected = [{ imported_id: 'ck-1:0', date: '2026-07-01', amount: -1200 }];

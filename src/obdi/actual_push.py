@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -386,13 +387,31 @@ def build_audit_envelope(
 
 
 def build_prune_envelope(
-    store: Store, bindings: list[ActualAccountBinding]
+    store: Store,
+    bindings: list[ActualAccountBinding],
+    *,
+    clear_empty: Mapping[str, int] | None = None,
+    confirmed: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     """The audit payload, marked kind=prune: the applier deletes rows
     that carry OUR imported ids but are absent from this expected set.
-    Rows without an imported id are the person's own and untouchable."""
-    envelope = build_audit_envelope(store, bindings)
-    return {**envelope, "kind": "prune"}
+    Rows without an imported id are the person's own and untouchable.
+
+    `clear_empty` (Actual account id -> rows the person confirmed) is the
+    only thing that lets the applier empty an account that expects nothing;
+    `confirmed` caps an ordinary account at the orphan count the person was
+    shown. Each key is written only when it has entries, so a request
+    without them reads exactly as it always did.
+    """
+    envelope: dict[str, object] = {
+        **build_audit_envelope(store, bindings),
+        "kind": "prune",
+    }
+    if clear_empty:
+        envelope["clear_empty"] = dict(clear_empty)
+    if confirmed:
+        envelope["confirmed"] = dict(confirmed)
+    return envelope
 
 
 def queue_push(

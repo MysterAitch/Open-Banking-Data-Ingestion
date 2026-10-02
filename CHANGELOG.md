@@ -26,6 +26,23 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.244] - 2026-10-02
+
+### Added
+- **An account obdi no longer sends anything for can be cleared of its old
+  imported rows**, one account at a time, against the count the newest audit
+  showed. The ordinary removal still refuses such an account.
+- **An unexpectedly large removal shows a warning and needs a second tick.**
+  Large means 100 rows or more from one account, a quarter or more of what obdi
+  imported there (from 20 rows up), or 250 in all. The server works this out
+  from the newest audit, not from the form.
+
+### Changed
+- **A removal never deletes more rows than were shown.** If Actual holds more
+  than the count confirmed, nothing is deleted in that account and both numbers
+  are reported. A page whose counts are no longer the newest audit's is refused.
+- **Removal results say what was removed, refused, skipped, and left.**
+
 ## [0.4.243] - 2026-10-02
 
 ### Fixed

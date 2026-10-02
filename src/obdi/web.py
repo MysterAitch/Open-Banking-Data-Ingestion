@@ -73,6 +73,7 @@ from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_overview import overview_html
 from .web_position import PositionPages
+from .web_prune import PruneRefused, check_prune_post, counts_from_audit, prune_section
 from .web_sections import (
     HOME_LINK,
     HookTimer,
@@ -503,8 +504,10 @@ class WebConfig:
     actual_history: (
         Callable[[], list[dict[str, object]] | dict[str, object]] | None
     ) = None
-    #: The audit's action arm: delete provably-ours orphaned imports.
-    prune_actual: Callable[[], str] | None = None
+    #: The audit's action arm: delete provably-ours orphaned imports. Called
+    #: bare for a prune with no counts to confirm, and with `clear_empty` or
+    #: `confirmed` (Actual account id -> rows the person was shown) otherwise.
+    prune_actual: Callable[..., str] | None = None
     #: The review queue decomposed: reasons, clusters, declaration matches.
     review_report_text: Callable[[], str] | None = None
     #: The uncategorised worklist as data: coverage, then groups with the
@@ -2580,25 +2583,49 @@ def _prune_result_row(result: dict[str, object]) -> str:
         )
     raw = result.get("accounts")
     accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
-    removed_total = sum(
-        int(a.get("removed", 0)) for a in accounts if "removed" in a
-    )
+    removed_total = sum(_count_of(a.get("removed")) for a in accounts)
+    refused_total = sum(1 for a in accounts if a.get("refused"))
     lines = []
     for account in accounts:
         name = html.escape(str(account.get("name") or account.get("account_id", "")))
+        if account.get("refused"):
+            lines.append(
+                f'<span class="warn">{name}: refused, nothing deleted - '
+                f"{html.escape(str(account.get('refused')))}</span>"
+            )
+            continue
         if account.get("skipped"):
             lines.append(
                 f'<span class="warn">{name}: '
                 f"{html.escape(str(account.get('skipped')))}</span>"
             )
-        elif account.get("removed"):
-            lines.append(
-                f'<span class="muted">{name}: removed '
-                f"{account.get('removed')} orphaned import(s)</span>"
+            continue
+        removed = _count_of(account.get("removed"))
+        left: list[str] = []
+        linked = _count_of(account.get("linked_left"))
+        if linked:
+            left.append(f"{linked} linked transfer {'leg' if linked == 1 else 'legs'} left")
+        foreign = _count_of(account.get("foreign_ids"))
+        if foreign:
+            left.append(
+                f"{foreign} {'row' if foreign == 1 else 'rows'} carrying another "
+                "importer's id left"
             )
+        if removed or left:
+            said = f"removed {removed} orphaned {'import' if removed == 1 else 'imports'}"
+            lines.append(
+                f'<span class="muted">{name}: {"; ".join([said, *left])}</span>'
+            )
+    pill = (
+        f'<span class="pill pill-ok">pruned ({removed_total} removed)</span>'
+        if not refused_total
+        else (
+            f'<span class="pill pill-bad">prune {"partly " if removed_total else ""}'
+            f"refused: {removed_total} removed, {refused_total} refused</span>"
+        )
+    )
     return (
-        f'<div class="row"><strong>{stamp}Z</strong> '
-        f'<span class="pill pill-ok">pruned ({removed_total} removed)</span><br>'
+        f'<div class="row"><strong>{stamp}Z</strong> {pill}<br>'
         + "<br>".join(lines)
         + "</div>"
     )
@@ -2774,7 +2801,8 @@ def _audit_difference_sentences(
                 f"{'it comes' if n == 1 else 'they come'} from an earlier "
                 "binding or mapping. Remove orphaned imports will not clear "
                 f"{'it' if n == 1 else 'them'}: it skips an account that "
-                "expects nothing"
+                "expects nothing. Under Remove orphaned imports, this account "
+                "has a clearing form of its own"
             )
         elif key == "orphaned":
             sentences.append(
@@ -3135,16 +3163,7 @@ def _actual_rows(
         else ""
     )
     prune_button = (
-        "<details><summary>Remove orphaned imports from Actual</summary>"
-        '<form method="post" action="/prune-actual">'
-        '<label style="display:block;margin:.35rem 0">'
-        '<input type="checkbox" name="confirm" value="yes" required> '
-        "I understand rows carrying obdi's imported ids that are no longer "
-        "expected will be deleted from Actual</label>"
-        '<p><button class="button" type="submit" '
-        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-        'background:#dc262622;color:#b91c1c">'
-        "Remove orphaned imports</button></p></form></details>"
+        prune_section(counts_from_audit(_newest_of_kind(results, "audit")))
         if prune_available
         else ""
     )
@@ -6143,19 +6162,28 @@ class ConnectionHandler(
                 404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_ACTUAL)
             )
             return
-        if form.get("confirm") != ["yes"]:
+        # The counts are read from the newest audit again here: what the page
+        # showed is the browser's claim, and a removal is judged against the
+        # record.
+        counts = None
+        status_hook = self.bound_config.actual_status
+        if status_hook is not None:
+            with contextlib.suppress(Exception):
+                counts = counts_from_audit(_newest_of_kind(status_hook(), "audit"))
+        try:
+            clear_empty, confirmed = check_prune_post(form, counts)
+        except PruneRefused as refused:
             self._respond(
-                400,
-                error_page(
-                    "Not confirmed",
-                    "<p>Pruning deletes rows from Actual (only ones carrying "
-                    "obdi's imported ids). Tick the confirmation box.</p>",
-                    BACK_TO_ACTUAL,
-                ),
+                400, error_page(refused.title, refused.message_html, BACK_TO_ACTUAL)
             )
             return
+        counted: dict[str, dict[str, int]] = {}
+        if clear_empty:
+            counted["clear_empty"] = clear_empty
+        if confirmed:
+            counted["confirmed"] = confirmed
         try:
-            summary = hook()
+            summary = hook(**counted)
         except Exception as exc:
             self._respond(
                 500,
@@ -6173,8 +6201,10 @@ class ConnectionHandler(
                 "ever considered - rows without an imported id, and rows "
                 "imported by Actual itself (file imports, bank sync), are "
                 "never touched. An account with an empty expected set is "
-                "skipped rather than pruned blind. Results appear on the "
-                "Actual sync page.</p>" + BACK_TO_ACTUAL,
+                "skipped rather than pruned blind, unless it was cleared from "
+                "its own form. A removal larger than the count you were shown "
+                "is refused. Results appear on the Actual sync page.</p>"
+                + BACK_TO_ACTUAL,
             ),
         )
 

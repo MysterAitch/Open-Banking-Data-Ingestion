@@ -13,7 +13,7 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -918,10 +918,18 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
     )
 
 
-def queue_actual_prune(db_path: Path) -> str:
+def queue_actual_prune(
+    db_path: Path,
+    clear_empty: Mapping[str, int] | None = None,
+    confirmed: Mapping[str, int] | None = None,
+) -> str:
     """Queue the audit's action arm: remove rows in Actual that carry our
     imported ids but are no longer in the expected payload - stale copies
-    of pendings that later VOIDed or superseded. Provably ours only."""
+    of pendings that later VOIDed or superseded. Provably ours only.
+
+    A request that clears named accounts carries only their bindings, so
+    pressing one account's clearing form can never prune another account.
+    """
     from .actual_push import build_prune_envelope, queue_push
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
@@ -930,10 +938,14 @@ def queue_actual_prune(db_path: Path) -> str:
     if busy:
         return busy
     bindings = _actual_bindings()
+    if clear_empty:
+        bindings = [b for b in bindings if b.actual_account_id in clear_empty]
     if not bindings:
         return "no Actual-bound accounts to prune - push first."
     with Store(db_path) as store:
-        envelope = build_prune_envelope(store, bindings)
+        envelope = build_prune_envelope(
+            store, bindings, clear_empty=clear_empty, confirmed=confirmed
+        )
     queued = queue_push(envelope, _actual_dir(db_path), prefix="prune")
     raw_accounts = envelope.get("accounts")
     count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
@@ -2223,8 +2235,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)
 
-    def prune_actual_hook() -> str:
-        return queue_actual_prune(db_path)
+    def prune_actual_hook(
+        clear_empty: Mapping[str, int] | None = None,
+        confirmed: Mapping[str, int] | None = None,
+    ) -> str:
+        return queue_actual_prune(db_path, clear_empty, confirmed)
 
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)

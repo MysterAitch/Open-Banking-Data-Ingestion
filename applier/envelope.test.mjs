@@ -170,3 +170,47 @@ test('an audit or prune envelope carries its opening entries as a push does', ()
     assert.deepEqual(parsed.openings, [OPENING_ENTRY]);
   }
 });
+
+test('a prune envelope passes the counts the person confirmed through, per account', () => {
+  const parsed = parseEnvelope({
+    version: 3,
+    kind: 'prune',
+    accounts: { 'act-1': [] },
+    clear_empty: { 'act-1': 212 },
+    confirmed: { 'act-2': 7 },
+  });
+  assert.deepEqual(parsed.clear_empty, { 'act-1': 212 });
+  assert.deepEqual(parsed.confirmed, { 'act-2': 7 });
+});
+
+test('a prune envelope without the confirmed counts reads them as empty', () => {
+  const parsed = parseEnvelope({ version: 3, kind: 'prune', accounts: {} });
+  assert.deepEqual(parsed.clear_empty, {});
+  assert.deepEqual(parsed.confirmed, {});
+});
+
+test('a push or audit envelope never carries confirmed counts, whatever it was sent', () => {
+  for (const kind of ['push', 'audit']) {
+    const parsed = parseEnvelope({
+      version: 3,
+      kind,
+      accounts: {},
+      clear_empty: { 'act-1': 5 },
+      confirmed: { 'act-1': 5 },
+    });
+    assert.equal('clear_empty' in parsed, false, kind);
+    assert.equal('confirmed' in parsed, false, kind);
+  }
+});
+
+test('a malformed confirmed count on a prune is refused loudly, never read as absent', () => {
+  for (const key of ['clear_empty', 'confirmed']) {
+    for (const bad of [null, [], 'many', 5, { 'act-1': '212' }, { 'act-1': 1.5 }, { 'act-1': null }]) {
+      assert.throws(
+        () => parseEnvelope({ version: 3, kind: 'prune', accounts: {}, [key]: bad }),
+        new RegExp(key),
+        `${key} ${JSON.stringify(bad)}`,
+      );
+    }
+  }
+});

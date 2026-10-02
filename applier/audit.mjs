@@ -215,17 +215,39 @@ export function countLinkedOrphans(expectedIds, rows) {
   return ourOrphans(expectedIds, rows).filter((row) => row.transfer_id).length;
 }
 
-export async function pruneAccounts(client, accounts) {
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+// What the person was shown and confirmed, as a ceiling on one account.
+// `clear_empty` names an account that expects nothing and is the person's
+// explicit request to empty it; `confirmed` is the orphan count shown for an
+// ordinary account. Neither is trusted beyond being a ceiling: the count that
+// is checked is the count that is deleted, on one read of the account.
+function shownCeiling(accountId, clearEmpty, confirmed) {
+  if (hasOwn(clearEmpty, accountId)) return { named: true, shown: clearEmpty[accountId] };
+  if (hasOwn(confirmed, accountId)) return { named: false, shown: confirmed[accountId] };
+  return { named: false, shown: undefined };
+}
+
+export async function pruneAccounts(client, accounts, options = {}) {
+  const clearEmpty = options.clear_empty ?? {};
+  const confirmed = options.confirmed ?? {};
+  // A request naming accounts to clear is the press of one clearing form and
+  // nothing else: pruning every other account in the same stroke would
+  // delete rows the person never saw a count for.
+  const clearing = Object.keys(clearEmpty).length > 0;
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
   const report = [];
   for (const [accountId, expectedRows] of Object.entries(accounts)) {
     if (!nameOf.has(accountId)) continue;
+    if (clearing && !hasOwn(clearEmpty, accountId)) continue;
     const expectedIds = new Set(expectedRows.map((row) => row.imported_id));
-    if (expectedIds.size === 0) {
+    const { named, shown } = shownCeiling(accountId, clearEmpty, confirmed);
+    if (expectedIds.size === 0 && !named) {
       // An empty expected set would authorise deleting every one of our
       // rows in the account - correct by definition, catastrophic by
-      // accident (a wiped store). Skip and say so.
+      // accident (a wiped store, a broken push). Only a clear_empty entry,
+      // the person's confirmed count for exactly this account, lifts it.
       report.push({
         account_id: accountId,
         name: nameOf.get(accountId),
@@ -233,8 +255,29 @@ export async function pruneAccounts(client, accounts) {
       });
       continue;
     }
+    const malformed =
+      shown !== undefined &&
+      (!Number.isInteger(shown) || (expectedIds.size === 0 && shown < 1));
+    if (malformed) {
+      report.push({
+        account_id: accountId,
+        name: nameOf.get(accountId),
+        refused: `confirmed count ${JSON.stringify(shown)} is not a positive whole number - nothing deleted`,
+      });
+      continue;
+    }
     const rows = await readAccountRows(client, accountId);
     const prunable = choosePrunable(expectedIds, rows);
+    if (shown !== undefined && prunable.length > shown) {
+      report.push({
+        account_id: accountId,
+        name: nameOf.get(accountId),
+        refused: `holds ${prunable.length}, more than the ${shown} confirmed - run the audit again`,
+        holds: prunable.length,
+        confirmed: shown,
+      });
+      continue;
+    }
     for (const target of prunable) {
       await client.deleteTransaction(target.id);
     }

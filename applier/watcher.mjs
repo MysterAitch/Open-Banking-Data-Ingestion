@@ -72,7 +72,8 @@ export function failedResult(name, error) {
 export async function processRequest(name) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
-  const { kind, provision, accounts, transfers, openings } = parseEnvelope(payload);
+  const { kind, provision, accounts, transfers, openings, clear_empty, confirmed } =
+    parseEnvelope(payload);
 
   if (kind === 'audit') {
     const { report, pairs } = await withBudget(async (client) => ({
@@ -90,7 +91,9 @@ export async function processRequest(name) {
   }
 
   if (kind === 'prune') {
-    const report = await withBudget((client) => pruneAccounts(client, accounts));
+    const report = await withBudget((client) =>
+      pruneAccounts(client, accounts, { clear_empty, confirmed }),
+    );
     return {
       ok: true,
       kind: 'prune',

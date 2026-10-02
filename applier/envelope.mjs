@@ -58,6 +58,22 @@ function parseOpenings(raw) {
   }));
 }
 
+// The counts a person confirmed before a prune: Actual account id -> whole
+// number of rows shown. Absent means none; anything else malformed is refused
+// because reading a damaged ceiling as "no ceiling" would delete more than
+// the person agreed to.
+function parseConfirmedCounts(raw, key) {
+  if (raw === undefined) return {};
+  const isMap = raw !== null && typeof raw === 'object' && !Array.isArray(raw);
+  if (!isMap || !Object.values(raw).every((n) => Number.isInteger(n))) {
+    throw new Error(
+      `prune request: "${key}" must be an object of account id to whole number, ` +
+        `got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { ...raw };
+}
+
 export function parseEnvelope(payload) {
   const declared =
     payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -75,13 +91,22 @@ export function parseEnvelope(payload) {
       payload.accounts && typeof payload.accounts === 'object'
         ? payload.accounts
         : {};
+    const kind = payload.kind === 'audit' || payload.kind === 'prune'
+      ? payload.kind
+      : 'push';
     return {
       // 'audit' asks for a read-back-and-compare instead of an import;
       // anything else is a push, so an unknown kind cannot silently
       // become a write.
-      kind: payload.kind === 'audit' || payload.kind === 'prune'
-        ? payload.kind
-        : 'push',
+      kind,
+      // Only a prune has counts to confirm; on any other kind they are not
+      // even read, so a stray key cannot widen what a push or audit does.
+      ...(kind === 'prune'
+        ? {
+            clear_empty: parseConfirmedCounts(payload.clear_empty, 'clear_empty'),
+            confirmed: parseConfirmedCounts(payload.confirmed, 'confirmed'),
+          }
+        : {}),
       provision: provision.filter(
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),

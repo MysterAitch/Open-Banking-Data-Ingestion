@@ -289,7 +289,7 @@ def render_actual(
     actual_roster: Callable[[], list[dict[str, object]]] | None = None,
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     audit_actual: Callable[[], str] | None = None,
-    prune_actual: Callable[[], str] | None = None,
+    prune_actual: Callable[..., str] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     rebuild_busy_note: Callable[[], str | None] | None = None,
