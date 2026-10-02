@@ -8,7 +8,12 @@ RUN useradd --create-home --uid 10001 obdi
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# --ignore-scripts: better-sqlite3 13 ships its native binaries inside the
+# package, yet npm 10 (the one in this base image) still runs an implicit
+# node-gyp rebuild for it, which has no compiler to run on in a slim image
+# and fails the build. No other production dependency has an install script.
+# The import check below proves the binding loads.
+RUN npm ci --omit=dev --ignore-scripts
 
 COPY audit.mjs empty.mjs envelope.mjs lease.mjs lib.mjs marker.mjs transfers.mjs turn.mjs watcher.mjs apply.mjs ./
 

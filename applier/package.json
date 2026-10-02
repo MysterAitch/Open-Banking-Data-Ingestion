@@ -8,12 +8,12 @@
     "apply": "node apply.mjs"
   },
   "dependencies": {
-    "@actual-app/api": "^26.7.0"
+    "@actual-app/api": "26.10.0"
   },
   "allowScripts": {
-    "better-sqlite3@12.11.1": true
+    "better-sqlite3@13.0.3": false
   },
   "devDependencies": {
-    "@actual-app/sync-server": "26.7.0"
+    "@actual-app/sync-server": "26.10.0"
   }
 }

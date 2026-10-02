@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.262] - 2026-10-03
+
+### Changed
+- **The applier's Actual library moves from 26.7.0 to 26.10.0**, with the
+  server image, for two sync fixes that touched a real fault: a timestamp
+  counter overflowing on a large sync, and Android killing the app's background
+  worker. Every engine measurement the applier rests on was re-run against the
+  new library and holds. The two must move together: the matching server pin is
+  in the stacks repository.
+
 ## [0.4.261] - 2026-10-03
 
 ### Changed
