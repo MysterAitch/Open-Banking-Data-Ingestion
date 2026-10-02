@@ -168,6 +168,19 @@ def render_page(title: str, body: str) -> bytes:
  .allclear {{ margin: .5rem 0; padding: .6rem .9rem; border-radius: .5rem;
              border: 1px solid #16a34a55; }}
  .legend {{ font-size: .85rem; margin: .5rem 0; padding-left: 1.1rem; }}
+ /* Accounts: one card each, so the same markup reads on a phone and sits two
+    abreast where there is room. A table of eight columns did neither. */
+ .accounts {{ list-style: none; margin: .5rem 0; padding: 0; display: grid;
+             grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: .6rem; }}
+ .account {{ padding: .7rem .9rem; border-radius: .5rem; border: 1px solid #8884; }}
+ .account p {{ margin: .2rem 0; }}
+ .account-name {{ font-size: 1.05rem; }}
+ .facts {{ display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .9rem;
+          margin: .5rem 0 .2rem; }}
+ .facts dt {{ font-size: .78rem; opacity: .65; }}
+ .facts dd {{ margin: 0; }}
+ details summary {{ cursor: pointer; min-height: 44px; display: flex;
+                   align-items: center; opacity: .75; }}
 </style></head>
 <body>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
 <footer style="margin-top:2rem;opacity:.6;font-size:.85rem">

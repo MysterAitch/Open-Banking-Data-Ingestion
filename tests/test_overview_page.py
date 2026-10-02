@@ -184,23 +184,23 @@ class TestAccounts:
         page = home(tmp_path, lambda fresh: assemble(household))
 
         assert page.count('<span class="mono muted">acct-multi</span>') == 1
-        row = page.split('<span class="mono muted">acct-multi</span>')[1].split("</tr>")[0]
+        row = page.split('<span class="mono muted">acct-multi</span>')[1].split("</li>")[0]
         for source in ("csv-export", "starling", "truelayer"):
             assert f">{source}</span>" in row
 
     def test_Home_DeclaredButEmptyAccount_AppearsMarkedEmpty(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        row = page.split('<span class="mono muted">acct-empty</span>')[1].split("</tr>")[0]
-        assert ">empty</span>" in row
+        card = page.split('<span class="mono muted">acct-empty</span>')[0].rsplit("<li", 1)[1]
+        assert ">empty</span>" in card
 
     def test_Home_ArchivedAccount_IsLabelledWithItsDateAndListedLast(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
 
         rows = re.findall(r'<span class="mono muted">(acct-[a-z]+)</span>', page)
         assert rows[-1] == "acct-old"
-        row = page.split('<span class="mono muted">acct-old</span>')[1].split("</tr>")[0]
-        assert ">archived</span> since 2026-01-31" in row
+        card = page.split('<span class="mono muted">acct-old</span>')[0].rsplit("<li", 1)[1]
+        assert ">archived</span> since 2026-01-31" in card
 
     def test_Home_EveryAccount_LinksToItsLedgerAndItsShapePage(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
@@ -223,9 +223,9 @@ class TestAccounts:
             ),
         )
 
-        row = page.split('<span class="mono muted">acct-silent</span>')[1].split("</tr>")[0]
+        row = page.split('<span class="mono muted">acct-silent</span>')[1].split("</li>")[0]
         assert 'href="#attention">2 items</a>' in row
-        other = page.split('<span class="mono muted">acct-current</span>')[1].split("</tr>")[0]
+        other = page.split('<span class="mono muted">acct-current</span>')[1].split("</li>")[0]
         assert "none</span>" in other
 
     def test_Home_ShowsEachStateAsAWordAndALegendWithEveryRule(self, tmp_path, household):
@@ -245,8 +245,8 @@ class TestAccounts:
         )
         off = home(tmp_path, lambda fresh: assemble(household))
 
-        assert "<td>bound</td>" in on and "<td>not bound</td>" in on
-        assert "not bound" not in off and "<td>bound</td>" not in off
+        assert "<dd>bound</dd>" in on and "<dd>not bound</dd>" in on
+        assert "not bound" not in off and "<dd>bound</dd>" not in off
 
     def test_Home_WhenNoAccountIsHeld_SaysSoRatherThanShowingAnEmptyTable(self, tmp_path):
         path = tmp_path / "empty.sqlite3"
@@ -256,7 +256,18 @@ class TestAccounts:
         page = home(tmp_path, lambda fresh: assemble(path))
 
         assert "No account is held or declared yet." in page
-        assert "<table" not in page.split('id="accounts"')[1].split("</section>")[0]
+        assert 'class="accounts"' not in page.split('id="accounts"')[1].split("</section>")[0]
+
+    def test_Home_Accounts_AreCardsAndNotATable_SoNothingScrollsSidewaysOnAPhone(
+        self, tmp_path, household
+    ):
+        """Eight columns did not fit a phone: the reference wrapped mid-word and
+        the links to each ledger were off the edge of the screen."""
+        page = home(tmp_path, lambda fresh: assemble(household))
+        accounts = page.split('id="accounts"')[1].split("</section>")[0]
+
+        assert '<ul class="accounts">' in accounts
+        assert "<table" not in accounts
 
     def test_Home_Controls_AreThumbSizedTapTargets(self, tmp_path, household):
         page = home(

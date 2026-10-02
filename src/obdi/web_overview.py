@@ -152,20 +152,29 @@ def _account_row(account: AccountOverview, today: date) -> str:
         if account.newest
         else '<span class="muted">-</span>'
     )
+    def fact(name: str, value: str) -> str:
+        return f"<div><dt>{name}</dt><dd>{value}</dd></div>"
+
+    # One card per account, not a table row.
+    # Eight columns do not fit a phone: as a table the reference wrapped
+    # mid-word and the page had to be scrolled sideways to reach the links,
+    # which are the reason for coming here.
     return (
-        "<tr>"
-        f'<th scope="row"><strong>{_esc(account.label)}</strong><br>'
-        f'<span class="mono muted">{_esc(account.ref)}</span><br>'
-        f"{_sources_html(account.sources)}</th>"
-        f"<td>{_state_html(account)}</td>"
-        f"<td>{account.rows:,}</td>"
-        f"<td>{newest}</td>"
-        f"<td>{_asked_html(account, today)}</td>"
-        f"<td>{bound}</td>"
-        f"<td>{items}</td>"
-        f'<td><a class="tap" href="/ledger?ref={_esc(target)}">Ledger</a> '
-        f'<a class="tap" href="/account?ref={_esc(target)}">Shape</a></td>'
-        "</tr>"
+        '<li class="account">'
+        f'<p class="account-name">{_state_html(account)} '
+        f"<strong>{_esc(account.label)}</strong></p>"
+        f'<span class="mono muted">{_esc(account.ref)}</span>'
+        f'<p class="account-sources">{_sources_html(account.sources)}</p>'
+        '<dl class="facts">'
+        + fact("Rows", f"{account.rows:,}")
+        + fact("Newest row", newest)
+        + fact("Provider last answered", _asked_html(account, today))
+        + fact("Actual", bound)
+        + fact("Needs attention", items)
+        + "</dl>"
+        f'<p class="account-links"><a class="tap" href="/ledger?ref={_esc(target)}">Ledger</a> '
+        f'<a class="tap" href="/account?ref={_esc(target)}">Shape</a></p>'
+        "</li>"
     )
 
 
@@ -176,22 +185,17 @@ def _accounts_html(overview: Overview) -> str:
         f"<li><strong>{_esc(state)}</strong> - {_esc(rule)}</li>"
         for state, rule in STATE_RULES.items()
     )
-    table = (
-        '<div class="scroll"><table>'
-        "<thead><tr>"
-        '<th scope="col">Account</th><th scope="col">State</th><th scope="col">Rows</th>'
-        '<th scope="col">Newest row</th><th scope="col">Provider last answered</th>'
-        '<th scope="col">Actual</th><th scope="col">Needs attention</th>'
-        '<th scope="col">Open</th>'
-        f"</tr></thead><tbody>{rows}</tbody></table></div>"
+    accounts = (
+        f'<ul class="accounts">{rows}</ul>'
         if overview.accounts
         else "<p>No account is held or declared yet.</p>"
     )
     return (
-        table
+        accounts
         + '<p class="muted">Counts and dates only. Amounts are on each ledger, '
         "masked until asked for.</p>"
-        f'<ul class="legend">{legend}</ul>'
+        "<details><summary>What each state means</summary>"
+        f'<ul class="legend">{legend}</ul></details>'
     )
 
 
