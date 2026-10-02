@@ -65,6 +65,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/attempts": "evidence",
     "/fetch-timeline": "evidence",
     "/statement-shape": "evidence",
+    "/statements": "evidence",
     "/spaces": "evidence",
 }
 

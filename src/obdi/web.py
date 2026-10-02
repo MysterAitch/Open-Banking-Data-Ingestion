@@ -52,7 +52,12 @@ from .coverage import SourceCoverage
 from .doctor import shape_problems
 from .ledger import Ledger
 from .logs import say
-from .namespaces import QUEUE_KINDS, validate_connection_name
+from .namespaces import (
+    QUEUE_KINDS,
+    UNASSIGNED_ACCOUNT,
+    validate_canonical_name,
+    validate_connection_name,
+)
 from .navigation import current_route
 from .overview import Overview
 from .position import Position
@@ -427,6 +432,11 @@ class WebConfig:
     #: keeping, because deciding whose a document is and deciding what
     #: it says are different acts, and only one of them can be undone.
     assign_kept_statement: Callable[[int, str], str] | None = None
+    #: Every kept statement, with no cap: id, origin (file name), fetched_at,
+    #: account_ref, and the name of the parser that reads it (None when none does).
+    kept_statements: Callable[[], list[dict[str, object]]] | None = None
+    #: Which artefact ids are kept statements, without reading any of them.
+    kept_statement_ids: Callable[[], set[int]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
     #: Correct one artefact's landed account (the mis-tapped destination
     #: remedy). Takes (artefact_id, new_account_ref); returns the old ref,
@@ -3802,6 +3812,9 @@ class ConnectionHandler(
                 return
             self._statement_shape_form()
             return
+        if route == "/statements":
+            self._statements_page()
+            return
         if route == "/review":
             self._review_page()
             return
@@ -4688,7 +4701,7 @@ class ConnectionHandler(
             # Reachable from where statements are sent, because "what have
             # I already uploaded?" is the question asked immediately
             # before uploading and immediately after.
-            '<p><a href="/artefacts">Every statement kept so far</a></p>'
+            '<p><a href="/statements">Every statement kept so far</a></p>'
             + f"<script>{UPLOAD_SCRIPT}</script>"
             "</form>" + HOME_LINK
         )
@@ -4972,7 +4985,7 @@ class ConnectionHandler(
             "shape can be read again without uploading the file again.</p>"
             f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
-            + self._assign_form(artefact_id)
+            + (self._assign_form(artefact_id) if self._is_kept(artefact_id) else "")
             + '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
@@ -4987,12 +5000,7 @@ class ConnectionHandler(
         """
         if self.bound_config.assign_kept_statement is None:
             return ""
-        labels: dict[str, str] = {}
-        hook = self.bound_config.display_labels
-        if hook is not None:
-            with contextlib.suppress(Exception):
-                labels = hook()
-        labels = picker_labels(labels, self.declared_accounts())
+        labels = self._account_labels()
         return (
             "<h3>Assign to an account</h3><p>Reading it in resolves its rows "
             "against everything already held. The parser's own arithmetic "
@@ -5002,6 +5010,256 @@ class ConnectionHandler(
             f'<input type="hidden" name="artefact" value="{artefact_id}">'
             + account_picker(labels)
             + '<p><button type="submit">Assign and read in</button></p></form>'
+        )
+
+    def _is_kept(self, artefact_id: int) -> bool:
+        """Is this a kept statement, as opposed to a PDF imported to an account?"""
+        hook = self.bound_config.kept_statement_ids
+        return hook is None or artefact_id in hook()
+
+    def _account_labels(self) -> dict[str, str]:
+        """Every account a statement can be given, as the picker offers them."""
+        labels: dict[str, str] = {}
+        hook = self.bound_config.display_labels
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                labels = hook()
+        return picker_labels(labels, self.declared_accounts())
+
+    def _statements_page(self) -> None:
+        """Every kept statement, grouped by what it is waiting for.
+
+        Served on a GET, so file names, dates, account labels, parser names
+        and counts only: nothing a statement says.
+        """
+        hook = self.bound_config.kept_statements
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        entries = hook()
+        labels = self._account_labels()
+        can_assign = self.bound_config.assign_kept_statement is not None
+        waiting = [
+            item for item in entries
+            if item["account_ref"] == UNASSIGNED_ACCOUNT and item["parser"]
+        ]
+        no_parser = [
+            item for item in entries
+            if item["account_ref"] == UNASSIGNED_ACCOUNT and not item["parser"]
+        ]
+        assigned = [item for item in entries if item["account_ref"] != UNASSIGNED_ACCOUNT]
+        if not entries:
+            body = (
+                "<p>No statements have been kept yet.</p>"
+                '<p><a class="button" href="/statement-shape">Upload a statement</a></p>'
+            )
+        else:
+            picker = account_picker(labels)
+
+            def file_order(item: dict[str, object]) -> tuple[str, int]:
+                return str(item["origin"]), int(str(item["id"]))
+
+            def card(item: dict[str, object], *, assignable: bool) -> str:
+                ident = int(str(item["id"]))
+                ref = str(item["account_ref"])
+                label = labels.get(ref, ref)
+                whose = (
+                    "no account yet"
+                    if ref == UNASSIGNED_ACCOUNT
+                    else html.escape(label)
+                    + (
+                        ""
+                        if label == ref
+                        else f' <span class="mono muted">{html.escape(ref)}</span>'
+                    )
+                )
+                parser = item["parser"]
+                reader = (
+                    html.escape(str(parser)) if parser else "no parser for this layout yet"
+                )
+                kept = str(item["fetched_at"])[:16].replace("T", " ")
+                form = (
+                    "<details><summary>Give it an account</summary>"
+                    '<form action="/statement-assign" method="post">'
+                    f'<input type="hidden" name="artefact" value="{ident}">'
+                    + picker
+                    + '<p><button type="submit">Assign and read in</button></p>'
+                    "</form></details>"
+                    if assignable and can_assign
+                    else ""
+                )
+                return (
+                    '<li class="account">'
+                    f'<p class="account-name"><strong>{html.escape(str(item["origin"]))}'
+                    "</strong></p>"
+                    '<dl class="facts">'
+                    f"<dt>Kept</dt><dd>{html.escape(kept)}</dd>"
+                    f"<dt>Whose</dt><dd>{whose}</dd>"
+                    f"<dt>Read by</dt><dd>{reader}</dd>"
+                    "</dl>"
+                    '<p class="account-links"><a class="tap" '
+                    f'href="/statement-shape?artefact={ident}">Masked shape</a></p>'
+                    f"{form}</li>"
+                )
+
+            def group(title: str, items: list[dict[str, object]], *, assignable: bool,
+                      lead: str = "") -> str:
+                if not items:
+                    return ""
+                ordered = sorted(items, key=file_order)
+                return (
+                    f"<h3>{html.escape(title)} ({len(items)})</h3>{lead}"
+                    '<ul class="accounts">'
+                    + "".join(card(item, assignable=assignable) for item in ordered)
+                    + "</ul>"
+                )
+
+            by_parser: dict[str, list[dict[str, object]]] = {}
+            for item in waiting:
+                by_parser.setdefault(str(item["parser"]), []).append(item)
+            bulk = ""
+            if can_assign:
+                for parser_name, items in sorted(by_parser.items()):
+                    if len(items) < 2:
+                        continue
+                    ids = ",".join(str(item["id"]) for item in sorted(items, key=file_order))
+                    bulk += (
+                        '<div class="account"><form action="/statements-assign" method="post">'
+                        f'<input type="hidden" name="artefacts" value="{ids}">'
+                        f"<p><strong>Give these {len(items)} statements to</strong> "
+                        f'<span class="muted">(all read by {html.escape(parser_name)}, '
+                        "in file-name order)</span></p>"
+                        + picker
+                        + '<p><button type="submit">Assign them all and read in</button></p>'
+                        "</form></div>"
+                    )
+            body = (
+                f'<p class="muted">{len(waiting)} waiting only for an account, '
+                f"{len(no_parser)} with no parser yet, {len(assigned)} assigned.</p>"
+                + group(
+                    "Waiting only for an account", waiting, assignable=True, lead=bulk
+                )
+                + group("No parser yet", no_parser, assignable=False)
+                + group("Assigned", assigned, assignable=False)
+            )
+        self._respond(
+            200,
+            render_page(
+                "Kept statements",
+                body
+                + '<p><a class="button secondary" href="/statement-shape">'
+                "Upload a statement</a></p>" + HOME_LINK,
+            ),
+        )
+
+    def _statements_assign(self) -> None:
+        """Give several kept statements one account, each read in turn.
+
+        One refusal never stops the rest: a statement the parser's own
+        arithmetic gate refuses is reported against its file name and the
+        others are still read, so a month that does not balance costs one
+        line rather than the whole batch.
+        """
+        hook = self.bound_config.assign_kept_statement
+        shape = self.bound_config.statement_payload
+        if hook is None or shape is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        form = parse_qs(
+            self.rfile.read(length).decode("utf-8", "replace"), keep_blank_values=True
+        )
+        wanted = [
+            part.strip()
+            for value in form.get("artefacts", []) + form.get("artefact", [])
+            for part in value.split(",")
+            if part.strip()
+        ]
+        typed = (form.get("account_other") or [""])[0].strip()
+        picked = (form.get("account") or [""])[0].strip()
+        if (
+            not wanted
+            or not all(part.isdigit() for part in wanted)
+            or not (typed or picked)
+        ):
+            self._respond(
+                400,
+                error_page(
+                    "Not assigned",
+                    "<p>A kept statement and an account are both needed.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
+        ids = list(dict.fromkeys(int(part) for part in wanted))
+        # Every id is checked before any is assigned, so one that is not a
+        # kept statement stops the batch instead of leaving half of it done.
+        named: list[tuple[str, int]] = []
+        for ident in ids:
+            held = shape(ident)
+            if held is None or not self._is_kept(ident):
+                self._respond(
+                    400,
+                    error_page(
+                        "Not assigned",
+                        f"<p>No kept statement {ident}. Nothing was assigned.</p>"
+                        + HOME_LINK,
+                    ),
+                )
+                return
+            named.append((held[0], ident))
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=(form.get(NEW_ACCOUNT_FIELD) or [""])[0],
+            action="/statements-assign",
+            carry=lambda: {"artefacts": ",".join(str(ident) for ident in ids)},
+            proceed_label="Declare it and read the statements in",
+        )
+        if account is None:
+            return
+        try:
+            validate_canonical_name(account)
+        except ValueError as exc:
+            self._respond(
+                400,
+                error_page(
+                    "Not assigned", f"<p>Not assigned: {html.escape(str(exc))}</p>" + HOME_LINK
+                ),
+            )
+            return
+        lines = []
+        read_in = 0
+        for name, ident in sorted(named):
+            try:
+                outcome = hook(ident, account)
+            except Exception as exc:
+                lines.append(
+                    f'<li class="account"><p><strong>{html.escape(name)}</strong></p>'
+                    f'<p class="alarm">Refused: {html.escape(str(exc))}</p>'
+                    "<p>Still kept, and still waiting for an account.</p></li>"
+                )
+                continue
+            if " read by " in outcome:
+                read_in += 1
+                css = "ok"
+            else:
+                css = "alarm"
+            lines.append(
+                f'<li class="account"><p><strong>{html.escape(name)}</strong></p>'
+                f'<p class="{css}">{html.escape(outcome)}</p></li>'
+            )
+        refused = len(named) - read_in
+        self._respond(
+            200,
+            render_page(
+                "Statements read in",
+                f"<h2>Statements read in</h2><p>{read_in} read in, {refused} refused, "
+                f"each in file-name order.</p>"
+                f'<ul class="accounts">{"".join(lines)}</ul>'
+                '<p><a class="button" href="/statements">Back to kept statements</a></p>'
+                + HOME_LINK,
+            ),
         )
 
     def _statement_assign(self) -> None:
@@ -5573,6 +5831,9 @@ class ConnectionHandler(
             return
         if route == "/statement-assign":
             self._statement_assign()
+            return
+        if route == "/statements-assign":
+            self._statements_assign()
             return
 
         if route == "/save-account":

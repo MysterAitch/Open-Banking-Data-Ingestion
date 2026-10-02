@@ -26,6 +26,24 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.249] - 2026-10-02
+
+### Added
+- **Every kept statement has a page: `/statements`.** It lists all of them,
+  grouped as waiting only for an account, no parser yet, and assigned, each
+  with its file name, the parser that reads it, and its masked shape.
+  Previously the only link led to a list capped at the newest 500 artefacts,
+  which held none of the 31 statements kept.
+- **Statements of one kind can be given an account together**, in file-name
+  order. One the balance check refuses is reported by name and the rest are
+  still read.
+
+### Fixed
+- **A statement the balance check refuses stays waiting for an account.** It
+  used to be filed under the account first and left there with no rows.
+- **`/statement-shape?artefact=…` answers for PDFs only.** It answered for
+  every artefact and offered to assign feed payloads to an account.
+
 ## [0.4.248] - 2026-10-02
 
 ### Added

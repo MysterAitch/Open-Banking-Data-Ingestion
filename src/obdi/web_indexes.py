@@ -83,6 +83,12 @@ EVIDENCE: tuple[tuple[str, str, str], ...] = (
         "masked, and the file is kept as evidence.",
     ),
     (
+        "/statements",
+        "Kept statements",
+        "Which statements have been kept, whose is each, and which are waiting only "
+        "for an account?",
+    ),
+    (
         "/spaces",
         "Historical Spaces",
         "Which Starling Spaces once moved money but are no longer listed by the "

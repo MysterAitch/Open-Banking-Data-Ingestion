@@ -2715,6 +2715,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         the ordinary parse - the rows resolve against the same identity
         rules as an API pull, and the parser's own arithmetic gate still
         refuses a document whose rows do not carry its declared balances.
+
+        Read BEFORE it is filed: a statement the gate refuses must stay
+        waiting for an account, not sit under one with no rows - which a
+        later rebuild would then replay into the same refusal.
+        Only a kept statement is assigned; any other artefact id is
+        refused, because refiling a feed payload would corrupt its filing.
         """
         from .ingest import ImportSummary, reconcile_batch
         from .namespaces import validate_canonical_name
@@ -2730,15 +2736,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             row = store.connection.execute(
                 "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
-                "WHERE rowid = ?",
+                "WHERE rowid = ? AND source = 'statement'",
                 (artefact_id,),
             ).fetchone()
             if row is None:
                 return f"No kept statement {artefact_id}."
             payload = bytes(row["payload"])
-            store.refile_artefact(artefact_id, destination)
             parser = detect(payload)
             incoming = list(parser.parse(payload, account_id=destination))
+            store.refile_artefact(artefact_id, destination)
             summary = ImportSummary(artefact_new=False)
             reconcile_batch(
                 store, incoming, digest=str(row["digest"]), summary=summary
@@ -2749,14 +2755,69 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         )
 
     def statement_payload(artefact_id: int) -> tuple[str, bytes] | None:
+        # PDFs only: it answered 200 for every artefact in the store, feed
+        # payloads and CSVs included, and printed "could not be read as a PDF".
+        # An imported PDF is served too, because its artefact page links here.
         with Store(db_path) as store:
             row = store.connection.execute(
-                "SELECT origin, payload FROM raw_artefacts WHERE rowid = ?",
+                "SELECT origin, payload FROM raw_artefacts WHERE rowid = ? "
+                "AND (source = 'statement' OR media_type = 'application/pdf')",
                 (artefact_id,),
             ).fetchone()
         if row is None:
             return None
         return str(row["origin"]), bytes(row["payload"])
+
+    def kept_statement_ids() -> set[int]:
+        """The ids that are kept statements - cheap, unlike `kept_statements`."""
+        with Store(db_path) as store:
+            rows = store.connection.execute(
+                "SELECT rowid FROM raw_artefacts WHERE source = 'statement'"
+            ).fetchall()
+        return {int(row["rowid"]) for row in rows}
+
+    # Keyed by digest, which is a hash of the bytes the parser reads, so a
+    # cached answer cannot go stale while this process runs: the same bytes
+    # always meet the same parsers. Reading a PDF's text is slow enough that
+    # re-reading every kept statement on each page view is not affordable.
+    parser_by_digest: dict[str, str | None] = {}
+
+    def kept_statements() -> list[dict[str, object]]:
+        """Every kept statement, however old and however many.
+
+        Unlike `artefact_index` there is no LIMIT: a capped list buried
+        statements under newer feed payloads, which is why this exists.
+        """
+        from .errors import DataError
+        from .parsers.uk_banks import detect
+
+        with Store(db_path) as store:
+            rows = store.connection.execute(
+                "SELECT rowid, digest, origin, fetched_at, account_ref "
+                "FROM raw_artefacts WHERE source = 'statement' ORDER BY rowid"
+            ).fetchall()
+            listing: list[dict[str, object]] = []
+            for row in rows:
+                digest = str(row["digest"])
+                if digest not in parser_by_digest:
+                    held = store.connection.execute(
+                        "SELECT payload FROM raw_artefacts WHERE rowid = ?",
+                        (row["rowid"],),
+                    ).fetchone()
+                    try:
+                        parser_by_digest[digest] = detect(bytes(held["payload"])).source
+                    except (DataError, ValueError):
+                        parser_by_digest[digest] = None
+                listing.append(
+                    {
+                        "id": int(row["rowid"]),
+                        "origin": str(row["origin"]),
+                        "fetched_at": str(row["fetched_at"]),
+                        "account_ref": str(row["account_ref"]),
+                        "parser": parser_by_digest[digest],
+                    }
+                )
+        return listing
 
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
@@ -3006,6 +3067,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statement_digests_held=statement_digests_held,
         statement_payload=statement_payload,
         assign_kept_statement=assign_kept_statement,
+        kept_statements=kept_statements,
+        kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,
         refile_artefact=(
             lambda artefact_id, account: _refile(db_path, artefact_id, account)

@@ -235,11 +235,12 @@ class TestTheIndexPages:
             assert question.count("?") == 1, route
         assert 'href="/artefacts"' not in page
 
-    def test_Evidence_ListsTheFiveSourcesEachWithOneSentence(self, base):
+    def test_Evidence_ListsTheSixSourcesEachWithOneSentence(self, base):
         page = httpx.get(f"{base}/evidence", timeout=20).text
 
         assert [route for route, _, _ in EVIDENCE] == [
-            "/artefacts", "/attempts", "/fetch-timeline", "/statement-shape", "/spaces",
+            "/artefacts", "/attempts", "/fetch-timeline", "/statement-shape",
+            "/statements", "/spaces",
         ]
         for route, title, question in EVIDENCE:
             assert f'href="{route}"' in page and title in page
