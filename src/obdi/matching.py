@@ -47,6 +47,14 @@ MANUAL_WINDOW_DAYS = 10
 
 INTERNAL_TRANSFER_WINDOW_DAYS = 1
 
+#: Sources that name a payment by ONE id for its whole life, pending and
+#: settled alike.
+#: For these a different id is always a different payment.
+#: A source is listed only once that is known of it: an aggregator that
+#: reissues a payment under a new id when it settles must not be here, or
+#: every settlement would read as a second payment.
+SETTLEMENT_KEEPS_ID = frozenset({"starling"})
+
 
 def could_be_one_payment(
     incoming: Transaction, candidate: Transaction, *, same_content: bool
@@ -89,7 +97,12 @@ def could_be_one_payment(
     incoming_pending = incoming.status is TransactionStatus.PENDING
     candidate_pending = candidate.status is TransactionStatus.PENDING
     if incoming_pending != candidate_pending:
-        return True
+        # Settlement runs one way.
+        # A pending record dated after a settled row cannot be that row's
+        # precursor, so it is a different payment; a pending record dated on
+        # or before it may be the stale tail of a pending list that still
+        # names a payment already settled.
+        return not (incoming_pending and incoming.value_date > candidate.value_date)
 
     both_authoritative = (
         incoming.tier is SourceTier.AUTHORITATIVE and candidate.tier is SourceTier.AUTHORITATIVE
@@ -221,14 +234,30 @@ class CandidateIndex:
     longer holds - invisible in output until it merges the wrong payment.
     """
 
-    def __init__(self, transactions: Iterable[Transaction] = ()) -> None:
+    def __init__(
+        self,
+        transactions: Iterable[Transaction] = (),
+        sightings: Iterable[tuple[str, str, str]] = (),
+    ) -> None:
         self._order: list[Transaction] = []
         self._position: dict[str, int] = {}
         self._by_source_id: dict[tuple[str, str, str], list[str]] = {}
         self._by_content: dict[tuple[str, str], list[str]] = {}
         self._by_amount: dict[tuple[str, int], list[str]] = {}
+        # Every provider id a row has EVER been sighted under, which outlives
+        # the row's own source and id.
+        # A row carries one source at a time, the last to observe it; this is
+        # what remembers the others.
+        self._sighted: dict[tuple[str, str, str], list[str]] = {}
+        self._ids_of: dict[str, dict[str, set[str]]] = {}
         for transaction in transactions:
             self.append(transaction)
+        for entity_id, source, source_id in sightings:
+            position = self._position.get(entity_id)
+            if position is not None:
+                self.note_sighting(
+                    entity_id, self._order[position].account_id, source, source_id
+                )
 
     def __len__(self) -> int:
         return len(self._order)
@@ -236,7 +265,38 @@ class CandidateIndex:
     def __iter__(self) -> Iterator[Transaction]:
         return iter(self._order)
 
+    def note_sighting(
+        self, entity_id: str, account_id: str, source: str, source_id: str | None
+    ) -> None:
+        """Record that `source` has called this row by `source_id`.
+
+        Never undone. A row's own source and id change every time another
+        source observes it, and a row that forgot what it had been called is
+        how one payment came to be held twice: the first source re-reported
+        it with a changed amount, found no row under its id, and made another.
+        """
+        if not source_id:
+            return
+        held = self._sighted.setdefault((account_id, source, source_id), [])
+        if entity_id not in held:
+            held.append(entity_id)
+        self._ids_of.setdefault(entity_id, {}).setdefault(source, set()).add(source_id)
+
+    def sighted_under_another_id(
+        self, entity_id: str, source: str, source_id: str | None
+    ) -> bool:
+        """Whether `source` has called this row by an id other than this one."""
+        if not source_id:
+            return False
+        return bool(self._ids_of.get(entity_id, {}).get(source, set()) - {source_id})
+
     def _file(self, transaction: Transaction) -> None:
+        self.note_sighting(
+            transaction.entity_id,
+            transaction.account_id,
+            transaction.source,
+            transaction.source_id,
+        )
         if transaction.source_id:
             key = (transaction.account_id, transaction.source, transaction.source_id)
             self._by_source_id.setdefault(key, []).append(transaction.entity_id)
@@ -287,9 +347,11 @@ class CandidateIndex:
     def by_source_id(
         self, account_id: str, source: str, source_id: str
     ) -> list[Transaction]:
-        return self._in_arrival_order(
-            self._by_source_id.get((account_id, source, source_id), [])
-        )
+        """Rows this source has called by this id, whatever they carry now."""
+        key = (account_id, source, source_id)
+        current = self._by_source_id.get(key, [])
+        entity_ids = [*current, *(e for e in self._sighted.get(key, []) if e not in current)]
+        return self._in_arrival_order(entity_ids)
 
     def by_content_key(self, account_id: str, content_key: str) -> list[Transaction]:
         return self._in_arrival_order(
@@ -353,9 +415,21 @@ def resolve(
         for candidate in index.by_source_id(account, incoming.source, incoming.source_id):
             return MatchResult(MatchTier.SOURCE_ID, candidate)
 
+    def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
+        # Where a source keeps a payment's id through settlement, a row it
+        # has already called by a different id is a different payment, and
+        # no resemblance of amount, date, or status can make it the same.
+        # Without this a new pending payment was merged into any settled row
+        # of the same amount within a week, and replaced it.
+        if incoming.source in SETTLEMENT_KEEPS_ID and index.sighted_under_another_id(
+            candidate.entity_id, incoming.source, incoming.source_id
+        ):
+            return False
+        return could_be_one_payment(incoming, candidate, same_content=same_content)
+
     if incoming.content_key:
         for candidate in index.by_content_key(account, incoming.content_key):
-            if could_be_one_payment(incoming, candidate, same_content=True):
+            if one_payment(candidate, same_content=True):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
     # A hand-entered date is remembered rather than observed, so the window
@@ -378,7 +452,7 @@ def resolve(
     near = [
         t
         for t in similar
-        if could_be_one_payment(incoming, t, same_content=t.content_key == incoming.content_key)
+        if one_payment(t, same_content=t.content_key == incoming.content_key)
     ]
     rejected = tuple(t for t in similar if t not in near)
 

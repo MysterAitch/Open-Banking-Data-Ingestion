@@ -28,6 +28,15 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.243] - 2026-10-02
 
+### Fixed
+- **A payment is no longer held twice when its bank amends it after a second
+  source has seen it.** The row had forgotten the id its first source knew it
+  by, so the amended report made a new row. Rows already doubled fold on the
+  next "Rebuild from raw".
+- **A new pending payment no longer replaces a settled one of the same
+  amount.** A pending record that matches a settled row is now only noted as a
+  sighting, and one dated after the settled row is a payment of its own.
+
 ### Changed
 - **The navigation strip is in order of use and fits two rows on a phone.**
   Position and Accounts come before Connections; previously the eight entries

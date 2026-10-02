@@ -2518,6 +2518,22 @@ class Store:
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
 
+    def sighted_ids_for_account(self, account_id: str) -> list[tuple[str, str, str]]:
+        """(entity, source, provider id) for every id a row here has been seen under.
+
+        The matcher's memory of what each source has called each row.
+        A row keeps only the id of the last source to observe it, and this is
+        the only record of the others.
+        """
+        rows = self.connection.execute(
+            "SELECT DISTINCT s.entity_id, s.source, s.source_id "
+            "FROM transaction_sources s "
+            "JOIN transactions t ON t.entity_id = s.entity_id "
+            "WHERE t.account_id = ? AND s.source_id IS NOT NULL AND s.source_id != ''",
+            (account_id,),
+        ).fetchall()
+        return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
+
     def record_source(self, transaction: Transaction) -> None:
         """Note that this source has seen this transaction, in this artefact.
 

@@ -530,6 +530,14 @@ link so a wrong match can be found and reversed.
 **Pending → settled is supersession, not update.** A settling transaction often
 arrives with a new provider id and a shifted date. The entity keeps its
 identity, both raw payloads are retained, and the rebuild stays reproducible.
+Settlement runs one way: a pending record that matches a settled row is noted
+as a sighting and changes nothing on the row.
+
+**A row is known by every id its source has called it.** A row carries one
+source at a time, the last to observe it, so the exact-id tier also looks up
+the ids recorded in its sightings. For a source that keeps one id through
+settlement (Starling, listed in `matching.SETTLEMENT_KEEPS_ID`), a row already
+known by a different id from that source is a different payment.
 
 **Normalisation is deliberately conservative.** Under-matching falls through to
 review; over-matching silently merges two real payments and is very hard to

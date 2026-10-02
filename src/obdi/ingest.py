@@ -18,7 +18,7 @@ from pathlib import Path
 from . import instrumentation
 from .identity import artefact_digest, entity_id_for
 from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
-from .models import RawArtefact, Transaction
+from .models import RawArtefact, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
 from .store import Store
 
@@ -359,7 +359,8 @@ def _reconcile_all(
         if existing is None:
             with instrumentation.phase("load-candidates"):
                 existing = CandidateIndex(
-                    store.transactions_for_account(transaction.account_id)
+                    store.transactions_for_account(transaction.account_id),
+                    sightings=store.sighted_ids_for_account(transaction.account_id),
                 )
             by_account[transaction.account_id] = existing
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
@@ -395,6 +396,28 @@ def _reconcile(
     """
     with instrumentation.phase("resolve"):
         result = resolve(transaction, existing)
+
+    if (
+        result.existing is not None
+        and result.existing.status is TransactionStatus.BOOKED
+        and transaction.status is TransactionStatus.PENDING
+    ):
+        # Settlement runs one way.
+        # A pending record that matches a settled row is the stale tail of a
+        # pending list, or a second source that has not caught up; either way
+        # it is a sighting of that row and says nothing new about it.
+        # Superseding with it put a settled payment back to pending, moved its
+        # date, and - when the pending record was really a different payment -
+        # replaced the settled one altogether.
+        sighting = replace(
+            transaction, entity_id=result.existing.entity_id, artefact_digest=digest
+        )
+        store.record_source(sighting)
+        existing.note_sighting(
+            sighting.entity_id, sighting.account_id, sighting.source, sighting.source_id
+        )
+        summary.matched += 1
+        return result.existing, result.existing.entity_id
 
     if result.existing is not None:
         merged = supersede(result.existing, transaction)

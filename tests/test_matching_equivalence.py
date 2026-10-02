@@ -14,6 +14,24 @@ for - a supersession changing an entity's source_id mid-fold, a manual
 record widening the window for one candidate but not its neighbour, an
 id-less repeat arriving while a settled reissue is in flight. Seeded, so
 any disagreement is reproducible by its seed alone.
+
+THE RESOLVE ORACLE IS NO LONGER VERBATIM, and the two amendments are the
+whole of the difference. Provider-id continuity changed what the matcher is
+meant to decide, so an oracle frozen at the old behaviour would have held
+the index to answers that are now known to be wrong (one payment held twice,
+a new pending payment replacing a settled one). The amendments are written
+here as naive scans, independently of the index that implements them:
+
+  1. Tier 1 finds a row by any id its source has EVER called it, not only
+     the id the row carries now.
+  2. For a source in SETTLEMENT_KEEPS_ID, a row that source has called by a
+     different id is a different payment, at every later tier.
+
+What a row has been called is memory the rows themselves do not hold, so
+there are two folds to agree with: one where that memory is only each row's
+current id (an index rebuilt from rows alone, which is all `resolve` has
+when handed a list), and one where it is kept across the batch (the
+persistent index, which is what ingestion runs).
 """
 
 from __future__ import annotations
@@ -25,6 +43,7 @@ from datetime import date, timedelta
 from obdi.matching import (
     FUZZY_WINDOW_DAYS,
     MANUAL_WINDOW_DAYS,
+    SETTLEMENT_KEEPS_ID,
     MatchResult,
     belongs_to_established_series,
     could_be_one_payment,
@@ -34,26 +53,50 @@ from obdi.matching import (
 )
 from obdi.models import MatchTier, SourceTier, Transaction, TransactionStatus
 
+#: Every (source, provider id) each row has been called, by entity id.
+Called = dict[str, set[tuple[str, str]]]
+
 
 def _resolve_reference(
-    incoming: Transaction, existing: list[Transaction]
+    incoming: Transaction,
+    existing: list[Transaction],
+    called: Called | None = None,
 ) -> MatchResult:
-    """The pre-index resolve(), preserved verbatim as the oracle."""
+    """The pre-index resolve() as a linear scan, with the two amendments.
+
+    `called` is the memory of what each row has been called.
+    Left out, a row is known only by the id it carries now.
+    """
+
+    def names_of(candidate: Transaction) -> set[tuple[str, str]]:
+        if called is not None:
+            return called.get(candidate.entity_id, set())
+        if candidate.source_id:
+            return {(candidate.source, candidate.source_id)}
+        return set()
+
+    def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
+        if incoming.source in SETTLEMENT_KEEPS_ID and incoming.source_id:
+            other_ids = {
+                source_id
+                for source, source_id in names_of(candidate)
+                if source == incoming.source
+            } - {incoming.source_id}
+            if other_ids:
+                return False
+        return could_be_one_payment(incoming, candidate, same_content=same_content)
+
     same_account = [t for t in existing if t.account_id == incoming.account_id]
 
     if incoming.source_id:
         for candidate in same_account:
-            if (
-                candidate.source_id
-                and candidate.source == incoming.source
-                and candidate.source_id == incoming.source_id
-            ):
+            if (incoming.source, incoming.source_id) in names_of(candidate):
                 return MatchResult(MatchTier.SOURCE_ID, candidate)
 
     if incoming.content_key:
         for candidate in same_account:
-            if candidate.content_key == incoming.content_key and could_be_one_payment(
-                incoming, candidate, same_content=True
+            if candidate.content_key == incoming.content_key and one_payment(
+                candidate, same_content=True
             ):
                 return MatchResult(MatchTier.CONTENT_KEY, candidate)
 
@@ -71,9 +114,7 @@ def _resolve_reference(
     near = [
         t
         for t in similar
-        if could_be_one_payment(
-            incoming, t, same_content=t.content_key == incoming.content_key
-        )
+        if one_payment(t, same_content=t.content_key == incoming.content_key)
     ]
     rejected = tuple(t for t in similar if t not in near)
 
@@ -311,13 +352,66 @@ def _fold_indexed(incoming: list[Transaction]) -> list[tuple]:
     return outcomes
 
 
+def _fold_remembering(incoming: list[Transaction]) -> list[tuple]:
+    """The reference fold, keeping what each row has been called.
+
+    The counterpart of `_fold_indexed`: a plain list of rows, and beside it
+    every (source, id) each row has arrived under, added to and never
+    removed.
+    """
+    seen: dict[tuple[str, str], int] = {}
+    rows: list[Transaction] = []
+    called: Called = {}
+    outcomes = []
+
+    def note(entity_id: str, sighting: Transaction) -> None:
+        if sighting.source_id:
+            called.setdefault(entity_id, set()).add(
+                (sighting.source, sighting.source_id)
+            )
+
+    for transaction in incoming:
+        key = (transaction.account_id, transaction.content_key)
+        numbered = replace(transaction, occurrence=seen.get(key, 0))
+        seen[key] = seen.get(key, 0) + 1
+
+        result = _resolve_reference(numbered, rows, called)
+        outcomes.append(_outcome(result))
+        if result.existing is None:
+            rows.append(numbered)
+            note(numbered.entity_id, numbered)
+        else:
+            merged = supersede(result.existing, numbered)
+            for position, candidate in enumerate(rows):
+                if candidate.entity_id == merged.entity_id:
+                    rows[position] = merged
+                    break
+            note(merged.entity_id, numbered)
+    return outcomes
+
+
 class TestTheMaintainedIndexMatchesTheReferenceFold:
     def test_APersistentIndexAcrossTheWholeBatch_AgreesWithTheReference(self):
         for seed in range(30):
             batch = _corpus(seed, 120)
-            reference = _fold(list(batch), _resolve_reference, [])
+            reference = _fold_remembering(list(batch))
             actual = _fold_indexed(list(batch))
             assert actual == reference, f"divergence at seed {seed}"
+
+    def test_TheCorpus_ReachesTheCasesWhereMemoryDecides(self):
+        """Without this the test above could pass with the memory unused.
+
+        A fold that remembers and one that knows only current ids must
+        part company somewhere in the corpus, or the corpus never offers an
+        id a row has since stopped carrying.
+        """
+        parted = [
+            seed
+            for seed in range(30)
+            if _fold_remembering(_corpus(seed, 120))
+            != _fold(_corpus(seed, 120), _resolve_reference, [])
+        ]
+        assert parted, "no seed distinguishes remembered ids from current ones"
 
 
 class TestIndexMaintenanceInvariants:
@@ -340,14 +434,20 @@ class TestIndexMaintenanceInvariants:
             status=status,
         )
 
-    def test_Supersession_WhenIdentityChanges_TheOldKeysStopMatching(self):
-        """A pending that settles under a new id must not be findable
-        under its old one - the stored row no longer carries it, and the
-        reference scan therefore cannot see it either."""
+    def test_Supersession_WhenIdentityChanges_TheOldIdStillFindsTheRow(self):
+        """A pending that settles under a new id is still the row its source
+        called by the old one.
+
+        This asserted the opposite until provider-id continuity: the row no
+        longer carries the old id, so the old id found nothing. That
+        forgetting is how one payment came to be held twice - its source
+        reported it again under the id it had always used, found no row,
+        and made another.
+        """
         from obdi.matching import CandidateIndex
 
         index = CandidateIndex()
-        pending = self._transaction("e1", source_id="old-id",
+        pending = self._transaction("e1", source="truelayer", source_id="old-id",
                                     content_key="ck-old",
                                     status=TransactionStatus.PENDING)
         index.append(pending)
@@ -355,14 +455,33 @@ class TestIndexMaintenanceInvariants:
                           status=TransactionStatus.BOOKED)
         index.replace(settled)
 
-        probe_old = self._transaction("probe", source_id="old-id",
-                                      content_key="ck-old")
+        probe_old = self._transaction("probe", source="truelayer",
+                                      source_id="old-id", content_key="ck-old")
         result = resolve(probe_old, index)
-        assert result.tier is not MatchTier.SOURCE_ID
-        assert result.tier is not MatchTier.CONTENT_KEY
+        assert result.tier is MatchTier.SOURCE_ID
+        assert result.existing is not None
+        assert result.existing.entity_id == "e1"
 
-        probe_new = self._transaction("probe2", source_id="new-id")
+        probe_new = self._transaction("probe2", source="truelayer",
+                                      source_id="new-id")
         assert resolve(probe_new, index).tier is MatchTier.SOURCE_ID
+
+    def test_Supersession_WhenContentChanges_TheOldContentKeyStopsMatching(self):
+        """Content is what a row says now, and unlike an id it is not
+        remembered: a record with no id and the row's former content must
+        not reach it through the content tier."""
+        from obdi.matching import CandidateIndex
+
+        index = CandidateIndex()
+        pending = self._transaction("e1", source="truelayer", source_id="old-id",
+                                    content_key="ck-old",
+                                    status=TransactionStatus.PENDING)
+        index.append(pending)
+        index.replace(replace(pending, source_id="new-id", content_key="ck-new",
+                              status=TransactionStatus.BOOKED))
+
+        probe = self._transaction("probe", source="qif", content_key="ck-old")
+        assert resolve(probe, index).tier is not MatchTier.CONTENT_KEY
 
     def test_Replacement_KeepsTheArrivalSlot_SoFirstMatchStaysFirst(self):
         """Tier 2 returns the FIRST arrival-order match. Replacing the
