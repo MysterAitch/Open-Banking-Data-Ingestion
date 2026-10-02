@@ -43,6 +43,7 @@ from typing import NewType
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord, ArchiveOutcome
+from .actual_push import valid_progress
 from .alerts import consent_rung
 from .callback import render_page
 from .classification import redact_summary
@@ -1805,19 +1806,40 @@ def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
     )
 
 
+#: Seconds without a heartbeat after which queued work is called stuck. The
+#: applier renews it every 60 seconds while a request runs.
+_HEARTBEAT_STALE_SECONDS = 120
+
+
+def _heartbeat_reading(heartbeat: str, now: datetime) -> tuple[str, float | None]:
+    """The heartbeat's clock time and its age in seconds; blank and None when
+    it is absent or unparseable."""
+    if heartbeat:
+        with contextlib.suppress(ValueError):
+            seen = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
+            return seen.strftime("%H:%M:%S"), (now - seen).total_seconds()
+    return "", None
+
+
+def _progress_sentence(raw: object) -> str:
+    """What a request has got through so far, in counts only; empty unless
+    the report is well formed."""
+    progress = valid_progress(raw)
+    if not progress:
+        return ""
+    done, total = f"{progress['done']:,}", f"{progress['total']:,}"
+    if progress["phase"] == "removing":
+        return f"removed {done} of {total} rows so far, in the account being worked on"
+    return f"worked through {done} of {total} transfer pairs so far"
+
+
 def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
     """The queue's counterparty, made visible.
 
     Quiet fact when the applier is checking in; a warning naming the
     container when work is queued and nobody has looked at it - which
     otherwise reads as a silent, minutes-long mystery."""
-    stamp = ""
-    age_seconds: float | None = None
-    if heartbeat:
-        with contextlib.suppress(ValueError):
-            seen = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
-            stamp = seen.strftime("%H:%M:%S")
-            age_seconds = (now - seen).total_seconds()
+    stamp, age_seconds = _heartbeat_reading(heartbeat, now)
     if not stamp:
         if queued_count:
             return (
@@ -1825,7 +1847,7 @@ def _applier_liveness(heartbeat: str, queued_count: int, now: datetime) -> str:
                 "look at the obdi-applier container</p>"
             )
         return ""
-    if queued_count and age_seconds is not None and age_seconds > 120:
+    if queued_count and age_seconds is not None and age_seconds > _HEARTBEAT_STALE_SECONDS:
         minutes = int(age_seconds // 60)
         return (
             f'<p class="warn">work is queued but the applier last checked '
@@ -3100,6 +3122,18 @@ def _actual_rows(
             queued = actual_queue()
         except Exception:
             queued = []
+        heartbeat = ""
+        if actual_heartbeat is not None:
+            try:
+                heartbeat = actual_heartbeat()
+            except Exception:
+                heartbeat = ""
+        now = datetime.now(UTC)
+        # Progress is only as good as the beat that carried it: past the
+        # staleness threshold the page shows the warning and not a count
+        # that may be minutes old.
+        _, heartbeat_age = _heartbeat_reading(heartbeat, now)
+        beating = heartbeat_age is not None and heartbeat_age <= _HEARTBEAT_STALE_SECONDS
         parts = []
         for entry in queued:
             stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
@@ -3113,6 +3147,9 @@ def _actual_rows(
                     "the applier picked this up at "
                     f"{html.escape(since[11:19])}Z and is working on it"
                 )
+                sentence = _progress_sentence(entry.get("progress")) if beating else ""
+                if sentence:
+                    note += f" - {html.escape(sentence)}"
             else:
                 what = f"queued{kind_note}"
                 note = "waiting for the applier"
@@ -3122,15 +3159,7 @@ def _actual_rows(
                 f'<br><span class="muted">{note}</span></div>'
             )
         queued_html = "".join(parts)
-        heartbeat = ""
-        if actual_heartbeat is not None:
-            try:
-                heartbeat = actual_heartbeat()
-            except Exception:
-                heartbeat = ""
-        queued_html += _applier_liveness(
-            heartbeat, len(queued), datetime.now(UTC)
-        )
+        queued_html += _applier_liveness(heartbeat, len(queued), now)
     results: list[dict[str, object]] = []
     summary_html = ""
     if actual_status is not None:

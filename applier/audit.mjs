@@ -27,6 +27,8 @@
  * transfers.mjs, which the linking push shares.
  */
 
+import { makeYielder } from './turn.mjs';
+
 export function partitionAccount(expectedRows, actualRows) {
   const expectedById = new Map(expectedRows.map((row) => [row.imported_id, row]));
   const seen = new Set();
@@ -231,6 +233,8 @@ function shownCeiling(accountId, clearEmpty, confirmed) {
 export async function pruneAccounts(client, accounts, options = {}) {
   const clearEmpty = options.clear_empty ?? {};
   const confirmed = options.confirmed ?? {};
+  const onProgress = options.onProgress;
+  const maybeYield = makeYielder();
   // A request naming accounts to clear is the press of one clearing form and
   // nothing else: pruning every other account in the same stroke would
   // delete rows the person never saw a count for.
@@ -278,8 +282,20 @@ export async function pruneAccounts(client, accounts, options = {}) {
       });
       continue;
     }
+    // The total is this account's: the next account is not read until this
+    // one is done, and reading them all first would only buy a prettier
+    // number at the cost of a second pass over the budget.
+    let done = 0;
     for (const target of prunable) {
       await client.deleteTransaction(target.id);
+      done += 1;
+      onProgress?.({
+        account_id: accountId,
+        name: nameOf.get(accountId),
+        done,
+        total: prunable.length,
+      });
+      await maybeYield();
     }
     const foreign = rows.filter(
       (row) => !row.is_child && row.imported_id && !isObdiImportedId(row.imported_id)

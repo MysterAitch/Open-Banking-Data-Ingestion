@@ -139,14 +139,134 @@ test('an update the engine refuses is counted as failed and named, and the next 
   assert.ok(result.lines.some((line) => line.includes('engine refused')));
 });
 
+// A stand-in for the pause between re-reads that records, rather than spends, it.
+function recordedSleep() {
+  const pauses = [];
+  return { pauses, sleep: async (ms) => void pauses.push(ms) };
+}
+
 test('an update that leaves the rows unlinked is reported as a failed verification', async () => {
   const { linkTransfers } = await import('./lib.mjs');
   const client = transferClient(freshRows());
   client.updateTransaction = async () => {};
-  const result = await linkTransfers(client, PAIR);
+  const { sleep } = recordedSleep();
+  const result = await linkTransfers(client, PAIR, { sleep });
   assert.equal(result.counts.linked, 0);
   assert.equal(result.counts.failed, 1);
   assert.ok(result.lines.some((line) => line.includes('verification')));
+});
+
+// updateTransaction resolves before the change can be read, as it does for an
+// opening row; the link becomes readable only once `becomesReadableAfter`
+// re-reads have been made since the updates.
+function slowLinkClient(rows, becomesReadableAfter) {
+  const client = transferClient(rows);
+  const pending = [];
+  let readsSinceUpdate = 0;
+  client.updateTransaction = async (id, fields) => {
+    client.updates.push([id, fields]);
+    pending.push([id, fields]);
+    readsSinceUpdate = 0;
+  };
+  const read = client.getTransactions;
+  client.getTransactions = async (accountId) => {
+    if (pending.length && readsSinceUpdate >= becomesReadableAfter) {
+      for (const [id, fields] of pending.splice(0)) {
+        Object.assign(Object.values(rows).flat().find((r) => r.id === id), fields);
+      }
+    }
+    readsSinceUpdate += 1;
+    return read(accountId);
+  };
+  return client;
+}
+
+test('Linking_WhenLinkOnlyReadsBackOnTheSecondReRead_CountsLinkedNotFailed', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  // Each verification read touches two accounts, so n whole reads is 2n calls.
+  const client = slowLinkClient(freshRows(), 4);
+  const { pauses, sleep } = recordedSleep();
+  const result = await linkTransfers(client, PAIR, {
+    sleep,
+    settle: { attempts: 5, intervalMs: 123 },
+  });
+  assert.equal(result.counts.linked, 1);
+  assert.equal(result.counts.failed, 0);
+  assert.deepEqual(pauses, [123, 123]);
+  assert.ok(!result.lines.some((line) => line.includes('FAILED')));
+});
+
+test('Linking_WhenLinkNeverReadsBack_IsFailedAfterTheBoundedAttemptsAndNamed', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const rows = freshRows();
+  const client = transferClient(rows);
+  client.updateTransaction = async () => {};
+  let reads = 0;
+  const read = client.getTransactions;
+  client.getTransactions = async (accountId) => {
+    reads += 1;
+    return read(accountId);
+  };
+  const { pauses, sleep } = recordedSleep();
+  const result = await linkTransfers(client, PAIR, {
+    sleep,
+    settle: { attempts: 3, intervalMs: 7 },
+  });
+  assert.equal(result.counts.failed, 1);
+  assert.equal(result.counts.linked, 0);
+  assert.ok(result.lines.some((line) => line.includes('k-a:0 -> k-b:0') && line.includes('verification')));
+  // The pre-link read, the first check, then three bounded re-reads: two accounts each.
+  assert.equal(pauses.length, 3);
+  assert.equal(reads, 2 + 2 + 3 * 2);
+});
+
+test('Linking_WhenLinkedAtOnce_CostsNoExtraWaitOrRead', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const client = transferClient(freshRows());
+  let reads = 0;
+  const read = client.getTransactions;
+  client.getTransactions = async (accountId) => {
+    reads += 1;
+    return read(accountId);
+  };
+  const { pauses, sleep } = recordedSleep();
+  const result = await linkTransfers(client, PAIR, { sleep });
+  assert.equal(result.counts.linked, 1);
+  assert.deepEqual(pauses, []);
+  assert.equal(reads, 4);
+});
+
+test('Linking_WhenOnePairLagsAndAnotherIsImmediate_BothCountLinkedAndNeitherFailed', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const rows = freshRows();
+  rows['act-1'].push({ id: 'row-c', imported_id: 'k-c:0', amount: -700 });
+  rows['act-2'].push({ id: 'row-d', imported_id: 'k-d:0', amount: 700 });
+  const second = {
+    debit: { account: 'act-1', imported_id: 'k-c:0', date: '2026-09-02', amount: -700 },
+    credit: { account: 'act-2', imported_id: 'k-d:0', date: '2026-09-02', amount: 700 },
+  };
+  const client = transferClient(rows);
+  const apply = client.updateTransaction;
+  const held = [];
+  client.updateTransaction = async (id, fields) => {
+    if (id === 'row-a' || id === 'row-b') held.push([id, fields]);
+    else await apply(id, fields);
+  };
+  let rereads = 0;
+  const read = client.getTransactions;
+  client.getTransactions = async (accountId) => {
+    rereads += 1;
+    // Release the held pair on the third whole pass over the rows.
+    if (rereads > 6) for (const [id, fields] of held.splice(0)) await apply(id, fields);
+    return read(accountId);
+  };
+  const { sleep } = recordedSleep();
+  const result = await linkTransfers(client, [...PAIR, second], {
+    sleep,
+    settle: { attempts: 5, intervalMs: 1 },
+  });
+  assert.equal(result.counts.linked, 2);
+  assert.equal(result.counts.failed, 0);
 });
 
 // An opening row's reserved id, and a stand-in that applies updates at once.

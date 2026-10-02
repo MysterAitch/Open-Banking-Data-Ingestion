@@ -2522,15 +2522,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return remove_stated_anchor(store, ref, day)
 
     def actual_queue() -> list[dict[str, object]]:
-        from .actual_push import processing_request, queued_requests
+        from .actual_push import queue_with_progress
 
-        queued = queued_requests(_actual_dir(db_path))
-        working = processing_request(_actual_dir(db_path))
-        working_name = str(working.get("name", ""))
-        for entry in queued:
-            if entry.get("name") == working_name:
-                entry["in_progress_since"] = str(working.get("started_at", ""))
-        return queued
+        return queue_with_progress(_actual_dir(db_path))
 
     def actual_history() -> dict[str, object]:
         """The recent results WITH their denominator.

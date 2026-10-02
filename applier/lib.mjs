@@ -18,6 +18,7 @@ import process from 'node:process';
 
 import { isOpeningImportedId, readAccountRows } from './audit.mjs';
 import { indexPairRows, judgePair } from './transfers.mjs';
+import { makeYielder } from './turn.mjs';
 
 function required(name) {
   const value = (process.env[name] ?? '').trim();
@@ -83,7 +84,9 @@ export async function provisionAccounts(client, provision) {
   const byName = new Map(existing.map((account) => [account.name, account.id]));
   const bindings = [];
   const lines = [];
+  const maybeYield = makeYielder();
   for (const entry of provision) {
+    await maybeYield();
     const name = (entry.label ?? '').trim() || entry.canonical_id;
     let id = byName.get(name);
     if (id) {
@@ -97,6 +100,10 @@ export async function provisionAccounts(client, provision) {
   }
   return { bindings, lines };
 }
+
+//: Re-reads of an unlinked pair before it is counted failed, and the pause
+//: between them: five seconds of pausing in all.
+const LINK_SETTLE = { attempts: 20, intervalMs: 250 };
 
 /**
  * Turn two ordinary rows into one Actual transfer, for each confirmed pair.
@@ -113,7 +120,9 @@ export async function provisionAccounts(client, provision) {
  * did not end pointing at each other, so a half-done pair is loud and the
  * next push completes it.
  */
-export async function linkTransfers(client, transfers) {
+export async function linkTransfers(client, transfers, options = {}) {
+  const settle = options.settle ?? LINK_SETTLE;
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const counts = {
     pairs: transfers.length,
     linked: 0,
@@ -137,21 +146,30 @@ export async function linkTransfers(client, transfers) {
   const rowsByAccount = await indexPairRows(client, transfers);
 
   const attempted = [];
+  const maybeYield = makeYielder();
+  let done = 0;
   for (const pair of transfers) {
+    done += 1;
+    await linkOne(pair);
+    options.onProgress?.({ done, total: transfers.length });
+    await maybeYield();
+  }
+
+  async function linkOne(pair) {
     const { verdict, a, b } = judgePair(pair, rowsByAccount);
     if (verdict === 'linked') {
       counts.already_linked += 1;
-      continue;
+      return;
     }
     if (verdict !== 'linkable') {
       skip(verdict, `${named(pair)}: skipped, ${PAIR_REFUSALS[verdict] ?? verdict}`);
-      continue;
+      return;
     }
     const payeeForA = transferPayeeOf.get(pair.credit.account);
     const payeeForB = transferPayeeOf.get(pair.debit.account);
     if (!payeeForA || !payeeForB) {
       skip('no_transfer_payee', `${named(pair)}: skipped, an account has no transfer payee`);
-      continue;
+      return;
     }
     try {
       // Order matters: after the first call alone the pair is one-sided.
@@ -164,16 +182,27 @@ export async function linkTransfers(client, transfers) {
     }
   }
 
-  if (attempted.length) {
-    const after = await indexPairRows(client, attempted);
-    for (const pair of attempted) {
-      if (judgePair(pair, after).verdict === 'linked') {
-        counts.linked += 1;
-      } else {
-        counts.failed += 1;
-        lines.push(`${named(pair)}: FAILED verification - the rows do not point at each other`);
-      }
+  // A pair that does not read as linked is read again after a pause, up to
+  // `settle.attempts` times, and only then counted failed: updateTransaction
+  // resolves before its change is readable (see applyOpeningBalances), and a
+  // push of 679 pairs reported one failed that an audit found linked.
+  // Bounded by attempts, not a deadline, because one read of a large account
+  // is itself seconds long.
+  let waiting = attempted;
+  for (let reread = 0; waiting.length; reread += 1) {
+    const after = await indexPairRows(client, waiting);
+    const stillUnlinked = [];
+    for (const pair of waiting) {
+      if (judgePair(pair, after).verdict === 'linked') counts.linked += 1;
+      else stillUnlinked.push(pair);
     }
+    waiting = stillUnlinked;
+    if (!waiting.length || reread >= settle.attempts) break;
+    await sleep(settle.intervalMs);
+  }
+  for (const pair of waiting) {
+    counts.failed += 1;
+    lines.push(`${named(pair)}: FAILED verification - the rows do not point at each other`);
   }
   return { counts, lines };
 }
@@ -231,7 +260,9 @@ export async function applyOpeningBalances(
 
   const indexes = new Map();
   const corrected = [];
+  const maybeYield = makeYielder();
   for (const entry of openings) {
+    await maybeYield();
     if (!isOpeningImportedId(entry.imported_id)) {
       counts.refused += 1;
       lines.push(`${named(entry)}: refused, not an opening-balance id; nothing was touched`);

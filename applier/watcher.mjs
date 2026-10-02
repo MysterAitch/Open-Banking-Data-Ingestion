@@ -69,7 +69,9 @@ export function failedResult(name, error) {
   };
 }
 
-export async function processRequest(name) {
+// `onProgress` receives {phase, done, total} as a long request advances; the
+// watcher keeps the latest and writes it into the heartbeat.
+export async function processRequest(name, onProgress = () => {}) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
   const { kind, provision, accounts, transfers, openings, clear_empty, confirmed } =
@@ -92,7 +94,11 @@ export async function processRequest(name) {
 
   if (kind === 'prune') {
     const report = await withBudget((client) =>
-      pruneAccounts(client, accounts, { clear_empty, confirmed }),
+      pruneAccounts(client, accounts, {
+        clear_empty,
+        confirmed,
+        onProgress: ({ done, total }) => onProgress({ phase: 'removing', done, total }),
+      }),
     );
     return {
       ok: true,
@@ -107,7 +113,9 @@ export async function processRequest(name) {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
     const opening = await applyOpeningBalances(client, openings);
-    const linked = await linkTransfers(client, transfers);
+    const linked = await linkTransfers(client, transfers, {
+      onProgress: ({ done, total }) => onProgress({ phase: 'linking', done, total }),
+    });
     return { provisioned, applied, opening, linked };
   });
 
@@ -181,15 +189,20 @@ async function tick() {
       // The lease and the heartbeat are both stamped once, above; work
       // longer than their horizon must renew them or it silently loses
       // the protection it is relying on.
+      // Only the latest progress is kept and it rides the next beat: a
+      // file write per row would cost more than the work it reports on.
+      let progress;
       const stopKeepalive = startKeepalive(async () => {
         await writeFile(
           HEARTBEAT,
-          JSON.stringify({ at: new Date().toISOString(), working_on: name }),
+          JSON.stringify({ at: new Date().toISOString(), working_on: name, progress }),
         );
         await takeLease(LOCKS, 'actual-apply', 'obdi-applier', 900);
       });
       try {
-        result = await processRequest(name);
+        result = await processRequest(name, (latest) => {
+          progress = latest;
+        });
       } finally {
         stopKeepalive();
       }

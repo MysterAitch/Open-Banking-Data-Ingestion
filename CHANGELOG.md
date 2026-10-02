@@ -36,7 +36,17 @@ transcription would add no reasoning that the subjects do not already carry.
   test fixtures were plain ASCII, so nothing showed it; they now carry the
   marker by default.
 
+- **A long removal no longer silences the applier's heartbeat.** Deleting 4,519
+  rows took twelve minutes, during which the page said to go and look at the
+  container. The per-row loops now give the timer a turn.
+- **A transfer pair whose link takes a moment to read back is not counted as
+  failed.** One push reported 1 of 679 failed and the next audit found it
+  linked.
+
 ### Changed
+- **The Actual page says how far a running request has got**, in counts: rows
+  removed so far in the account being worked on, or transfer pairs worked
+  through. It can be up to a minute behind.
 - **A kept statement with no account is never read into rows.** A rebuild now
   counts them apart from problems, and says how many a parser can read once
   given an account and how many have no parser for their layout yet.

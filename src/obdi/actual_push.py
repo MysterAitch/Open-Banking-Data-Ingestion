@@ -244,16 +244,65 @@ def processing_request(actual_dir: Path) -> dict[str, object]:
     return decoded if isinstance(decoded, dict) else {}
 
 
-def applier_heartbeat(actual_dir: Path) -> str:
-    """When the applier last checked the queue, empty if never seen."""
+def _heartbeat_file(actual_dir: Path) -> dict[str, object]:
     path = actual_dir / "heartbeat.json"
     if not path.is_file():
-        return ""
+        return {}
     try:
         decoded = json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
-        return ""
-    return str(decoded.get("at", "")) if isinstance(decoded, dict) else ""
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def applier_heartbeat(actual_dir: Path) -> str:
+    """When the applier last checked the queue, empty if never seen."""
+    beat = _heartbeat_file(actual_dir)
+    return str(beat["at"]) if "at" in beat else ""
+
+
+#: The phases the applier reports, and nothing else is believed.
+PROGRESS_PHASES = ("removing", "linking")
+
+
+def valid_progress(raw: object) -> dict[str, object]:
+    """The applier's progress report if it is well formed, else empty.
+
+    The heartbeat is a file another process writes, so every field is
+    checked: a report that cannot be trusted is shown as no report."""
+    if not isinstance(raw, dict):
+        return {}
+    phase, done, total = raw.get("phase"), raw.get("done"), raw.get("total")
+    if phase not in PROGRESS_PHASES:
+        return {}
+    # bool is an int in Python, and a JSON true is not a count.
+    if not isinstance(done, int) or isinstance(done, bool):
+        return {}
+    if not isinstance(total, int) or isinstance(total, bool):
+        return {}
+    if total < 1 or not 0 <= done <= total:
+        return {}
+    return {"phase": phase, "done": done, "total": total}
+
+
+def queue_with_progress(actual_dir: Path) -> list[dict[str, object]]:
+    """The queue, with the applier's marker and progress on the request it is
+    working on.
+
+    Progress is taken from the heartbeat only when the heartbeat names the
+    same request as the marker: a report left by an earlier request is
+    history, not status."""
+    queued = queued_requests(actual_dir)
+    working = processing_request(actual_dir)
+    working_name = str(working.get("name", ""))
+    beat = _heartbeat_file(actual_dir)
+    progress = valid_progress(beat.get("progress"))
+    for entry in queued:
+        if entry.get("name") == working_name:
+            entry["in_progress_since"] = str(working.get("started_at", ""))
+            if progress and beat.get("working_on") == working_name:
+                entry["progress"] = progress
+    return queued
 
 
 def build_envelope(
