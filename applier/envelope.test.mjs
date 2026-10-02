@@ -214,3 +214,43 @@ test('a malformed confirmed count on a prune is refused loudly, never read as ab
     }
   }
 });
+
+test('an empty envelope carries the rows the person was shown per account, and is its own kind', () => {
+  const parsed = parseEnvelope({
+    version: 3,
+    kind: 'empty',
+    empty_accounts: { 'act-1': 12, 'act-2': 0 },
+    accounts: { 'act-9': [{ imported_id: 'k:0' }] },
+  });
+  assert.equal(parsed.kind, 'empty');
+  assert.deepEqual(parsed.empty_accounts, { 'act-1': 12, 'act-2': 0 });
+});
+
+test('an empty envelope that was not told what the person saw is refused, never read as no ceiling', () => {
+  const badCounts = [
+    undefined,
+    null,
+    [],
+    'all',
+    5,
+    { 'act-1': '12' },
+    { 'act-1': 1.5 },
+    { 'act-1': -1 },
+    { 'act-1': null },
+  ];
+  for (const bad of badCounts) {
+    assert.throws(
+      () => parseEnvelope({ version: 3, kind: 'empty', empty_accounts: bad }),
+      /empty_accounts/,
+      JSON.stringify(bad),
+    );
+  }
+});
+
+test('the empty counts are read only on an empty, so a stray key cannot widen another kind', () => {
+  for (const kind of ['push', 'audit', 'prune', 'anything-else']) {
+    const parsed = parseEnvelope({ version: 3, kind, accounts: {}, empty_accounts: { 'act-1': 5 } });
+    assert.equal('empty_accounts' in parsed, false, kind);
+    assert.notEqual(parsed.kind, 'empty', kind);
+  }
+});

@@ -45,6 +45,7 @@ from obdi.models import RawArtefact
 from obdi.navigation import DESTINATIONS
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
+from obdi.web_empty import empty_section, plan_from_audit
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -300,6 +301,47 @@ def test_LedgerPage_WithValuesShown_AtPhoneWidth_DoesNotScrollSideways(
     _assert_fits(
         _overflow(browser, f"{corpus_base}/ledger?ref=synthetic-current", press="Show values")
     )
+
+
+def test_EmptyActualSection_WithManyAccountsAndAVeryLongName_DoesNotScrollSideways(
+    browser: object,
+) -> None:
+    accounts: list[dict[str, object]] = [
+        {
+            "account_id": f"act-{n:02d}-{LONG_IDENTITY}",
+            "name": LONG_NAME if n == 0 else f"Account {n}",
+            "missing_account": False,
+            "expected": 3,
+            "present": 3,
+            "human": 1,
+            "rows": 4,
+        }
+        for n in range(24)
+    ]
+    accounts.append(
+        {
+            "account_id": LONG_IDENTITY * 2,
+            "name": LONG_IDENTITY * 3,
+            "unbound_in_actual": True,
+            "rows": 9,
+        }
+    )
+    plan, why = plan_from_audit(
+        {"kind": "audit", "ok": True, "finished_at": "2026-10-02T09:00:00Z", "accounts": accounts}
+    )
+    assert plan is not None, why
+    section = empty_section(plan, why).replace("<details>", "<details open>", 1)
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        page.set_content(render_page("Actual", section).decode())
+        _assert_fits(_measure(page))
+        # The form is reachable: its controls are on screen, not pushed aside.
+        assert page.get_by_role("button", name="Empty Actual completely").is_visible()
+        assert page.locator("input[name=phrase]").is_visible()
+    finally:
+        page.close()
 
 
 def test_ActualAudit_WithSixtyFourCharacterIdentities_DoesNotScrollSideways(

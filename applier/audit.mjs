@@ -158,6 +158,10 @@ export async function auditAccounts(client, accounts) {
       name: nameOf.get(accountId),
       missing_account: false,
       ...summariseAudit(partitionAccount(expectedRows, rows)),
+      // Every top-level row the account holds, whoever owns it: the partition
+      // above counts a duplicated imported id once, so its numbers cannot add
+      // up to this, and an empty of the whole budget is confirmed against it.
+      rows: rows.filter((row) => !row.is_child).length,
       // What a removal would do with the orphans counted above: the two add
       // up to `orphaned`, which is the ceiling the person confirms.
       orphaned_will_go: prunable.length,

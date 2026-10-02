@@ -10,6 +10,8 @@
  * { account, imported_id, date, amount }. Version 3 also names each account's
  * opening-balance row, which the import cannot keep exact on its own:
  * { opening_balances: [{ account, imported_id, date, amount }] }.
+ * Beside the push, `kind` may name an audit, a prune, or an empty; an empty
+ * carries only `empty_accounts`, the rows the person was shown per account.
  *
  * A declared version this file does not know is refused, never read as the
  * legacy shape: that fallthrough would treat "version", "provision" and
@@ -74,6 +76,21 @@ function parseConfirmedCounts(raw, key) {
   return { ...raw };
 }
 
+// What a person was shown before an empty: Actual account id -> rows. Unlike a
+// prune's optional ceilings it is REQUIRED and may not be negative: an empty
+// request that told nothing would read as "no ceiling" to a careless reader,
+// and the applier reads it as "every account is unknown", which refuses.
+function parseEmptyAccounts(raw) {
+  const isMap = raw !== null && typeof raw === 'object' && !Array.isArray(raw);
+  if (!isMap || !Object.values(raw).every((n) => Number.isInteger(n) && n >= 0)) {
+    throw new Error(
+      'empty request: "empty_accounts" must be an object of account id to ' +
+        `non-negative whole number, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { ...raw };
+}
+
 export function parseEnvelope(payload) {
   const declared =
     payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -91,9 +108,10 @@ export function parseEnvelope(payload) {
       payload.accounts && typeof payload.accounts === 'object'
         ? payload.accounts
         : {};
-    const kind = payload.kind === 'audit' || payload.kind === 'prune'
-      ? payload.kind
-      : 'push';
+    const kind =
+      payload.kind === 'audit' || payload.kind === 'prune' || payload.kind === 'empty'
+        ? payload.kind
+        : 'push';
     return {
       // 'audit' asks for a read-back-and-compare instead of an import;
       // anything else is a push, so an unknown kind cannot silently
@@ -107,6 +125,7 @@ export function parseEnvelope(payload) {
             confirmed: parseConfirmedCounts(payload.confirmed, 'confirmed'),
           }
         : {}),
+      ...(kind === 'empty' ? { empty_accounts: parseEmptyAccounts(payload.empty_accounts) } : {}),
       provision: provision.filter(
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),

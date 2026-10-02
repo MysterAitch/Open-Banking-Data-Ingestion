@@ -30,12 +30,13 @@ import { pathToFileURL } from 'node:url';
 import { auditAccounts, pruneAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
+import { emptyBudget } from './empty.mjs';
 import {
   applyAccounts,
   applyOpeningBalances,
   linkTransfers,
   provisionAccounts,
-  withBudget,
+  withBudget as openBudget,
 } from './lib.mjs';
 import { auditTransfers } from './transfers.mjs';
 
@@ -71,11 +72,38 @@ export function failedResult(name, error) {
 
 // `onProgress` receives {phase, done, total} as a long request advances; the
 // watcher keeps the latest and writes it into the heartbeat.
-export async function processRequest(name, onProgress = () => {}) {
+// `withBudget` is a parameter only so a test can hand in a budget without a
+// server; the watcher always uses the real one.
+export async function processRequest(name, onProgress = () => {}, withBudget = openBudget) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
-  const { kind, provision, accounts, transfers, openings, clear_empty, confirmed } =
-    parseEnvelope(payload);
+  const {
+    kind,
+    provision,
+    accounts,
+    transfers,
+    openings,
+    clear_empty,
+    confirmed,
+    empty_accounts,
+  } = parseEnvelope(payload);
+
+  if (kind === 'empty') {
+    const outcome = await withBudget((client) =>
+      emptyBudget(client, empty_accounts, {
+        onProgress: ({ done, total }) => onProgress({ phase: 'emptying', done, total }),
+      }),
+    );
+    // ok means the request ran and answered, not that the budget is empty:
+    // `complete` says that, and a refusal or a stop is a complete: false.
+    return {
+      ok: true,
+      kind: 'empty',
+      request: name,
+      finished_at: new Date().toISOString(),
+      ...outcome,
+    };
+  }
 
   if (kind === 'audit') {
     const { report, pairs } = await withBudget(async (client) => ({
@@ -214,7 +242,13 @@ async function tick() {
     await writeFile(join(RESULTS, name), JSON.stringify(result, null, 2));
     await rename(join(REQUESTS, name), join(PROCESSED, name));
     let line = `${name}: FAILED - ${result.error}`;
-    if (result.ok) {
+    if (result.ok && result.kind === 'empty') {
+      line =
+        `${name}: ${result.complete ? 'emptied' : 'NOT EMPTIED'} ` +
+        `(${result.accounts_removed} account(s), ${result.rows_removed} row(s) removed` +
+        `${result.refused ? `; refused: ${result.refused}` : ''}` +
+        `${result.stopped ? `; stopped: ${result.stopped}` : ''})`;
+    } else if (result.ok) {
       line =
         result.kind === 'audit'
           ? `${name}: audited ${result.accounts.length} account(s)`

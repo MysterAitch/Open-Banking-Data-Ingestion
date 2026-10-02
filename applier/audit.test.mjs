@@ -98,6 +98,29 @@ test('accounts existing in Actual but bound to nothing are named as strays', asy
   assert.ok(report.find((entry) => entry.account_id === 'act-1' && !entry.unbound_in_actual));
 });
 
+test('a bound account reports every row it holds, whoever owns it, split children excluded', async () => {
+  // The empty request is checked against this number, so it must count what
+  // the partition does not: a second copy of an imported id, an orphan, and a
+  // row the person typed are all rows that an empty would delete.
+  const { auditAccounts } = await import('./audit.mjs');
+  const expectedRow = { imported_id: `${hex('1')}:0`, date: '2026-07-01', amount: -100 };
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'Current' }],
+    getAccountBalance: async () => 0,
+    getTransactions: async () => [
+      { id: 'r1', ...expectedRow },
+      { id: 'r2', ...expectedRow },
+      { id: 'r3', imported_id: `${hex('e')}:0`, date: '2026-07-02', amount: -5 },
+      { id: 'r4', imported_id: null, date: '2026-07-03', amount: -7 },
+      { id: 'r5', imported_id: null, date: '2026-07-03', amount: -3, is_child: true },
+    ],
+  };
+
+  const [entry] = await auditAccounts(client, { 'act-1': [expectedRow] });
+
+  assert.equal(entry.rows, 4);
+});
+
 const hex = (seed) => seed.repeat(64).slice(0, 64);
 
 // The selection with nothing linked to look up: a context whose client is

@@ -227,6 +227,136 @@ def forget_actual_bindings(map_path: Path) -> int:
     return count
 
 
+EMPTY_SETTLED_FILE = "empty-settled.json"
+
+
+def _settled_empties(actual_dir: Path) -> set[str]:
+    """The empty results whose bindings have already been forgotten.
+
+    A marker that exists but cannot be read raises rather than reading as
+    "none settled": that reading would forget the bindings a later push had
+    minted, once for every old empty result still on disk.
+    """
+    path = actual_dir / EMPTY_SETTLED_FILE
+    if not path.is_file():
+        return set()
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"{path} cannot be read ({error}); obdi cannot tell which emptied "
+            "budgets it has already forgotten the Actual links for. Repair or "
+            "remove the file by hand once you know whether a push has run since "
+            "the last empty."
+        ) from error
+    raw = decoded.get("settled") if isinstance(decoded, dict) else None
+    if not isinstance(raw, list):
+        raise ValueError(f"{path} does not list the settled results")
+    return {str(name) for name in raw}
+
+
+def settle_emptied_budgets(map_path: Path, actual_dir: Path) -> int | None:
+    """Forget obdi's Actual links once for each COMPLETE empty result.
+
+    The applier reports an empty as complete only after the budget itself
+    lists no account, so every Actual account id obdi holds is dead and the
+    next push must provision afresh. A partial, refused, or failed empty
+    changes nothing here: some of those accounts may still exist.
+
+    Idempotent per result, not per call: the names of the results already
+    acted on are recorded, because the same result stays on disk and is read
+    on every page load, and forgetting again after a push had minted new
+    links would undo that push's provisioning. Links the applier minted but
+    obdi had not yet merged are merged first, so none is left to return after
+    the forgetting. The links are forgotten BEFORE the record is written: a
+    crash between the two forgets twice (harmless while nothing has been
+    pushed), where the other order would leave dead links in place.
+
+    Returns how many links were forgotten, or None when no complete empty was
+    waiting to be acted on.
+    """
+    results_dir = actual_dir / "results"
+    if not results_dir.is_dir():
+        return None
+    settled = _settled_empties(actual_dir)
+    waiting: list[str] = []
+    for path in sorted(results_dir.glob("empty-*.json")):
+        if path.name in settled:
+            continue
+        try:
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(decoded, dict)
+            and decoded.get("kind") == "empty"
+            and decoded.get("ok") is True
+            and decoded.get("complete") is True
+        ):
+            waiting.append(path.name)
+    if not waiting:
+        return None
+    merge_pending_bindings(map_path, actual_dir)
+    forgotten = forget_actual_bindings(map_path)
+    marker = actual_dir / EMPTY_SETTLED_FILE
+    tmp = marker.with_name(f".{marker.name}.tmp")
+    tmp.write_text(json.dumps({"settled": sorted(settled | set(waiting))}), encoding="utf-8")
+    tmp.replace(marker)
+    return forgotten
+
+
+def empty_pending_note(actual_dir: Path) -> str | None:
+    """Why no push may be queued right now because of an empty of Actual, or
+    None. The one place that knows; every path that writes a push request asks
+    it (they all end in cli.queue_actual_push), after settling any complete
+    empty, so a complete one never reaches it.
+
+    - An empty queued or being worked on: the push would be built from links
+      to accounts the empty is about to delete, and would run after it.
+    - The newest empty ended partial or failed, and no audit has finished
+      since: the links were kept because some accounts still exist, but some
+      are gone, so a push would import into accounts that no longer exist. An
+      audit afterwards says what Actual holds now and ends the block. A
+      REFUSED empty changed nothing and never blocks.
+    """
+    if any(entry.get("kind") == "empty" for entry in queued_requests(actual_dir)):
+        return (
+            "an empty of Actual is pending (queued or being worked on), so the push "
+            "was skipped: it would carry links to accounts the empty deletes. Push "
+            "again once the empty's result has appeared."
+        )
+    results_dir = actual_dir / "results"
+    if not results_dir.is_dir():
+        return None
+    newest: tuple[str, dict[str, object]] | None = None
+    last_audit = ""
+    for path in results_dir.glob("*.json"):
+        try:
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(decoded, dict):
+            continue
+        finished = str(decoded.get("finished_at", ""))
+        if decoded.get("kind") == "audit" and decoded.get("ok") is True:
+            last_audit = max(last_audit, finished)
+        elif decoded.get("kind") == "empty" and (newest is None or finished > newest[0]):
+            newest = (finished, decoded)
+    if newest is None:
+        return None
+    finished, result = newest
+    unfinished = result.get("ok") is not True or (
+        result.get("complete") is not True and not result.get("refused")
+    )
+    if unfinished and last_audit <= finished:
+        return (
+            "the last empty of Actual did not finish cleanly, so Actual is in a "
+            "partial state (some accounts are gone, some remain) and the push was "
+            "skipped. Run an audit to see what is left, then push or empty again."
+        )
+    return None
+
+
 def processing_request(actual_dir: Path) -> dict[str, object]:
     """The request the applier is working on right now, if any.
 
@@ -262,7 +392,7 @@ def applier_heartbeat(actual_dir: Path) -> str:
 
 
 #: The phases the applier reports, and nothing else is believed.
-PROGRESS_PHASES = ("removing", "linking")
+PROGRESS_PHASES = ("removing", "linking", "emptying")
 
 
 def valid_progress(raw: object) -> dict[str, object]:
@@ -461,6 +591,18 @@ def build_prune_envelope(
     if confirmed:
         envelope["confirmed"] = dict(confirmed)
     return envelope
+
+
+def build_empty_envelope(shown: Mapping[str, int]) -> dict[str, object]:
+    """The request to empty the whole Actual budget.
+
+    Unlike every other envelope it names no obdi account: it carries only what
+    the person was shown, Actual account id -> rows, which the applier treats
+    as a ceiling and re-counts against its own fresh download before it
+    deletes anything. The store is not read, because an empty is about what
+    Actual holds, not what obdi expects.
+    """
+    return {"version": ENVELOPE_VERSION, "kind": "empty", "empty_accounts": dict(shown)}
 
 
 def queue_push(

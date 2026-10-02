@@ -33,7 +33,7 @@ import re
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,6 +74,13 @@ from .web_accounts import (
     archive_controls,
     archive_label,
     picker_labels,
+)
+from .web_empty import (
+    EmptyPlan,
+    check_empty_post,
+    empty_result_row,
+    empty_section,
+    plan_from_audit,
 )
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
@@ -529,6 +536,10 @@ class WebConfig:
     #: bare for a prune with no counts to confirm, and with `clear_empty` or
     #: `confirmed` (Actual account id -> rows the person was shown) otherwise.
     prune_actual: Callable[..., str] | None = None
+    #: Empty the whole Actual budget, called with the Actual account id -> rows
+    #: the person was shown. Raises ValueError, with a sentence the page shows,
+    #: when it refuses to queue (a rebuild in flight, another job in the queue).
+    empty_actual: Callable[[Mapping[str, int]], str] | None = None
     #: The review queue decomposed by class, account, source, and age. Called
     #: with True for the masked rendering (counts only) and False for the one
     #: that adds descriptions, which only a request made on purpose receives.
@@ -3066,6 +3077,7 @@ _RESULT_ROWS: dict[str, Callable[[dict[str, object]], str]] = {
     "push": _push_result_row,
     "audit": _audit_result_row,
     "prune": _prune_result_row,
+    "empty": empty_result_row,
 }
 
 
@@ -3177,11 +3189,13 @@ def _actual_rows(
     audit_available: bool = False,
     actual_heartbeat: Callable[[], str] | None = None,
     prune_available: bool = False,
+    empty_available: bool = False,
 ) -> str:
     """The budget sync, visible and pressable: the two-line state first (the
     last push, the newest audit), then what is in flight, then the buttons
     (the push the heaviest), then the latest results, then the roster and the
-    destructive prune folded away as reference and rarely-used controls."""
+    destructive prune and empty folded away as reference and rarely-used
+    controls, the empty last."""
     if actual_status is None and not push_available:
         return ""
     roster_html = ""
@@ -3272,6 +3286,9 @@ def _actual_rows(
         if prune_available
         else ""
     )
+    empty_block = (
+        empty_section(*_empty_plan(results)) if empty_available else ""
+    )
     explanation = (
         "<details><summary>How the sync works</summary>"
         "<p>Pushes run through the applier container: bound accounts import, "
@@ -3296,8 +3313,22 @@ def _actual_rows(
         )
         + roster_html
         + prune_button
+        + empty_block
         + explanation
     )
+
+
+def _empty_plan(results: list[dict[str, object]]) -> tuple[EmptyPlan | None, str | None]:
+    """What an empty would delete, from the newest audit, unless an empty has
+    finished since that audit: the audit then describes a budget that is gone."""
+    audit = _newest_of_kind(results, "audit")
+    newest_empty = _newest_of_kind(results, "empty")
+    emptied_since = (
+        audit is not None
+        and newest_empty is not None
+        and str(newest_empty.get("finished_at", "")) > str(audit.get("finished_at", ""))
+    )
+    return plan_from_audit(audit, emptied_since=emptied_since)
 
 
 def _roster_block(roster: list[dict[str, object]]) -> str:
@@ -6194,6 +6225,9 @@ class ConnectionHandler(
         if route == "/prune-actual":
             self._prune_actual(self._read_form())
             return
+        if route == "/empty-actual":
+            self._empty_actual(self._read_form())
+            return
         if route == "/rename-connection":
             self._rename_connection(self._read_form())
             return
@@ -6819,6 +6853,62 @@ class ConnectionHandler(
                 "its own form. A removal larger than the count you were shown "
                 "is refused. Results appear on the Actual sync page.</p>"
                 + BACK_TO_ACTUAL,
+            ),
+        )
+
+    def _empty_actual(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.empty_actual
+        if hook is None:
+            self._respond(
+                404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_ACTUAL)
+            )
+            return
+        # Judged against the newest audit as it is now, never against what the
+        # browser says the page showed.
+        plan: EmptyPlan | None = None
+        why_not: str | None = None
+        status_hook = self.bound_config.actual_status
+        if status_hook is not None:
+            with contextlib.suppress(Exception):
+                plan, why_not = _empty_plan(status_hook())
+        try:
+            shown = check_empty_post(form, plan, why_not)
+        except PruneRefused as refused:
+            self._respond(
+                400, error_page(refused.title, refused.message_html, BACK_TO_ACTUAL)
+            )
+            return
+        try:
+            summary = hook(shown)
+        except ValueError as refusal:
+            # The hook's own refusals (a rebuild in flight, another job in the
+            # queue) are sentences meant for the page; nothing was queued.
+            self._respond(
+                409,
+                error_page(
+                    "Not queued", f"<p>{html.escape(str(refusal))}</p>", BACK_TO_ACTUAL
+                ),
+            )
+            return
+        except Exception as exc:
+            self._respond(
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Empty queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>The applier re-counts the budget first and refuses, changing "
+                "nothing, if Actual holds more than you were shown. When the "
+                "result appears on the Actual sync page, obdi has forgotten its "
+                "links to Actual accounts; press &quot;Push to Actual now&quot; "
+                "to rebuild the budget from nothing. Nothing is pushed "
+                "automatically.</p>" + BACK_TO_ACTUAL,
             ),
         )
 

@@ -305,7 +305,7 @@ def build_push_envelope(store: Store, map_path: Path) -> dict[str, object]:
 def queue_actual_push(db_path: Path) -> str:
     """The push, as one call returning its summary - shared by the CLI
     command and the web button so the two routes cannot drift."""
-    from .actual_push import merge_pending_bindings, queue_push
+    from .actual_push import empty_pending_note, merge_pending_bindings, queue_push
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
         return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
@@ -320,6 +320,19 @@ def queue_actual_push(db_path: Path) -> str:
     from .actual_push import drop_conflicting_bindings
 
     lines = []
+    # Before the merge and the build below read the links: a complete empty
+    # has made every one of them point at an account that no longer exists.
+    forgotten = settle_emptied_budgets_for(db_path)
+    if forgotten is not None:
+        lines.append(
+            f"Actual was emptied since the last push: forgot {forgotten} link(s) "
+            "to accounts that no longer exist, so every account is provisioned afresh"
+        )
+    # A sentence and not an error: the scheduler runs this after a pull cycle
+    # and must carry on; the push simply waits for the next cycle.
+    pending = empty_pending_note(actual_dir)
+    if pending:
+        return "\n".join([*lines, pending])
     merge_note = merge_pending_bindings(Path(map_path_env), actual_dir).describe()
     if merge_note:
         lines.append(merge_note)
@@ -944,6 +957,7 @@ def queue_actual_prune(
     busy = rebuild_in_progress_note(db_path)
     if busy:
         return busy
+    settle_emptied_budgets_for(db_path)
     bindings = _actual_bindings()
     if clear_empty:
         bindings = [b for b in bindings if b.actual_account_id in clear_empty]
@@ -963,6 +977,51 @@ def queue_actual_prune(
     )
 
 
+def queue_actual_empty(db_path: Path, shown: Mapping[str, int]) -> str:
+    """Queue the emptying of the whole Actual budget.
+
+    `shown` is what the person was shown, Actual account id -> rows, and is
+    the applier's ceiling. Raises ValueError, in a sentence for the page, when
+    it will not queue: nothing else may be reading or changing the budget while
+    every account in it is deleted, and a rebuild that is replaying the store
+    is the thing a push after the empty would read.
+    """
+    from .actual_push import build_empty_envelope, queue_push, queued_requests
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        raise ValueError("Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued.")
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        raise ValueError(busy)
+    actual_dir = _actual_dir(db_path)
+    waiting = queued_requests(actual_dir)
+    if waiting:
+        raise ValueError(
+            f"{len(waiting)} applier request(s) are queued or being worked on "
+            f"({', '.join(sorted(str(w.get('kind', '')) for w in waiting))}). "
+            "Nothing was queued: wait for them to finish, then press again."
+        )
+    if not shown:
+        raise ValueError("No accounts to empty - nothing queued.")
+    queued = queue_push(build_empty_envelope(shown), actual_dir, prefix="empty")
+    return (
+        f"queued {queued.name}: emptying {len(shown)} account(s) holding "
+        f"{sum(shown.values())} row(s) in Actual"
+    )
+
+
+def settle_emptied_budgets_for(db_path: Path) -> int | None:
+    """Forget the Actual links a complete empty has made dead; see
+    `settle_emptied_budgets`, which owns the rule. Called wherever the links
+    are about to be read or shown, so no consumer sees them before this ran."""
+    from .actual_push import settle_emptied_budgets
+
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path:
+        return None
+    return settle_emptied_budgets(Path(map_path), _actual_dir(db_path))
+
+
 def queue_actual_audit(db_path: Path) -> str:
     """Ask the applier to read Actual back and report differences.
 
@@ -978,6 +1037,7 @@ def queue_actual_audit(db_path: Path) -> str:
     busy = rebuild_in_progress_note(db_path)
     if busy:
         return busy
+    settle_emptied_budgets_for(db_path)
     bindings = _actual_bindings()
     if not bindings:
         return "no Actual-bound accounts to audit - push first."
@@ -2182,6 +2242,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         from .labels import collect_display_labels
 
+        settle_emptied_budgets_for(db_path)
         actual_bound = {b.canonical_id for b in _actual_bindings()}
         named: set[str] = set()
         map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
@@ -2239,6 +2300,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def actual_status() -> list[dict[str, object]]:
         from .actual_push import latest_results
 
+        # Read here as well as at the doors: the page that shows an emptied
+        # budget's result must already have forgotten its links.
+        settle_emptied_budgets_for(db_path)
         return latest_results(_actual_dir(db_path))
 
     def audit_actual_hook() -> str:
@@ -2249,6 +2313,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         confirmed: Mapping[str, int] | None = None,
     ) -> str:
         return queue_actual_prune(db_path, clear_empty, confirmed)
+
+    def empty_actual_hook(shown: Mapping[str, int]) -> str:
+        return queue_actual_empty(db_path, shown)
 
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)
@@ -3200,6 +3267,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
         prune_actual=prune_actual_hook,
+        empty_actual=empty_actual_hook,
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,

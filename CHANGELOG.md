@@ -26,6 +26,20 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.259] - 2026-10-02
+
+### Added
+- **The Actual budget can be emptied completely from its page.** Actual is a
+  disposable view of what obdi holds, and there was no way to start it again
+  from nothing. The page lists every account and row count that will go,
+  including rows entered by hand, and needs a tick and a typed phrase; the
+  applier refuses if Actual holds more than the page showed. Afterwards a push
+  rebuilds the budget. Measured against an offline engine, not a live server.
+
+### Changed
+- **A push is skipped while an empty is pending**, so the scheduler cannot
+  import into accounts that are about to disappear.
+
 ## [0.4.258] - 2026-10-02
 
 ### Added
