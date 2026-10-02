@@ -354,6 +354,9 @@ def _reconcile_all(
     result: ImportSummary,
     on_record: Callable[[int], None] | None,
 ) -> None:
+    # One call is one response; a cached index may have seen earlier ones.
+    for index in by_account.values():
+        index.begin_batch()
     for position, transaction in enumerate(numbered, start=1):
         existing = by_account.get(transaction.account_id)
         if existing is None:
@@ -364,6 +367,10 @@ def _reconcile_all(
                 )
             by_account[transaction.account_id] = existing
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
+        # Whichever row took this record has now answered to its id.
+        existing.claim(
+            matched_entity_id or merged.entity_id, transaction.source, transaction.source_id
+        )
 
         if on_record is not None:
             # Never let reporting break the work it reports on.

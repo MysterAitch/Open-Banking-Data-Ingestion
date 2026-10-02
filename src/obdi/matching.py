@@ -250,6 +250,9 @@ class CandidateIndex:
         # what remembers the others.
         self._sighted: dict[tuple[str, str, str], list[str]] = {}
         self._ids_of: dict[str, dict[str, set[str]]] = {}
+        # The id each row has answered to in the CURRENT batch, by source.
+        # See `claim`.
+        self._claimed: dict[str, dict[str, str]] = {}
         for transaction in transactions:
             self.append(transaction)
         for entity_id, source, source_id in sightings:
@@ -289,6 +292,35 @@ class CandidateIndex:
         if not source_id:
             return False
         return bool(self._ids_of.get(entity_id, {}).get(source, set()) - {source_id})
+
+    def begin_batch(self) -> None:
+        """Forget which row answered to which id; a new response starts clean."""
+        self._claimed.clear()
+
+    def claim(self, entity_id: str, source: str, source_id: str | None) -> None:
+        """Record that, in this batch, this row answered to `source_id`.
+
+        One response naming two ids is the provider saying two payments, so a
+        row that has answered to one of a source's ids in a batch may not
+        answer to another of them in the same batch.
+        Without this the memory of every id a row was ever called made one
+        early wrong merge permanent: both ids found the same row for ever,
+        and one payment had no row of its own (one such on the deployed
+        store, the day the memory was introduced).
+        The first id to claim a row keeps it.
+        """
+        if source_id:
+            self._claimed.setdefault(entity_id, {}).setdefault(source, source_id)
+
+    def claimed_under_another_id(
+        self, entity_id: str, source: str, source_id: str | None
+    ) -> bool:
+        """Whether this row has already answered, in this batch, to a
+        different id from the same source."""
+        if not source_id:
+            return False
+        held = self._claimed.get(entity_id, {}).get(source)
+        return held is not None and held != source_id
 
     def _file(self, transaction: Transaction) -> None:
         self.note_sighting(
@@ -347,11 +379,17 @@ class CandidateIndex:
     def by_source_id(
         self, account_id: str, source: str, source_id: str
     ) -> list[Transaction]:
-        """Rows this source has called by this id, whatever they carry now."""
+        """Rows this source has called by this id, whatever they carry now.
+
+        A row that carries the id NOW comes before one that only used to.
+        Once two payments wrongly merged have been separated, each must find
+        its own row and not the older one that remembers them both, or the
+        two rows trade payments on every later response.
+        """
         key = (account_id, source, source_id)
         current = self._by_source_id.get(key, [])
-        entity_ids = [*current, *(e for e in self._sighted.get(key, []) if e not in current)]
-        return self._in_arrival_order(entity_ids)
+        remembered = [e for e in self._sighted.get(key, []) if e not in current]
+        return [*self._in_arrival_order(current), *self._in_arrival_order(remembered)]
 
     def by_content_key(self, account_id: str, content_key: str) -> list[Transaction]:
         return self._in_arrival_order(
@@ -411,11 +449,20 @@ def resolve(
     # Provider ids are only unique within a provider's own namespace, so tier 1
     # matches on (source, source_id) rather than the id alone. Two sources
     # reporting the same payment are SUPPOSED to disagree here.
+    def taken(candidate: Transaction) -> bool:
+        # Already answered, in this batch, to another of this source's ids.
+        return index.claimed_under_another_id(
+            candidate.entity_id, incoming.source, incoming.source_id
+        )
+
     if incoming.source_id:
         for candidate in index.by_source_id(account, incoming.source, incoming.source_id):
-            return MatchResult(MatchTier.SOURCE_ID, candidate)
+            if not taken(candidate):
+                return MatchResult(MatchTier.SOURCE_ID, candidate)
 
     def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
+        if taken(candidate):
+            return False
         # Where a source keeps a payment's id through settlement, a row it
         # has already called by a different id is a different payment, and
         # no resemblance of amount, date, or status can make it the same.

@@ -57,15 +57,22 @@ from obdi.models import MatchTier, SourceTier, Transaction, TransactionStatus
 Called = dict[str, set[tuple[str, str]]]
 
 
+#: The id each row has answered to within the batch, by entity and source.
+Claimed = dict[str, dict[str, str]]
+
+
 def _resolve_reference(
     incoming: Transaction,
     existing: list[Transaction],
     called: Called | None = None,
+    claimed: Claimed | None = None,
 ) -> MatchResult:
-    """The pre-index resolve() as a linear scan, with the two amendments.
+    """The pre-index resolve() as a linear scan, with the amendments.
 
     `called` is the memory of what each row has been called.
     Left out, a row is known only by the id it carries now.
+    `claimed` is which id each row has answered to in this batch; a row that
+    answered to one of a source's ids cannot answer to another of them.
     """
 
     def names_of(candidate: Transaction) -> set[tuple[str, str]]:
@@ -75,7 +82,15 @@ def _resolve_reference(
             return {(candidate.source, candidate.source_id)}
         return set()
 
+    def taken(candidate: Transaction) -> bool:
+        if claimed is None or not incoming.source_id:
+            return False
+        held = claimed.get(candidate.entity_id, {}).get(incoming.source)
+        return held is not None and held != incoming.source_id
+
     def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
+        if taken(candidate):
+            return False
         if incoming.source in SETTLEMENT_KEEPS_ID and incoming.source_id:
             other_ids = {
                 source_id
@@ -89,8 +104,16 @@ def _resolve_reference(
     same_account = [t for t in existing if t.account_id == incoming.account_id]
 
     if incoming.source_id:
-        for candidate in same_account:
-            if (incoming.source, incoming.source_id) in names_of(candidate):
+        wanted = (incoming.source, incoming.source_id)
+        # A row carrying the id now comes before one that only used to.
+        carrying = [
+            c for c in same_account if c.source_id and (c.source, c.source_id) == wanted
+        ]
+        remembering = [
+            c for c in same_account if wanted in names_of(c) and c not in carrying
+        ]
+        for candidate in [*carrying, *remembering]:
+            if not taken(candidate):
                 return MatchResult(MatchTier.SOURCE_ID, candidate)
 
     if incoming.content_key:
@@ -347,8 +370,12 @@ def _fold_indexed(incoming: list[Transaction]) -> list[tuple]:
         outcomes.append(_outcome(result))
         if result.existing is None:
             index.append(numbered)
+            taker = numbered.entity_id
         else:
             index.replace(supersede(result.existing, numbered))
+            taker = result.existing.entity_id
+        # The whole corpus is one batch, so every claim stands to the end.
+        index.claim(taker, numbered.source, numbered.source_id)
     return outcomes
 
 
@@ -362,6 +389,7 @@ def _fold_remembering(incoming: list[Transaction]) -> list[tuple]:
     seen: dict[tuple[str, str], int] = {}
     rows: list[Transaction] = []
     called: Called = {}
+    claimed: Claimed = {}
     outcomes = []
 
     def note(entity_id: str, sighting: Transaction) -> None:
@@ -369,13 +397,16 @@ def _fold_remembering(incoming: list[Transaction]) -> list[tuple]:
             called.setdefault(entity_id, set()).add(
                 (sighting.source, sighting.source_id)
             )
+            claimed.setdefault(entity_id, {}).setdefault(
+                sighting.source, sighting.source_id
+            )
 
     for transaction in incoming:
         key = (transaction.account_id, transaction.content_key)
         numbered = replace(transaction, occurrence=seen.get(key, 0))
         seen[key] = seen.get(key, 0) + 1
 
-        result = _resolve_reference(numbered, rows, called)
+        result = _resolve_reference(numbered, rows, called, claimed)
         outcomes.append(_outcome(result))
         if result.existing is None:
             rows.append(numbered)

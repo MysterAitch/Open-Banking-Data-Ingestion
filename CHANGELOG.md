@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.245] - 2026-10-02
+
+### Fixed
+- **Two payments that a provider lists side by side are never merged into one
+  row.** 0.4.243 made a row remember every id it had been called, which turned
+  one earlier wrong merge into a permanent one: both ids found the same row,
+  and one payment had no row of its own. A row that has answered to one of a
+  source's ids in a response can no longer answer to another in the same
+  response. A rebuild from raw separates the payment already affected.
+
 ## [0.4.244] - 2026-10-02
 
 ### Added
