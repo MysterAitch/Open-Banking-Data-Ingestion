@@ -35,6 +35,11 @@ transcription would add no reasoning that the subjects do not already carry.
   each page at that width.
 - **On the ledger only "Show values" is filled.** Archiving the account and
   hiding values were styled as heavily as the primary action.
+- **The Nationwide statement's date and balances are found.** The one real
+  statement was refused as stating neither: read by position, its labels
+  arrive with no space inside ("Statementdate:"), which the masked layout the
+  reader was written from had hidden. Whether it now reads is for the Kept
+  statements page to say.
 - **A request refused as coming from another site receives its refusal.** The
   refusal was sent without reading the request, which on Windows could reset
   the connection instead; the test for it failed one run in three.

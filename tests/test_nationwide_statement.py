@@ -91,7 +91,7 @@ SIDE_NOTES = [
 
 
 def layout(
-    lines: list[str], *, pound: str = "£", minus_first: bool = False
+    lines: list[str], *, pound: str = "£", minus_first: bool = False, fused: bool = False
 ) -> list[list[Placement]]:
     """The row language as pages of placed strings.
 
@@ -102,10 +102,19 @@ def layout(
     The Start and End balances are drawn with the pound sign the document under
     test uses, and the minus after it ("£-100.00") unless `minus_first`
     puts it before ("-£100.00"). Table figures are bare, as the shape has them.
+
+    `fused` draws each label as the real document's word positions give it:
+    with no space inside ("Statementdate:", "Startbalance", "£Out"). The first
+    real statement was refused for exactly that - its panel and its date were
+    there and unrecognised - and the masked shape had hidden it, because a
+    fused label is no longer a known word and is masked like any other.
     """
     pages: list[list[Placement]] = [[]]
     cursor = TOP
     notes = 0
+
+    def label(text: str) -> str:
+        return text.replace(" ", "") if fused else text
 
     def emit(cells: list[tuple[float, str]], *, side: bool = False) -> None:
         nonlocal cursor, notes
@@ -143,28 +152,28 @@ def layout(
             emit([(DATE_X, "1 Example Street")])
             emit(
                 [
-                    (200.0, "Statement date:"), (270.0, stated),
-                    (SIDE_X, "Sort code"), (500.0, "11-22-33"),
+                    (200.0, label("Statement date:")), (270.0, stated),
+                    (SIDE_X, label("Sort code")), (500.0, "11-22-33"),
                 ]
             )
             emit(
                 [
-                    (200.0, "Statement no"), (270.0, number),
-                    (SIDE_X, "Account no"), (500.0, "12345678"),
+                    (200.0, label("Statement no")), (270.0, number),
+                    (SIDE_X, label("Account no")), (500.0, "12345678"),
                 ]
             )
             if start:
-                emit([(SIDE_X, "Start balance"), _right(SIDE_END, fig(start))])
+                emit([(SIDE_X, label("Start balance")), _right(SIDE_END, fig(start))])
             if end:
-                emit([(SIDE_X, "End  balance"), _right(SIDE_END, fig(end))])
+                emit([(SIDE_X, label("End  balance")), _right(SIDE_END, fig(end))])
         elif kind == "HEAD":
             emit(
                 [
                     (DATE_X, "Date"),
                     (DESCRIPTION_X, "Description"),
-                    _right(OUT_END, f"{pound} Out"),
-                    _right(IN_END, f"{pound} In"),
-                    _right(BALANCE_END, f"{pound} Balance"),
+                    _right(OUT_END, label(f"{pound} Out")),
+                    _right(IN_END, label(f"{pound} In")),
+                    _right(BALANCE_END, label(f"{pound} Balance")),
                 ]
             )
         elif kind == "OPENING":
@@ -233,7 +242,7 @@ def layout(
 
 
 def build_nationwide_pdf(
-    lines: list[str], *, pound: str = "£", minus_first: bool = False
+    lines: list[str], *, pound: str = "£", minus_first: bool = False, fused: bool = False
 ) -> bytes:
     """The fixture as a real multi-page PDF.
 
@@ -241,7 +250,7 @@ def build_nationwide_pdf(
     as two characters.
     """
     return build_placed_pdf(
-        layout(lines, pound=pound, minus_first=minus_first), font_size=FONT
+        layout(lines, pound=pound, minus_first=minus_first, fused=fused), font_size=FONT
     )
 
 
@@ -331,16 +340,22 @@ CONTRACT = [
 ]
 
 
-def read(lines: list[str], *, pound: str = "£", minus_first: bool = False):
+def read(
+    lines: list[str], *, pound: str = "£", minus_first: bool = False, fused: bool = False
+):
     return NationwideStatementPdfParser().read(
-        build_nationwide_pdf(lines, pound=pound, minus_first=minus_first)
+        build_nationwide_pdf(lines, pound=pound, minus_first=minus_first, fused=fused)
     )
 
 
-def rows_of(lines: list[str], *, pound: str = "£", minus_first: bool = False):
+def rows_of(
+    lines: list[str], *, pound: str = "£", minus_first: bool = False, fused: bool = False
+):
     return [
         (row.value_date, row.description, row.amount_minor)
-        for row in read(lines, pound=pound, minus_first=minus_first).transactions
+        for row in read(
+            lines, pound=pound, minus_first=minus_first, fused=fused
+        ).transactions
     ]
 
 
@@ -375,6 +390,25 @@ class TestATwoPageStatement:
 
     def test_NationwideStatement_IsDatedByItsOwnStatementDate(self):
         assert read(STATEMENT).statement_date == date(2026, 7, 15)
+
+    def test_NationwideStatement_WhenLabelsArriveWithNoSpaceInside_ReadsTheSameStatement(self):
+        reading = read(STATEMENT, fused=True)
+
+        assert reading.notes == []
+        assert rows_of(STATEMENT, fused=True) == EXPECTED_ROWS
+        assert reading.statement_date == date(2026, 7, 15)
+        assert (reading.opening_balance_minor, reading.closing_balance_minor) == (
+            -10000,
+            47057,
+        )
+
+    def test_NationwideStatement_WhenFusedLabelsAndMangledPound_ReadsTheSameStatement(self):
+        assert rows_of(STATEMENT, pound="Â£", fused=True) == EXPECTED_ROWS
+
+    def test_NationwideStatement_WhenFusedAndTheEndBalanceIsAPennyOut_IsStillRefused(self):
+        wrong = replaced(STATEMENT, "-100.00|470.57", "-100.00|470.58")
+
+        assert not read(wrong, fused=True).reconciles
 
     def test_NationwideStatement_WhenRowsShareADate_TheyKeepTheDateAbove(self):
         dates = [day for day, _, _ in rows_of(STATEMENT)]

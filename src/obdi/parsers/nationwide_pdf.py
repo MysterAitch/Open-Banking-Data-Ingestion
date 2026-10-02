@@ -89,10 +89,15 @@ _MONTHS = {
 
 _DAY_MONTH = re.compile(r"(\d{1,2})\s+([A-Za-z]+)")
 _YEAR = re.compile(r"\d{4}")
+#: Labels are matched with or without the space inside them. The document's
+#: word positions give "Statementdate:", "Startbalance", and "Endbalance" as
+#: single words, and the first real statement was refused as having no date and
+#: no balances while printing all three.
 _STATEMENT_DATE = re.compile(
-    r"statement\s+date:?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", re.IGNORECASE
+    r"statement\s*date:?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", re.IGNORECASE
 )
-_PANEL_FIGURE = re.compile(r"^(start|end)\s+balance\s+(.+)$", re.IGNORECASE)
+_PANEL_FIGURE = re.compile(r"^(start|end)\s*balance\s+(.+)$", re.IGNORECASE)
+_PANEL_LABELS = {"startbalance": "start", "endbalance": "end"}
 #: A figure inside running text: a wrapped line that carries one may be a
 #: movement that lost its columns, which is never joined to the row above.
 _FIGURE_IN_TEXT = re.compile(r"\d[\d,]*\.\d{2}\b")
@@ -207,9 +212,7 @@ def _panel_balances(table: list[Row], notes: list[str]) -> dict[str, int]:
     stated: dict[str, set[int]] = {"start": set(), "end": set()}
     for row in table:
         for index, cell in enumerate(row.cells):
-            label = {"start balance": "start", "end balance": "end"}.get(
-                tidy(cell.text).casefold()
-            )
+            label = _PANEL_LABELS.get("".join(cell.text.split()).casefold())
             figure_text: str | None = None
             if label is not None:
                 beside = next(
