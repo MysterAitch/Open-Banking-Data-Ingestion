@@ -148,3 +148,156 @@ test('an update that leaves the rows unlinked is reported as a failed verificati
   assert.equal(result.counts.failed, 1);
   assert.ok(result.lines.some((line) => line.includes('verification')));
 });
+
+// An opening row's reserved id, and a stand-in that applies updates at once.
+const OPENING = 'obdi-opening:halifax-current';
+const NO_WAIT = { timeoutMs: 0, intervalMs: 1 };
+
+function openingClient(rows, { failOn, applyUpdates = true } = {}) {
+  const updates = [];
+  let reads = 0;
+  return {
+    updates,
+    get reads() {
+      return reads;
+    },
+    getTransactions: async (accountId) => {
+      reads += 1;
+      return rows[accountId] ?? [];
+    },
+    updateTransaction: async (id, fields) => {
+      if (failOn === id) throw new Error('engine refused');
+      updates.push([id, fields]);
+      if (!applyUpdates) return;
+      Object.assign(Object.values(rows).flat().find((r) => r.id === id), fields);
+    },
+  };
+}
+
+const ENTRY = { account: 'act-1', imported_id: OPENING, date: '2026-08-31', amount: 100000 };
+const openingRows = (extra = {}) => ({
+  'act-1': [{ id: 'row-o', imported_id: OPENING, amount: 100000, date: '2026-08-31', ...extra }],
+});
+
+test('an opening row that already matches is counted and costs no update', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient(openingRows());
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.equal(result.counts.already_right, 1);
+  assert.equal(result.counts.corrected, 0);
+  assert.deepEqual(client.updates, []);
+});
+
+test('a differing amount is corrected with an update naming only amount and date', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient(openingRows({ amount: 99999 }));
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.deepEqual(client.updates, [['row-o', { amount: 100000, date: '2026-08-31' }]]);
+  assert.equal(result.counts.corrected, 1);
+  assert.equal(result.counts.already_right, 0);
+});
+
+test('a differing date alone is corrected too', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient(openingRows({ date: '2026-08-01' }));
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.equal(result.counts.corrected, 1);
+  assert.equal(client.updates.length, 1);
+});
+
+test('an opening row that is not in Actual is counted missing and never created', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient({ 'act-1': [] });
+  client.importTransactions = async () => {
+    throw new Error('must not create');
+  };
+  client.addTransactions = client.importTransactions;
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.equal(result.counts.missing, 1);
+  assert.deepEqual(client.updates, []);
+  assert.ok(result.lines.some((line) => line.includes('nothing was created')));
+});
+
+test('two rows carrying one opening id are reported ambiguous and neither is changed', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const rows = openingRows({ amount: 1 });
+  rows['act-1'].push({ id: 'row-twin', imported_id: OPENING, amount: 2, date: '2026-08-31' });
+  const client = openingClient(rows);
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.equal(result.counts.ambiguous, 1);
+  assert.deepEqual(client.updates, []);
+});
+
+test('an entry that does not name an opening id is refused before any read or update', async () => {
+  // The update is keyed by imported id, so an envelope naming a payment's id
+  // would otherwise be a way to rewrite that payment.
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const paymentId = `${'a'.repeat(64)}:0`;
+  const client = openingClient({
+    'act-1': [{ id: 'row-p', imported_id: paymentId, amount: -5, date: '2026-09-01' }],
+  });
+  const result = await applyOpeningBalances(
+    client,
+    [{ account: 'act-1', imported_id: paymentId, date: '2026-09-01', amount: 7 }],
+    NO_WAIT,
+  );
+  assert.equal(result.counts.refused, 1);
+  assert.deepEqual(client.updates, []);
+  assert.equal(client.reads, 0);
+});
+
+test('an update the engine refuses is counted as failed and named, and the next entry still runs', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const rows = openingRows({ amount: 1 });
+  rows['act-2'] = [
+    { id: 'row-q', imported_id: 'obdi-opening:other', amount: 1, date: '2026-08-31' },
+  ];
+  const client = openingClient(rows, { failOn: 'row-o' });
+  const result = await applyOpeningBalances(
+    client,
+    [ENTRY, { account: 'act-2', imported_id: 'obdi-opening:other', date: '2026-08-31', amount: 5 }],
+    NO_WAIT,
+  );
+  assert.equal(result.counts.failed, 1);
+  assert.equal(result.counts.corrected, 1);
+  assert.ok(result.lines.some((line) => line.includes('engine refused')));
+});
+
+test('an update that leaves the row unchanged is reported as a failed verification', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient(openingRows({ amount: 99999 }), { applyUpdates: false });
+  const result = await applyOpeningBalances(client, [ENTRY], NO_WAIT);
+  assert.equal(result.counts.corrected, 0);
+  assert.equal(result.counts.failed, 1);
+  assert.ok(result.lines.some((line) => line.includes('verification')));
+});
+
+test('a correction that only becomes readable after a delay is waited for, not failed', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const rows = openingRows({ amount: 99999 });
+  const client = openingClient(rows, { applyUpdates: false });
+  client.updateTransaction = async (id, fields) => {
+    setTimeout(() => Object.assign(rows['act-1'][0], fields), 30);
+  };
+  const result = await applyOpeningBalances(client, [ENTRY], { timeoutMs: 2000, intervalMs: 10 });
+  assert.equal(result.counts.corrected, 1);
+  assert.equal(result.counts.failed, 0);
+});
+
+test('with no opening entries nothing is read at all', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const client = openingClient({});
+  const result = await applyOpeningBalances(client, [], NO_WAIT);
+  assert.equal(client.reads, 0);
+  assert.equal(result.counts.entries, 0);
+  assert.deepEqual(result.lines, []);
+});
+
+test('split children carrying the opening id are not mistaken for the row', async () => {
+  const { applyOpeningBalances } = await import('./lib.mjs');
+  const rows = openingRows();
+  rows['act-1'].push({ id: 'child', imported_id: OPENING, amount: 3, date: 'x', is_child: true });
+  const result = await applyOpeningBalances(openingClient(rows), [ENTRY], NO_WAIT);
+  assert.equal(result.counts.already_right, 1);
+  assert.equal(result.counts.ambiguous, 0);
+});

@@ -155,14 +155,30 @@ export async function auditAccounts(client, accounts) {
   return report;
 }
 
-// obdi's imported ids have exactly one shape: the 64-hex sha256 content
-// key, a colon, and the occurrence counter. Actual's own importers (OFX/
-// QIF/CSV file import, its bank sync) also populate imported_id - from
-// FITIDs and the like - so "has an imported id" is NOT "is ours".
-const OBDI_IMPORTED_ID = /^[0-9a-f]{64}:\d+$/;
+// obdi's imported ids have exactly two shapes. A payment's is the 64-hex
+// sha256 content key, a colon, and the occurrence counter. An account's
+// opening balance row is the reserved prefix below plus the canonical account
+// reference, which may hold any character a reference can (colons and spaces
+// included), so only the prefix and a non-empty remainder are checked. The
+// prefix is the one OPENING_IMPORTED_ID_PREFIX names in src/obdi/replay.py,
+// and a test holds the two together.
+// Actual's own importers (OFX/QIF/CSV file import, its bank sync) also
+// populate imported_id - from FITIDs and the like - so "has an imported id"
+// is NOT "is ours". Recognising the opening shape is also what makes the row
+// prunable once its account stops having an opening balance: an orphan is
+// only ever deleted if it is provably ours.
+const OBDI_PAYMENT_IMPORTED_ID = /^[0-9a-f]{64}:\d+$/;
+const OBDI_OPENING_IMPORTED_ID = /^obdi-opening:.+$/s;
+
+export function isOpeningImportedId(value) {
+  return typeof value === 'string' && OBDI_OPENING_IMPORTED_ID.test(value);
+}
 
 export function isObdiImportedId(value) {
-  return typeof value === 'string' && OBDI_IMPORTED_ID.test(value);
+  return (
+    typeof value === 'string' &&
+    (OBDI_PAYMENT_IMPORTED_ID.test(value) || OBDI_OPENING_IMPORTED_ID.test(value))
+  );
 }
 
 function ourOrphans(expectedIds, rows) {
@@ -181,8 +197,15 @@ export function choosePrunable(expectedIds, rows) {
   // Deleting one leg makes Actual delete the other as well (measured on the
   // pinned library, 26.7.0, where the partner vanished shortly after the
   // delete resolved), and the other leg is a row obdi still expects.
-  // By the library's source a deleted row's imported id is still matched on
-  // import, so that row would not come back on the next push either.
+  // A prune must not remove an expected row as a side effect, so the orphan
+  // is left and counted.
+  // The cost is that it stays, linked, until somebody unlinks it: the proper
+  // remedy is to unlink first and then delete, which has not been run
+  // against the engine.
+  // An earlier version of this comment said a deleted row's id would never
+  // be imported again. That came from reading the library and was wrong for
+  // at least one case: a pruned row WAS created again by a later import,
+  // once the delete had settled.
   return ourOrphans(expectedIds, rows)
     .filter((row) => !row.transfer_id)
     .map((row) => ({ id: row.id, imported_id: row.imported_id }));

@@ -29,7 +29,13 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 import { parseEnvelope } from './envelope.mjs';
-import { applyAccounts, linkTransfers, provisionAccounts, withBudget } from './lib.mjs';
+import {
+  applyAccounts,
+  applyOpeningBalances,
+  linkTransfers,
+  provisionAccounts,
+  withBudget,
+} from './lib.mjs';
 
 // The Python side loads .env, so this must too - otherwise a correctly
 // configured project reports a missing setting, which reads as a config
@@ -58,7 +64,7 @@ async function main() {
   loadEnvFile();
 
   const raw = JSON.parse(await readFile(payloadPath, 'utf8'));
-  const { provision, accounts, transfers } = parseEnvelope(raw);
+  const { provision, accounts, transfers, openings } = parseEnvelope(raw);
   if (!provision.length && Object.keys(accounts).length === 0) {
     console.log('Payload is empty - nothing to apply.');
     return;
@@ -67,13 +73,15 @@ async function main() {
   const outcome = await withBudget(async (client) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
+    const opening = await applyOpeningBalances(client, openings);
     const linked = await linkTransfers(client, transfers);
-    return { provisioned, applied, linked };
+    return { provisioned, applied, opening, linked };
   });
 
   for (const line of [
     ...outcome.provisioned.lines,
     ...outcome.applied.lines,
+    ...outcome.opening.lines,
     ...outcome.linked.lines,
   ]) {
     console.log(line);

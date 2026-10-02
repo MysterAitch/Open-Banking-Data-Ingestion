@@ -121,6 +121,31 @@ def _declared_accounts(store: Store) -> list[dict[str, object]]:
     ]
 
 
+def _stated_balances(store: Store) -> list[dict[str, object]]:
+    """The balances a person stated for an account, which no artefact can replay.
+
+    Keyed by the account's reference as it is NOW, the name a person recovering
+    the export reads. `balance_minor` is signed in the store's own convention,
+    so money owed is negative.
+    """
+    from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND
+
+    rows = store.connection.execute(
+        "SELECT asset_id, observed_at, value_minor, currency FROM valuations "
+        "WHERE kind = ? AND value_minor IS NOT NULL ORDER BY asset_id, observed_at",
+        (ACCOUNT_BALANCE_KIND,),
+    ).fetchall()
+    return [
+        {
+            "account": str(row["asset_id"]).removeprefix(ACCOUNT_BALANCE_ASSET_PREFIX),
+            "end_of_day": str(row["observed_at"]),
+            "balance_minor": int(row["value_minor"]),
+            "currency": str(row["currency"]),
+        }
+        for row in rows
+    ]
+
+
 def _review_decisions(store: Store) -> list[dict[str, object]]:
     """Only the RESOLVED ones. An unresolved flag is a claim the current rules
     make about the current evidence - the rules will make it again, so it is not
@@ -158,6 +183,7 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     annotations, orphaned = _annotations(store)
     accounts = _declared_accounts(store)
     decisions = _review_decisions(store)
+    balances = _stated_balances(store)
 
     def write(name: str, payload: object) -> None:
         (out_dir / name).write_text(
@@ -167,11 +193,13 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     write("annotations.json", annotations)
     write("declared-accounts.json", accounts)
     write("review-decisions.json", decisions)
+    write("stated-balances.json", balances)
 
     counts = {
         "annotations": len(annotations),
         "declared_accounts": len(accounts),
         "review_decisions": len(decisions),
+        "stated_balances": len(balances),
     }
     write(
         "manifest.json",

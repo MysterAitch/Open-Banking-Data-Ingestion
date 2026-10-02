@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 
 from .models import Transaction, TransactionStatus
 
@@ -141,9 +142,72 @@ def _sendable(
     return sendable
 
 
+#: The imported id of an account's opening-balance row, which is the prefix
+#: plus the canonical account reference. It is not the shape of a payment's id
+#: (a content key and an occurrence), so the applier recognises it separately
+#: (`isObdiImportedId` in applier/audit.mjs, which must agree with this).
+OPENING_IMPORTED_ID_PREFIX = "obdi-opening:"
+
+#: Actual's own name for the entry that holds an account's opening balance.
+OPENING_PAYEE = "Starting Balance"
+
+
+@dataclass(frozen=True)
+class OpeningBalance:
+    """An account's derived opening balance, as the end of `as_at`."""
+
+    canonical_id: str
+    as_at: date
+    amount_minor: int
+
+
+def opening_imported_id(canonical_id: str) -> str:
+    return f"{OPENING_IMPORTED_ID_PREFIX}{canonical_id}"
+
+
+def to_actual_opening(opening: OpeningBalance) -> dict[str, object]:
+    """The one extra row an account's list carries for its opening balance.
+
+    Cleared, because it is a statement of fact rather than a payment awaiting
+    settlement, and flagged as Actual's starting balance so the budget shows
+    it as one. Actual keeps an existing row's values on a re-import, so the
+    applier corrects a changed amount or date afterwards.
+    """
+    return {
+        "imported_id": opening_imported_id(opening.canonical_id),
+        "date": opening.as_at.isoformat(),
+        "amount": opening.amount_minor,
+        "payee_name": OPENING_PAYEE,
+        "starting_balance_flag": True,
+        "cleared": True,
+    }
+
+
+def build_opening_entries(
+    bindings: list[ActualAccountBinding], openings: list[OpeningBalance]
+) -> list[dict[str, object]]:
+    """What the applier must keep exact, one entry per bound account's opening.
+
+    An opening for an account with no binding has no Actual account to land
+    in and is left out, as an unbound account's transactions are.
+    """
+    by_canonical = {binding.canonical_id: binding.actual_account_id for binding in bindings}
+    return [
+        {
+            "account": by_canonical[opening.canonical_id],
+            "imported_id": opening_imported_id(opening.canonical_id),
+            "date": opening.as_at.isoformat(),
+            "amount": opening.amount_minor,
+        }
+        for opening in openings
+        if opening.canonical_id in by_canonical
+    ]
+
+
 def build_payload(
     transactions: list[Transaction],
     bindings: list[ActualAccountBinding],
+    openings: list[OpeningBalance] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     """Group transactions by Actual account, ready to import.
 
@@ -154,8 +218,17 @@ def build_payload(
     linked by the applier once the rows are in. Whether the provider claimed
     the transfer or the pairing pass proved it, the row is sent and its note
     says which.
+
+    An account with a derived opening balance carries it as one further row
+    (`to_actual_opening`), so that Actual's balance is the account's and not
+    merely the sum of the history a provider happened to hold.
     """
     payload: dict[str, list[dict[str, object]]] = defaultdict(list)
+    by_canonical = {binding.canonical_id: binding.actual_account_id for binding in bindings}
+    for opening in openings or []:
+        actual_account = by_canonical.get(opening.canonical_id)
+        if actual_account is not None:
+            payload[actual_account].append(to_actual_opening(opening))
     for transaction, actual_account in _sendable(transactions, bindings):
         payload[actual_account].append(to_actual_transaction(transaction))
     return dict(payload)

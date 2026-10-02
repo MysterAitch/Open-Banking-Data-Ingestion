@@ -13,11 +13,14 @@ balance starts costing what it did not cost yesterday.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from .account_observations import Observation
 from .parsers.base import ParseError
 from .parsers.pdf_statements import PdfStatementParser, _lines, pdf_parser_for
+from .parsers.statement_reading import StatementReading
 from .store import Store
 
 
@@ -45,6 +48,131 @@ def _parser_for(payload: bytes) -> PdfStatementParser | None:
         return None
 
 
+def _read_statement(payload: bytes, digest: str) -> StatementReading | None:
+    """One held PDF, read, or None - with the reason said aloud on stderr.
+
+    A statement that cannot be read must not be contributed as an empty
+    reading: the two look identical downstream.
+    """
+    try:
+        # Read for its own sake: a payload that cannot be turned into
+        # text at all is a document nothing downstream can use, and
+        # finding that out here keeps the reason attached to the
+        # artefact it belongs to.
+        _lines(payload)
+    except Exception as exc:
+        # Said aloud rather than skipped quietly: a statement that
+        # contributes nothing looks exactly like a statement with
+        # nothing to contribute, and only one of those is a fault.
+        print(f"artefact {digest}: could not be read - {exc}", file=sys.stderr)
+        return None
+    parser = _parser_for(payload)
+    if parser is None:
+        return None
+    try:
+        # The payload rather than the lines: a format whose table is
+        # only legible by coordinate reads the page for itself, and the
+        # parser is the one that knows which reading its document needs.
+        return parser.read(payload)
+    except Exception as exc:
+        print(
+            f"artefact {digest}: {parser.source} could not read it - {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _held_pdfs(store: Store, account_ref: str | None) -> list[tuple[str, str]]:
+    """(digest, account filed under) of every held PDF, or those under `account_ref`.
+
+    Distinct, because the same bytes may be held under more than one source
+    label and one document is one statement. The payload is fetched separately,
+    only when somebody needs it: a page that has already read a statement
+    should not pull its bytes out of the store again.
+    """
+    scope = "" if account_ref is None else " AND account_ref = ?"
+    return [
+        (str(row["digest"]), str(row["account_ref"]))
+        for row in store.connection.execute(
+            "SELECT DISTINCT digest, account_ref FROM raw_artefacts "  # noqa: S608
+            f"WHERE media_type = 'application/pdf'{scope}",
+            () if account_ref is None else (account_ref,),
+        )
+    ]
+
+
+def _payload_of(store: Store, digest: str, account_ref: str) -> bytes:
+    row = store.connection.execute(
+        "SELECT payload FROM raw_artefacts "
+        "WHERE digest = ? AND account_ref = ? AND media_type = 'application/pdf' LIMIT 1",
+        (digest, account_ref),
+    ).fetchone()
+    return b"" if row is None else bytes(row["payload"])
+
+
+def held_statement_readings(store: Store) -> Iterator[tuple[str, StatementReading]]:
+    """(account the statement is filed under, its reading) for each readable one."""
+    for digest, account in _held_pdfs(store, None):
+        reading = _read_statement(_payload_of(store, digest, account), digest[:12])
+        if reading is not None:
+            yield account, reading
+
+
+@dataclass(frozen=True)
+class StatementBalance:
+    """A held statement's closing balance, in the store's own sign convention."""
+
+    account_ref: str
+    day: date
+    balance_minor: int
+
+
+#: Artefact digest -> its closing balance, or None when the document states no
+#: figure that can be trusted. A document's bytes never change, so a reading is
+#: valid for the life of the process, and a ledger page that re-extracted every
+#: held statement's text on each view would be unusable.
+_BALANCE_BY_DIGEST: dict[str, tuple[date, int] | None] = {}
+
+
+def statement_balances(
+    store: Store, account_ref: str | None = None
+) -> tuple[list[StatementBalance], int]:
+    """The closing balances the held statements can be trusted to state, and
+    how many held PDFs could not supply one.
+
+    SIGN RULE. A balance is taken only from a statement whose own rows carry
+    its opening balance to its closing balance (`StatementReading.reconciles`),
+    and those rows are signed the store's way: spending negative, money in
+    positive. Because the walk from opening to closing succeeds in that
+    convention, the closing balance is in it too, which for a card makes money
+    owed a NEGATIVE position. A statement that does not reconcile, carries
+    notes, states no closing figure or date, or cannot be read at all is
+    counted and left out - an anchor with the wrong sign would derive a
+    confident wrong opening, and absence is safe where a guess is not.
+    """
+    usable: list[StatementBalance] = []
+    unusable = 0
+    for digest, account in _held_pdfs(store, account_ref):
+        if digest not in _BALANCE_BY_DIGEST:
+            reading = _read_statement(_payload_of(store, digest, account), digest[:12])
+            held: tuple[date, int] | None = None
+            if (
+                reading is not None
+                and reading.statement_date is not None
+                and reading.closing_balance_minor is not None
+                and not reading.notes
+                and reading.reconciles
+            ):
+                held = (reading.statement_date, reading.closing_balance_minor)
+            _BALANCE_BY_DIGEST[digest] = held
+        known = _BALANCE_BY_DIGEST[digest]
+        if known is None:
+            unusable += 1
+        else:
+            usable.append(StatementBalance(account, known[0], known[1]))
+    return usable, unusable
+
+
 def observations_from_statements(store: Store) -> list[Observation]:
     """Every account fact the held statements state, as dated observations.
 
@@ -55,42 +183,10 @@ def observations_from_statements(store: Store) -> list[Observation]:
     resolving them early is what would make import order matter.
     """
     found: list[Observation] = []
-    for row in store.connection.execute(
-        "SELECT digest, account_ref, source, payload FROM raw_artefacts "
-        "WHERE media_type = 'application/pdf'"
-    ):
-        digest = str(row["digest"])[:12]
-        payload = bytes(row["payload"])
-        try:
-            # Read for its own sake: a payload that cannot be turned into
-            # text at all is a document nothing downstream can use, and
-            # finding that out here keeps the reason attached to the
-            # artefact it belongs to.
-            _lines(payload)
-        except Exception as exc:
-            # Said aloud rather than skipped quietly: a statement that
-            # contributes nothing looks exactly like a statement with
-            # nothing to contribute, and only one of those is a fault.
-            print(f"artefact {digest}: could not be read - {exc}", file=sys.stderr)
-            continue
-        parser = _parser_for(payload)
-        if parser is None:
-            continue
-        try:
-            # The payload rather than the lines: a format whose table is
-            # only legible by coordinate reads the page for itself, and the
-            # parser is the one that knows which reading its document needs.
-            reading = parser.read(payload)
-        except Exception as exc:
-            print(
-                f"artefact {digest}: {parser.source} could not read it - {exc}",
-                file=sys.stderr,
-            )
-            continue
+    for account, reading in held_statement_readings(store):
         observed = reading.statement_date
         if observed is None:
             continue
-        account = str(row["account_ref"])
         source = f"statement {observed}"
 
         def add(

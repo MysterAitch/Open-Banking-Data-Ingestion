@@ -7,7 +7,9 @@
  * accounts: {actualAccountId: [transactions]} }. Version 3 adds the
  * confirmed transfer pairs to link once the rows are in:
  * { version: 3, ..., transfers: [{debit: leg, credit: leg}] } where a leg is
- * { account, imported_id, date, amount }.
+ * { account, imported_id, date, amount }. Version 3 also names each account's
+ * opening-balance row, which the import cannot keep exact on its own:
+ * { opening_balances: [{ account, imported_id, date, amount }] }.
  *
  * A declared version this file does not know is refused, never read as the
  * legacy shape: that fallthrough would treat "version", "provision" and
@@ -34,6 +36,26 @@ function parseTransfers(raw) {
   return raw
     .filter((pair) => pair && isLeg(pair.debit) && isLeg(pair.credit))
     .map((pair) => ({ debit: pair.debit, credit: pair.credit }));
+}
+
+const isOpening = (entry) =>
+  entry &&
+  typeof entry === 'object' &&
+  typeof entry.account === 'string' &&
+  entry.account &&
+  typeof entry.imported_id === 'string' &&
+  entry.imported_id &&
+  typeof entry.date === 'string' &&
+  Number.isInteger(entry.amount);
+
+function parseOpenings(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isOpening).map((entry) => ({
+    account: entry.account,
+    imported_id: entry.imported_id,
+    date: entry.date,
+    amount: entry.amount,
+  }));
 }
 
 export function parseEnvelope(payload) {
@@ -65,6 +87,7 @@ export function parseEnvelope(payload) {
       ),
       accounts,
       transfers: declared === 3 ? parseTransfers(payload.transfers) : [],
+      openings: declared === 3 ? parseOpenings(payload.opening_balances) : [],
     };
   }
   // Legacy: the whole payload IS the accounts map.
@@ -73,6 +96,7 @@ export function parseEnvelope(payload) {
     provision: [],
     accounts: payload && typeof payload === 'object' ? payload : {},
     transfers: [],
+    openings: [],
   };
 }
 

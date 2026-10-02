@@ -62,6 +62,16 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: moved - which is the whole of what it was built to do.
 SCHEMA_VERSION = 10
 
+#: How a bank account's balance observation is filed in `valuations`: the
+#: asset id is this prefix plus the canonical account reference, and the kind
+#: separates it from the assets that table was built for.
+#: A balance a person STATED is the only kind held there - the bank's own
+#: running balance and a statement's closing balance are re-derived from
+#: evidence on demand (see balance_anchors), so storing them would be a second
+#: copy that could disagree with the evidence it came from.
+ACCOUNT_BALANCE_ASSET_PREFIX = "account:"
+ACCOUNT_BALANCE_KIND = "account_balance"
+
 SCHEMA = """
 -- Keyed on (digest, account_ref, source): the bytes, the account they are
 -- filed against, and the pipe that delivered them - and NOTHING about the
@@ -1103,6 +1113,9 @@ class Store:
                 else mint_account_id()
             )
         stored = replace(record, stable_id=stable_id)
+        previous = self.connection.execute(
+            "SELECT ref FROM declared_accounts WHERE stable_id = ?", (stable_id,)
+        ).fetchone()
         try:
             self.connection.execute(
                 "INSERT INTO declared_accounts (stable_id, ref, kind, label, "
@@ -1131,6 +1144,8 @@ class Store:
                 "canonical name is what every stored row resolves through, so "
                 "two accounts cannot share one. Nothing was declared."
             ) from exc
+        if previous is not None and str(previous["ref"]) != stored.ref:
+            self._move_account_balances(str(previous["ref"]), stored.ref)
         self.connection.execute(
             "DELETE FROM declared_account_limits WHERE stable_id = ?", (stable_id,)
         )
@@ -1686,8 +1701,38 @@ class Store:
             "UPDATE fetch_attempts SET account_ref = ? WHERE account_ref = ?",
             (new_account_id, old_account_id),
         )
+        self._move_account_balances(old_account_id, new_account_id)
         self.connection.commit()
         return cursor.rowcount
+
+    def _move_account_balances(self, old_account_ref: str, new_account_ref: str) -> None:
+        """Carry the balances a person stated across an account's renaming.
+
+        They are the person's own figures, with no artefact to re-derive them
+        from, so a rename that left them under the old reference would strand
+        them silently: the account would read as having no opening balance.
+        Where the new reference already holds a balance for the same date and
+        basis it is kept and the old one stays behind under the old name,
+        because choosing between two stated figures is the person's decision
+        and a rename must not make it for them.
+        """
+        self.connection.execute(
+            "UPDATE OR IGNORE valuations SET asset_id = ? WHERE asset_id = ? AND kind = ?",
+            (
+                ACCOUNT_BALANCE_ASSET_PREFIX + new_account_ref,
+                ACCOUNT_BALANCE_ASSET_PREFIX + old_account_ref,
+                ACCOUNT_BALANCE_KIND,
+            ),
+        )
+
+    def delete_valuation_row(self, *, asset_id: str, observed_at: date, source: str) -> bool:
+        """Remove one observation. Returns whether there was one to remove."""
+        cursor = self.connection.execute(
+            "DELETE FROM valuations WHERE asset_id = ? AND observed_at = ? AND source = ?",
+            (asset_id, observed_at.isoformat(), source),
+        )
+        self.connection.commit()
+        return bool(cursor.rowcount)
 
     def _entity_moves(
         self,
@@ -2865,11 +2910,17 @@ class Store:
         declared = self.connection.execute(
             "SELECT COUNT(*) FROM declared_accounts"
         ).fetchone()[0]
+        # A balance a person stated has no artefact behind it, so it is
+        # exactly the kind of thing a wipe loses for good.
+        stated = self.connection.execute(
+            "SELECT COUNT(*) FROM valuations WHERE kind = ?", (ACCOUNT_BALANCE_KIND,)
+        ).fetchone()[0]
         return {
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),
             "declared accounts": int(declared),
+            "stated balance anchors": int(stated),
         }
 
 

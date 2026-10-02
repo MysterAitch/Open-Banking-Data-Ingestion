@@ -222,3 +222,132 @@ test('a duplicate row sharing one imported id is counted, not collapsed', async 
   assert.deepEqual(summary.duplicated_sample, [{ imported_id: 'ck-1:0', copies: 2 }]);
   assert.equal(summary.present, 1);
 });
+
+test('an opening-balance id is ours: the reserved prefix and any non-empty reference', async () => {
+  const { isObdiImportedId, isOpeningImportedId } = await import('./audit.mjs');
+  for (const id of [
+    'obdi-opening:halifax-current',
+    'obdi-opening:truelayer:3fc9a1 with spaces',
+    'obdi-opening:a',
+    'obdi-opening:two\nlines',
+  ]) {
+    assert.equal(isOpeningImportedId(id), true, id);
+    assert.equal(isObdiImportedId(id), true, id);
+  }
+});
+
+test('the reserved prefix alone, another case, or another id is not an opening id', async () => {
+  const { isObdiImportedId, isOpeningImportedId } = await import('./audit.mjs');
+  for (const id of [
+    'obdi-opening:',
+    'OBDI-OPENING:halifax-current',
+    ' obdi-opening:halifax-current',
+    'xobdi-opening:halifax-current',
+    'obdi-opening',
+    'FITID-20260803-0001',
+    '',
+    null,
+    undefined,
+    42,
+  ]) {
+    assert.equal(isOpeningImportedId(id), false, String(id));
+    assert.equal(isObdiImportedId(id), false, String(id));
+  }
+});
+
+test('a payment id is still ours and is not mistaken for an opening id', async () => {
+  const { isObdiImportedId, isOpeningImportedId } = await import('./audit.mjs');
+  assert.equal(isObdiImportedId(`${hex('c')}:3`), true);
+  assert.equal(isOpeningImportedId(`${hex('c')}:3`), false);
+});
+
+test('an opening row the expected set no longer names is prunable as ours', async () => {
+  // The account stopped having an opening balance, so its row is an orphan,
+  // and an orphan is deleted only if it is provably ours.
+  const { choosePrunable } = await import('./audit.mjs');
+  const expected = new Set([`${hex('1')}:0`]);
+  const rows = [
+    { id: 'pay', imported_id: `${hex('1')}:0` },
+    { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
+  ];
+  assert.deepEqual(choosePrunable(expected, rows), [
+    { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
+  ]);
+});
+
+test('an opening row the expected set still names is never pruned', async () => {
+  const { choosePrunable } = await import('./audit.mjs');
+  const expected = new Set([`${hex('1')}:0`, 'obdi-opening:halifax-current']);
+  const rows = [
+    { id: 'pay', imported_id: `${hex('1')}:0` },
+    { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
+  ];
+  assert.deepEqual(choosePrunable(expected, rows), []);
+});
+
+test('an opening row in the wrong account is an orphan there, and prunable', async () => {
+  // A mis-binding leaves one account holding another's opening row; the id
+  // names the account it belongs to, so it is not expected in this one.
+  const { choosePrunable } = await import('./audit.mjs');
+  const expected = new Set([`${hex('1')}:0`, 'obdi-opening:this-one']);
+  const rows = [{ id: 'stray', imported_id: 'obdi-opening:somebody-else' }];
+  assert.deepEqual(choosePrunable(expected, rows), [
+    { id: 'stray', imported_id: 'obdi-opening:somebody-else' },
+  ]);
+});
+
+test('an opening row that is linked as a transfer is left in place like any linked orphan', async () => {
+  const { choosePrunable, countLinkedOrphans } = await import('./audit.mjs');
+  const expected = new Set([`${hex('1')}:0`]);
+  const rows = [{ id: 'o', imported_id: 'obdi-opening:x', transfer_id: 'partner' }];
+  assert.deepEqual(choosePrunable(expected, rows), []);
+  assert.equal(countLinkedOrphans(expected, rows), 1);
+});
+
+test('prune counts an opening row it removes and still refuses an empty expected set', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const deleted = [];
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getTransactions: async () => [
+      { id: 'a', imported_id: `${hex('1')}:0` },
+      { id: 'o', imported_id: 'obdi-opening:halifax-current' },
+    ],
+    deleteTransaction: async (id) => deleted.push(id),
+  };
+
+  const report = await pruneAccounts(client, { 'act-1': [{ imported_id: `${hex('1')}:0` }] });
+  assert.deepEqual(deleted, ['o']);
+  assert.equal(report[0].removed, 1);
+
+  // With nothing at all expected, even a lone opening row is not removed:
+  // an empty set is what a wiped store looks like.
+  deleted.length = 0;
+  const blind = await pruneAccounts(client, { 'act-1': [] });
+  assert.deepEqual(deleted, []);
+  assert.ok(blind[0].skipped);
+});
+
+test('the audit counts an opening row expected and present, and its balance includes it', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const expected = [
+    { imported_id: 'obdi-opening:halifax-current', date: '2026-08-31', amount: 100000 },
+    { imported_id: `${hex('1')}:0`, date: '2026-09-01', amount: -2500 },
+  ];
+  const client = (openingAmount) => ({
+    getAccounts: async () => [{ id: 'act-1', name: 'halifax-current' }],
+    getAccountBalance: async () => openingAmount - 2500,
+    getTransactions: async () => [
+      { imported_id: 'obdi-opening:halifax-current', date: '2026-08-31', amount: openingAmount },
+      { imported_id: `${hex('1')}:0`, date: '2026-09-01', amount: -2500 },
+    ],
+  });
+
+  const [right] = await auditAccounts(client(100000), { 'act-1': expected });
+  const [altered] = await auditAccounts(client(90000), { 'act-1': expected });
+
+  assert.deepEqual(right.balance, { expected: 97500, actual: 97500, agrees: true });
+  assert.equal(right.diverged, 0);
+  assert.deepEqual(altered.balance, { expected: 97500, actual: 87500, agrees: false });
+  assert.equal(altered.diverged, 1);
+});

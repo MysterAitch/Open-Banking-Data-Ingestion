@@ -24,7 +24,12 @@ fetch history, which this page does not read. The page says so rather than
 letting silence read as a pass.
 
 COST: a page costs a fixed number of statements however many rows the account
-holds - see QUERIES_PER_PAGE. Nothing is fetched per row.
+holds - see QUERIES_PER_PAGE. Nothing is fetched per row. Finding the opening
+balance's anchors adds ANCHOR_QUERIES and, where the account has bank records or
+held statements, one more per artefact not yet read.
+
+THE OPENING BALANCE is derived in `balance_anchors`, which states how and what
+its one weakness is; here it only joins the running position.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from .accounts import AccountRef
+from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural
 from .models import Transaction, TransactionStatus
@@ -46,6 +52,14 @@ from .store import Store
 #: review flags, and the two annotation kinds. An account with no rows adds
 #: the registry lookup that tells "declared but empty" from "unknown".
 QUERIES_PER_PAGE = 8
+
+#: Statements issued to look for the account's opening-balance anchors when it
+#: has no TrueLayer records and no held statements: the stated balances, the
+#: bank-record reconciliation (cards, rows, pending, sightings), and the held
+#: statement listing. Each TrueLayer artefact a row's balance has to be found
+#: in, and each held statement not yet read, adds statements beyond this, so a
+#: page for such an account costs more and the fixed figure is a floor.
+ANCHOR_QUERIES = 6
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -149,15 +163,60 @@ class MonthSummary:
 
 @dataclass(frozen=True)
 class Position:
-    #: The last day counted, ISO. No opening balance is included in either figure.
+    #: The last day counted, ISO.
     through: Structural[str]
     rows_counted: Structural[int]
+    #: Whether both figures start from the account's derived opening balance.
+    #: When False they start from zero, which is a statement about the figures
+    #: and not a claim that the account opened empty.
+    opening_included: Structural[bool]
     store_direction: Structural[str]
     sent_direction: Structural[str]
     differs: Structural[bool]
 
     store_balance: Money
     sent_balance: Money
+
+
+@dataclass(frozen=True)
+class AnchorLine:
+    """One anchor: a fact about the account's balance at the end of a day."""
+
+    day: Structural[str]
+    #: "stated", "bank", or "statement": where the fact was said.
+    basis: Structural[str]
+    #: The earliest anchor, the only one the opening balance is derived from.
+    defines_opening: Structural[bool]
+    #: "" for the defining anchor, otherwise "agrees" or "differs".
+    verdict: Structural[str]
+    balance_direction: Structural[str]
+    #: Which way the anchor sits from what the rows predict, "nil" if it agrees.
+    difference_direction: Structural[str]
+
+    balance: Money
+    #: Zero for the defining anchor and for one that agrees.
+    difference: Money
+
+
+@dataclass(frozen=True)
+class OpeningView:
+    #: "none" (no anchor, so no opening balance), "derived", or "withheld"
+    #: (anchors exist but an opening cannot be derived; `withheld` says why).
+    state: Structural[str]
+    withheld: Structural[str]
+    #: The opening is the balance at the end of this ISO day.
+    as_at: Structural[str]
+    direction: Structural[str]
+    #: Only one anchor, so the opening absorbs every missing or surplus row
+    #: before it and nothing can tell.
+    single_anchor: Structural[bool]
+    unusable_statements: Structural[int]
+    anchors: Structural[tuple[AnchorLine, ...]]
+    #: The dates of the anchors a person stated, which are the ones that can
+    #: be removed from the page.
+    stated_days: Structural[tuple[str, ...]]
+
+    opening: Money
 
 
 @dataclass(frozen=True)
@@ -181,6 +240,49 @@ class Ledger:
     #: has left. Handed in rather than read here, so a page still costs
     #: QUERIES_PER_PAGE statements for the ledger proper.
     archive: Structural[ArchiveNote | None] = None
+    #: Absent only for an account nothing is known about.
+    opening: Structural[OpeningView | None] = None
+
+
+def opening_view(opening: EffectiveOpening) -> OpeningView:
+    lines = []
+    for reading in opening.readings:
+        anchor = reading.anchor
+        difference = reading.difference_minor or 0
+        lines.append(
+            AnchorLine(
+                day=anchor.day.isoformat(),
+                basis=anchor.basis,
+                defines_opening=reading.defines_opening,
+                verdict=(
+                    ""
+                    if reading.agrees is None
+                    else "agrees"
+                    if reading.agrees
+                    else "differs"
+                ),
+                balance_direction=direction_of(anchor.balance_minor),
+                difference_direction=direction_of(difference),
+                balance=Money(anchor.balance_minor, CURRENCY),
+                difference=Money(difference, CURRENCY),
+            )
+        )
+    derived = opening.opening_minor is not None and opening.as_at is not None
+    return OpeningView(
+        state=(
+            "derived" if derived else "withheld" if opening.readings else "none"
+        ),
+        withheld=opening.withheld,
+        as_at=opening.as_at.isoformat() if opening.as_at else "",
+        direction=direction_of(opening.opening_minor or 0),
+        single_anchor=opening.single_anchor,
+        unusable_statements=opening.unusable_statements,
+        anchors=tuple(lines),
+        stated_days=tuple(
+            r.anchor.day.isoformat() for r in opening.readings if r.anchor.basis == STATED
+        ),
+        opening=Money(opening.opening_minor or 0, CURRENCY),
+    )
 
 
 def parse_month(text: str) -> tuple[int, int]:
@@ -262,7 +364,13 @@ def _ledger_for(
     rows = store.transactions_for_account(ref)
     if not rows:
         declared = store.declared_account(AccountRef(ref)) is not None
-        return _empty(ref, label, "no-rows" if declared else "unknown", bound)
+        empty = _empty(ref, label, "no-rows" if declared else "unknown", bound)
+        if not declared:
+            return empty
+        # An account declared before any money moved can still have had its
+        # balance stated, and that is exactly the figure a new account needs.
+        return replace(empty, opening=opening_view(effective_opening(store, ref, [])))
+    opening = effective_opening(store, ref, rows)
 
     other_side = _confirmed_other_sides(store, ref)
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
@@ -368,9 +476,18 @@ def _ledger_for(
     currency = rows[0].currency
     through = [pair for pair in built if pair[0].value_date <= last]
     pos_store, pos_sent, counted = totals(through)
+    # The opening is the balance BEFORE the first row, so it belongs in every
+    # running position. It reaches Actual only on a bound account, as the
+    # payload's one extra row, so the sent figure takes it on the same terms.
+    opening_minor = opening.opening_minor
+    if opening_minor is not None:
+        pos_store += opening_minor
+        if bound:
+            pos_sent += opening_minor
     position = Position(
         through=last.isoformat(),
         rows_counted=counted,
+        opening_included=opening_minor is not None,
         store_direction=direction_of(pos_store),
         sent_direction=direction_of(pos_sent),
         differs=pos_store != pos_sent,
@@ -422,13 +539,17 @@ def _ledger_for(
         sources=tuple(account_sources),
         actual_bound=bound,
         month=shown,
-        previous_month=_neighbour(year, number, -1),
-        next_month=_neighbour(year, number, 1),
+        # A step is offered only towards months that could hold something.
+        # Offering "next" from the newest month led to a page saying the month
+        # was empty, which reads as a gap and is only the future.
+        previous_month=_neighbour(year, number, -1) if shown > months_held[0] else "",
+        next_month=_neighbour(year, number, 1) if shown < months_held[-1] else "",
         oldest_month=months_held[0],
         newest_month=months_held[-1],
         summary=summary,
         position=position,
         rows=tuple(row for _, row in in_month),
+        opening=opening_view(opening),
     )
 
 

@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .callback import render_page
-from .ledger import QUERIES_PER_PAGE, Ledger, LedgerRequestError
+from .errors import DataError
+from .ledger import ANCHOR_QUERIES, QUERIES_PER_PAGE, Ledger, LedgerRequestError
+from .logs import say
 from .masking import Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
 
@@ -152,9 +154,9 @@ def _row_html(row: Any) -> str:
     )
     return (
         "<tr>"
-        f'<td class="mono">{_esc(row.dated.isoformat())}{dates}</td>'
+        f'<td class="mono nowrap">{_esc(row.dated.isoformat())}{dates}</td>'
         f"<td><strong>{_esc(row.description)}</strong>{counterparty}</td>"
-        f'<td class="mono">{_esc(row.direction)} {_esc(row.amount)}{currency}</td>'
+        f'<td class="mono nowrap">{_esc(row.direction)} {_esc(row.amount)}{currency}</td>'
         f"<td>{_status_pill(row.status)}</td>"
         f"<td>{sources}</td>"
         f"<td>{_row_flags(row)}</td>"
@@ -198,24 +200,167 @@ def _summary_html(summary: Any) -> str:
     )
 
 
+_BALANCE_WORDS = {"in": "in credit", "out": "overdrawn or owed", "nil": "nil"}
+
+_BASIS_WORDS = {
+    "stated": "stated by a person",
+    "bank": "the bank's own running balance",
+    "statement": "a held statement's closing balance",
+}
+
+
+def _balance_word(direction: str) -> str:
+    return _BALANCE_WORDS.get(direction, direction)
+
+
+def _anchor_row(line: Any) -> str:
+    """One anchor as a list item: its verdict first, then when, what, and whence.
+
+    A list and not a table.
+    Four columns did not fit a phone: the verdict, which is the reason for
+    reading the section, was the column cut off at the right-hand edge.
+    """
+    if line.defines_opening:
+        role = '<span class="pill pill-quiet">defines the opening balance</span>'
+        detail = ""
+    elif line.verdict == "agrees":
+        role = '<span class="pill pill-ok">agrees</span>'
+        detail = " with what the rows predict"
+    else:
+        role = '<span class="pill pill-bad">differs</span>'
+        detail = (
+            " from what the rows predict by "
+            f"{_esc(_balance_word(line.difference_direction))} {_esc(line.difference)}"
+        )
+    basis = _BASIS_WORDS.get(line.basis, line.basis)
+    return (
+        "<li>"
+        f"<p>{role}{detail}</p>"
+        f'<p>End of <span class="mono nowrap">{_esc(line.day)}</span>: '
+        f"{_esc(_balance_word(line.balance_direction))} "
+        f'<span class="mono nowrap">{_esc(line.balance)}</span></p>'
+        f'<p class="muted">{_esc(basis)}</p>'
+        "</li>"
+    )
+
+
+def _anchor_forms(view: Any, ref: str, month: str) -> str:
+    """The forms that state or remove a balance.
+
+    Nothing typed is ever put back into a form: the amount field is empty on
+    every rendering, masked or not, because a pre-filled field is a value on
+    a page reachable by address.
+    """
+    hidden = (
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<input type="hidden" name="month" value="{_esc(month)}">'
+    )
+    save = (
+        '<form method="post" action="/ledger-anchor">'
+        + hidden
+        + '<input type="hidden" name="currency" value="GBP">'
+        '<p><label>Date the balance applies to, the END of that day<br>'
+        '<input type="date" name="day" required></label></p>'
+        '<p><label>Balance at the end of that day, in pounds and pence<br>'
+        '<span class="muted">start with a minus sign if the account is overdrawn or owed</span><br>'
+        '<input name="amount" inputmode="decimal" autocomplete="off" required>'
+        "</label></p>" + submit_button("Save stated balance") + "</form>"
+    )
+    remove = "".join(
+        '<form method="post" action="/ledger-anchor-remove">'
+        + hidden
+        + f'<input type="hidden" name="day" value="{_esc(day)}">'
+        + submit_button(f"Remove the stated balance for the end of {day}")
+        + "</form>"
+        for day in view.opening.stated_days
+    )
+    return (
+        "<h3>State a balance</h3>"
+        '<p class="muted">Stating a balance for a date already stated replaces it. '
+        "The amount you type is never shown on any page you can bookmark; after "
+        "saving, this page comes back masked.</p>" + save + remove
+    )
+
+
+def _opening_html(view: Any, unmasked: bool) -> str:
+    """The "Opening balance and anchors" section, and the forms that edit it."""
+    opening = view.opening
+    if opening is None:
+        return ""
+    body = "<h2>Opening balance and anchors</h2>"
+    if opening.state == "none":
+        body += (
+            '<p class="warn"><strong>No opening balance: the figures on this page '
+            "start from zero.</strong> That is how they are counted, and it is not "
+            "a claim that the account opened empty. No balance has been stated for "
+            "it, and neither the bank's records nor a held statement supplies one.</p>"
+        )
+    else:
+        body += (
+            '<ul class="anchors">'
+            + "".join(_anchor_row(line) for line in opening.anchors)
+            + "</ul>"
+        )
+        if opening.state == "derived":
+            body += (
+                f'<p><strong>Opening balance, at the end of {_esc(opening.as_at)}:</strong> '
+                f'<span class="mono">{_esc(_balance_word(opening.direction))} '
+                f"{_esc(opening.opening)}</span>. It is the earliest anchor's balance less "
+                "the rows dated on or before that anchor.</p>"
+            )
+            if opening.single_anchor:
+                body += (
+                    '<p class="warn">An opening derived from a single anchor absorbs every '
+                    "missing or surplus row before that anchor into the opening figure, and "
+                    "nothing here can tell. A second anchor turns it into a test.</p>"
+                )
+            differing = sum(1 for line in opening.anchors if line.verdict == "differs")
+            if differing:
+                body += (
+                    f'<p class="warn"><strong>{differing} later anchor(s) differ</strong> '
+                    "from what the rows predict: rows are missing, duplicated, or "
+                    "mis-dated between the anchors.</p>"
+                )
+        else:
+            body += (
+                '<p class="warn"><strong>No opening balance could be derived:</strong> '
+                f"{_esc(opening.withheld)}.</p>"
+            )
+    if opening.unusable_statements:
+        body += (
+            f'<p class="muted">{_esc(str(opening.unusable_statements))} held statement(s) '
+            "could not supply a balance - unreadable, or its rows do not carry its "
+            "opening balance to its closing one - and are not used.</p>"
+        )
+    return body + _anchor_forms(view, view.ref, view.month)
+
+
 def _position_html(position: Any) -> str:
+    included = position.opening_included
+    word = _balance_word if included else _direction_word
     return (
         "<h2>Running position</h2>"
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
         + _count("Non-void rows counted", position.rows_counted)
         + _count(
-            "Balance by the store's own rows",
-            f"{_direction_word(position.store_direction)} {position.store_balance}",
+            "Balance by the store's own rows" + (", plus the opening balance" if included else ""),
+            f"{word(position.store_direction)} {position.store_balance}",
         )
         + _count(
             "Balance by what would be sent to Actual",
-            f"{_direction_word(position.sent_direction)} {position.sent_balance}",
+            f"{word(position.sent_direction)} {position.sent_balance}",
         )
         + "</table></div>"
         f"<p><strong>The two positions {_differ(position.differs)}.</strong> "
-        "An account whose history starts partway through has no opening balance "
-        "in either figure.</p>"
+        + (
+            "Both figures start from the account's derived opening balance, shown "
+            "above."
+            if included
+            else "Neither figure includes an opening balance: both start from zero, "
+            "which is not a claim that the account opened empty."
+        )
+        + "</p>"
     )
 
 
@@ -316,10 +461,17 @@ def _header(view: Any, *, archive_wired: bool) -> str:
 
 
 def render_ledger(
-    ledger: Ledger, *, unmasked: bool, archive_wired: bool = False
+    ledger: Ledger, *, unmasked: bool, archive_wired: bool = False, notice: str = ""
 ) -> bytes:
+    """`notice` is a sentence about what the request just did, escaped here.
+
+    It is for a confirmation that names a date and a basis; a value must never
+    be passed in it, since the masked rendering is the one that carries it.
+    """
     view = Disclosed(ledger, unmasked=unmasked)
-    body = _header(view, archive_wired=archive_wired)
+    body = (f'<p class="ok"><strong>{_esc(notice)}</strong></p>' if notice else "") + _header(
+        view, archive_wired=archive_wired
+    )
 
     if view.state == "unknown":
         body += (
@@ -333,7 +485,7 @@ def render_ledger(
             '<p class="warn"><strong>This account holds no transactions at all.</strong> '
             "It is declared, but nothing has been imported or fetched for it, or "
             "its feed has been silent since it was set up. This is not a clean "
-            "month.</p>" + _navigation(view, unmasked)
+            "month.</p>" + _opening_html(view, unmasked) + _navigation(view, unmasked)
         )
         return render_page("Ledger", body)
 
@@ -348,6 +500,7 @@ def render_ledger(
         )
     else:
         body += _summary_html(view.summary)
+    body += _opening_html(view, unmasked)
     body += _position_html(view.position)
     if view.state == "ok":
         body += (
@@ -361,7 +514,9 @@ def render_ledger(
     body += _LIMITS
     body += (
         f'<p class="muted">This page costs {QUERIES_PER_PAGE} statements however '
-        "many rows the account holds.</p>"
+        f"many rows the account holds, plus {ANCHOR_QUERIES} to look for opening "
+        "balance anchors and a few more for each held statement or bank record "
+        "that has not been read yet.</p>"
     )
     body += _navigation(view, unmasked)
     return render_page("Ledger", body)
@@ -398,7 +553,95 @@ class LedgerPages:
             unmasked=True,
         )
 
-    def _ledger(self, ref: str, month: str, *, unmasked: bool) -> None:
+    def _anchor_refusal(self, status: int, title: str, message: str) -> None:
+        self._respond(status, _page(title, message), no_store=True)
+
+    def _anchor_save_post(self, form: dict[str, list[str]]) -> None:
+        """State (or restate) a balance, then answer with the MASKED ledger.
+
+        The amount is handed to the hook and goes no further: not into the
+        confirmation, not into a refusal, and not into the page that follows.
+        That page is the masked one, so a person who wants to see what they
+        saved asks for values the ordinary way.
+        """
+        hook = self.bound_config.anchor_save
+        if hook is None:
+            self._respond(404, _page("Not available", "Stating a balance is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        day = (form.get("day", [""])[0] or "").strip()
+        try:
+            hook(
+                ref,
+                day,
+                form.get("amount", [""])[0] or "",
+                (form.get("currency", ["GBP"])[0] or "GBP").strip(),
+            )
+        except DataError as exc:
+            self._anchor_refusal(400, "Balance not saved", f"Nothing was saved. {exc}.")
+            return
+        except Exception as fault:
+            # Not str(fault): an unexpected failure's text is not under this
+            # module's control and could quote what was typed.
+            say("ledger.anchor.save.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500, "Balance not saved", "Nothing was saved, because of an unexpected fault."
+            )
+            return
+        self._ledger(
+            ref,
+            month,
+            unmasked=False,
+            notice=f"Saved: a stated balance for the end of {day}. Nothing else changed.",
+            no_store=True,
+        )
+
+    def _anchor_remove_post(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.anchor_remove
+        if hook is None:
+            self._respond(404, _page("Not available", "Removing a balance is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        day = (form.get("day", [""])[0] or "").strip()
+        try:
+            removed = hook(ref, day)
+        except DataError as exc:
+            self._anchor_refusal(400, "Balance not removed", f"Nothing was removed. {exc}.")
+            return
+        except Exception as fault:
+            say("ledger.anchor.remove.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                "Balance not removed",
+                "Nothing was removed, because of an unexpected fault.",
+            )
+            return
+        if not removed:
+            self._anchor_refusal(
+                404,
+                "No such stated balance",
+                f"No balance was stated for the end of {day}, so nothing was removed.",
+            )
+            return
+        self._ledger(
+            ref,
+            month,
+            unmasked=False,
+            notice=f"Removed: the stated balance for the end of {day}.",
+            no_store=True,
+        )
+
+    def _ledger(
+        self,
+        ref: str,
+        month: str,
+        *,
+        unmasked: bool,
+        notice: str = "",
+        no_store: bool = False,
+    ) -> None:
         hook = self.bound_config.ledger_data
         if hook is None:
             self._respond(404, _page("Not available", "No ledger is wired."))
@@ -420,6 +663,7 @@ class LedgerPages:
                 ledger,
                 unmasked=unmasked,
                 archive_wired=self.bound_config.archive_account is not None,
+                notice=notice,
             ),
-            no_store=unmasked,
+            no_store=unmasked or no_store,
         )

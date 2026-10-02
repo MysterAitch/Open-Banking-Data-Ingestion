@@ -21,16 +21,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .balance_anchors import effective_opening
 from .replay import (
     ActualAccountBinding,
+    OpeningBalance,
+    build_opening_entries,
     build_payload,
     build_transfer_pairs,
     unbound_accounts,
 )
 from .store import Store
 
-# Version 3 added `transfers` beside `accounts`. The applier refuses any
-# version it does not know, so a change here ships with its applier.
+# Version 3 added `transfers` and `opening_balances` beside `accounts`. The
+# applier refuses any version it does not know, so a change here ships with
+# its applier.
 ENVELOPE_VERSION = 3
 
 
@@ -259,7 +263,8 @@ def build_envelope(
     named_canonicals: set[str] | None = None,
 ) -> dict[str, object]:
     transactions = store.all_transactions()
-    payload = build_payload(transactions, bindings)
+    openings = opening_balances(store, bindings)
+    payload = build_payload(transactions, bindings, openings)
     # Two store rows sharing one imported id would reach Actual as one row:
     # importTransactions treats the id as THE identity, so the second row is
     # silently absorbed and a real payment vanishes from the budget. Refuse
@@ -328,7 +333,26 @@ def build_envelope(
         "transfers": build_transfer_pairs(
             transactions, bindings, store.confirmed_transfer_pairs()
         ),
+        "opening_balances": build_opening_entries(bindings, openings),
     }
+
+
+def opening_balances(
+    store: Store, bindings: list[ActualAccountBinding]
+) -> list[OpeningBalance]:
+    """The derived opening balance of each bound account that has one.
+
+    An account with no anchor has none, and is simply absent: sending a zero
+    would assert that it opened empty, which nothing has established.
+    """
+    found: list[OpeningBalance] = []
+    for binding in bindings:
+        opening = effective_opening(store, binding.canonical_id)
+        if opening.opening_minor is not None and opening.as_at is not None:
+            found.append(
+                OpeningBalance(binding.canonical_id, opening.as_at, opening.opening_minor)
+            )
+    return found
 
 
 def build_audit_envelope(
@@ -342,7 +366,8 @@ def build_audit_envelope(
     the Actual side, and those are precisely what the audit exists to see.
     """
     transactions = store.all_transactions()
-    accounts = build_payload(transactions, bindings)
+    openings = opening_balances(store, bindings)
+    accounts = build_payload(transactions, bindings, openings)
     for binding in bindings:
         accounts.setdefault(binding.actual_account_id, [])
     return {
@@ -353,6 +378,10 @@ def build_audit_envelope(
         "transfers": build_transfer_pairs(
             transactions, bindings, store.confirmed_transfer_pairs()
         ),
+        # The opening rows are in `accounts` already, so the audit's expected
+        # balance and expected set include them; the list names them as the
+        # push does.
+        "opening_balances": build_opening_entries(bindings, openings),
     }
 
 

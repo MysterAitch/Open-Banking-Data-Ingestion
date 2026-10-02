@@ -486,10 +486,11 @@ def archive_controls(
         assert note is not None  # narrowed for the type checker by `archived`
         return (
             _final_movements(note)
+            + "<details><summary>Unarchive this account</summary>"
             + '<form method="post" action="/unarchive-account">'
             + hidden
             + submit_button("Unarchive")
-            + "</form>"
+            + "</form></details>"
         )
     parts = ""
     if note is not None and note.state == "suggested":
@@ -506,7 +507,10 @@ def archive_controls(
             + "</form>"
         )
     if offer:
+        # Behind a disclosure: archiving is done once in an account's life, and
+        # as an open form it was the first and heaviest thing on every ledger.
         parts += (
+            "<details><summary>Archive this account</summary>"
             '<form method="post" action="/archive-account">'
             + hidden
             + (
@@ -517,7 +521,7 @@ def archive_controls(
                 else ""
             )
             + submit_button("Archive this account")
-            + "</form>"
+            + "</form></details>"
         )
     return parts
 

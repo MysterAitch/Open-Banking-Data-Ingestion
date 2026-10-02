@@ -137,6 +137,10 @@ def render_page(title: str, body: str) -> bytes:
  .muted {{ opacity: .65; }}
  .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
          font-size: .85em; word-break: break-all; }}
+ /* A date or an amount is read whole. The monospace rule above breaks
+    anywhere, which is right for a long identifier and split "2026-06-28"
+    and "£1,234.56" across three lines in a narrow table cell. */
+ .nowrap {{ white-space: nowrap; word-break: normal; }}
  .warn {{ color: #b45309; font-weight: 600; }}
  .bad {{ color: #b91c1c; font-weight: 600; }}
  .ok {{ opacity: .75; }}
@@ -179,6 +183,9 @@ def render_page(title: str, body: str) -> bytes:
           margin: .5rem 0 .2rem; }}
  .facts dt {{ font-size: .78rem; opacity: .65; }}
  .facts dd {{ margin: 0; }}
+ .anchors {{ list-style: none; margin: .5rem 0; padding: 0; }}
+ .anchors li {{ padding: .5rem 0; border-bottom: 1px solid #8883; }}
+ .anchors p {{ margin: .15rem 0; }}
  details summary {{ cursor: pointer; min-height: 44px; display: flex;
                    align-items: center; opacity: .75; }}
 </style></head>

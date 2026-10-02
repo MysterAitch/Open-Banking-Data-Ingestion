@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 
+import { isOpeningImportedId, readAccountRows } from './audit.mjs';
 import { indexPairRows, judgePair } from './transfers.mjs';
 
 function required(name) {
@@ -148,6 +149,119 @@ export async function linkTransfers(client, transfers) {
         lines.push(`${named(pair)}: FAILED verification - the rows do not point at each other`);
       }
     }
+  }
+  return { counts, lines };
+}
+
+/**
+ * Keep each account's opening-balance row exact, after the import.
+ *
+ * Importing creates the row but cannot change it: a re-import of an imported
+ * id keeps the existing row's values, so a corrected opening amount or date
+ * would never arrive on its own. This finds each row by its imported id and
+ * updates amount and date where they differ from the envelope. Everything
+ * else about the row (payee, notes, category) is Actual's and is left alone.
+ *
+ * It never creates a row. A row that is not there is counted as missing and
+ * reported, because a creation here would bypass the import's reconciliation
+ * and could duplicate a row the person already entered. It also touches only
+ * ids of the opening shape: an entry naming anything else is refused, since
+ * an update keyed by imported id would otherwise be a way to rewrite a
+ * payment.
+ *
+ * Each correction is read back, and a row that did not end up as asked is
+ * counted as failed. updateTransaction resolves BEFORE the change can be read
+ * (measured on the pinned library, 26.7.0: an immediate getTransactions still
+ * returned the old amount and date, and the new ones appeared within about a
+ * tenth of a second), so the read-back polls until the row is right or
+ * `settle.timeoutMs` has passed. Without that wait every correction would be
+ * reported as a failure.
+ */
+export async function applyOpeningBalances(
+  client,
+  openings,
+  settle = { timeoutMs: 5000, intervalMs: 50 },
+) {
+  const counts = {
+    entries: openings.length,
+    already_right: 0,
+    corrected: 0,
+    missing: 0,
+    ambiguous: 0,
+    refused: 0,
+    failed: 0,
+  };
+  const lines = [];
+  if (!openings.length) return { counts, lines };
+
+  const named = (entry) => `${entry.account}: ${entry.imported_id}`;
+  const readIndex = async (accountId) => {
+    const index = new Map();
+    for (const row of await readAccountRows(client, accountId)) {
+      if (row.is_child || !row.imported_id) continue;
+      index.set(row.imported_id, [...(index.get(row.imported_id) ?? []), row]);
+    }
+    return index;
+  };
+
+  const indexes = new Map();
+  const corrected = [];
+  for (const entry of openings) {
+    if (!isOpeningImportedId(entry.imported_id)) {
+      counts.refused += 1;
+      lines.push(`${named(entry)}: refused, not an opening-balance id; nothing was touched`);
+      continue;
+    }
+    if (!indexes.has(entry.account)) indexes.set(entry.account, await readIndex(entry.account));
+    const found = indexes.get(entry.account).get(entry.imported_id) ?? [];
+    if (found.length === 0) {
+      counts.missing += 1;
+      lines.push(`${named(entry)}: opening row is not in Actual; nothing was created`);
+      continue;
+    }
+    if (found.length > 1) {
+      counts.ambiguous += 1;
+      lines.push(`${named(entry)}: ${found.length} rows carry this id; none was changed`);
+      continue;
+    }
+    const [row] = found;
+    if (row.amount === entry.amount && row.date === entry.date) {
+      counts.already_right += 1;
+      continue;
+    }
+    try {
+      await client.updateTransaction(row.id, { amount: entry.amount, date: entry.date });
+      corrected.push(entry);
+    } catch (error) {
+      counts.failed += 1;
+      lines.push(`${named(entry)}: FAILED while correcting - ${error?.message ?? error}`);
+    }
+  }
+
+  let waiting = corrected;
+  const deadline = Date.now() + settle.timeoutMs;
+  while (waiting.length) {
+    const indexesNow = new Map();
+    const stillWrong = [];
+    for (const entry of waiting) {
+      if (!indexesNow.has(entry.account)) {
+        indexesNow.set(entry.account, await readIndex(entry.account));
+      }
+      const [row] = indexesNow.get(entry.account).get(entry.imported_id) ?? [];
+      if (row && row.amount === entry.amount && row.date === entry.date) {
+        counts.corrected += 1;
+        lines.push(`${named(entry)}: opening row corrected`);
+      } else {
+        stillWrong.push(entry);
+      }
+    }
+    waiting = stillWrong;
+    if (!waiting.length || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, settle.intervalMs));
+  }
+  for (const entry of waiting) {
+    counts.failed += 1;
+    lines.push(`${named(entry)}: FAILED verification - the row is not as asked`);
   }
   return { counts, lines };
 }

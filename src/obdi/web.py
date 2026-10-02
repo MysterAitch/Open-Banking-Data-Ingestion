@@ -524,6 +524,11 @@ class WebConfig:
     #: values included. Returning data rather than text is what lets the page
     #: decide, in one place, whether a reader may see the values.
     ledger_data: Callable[[str, str], Ledger] | None = None
+    #: State a balance for an account: (ref, day, amount, currency), all as
+    #: typed. Raises a DataError whose text never quotes the amount.
+    anchor_save: Callable[[str, str, str, str], None] | None = None
+    #: Remove the balance stated for (ref, day); whether there was one.
+    anchor_remove: Callable[[str, str], bool] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -5295,6 +5300,12 @@ class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHa
         if route == "/ledger":
             # A POST because showing values is a decision, not a link.
             self._ledger_post(self._read_form())
+            return
+        if route == "/ledger-anchor":
+            self._anchor_save_post(self._read_form())
+            return
+        if route == "/ledger-anchor-remove":
+            self._anchor_remove_post(self._read_form())
             return
         if route == "/statement-held":
             self._statement_held()

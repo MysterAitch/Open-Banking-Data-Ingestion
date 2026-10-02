@@ -44,6 +44,9 @@ from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 ACCOUNT = "truelayer:tl-1"
 
+#: What the real web hook tells a reader of the page, which has a button for it.
+PAGE_HINT = "press the Show the figures button on this page"
+
 LEDGER: list[tuple[str, date, int, str]] = [
     ("a", date(2026, 3, 2), -1234, "Alpha Bakery"),
     ("b", date(2026, 3, 2), -500, "Bravo Books"),
@@ -498,6 +501,40 @@ class TestTheFiguresArePrivate:
         assert PRIVATE_PAYEE not in unmasked
         assert "MASKED: account names" in masked
 
+    def test_Describe_WhenMasked_OffersNoWayToUnmaskThatTheCallerDidNotSupply(
+        self, tmp_path
+    ):
+        """The report cannot know whether it is on a page or a command, so with
+        no hint it must not name a mechanism. `?values=1` in particular does
+        nothing on the page, and a hint that sends the reader to try it is
+        worse than none."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _private_store(store)
+            masked = balance_reconciliation(store).describe()
+
+        header = masked.splitlines()[1]
+        assert header.startswith("MASKED: account names")
+        assert "values=1" not in masked and "--show-values" not in masked
+        assert "(" not in header, "no hint was given, so no parenthesis offers one"
+
+    def test_Describe_WhenMaskedWithACallersHint_ShowsExactlyThatHint(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _private_store(store)
+            masked = balance_reconciliation(store).describe(unmask_hint="press the button")
+
+        assert masked.splitlines()[1].endswith("appears (press the button)")
+
+    def test_Describe_WhenUnmasked_NeverRepeatsTheHintBecauseTheFiguresAreAlreadyShown(
+        self, tmp_path
+    ):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _private_store(store)
+            unmasked = balance_reconciliation(store).describe(
+                masked=False, unmask_hint="press the button"
+            )
+
+        assert "press the button" not in unmasked
+
     def test_Describe_ByDefault_IsTheMaskedRendering(self, tmp_path):
         with Store(tmp_path / "s.sqlite3") as store:
             _private_store(store)
@@ -648,6 +685,9 @@ class TestBalanceReconciliationCommand:
         assert exit_code == 0
         assert "1 day mismatch" in printed
         assert "86482.01" not in printed and "42.17" not in printed
+        # Only the command has a flag, and the page's `?values=1` is gone.
+        assert "add --show-values to see them" in printed
+        assert "values=1" not in printed
 
     def test_Command_WithShowValues_PrintsTheFiguresAndStillExitsZero(
         self, tmp_path, capsys, monkeypatch
@@ -674,7 +714,10 @@ class TestBalanceReconciliationCommand:
         with Store(db) as store:
             _private_store(store)
             report = balance_reconciliation(store)
-            expected = (report.describe(masked=True), report.describe(masked=False))
+            expected = (
+                report.describe(masked=True, unmask_hint=PAGE_HINT),
+                report.describe(masked=False, unmask_hint=PAGE_HINT),
+            )
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "connections.json"))
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "accounts.json"))
@@ -686,3 +729,26 @@ class TestBalanceReconciliationCommand:
         hook = config.balance_reconciliation_text
         assert hook is not None
         assert (hook(True), hook(False)) == expected
+
+    def test_RealPage_MaskedHeaderNamesTheButtonThePageActuallyHas(
+        self, tmp_path, monkeypatch
+    ):
+        """The hint is only true if the control it names is on the same page,
+        and `?values=1` (which the page ignores) is not offered."""
+        from obdi.cli import build_web_config
+
+        db = tmp_path / "store.sqlite3"
+        with Store(db) as store:
+            _private_store(store)
+        monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "connections.json"))
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "accounts.json"))
+        for variable in ("TRUELAYER_CLIENT_ID", "TRUELAYER_CLIENT_SECRET_FILE"):
+            monkeypatch.delenv(variable, raising=False)
+        config = build_web_config(db)
+        assert config is not None
+
+        page = _get(config, "/balance-reconciliation").text
+
+        assert PAGE_HINT in page
+        assert "Show the figures</button>" in page
+        assert "values=1" not in page

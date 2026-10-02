@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from .errors import DataError
 from .money import format_amount, parse_amount
@@ -72,6 +72,14 @@ class BankDay:
     @property
     def known(self) -> bool:
         return self.opening_minor is not None and self.closing_minor is not None
+
+
+@dataclass(frozen=True)
+class BankBalance:
+    """The balance the bank's figures give at the END of one day."""
+
+    day: date
+    balance_minor: int
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,23 @@ class AccountReconciliation:
     @property
     def faults(self) -> int:
         return len(self.continuity_breaks) + len(self.day_mismatches)
+
+    def balances(self) -> list[BankBalance]:
+        """The bank's own statements of the balance, as end-of-day figures.
+
+        The earliest known OPENING is the balance at the end of the day before
+        it, and the latest known CLOSING is the balance at the end of its own
+        day. Nothing here is stored: both come from evidence the store already
+        holds, so they cannot drift from it.
+        """
+        found: list[BankBalance] = []
+        first = self.opening
+        if first is not None and first.opening_minor is not None:
+            found.append(BankBalance(first.day - timedelta(days=1), first.opening_minor))
+        last = self.latest
+        if last is not None and last.closing_minor is not None:
+            found.append(BankBalance(last.day, last.closing_minor))
+        return found
 
 
 def _chain_ends(pairs: list[tuple[int, int]]) -> tuple[int | None, int | None, str]:
@@ -275,10 +300,19 @@ def _reconcile_account(
 class BalanceReconciliation:
     accounts: list[AccountReconciliation] = field(default_factory=list)
 
-    def describe(self, masked: bool = True) -> str:
+    def describe(self, masked: bool = True, *, unmask_hint: str = "") -> str:
+        """The report as text.
+
+        `unmask_hint` is how the CALLER's reader asks for the figures, because
+        only the caller knows whether that is a button on a page or a flag on
+        a command - and a hint that names the wrong one sends the reader off
+        to try a thing that does nothing. Left empty, the header says only
+        that the figures are withheld.
+        """
+        hint = f" ({unmask_hint})" if unmask_hint else ""
         shown = (
             "MASKED: account names, dates and counts only - no balance, amount, "
-            "or difference appears (add ?values=1 or --show-values to see them)"
+            f"or difference appears{hint}"
             if masked
             else "UNMASKED: balances and differences are shown - this is private"
         )
@@ -396,14 +430,17 @@ class _TruelayerSightings:
     for there before being counted as one the bank never described.
     """
 
-    def __init__(self, store: Store) -> None:
+    def __init__(self, store: Store, account_id: str | None = None) -> None:
         self._store = store
         self._by_entity: dict[str, list[tuple[str, str]]] = {}
+        only = "" if account_id is None else " AND t.account_id = ?"
         for row in store.connection.execute(
-            "SELECT s.entity_id AS entity_id, s.source_id AS source_id, "
+            "SELECT s.entity_id AS entity_id, s.source_id AS source_id, "  # noqa: S608
             "s.artefact_digest AS digest FROM transaction_sources s "
+            "JOIN transactions t ON t.entity_id = s.entity_id "
             "WHERE s.source = 'truelayer' AND s.source_id IS NOT NULL "
-            "AND s.source_id != ''"
+            f"AND s.source_id != ''{only}",
+            () if account_id is None else (account_id,),
         ):
             self._by_entity.setdefault(str(row["entity_id"]), []).append(
                 (str(row["digest"]), str(row["source_id"]))
@@ -440,32 +477,44 @@ class _TruelayerSightings:
         return None
 
 
-def balance_reconciliation(store: Store) -> BalanceReconciliation:
+def balance_reconciliation(
+    store: Store, account_id: str | None = None
+) -> BalanceReconciliation:
+    """Every account's reconciliation, or just `account_id`'s.
+
+    Narrowing exists for a page about one account: the whole-store read costs
+    in proportion to every row held, and the page needs one account's figures.
+    """
+    only = "" if account_id is None else " AND t.account_id = ?"
+    own: tuple[str, ...] = () if account_id is None else (account_id,)
     cards = {
         str(row["entity_id"])
         for row in store.connection.execute(
-            "SELECT DISTINCT s.entity_id AS entity_id FROM transaction_sources s "
+            "SELECT DISTINCT s.entity_id AS entity_id FROM transaction_sources s "  # noqa: S608
             "JOIN raw_artefacts a ON a.digest = s.artefact_digest "
-            "WHERE a.source = 'truelayer-card-booked'"
+            "JOIN transactions t ON t.entity_id = s.entity_id "
+            f"WHERE a.source = 'truelayer-card-booked'{only}",
+            own,
         )
     }
     placeholders = ",".join("?" for _ in _UNBOOKED)
     rows = store.connection.execute(
         "SELECT entity_id, account_id, amount_minor, currency, value_date, raw "  # noqa: S608
-        "FROM transactions "
+        "FROM transactions t "
         # Placeholders only - the interpolation builds "?,?", never data.
-        f"WHERE status NOT IN ({placeholders}) ORDER BY account_id, value_date",
-        _UNBOOKED,
+        f"WHERE status NOT IN ({placeholders}){only} ORDER BY account_id, value_date",
+        (*_UNBOOKED, *own),
     ).fetchall()
     pending = {
         str(row["account_id"]): int(row["n"])
         for row in store.connection.execute(
-            "SELECT account_id, COUNT(*) AS n FROM transactions "
-            "WHERE status = 'pending' GROUP BY account_id"
+            "SELECT account_id, COUNT(*) AS n FROM transactions t "  # noqa: S608
+            f"WHERE status = 'pending'{only} GROUP BY account_id",
+            own,
         )
     }
 
-    sightings = _TruelayerSightings(store)
+    sightings = _TruelayerSightings(store, account_id)
     per_account: dict[str, list[tuple[date, int, tuple[int, int] | None]]] = {}
     card_accounts: set[str] = set()
     for row in rows:

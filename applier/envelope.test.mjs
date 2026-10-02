@@ -113,3 +113,60 @@ test('the queue drains in the order things were pressed, not the alphabet', asyn
     'audit-20260802T185427538211Z.json',
   ]);
 });
+
+const OPENING_ENTRY = {
+  account: 'act-1',
+  imported_id: 'obdi-opening:halifax-current',
+  date: '2026-08-31',
+  amount: 100000,
+};
+
+test('a version-3 envelope names its opening-balance rows', () => {
+  const parsed = parseEnvelope({
+    version: 3,
+    accounts: {},
+    opening_balances: [OPENING_ENTRY],
+  });
+  assert.deepEqual(parsed.openings, [OPENING_ENTRY]);
+});
+
+test('an envelope with no opening_balances parses with none, whatever else it holds', () => {
+  assert.deepEqual(parseEnvelope({ version: 3, accounts: {} }).openings, []);
+  assert.deepEqual(
+    parseEnvelope({ version: 3, accounts: {}, opening_balances: 'nope' }).openings,
+    [],
+  );
+  assert.deepEqual(parseEnvelope({ version: 2, accounts: {} }).openings, []);
+  assert.deepEqual(parseEnvelope({ 'act-1': [] }).openings, []);
+});
+
+test('malformed opening entries are dropped and well-formed ones kept', () => {
+  const parsed = parseEnvelope({
+    version: 3,
+    accounts: {},
+    opening_balances: [
+      OPENING_ENTRY,
+      null,
+      'text',
+      { ...OPENING_ENTRY, account: '' },
+      { ...OPENING_ENTRY, imported_id: 7 },
+      { ...OPENING_ENTRY, date: 20260831 },
+      { ...OPENING_ENTRY, amount: 1.5 },
+      { ...OPENING_ENTRY, amount: '100000' },
+    ],
+  });
+  assert.deepEqual(parsed.openings, [OPENING_ENTRY]);
+});
+
+test('an audit or prune envelope carries its opening entries as a push does', () => {
+  for (const kind of ['audit', 'prune']) {
+    const parsed = parseEnvelope({
+      version: 3,
+      kind,
+      accounts: {},
+      opening_balances: [OPENING_ENTRY],
+    });
+    assert.equal(parsed.kind, kind);
+    assert.deepEqual(parsed.openings, [OPENING_ENTRY]);
+  }
+});

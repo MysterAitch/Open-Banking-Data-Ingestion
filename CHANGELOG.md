@@ -55,6 +55,19 @@ transcription would add no reasoning that the subjects do not already carry.
   so.** Deleting it would make Actual delete the other leg too.
 
 ### Added
+- **Opening balances, from balance anchors.** An anchor is one fact: this
+  account's balance was X at the end of date D. The earliest anchor gives the
+  account its opening balance; every later one is a check, shown as agreeing or
+  differing and never used to adjust anything. Anchors come from the bank's own
+  running balance, from a held statement's closing balance, or from a figure
+  typed on the ledger page.
+- **The opening balance is sent to Actual** as one starting-balance row per
+  account, created on the first push and corrected on later ones if the figure
+  or date changes. Previously an account whose history starts partway through
+  showed the sum of its held rows as its balance.
+- **A typed anchor can be today's balance.** obdi works back through the rows it
+  holds. The page says that a single anchor absorbs any missing rows into the
+  opening figure, and that a second one turns it into a test.
 - **The home page opens on an Overview.** "Needs attention" lists everything that
   currently needs a person, most serious first, each with what to do and a link
   to where it is done; when nothing does, it says so along with what was checked

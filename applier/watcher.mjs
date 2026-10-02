@@ -30,7 +30,13 @@ import { pathToFileURL } from 'node:url';
 import { auditAccounts, pruneAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
-import { applyAccounts, linkTransfers, provisionAccounts, withBudget } from './lib.mjs';
+import {
+  applyAccounts,
+  applyOpeningBalances,
+  linkTransfers,
+  provisionAccounts,
+  withBudget,
+} from './lib.mjs';
 import { auditTransfers } from './transfers.mjs';
 
 const BASE = (process.env.OBDI_ACTUAL_DIR ?? '/data/actual').trim();
@@ -66,7 +72,7 @@ export function failedResult(name, error) {
 export async function processRequest(name) {
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
-  const { kind, provision, accounts, transfers } = parseEnvelope(payload);
+  const { kind, provision, accounts, transfers, openings } = parseEnvelope(payload);
 
   if (kind === 'audit') {
     const { report, pairs } = await withBudget(async (client) => ({
@@ -97,8 +103,9 @@ export async function processRequest(name) {
   const outcome = await withBudget(async (client) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
+    const opening = await applyOpeningBalances(client, openings);
     const linked = await linkTransfers(client, transfers);
-    return { provisioned, applied, linked };
+    return { provisioned, applied, opening, linked };
   });
 
   if (outcome.provisioned.bindings.length) {
@@ -116,9 +123,11 @@ export async function processRequest(name) {
     added: outcome.applied.added,
     provisioned: outcome.provisioned.bindings.length,
     transfers: outcome.linked.counts,
+    opening_balances: outcome.opening.counts,
     lines: [
       ...outcome.provisioned.lines,
       ...outcome.applied.lines,
+      ...outcome.opening.lines,
       ...outcome.linked.lines,
     ],
   };

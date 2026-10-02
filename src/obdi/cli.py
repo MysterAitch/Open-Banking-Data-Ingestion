@@ -58,6 +58,7 @@ from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import (
     ActualAccountBinding,
+    build_opening_entries,
     build_payload,
     build_transfer_pairs,
     unbound_accounts,
@@ -1016,11 +1017,14 @@ def _replay(db_path: Path, out: Path | None) -> int:
         )
         return 2
 
+    from .actual_push import opening_balances
+
     with Store(db_path) as store:
         transactions = store.all_transactions()
         pairs = store.confirmed_transfer_pairs()
+        openings = opening_balances(store, bindings)
 
-    payload = build_payload(transactions, bindings)
+    payload = build_payload(transactions, bindings, openings)
     missing = unbound_accounts(transactions, bindings)
 
     # The envelope shape, so the manual apply links transfers exactly as
@@ -1032,6 +1036,7 @@ def _replay(db_path: Path, out: Path | None) -> int:
             "provision": [],
             "accounts": payload,
             "transfers": build_transfer_pairs(transactions, bindings, pairs),
+            "opening_balances": build_opening_entries(bindings, openings),
         },
         indent=2,
     )
@@ -2407,7 +2412,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .balance_reconciliation import balance_reconciliation
 
         with Store(db_path) as store:
-            return balance_reconciliation(store).describe(masked=masked)
+            return balance_reconciliation(store).describe(
+                masked=masked, unmask_hint="press the Show the figures button on this page"
+            )
 
     def archive_notes_for(store: Store, *, only: str | None = None) -> dict[str, ArchiveNote]:
         from .spaces import archive_notes as read_archive_notes
@@ -2473,6 +2480,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 label=label,
                 archive=archive_notes_for(store, only=ref).get(ref),
             )
+
+    def anchor_save(ref: str, day: str, amount: str, currency: str) -> None:
+        from .balance_anchors import record_stated_anchor
+
+        with Store(db_path) as store:
+            record_stated_anchor(store, ref, day, amount, currency=currency)
+
+    def anchor_remove(ref: str, day: str) -> bool:
+        from .balance_anchors import remove_stated_anchor
+
+        with Store(db_path) as store:
+            return remove_stated_anchor(store, ref, day)
 
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import processing_request, queued_requests
@@ -2995,6 +3014,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         identity_health_text=identity_health_text,
         balance_reconciliation_text=balance_reconciliation_text,
         ledger_data=ledger_data,
+        anchor_save=anchor_save,
+        anchor_remove=anchor_remove,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,
@@ -4178,7 +4199,12 @@ def main(argv: list[str] | None = None) -> int:
         # Measures only, like identity-health: the exit code never carries
         # the verdict.
         with Store(db_path) as store:
-            print(balance_reconciliation(store).describe(masked=not args.show_values))
+            print(
+                balance_reconciliation(store).describe(
+                    masked=not args.show_values,
+                    unmask_hint="add --show-values to see them",
+                )
+            )
         return 0
     if args.command == "rebuild":
         if not args.yes:

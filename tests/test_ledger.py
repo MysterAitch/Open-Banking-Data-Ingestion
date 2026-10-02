@@ -21,12 +21,15 @@ from obdi.accounts import AccountRecord, AccountRef
 from obdi.identity import content_key
 from obdi.ingest import pair_transfers_across_store, reconcile_batch
 from obdi.ledger import (
+    ANCHOR_QUERIES,
     QUERIES_PER_PAGE,
+    AnchorLine,
     Ledger,
     LedgerRequestError,
     LedgerRow,
     Money,
     MonthSummary,
+    OpeningView,
     Position,
     build_ledger,
 )
@@ -454,8 +457,17 @@ class TestMonthNavigation:
         assert position.store_balance == Money(162538, "GBP")
 
     def test_Neighbours_CrossTheYearBoundary(self, household):
-        assert ledger_of(household, "2026-01").previous_month == "2025-12"
+        """The household holds rows from 2026-01 to 2026-05."""
         assert ledger_of(household, "2025-12").next_month == "2026-01"
+        assert ledger_of(household, "2027-01").previous_month == "2026-12"
+
+    def test_Neighbours_AreNotOfferedBeyondTheMonthsThatHoldRows(self, household):
+        """Stepping past either end led to a page announcing an empty month,
+        which reads as a gap in the data and is only the calendar running on."""
+        assert ledger_of(household, "2026-01").previous_month == ""
+        assert ledger_of(household, "2026-05").next_month == ""
+        assert ledger_of(household, "2026-05").previous_month == "2026-04"
+        assert ledger_of(household, "2026-01").next_month == "2026-02"
 
     @pytest.mark.parametrize("bad", ["2026-13", "2026-00", "March", "2026-3", "20260", "0000-01"])
     def test_Month_WhenNotAMonth_IsRefused(self, household, bad):
@@ -518,7 +530,9 @@ class TestWhatAPageCosts:
         return sum(1 for sql in issued if sql.lstrip().upper().startswith("SELECT"))
 
     def test_Page_CostsTheDocumentedNumberOfStatements(self, household):
-        assert self._statements(household, CURRENT) == QUERIES_PER_PAGE
+        # An account with no TrueLayer records and no held statements: the
+        # anchor search has no per-artefact reads to add.
+        assert self._statements(household, CURRENT) == QUERIES_PER_PAGE + ANCHOR_QUERIES
 
     def test_Page_CostsTheSameForAMonthTenTimesAsBig(self, tmp_path):
         path = tmp_path / "big.sqlite3"
@@ -533,7 +547,7 @@ class TestWhatAPageCosts:
                     for n in range(120)
                 ),
             )
-        assert self._statements(path, CURRENT) == QUERIES_PER_PAGE
+        assert self._statements(path, CURRENT) == QUERIES_PER_PAGE + ANCHOR_QUERIES
 
 
 class TestStructureIsDeclaredNotAssumed:
@@ -563,6 +577,45 @@ class TestStructureIsDeclaredNotAssumed:
 
         values = {f.name for f in fields(Position)} - structural_field_names(Position)
         assert values == {"store_balance", "sent_balance"}
+
+    def test_AnchorLine_OnlyTheBalanceAndTheDifferenceAreValues(self):
+        from dataclasses import fields
+
+        values = {f.name for f in fields(AnchorLine)} - structural_field_names(AnchorLine)
+        assert values == {"balance", "difference"}
+
+    def test_OpeningView_OnlyTheOpeningFigureIsAValue(self):
+        from dataclasses import fields
+
+        values = {f.name for f in fields(OpeningView)} - structural_field_names(OpeningView)
+        assert values == {"opening"}
+
+    def test_Ledger_TheOpeningIsAStructuralRecordWhoseOwnFieldsDecideWhatIsShown(self):
+        """The record is reached through the ledger's view, so its figures are
+        masked by its own declarations and not by the ledger's."""
+        from dataclasses import fields
+
+        values = {f.name for f in fields(Ledger)} - structural_field_names(Ledger)
+        assert values == set()
+
+    def test_Opening_MaskedThroughTheLedgersView_ShowsNoDigitOfAnyFigure(self, tmp_path):
+        from obdi.balance_anchors import record_stated_anchor
+
+        path = tmp_path / "masked-opening.sqlite3"
+        with Store(path) as store:
+            land(store, "d", txn("acct", "src-a", "x", date(2026, 3, 2), -1250, "ONE"))
+            record_stated_anchor(store, "acct", "2026-03-10", "4517.89")
+            record_stated_anchor(store, "acct", "2026-03-20", "4000.00")
+        ledger = ledger_of(path, "2026-03", ref="acct")
+
+        masked = Disclosed(ledger, unmasked=False).opening
+        shown = Disclosed(ledger, unmasked=True).opening
+
+        assert [line.balance for line in masked.anchors] == ["£9,999.99", "£9,999.99"]
+        assert masked.opening == "£9,999.99"
+        assert [line.verdict for line in masked.anchors] == ["", "differs"]
+        assert [line.balance for line in shown.anchors] == ["£4,517.89", "£4,000.00"]
+        assert shown.opening == "£4,530.39"
 
     def test_AFieldAddedWithoutADeclaration_IsMaskedByDefault(self):
         @dataclass(frozen=True)

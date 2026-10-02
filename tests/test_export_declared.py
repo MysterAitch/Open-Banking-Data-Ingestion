@@ -216,6 +216,43 @@ class TestExportingWhatCannotBeFetchedAgain:
         assert result.describe()
 
 
+class TestStatedBalances:
+    def test_AStatedBalance_IsExportedWithItsAccountDateAndSignedAmount(self, tmp_path):
+        """A balance a person stated has no artefact to replay it from, so an
+        export that left it out would lose it silently. Owed is negative."""
+        from obdi.balance_anchors import record_stated_anchor
+        from obdi.export_declared import export_declared
+
+        store_path = tmp_path / "store.sqlite3"
+        _store_with_hand_work(store_path)
+        out = tmp_path / "export"
+        with Store(store_path) as store:
+            account = store.all_transactions()[0].account_id
+            record_stated_anchor(store, account, "2026-07-02", "-125.40")
+            export_declared(store, out)
+
+        assert _exported(out, "stated-balances.json") == [
+            {
+                "account": account,
+                "end_of_day": "2026-07-02",
+                "balance_minor": -12540,
+                "currency": "GBP",
+            }
+        ]
+        assert _exported(out, "manifest.json")["counts"]["stated_balances"] == 1
+
+    def test_WithNothingStated_TheFileIsPresentAndEmptyRatherThanMissing(self, tmp_path):
+        from obdi.export_declared import export_declared
+
+        store_path = tmp_path / "store.sqlite3"
+        _store_with_hand_work(store_path)
+        out = tmp_path / "export"
+        with Store(store_path) as store:
+            export_declared(store, out)
+
+        assert _exported(out, "stated-balances.json") == []
+
+
 class TestTheCommandLine:
     def test_ExportDeclared_WritesTheTreeAndSaysWhatItWrote(
         self, tmp_path, capsys, monkeypatch
