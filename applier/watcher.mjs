@@ -82,6 +82,13 @@ export function failedResult(name, error) {
 // the marker kind writes it alone, an audit only reads it (an audit changes
 // nothing, and the page says so), a prune neither reads nor writes it, and an
 // empty deletes it with every other account (the next push writes it again).
+//
+// Which kinds then refresh the server's snapshot (lib.mjs, refreshSnapshot,
+// says why) is decided here too, always as a job's last step: a push and the
+// marker kind, a prune that removed something and stopped nowhere, an empty
+// that completed. Never an audit, and never a job that threw, since a throw
+// leaves before the refresh is reached. A refresh that fails is a field of the
+// result, not a failure of the job.
 export async function processRequest(
   name,
   onProgress = () => {},
@@ -89,6 +96,9 @@ export async function processRequest(
   now = () => new Date(),
 ) {
   const run = withBudget;
+  // A session without a refresh (a test's stand-in) leaves the result without
+  // a `snapshot` field, which the page reads as "not reported", never as done.
+  const refresh = async (session) => session?.refreshSnapshot?.();
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
   const {
@@ -103,30 +113,38 @@ export async function processRequest(
   } = parseEnvelope(payload);
 
   if (kind === 'empty') {
-    const outcome = await withBudget((client) =>
-      emptyBudget(client, empty_accounts, {
+    const { outcome, snapshot } = await run(async (client, session) => {
+      const emptied = await emptyBudget(client, empty_accounts, {
         onProgress: ({ done, total }) => onProgress({ phase: 'emptying', done, total }),
-      }),
-    );
+      });
+      // Only a complete empty refreshes: a refusal changed nothing, and one
+      // that stopped partway left a budget nobody should publish as current.
+      return { outcome: emptied, snapshot: emptied.complete ? await refresh(session) : undefined };
+    });
     // ok means the request ran and answered, not that the budget is empty:
     // `complete` says that, and a refusal or a stop is a complete: false.
     return {
       ok: true,
       kind: 'empty',
       request: name,
-      finished_at: new Date().toISOString(),
+      finished_at: now().toISOString(),
       ...outcome,
+      ...(snapshot ? { snapshot } : {}),
     };
   }
 
   if (kind === 'marker') {
-    const marker = await run((client) => writeMarker(client, now()));
+    const { marker, snapshot } = await run(async (client, session) => ({
+      marker: await writeMarker(client, now()),
+      snapshot: await refresh(session),
+    }));
     return {
       ok: true,
       kind: 'marker',
       request: name,
       finished_at: now().toISOString(),
       marker,
+      ...(snapshot ? { snapshot } : {}),
     };
   }
 
@@ -148,23 +166,32 @@ export async function processRequest(
   }
 
   if (kind === 'prune') {
-    const report = await run((client) =>
-      pruneAccounts(client, accounts, {
+    const { report, snapshot } = await run(async (client, session) => {
+      const pruned = await pruneAccounts(client, accounts, {
         clear_empty,
         confirmed,
         onProgress: ({ done, total }) => onProgress({ phase: 'removing', done, total }),
-      }),
-    );
+      });
+      // A prune that removed nothing changed nothing, and one that stopped in
+      // any account is partway; neither refreshes.
+      const changed = pruned.some((entry) => (entry.removed ?? 0) > 0 || (entry.unlinked ?? 0) > 0);
+      const stopped = pruned.some((entry) => entry.stopped);
+      return {
+        report: pruned,
+        snapshot: changed && !stopped ? await refresh(session) : undefined,
+      };
+    });
     return {
       ok: true,
       kind: 'prune',
       request: name,
       finished_at: now().toISOString(),
       accounts: report,
+      ...(snapshot ? { snapshot } : {}),
     };
   }
 
-  const outcome = await run(async (client) => {
+  const outcome = await run(async (client, session) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
     const opening = await applyOpeningBalances(client, openings);
@@ -174,7 +201,9 @@ export async function processRequest(
     // Last, and inside the same session, so it reaches the server with the
     // rows it vouches for and is never written by a push that threw.
     const marker = await writeMarker(client, now());
-    return { provisioned, applied, opening, linked, marker };
+    // After everything, so the file that is uploaded is the finished push.
+    const snapshot = await refresh(session);
+    return { provisioned, applied, opening, linked, marker, snapshot };
   });
 
   if (outcome.provisioned.bindings.length) {
@@ -194,6 +223,7 @@ export async function processRequest(
     transfers: outcome.linked.counts,
     opening_balances: outcome.opening.counts,
     marker: outcome.marker,
+    ...(outcome.snapshot ? { snapshot: outcome.snapshot } : {}),
     lines: [
       ...outcome.provisioned.lines,
       ...outcome.applied.lines,

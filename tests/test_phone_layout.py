@@ -359,6 +359,12 @@ def test_ActualPage_WithTheSyncMarkerLinesShown_AtPhoneWidth_DoesNotScrollSidewa
             "added": 1,
             "provisioned": 0,
             "marker": {"name": "02 Oct 20:41Z obdi marker", "found": 1, "action": "renamed"},
+            # The warning wording with an unbroken reason: the longest line.
+            "snapshot": {
+                "refreshed": False,
+                "at": "2026-10-02T20:41:10.000Z",
+                "error": "the upload was refused (" + LONG_IDENTITY * 2 + ")",
+            },
         },
         {
             "ok": True,
@@ -380,6 +386,7 @@ def test_ActualPage_WithTheSyncMarkerLinesShown_AtPhoneWidth_DoesNotScrollSidewa
             actual_status=lambda: results,
         ).decode()
         assert "server is behind" in body
+        assert "snapshot not refreshed" in body
         assert "Write a sync marker now" in body
         page.set_content(body)
         _assert_fits(_measure(page))

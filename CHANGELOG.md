@@ -44,6 +44,14 @@ transcription would add no reasoning that the subjects do not already carry.
   by a button on the Actual page.
 
 ### Changed
+- **A job that changes the budget now refreshes the server's stored copy of
+  it.** A device downloading the budget receives that stored copy plus every
+  change since, applied all together or not at all, and nothing here ever
+  replaced the copy. On the deployed server 53,496 changes had built up behind
+  it in a day, and a phone downloading afresh showed the old budget with no
+  error. A push, a marker write, a removal, and an empty now end by uploading
+  the current file, so a fresh download has nothing to replay. The Sync ID is
+  unchanged. Proven against a sync server run locally, not yet on the real one.
 - **A push is skipped while an empty is pending**, so the scheduler cannot
   import into accounts that are about to disappear.
 

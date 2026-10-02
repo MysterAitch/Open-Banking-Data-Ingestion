@@ -12,5 +12,8 @@
   },
   "allowScripts": {
     "better-sqlite3@12.11.1": true
+  },
+  "devDependencies": {
+    "@actual-app/sync-server": "26.7.0"
   }
 }

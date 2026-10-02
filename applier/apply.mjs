@@ -71,16 +71,22 @@ async function main() {
     return;
   }
 
-  const outcome = await withBudget(async (client) => {
+  const outcome = await withBudget(async (client, session) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
     const opening = await applyOpeningBalances(client, openings);
     const linked = await linkTransfers(client, transfers);
     const marker = await writeMarker(client, new Date());
-    return { provisioned, applied, opening, linked, marker };
+    const snapshot = await session.refreshSnapshot();
+    return { provisioned, applied, opening, linked, marker, snapshot };
   });
 
   console.log(`Sync marker ${outcome.marker.action}: "${outcome.marker.name}"`);
+  console.log(
+    outcome.snapshot.refreshed
+      ? 'Server snapshot refreshed.'
+      : `Server snapshot NOT refreshed: ${outcome.snapshot.error}`,
+  );
   for (const line of [
     ...outcome.provisioned.lines,
     ...outcome.applied.lines,

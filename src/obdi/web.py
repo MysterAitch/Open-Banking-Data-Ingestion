@@ -3316,7 +3316,14 @@ def _actual_rows(
         "<p>The sync marker is an off-budget account with no transactions "
         "whose name is the time obdi last wrote to the budget. Every "
         "successful push renames it, and so does its own button; an audit "
-        "only reads it, and a removal never touches it.</p></details>"
+        "only reads it, and a removal of orphaned imports never touches "
+        "it.</p>"
+        "<p>After a push, a marker, a removal that took rows, or an emptying, "
+        "obdi also re-uploads the budget file to the server (the server "
+        "snapshot), so a device downloading afresh starts from there instead "
+        "of replaying every change since an old file. &quot;Write a sync "
+        "marker now&quot; is therefore also the on-demand way to refresh "
+        "it.</p></details>"
     )
     return (
         summary_html

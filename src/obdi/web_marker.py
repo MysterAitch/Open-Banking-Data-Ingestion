@@ -118,7 +118,51 @@ def marker_lines(results: list[dict[str, object]]) -> str:
         else:
             second = _found_line(audit, found, when, write, written)
 
-    return f"{first}{second}" + f'<p class="muted">{PURPOSE}</p>'
+    return f"{first}{second}{snapshot_line(results)}" + f'<p class="muted">{PURPOSE}</p>'
+
+
+def _snapshot_of(result: dict[str, object]) -> dict[str, object] | None:
+    """The applier's account of refreshing the server's snapshot, if this
+    result is one that could carry it and carries a well-formed one."""
+    if not result.get("ok") or _kind(result) == "audit":
+        return None
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("refreshed"), bool):
+        return None
+    return snapshot
+
+
+def snapshot_line(results: list[dict[str, object]]) -> str:
+    """Whether the server's stored copy of the budget was refreshed by the
+    newest job that says so.
+
+    A device downloading afresh gets that stored copy plus every change since
+    it, applied in one go, and phones are reported to fail on a long backlog
+    (applier/lib.mjs, refreshSnapshot, owns the mechanism and the evidence).
+    """
+    told = [(r, s) for r in results if (s := _snapshot_of(r)) is not None]
+    if not told:
+        return (
+            '<p><span class="pill pill-quiet">snapshot unknown</span> No recent '
+            "result says whether the server snapshot was refreshed (they predate "
+            "this check).</p>"
+        )
+    result, snapshot = max(told, key=lambda pair: str(pair[0].get("finished_at", "")))
+    stamp = str(snapshot.get("at") or result.get("finished_at", ""))
+    when = html.escape(stamp[:16].replace("T", " "))
+    if snapshot["refreshed"]:
+        return (
+            '<p><span class="pill pill-ok">snapshot refreshed</span> The '
+            f"server snapshot refreshed {when}Z, so a device downloading afresh "
+            "starts from that point.</p>"
+        )
+    reason = html.escape(str(snapshot.get("error") or "no reason was given"))
+    return (
+        '<p><span class="pill pill-warn">snapshot not refreshed</span> The '
+        f"server snapshot was not refreshed ({when}Z): {reason}. A device "
+        "downloading afresh then replays every change since the old snapshot, "
+        "which phones can fail to finish. Writing a sync marker tries again.</p>"
+    )
 
 
 def _found_line(

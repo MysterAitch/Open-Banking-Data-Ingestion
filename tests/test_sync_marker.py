@@ -222,6 +222,113 @@ class TestTheLinesSayWhatWasWrittenAndWhatTheServerHolds:
         assert body.index("push applied") < body.index("marker written") < body.index(PURPOSE)
 
 
+def with_snapshot(
+    result: dict[str, object], refreshed: object, error: str | None = None
+) -> dict[str, object]:
+    snapshot: dict[str, object] = {"refreshed": refreshed, "at": "2026-10-02T21:30:00.000Z"}
+    if error is not None:
+        snapshot["error"] = error
+    return {**result, "snapshot": snapshot}
+
+
+class TestTheSnapshotLineSaysWhetherAFreshDownloadStartsFromNow:
+    """A download is the server's stored file plus every change since it, so a
+    stale file means a device replays a growing backlog. The applier says in
+    each result whether it refreshed the file (applier/lib.mjs owns why)."""
+
+    def test_Summary_AfterARefresh_SaysTheServerSnapshotWasRefreshedAndWhen(self):
+        text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), True))
+
+        assert "snapshot refreshed" in text
+        assert "server snapshot refreshed 2026-10-02 21:30Z" in text
+        assert "not refreshed" not in text
+
+    def test_Summary_AfterARefusedRefresh_WarnsWithTheReasonAndWhatItMeans(self):
+        text = summary(
+            with_snapshot(
+                push("2026-10-02T21:30:05.000Z"),
+                False,
+                "the upload was refused (network)",
+            )
+        )
+
+        assert 'pill pill-warn">snapshot not refreshed' in text
+        assert "the upload was refused (network)" in text
+        assert "replays every change since the old snapshot" in text
+        assert "phones can fail to finish" in text
+
+    def test_Summary_WhenNoResultSaysWhetherItWasRefreshed_SaysItIsUnknown(self):
+        text = summary(push("2026-10-02T21:30:05.000Z"))
+
+        assert "snapshot unknown" in text
+        assert "predate this check" in text
+        assert "snapshot refreshed" not in text
+        assert "not refreshed" not in text
+
+    def test_Summary_WithNoResultsAtAll_SaysItIsUnknown(self):
+        assert "snapshot unknown" in summary()
+
+    def test_Summary_ReadsTheNewestResultThatSaysSo_WhateverItsKind(self):
+        older = with_snapshot(push("2026-10-02T20:00:00.000Z"), False, "network")
+        newer = with_snapshot(marker_request("2026-10-02T21:30:00.000Z", B), True)
+
+        text = summary(older, newer)
+
+        assert "snapshot refreshed" in text
+        assert "not refreshed" not in text
+
+    def test_Summary_ANewerResultThatSaysNothing_DoesNotHideAnOlderOneThatDid(self):
+        older = with_snapshot(push("2026-10-02T20:00:00.000Z"), True)
+        newer = push("2026-10-02T21:30:00.000Z")
+
+        assert "snapshot refreshed" in summary(older, newer)
+
+    def test_Summary_AnAuditIsNeverASnapshotRefresh_EvenIfItCarriesTheField(self):
+        text = summary(with_snapshot(audit("2026-10-02T21:30:00.000Z", A), True))
+
+        assert "snapshot unknown" in text
+
+    def test_Summary_AFailedResultIsNotASnapshotRefresh(self):
+        failed = {**push("2026-10-02T21:30:00.000Z", ok=False), "snapshot": {"refreshed": True}}
+
+        assert "snapshot unknown" in summary(failed)
+
+    @pytest.mark.parametrize(
+        "snapshot",
+        ["yes", 1, {"refreshed": "true"}, {"at": "2026-10-02T21:30:00Z"}, {"refreshed": None}],
+    )
+    def test_Summary_WithAMalformedSnapshotField_IsUnknownRatherThanBreakingThePage(
+        self, snapshot
+    ):
+        result = {**push("2026-10-02T21:30:05.000Z"), "snapshot": snapshot}
+
+        assert "snapshot unknown" in summary(result)
+
+    def test_Summary_WithAReasonThatIsMarkup_ShowsItAsText(self):
+        text = summary(
+            with_snapshot(push("2026-10-02T21:30:05.000Z"), False, "<script>x</script>")
+        )
+
+        assert "&lt;script&gt;x&lt;/script&gt;" in text
+        assert "<script>" not in text
+
+    def test_Summary_NamesNoAmountAndNoBalance(self):
+        text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), False, "network")).lower()
+
+        assert "amount" not in text
+        assert "balance" not in text
+
+    def test_Summary_PutsTheSnapshotLineBesideTheMarkerLines(self):
+        text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), True))
+
+        assert text.index("marker written") < text.index("snapshot refreshed") < text.index(PURPOSE)
+
+    def test_Page_SaysTheMarkerButtonIsAlsoTheOnDemandWayToRefreshTheSnapshot(self):
+        rendered = web._actual_rows(lambda: [], True, marker_available=True)
+
+        assert "on-demand way to refresh" in rendered
+
+
 class TestMarkerResultsHaveARowOfTheirOwn:
     def test_ResultRow_ForAMarkerWrite_SaysWhatWasDone_NotThatAPushWasApplied(self):
         row = web._result_row(marker_request("2026-10-02T20:41:09.000Z", A))

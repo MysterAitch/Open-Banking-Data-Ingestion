@@ -60,6 +60,53 @@ export async function optionalSecret(name, env = process.env, read = readFile) {
   return secret;
 }
 
+/**
+ * Make the server's copy of the budget file match this session's, so that a
+ * device downloading afresh starts from now and not from an old file.
+ *
+ * Why it is needed: a download is the server's stored FILE plus every sync
+ * message since that file was written (read from the pinned library, 26.7.0:
+ * downloadBudget, then a full sync from the file's own lastSyncedTimestamp).
+ * The file is replaced only when a client uploads it, which the library does
+ * on loading a budget not uploaded for seven days, and this applier downloads
+ * into a new directory for every job, so it never would. A device then replays
+ * a backlog that only grows, in one all-or-nothing transaction.
+ *
+ * Two internal handlers, in this order: `sync`, because the exported file
+ * carries the lastSyncedTimestamp a downloader resumes from, which is only
+ * advanced by a sync that completed; then `upload-budget`, which re-sends the
+ * local file under the SAME cloud file id and group, so the Sync ID is kept
+ * (`sync-reset` would delete the server's messages and issue a new Sync ID,
+ * and is never used). Both report failure as `{ error }` rather than throwing,
+ * and a failure of either is returned, not raised: the job's changes are
+ * already on the server as messages, so a refused refresh must not turn a
+ * job that worked into one that failed. It is reported instead.
+ */
+export async function refreshSnapshot(handle, now = () => new Date()) {
+  const failed = (message) => ({ refreshed: false, at: now().toISOString(), error: message });
+  const describe = (error) =>
+    typeof error === 'string' ? error : (error?.reason ?? error?.message ?? 'unknown error');
+  try {
+    const synced = await handle.send('sync');
+    if (synced?.error) {
+      return failed(`the final sync did not complete (${describe(synced.error)}); nothing was uploaded`);
+    }
+    const uploaded = await handle.send('upload-budget');
+    if (uploaded?.error) return failed(`the upload was refused (${describe(uploaded.error)})`);
+    return { refreshed: true, at: now().toISOString() };
+  } catch (error) {
+    return failed(`the refresh threw (${error?.message ?? error})`);
+  }
+}
+
+/**
+ * Open the budget fresh from the server and run `work` against it.
+ *
+ * `work` receives the client and a session whose `refreshSnapshot()` the job
+ * calls once, as its very last step and only when it succeeded and changed
+ * something: a job that failed or stopped partway never refreshes, and an
+ * audit never does.
+ */
 export async function withBudget(work) {
   const serverURL = required('ACTUAL_SERVER_URL');
   const password = await readSecret('ACTUAL_PASSWORD');
@@ -67,13 +114,13 @@ export async function withBudget(work) {
   const filePassword = await optionalSecret('ACTUAL_ENCRYPTION_PASSWORD');
 
   const dataDir = await mkdtemp(join(tmpdir(), 'obdi-actual-'));
-  await api.init({ dataDir, serverURL, password });
+  const handle = await api.init({ dataDir, serverURL, password });
   try {
     await api.downloadBudget(
       syncId,
       filePassword ? { password: filePassword } : undefined,
     );
-    return await work(api);
+    return await work(api, { refreshSnapshot: () => refreshSnapshot(handle) });
   } finally {
     await api.shutdown();
   }
