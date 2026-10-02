@@ -5095,6 +5095,16 @@ class ConnectionHandler(
                     noun = "row" if rows_read == 1 else "rows"
                     reader += f", reads {rows_read} {noun} and its balances carry"
                 kept = str(item["fetched_at"])[:16].replace("T", " ")
+                # Counts of listed issuer names only; see `statement_names`.
+                found = item.get("names")
+                named = (
+                    ", ".join(
+                        f"{html.escape(str(name))} {count}"
+                        for name, count in found
+                    )
+                    if isinstance(found, list) and found
+                    else "none of the issuer names looked for"
+                )
                 form = (
                     "<details><summary>Give it an account</summary>"
                     '<form action="/statement-assign" method="post">'
@@ -5113,6 +5123,7 @@ class ConnectionHandler(
                     f"<dt>Kept</dt><dd>{html.escape(kept)}</dd>"
                     f"<dt>Whose</dt><dd>{whose}</dd>"
                     f"<dt>Read by</dt><dd>{reader}</dd>"
+                    f"<dt>Names found</dt><dd>{named}</dd>"
                     "</dl>"
                     '<p class="account-links"><a class="tap" '
                     f'href="/statement-shape?artefact={ident}">Masked shape</a></p>'

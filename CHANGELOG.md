@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.251] - 2026-10-02
+
+### Added
+- **Kept statements says which issuer names each statement's text holds, and
+  how often.** A statement's masked shape hides every name, so one with no
+  parser could not be told from any other. An issuer prints its name on every
+  page and a payee once per payment, so the count is the evidence. Only names
+  from a fixed list are ever reported.
+
 ## [0.4.250] - 2026-10-02
 
 ### Added

@@ -203,6 +203,20 @@ class TestTheKeptStatementsPage:
         assert page.text.index("Waiting only") < page.text.index("No parser yet")
         assert page.text.index("No parser yet") < page.text.index("Assigned (1)")
 
+    def test_KeptStatements_EachEntry_SaysWhichIssuerNamesItsTextHolds(
+        self, serve, one_of_each
+    ):
+        """The masked shape hides every name, so a statement with no parser
+        could not be told from any other. The May statement names Santander
+        twice: its registered-office line and its card fee."""
+        page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60).text
+
+        waiting = _group(page, "Waiting only for an account (1)")
+        assert "Names found" in waiting
+        assert "Santander 2" in waiting
+        nowhere = _group(page, "No parser yet (1)")
+        assert "none of the issuer names looked for" in nowhere
+
     def test_KeptStatements_EachEntry_LinksToItsMaskedShape(self, serve, one_of_each):
         page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60).text
 

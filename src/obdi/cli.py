@@ -2788,6 +2788,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     #: "recognised" alone told a person a statement was ready when its own
     #: balances did not carry.
     reading_by_digest: dict[str, tuple[int | None, str]] = {}
+    #: Which issuer names each statement's text holds; see `statement_names`.
+    names_by_digest: dict[str, list[tuple[str, int]]] = {}
 
     def _trial_reading(parser: StatementParser, payload: bytes) -> tuple[int | None, str]:
         import re
@@ -2808,7 +2810,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statements under newer feed payloads, which is why this exists.
         """
         from .errors import DataError
+        from .parsers.pdf_statements import statement_lines
         from .parsers.uk_banks import detect
+        from .statement_names import names_found
 
         with Store(db_path) as store:
             rows = store.connection.execute(
@@ -2832,6 +2836,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     else:
                         parser_by_digest[digest] = parser.source
                         reading_by_digest[digest] = _trial_reading(parser, payload)
+                    try:
+                        names_by_digest[digest] = names_found(statement_lines(payload))
+                    except (DataError, ValueError, OSError):
+                        # Not readable as a PDF at all: no names, and the
+                        # parser column already says nothing reads it.
+                        names_by_digest[digest] = []
                 rows_read, refusal = reading_by_digest[digest]
                 listing.append(
                     {
@@ -2842,6 +2852,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         "parser": parser_by_digest[digest],
                         "rows": rows_read,
                         "refusal": refusal,
+                        "names": names_by_digest[digest],
                     }
                 )
         return listing

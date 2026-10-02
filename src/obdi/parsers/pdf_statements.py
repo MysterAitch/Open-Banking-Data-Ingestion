@@ -68,6 +68,14 @@ def _lines(payload: bytes) -> list[str]:
         return [str(line) for line in pdf_lines(temporary)]
 
 
+def statement_lines(payload: bytes) -> list[str]:
+    """A statement's text lines, for a caller outside the parsers.
+
+    The same cached reading the parsers use, so asking costs nothing more.
+    """
+    return _lines(payload)
+
+
 @lru_cache(maxsize=_READINGS_KEPT)
 def _grid(payload: bytes) -> list[list[str]]:
     """The document's TABLE, read by coordinate rather than by spacing.
