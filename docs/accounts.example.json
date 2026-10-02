@@ -26,9 +26,10 @@
     "it reverts, which is what a future notification will hang from).",
     "",
     "These now live in the STORE, not here. The first open after upgrading",
-    "imports whatever this key holds, and the store is the master copy from",
-    "then on: an account edited there is not reverted by this file, and an",
-    "account added here is still picked up. Nothing needs doing by hand.",
+    "imports whatever this key holds, once, and the store is the master copy",
+    "from then on: an account edited there is not reverted by this file, and an",
+    "account added here afterwards is NOT picked up - declare it in the web",
+    "interface instead. Nothing needs doing by hand at the import itself.",
     "The account's \"id\" is its canonical NAME - the reference every stored",
     "row resolves through. The store also mints an opaque stable id per",
     "account, which never appears in this file and never changes."

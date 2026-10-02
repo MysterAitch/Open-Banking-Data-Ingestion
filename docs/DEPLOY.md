@@ -39,10 +39,18 @@ The connection store must not live under `/data`. That volume exists to be
 freely copied and queried, and putting bank credentials in it would make every
 copy of the history also a copy of the credentials.
 
-Both services run as a non-root user, and the published port stays on loopback.
+The services (the web page and scheduler from `Dockerfile`, and the applier from
+`applier/Dockerfile`) run as a non-root user, and the published port stays on loopback.
 That last part is deliberate and worth not "fixing": the page can begin a bank
 authorisation, so it must not answer everything that can reach the host.
 Exposure belongs to whatever you already use for private access.
+
+Several instances can run side by side (the live one, a restore target, a
+synthetic one), and they render identically. Set `OBDI_INSTANCE_LABEL` and
+`OBDI_INSTANCE_ROLE` on each: role `production` shows nothing, so that its
+absence is what marks the real one; any other role shows a boxed banner and a
+title prefix on every page; an instance with neither set says it is not
+identified rather than guessing.
 
 Prefer pulling a published image over building on the host. Build failures then
 surface in CI rather than during a deploy, and a published tag gives
@@ -124,8 +132,25 @@ effect.
 
 ## The scheduled pull
 
-Six hours, and that is not a tuning choice. Many banks cap unattended data
-fetches at four a day, and an aggregator's own polling runs on the same cycle, so
-a shorter interval buys nothing and risks a rate limit. A failed pull is logged
-and the loop continues rather than halting the schedule, because the commonest
-cause is a single expired consent that should not stop the others.
+Six hours (`OBDI_PULL_INTERVAL_SECONDS`, default 21600), and that is not a tuning
+choice. Many banks cap unattended data fetches at four a day, and an aggregator's
+own polling runs on the same cycle, so a shorter interval buys nothing and risks
+a rate limit. The loop in `compose.yaml` runs a bare `obdi pull`, which fetches
+every stored connection (card accounts included) and Starling when its token
+resolves, then `obdi pair-transfers` and `obdi export-raw`. A failed pull is
+logged and the loop continues rather than halting the schedule, because the
+commonest cause is a single expired consent that should not stop the others.
+
+A pull labelled scheduled (`OBDI_TRIGGER=scheduled`) is spaced from the previous
+scheduled one by 90 per cent of the interval unless
+`OBDI_PULL_MIN_INTERVAL_SECONDS` says otherwise (0 switches it off). A cycle that
+starts early, as after a deploy restarts the container, waits for its slot and
+then pulls, rather than giving up and leaving a whole interval of silence. A
+cycle that meets a rebuild or an attended post-authorisation backfill holding its
+lease waits briefly for it and then skips the pull for that cycle.
+
+`obdi alert` is meant to run last in the cycle (the local `compose.yaml` loop
+does not include it; a deployment adds it). It prints every finding, sends a
+notification when one appears and again when it clears (`OBDI_NTFY_URL`, else the
+log is the channel), and pings `OBDI_HEARTBEAT_URL` when the cycle reached it, so
+a cycle that never finishes is the one failure it can report by silence.

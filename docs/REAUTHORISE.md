@@ -110,20 +110,25 @@ Afterwards, if this account is also reachable another way (its own bank API, or
 a file export), bind them to one canonical account so the two sources
 cross-check instead of double-counting. See "Canonical accounts" in the README.
 
-## The shorter version, once the callback receiver is deployed
+## The shorter version, once `obdi serve` is reachable and registered
 
 Steps 2 and 3 collapse into one. The OAuth redirect happens **in your browser**,
 not server to server — the provider never connects to anything of yours, it just
 sends the browser somewhere. So the redirect target only has to be reachable by
-the machine holding the session. A receiver bound to loopback and fronted by
-whatever you already use for private access qualifies, so long as it presents a
-certificate the browser trusts and nothing is published to the internet.
+the machine holding the session. The web interface (`obdi serve`) is that
+target: its `/callback` route is the receiver. Bound to loopback and fronted by
+whatever you already use for private access, it qualifies, so long as it presents
+a certificate the browser trusts and nothing is published to the internet.
 
 With that running:
 
-1. `obdi connections` tells you what needs doing.
-2. Open the authorisation link, approve at the bank.
-3. The browser lands on the receiver, which exchanges the code and saves the
+1. `obdi connections`, or the Connections page (`/connections`) in the web
+   interface, tells you what needs doing. The page shows the date each consent
+   expires, and its Reconnect button is the heavy one only when a consent is
+   inside its alert window or has expired.
+2. Press Reconnect (which opens the authorisation link under the existing
+   name) and approve at the bank.
+3. The browser lands on `/callback`, which exchanges the code and saves the
    connection itself. It shows a confirmation page saying so.
 
 No copying URLs, no second command, nothing to mistype. The bank login stays —

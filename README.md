@@ -24,12 +24,12 @@ than the mechanism:
 |---|---|---|
 | Code (this repo) | here | shareable, reviewable |
 | Secrets | `.env`, gitignored | never committed, never read by tooling |
-| Raw artefacts + derived store | `OBDI_RAW_DIR` / `OBDI_DB_PATH`, outside the repo | private data |
+| Raw artefacts + derived store | one SQLite file at `OBDI_DB_PATH`, outside the repo (raw artefacts land inside it; `obdi export-raw` projects them onto the filesystem on request) | private data |
 | Statement PDFs | Paperless | already indexed, searchable and backed up |
 
 Set `OBDI_TIMINGS=1` to have rebuilds report a per-phase timing breakdown
-(parse, reconcile, resolve, transfer pairing) in the container log and on the
-CLI. Off by default and free when off - it exists so performance questions
+(parse, reconcile, resolve, transfer pairing, among others) in the container log
+and on the CLI. Off by default and free when off - it exists so performance questions
 about the real deployment get measured answers rather than extrapolations.
 
 A private Forgejo repo is the intended long-term home for the raw text exports:
@@ -80,8 +80,8 @@ stays legible enough to write a parser from; the money does not appear.
 ## Architecture
 
 ```
-   bank CSV / QIF / OFX          Open Banking API
-   (manual download)             (Enable Banking, Starling, Monzo)
+   bank CSV / QIF / PDF          Open Banking API
+   (manual download)             (TrueLayer, Starling)
             |                             |
             +--------------+--------------+
                            v
@@ -137,17 +137,23 @@ never read by tooling in this repo.**
 obdi pull starling                      # first-party, no consent clock
 obdi pull halifax                       # a stored TrueLayer connection
 obdi pull halifax --since 2026-01-01    # narrower window
+obdi pull                               # every stored connection, plus Starling if a token is set
 
-# import downloaded files
+# import downloaded files (CSV, QIF, or a PDF statement a parser exists for)
 obdi import path/to/export.csv --account starling-personal
 obdi import path/to/savings.csv --account starling-savings
 
 obdi pair-transfers      # after ingesting every account, by any route
 obdi status
 
-# emit an Actual Budget import payload
+# emit an Actual Budget envelope for a manual apply
 obdi replay --out ./actual-import.json
+# or queue a push for the applier container, which is what the web page does
+obdi push-actual
 ```
+
+`obdi --help` lists every other command (`doctor`, `backup`, `rebuild`,
+`coverage`, `alert`, and so on); each prints its own `--help`.
 
 `pair-transfers` is a separate pass over the whole store, and has to be: a
 movement between your own accounts has its two sides in *different* accounts,
@@ -158,14 +164,52 @@ The parser is chosen by inspecting the header row. If no parser recognises it,
 the import is **refused** rather than guessed at — a hard failure costs minutes,
 a silent misparse corrupts the store and is discovered months later.
 
-## Connecting a bank from a phone
+## The web interface
 
 ```bash
-obdi serve      # then reach it from the phone, however you reach your network
+obdi serve      # 127.0.0.1:8080 by default; --host and --port change it
 ```
 
-A page listing every connection with its consent clock, and a button to add or
-reconnect one. Doing it from a phone means the bank's own app handles
+Every page carries the same navigation strip (`src/obdi/navigation.py`):
+Overview, Accounts, Position, Connections, Actual, Reports, Evidence, and Admin.
+
+- **Overview (`/`)** is the home page and carries no forms. It opens with
+  "Needs attention", everything that currently needs a person, most serious
+  first, each with what to do. Below it is one card per account (counts, dates,
+  and a state such as current or silent, never an amount), then a System strip
+  of five facts - scheduler, Actual, connections, rebuild, build - each linking
+  to where it is dealt with. A healthy answer still says what was checked and
+  when, so an empty list cannot be mistaken for checks that never ran.
+- **Accounts** is the Overview's account section, which links on to
+  `/coverage` (coverage by source), `/accounts` (declared accounts), `/import`,
+  and `/review` (categorise). An account can be archived, and unarchived, from
+  its ledger or the coverage page.
+- **Position (`/position`)** states each account's balance, each observed asset
+  at its latest value, and a net worth that counts only what has a known
+  balance. An account with no opening balance is listed as not counted rather
+  than added as nil.
+- **Connections (`/connections`)** lists each bank with its consent expiry and a
+  Reconnect button. **Actual (`/actual`)** shows the newest push and audit and
+  starts either. **Admin (`/admin`)** holds the controls that can hurt, such as
+  a rebuild from raw.
+- **Reports (`/reports`)** and **Evidence (`/evidence`)** are indexes. Reports
+  include cross-source agreement, identity health, and balance reconciliation;
+  Evidence holds the raw artefacts, the fetch attempts, and statement shapes.
+- A transaction's page is the account's **ledger** (`/ledger?ref=…`), which
+  lists transactions month by month and is where an opening balance is stated.
+
+**Money is masked on every GET.** A page that shows amounts (the ledger,
+Position, balance reconciliation, a statement's shape) renders them masked, and
+real values arrive only in the response to a POST from its "Show values"
+button. A single payment keeps the
+shape of its figure; a balance or a total masks to one fixed token whatever its
+size, because the number of digits of a total is most of what there is to know
+about it. `src/obdi/masking.py` states the rule once.
+
+## Connecting a bank from a phone
+
+The Connections page above is the one for this: every connection with its
+consent clock, and a button to add or reconnect one. Doing it from a phone means the bank's own app handles
 authentication — biometrics rather than a password typed into a desktop browser
 and a second factor juggled alongside it.
 
@@ -324,8 +368,21 @@ also what lets you run a second budgeting tool alongside it on the same real
 data, and drop whichever loses.
 
 ```bash
-obdi replay --out ./actual-import.json
+obdi replay --out ./actual-import.json     # an envelope for a manual apply
+node applier/apply.mjs ./actual-import.json
+obdi push-actual                           # or queue it for the resident applier
 ```
+
+The queued route is the everyday one: `push-actual` (also the "Push to Actual
+now" button on the Actual page, and what a deployment may run after its
+scheduled pulls) writes an envelope
+into `OBDI_ACTUAL_DIR` (default `actual/` beside the store), and the
+`applier/watcher.mjs` container applies it and answers with a result file the
+web page reads. Neither side calls the other. The applier refuses an envelope
+version it does not know, so a change to the envelope ships with its applier.
+`ACTUAL_SERVER_URL`, `ACTUAL_SYNC_ID`, and a password (`ACTUAL_PASSWORD_FILE`)
+configure it; the Actual page's audit reports whether each account's balance in
+Actual agrees with what obdi expects.
 
 Accounts with no Actual binding are **not** replayed and are named in the
 output, because a budget quietly missing an account looks like missing spending.
@@ -336,7 +393,22 @@ confirmed pairs travel beside the rows and the applier links the two existing
 rows once both are in (it never creates a transfer by importing one, which
 double-counts a leg that is already there). An unpaired provider claim, or a
 pair whose other account is not bound, stays an ordinary row and its note says
-what it is.
+what it is. Voided pending rows are not sent, and a row in any currency but
+sterling is refused outright, since a budget file has one currency.
+
+A provider's history often starts partway through an account's life, so the sum
+of the rows held is not the account's balance. Each account's **opening
+balance** is therefore derived from a *balance anchor*: one fact, "this
+account's balance was X at the end of date D", taken from the bank's running
+balance, from a held statement's closing balance, or typed on the account's
+ledger page. The earliest anchor defines the opening balance; every later one is
+only a check, shown as agreeing or differing and never used to adjust
+anything. The opening balance is sent to Actual as a single starting-balance
+row per account. An account with no anchor has no opening balance, which is
+reported as unknown rather than assumed to be nil
+(`src/obdi/balance_anchors.py` explains the one weakness: a single anchor
+absorbs any missing rows into the opening figure, and a second turns it into a
+test).
 
 ### Why the payload rather than a direct write
 
@@ -365,15 +437,15 @@ fall out for free:
 
 ## What needs an account
 
-Only the first item is needed to start. File import needs no credentials at all.
+None of these is needed to start. File import needs no credentials at all.
 
 | Provider | Needed? | What to get |
 |---|---|---|
 | **Starling** | only if you bank there | personal access token, read-only scopes |
-| **Monzo** | only if you bank there | **confidential** client id + secret |
-| **Actual Budget** | later, for replay | server URL, password, sync id |
-| Enable Banking | EEA accounts only | personal tier has no UK; see below |
-| TrueLayer | no | live access is sales-gated; sandbox is fake data |
+| **Monzo** | not yet | CSV exports import; there is no Monzo API client, so the credentials below are for when one is written |
+| **Actual Budget** | only to push into it | server URL, password file, sync id |
+| TrueLayer | for aggregator feeds (the route in use for banks without a first-party API) | client id, client secret file, a registered redirect URI; `docs/REAUTHORISE.md` |
+| Enable Banking | EEA accounts only; no client code, only `scripts/check_uk_coverage.py` | personal tier has no UK; see below |
 | GoCardless | no | closed to new signups since 2025 |
 
 **Enable Banking does not serve the UK** (established 2026-08-01). Its
@@ -387,25 +459,26 @@ and Wise both operate one — since Ireland and Lithuania are selectable.
 
 Routes still worth testing, none confirmed here:
 
-- **TrueLayer** and **Tink** consoles. A developer building UK sync for Actual
-  and Firefly III reports running live data-only applications on TrueLayer
-  without ever being asked for a payment method, then moving to Tink for wider
-  UK coverage. Working community integrations exist for both.
+- **Tink**'s console. A developer building UK sync for Actual and Firefly III
+  reports running live data-only applications on TrueLayer without ever being
+  asked for a payment method, then moving to Tink for wider UK coverage. TrueLayer
+  is the route this repository now uses live; Tink has no client code here.
 - **LunchFlow** — a paid hosted service holding the aggregator relationships
   (GoCardless among them, which is how it reaches UK banks), pushing into a
   self-hosted Actual via `lunchflow/actual-flow`. Self-serve. One real test
   reported UK connections stuck "pending" for hours, so treat reliability as
   unproven.
 
-**File import is the dependable floor regardless**, which is why it is what
-this repo implements first.
+**File import is the dependable floor regardless**, which is why it was the first
+thing this repo implemented.
 
 Notes that will save time:
 
 - **Starling** tokens do not expire and carry no 90-day consent cycle, because
   first-party access to your own bank is not an account information service.
   Grant only `account:read`, `balance:read`, `transaction:read`, `space:read`.
-- **Monzo** must be registered as a *confidential* client — only those receive
+- **Monzo** (research for a future API client; only its CSV export is read
+  today) must be registered as a *confidential* client — only those receive
   refresh tokens. And full transaction history is available **only within five
   minutes of authenticating**; after that it serves a rolling 90 days. The
   backfill has to be armed and waiting before you authorise.
@@ -426,7 +499,10 @@ land the files here. This needs no code and should not wait for any of it.
 
 ## Known format hazards
 
-Each of these is encoded in a test, because each corrupts data silently:
+The first four are encoded in a test (`tests/test_parsers.py`,
+`tests/test_sign_convention.py`), because each corrupts data silently. The last
+two are limits the banks publish, recorded from research: nothing here reads
+OFX at all, and the overlap they force is handled by the identity tiers below.
 
 - **Amex UK inverts its signs** — a spend is positive. Storing it unchanged
   reverses the entire card balance.
@@ -446,7 +522,8 @@ Each of these is encoded in a test, because each corrupts data silently:
 a documented cause of failed matching in other importers.
 
 **Identity is tiered and never guesses**: exact provider id, then exact content
-key, then fuzzy (same account, exact amount, ±7 days, nearest date first), then
+key, then fuzzy (same account, exact amount, ±7 days, widening to ±10 when one
+side was typed by a person; nearest date first), then
 *unresolved* — flagged, not silently merged. The match tier is recorded on every
 link so a wrong match can be found and reversed.
 
@@ -470,18 +547,26 @@ Working: file import end to end — land raw, parse, normalise, resolve identity
 store — plus cross-account internal-transfer pairing. Starling, Monzo and Amex
 UK CSV parsers, with layouts taken from research rather than real exports —
 **verify each against a first real download**; the header check will refuse a
-mismatch rather than misread it.
+mismatch rather than misread it. A QIF parser and PDF statement parsers
+(`src/obdi/parsers/`) exist beside them; a PDF from a bank with no parser yet
+is kept as evidence and refused with a pointer to the statement-shape page.
 
-Also working: live pulls from TrueLayer and Starling, connection storage with
-consent tracking, cross-source matching with source tiers, savings spaces as
-accounts, valuation recording for assets with no transaction stream, a
-phone-usable connection interface, a Docker stack, and Actual replay payload
-generation.
+Also working: live pulls from TrueLayer (accounts and cards) and Starling,
+scheduled by the shell loop in `compose.yaml` or its deployment equivalent; connection storage with
+consent tracking; cross-source matching with source tiers; savings spaces as
+accounts; valuation recording for assets with no transaction stream; the web
+interface described above, including the Position page; the **Node applier**
+that pushes to Actual, with transfers linked and opening balances derived from
+anchors; backup, restore, and export of the layer no fetch can recreate; and
+**alerts** (`obdi alert`), which announce a finding when it appears and again
+when it clears. The findings include silent feeds, refused or stale pushes,
+rows sharing one identity, runs of refused provider asks, expiring consents, a
+nearly full disk, and a rebuild that left nothing.
+A Docker stack builds from `compose.yaml` for local development.
 
-Not built yet: the **Node applier** that consumes the replay payload — it needs
-a reachable Actual server to verify against, so it is deliberately unwritten
-rather than shipped unverified — plus MQTT events and a review interface for
-the flagged-but-undecided queue.
+Not built yet: MQTT events (the `events` outbox table exists; nothing consumes
+it), a Monzo or Enable Banking API client, and any capitalised figure for
+defined-benefit pensions.
 
 Assurance: `pytest` green, `mypy --strict` clean, `ruff` clean under a widened
 rule set including annotations, security, timezone and pathlib families. An
@@ -496,5 +581,6 @@ because they are dated claims about a past state rather than a description of
 now: 189 tests passing beside four silent data-loss defects is the point, and
 that does not decay.
 
-`scripts/check_uk_coverage.py` answers the outstanding design question — whether
-Enable Banking actually carries your banks.
+`scripts/check_uk_coverage.py` answered the design question of whether Enable
+Banking carries UK banks (it does not, as above), and remains a probe for any
+other country or an activated application.
