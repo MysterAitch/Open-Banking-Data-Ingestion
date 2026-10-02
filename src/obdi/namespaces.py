@@ -31,10 +31,13 @@ from collections.abc import Iterable
 #: a source prefix would be indistinguishable in a qualified reference.
 PROVIDERS = frozenset({"truelayer", "starling", "file"})
 
-#: The card statement whose issuer the masked shapes could not name. A
-#: placeholder, declared once so naming the issuer is a change to this line
-#: alone: the parser and the registry below both read it.
-UK_CARD_STATEMENT_SOURCE = "uk-card-statement-pdf"
+#: The Halifax credit card statement.
+#: The parser was written from masked shapes, which hide the issuer, under a
+#: placeholder name; counting the issuer names in the eight kept statements
+#: (Halifax about twenty times in each) settled it before any row was stored.
+#: The constant keeps its neutral name because the parser, its module, and
+#: its tests were named before the issuer was known.
+UK_CARD_STATEMENT_SOURCE = "halifax-cc-pdf"
 
 #: Sources that name a FILE FORMAT rather than a provider pipe: an
 #: exported statement identifies itself by the parser that read it, since

@@ -26,6 +26,13 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.252] - 2026-10-02
+
+### Changed
+- **The second card statement layout is named for its issuer: Halifax.** It
+  was added under a placeholder because a masked layout hides the name; the
+  issuer-name counts on the eight kept statements settled it.
+
 ## [0.4.251] - 2026-10-02
 
 ### Added
