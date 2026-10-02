@@ -381,6 +381,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 if TYPE_CHECKING:
     from .models import Transaction
     from .parsers.base import StatementParser
+    from .parsers.pdf_statements import SectionReading
     from .rebuild import RebuildReport
 
 
@@ -2765,6 +2766,24 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             f"{parser.source}: {summary.describe()}"
         )
 
+    def assign_statement_section(artefact_id: int, section_key: str, account_id: str) -> str:
+        """Give one account of a kept "all accounts" statement its account.
+
+        See `statement_sections.assign_section`: the statement stays
+        unassigned as a whole, the choice is recorded as declared state, and
+        the section's rows go through the same reconcile path as any other.
+        """
+        from .statement_sections import assign_section
+
+        with Store(db_path) as store:
+            return assign_section(
+                store,
+                artefact_id=artefact_id,
+                section_key=section_key,
+                account=account_id,
+                account_map=_account_map(store),
+            )
+
     def statement_payload(artefact_id: int) -> tuple[str, bytes] | None:
         # PDFs only: it answered 200 for every artefact in the store, feed
         # payloads and CSVs included, and printed "could not be read as a PDF".
@@ -2800,6 +2819,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     reading_by_digest: dict[str, tuple[int | None, str]] = {}
     #: Which issuer names each statement's text holds; see `statement_names`.
     names_by_digest: dict[str, list[tuple[str, int]]] = {}
+    #: A multi-account statement's sections; absent for a statement read whole,
+    #: and for one whose sections cannot be told apart (that is its refusal).
+    #: Keyed by digest for the same reason.
+    sections_by_digest: dict[str, list[SectionReading]] = {}
 
     def _trial_reading(parser: StatementParser, payload: bytes) -> tuple[int | None, str]:
         import re
@@ -2823,12 +2846,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .parsers.pdf_statements import statement_lines
         from .parsers.uk_banks import detect
         from .statement_names import names_found
+        from .statement_sections import masked, section_token, trial_sections
 
         with Store(db_path) as store:
             rows = store.connection.execute(
                 "SELECT rowid, digest, origin, fetched_at, account_ref "
                 "FROM raw_artefacts WHERE source = 'statement' ORDER BY rowid"
             ).fetchall()
+            assignments = store.statement_section_assignments()
+            held_by: dict[tuple[str, str], str] = {
+                (item.digest, item.section_key): item.account_ref for item in assignments
+            }
+            # Offered for another statement's section of the same key: the most
+            # recent choice, since assignments come oldest first.
+            offered_for: dict[str, str] = {
+                item.section_key: item.account_ref for item in assignments
+            }
             listing: list[dict[str, object]] = []
             for row in rows:
                 digest = str(row["digest"])
@@ -2845,7 +2878,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         reading_by_digest[digest] = (None, "")
                     else:
                         parser_by_digest[digest] = parser.source
-                        reading_by_digest[digest] = _trial_reading(parser, payload)
+                        divided = trial_sections(parser, payload)
+                        if isinstance(divided, list):
+                            sections_by_digest[digest] = divided
+                            reading_by_digest[digest] = (None, "")
+                        elif isinstance(divided, str):
+                            reading_by_digest[digest] = (None, divided)
+                        else:
+                            reading_by_digest[digest] = _trial_reading(parser, payload)
                     try:
                         names_by_digest[digest] = names_found(statement_lines(payload))
                     except (DataError, ValueError, OSError):
@@ -2853,6 +2893,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         # parser column already says nothing reads it.
                         names_by_digest[digest] = []
                 rows_read, refusal = reading_by_digest[digest]
+                divided_sections = sections_by_digest.get(digest)
                 listing.append(
                     {
                         "id": int(row["rowid"]),
@@ -2863,6 +2904,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         "rows": rows_read,
                         "refusal": refusal,
                         "names": names_by_digest[digest],
+                        # Per account of a multi-account statement, shown on a
+                        # GET: so the label and the reason are digit-masked and
+                        # nothing but a count of rows is stated.
+                        "sections": [
+                            {
+                                "token": section_token(item.key),
+                                "label": masked(item.label),
+                                "rows": item.rows,
+                                "refusal": masked(item.refusal)[:300],
+                                "account": held_by.get((digest, item.key), ""),
+                                "suggested": offered_for.get(item.key, ""),
+                            }
+                            for item in divided_sections
+                        ]
+                        if divided_sections
+                        else [],
                     }
                 )
         return listing
@@ -3115,6 +3172,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statement_digests_held=statement_digests_held,
         statement_payload=statement_payload,
         assign_kept_statement=assign_kept_statement,
+        assign_statement_section=assign_statement_section,
         kept_statements=kept_statements,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,

@@ -19,9 +19,14 @@ from datetime import date, datetime
 
 from .account_observations import Observation
 from .parsers.base import ParseError
-from .parsers.pdf_statements import PdfStatementParser, _lines, pdf_parser_for
+from .parsers.pdf_statements import (
+    PdfStatementParser,
+    SectionReading,
+    _lines,
+    pdf_parser_for,
+)
 from .parsers.statement_reading import StatementReading
-from .store import Store
+from .store import SectionAssignment, Store
 
 
 def _parser_for(payload: bytes) -> PdfStatementParser | None:
@@ -110,12 +115,71 @@ def _payload_of(store: Store, digest: str, account_ref: str) -> bytes:
     return b"" if row is None else bytes(row["payload"])
 
 
+#: Artefact digest -> the sections of that statement, for a multi-account one.
+#: Same reason as `_BALANCE_BY_DIGEST`: the bytes never change, and re-reading a
+#: wide page's geometry on every view of a ledger would make it unusable.
+_SECTIONS_BY_DIGEST: dict[str, list[SectionReading]] = {}
+
+
+def _sections_of(store: Store, digest: str) -> list[SectionReading]:
+    """The sections of a held multi-account statement, empty when it has none
+    or cannot be read - said aloud on stderr, like every other unreadable one."""
+    if digest not in _SECTIONS_BY_DIGEST:
+        found: list[SectionReading] = []
+        row = store.connection.execute(
+            "SELECT payload FROM raw_artefacts "
+            "WHERE digest = ? AND media_type = 'application/pdf' LIMIT 1",
+            (digest,),
+        ).fetchone()
+        parser = None if row is None else _parser_for(bytes(row["payload"]))
+        if row is not None and parser is not None:
+            try:
+                found = parser.sections(bytes(row["payload"])) or []
+            except Exception as exc:
+                print(
+                    f"artefact {digest[:12]}: {parser.source} could not read its "
+                    f"sections - {exc}",
+                    file=sys.stderr,
+                )
+        _SECTIONS_BY_DIGEST[digest] = found
+    return _SECTIONS_BY_DIGEST[digest]
+
+
+def assigned_sections(
+    store: Store, account_ref: str | None = None
+) -> Iterator[tuple[SectionAssignment, SectionReading | None]]:
+    """Each assigned section of a held statement, with its reading if it can be found.
+
+    None means the declared assignment names a section the statement no longer
+    holds, which a caller counts as unusable rather than skipping.
+    """
+    for assignment in store.statement_section_assignments():
+        if account_ref is not None and assignment.account_ref != account_ref:
+            continue
+        found = next(
+            (
+                item
+                for item in _sections_of(store, assignment.digest)
+                if item.key == assignment.section_key
+            ),
+            None,
+        )
+        yield assignment, found
+
+
 def held_statement_readings(store: Store) -> Iterator[tuple[str, StatementReading]]:
-    """(account the statement is filed under, its reading) for each readable one."""
+    """(account the statement is filed under, its reading) for each readable one.
+
+    An assigned section of an "all accounts" statement is one of them, filed
+    under the account it was assigned to.
+    """
     for digest, account in _held_pdfs(store, None):
         reading = _read_statement(_payload_of(store, digest, account), digest[:12])
         if reading is not None:
             yield account, reading
+    for assignment, section in assigned_sections(store):
+        if section is not None and not section.refusal:
+            yield assignment.account_ref, section.reading
 
 
 @dataclass(frozen=True)
@@ -170,6 +234,26 @@ def statement_balances(
             unusable += 1
         else:
             usable.append(StatementBalance(account, known[0], known[1]))
+    # An assigned section states its own closing balance, judged by the same
+    # rule: its own rows carry its own opening balance to it. A loan's is
+    # already negative, because the reader holds what is owed as a negative
+    # position, so a Position that sums balances counts the liability.
+    for assignment, section in assigned_sections(store, account_ref):
+        if (
+            section is not None
+            and not section.refusal
+            and section.reading.statement_date is not None
+            and section.reading.closing_balance_minor is not None
+        ):
+            usable.append(
+                StatementBalance(
+                    assignment.account_ref,
+                    section.reading.statement_date,
+                    section.reading.closing_balance_minor,
+                )
+            )
+        else:
+            unusable += 1
     return usable, unusable
 
 

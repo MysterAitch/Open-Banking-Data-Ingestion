@@ -47,6 +47,7 @@ from .providers import starling, truelayer
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
 from .space_attribution import fold_space_copies
+from .statement_sections import replay_batches
 from .store import Store
 
 
@@ -89,6 +90,10 @@ class RebuildReport:
     kept_unassigned: int = 0
     #: Of those, how many a parser recognises and could read once assigned.
     kept_readable: int = 0
+    #: Accounts of "all accounts" statements: those a person assigned, read
+    #: back into their accounts, and those still waiting for one.
+    kept_sections_replayed: int = 0
+    kept_sections_unassigned: int = 0
     #: Main-account rows folded into the Space rows they copy, and the
     #: space-blind rows the fold left counted - see `space_attribution`.
     space_folded: int = 0
@@ -169,6 +174,13 @@ class RebuildReport:
                 f"recognises, {unread} with no parser yet for its layout. "
                 "The Kept statements page says which, and whether each "
                 "recognised one can actually be read."
+            )
+        if self.kept_sections_replayed or self.kept_sections_unassigned:
+            lines.append(
+                f"  {self.kept_sections_replayed} account(s) of all-accounts "
+                f"statements read back into the accounts they were assigned to; "
+                f"{self.kept_sections_unassigned} more still have no account, so "
+                "contributed no rows."
             )
         return "\n".join(lines)
 
@@ -334,6 +346,39 @@ def resolve_artefact_ref(
     return _resolve_ref(str(row["account_ref"]), account_map)
 
 
+def _replay_sections(
+    store: Store,
+    report: RebuildReport,
+    digest: str,
+    payload: bytes,
+    account_map: AccountMap | None,
+    candidate_cache: dict[str, CandidateIndex],
+) -> None:
+    """Read each assigned section of one kept statement back into its account.
+
+    Each section is its own batch, numbered on its own, exactly as it was when
+    assigned live: that is what lets a section overlapping an annual statement
+    merge into it occurrence for occurrence rather than being renumbered by
+    whatever else the rebuild has seen.
+    """
+    replay = replay_batches(
+        store, digest, payload, lambda ref: _resolve_ref(ref, account_map)
+    )
+    report.kept_sections_unassigned += replay.unassigned
+    report.problems.extend(replay.problems)
+    for _account, transactions in replay.batches:
+        if transactions:
+            reconcile_batch(
+                store,
+                transactions,
+                digest=digest,
+                summary=ImportSummary(artefact_new=False),
+                candidate_cache=candidate_cache,
+            )
+            report.transactions += len(transactions)
+        report.kept_sections_replayed += 1
+
+
 def rebuild_from_raw(
     store: Store,
     progress: Callable[[int, int, RebuildReport], None] | None = None,
@@ -445,6 +490,15 @@ def rebuild_from_raw(
             with contextlib.suppress(DataError, ValueError):
                 detect(payload)
                 report.kept_readable += 1
+            # The statement as a whole has no account, but an "all accounts"
+            # document may have had some of its sections assigned: those are
+            # declared state, which the artefact alone cannot reproduce, so
+            # they are read back here or the rebuild would silently drop them.
+            if source == "statement":
+                with instrumentation.phase("reconcile"):
+                    _replay_sections(
+                        store, report, digest, bytes(payload), account_map, candidate_cache
+                    )
             continue
 
         summary = ImportSummary(artefact_new=False)

@@ -118,6 +118,10 @@ JUSTIFIED = {
     # constructs a state the application prevents, which is the state under test:
     # rewinding a migration marker so the upgrade runs again, corrupting a copy so
     # verification has something to catch, vanishing one side of a pair.
+    ("test_statement_sections.py", "obdi_meta"): "stamps a store with the version "
+    "BEFORE the statement_sections table existed, which nothing but an older release "
+    "can do - the application stamps the current version, so only a rewound marker "
+    "shows that opening an old store grows the table the first assignment needs",
     ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
     "upgrade path to run",
     ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "

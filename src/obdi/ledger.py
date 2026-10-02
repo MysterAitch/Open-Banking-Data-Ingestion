@@ -56,11 +56,12 @@ QUERIES_PER_PAGE = 8
 
 #: Statements issued to look for the account's opening-balance anchors when it
 #: has no TrueLayer records and no held statements: the stated balances, the
-#: bank-record reconciliation (cards, rows, pending, sightings), and the held
-#: statement listing. Each TrueLayer artefact a row's balance has to be found
-#: in, and each held statement not yet read, adds statements beyond this, so a
-#: page for such an account costs more and the fixed figure is a floor.
-ANCHOR_QUERIES = 6
+#: bank-record reconciliation (cards, rows, pending, sightings), the held
+#: statement listing, and the sections of "all accounts" statements assigned to
+#: accounts. Each TrueLayer artefact a row's balance has to be found in, and
+#: each held statement not yet read, adds statements beyond this, so a page for
+#: such an account costs more and the fixed figure is a floor.
+ANCHOR_QUERIES = 7
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
 

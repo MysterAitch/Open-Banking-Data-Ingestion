@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 
+from credit_union_documents import Move, document, pdf, section
 from obdi import web
 from obdi.callback import render_page
 from obdi.cli import build_web_config
@@ -61,6 +62,27 @@ LONG_IDENTITY = "a1b2c3d4" * 8
 #: A name and a file name as long as a person could be expected to type.
 LONG_NAME = "Joint household current account with an unreasonably long name " * 3
 LONG_FILE_NAME = "Statement_for_the_account_ending_in_1234_issued_2026-06-30_final_v2_" * 2 + ".pdf"
+
+
+def nine_long_labelled_accounts() -> bytes:
+    """A nine-account credit union document whose account labels are very long."""
+    accounts = []
+    for number in range(7):
+        label = (
+            f"Joint household regular savings account number {number} "
+            + "Unbroken" * 9
+        )
+        accounts.append(section(label, 1000 * number, [Move("04/05/2025", "DD Lodgement", 100)]))
+    for number in range(2):
+        accounts.append(
+            section(
+                f"Personal loan secured on the family home phase {number} -9.50%",
+                -50000,
+                [Move("12/05/2025", "tx", 15500)],
+                loan=True,
+            )
+        )
+    return pdf(document(*accounts), step=5.5)
 
 
 def _free_port() -> int:
@@ -149,6 +171,20 @@ def worst_case_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 digest=artefact_digest(payload),
                 payload=payload,
                 origin=LONG_FILE_NAME,
+            )
+        )
+        # An "all accounts" statement of nine accounts whose labels are as long
+        # as one could be printed, one of them with no break to wrap at.
+        every_account = nine_long_labelled_accounts()
+        store.land_artefact(
+            RawArtefact(
+                source="statement",
+                account_ref="(unassigned)",
+                fetched_at=datetime.now(UTC),
+                media_type="application/pdf",
+                digest=artefact_digest(every_account),
+                payload=every_account,
+                origin=LONG_FILE_NAME.replace("Statement", "AllAccounts"),
             )
         )
     config = build_web_config(db)
@@ -297,6 +333,27 @@ def test_StatementsPage_WithVeryLongFileName_DoesNotScrollSideways(
     browser: object, worst_case_base: str
 ) -> None:
     _assert_fits(_overflow(browser, f"{worst_case_base}/statements"))
+
+
+def test_StatementsPage_WithANineSectionStatementAndLongLabels_DoesNotScrollSideways(
+    browser: object, worst_case_base: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        page.goto(f"{worst_case_base}/statements", wait_until="load")
+        listed = page.evaluate(
+            "() => document.querySelectorAll('form[action=\"/statement-section-assign\"]').length"
+        )
+        # The pickers sit in closed disclosures, so they are opened: the layout
+        # that matters is the one a person meets after tapping one.
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        measured = _measure(page)
+    finally:
+        page.close()
+    assert listed == 9, "the nine sections were not listed, so nothing was measured"
+    _assert_fits(measured)
 
 
 def test_LedgerPage_ForUnknownVeryLongReference_RefusalDoesNotScrollSideways(

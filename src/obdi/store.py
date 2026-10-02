@@ -61,7 +61,11 @@ from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 #: evidence can say its dates were inferred. The guard added at 9 caught this
 #: change on its first real use, named the column, and refused until this line
 #: moved - which is the whole of what it was built to do.
-SCHEMA_VERSION = 10
+#:
+#: 10 -> 11: the `statement_sections` table. A new table needs no migration
+#: (SCHEMA creates it), but only an open that does work runs SCHEMA, so a store
+#: stamped 10 would never have grown it and the first assignment would fail.
+SCHEMA_VERSION = 11
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -72,6 +76,18 @@ SCHEMA_VERSION = 10
 #: copy that could disagree with the evidence it came from.
 ACCOUNT_BALANCE_ASSET_PREFIX = "account:"
 ACCOUNT_BALANCE_KIND = "account_balance"
+
+
+@dataclass(frozen=True)
+class SectionAssignment:
+    """One account of an "all accounts" statement, and where it was filed."""
+
+    digest: str
+    section_key: str
+    account_ref: str
+    label: str
+    assigned_at: str
+
 
 SCHEMA = """
 -- Keyed on (digest, account_ref, source): the bytes, the account they are
@@ -393,6 +409,26 @@ CREATE TABLE IF NOT EXISTS declared_account_rates (
     annual_percent REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (stable_id, position)
 );
+
+-- Which account each ACCOUNT OF AN "ALL ACCOUNTS" STATEMENT belongs to.
+-- DECLARED state, like the registry above: the statement itself stays an
+-- unassigned artefact (one artefact carries one account_ref, and this one
+-- covers several accounts), so the choice a person made about one of its
+-- sections has nowhere else to live, and no replay of raw evidence can
+-- reproduce it. Nothing that regenerates the derived layers may touch it.
+-- Keyed by the artefact's digest and the section's key, which is derived
+-- from the label the document itself prints for the account - not from its
+-- position - so the same account in a second document has the same key.
+-- account_ref is the canonical account the section's rows are read into;
+-- label is what the document calls the account, kept to show a person.
+CREATE TABLE IF NOT EXISTS statement_sections (
+    digest      TEXT NOT NULL,
+    section_key TEXT NOT NULL,
+    account_ref TEXT NOT NULL,
+    label       TEXT NOT NULL DEFAULT '',
+    assigned_at TEXT NOT NULL,
+    PRIMARY KEY (digest, section_key)
+);
 """
 
 
@@ -467,6 +503,9 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'transactions', 'transfers_paired',
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
+    'statement_sections': [
+        'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
+    ],
     'transaction_sources': [
         'artefact_digest', 'entity_id', 'first_seen_at', 'observed_date', 'source',
         'source_id',
@@ -1156,6 +1195,7 @@ class Store:
             ) from exc
         if previous is not None and str(previous["ref"]) != stored.ref:
             self._move_account_balances(str(previous["ref"]), stored.ref)
+            self._move_statement_sections(str(previous["ref"]), stored.ref)
         self.connection.execute(
             "DELETE FROM declared_account_limits WHERE stable_id = ?", (stable_id,)
         )
@@ -1712,8 +1752,76 @@ class Store:
             (new_account_id, old_account_id),
         )
         self._move_account_balances(old_account_id, new_account_id)
+        self._move_statement_sections(old_account_id, new_account_id)
         self.connection.commit()
         return cursor.rowcount
+
+    def _move_statement_sections(self, old_account_ref: str, new_account_ref: str) -> None:
+        """Carry the sections a person assigned across an account's renaming.
+
+        They are the person's own choices with no artefact to re-derive them
+        from, so a rename that left them under the old reference would have
+        the next rebuild read those sections into an account that no longer
+        exists - or, if the old name were declared again later, into the
+        wrong one. The key is (digest, section), so a move never collides.
+        """
+        self.connection.execute(
+            "UPDATE statement_sections SET account_ref = ? WHERE account_ref = ?",
+            (new_account_ref, old_account_ref),
+        )
+
+    def assign_statement_section(
+        self, digest: str, section_key: str, account_ref: str, label: str
+    ) -> None:
+        """File one account of a multi-account statement under `account_ref`.
+
+        Assigning a section to the account it already has is harmless and
+        changes nothing. Assigning it to a DIFFERENT account is refused: the
+        rows read in under the first choice would stay there, and nothing
+        here can take them back (an assigned single statement cannot be
+        un-assigned either), so a second answer would leave one section's
+        rows in two accounts with no total anywhere saying so.
+        """
+        held = self.connection.execute(
+            "SELECT account_ref FROM statement_sections "
+            "WHERE digest = ? AND section_key = ?",
+            (digest, section_key),
+        ).fetchone()
+        if held is not None and str(held["account_ref"]) != account_ref:
+            raise DataError(
+                f"this section is already assigned to {held['account_ref']}, and "
+                "its rows have been read into that account. A section cannot be "
+                "moved to another account once read in, because nothing takes "
+                "back the rows it contributed - nothing was changed."
+            )
+        self.connection.execute(
+            "INSERT INTO statement_sections "
+            "(digest, section_key, account_ref, label, assigned_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(digest, section_key) DO UPDATE SET label = excluded.label",
+            (digest, section_key, account_ref, label, _stamp_now()),
+        )
+        self.connection.commit()
+
+    def statement_section_assignments(
+        self, digest: str | None = None
+    ) -> list[SectionAssignment]:
+        """Every assigned section, or those of one statement, in assignment order."""
+        scope = "" if digest is None else " WHERE digest = ?"
+        return [
+            SectionAssignment(
+                digest=str(row["digest"]),
+                section_key=str(row["section_key"]),
+                account_ref=str(row["account_ref"]),
+                label=str(row["label"]),
+                assigned_at=str(row["assigned_at"]),
+            )
+            for row in self.connection.execute(
+                "SELECT digest, section_key, account_ref, label, assigned_at "  # noqa: S608
+                f"FROM statement_sections{scope} ORDER BY assigned_at, section_key",
+                () if digest is None else (digest,),
+            )
+        ]
 
     def _move_account_balances(self, old_account_ref: str, new_account_ref: str) -> None:
         """Carry the balances a person stated across an account's renaming.
@@ -3051,12 +3159,18 @@ class Store:
         stated = self.connection.execute(
             "SELECT COUNT(*) FROM valuations WHERE kind = ?", (ACCOUNT_BALANCE_KIND,)
         ).fetchone()[0]
+        # Which account a person gave each account of an "all accounts"
+        # statement: the statement is evidence, the choice is not.
+        sections = self.connection.execute(
+            "SELECT COUNT(*) FROM statement_sections"
+        ).fetchone()[0]
         return {
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),
             "declared accounts": int(declared),
             "stated balance anchors": int(stated),
+            "statement section assignments": int(sections),
         }
 
 

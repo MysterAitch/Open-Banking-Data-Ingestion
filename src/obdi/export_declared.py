@@ -146,6 +146,26 @@ def _stated_balances(store: Store) -> list[dict[str, object]]:
     ]
 
 
+def _statement_sections(store: Store) -> list[dict[str, object]]:
+    """Which account a person gave each account of an "all accounts" statement.
+
+    Keyed by the statement's digest (the hash of its bytes, which the raw
+    export's sidecars carry) and the section's key, so the choice can be
+    matched to its document by something other than this store's row ids.
+    The account is as it is NOW.
+    """
+    return [
+        {
+            "digest": assignment.digest,
+            "section": assignment.section_key,
+            "label": assignment.label,
+            "account": assignment.account_ref,
+            "assigned_at": assignment.assigned_at,
+        }
+        for assignment in store.statement_section_assignments()
+    ]
+
+
 def _review_decisions(store: Store) -> list[dict[str, object]]:
     """Only the RESOLVED ones. An unresolved flag is a claim the current rules
     make about the current evidence - the rules will make it again, so it is not
@@ -184,6 +204,7 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     accounts = _declared_accounts(store)
     decisions = _review_decisions(store)
     balances = _stated_balances(store)
+    sections = _statement_sections(store)
 
     def write(name: str, payload: object) -> None:
         (out_dir / name).write_text(
@@ -194,12 +215,14 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     write("declared-accounts.json", accounts)
     write("review-decisions.json", decisions)
     write("stated-balances.json", balances)
+    write("statement-sections.json", sections)
 
     counts = {
         "annotations": len(annotations),
         "declared_accounts": len(accounts),
         "review_decisions": len(decisions),
         "stated_balances": len(balances),
+        "statement_sections": len(sections),
     }
     write(
         "manifest.json",

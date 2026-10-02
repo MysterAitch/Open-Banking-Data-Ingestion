@@ -26,6 +26,20 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.258] - 2026-10-02
+
+### Added
+- **An "all accounts" credit union statement is read account by account.** The
+  two such statements were refused as unassignable, which kept the loan they
+  hold out of the net-worth page. Each account's section is now checked on its
+  own and can be given its own account on the Kept statements page; the choice
+  is declared state and survives a rebuild, a backup, and an account rename.
+  Written from masked layouts, never run on the real files.
+
+### Changed
+- **Schema version 11**, for the table that holds those choices. A new table
+  only; nothing existing is altered.
+
 ## [0.4.257] - 2026-10-02
 
 ### Changed

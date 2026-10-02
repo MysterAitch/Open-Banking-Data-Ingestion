@@ -438,6 +438,9 @@ class WebConfig:
     #: keeping, because deciding whose a document is and deciding what
     #: it says are different acts, and only one of them can be undone.
     assign_kept_statement: Callable[[int, str], str] | None = None
+    #: Give ONE account of a kept "all accounts" statement its account and read
+    #: that section in: (artefact id, section key, account) to the outcome.
+    assign_statement_section: Callable[[int, str, str], str] | None = None
     #: Every kept statement, with no cap: id, origin (file name), fetched_at,
     #: account_ref, and the name of the parser that reads it (None when none does).
     kept_statements: Callable[[], list[dict[str, object]]] | None = None
@@ -3575,8 +3578,12 @@ def _starling_row(
     )
 
 
-def account_options(labels: dict[str, str]) -> str:
+def account_options(labels: dict[str, str], *, selected: str = "") -> str:
     """The import destination picker's options, every one self-identifying.
+
+    `selected` pre-selects one account, for a form that has a suggestion to
+    offer. It is only ever a starting point: nothing is submitted until the
+    person presses the button, and an account no option names selects nothing.
 
     Providers reuse display names (Starling labels a main account's uid
     AND its defaultCategory identically), so two different destinations
@@ -3598,8 +3605,9 @@ def account_options(labels: dict[str, str]) -> str:
             # new accounts - but never as an innocent-looking twin of a
             # bound canonical, so the option states the consequence.
             shown += " (unbound - imports here land in a SEPARATE account)"
+        mark = " selected" if selected and ref == selected else ""
         options.append(
-            f'<option value="{html.escape(ref)}">{html.escape(shown)}</option>'
+            f'<option value="{html.escape(ref)}"{mark}>{html.escape(shown)}</option>'
         )
     return "".join(options)
 
@@ -3610,6 +3618,7 @@ def account_picker(
     field: str = "account",
     other_field: str = "account_other",
     other_placeholder: str = "or type a canonical name, e.g. hsbc-old-current",
+    selected: str = "",
 ) -> str:
     """The shared destination picker: a labelled dropdown plus a free-text
     escape hatch, one component wherever an account is chosen.
@@ -3622,7 +3631,7 @@ def account_picker(
     return (
         f'<p><select name="{html.escape(field)}" style="width:100%;padding:.6rem">'
         '<option value="">choose an account...</option>'
-        f"{account_options(labels)}</select></p>"
+        f"{account_options(labels, selected=selected)}</select></p>"
         f'<p><input name="{html.escape(other_field)}" '
         f'placeholder="{html.escape(other_placeholder)}"></p>'
     )
@@ -5078,13 +5087,21 @@ class ConnectionHandler(
         entries = hook()
         labels = self._account_labels()
         can_assign = self.bound_config.assign_kept_statement is not None
+        can_section_assign = self.bound_config.assign_statement_section is not None
         # Recognised is not readable: a parser may claim a statement and then
         # refuse it because its rows do not carry its own balances.
+        # A document of several accounts is never assigned whole; each of its
+        # accounts is, so it is listed on its own with a control per account.
+        sectioned = [
+            item for item in entries
+            if item["account_ref"] == UNASSIGNED_ACCOUNT and item.get("sections")
+        ]
         waiting = [
             item for item in entries
             if item["account_ref"] == UNASSIGNED_ACCOUNT
             and item["parser"]
             and not item.get("refusal")
+            and not item.get("sections")
         ]
         refused = [
             item for item in entries
@@ -5203,13 +5220,102 @@ class ConnectionHandler(
             refused_count = (
                 f"{len(refused)} recognised but refused, " if refused else ""
             )
+            several_count = (
+                f"{len(sectioned)} covering several accounts, " if sectioned else ""
+            )
+
+            def section_card(item: dict[str, object]) -> str:
+                """A document of several accounts: one control for each account.
+
+                Served on a GET, so a label is shown with its digits masked and
+                a section's refusal likewise; no row, figure, or payee appears.
+                """
+                ident = int(str(item["id"]))
+                kept_at = str(item["fetched_at"])[:16].replace("T", " ")
+                raw_sections = item.get("sections")
+                parts = raw_sections if isinstance(raw_sections, list) else []
+                items = []
+                for part in parts:
+                    if not isinstance(part, dict):
+                        continue
+                    key = html.escape(str(part["token"]))
+                    label = html.escape(str(part["label"]))
+                    count = int(str(part["rows"]))
+                    held = str(part.get("account") or "")
+                    refusal = str(part.get("refusal") or "")
+                    suggested = str(part.get("suggested") or "")
+                    noun = "row" if count == 1 else "rows"
+                    if held:
+                        shown = labels.get(held, held)
+                        status = (
+                            f'<span class="ok">assigned to {html.escape(shown)}</span>'
+                        )
+                        form = ""
+                    elif refusal:
+                        status = (
+                            f'<span class="warn">refused: {html.escape(refusal)}</span>'
+                        )
+                        form = ""
+                    else:
+                        status = f"reads {count} {noun} and its balances carry"
+                        hint = (
+                            "<p class=\"muted\">The same account in another "
+                            "statement was given the account chosen below.</p>"
+                            if suggested
+                            else ""
+                        )
+                        form = (
+                            "<details><summary>Give it an account</summary>"
+                            '<form action="/statement-section-assign" method="post">'
+                            f'<input type="hidden" name="artefact" value="{ident}">'
+                            f'<input type="hidden" name="section" value="{key}">'
+                            + hint
+                            + account_picker(labels, selected=suggested)
+                            + '<p><button type="submit">Assign and read in</button></p>'
+                            "</form></details>"
+                            if can_section_assign
+                            else ""
+                        )
+                    items.append(
+                        '<li class="section">'
+                        f'<p class="account-name"><strong>{label}</strong></p>'
+                        f"<p>{status}</p>{form}</li>"
+                    )
+                return (
+                    '<li class="account">'
+                    f'<p class="account-name"><strong>{html.escape(str(item["origin"]))}'
+                    "</strong></p>"
+                    '<dl class="facts">'
+                    f"<dt>Kept</dt><dd>{html.escape(kept_at)}</dd>"
+                    f"<dt>Read by</dt><dd>{html.escape(str(item['parser']))}, which "
+                    f"found {len(items)} accounts in it</dd>"
+                    "</dl>"
+                    f'<ul class="sections">{"".join(items)}</ul>'
+                    '<p class="account-links"><a class="tap" '
+                    f'href="/statement-shape?artefact={ident}">Masked shape</a></p>'
+                    "</li>"
+                )
+
+            several = (
+                f"<h3>Covers several accounts ({len(sectioned)})</h3>"
+                '<p class="muted">Each account in these documents is given its '
+                "own account. The document itself stays kept as it is.</p>"
+                '<ul class="accounts">'
+                + "".join(
+                    section_card(item) for item in sorted(sectioned, key=file_order)
+                )
+                + "</ul>"
+                if sectioned
+                else ""
+            )
             body = (
                 f'<p class="muted">{len(waiting)} waiting only for an account, '
-                f"{refused_count}"
+                f"{refused_count}{several_count}"
                 f"{len(no_parser)} with no parser yet, {len(assigned)} assigned.</p>"
                 + group(
                     "Waiting only for an account", waiting, assignable=True, lead=bulk
                 )
+                + several
                 + group(
                     "Recognised, but the reading is refused", refused, assignable=False
                 )
@@ -5394,6 +5500,83 @@ class ConnectionHandler(
                 f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
                 '<p><a class="button" href="/statement-shape">Read another</a>'
                 "</p>" + HOME_LINK,
+            ),
+        )
+
+    def _statement_section_assign(self) -> None:
+        """Give one account of an "all accounts" statement its account.
+
+        The same controls as a whole statement - an existing account, or a
+        typed new name that must be confirmed - because the decision is the
+        same one. What differs is only what it applies to.
+        """
+        hook = self.bound_config.assign_statement_section
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8", "replace")
+        fields = {
+            key: values[0]
+            for key, values in parse_qs(raw, keep_blank_values=True).items()
+        }
+        artefact = fields.get("artefact", "").strip()
+        section = fields.get("section", "").strip()
+        typed = (fields.get("account_other") or "").strip()
+        picked = (fields.get("account") or "").strip()
+        if not artefact.isdigit() or not section or not (typed or picked):
+            self._respond(
+                400,
+                error_page(
+                    "Not assigned",
+                    "<p>A kept statement, one of its accounts, and an account to "
+                    "give it are all needed.</p>" + HOME_LINK,
+                ),
+            )
+            return
+        if not self._is_kept(int(artefact)):
+            self._respond(
+                400,
+                error_page(
+                    "Not assigned",
+                    f"<p>No kept statement {html.escape(artefact)}. Nothing was "
+                    "assigned.</p>" + HOME_LINK,
+                ),
+            )
+            return
+        account = self.chosen_account(
+            typed=typed,
+            picked=picked,
+            confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
+            action="/statement-section-assign",
+            carry=lambda: {"artefact": artefact, "section": section},
+            proceed_label="Declare it and read the account in",
+        )
+        if account is None:
+            return
+        try:
+            outcome = hook(int(artefact), section, account)
+        except Exception as exc:
+            self._respond(
+                200,
+                render_page(
+                    "Not read in",
+                    '<h2>Not read in</h2><p class="alarm">'
+                    + html.escape(str(exc))
+                    + "</p><p>The statement is still kept and this account of it "
+                    "is still waiting, so nothing needs uploading again.</p>"
+                    '<p><a class="button" href="/statements">Back to kept '
+                    "statements</a></p>" + HOME_LINK,
+                ),
+            )
+            return
+        self._respond(
+            200,
+            render_page(
+                "Read in",
+                f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
+                '<p><a class="button" href="/statements">Back to kept '
+                "statements</a></p>" + HOME_LINK,
             ),
         )
 
@@ -5948,6 +6131,9 @@ class ConnectionHandler(
             return
         if route == "/statements-assign":
             self._statements_assign()
+            return
+        if route == "/statement-section-assign":
+            self._statement_section_assign()
             return
 
         if route == "/save-account":
