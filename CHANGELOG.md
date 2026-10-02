@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.255] - 2026-10-02
+
+### Added
+- **Capital One card statements are read.** Two kept statements named the
+  issuer and had no parser. Written from their masked layouts and never run on
+  a real one: a statement is refused unless its rows reach the new balance and
+  each column's printed total, so a wrong inference shows as a refusal on the
+  Kept statements page rather than as wrong rows.
+
 ## [0.4.254] - 2026-10-02
 
 ### Fixed

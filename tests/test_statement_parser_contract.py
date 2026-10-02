@@ -27,12 +27,14 @@ import pytest
 from obdi.parsers.base import ParseError
 from obdi.parsers.pdf_statements import (
     PDF_PARSERS,
+    CapitalOneCreditCardPdfParser,
     CreditUnionStatementPdfParser,
     SantanderCreditCardPdfParser,
     StarlingStatementPdfParser,
     UkCardStatementPdfParser,
     VirginMoneyCreditCardPdfParser,
 )
+from test_capital_one_statement import CONTRACT as CAPITAL_ONE
 from test_credit_union_statement import build_columned_pdf
 from test_starling_statement import CONTRACT as STARLING
 from test_starling_statement import build_starling_pdf
@@ -124,6 +126,9 @@ CASES = {
         "Direct Payment",
         "Direct Payment",
         build=build_card_statement_pdf,
+    ),
+    CapitalOneCreditCardPdfParser: Case(
+        CAPITAL_ONE, "EXAMPLE SHOP", "Direct Payment", "Direct Payment",
     ),
 }
 

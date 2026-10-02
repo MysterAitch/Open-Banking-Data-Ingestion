@@ -24,6 +24,7 @@ from ..models import SourceTier, Transaction
 from ..namespaces import UK_CARD_STATEMENT_SOURCE
 from ..statement_columns import Row
 from .base import ParseError, StatementParser
+from .capital_one_pdf import read_statement as read_capital_one
 from .card_statement_pdf import read_statement as read_card_statement
 from .credit_union_pdf import read_statement as read_credit_union
 from .santander_pdf import read_statement as read_santander
@@ -328,6 +329,29 @@ class UkCardStatementPdfParser(PdfStatementParser):
     reader = staticmethod(read_card_statement)
 
 
+class CapitalOneCreditCardPdfParser(PdfStatementParser):
+    """A Capital One card statement, whose figures carry their sign by column.
+
+    The issuer's name is on every page and so is a hint at most - a payee is
+    free text, and a payment to the card names it on another bank's statement.
+    The summary heading, the table's own headings, and the closing lines are
+    what say the layout is the one the reader was written from.
+    """
+
+    source = "capital-one-cc-pdf"
+    marker = "Capital One"
+    requires = (
+        "Your account summary",
+        "Your transaction details",
+        "Paid in",
+        "Paid out",
+        "STATEMENT TOTALS",
+        "CLOSING BALANCE",
+        "Statement date",
+    )
+    reader = staticmethod(read_capital_one)
+
+
 def _comparable(reading: StatementReading) -> tuple[object, ...]:
     """The part of a reading two parsers must agree on to be interchangeable.
 
@@ -402,4 +426,5 @@ PDF_PARSERS: tuple[type[PdfStatementParser], ...] = (
     CreditUnionStatementPdfParser,
     StarlingStatementPdfParser,
     UkCardStatementPdfParser,
+    CapitalOneCreditCardPdfParser,
 )

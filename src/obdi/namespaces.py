@@ -56,6 +56,7 @@ FILE_SOURCES = frozenset(
         # parser that read a row is the fact worth recording.
         "santander-cc-pdf",
         "virgin-money-cc-pdf",
+        "capital-one-cc-pdf",
         "credit-union-pdf",
         "starling-statement-pdf",
         UK_CARD_STATEMENT_SOURCE,
