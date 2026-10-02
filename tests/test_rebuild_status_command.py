@@ -16,12 +16,18 @@ EXIT CODES, which are the interface:
     0  the last rebuild succeeded, or none has run yet
     1  the last rebuild FAILED
     2  a rebuild is in flight, so the answer is not yet known
+    3  the store could not be opened, so the answer cannot be read at all
 
 Two and one are distinguished because they call for different things - retry
-versus stop - even where a caller currently retries on both.
+versus stop - even where a caller currently retries on both. Three is kept
+apart from one because it is not a verdict on the rebuild: on 2026-10-02 the
+data volume filled, the command died with a traceback on stderr, and the
+converge reported a failed rebuild with an empty reason.
 """
 
 from __future__ import annotations
+
+import sqlite3
 
 import pytest
 
@@ -119,6 +125,53 @@ class TestTheExitCode:
             "missing secrets made the rebuild gate fail - which is the exact "
             "false positive that blocked production deploys"
         )
+
+
+class TestAStoreThatCannotBeOpened:
+    """The gate prints stdout as its reason, so the reason has to be there."""
+
+    def test_WhenTheDiskRefusesTheStore_SaysSoInOneSentenceAndExitsThree(
+        self, store_path, capsys, monkeypatch
+    ):
+        from obdi import cli
+
+        _record(store_path, SUCCEEDED)
+
+        def full_disk(_path):
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(cli, "Store", full_disk)
+
+        assert cli.main(["--db", str(store_path), "rebuild-status"]) == 3
+        said = capsys.readouterr().out
+        assert "could not be opened" in said
+        assert "disk I/O error" in said
+        assert "Traceback" not in said
+
+    def test_WhenTheStorePathIsNotAFile_ExitsThree_NotAsAFailedRebuild(
+        self, store_path, capsys
+    ):
+        from obdi.cli import main
+
+        store_path.mkdir()
+
+        assert main(["--db", str(store_path), "rebuild-status"]) == 3
+        assert "could not be opened" in capsys.readouterr().out
+
+    def test_WhenARebuildIsInFlight_TheStoreIsNotOpenedAtAll(
+        self, store_path, capsys, monkeypatch
+    ):
+        """In flight is still the answer that waiting can change, whatever the
+        store would have said."""
+        from obdi import cli
+
+        def never(_path):
+            raise AssertionError("the store was opened while a rebuild was in flight")
+
+        monkeypatch.setattr(cli, "rebuild_in_progress_note", lambda _p: "replaying")
+        monkeypatch.setattr(cli, "Store", never)
+
+        assert cli.main(["--db", str(store_path), "rebuild-status"]) == 2
 
 
 if __name__ == "__main__":

@@ -40,6 +40,12 @@ transcription would add no reasoning that the subjects do not already carry.
 - **Schema version 11**, for the table that holds those choices. A new table
   only; nothing existing is altered.
 
+### Fixed
+- **The rebuild check a deploy gates on names a store it cannot open.** The
+  data volume filled, the check died with a traceback where its reason should
+  have been, and the deploy reported a failed rebuild with nothing beside it.
+  It now prints one sentence and exits 3, apart from a failed rebuild's 1.
+
 ## [0.4.257] - 2026-10-02
 
 ### Changed

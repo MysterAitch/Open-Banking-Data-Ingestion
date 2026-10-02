@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -4015,7 +4016,8 @@ def main(argv: list[str] | None = None) -> int:
     subcommands.add_parser(
         "rebuild-status",
         help="did the last rebuild work? Exit 0 succeeded or none yet, 1 "
-        "failed, 2 still running - for a deploy to gate on",
+        "failed, 2 still running, 3 the store could not be opened - for a "
+        "deploy to gate on",
     )
 
     categorise_command = subcommands.add_parser(
@@ -4540,8 +4542,20 @@ def main(argv: list[str] | None = None) -> int:
                 "is the run BEFORE this one"
             )
             return 2
-        with Store(db_path) as store:
-            rebuilt = rebuild_check(store.recent_rebuild_runs(limit=1))
+        try:
+            with Store(db_path) as store:
+                rebuilt = rebuild_check(store.recent_rebuild_runs(limit=1))
+        except (sqlite3.Error, OSError) as exc:
+            # Said on stdout in one sentence, with its own exit code, because
+            # the gate prints stdout as its reason. When the data volume
+            # filled, this died with a traceback on stderr, and the converge
+            # refused to finish with an empty reason beside a rebuild that had
+            # not failed. Not exit 1: this is no verdict on the rebuild.
+            print(
+                f"last rebuild: cannot be read - the store could not be opened ({exc}). "
+                "Check the data volume has free space and is writable"
+            )
+            return 3
         print(f"last rebuild: {rebuilt.detail}")
         return 0 if rebuilt.ok else 1
 
