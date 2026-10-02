@@ -60,7 +60,20 @@ _STATEMENT_DATE = re.compile(
 _OPENING = re.compile(
     r"Balance brought forward from previous statement\s+([\d,]+\.\d{2})"
 )
+#: The summary's restatement of the opening position. The first statement an
+#: account ever receives opens its table with "Opening balance" and NO figure,
+#: so this is the only place that statement says where it started.
+_PREVIOUS_BALANCE = re.compile(
+    r"Previous balance as at\s+\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4}:"
+    r"\s*£?\s*([\d,]+\.\d{2})"
+)
 _CLOSING = re.compile(r"Your new balance:\s*£?\s*([\d,]+\.\d{2})")
+#: An UNDATED line headed "Total" that carries a credit marker, printed among
+#: the dated rows (measured on every statement after the first, directly
+#: below the monthly fee). It moves the balance, and reading only dated lines
+#: left each statement short by that one small credit. Only a stated credit
+#: is read: a total with no marker could be a subtotal of the rows above it.
+_TOTAL_CREDIT = re.compile(r"^(Total\s+.+?)\s+CR\s+([\d,]+\.\d{2})$")
 _CREDIT_LIMIT = re.compile(r"Account credit limit:\s*£?\s*([\d,]+\.\d{2})")
 _RATE = re.compile(r"^x?\s*(Purchases|Cash transactions)\s+([\d.]+)%")
 #: `Balance <amount> Interest <rate>% to <DD-MM-YYYY>` - a dated rate
@@ -105,11 +118,17 @@ def read_statement(lines: list[str]) -> StatementReading:
             "their own, so none can be dated"
         )
 
+    stated_previous: int | None = None
     for raw in lines:
         line = raw.strip()
         if not line:
             continue
 
+        previous = _PREVIOUS_BALANCE.search(line)
+        if previous:
+            if stated_previous is None:
+                stated_previous = -_minor(previous.group(1))
+            continue
         opening = _OPENING.search(line)
         if opening:
             # THE FIRST ONE WINS, because a multi-page statement repeats this
@@ -155,6 +174,18 @@ def read_statement(lines: list[str]) -> StatementReading:
         if any(line.startswith(prefix) for prefix in _NOT_A_TRANSACTION):
             continue
 
+        credit = _TOTAL_CREDIT.match(line)
+        if credit:
+            if reading.statement_date is not None:
+                reading.transactions.append(
+                    StatementRow(
+                        value_date=reading.statement_date,
+                        description=credit.group(1).strip(),
+                        amount_minor=_minor(credit.group(2)),
+                    )
+                )
+            continue
+
         row = _TRANSACTION.match(line)
         if row:
             month = _MONTHS.get(row.group(2)[:3].lower())
@@ -189,4 +220,9 @@ def read_statement(lines: list[str]) -> StatementReading:
                         amount_minor=-_minor(charged.group(1)),
                     )
                 )
+
+    # The table's own figure wins where both exist; the summary's is read only
+    # where the table states none, so a first statement is never assumed nil.
+    if reading.opening_balance_minor is None:
+        reading.opening_balance_minor = stated_previous
     return reading

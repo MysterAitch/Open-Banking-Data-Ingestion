@@ -231,3 +231,218 @@ class TestTheLayoutExtractedForm:
         assert not any(
             "Total" in row.description for row in laid_out.transactions
         )
+
+
+#: A month's statement as the real layout prints it: a dated fee, then an
+#: UNDATED line headed "Total" that carries a credit marker and an amount,
+#: then the dated rows. Invented figures.
+#:
+#: Owed at the start 1,000.00. Moving it: fee +3.00, the credit line -1.25,
+#: payment -100.00, spends +45.50 and +12.00, interest +4.20.
+#: 1,000.00 + 3.00 - 1.25 - 100.00 + 45.50 + 12.00 + 4.20 = 963.45 owed,
+#: so the house-convention walk is -100,000 + 3,655 = -96,345.
+WITH_A_CREDIT_LINE = [
+    "     Account summary as at: 13th November 2025 for card number ending 1234",
+    "     Previous balance as at 13th October 2025:                      £1,000.00",
+    "     Your new balance:                                                £963.45",
+    "                                          Statement Date: 13th November 2025   Page No: 1 / 2",
+    " Date          Description                                           Amount (£)",
+    "                   Balance brought forward from previous statement     1,000.00",
+    " 14th Oct    Monthly Credit Card Fee                                        3.00",
+    "                   Total Cashback rewards credited this month   CR          1.25",
+    " 15th Oct    Direct Payment                                CR           100.00",
+    " 16th Oct    Example Shop Londonderry GB                                   45.50",
+    " 2nd Nov     Another Shop Birmingham GB                                    12.00",
+    "                   Purchase Interest                                        4.20",
+    "                   Balance 99.99 Interest  0.000% to 11-03-2027",
+]
+
+
+class TestAnUndatedCreditLineInTheTable:
+    def test_ACreditLineHeadedTotal_IsARowThatCarriesMoneyIn(self):
+        reading = read_statement(WITH_A_CREDIT_LINE)
+
+        credit = next(
+            row for row in reading.transactions if row.description.startswith("Total")
+        )
+        assert credit.amount_minor == 125
+
+    def test_AStatementOutBySmallCredit_NowBalances(self):
+        reading = read_statement(WITH_A_CREDIT_LINE)
+
+        assert reading.opening_balance_minor == -100000
+        assert reading.closing_balance_minor == -96345
+        assert len(reading.transactions) == 6
+        assert reading.discrepancy_minor == 0
+        assert reading.reconciles
+
+    def test_TheSameStatementWithoutTheCreditLine_IsStillRefusedByTheGate(self):
+        without = [line for line in WITH_A_CREDIT_LINE if "Cashback" not in line]
+
+        reading = read_statement(without)
+
+        assert not reading.reconciles
+        assert reading.discrepancy_minor == 125
+
+    def test_ATotalPaymentsLineWithAMarker_IsStillNotARow(self):
+        lines = [
+            *WITH_A_CREDIT_LINE,
+            "                   Total Payments received during period   CR   100.00",
+        ]
+
+        assert read_statement(lines).reconciles
+
+    def test_ATotalOfLineWithAMarker_IsStillNotARow(self):
+        lines = [
+            *WITH_A_CREDIT_LINE,
+            "                   Total of New Transactions   CR   45.50",
+        ]
+
+        assert read_statement(lines).reconciles
+
+    def test_ATotalLineWithNoCreditMarker_IsNotGuessedAsARow(self):
+        # Only a stated credit is read. A total with no marker could be a
+        # subtotal of the rows above it, and counting it would double them.
+        lines = [*WITH_A_CREDIT_LINE, "                   Total Cashback rewards to date   7.77"]
+
+        reading = read_statement(lines)
+
+        assert len(reading.transactions) == 6
+        assert reading.reconciles
+
+    def test_TheCreditLine_IsDatedByTheStatementWhichIssuedIt(self):
+        reading = read_statement(WITH_A_CREDIT_LINE)
+
+        credit = next(
+            row for row in reading.transactions if row.description.startswith("Total")
+        )
+        assert credit.value_date == date(2025, 11, 13)
+
+
+#: The first statement ever issued. Its table opens with the words "Opening
+#: balance" and NO figure, so the figure that states where the account
+#: started is the summary's "Previous balance as at". Invented figures.
+#:
+#: Owed at the start 0.00. Fee 3.00, spend 20.00, balance transfer 500.00 and
+#: its fee 15.00, balance transfer interest 2.50, purchase interest 0.30:
+#: 3.00 + 20.00 + 500.00 + 15.00 + 2.50 + 0.30 = 540.80 owed, so the walk is
+#: 0 - 54,080 = -54,080.
+FIRST_STATEMENT = [
+    "     Account summary as at: 11th October 2025 for card number ending 1234",
+    "     Previous balance as at 11th September 2025:                      £0.00",
+    "     Payments received:                                               £0.00",
+    "     Your new balance:                                              £540.80",
+    "                                          Statement Date: 11th October 2025   Page No: 1 / 2",
+    " Date          Description                                           Amount (£)",
+    "                   Opening balance",
+    " 12th Sep    Monthly Credit Card Fee                                        3.00",
+    " 13th Sep    Example Shop Londonderry GB                                   20.00",
+    " 14th Sep    Balance Transfer                                             500.00",
+    " 14th Sep    Balance Transfer Fee                                          15.00",
+    "                   Balance Transfer Interest                                2.50",
+    "                   Balance 500.00 Interest  0.000% to 14-03-2026",
+    "                   Purchase Interest                                        0.30",
+    "                   Balance 20.00 Interest  0.000% to 14-03-2026",
+]
+
+
+class TestTheFirstStatementWithNoBalanceBroughtForward:
+    def test_TheOpeningBalance_IsTheSummarysStatedPreviousBalance(self):
+        reading = read_statement(FIRST_STATEMENT)
+
+        assert reading.opening_balance_minor == 0
+
+    def test_TheFirstStatement_Balances(self):
+        reading = read_statement(FIRST_STATEMENT)
+
+        assert reading.closing_balance_minor == -54080
+        assert len(reading.transactions) == 6
+        assert reading.discrepancy_minor == 0
+        assert reading.reconciles
+
+    def test_ANonNilStatedPreviousBalance_IsReadAsStated_NotAsNil(self):
+        # The document states 25.00 owed, so the walk starts there; the
+        # reader does not assume a first statement starts at nothing.
+        lines = [
+            line.replace("£0.00", "£25.00", 1)
+            if "Previous balance" in line
+            else line.replace("£540.80", "£565.80")
+            for line in FIRST_STATEMENT
+        ]
+
+        reading = read_statement(lines)
+
+        assert reading.opening_balance_minor == -2500
+        assert reading.reconciles
+
+    def test_AStatedPreviousBalanceThatDisagreesWithTheRows_IsRefusedNotAbsorbed(self):
+        lines = [
+            line.replace("£0.00", "£25.00", 1) if "Previous balance" in line else line
+            for line in FIRST_STATEMENT
+        ]
+
+        reading = read_statement(lines)
+
+        assert not reading.reconciles
+        assert reading.discrepancy_minor == 2500
+
+    def test_ABalanceBroughtForwardFigure_WinsOverTheSummary(self):
+        # Both printed, as on every later statement: the table's own opening
+        # line is the one the rows were walked from.
+        lines = [
+            *FIRST_STATEMENT[:6],
+            "                   Balance brought forward from previous statement   0.00",
+            *FIRST_STATEMENT[7:],
+        ]
+        lines[1] = lines[1].replace("£0.00", "£9.00")
+
+        reading = read_statement(lines)
+
+        assert reading.opening_balance_minor == 0
+        assert reading.reconciles
+
+    def test_NeitherAnOpeningFigureNorAPreviousBalance_LeavesTheOpeningUnknown(self):
+        lines = [line for line in FIRST_STATEMENT if "Previous balance" not in line]
+
+        reading = read_statement(lines)
+
+        assert reading.opening_balance_minor is None
+        assert not reading.reconciles
+
+
+class TestTheseStatementsThroughTheParserGate:
+    def _parser(self):
+        from obdi.parsers.pdf_statements import SantanderCreditCardPdfParser
+
+        return SantanderCreditCardPdfParser()
+
+    def test_AStatementWithACreditLine_IsImported(self):
+        from test_statement_shape import build_pdf
+
+        payload = build_pdf(["Santander UK plc.", *WITH_A_CREDIT_LINE])
+
+        rows = list(self._parser().parse(payload, account_id="santander-cc"))
+
+        assert len(rows) == 6
+        assert sum(row.amount_minor for row in rows) == 3655
+
+    def test_TheFirstStatement_IsImported(self):
+        from test_statement_shape import build_pdf
+
+        payload = build_pdf(["Santander UK plc.", *FIRST_STATEMENT])
+
+        rows = list(self._parser().parse(payload, account_id="santander-cc"))
+
+        assert sum(row.amount_minor for row in rows) == -54080
+
+    def test_AFirstStatementWithNoStatedOpening_IsRefusedAndSaysWhy(self):
+        import pytest
+
+        from obdi.parsers.base import ParseError
+        from test_statement_shape import build_pdf
+
+        lines = [line for line in FIRST_STATEMENT if "Previous balance" not in line]
+        payload = build_pdf(["Santander UK plc.", *lines])
+
+        with pytest.raises(ParseError, match="could not both be found"):
+            list(self._parser().parse(payload, account_id="santander-cc"))

@@ -26,6 +26,17 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.253] - 2026-10-02
+
+### Fixed
+- **Santander card statements read an undated credit line printed under the
+  monthly fee.** All nine real statements with that line were refused, each out
+  by a small figure, because the line has no date and was never read. Written
+  from the masked layout: whether the nine now balance is what the Kept
+  statements page will say.
+- **A Santander first statement opens from the previous balance its summary
+  states**, where its table prints "Opening balance" with no figure.
+
 ## [0.4.252] - 2026-10-02
 
 ### Changed
