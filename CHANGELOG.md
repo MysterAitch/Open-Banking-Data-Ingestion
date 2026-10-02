@@ -34,6 +34,19 @@ transcription would add no reasoning that the subjects do not already carry.
   wrapped to three rows before the page began.
 - **The Overview and Position pages use a wide screen.** Their cards sit
   abreast on a desktop; prose, forms, and the chart keep a readable width.
+- **An audited account leads with "agrees" or "differs" and lists only what is
+  not zero**, each with what it means and what answers it. Previously every
+  account printed seven counts with no word on which were faults.
+- **An account that expects nothing but holds imported rows says so**, and
+  says that "Remove orphaned imports" will not clear them.
+- **The roster says "bound", not "syncing".** The old word read as live while
+  nothing had been applied for seven weeks.
+- **Entries that share a label show a reference beside each.**
+
+### Known limits
+- No action is offered yet for a payment that differs in Actual, for an
+  imported id held by two rows there, or for imported rows in an account that
+  now expects nothing. The page says so in each case.
 
 ## [0.4.242] - 2026-10-02
 

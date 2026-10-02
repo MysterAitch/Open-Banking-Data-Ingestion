@@ -475,8 +475,8 @@ class TestActualLeadsWithTheTwoLineSummaryAndPrintsNoAmount:
     def test_EachAuditsPerAccountDetail_IsBehindADisclosure(self, serve):
         page = fetch(serve(push_actual=lambda: "q", actual_status=results), "/actual")
 
-        assert inside_details(page, "Alpha Current: expected 10")
-        assert inside_details(page, "Beta Savings: expected 10")
+        assert inside_details(page, "Alpha Current: agrees")
+        assert inside_details(page, "Beta Savings: differs")
         assert not inside_details(page, "audit: differences</span>")
 
     def test_Page_PrintsNoAmountNorTheFiguresBehindABalanceVerdict(self, serve):

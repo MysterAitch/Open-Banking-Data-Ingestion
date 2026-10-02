@@ -1723,24 +1723,48 @@ def _suggest_slug(label: str, ref: str) -> str:
     return base[:64].rstrip("-")
 
 
-def _roster_row(entry: dict[str, object]) -> str:
+def _shared_labels(labels: list[str]) -> set[str]:
+    """The labels that appear more than once in one list.
+
+    Two accounts labelled alike are indistinguishable by label alone, so
+    only those get their reference shown beside them; unique labels stay
+    free of the noise."""
+    seen: set[str] = set()
+    shared: set[str] = set()
+    for label in labels:
+        if label in seen:
+            shared.add(label)
+        seen.add(label)
+    return shared
+
+
+def _reference_tag(ref: str) -> str:
+    return f' <small><code>{html.escape(ref)}</code></small>'
+
+
+def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
     label = html.escape(str(entry.get("label", "")))
     ref = str(entry.get("ref", ""))
+    if show_ref:
+        label += _reference_tag(ref)
     state = str(entry.get("state", ""))
     raw_count = entry.get("count", 0)
     count = raw_count if isinstance(raw_count, int) else 0
     held = f"{count:,} transaction(s)" if count else "no transactions yet"
     form = ""
+    # "syncing" is the hook's name for bound; what the page may claim is
+    # only that the account is bound, because a bound account that has
+    # never been pushed (nothing applied for seven weeks) read as live.
     if state == "syncing":
-        badge = '<span class="pill pill-ok">syncing</span>'
-        note = held
+        badge = '<span class="pill pill-ok">bound</span>'
+        note = held + " - included in each push"
     elif state == "provision":
         badge = '<span class="pill pill-quiet">creates on next push</span>'
         note = held + (
             "" if count else " - created empty in Actual, fills as data arrives"
         )
     else:
-        badge = '<span class="pill pill-bad">not synced - needs a name</span>'
+        badge = '<span class="pill pill-bad">not bound - needs a name</span>'
         note = f"{held} - name it and the next push takes it"
         suggestion = _suggest_slug(str(entry.get("label", "")), ref)
         form = (
@@ -2700,6 +2724,92 @@ def _audit_sample_lines(account: dict[str, object]) -> list[str]:
     return lines
 
 
+def _audit_difference_sentences(
+    account: dict[str, object], differences: dict[str, object]
+) -> list[str]:
+    """One sentence per difference: what it means as applier/audit.mjs
+    defines it, and what, if anything, answers it. HTML-safe on return.
+
+    Where the applier's code does not settle the right action the sentence
+    says so rather than advising: a diverged payment is not corrected by a
+    push (only opening-balance rows are, in applyOpeningBalances), and
+    nothing removes a duplicate. A category not named here is reported
+    with its count and said to be unknown, so it still reads as a difference.
+    """
+    sentences: list[str] = []
+    expected = _count_of(account.get("expected"))
+    for key in _AUDIT_NAMED_DIFFERENCES:
+        if key not in differences:
+            continue
+        n = _count_of(differences[key])
+        if key == "missing":
+            one = n == 1
+            sentences.append(
+                f"{n} expected {'row is' if one else 'rows are'} not in Actual "
+                f"- the next push adds {'it' if one else 'them'}"
+            )
+        elif key == "orphaned" and expected == 0:
+            sentences.append(
+                f"{n} {'row' if n == 1 else 'rows'} in Actual carry an imported "
+                "id, but nothing is sent for this account now - "
+                f"{'it comes' if n == 1 else 'they come'} from an earlier "
+                "binding or mapping. Remove orphaned imports will not clear "
+                f"{'it' if n == 1 else 'them'}: it skips an account that "
+                "expects nothing"
+            )
+        elif key == "orphaned":
+            sentences.append(
+                f"{n} {'row' if n == 1 else 'rows'} in Actual carry an imported "
+                "id this account does not expect, usually left by an earlier "
+                "binding or mapping. Remove orphaned imports deletes those "
+                "that are obdi's own, except legs of linked transfers; a row "
+                "with another importer's id is left alone"
+            )
+        elif key == "diverged":
+            sentences.append(
+                f"{n} {'row' if n == 1 else 'rows'} in Actual "
+                f"{'differs' if n == 1 else 'differ'} in date "
+                "or value from what obdi expects. A push corrects only "
+                "opening-balance rows, so no action is offered for the rest "
+                "yet"
+            )
+        elif key == "duplicated":
+            sentences.append(
+                f"{n} imported {'id appears' if n == 1 else 'ids appear'} on "
+                "more than one row in Actual, which inflates the balance. "
+                "No action is offered for this yet"
+            )
+    if "balance" in differences:
+        sentences.append(
+            "the balance in Actual is not the sum of the rows obdi expects"
+            + (
+                "; rows entered by hand count in Actual's balance and can "
+                "explain this"
+                if _count_of(account.get("human"))
+                else ""
+            )
+        )
+    if "unlinked_transfers" in differences:
+        n = _count_of(differences["unlinked_transfers"])
+        sentences.append(
+            f"{n} transfer {'pair' if n == 1 else 'pairs'} not linked - the "
+            "next push links what it can; a pair with a leg missing from "
+            "Actual is refused and says why in the push result"
+        )
+    sentences = [html.escape(s, quote=False) for s in sentences]
+    for key in sorted(differences):
+        if (
+            key in _AUDIT_NAMED_DIFFERENCES
+            or key in _AUDIT_WORDED_DIFFERENCES
+        ):
+            continue
+        sentences.append(
+            f"{html.escape(key)} {html.escape(str(differences[key]))} - not a "
+            "category this page knows, so read it as a difference to look at"
+        )
+    return sentences
+
+
 def _audit_result_row(result: dict[str, object]) -> str:
     """One audit outcome: a verdict pill, then a line per account, then
     the sampled rows behind each account's counts.
@@ -2726,9 +2836,19 @@ def _audit_result_row(result: dict[str, object]) -> str:
         )
         else '<span class="pill pill-ok">audit clean</span>'
     )
+    shared = _shared_labels(
+        [str(a.get("name") or a.get("account_id", "")) for a in accounts]
+    )
     lines = []
     for account in accounts:
-        name = html.escape(str(account.get("name") or account.get("account_id", "")))
+        raw_name = str(account.get("name") or account.get("account_id", ""))
+        # The audit knows an account by Actual's own id, not by its canonical
+        # reference, so that id is the only reference there is to show.
+        name = html.escape(raw_name) + (
+            _reference_tag(str(account.get("account_id", "")))
+            if raw_name in shared
+            else ""
+        )
         pairs = _account_pairs(result, account.get("account_id"))
         differences = _audit_differences(account, pairs)
         if account.get("missing_account"):
@@ -2744,26 +2864,8 @@ def _audit_result_row(result: dict[str, object]) -> str:
                 "row(s)) - delete it there, or bind something to it</span>"
             )
             continue
-        detail = (
-            f"expected {account.get('expected', 0)}, "
-            f"present {account.get('present', 0)}, "
-            f"missing {account.get('missing', 0)}, "
-            f"orphaned {account.get('orphaned', 0)}, "
-            f"yours {account.get('human', 0)}, "
-            f"diverged {account.get('diverged', 0)}, "
-            f"duplicated {account.get('duplicated', 0)}"
-        )
-        unnamed = [
-            key
-            for key in sorted(differences)
-            if key not in _AUDIT_NAMED_DIFFERENCES
-            and key not in _AUDIT_WORDED_DIFFERENCES
-        ]
-        if unnamed:
-            detail += ", " + ", ".join(
-                f"{html.escape(key)} {html.escape(str(differences[key]))}"
-                for key in unnamed
-            )
+        compared = _count_of(account.get("expected"))
+        detail = f"{'differs' if differences else 'agrees'} - {compared} rows compared"
         balance = account.get("balance")
         if isinstance(balance, dict):
             # Words only: the figures behind the verdict are not shown on
@@ -2775,8 +2877,24 @@ def _audit_result_row(result: dict[str, object]) -> str:
             )
         if pairs is not None:
             detail += f", transfers linked {pairs[0]} of {pairs[1]} pair(s)"
-        css = "warn" if differences else "muted"
-        lines.append(f'<span class="{css}">{name}: {detail}</span>')
+        yours = _count_of(account.get("human"))
+        yours_note = (
+            f"{yours} entered by hand in Actual are never compared or touched"
+            if yours
+            else ""
+        )
+        if not differences:
+            if yours_note:
+                detail += f"; {yours_note}"
+            lines.append(f'<span class="muted">{name}: {detail}</span>')
+            continue
+        lines.append(f'<span class="warn">{name}: {detail}</span>')
+        lines.extend(
+            f'<span class="muted">- {sentence}</span>'
+            for sentence in _audit_difference_sentences(account, differences)
+        )
+        if yours_note:
+            lines.append(f'<span class="muted">- {yours_note}</span>')
         lines.extend(_audit_sample_lines(account))
     totals = result.get("transfers")
     if isinstance(totals, dict):
@@ -3046,15 +3164,19 @@ def _roster_block(roster: list[dict[str, object]]) -> str:
     that unblocks it and a folded form is one nobody finds.
     """
     needs_name = [e for e in roster if e.get("state") not in {"syncing", "provision"}]
-    syncing = sum(1 for e in roster if e.get("state") == "syncing")
+    bound = sum(1 for e in roster if e.get("state") == "syncing")
     provision = sum(1 for e in roster if e.get("state") == "provision")
-    tally = f"{syncing} syncing, {provision} created on the next push"
+    tally = f"{bound} bound, {provision} created on the next push"
     if needs_name:
-        tally += f", {len(needs_name)} not synced - need a name"
+        tally += f", {len(needs_name)} not bound - need a name"
+    shared = _shared_labels([str(e.get("label", "")) for e in roster])
     return (
         f"<details{' open' if needs_name else ''}>"
         f"<summary>Accounts and what a push does to them ({tally})</summary>"
-        + "".join(_roster_row(entry) for entry in roster)
+        + "".join(
+            _roster_row(entry, str(entry.get("label", "")) in shared)
+            for entry in roster
+        )
         + "</details>"
     )
 

@@ -1567,7 +1567,8 @@ class TestActualRoster:
             ],
         )
 
-        assert "syncing" in rendered
+        assert "bound" in rendered
+        assert "syncing" not in rendered
         assert "947" in rendered
         assert "creates on next push" in rendered
         assert "no transactions yet" in rendered
@@ -1664,9 +1665,9 @@ class TestActualRoster:
         assert "953" in rendered_with_stray
 
         assert "audit: differences" in rendered
-        assert "yours 2" in rendered
+        assert "2 entered by hand in Actual are never compared or touched" in rendered
         assert "exists in Actual but no" in rendered_with_stray
-        assert "orphaned 3" in rendered
+        assert "3 rows in Actual carry an imported id this account does not expect" in rendered
         assert 'class="warn">halifax-instant-saver' in rendered
         assert 'class="muted">halifax-current-account' in rendered
 
