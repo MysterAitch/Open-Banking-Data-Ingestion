@@ -9,7 +9,12 @@
 #      creation reads the PREVIOUS run's conclusion. Every wait here is
 #      pinned to the commit SHA.
 #   2. A green main build publishes nothing deployable - :latest moves
-#      only on a v* tag build. Both builds are awaited, separately.
+#      only on a v* tag build. The tag build is the one awaited.
+#      Both used to be awaited in turn, and each runs the whole suite
+#      before its 35-second image build: measured on 2026-10-02, a
+#      release took 22 minutes, of which 6.9 was waiting for a main
+#      build whose verdict the tag build repeats. main and the tag are
+#      now pushed together and run side by side.
 #   3. Gate output piped through tail can swallow the failure line while
 #      showing a truthful-looking tail. Gates here are judged by EXIT
 #      CODE, never by reading their output.
@@ -66,9 +71,15 @@ PY=./.venv/Scripts/python.exe
 [ -x "$PY" ] || PY=python
 run_gate "$PY" -m ruff check .
 run_gate "$PY" -m mypy
-run_gate "$PY" -m pytest -q
+# In parallel: 2,708 tests took 8.5 minutes in one process and 2 minutes 7
+# seconds across six (2026-10-02). OBDI_TEST_WORKERS=0 runs them in one
+# process again, for a failure that only appears in parallel.
+run_gate "$PY" -m pytest -q -n "${OBDI_TEST_WORKERS:-6}"
+# The applier's tests gate the image in CI; run here they fail in seconds
+# and before anything is pushed.
+run_gate bash -c 'cd applier && node --test'
 
-# --- push and await THIS COMMIT's main build -------------------------------
+# --- push main and the tag together ----------------------------------------
 git push origin main
 
 await_run() { # $1 = branch/ref name shown by gh
@@ -94,9 +105,10 @@ await_run() { # $1 = branch/ref name shown by gh
   fail "$ref build for ${SHA:0:9} did not complete within $((POLL_LIMIT * POLL_SECONDS))s"
 }
 
-await_run main
-
-# --- tag the proven commit, await the tag build ----------------------------
+# --- tag the gated commit, await the tag build -----------------------------
+# The tag build runs the same checks as the main build before it publishes,
+# so a commit that fails them publishes nothing and this script says so.
+# What that costs is the version number: a tag on a failed build stays.
 git tag -a "$TAG" -m "release $TAG" "$SHA" 2>/dev/null || true
 git push origin "$TAG" 2>/dev/null || true
 await_run "$TAG"

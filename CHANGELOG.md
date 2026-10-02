@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.247] - 2026-10-02
+
+### Maintenance
+- **Release: the suite runs once per place instead of three times in a row.**
+  A release took 22 minutes: the suite ran locally, again in the build for
+  `main`, and again in the build for the tag, each waited for in turn. The tag
+  is now pushed with `main` and only its build is awaited.
+- **Tests: run across processes**, locally and in CI. No behaviour changes in
+  this version.
+
 ## [0.4.246] - 2026-10-02
 
 ### Fixed

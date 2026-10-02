@@ -30,7 +30,9 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: mypy
-      - run: pytest -q
+      # In parallel: the suite was 4m54s of a 6m22s run in one process, and
+      # every release waits on it.
+      - run: pytest -q -n auto
       # The applier's pure logic (envelope parsing, audit partitioning)
       # is node:test covered; a failure here must gate the image build
       # the same way pytest does.

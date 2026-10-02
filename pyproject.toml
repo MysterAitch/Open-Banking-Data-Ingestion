@@ -1,6 +1,6 @@
 [project]
 name = "obdi"
-version = "0.4.246"
+version = "0.4.247"
 description = "Open banking data ingestion - canonical local store, app-agnostic"
 requires-python = ">=3.11"
 # Floors track the versions this project is actually tested against, so a
@@ -22,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1",
+    # Runs the suite across processes. One process took 8.5 minutes, and a
+    # release runs the suite before it will push.
+    "pytest-xdist>=3.6",
     "ruff>=0.16",
     "mypy>=2.3",
     # Drives the pages in a real browser. Every fault in the upload flow
