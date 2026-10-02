@@ -2528,22 +2528,64 @@ class Store:
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
 
-    def sighted_ids_for_account(self, account_id: str) -> list[tuple[str, str, str]]:
-        """(entity, source, provider id) for every id a row here has been seen under.
+    def is_pending_snapshot(self, digest: str) -> bool:
+        """Whether this landed artefact is a pending snapshot.
+
+        A pending snapshot names a payment by an id it will not keep, which is
+        what tells a settlement reissue from a second payment. False for an
+        artefact that is not landed: nothing then says the id was provisional.
+        """
+        from .identity_health import PENDING_SNAPSHOT_SOURCES
+
+        placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
+        return (
+            self.connection.execute(
+                "SELECT 1 FROM raw_artefacts "  # noqa: S608
+                # Placeholders only - the interpolation builds "?,?", never data.
+                f"WHERE digest = ? AND source IN ({placeholders}) LIMIT 1",
+                (digest, *PENDING_SNAPSHOT_SOURCES),
+            ).fetchone()
+            is not None
+        )
+
+    def sighted_ids_for_account(
+        self, account_id: str
+    ) -> list[tuple[str, str, str, bool, bool]]:
+        """(entity, source, provider id, seen pending, seen booked) per id a row was seen under.
 
         The matcher's memory of what each source has called each row.
         A row keeps only the id of the last source to observe it, and this is
         the only record of the others.
+
+        Whether an id was seen in a pending snapshot, a settled response, or
+        both is read from the artefact each sighting came from, so a live pull
+        and a rebuild derive it the same way. An id seen only pending may be
+        replaced by the payment's settled id; one seen settled will not.
+        A source with no pending snapshot (a file, the bank's own feed) reads
+        as settled throughout, which is the conservative answer: it holds a
+        second id apart rather than merging it.
         """
+        from .identity_health import PENDING_SNAPSHOT_SOURCES
+
+        placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
+        pending_artefact = (
+            "EXISTS (SELECT 1 FROM raw_artefacts a WHERE a.digest = s.artefact_digest "  # noqa: S608
+            # Placeholders only - the interpolation builds "?,?", never data.
+            f"AND a.source IN ({placeholders}))"
+        )
         rows = self.connection.execute(
-            "SELECT DISTINCT s.entity_id, s.source, s.source_id "
+            "SELECT s.entity_id, s.source, s.source_id, "  # noqa: S608
+            f"MAX({pending_artefact}), MAX(NOT {pending_artefact}) "
             "FROM transaction_sources s "
             "JOIN transactions t ON t.entity_id = s.entity_id "
             "WHERE t.account_id = ? AND s.source_id IS NOT NULL AND s.source_id != '' "
-            "AND s.source_id NOT LIKE ?",
-            (account_id, _COPY_PATTERN),
+            "AND s.source_id NOT LIKE ? "
+            "GROUP BY s.entity_id, s.source, s.source_id",
+            (*PENDING_SNAPSHOT_SOURCES, *PENDING_SNAPSHOT_SOURCES, account_id, _COPY_PATTERN),
         ).fetchall()
-        return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
+        return [
+            (str(row[0]), str(row[1]), str(row[2]), bool(row[3]), bool(row[4])) for row in rows
+        ]
 
     def record_source(self, transaction: Transaction) -> None:
         """Note that this source has seen this transaction, in this artefact.

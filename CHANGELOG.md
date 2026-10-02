@@ -26,6 +26,18 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.257] - 2026-10-02
+
+### Fixed
+- **A second payment of the same amount is no longer merged into the first
+  after an export has touched it.** The matcher judged "same source" by the
+  row's last writer, so once a CSV or a typed entry had sighted an aggregator
+  payment, the aggregator's next payment of that amount looked like another
+  source's report of it and was merged, with no flag and one payment missing
+  from every sum. A different id after a settled one is now kept as its own
+  row and flagged; a pending id replaced on settlement still merges. Found by
+  constructed inputs, not seen on the real store.
+
 ## [0.4.256] - 2026-10-02
 
 ### Changed

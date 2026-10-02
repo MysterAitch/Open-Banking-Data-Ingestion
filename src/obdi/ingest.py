@@ -381,8 +381,11 @@ def _reconcile_all(
     on_record: Callable[[int], None] | None,
 ) -> None:
     # One call is one response; a cached index may have seen earlier ones.
+    # Read from the artefact, as the stored sightings are, so a live pull and a
+    # rebuild agree on which ids were provisional.
+    pending_snapshot = store.is_pending_snapshot(digest)
     for index in by_account.values():
-        index.begin_batch()
+        index.begin_batch(pending_snapshot=pending_snapshot)
     for position, transaction in enumerate(numbered, start=1):
         existing = by_account.get(transaction.account_id)
         if existing is None:
@@ -391,6 +394,7 @@ def _reconcile_all(
                     store.transactions_for_account(transaction.account_id),
                     sightings=store.sighted_ids_for_account(transaction.account_id),
                 )
+            existing.begin_batch(pending_snapshot=pending_snapshot)
             by_account[transaction.account_id] = existing
         merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
         # Whichever row took this record has now answered to its id.

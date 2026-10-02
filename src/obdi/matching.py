@@ -129,6 +129,38 @@ def could_be_one_payment(
     return incoming.occurrence == candidate.occurrence
 
 
+def could_be_reissue(incoming: Transaction, candidate: Transaction) -> bool:
+    """Whether `incoming` could be a source's reissue of a row it already reported.
+
+    For a candidate that the incoming record's own source has ALREADY called by
+    a different id, though a later source now holds the row's `source` column.
+    `could_be_one_payment` reads that column, so it takes such a row for a
+    cross-source candidate and merges on amount and date alone: an aggregator's
+    second payment of the same price, a few days on, was folded into the first
+    after an export had merely sighted the first, with nothing flagged and one
+    payment missing from every sum.
+
+    Called only when the source has called the row by another id IN A SETTLED
+    RESPONSE (`CandidateIndex.sighted_settled_under_another_id`). An earlier id
+    seen only in pending snapshots is provisional, and the new id may be its
+    settlement, so that case never reaches here and merges as any cross-source
+    pair does. Holding it apart instead counted one card payment twice, on the
+    most ordinary path there is: the aggregator pending, the bank's own feed
+    settled, the aggregator settled under a new id.
+
+    A settled id is not replaced, so a different one is evidence of a second
+    payment, unless the incoming record is a stale pending tail of the row. So
+    the only merge left is that shape: pending incoming, not dated after the
+    row. Anything else is held apart, and the near-miss is queued for review:
+    a wrongly separate row is visible, and a wrongly merged one is silent.
+    """
+    return (
+        incoming.status is TransactionStatus.PENDING
+        and candidate.status is not TransactionStatus.PENDING
+        and incoming.value_date <= candidate.value_date
+    )
+
+
 def belongs_to_established_series(
     incoming: Transaction, candidates: Sequence[Transaction]
 ) -> bool:
@@ -237,7 +269,7 @@ class CandidateIndex:
     def __init__(
         self,
         transactions: Iterable[Transaction] = (),
-        sightings: Iterable[tuple[str, str, str]] = (),
+        sightings: Iterable[tuple[str, str, str, bool, bool]] = (),
     ) -> None:
         self._order: list[Transaction] = []
         self._position: dict[str, int] = {}
@@ -253,14 +285,30 @@ class CandidateIndex:
         # The id each row has answered to in the CURRENT batch, by source.
         # See `claim`.
         self._claimed: dict[str, dict[str, str]] = {}
+        # Which of those ids were seen in a pending snapshot and which in a
+        # settled response, per (row, source, id). See `sighted_settled_under_another_id`.
+        self._seen_pending: set[tuple[str, str, str]] = set()
+        self._seen_settled: set[tuple[str, str, str]] = set()
+        # Whether the response now being resolved is a pending snapshot.
+        self._batch_pending = False
+        # Stored rows are filed with no evidence of their own: the row holds
+        # only its last writer's digest, and the store's sightings say the rest.
+        self._recording_evidence = False
         for transaction in transactions:
             self.append(transaction)
-        for entity_id, source, source_id in sightings:
+        for entity_id, source, source_id, was_pending, was_settled in sightings:
             position = self._position.get(entity_id)
             if position is not None:
+                account_id = self._order[position].account_id
                 self.note_sighting(
-                    entity_id, self._order[position].account_id, source, source_id
+                    entity_id, account_id, source, source_id, record_evidence=False
                 )
+                key = (entity_id, source, source_id)
+                if was_pending:
+                    self._seen_pending.add(key)
+                if was_settled:
+                    self._seen_settled.add(key)
+        self._recording_evidence = True
 
     def __len__(self) -> int:
         return len(self._order)
@@ -269,7 +317,13 @@ class CandidateIndex:
         return iter(self._order)
 
     def note_sighting(
-        self, entity_id: str, account_id: str, source: str, source_id: str | None
+        self,
+        entity_id: str,
+        account_id: str,
+        source: str,
+        source_id: str | None,
+        *,
+        record_evidence: bool = True,
     ) -> None:
         """Record that `source` has called this row by `source_id`.
 
@@ -277,9 +331,17 @@ class CandidateIndex:
         source observes it, and a row that forgot what it had been called is
         how one payment came to be held twice: the first source re-reported
         it with a changed amount, found no row under its id, and made another.
+
+        Also records whether the response now being resolved is a pending
+        snapshot or a settled one, unless `record_evidence` is False (a stored
+        row being loaded, whose evidence comes from the store instead).
         """
         if not source_id:
             return
+        if record_evidence:
+            (self._seen_pending if self._batch_pending else self._seen_settled).add(
+                (entity_id, source, source_id)
+            )
         held = self._sighted.setdefault((account_id, source, source_id), [])
         if entity_id not in held:
             held.append(entity_id)
@@ -293,9 +355,38 @@ class CandidateIndex:
             return False
         return bool(self._ids_of.get(entity_id, {}).get(source, set()) - {source_id})
 
-    def begin_batch(self) -> None:
-        """Forget which row answered to which id; a new response starts clean."""
+    def sighted_settled_under_another_id(
+        self, entity_id: str, source: str, source_id: str | None
+    ) -> bool:
+        """Whether `source` has called this row, in a settled response, by another id.
+
+        An id seen ONLY in pending snapshots is provisional: the payment's
+        settled id will replace it, so a different settled id may be that
+        settlement. An id seen in a settled response is not provisional, and a
+        different settled id after it is a different payment. An id with no
+        evidence either way is taken as settled, because holding a payment
+        apart is visible and merging two is not.
+        """
+        if not source_id:
+            return False
+        for other in self._ids_of.get(entity_id, {}).get(source, set()) - {source_id}:
+            key = (entity_id, source, other)
+            if key in self._seen_settled or key not in self._seen_pending:
+                return True
+        return False
+
+    def begin_batch(self, *, pending_snapshot: bool = False) -> None:
+        """Forget which row answered to which id; a new response starts clean.
+
+        `pending_snapshot` says the response is a pending list, so ids it
+        reports are noted as provisional.
+        """
         self._claimed.clear()
+        self._batch_pending = pending_snapshot
+
+    @property
+    def batch_is_pending_snapshot(self) -> bool:
+        return self._batch_pending
 
     def claim(self, entity_id: str, source: str, source_id: str | None) -> None:
         """Record that, in this batch, this row answered to `source_id`.
@@ -328,6 +419,7 @@ class CandidateIndex:
             transaction.account_id,
             transaction.source,
             transaction.source_id,
+            record_evidence=self._recording_evidence,
         )
         if transaction.source_id:
             key = (transaction.account_id, transaction.source, transaction.source_id)
@@ -472,6 +564,13 @@ def resolve(
             candidate.entity_id, incoming.source, incoming.source_id
         ):
             return False
+        # Before every other rule, hand-entered rows included: the row's
+        # `source` is only the last writer, and this source's own earlier id on
+        # it outranks any resemblance.
+        if candidate.source != incoming.source and index.sighted_settled_under_another_id(
+            candidate.entity_id, incoming.source, incoming.source_id
+        ):
+            return could_be_reissue(incoming, candidate)
         return could_be_one_payment(incoming, candidate, same_content=same_content)
 
     if incoming.content_key:
