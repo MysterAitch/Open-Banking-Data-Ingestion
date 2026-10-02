@@ -33,11 +33,36 @@ async function readSecret(name) {
   return required(name);
 }
 
+/**
+ * A secret that may be absent: '' when neither form is set.
+ *
+ * Absent and misconfigured are kept apart. A `_FILE` that is named but
+ * missing or empty is an error here, because the alternative is to carry on
+ * with no secret and fail later at a point that cannot say why - for the
+ * budget's encryption password, as a download that will not decrypt.
+ */
+export async function optionalSecret(name, env = process.env, read = readFile) {
+  const variable = `${name}_FILE`;
+  const path = (env[variable] ?? '').trim();
+  if (!path) return (env[name] ?? '').trim();
+  let content;
+  try {
+    content = await read(path, 'utf8');
+  } catch (error) {
+    throw new Error(`${variable} names ${path}, which could not be read: ${error.message}`);
+  }
+  const secret = content.trim();
+  if (!secret) {
+    throw new Error(`${variable} names ${path}, which is empty. Unset it if there is no secret.`);
+  }
+  return secret;
+}
+
 export async function withBudget(work) {
   const serverURL = required('ACTUAL_SERVER_URL');
   const password = await readSecret('ACTUAL_PASSWORD');
   const syncId = required('ACTUAL_SYNC_ID');
-  const filePassword = (process.env.ACTUAL_ENCRYPTION_PASSWORD ?? '').trim();
+  const filePassword = await optionalSecret('ACTUAL_ENCRYPTION_PASSWORD');
 
   const dataDir = await mkdtemp(join(tmpdir(), 'obdi-actual-'));
   await api.init({ dataDir, serverURL, password });

@@ -102,7 +102,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(`Failed: ${error.message}`);
     if (/encrypt/i.test(error.message)) {
       console.error(
-        'If the budget file is end-to-end encrypted, set ACTUAL_ENCRYPTION_PASSWORD.',
+        'If the budget file is end-to-end encrypted, set ACTUAL_ENCRYPTION_PASSWORD_FILE ' +
+          '(or ACTUAL_ENCRYPTION_PASSWORD).',
       );
     }
     process.exit(1);

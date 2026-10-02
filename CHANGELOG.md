@@ -28,71 +28,64 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.242] - 2026-10-02
 
+### Fixed
+- **The applier reads the budget's encryption password from a file, as
+  documented.** It read only the plain variable, so an encrypted budget
+  configured as `.env.example` describes failed to decrypt. A file that is
+  named but missing or empty is now an error that says so.
+
+### Maintenance
+- **The README, deploy notes, and re-authorisation runbook describe the code as
+  it is.** They still said the applier was unbuilt and named providers and a
+  setting that do not exist. The screenshots under `docs/screens` are still
+  from 0.4.181.
+
 ### Added
 - **A Position page: `/position`.** Each account's balance, each observed asset
-  at its latest value, a net worth, and a month-by-month history, reachable
-  from the navigation strip and the Overview. This is the first page that
-  answers "what is the position" and not "what arrived".
+  at its latest value, a net worth, and a month-by-month history.
 - **An account with no opening balance is not counted, and the page says so.**
-  It is listed under "Not counted: no opening balance" with a link to state
-  one, and left out of every total: an unknown balance is not nil, and adding
-  it as nil would give a net worth that is wrong by an amount nobody can name.
-  The headline says how many accounts are counted and how many are not.
+  It is listed apart with a link to state one, and left out of every total: an
+  unknown balance is not nil.
 - **Defined-benefit and state-pension entries are shown as income and never
-  added to net worth.** There is no agreed way to turn a promise of income into
-  a capital figure, so the page does not pick one.
-- **An account whose later balance checks differ is flagged and still counted**
-  at what its rows give, with a link to its ledger.
-- **The history chart is drawn only when values are shown.** The shape of a
-  net-worth line says how large the figures are relative to one another, so the
-  masked page draws none. Months before every counted item had a known figure
-  are marked partial, and the page names the month from which the history is
-  complete.
-- **A masked balance or total shows as one fixed token, whatever its size.**
-  Elsewhere masking keeps a value's length, which is harmless for one payment
-  and is most of the answer for a net worth: the number of digits. On the
-  Position page every figure is a total, so none keeps its length. The ledger's
-  balances, sums, and anchor figures follow the same rule; a single payment
-  there still shows its shape. The statement-shape and balance-reconciliation
-  pages have not been reviewed for this and are unchanged.
+  added to net worth.** No way of turning a promise of income into a capital
+  figure is agreed, so the page does not pick one.
+- **An account whose later balance checks differ is flagged and still counted.**
+- **The history chart is drawn only when values are shown**, since the shape of
+  the line is itself a value. Months before every counted item had a figure are
+  marked partial.
+- **A masked balance or total shows as one fixed token, whatever its size**, on
+  the Position page and the ledger. Its number of digits would say how much
+  there is. A single payment still keeps its shape. The statement-shape and
+  balance-reconciliation pages are unchanged.
 
 ### Changed
 - **An account's balance on the Position page and its running position on the
   ledger come from one function**, so the two pages cannot disagree.
 - **The ledger's month links sit under the month heading as ordinary links.**
-  Stepping through months had meant scrolling to a column of buttons at the
-  foot of the page, each as heavy as "Show values".
+  Previously they were buttons at the foot of the page.
 - **The ledger's month summary lists only the counts that are not zero** and
-  names the zero ones in one sentence, so a count that matters stands out and a
-  zero is still accounted for.
-- **A nil amount reads "nil" alone**, without a masked figure beside it, and an
-  account not bound to Actual says nothing in it is sent, where it used to
-  report that two figures differ.
+  names the zero ones in one sentence.
+- **A nil amount reads "nil" alone**, and an account not bound to Actual says
+  nothing in it is sent, where it used to report that two figures differ.
 - **A long run of agreeing balance anchors folds into one counted line.** The
   anchor that defines the opening balance and any that differ stay in view.
 - **Ledger transactions are a wrapping list, not a table**, so every flag,
   source, and note is visible on a phone without scrolling sideways.
-- **The home page is the Overview and nothing else.** Everything that used to
-  sit beneath it has a page of its own: Bank connections, Actual sync, Coverage
-  by source, Import, and Admin. The home page had grown by accretion until its
-  first screen was a Reconnect button for every bank and the thing being looked
-  for was somewhere below; it now carries no forms at all, and ends in a System
-  strip of five facts - scheduler, Actual, connections, rebuild, build - each a
-  link to where it is dealt with.
-- **A consent shows the date it expires, not only the days left**, and Reconnect
-  is the heavy button only when the consent is inside its first alert window or
-  has expired. Before, every bank offered an equally loud Reconnect every day.
+- **The home page is the Overview and nothing else.** What sat beneath it has
+  pages of its own: Bank connections, Actual sync, Coverage by source, Import,
+  and Admin. The home page carries no forms, and ends in a System strip of five
+  facts, each a link to where it is dealt with.
+- **A consent shows the date it expires**, and Reconnect is the heavy button
+  only inside the first alert window or once expired. Previously every bank
+  offered an equally loud Reconnect every day.
 - **"Authorised 85183 min ago" reads "authorised 59 days 3 hours ago".**
 - **Actual sync leads with two lines**: the newest push and the newest audit.
-  The roster, the prune form, and the explanation are folded beneath, and the
-  roster opens by itself when an account needs a name before it can sync.
+  The roster opens by itself when an account needs a name before it can sync.
 - **Occasional controls are folded**: renaming a connection, extending history,
-  archiving an account. What they act on stays visible; the form appears when
-  asked for.
-- **A result page leads back to the page the button was on**, and to the
-  Overview. Previously every result led only to the home page.
-- **Folds show a marker.** The stylesheet had removed the browser's own, so a
-  folded section read as a plain sentence.
+  archiving an account.
+- **A result page leads back to the page the button was on.** Previously every
+  result led only to the home page.
+- **Folds show a marker.** The stylesheet had removed the browser's own.
 
 ## [0.4.241] - 2026-10-02
 
