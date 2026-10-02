@@ -3423,7 +3423,7 @@ def render_index(
     recent_rebuilds=recent_rebuilds,
 )}
 """
-    return render_page("Overview", body)
+    return render_page("Overview", body, wide=True)
 
 
 #: Typed by hand to disclose a statement's real contents. A phrase costs

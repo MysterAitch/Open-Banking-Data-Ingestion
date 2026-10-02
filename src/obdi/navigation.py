@@ -19,12 +19,15 @@ import html
 from contextvars import ContextVar
 
 #: (section, label, destination). The section is what `SECTION_OF_ROUTE` names.
+#: In order of use: what is read daily first, what is visited to repair last.
+#: The order is also what fits a phone: these eight wrap to two rows of four at
+#: 390 pixels, where the earlier order took three.
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("overview", "Overview", "/"),
-    ("accounts", "Accounts", "/#accounts"),
     ("position", "Position", "/position"),
-    ("connections", "Connections", "/connections"),
+    ("accounts", "Accounts", "/#accounts"),
     ("actual", "Actual", "/actual"),
+    ("connections", "Connections", "/connections"),
     ("reports", "Reports", "/reports"),
     ("evidence", "Evidence", "/evidence"),
     ("admin", "Admin", "/admin"),

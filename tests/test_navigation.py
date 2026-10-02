@@ -93,6 +93,13 @@ class TestEveryPageCarriesTheStrip:
         for anchor in anchors:
             assert f'id="{anchor}"' in page, anchor
 
+    def test_Destinations_AreInOrderOfUse_DailyReadingFirstAndRepairsLast(self):
+        keys = [key for key, _, _ in DESTINATIONS]
+
+        assert keys[0] == "overview" and keys[-1] == "admin"
+        assert keys.index("position") < keys.index("connections")
+        assert keys.index("accounts") < keys.index("reports")
+
     def test_Destinations_ConnectionsActualAndAdmin_AreTheirOwnPages(self):
         hrefs = {key: href for key, _, href in DESTINATIONS}
 
@@ -187,6 +194,26 @@ class TestNavigationLinksAreThumbSizedButNotButtons:
         css = render_page("t", "").decode()
 
         assert "min-height: 44px" in re.search(r"a\.tap \{[^}]*\}", css).group(0)
+
+
+class TestAPageOfCardsUsesAWideScreen:
+    def test_WidePage_IsMarkedOnItsBody_AndAnOrdinaryPageIsNot(self):
+        assert '<body class="wide">' in render_page("t", "", wide=True).decode()
+        assert "<body>" in render_page("t", "").decode()
+
+    def test_Stylesheet_WidensOnlyOnAWideScreen_AndKeepsProseToAReadableMeasure(self):
+        css = render_page("t", "").decode()
+
+        rule = re.search(r"@media \(min-width: 60rem\) \{(.*?)\n \}", css, re.S)
+        assert rule, "the widening must sit inside a media query, or a phone gets it too"
+        assert "body.wide {" in rule.group(1)
+        assert re.search(r"body\.wide > p[^{]*\{[^}]*max-width: 40rem", rule.group(1))
+
+    def test_Overview_IsWide(self, base):
+        assert '<body class="wide">' in httpx.get(f"{base}/", timeout=20).text
+
+    def test_APageOfProseAndForms_IsNotWide(self, base):
+        assert "<body>" in httpx.get(f"{base}/import", timeout=20).text
 
 
 class TestTheIndexPages:

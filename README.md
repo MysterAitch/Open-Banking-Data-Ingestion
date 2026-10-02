@@ -171,7 +171,7 @@ obdi serve      # 127.0.0.1:8080 by default; --host and --port change it
 ```
 
 Every page carries the same navigation strip (`src/obdi/navigation.py`):
-Overview, Accounts, Position, Connections, Actual, Reports, Evidence, and Admin.
+Overview, Position, Accounts, Actual, Connections, Reports, Evidence, and Admin.
 
 - **Overview (`/`)** is the home page and carries no forms. It opens with
   "Needs attention", everything that currently needs a person, most serious

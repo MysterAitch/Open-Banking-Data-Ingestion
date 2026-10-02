@@ -122,6 +122,9 @@ class TestMaskedByDefault:
         assert MASKED_TOTAL in page
         assert "VALUES ARE SHOWN" not in page
 
+    def test_Get_IsAWidePage_SoItsCardsSitAbreastOnADesktop(self, lab):
+        assert '<body class="wide">' in lab.get().text
+
     def test_Get_ShowsNoFigureByItsSizeEither(self, lab):
         """Every figure on the page is a balance or a sum, and the number of
         digits in one is most of what there is to know about it."""

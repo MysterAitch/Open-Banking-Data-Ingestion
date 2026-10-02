@@ -82,7 +82,7 @@ def instance_identity() -> tuple[str, str]:
     )
 
 
-def render_page(title: str, body: str) -> bytes:
+def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
     """A plain confirmation page.
 
     Deliberately styled to be unmistakable at a glance, because the failure
@@ -92,6 +92,9 @@ def render_page(title: str, body: str) -> bytes:
     Every page carries the instance identification rather than only the homepage:
     the destructive controls are not all in one place, and a link opens wherever it
     points.
+
+    `wide` is for a page made of cards, which then sit abreast on a desktop.
+    A page of prose and forms stays narrow, where a line is short enough to read.
     """
     banner, prefix = instance_identity()
     if prefix:
@@ -160,7 +163,7 @@ def render_page(title: str, body: str) -> bytes:
     button, so the page's own action stays the heaviest thing on it. */
  .sitenav ul {{ list-style: none; margin: 0 0 1rem; padding: 0; display: flex;
                flex-wrap: wrap; gap: .3rem; }}
- .sitenav a {{ display: flex; align-items: center; min-height: 44px; padding: 0 .75rem;
+ .sitenav a {{ display: flex; align-items: center; min-height: 44px; padding: 0 .6rem;
               box-sizing: border-box; border-radius: .5rem; border: 1px solid #8886;
               color: inherit; text-decoration: none; }}
  .sitenav a[aria-current="page"] {{ background: #2563eb; border-color: #2563eb;
@@ -185,7 +188,7 @@ def render_page(title: str, body: str) -> bytes:
  /* Accounts: one card each, so the same markup reads on a phone and sits two
     abreast where there is room. A table of eight columns did neither. */
  .accounts {{ list-style: none; margin: .5rem 0; padding: 0; display: grid;
-             grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: .6rem; }}
+             grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .6rem; }}
  .account {{ padding: .7rem .9rem; border-radius: .5rem; border: 1px solid #8884; }}
  .account p {{ margin: .2rem 0; }}
  .account-name {{ font-size: 1.05rem; }}
@@ -198,7 +201,7 @@ def render_page(title: str, body: str) -> bytes:
  .anchors p {{ margin: .15rem 0; }}
  /* The headline figure of a position, an account, or an asset. */
  .figure {{ font-size: 1.35rem; font-weight: 700; margin: .3rem 0; }}
- .chart {{ margin: .6rem 0; }}
+ .chart {{ margin: .6rem 0; max-width: 40rem; }}
  /* A step between months: a text link beside the heading it steps, and a
     button only because stepping while values are shown must be a POST. It is
     set after the bare-submit rule above so it wins over it. */
@@ -236,8 +239,15 @@ def render_page(title: str, body: str) -> bytes:
  a.tap.outline {{ border: 1px solid #8886; border-radius: .5rem; padding: 0 .75rem; }}
  /* A one-off experiment sits apart from the repairs above it. */
  details.oneoff {{ margin-top: 1.5rem; padding-top: .5rem; border-top: 1px solid #8884; }}
+ /* A page of cards uses a wide screen. Its loose prose and forms keep the
+    narrow page's measure, since a line the full width is too long to read. */
+ @media (min-width: 60rem) {{
+  body.wide {{ max-width: 64rem; }}
+  body.wide > p, body.wide > form, body.wide > details, body.wide > section > p,
+  body.wide > section > form, body.wide > section > details {{ max-width: 40rem; }}
+ }}
 </style></head>
-<body>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
+<body{' class="wide"' if wide else ""}>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
 <footer style="margin-top:2rem;opacity:.6;font-size:.85rem">
 obdi {html.escape(describe())}</footer></body></html>
 """.encode()

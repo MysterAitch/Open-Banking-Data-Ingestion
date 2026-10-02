@@ -472,7 +472,7 @@ def render_position(position: Position, *, unmasked: bool) -> bytes:
         )
     body += _history(position, view, unmasked=unmasked)
     body += _LIMITS + _HOME
-    return render_page("Position", body)
+    return render_page("Position", body, wide=True)
 
 
 def _page(title: str, message: str) -> bytes:

@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.243] - 2026-10-02
+
+### Changed
+- **The navigation strip is in order of use and fits two rows on a phone.**
+  Position and Accounts come before Connections; previously the eight entries
+  wrapped to three rows before the page began.
+- **The Overview and Position pages use a wide screen.** Their cards sit
+  abreast on a desktop; prose, forms, and the chart keep a readable width.
+
 ## [0.4.242] - 2026-10-02
 
 ### Fixed
