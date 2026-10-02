@@ -26,6 +26,19 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.261] - 2026-10-03
+
+### Changed
+- **Giving a kept statement an account is refused when that account's other
+  sources say the statement is somebody else's.** The upload preview already
+  asked that question; the assign flow did not, so a wrong account would have
+  been read in. It now refuses before anything is read when most of the rows
+  match another account's, or a witness over the period matches fewer than half
+  of them; otherwise it states the corroboration, or that there is none.
+- **The batch-scaling test tolerates a stalled CI runner** by timing a larger
+  batch over three runs; it failed one build with 6.3x on code that measured
+  1.8x locally.
+
 ## [0.4.260] - 2026-10-02
 
 ### Fixed

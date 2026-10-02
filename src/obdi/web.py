@@ -5659,6 +5659,18 @@ class ConnectionHandler(
                 ),
             )
             return
+        if outcome.startswith("Not assigned"):
+            self._respond(
+                200,
+                render_page(
+                    "Not read in",
+                    '<h2>Not read in</h2><p class="alarm">'
+                    + html.escape(outcome)
+                    + "</p><p>The file is still kept, waiting for an account.</p>"
+                    + HOME_LINK,
+                ),
+            )
+            return
         self._respond(
             200,
             render_page(
@@ -5731,6 +5743,20 @@ class ConnectionHandler(
                     + html.escape(str(exc))
                     + "</p><p>The statement is still kept and this account of it "
                     "is still waiting, so nothing needs uploading again.</p>"
+                    '<p><a class="button" href="/statements">Back to kept '
+                    "statements</a></p>" + HOME_LINK,
+                ),
+            )
+            return
+        if outcome.startswith("Not assigned"):
+            self._respond(
+                200,
+                render_page(
+                    "Not read in",
+                    '<h2>Not read in</h2><p class="alarm">'
+                    + html.escape(outcome)
+                    + "</p><p>The statement is still kept and this account of it "
+                    "is still waiting.</p>"
                     '<p><a class="button" href="/statements">Back to kept '
                     "statements</a></p>" + HOME_LINK,
                 ),

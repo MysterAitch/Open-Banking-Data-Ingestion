@@ -30,6 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .accounts import AccountMap
+from .coverage import agreements, assignment_corroboration, assignment_doubt
 from .errors import DataError
 from .ingest import ImportSummary, reconcile_batch
 from .models import Transaction
@@ -79,6 +80,57 @@ def trial_sections(
         return parser.sections(payload)
     except (DataError, ValueError) as exc:
         return masked(str(exc))[:300]
+
+
+@dataclass(frozen=True)
+class AssignmentCheck:
+    """What assigning a statement's rows to an account was checked against."""
+
+    #: Why the statement probably is not this account's; None when nothing
+    #: doubts it. Judged by `coverage.assignment_doubt`.
+    doubt: str | None
+    #: What it was checked against, in counts, for the result sentence.
+    corroboration: str
+
+    @property
+    def refusal(self) -> str | None:
+        """The result sentence for a refused assignment, or None to proceed."""
+        if self.doubt is None:
+            return None
+        stop = "" if self.doubt.endswith(("?", ".")) else "."
+        return (
+            f"Not assigned: {self.doubt}{stop} Nothing was read in; "
+            "choose the account again."
+        )
+
+
+def check_assignment(
+    store: Store,
+    *,
+    incoming: list[Transaction],
+    source: str,
+    account: str,
+    account_map: AccountMap,
+) -> AssignmentCheck:
+    """Ask whether these rows belong to `account`, BEFORE anything is written.
+
+    The question the upload preview asks of a file, asked the same way: the
+    rows against every OTHER source of the account, with the rows `source`
+    already holds in this account left out (a statement of the same source
+    already read in would otherwise corroborate the next one with itself),
+    and every other account kept in as the sibling pool that lets a row be
+    recognised as another account's.
+    """
+    held = [
+        row
+        for row in store.transactions_by_sighting()
+        if not (row.account_id == account and row.source == source)
+    ]
+    found = agreements(held + incoming, sibling_accounts=account_map.accounts_by_source())
+    return AssignmentCheck(
+        doubt=assignment_doubt(found, source=source, account=account),
+        corroboration=assignment_corroboration(found, source=source, account=account),
+    )
 
 
 def read_sections(payload: bytes) -> tuple[PdfStatementParser, list[SectionReading]] | None:
@@ -144,6 +196,15 @@ def assign_section(
     if chosen is None:
         raise DataError("the statement holds no such account")
     incoming = list(parser.parse_section(payload, chosen.key, account_id=destination))
+    check = check_assignment(
+        store,
+        incoming=incoming,
+        source=parser.source,
+        account=destination,
+        account_map=account_map,
+    )
+    if check.refusal is not None:
+        return check.refusal
     digest = str(row["digest"])
     store.assign_statement_section(digest, chosen.key, destination, chosen.label)
     summary = ImportSummary(artefact_new=False)
@@ -152,7 +213,8 @@ def assign_section(
     settle_review_flags(store)
     return (
         f"{row['origin']}, the account labelled {masked(chosen.label)}, assigned to "
-        f"{destination} and read by {parser.source}: {summary.describe()}"
+        f"{destination} and read by {parser.source}: {summary.describe()}; "
+        f"{check.corroboration}"
     )
 
 

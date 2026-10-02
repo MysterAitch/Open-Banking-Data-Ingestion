@@ -979,6 +979,140 @@ def destination_doubt(
     return best
 
 
+#: Fewer rows than this in the shared window, and a low match share proves
+#: nothing: a statement of two rows has no way to match "most" of a witness's
+#: month, and a one-row statement matches either all of it or none. The
+#: destination doubt has no such floor because a SIBLING match is positive
+#: evidence at any size, where a failure to match is only the absence of it.
+LOW_OVERLAP_MIN_ROWS = 5
+
+#: Below this share of the statement's rows matching a witness's rows for the
+#: chosen account, the statement is probably another account's. A statement of
+#: the right account matches nearly all of its rows (the misfile that
+#: motivated the destination doubt matched 97% of its rows against the OTHER
+#: account); a different account's statement matches almost none. The two
+#: populations sit at the ends, so the threshold only has to fall somewhere in
+#: the empty middle; half is the same majority rule `DESTINATION_DOUBT_THRESHOLD`
+#: uses. Strictly below: a statement with exactly half its rows matching is
+#: accepted, where a destination share of exactly half is doubted, because
+#: acting on missing evidence is held to a stricter bar than acting on
+#: contrary evidence.
+LOW_OVERLAP_THRESHOLD = 0.5
+
+
+@dataclass(frozen=True)
+class _Overlap:
+    """One witness's view of a statement's rows, as the agreements page counts it."""
+
+    witness: str
+    file_rows: int
+    matched: int
+    overlap_from: date
+    overlap_to: date
+
+
+def _overlaps(
+    found: Sequence[Agreement], *, source: str, account: str
+) -> list[_Overlap]:
+    """Every agreement of `account` that has `source` as one side, as counts.
+
+    `matched` is the number the agreements page shows as "matched with": rows
+    of the file that a witness row in the same account stands behind. Rows the
+    reconciliation could only explain by a sibling account are NOT matched
+    here - they are the wrong-destination signal, not corroboration. An
+    agreement whose figures agree outright never ran the row-by-row matching,
+    so its matched count is the whole side. One that disagreed without a
+    sibling scope has no matched count at all and is left out rather than
+    read as zero.
+    """
+    overlaps = []
+    for agreement in found:
+        if agreement.account_id != account or source not in (
+            agreement.left,
+            agreement.right,
+        ):
+            continue
+        file_is_left = agreement.left == source
+        file_rows = agreement.left_count if file_is_left else agreement.right_count
+        if agreement.agrees:
+            matched = file_rows
+        elif agreement.reconciled:
+            matched = agreement.matched_count
+        else:
+            continue
+        overlaps.append(
+            _Overlap(
+                witness=agreement.right if file_is_left else agreement.left,
+                file_rows=file_rows,
+                matched=matched,
+                overlap_from=agreement.overlap_from,
+                overlap_to=agreement.overlap_to,
+            )
+        )
+    return overlaps
+
+
+def assignment_doubt(
+    found: Sequence[Agreement], *, source: str, account: str
+) -> str | None:
+    """A sentence saying why a statement probably is not this account's, or None.
+
+    Giving a kept statement an account had only the parser's arithmetic gate
+    behind it, which proves a document is consistent and says nothing about
+    whose it is. Two independent signals read from the reconciliation of the
+    statement's rows against everything else held for the account:
+
+    - the destination doubt (most rows match rows a witness filed under
+      OTHER accounts), which is also what the upload preview raises;
+    - low overlap (fewer than `LOW_OVERLAP_THRESHOLD` of the rows match what a
+      witness holds for THIS account, given at least `LOW_OVERLAP_MIN_ROWS`
+      in the shared window).
+
+    No agreement covering the account and source means no witness over the
+    period: None, and the assignment proceeds uncorroborated rather than
+    being refused for evidence nobody could have supplied.
+    """
+    destination = destination_doubt(found, source=source, account=account)
+    if destination is not None:
+        return destination.describe()
+    worst: _Overlap | None = None
+    for overlap in _overlaps(found, source=source, account=account):
+        if overlap.file_rows < LOW_OVERLAP_MIN_ROWS:
+            continue
+        if overlap.matched / overlap.file_rows >= LOW_OVERLAP_THRESHOLD:
+            continue
+        if worst is None or overlap.matched / overlap.file_rows < (
+            worst.matched / worst.file_rows
+        ):
+            worst = overlap
+    if worst is None:
+        return None
+    return (
+        f"only {worst.matched} of the statement's {worst.file_rows} rows between "
+        f"{worst.overlap_from} and {worst.overlap_to} match what {worst.witness} "
+        f"holds for {account}; this is probably another account's statement"
+    )
+
+
+def assignment_corroboration(
+    found: Sequence[Agreement], *, source: str, account: str
+) -> str:
+    """What a statement that was not doubted was checked against, in counts.
+
+    One clause per witness, in the numbers `assignment_doubt` judged. With no
+    witness over the period it says so, because "nothing disagreed" and
+    "nothing was there to disagree" must not read alike.
+    """
+    clauses = [
+        f"{overlap.witness}: {overlap.matched} of {overlap.file_rows} rows match "
+        f"over {overlap.overlap_from} to {overlap.overlap_to}"
+        for overlap in _overlaps(found, source=source, account=account)
+    ]
+    if not clauses:
+        return "no other source covers this period; the statement stands uncorroborated"
+    return "; ".join(clauses)
+
+
 @dataclass(frozen=True)
 class Gap:
     """A month a source has nothing for, inside the period it otherwise covers."""

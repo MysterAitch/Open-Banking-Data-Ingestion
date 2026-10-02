@@ -2822,6 +2822,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .ingest import ImportSummary, reconcile_batch
         from .namespaces import validate_canonical_name
         from .parsers.uk_banks import detect
+        from .statement_sections import check_assignment
 
         destination = account_id.strip()
         if not destination:
@@ -2841,6 +2842,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             payload = bytes(row["payload"])
             parser = detect(payload)
             incoming = list(parser.parse(payload, account_id=destination))
+            # Asked BEFORE the refile: the parser's gate proves the document
+            # is consistent, not that it is this account's, and once refiled
+            # the rows' only undo is a refile and a rebuild.
+            check = check_assignment(
+                store,
+                incoming=incoming,
+                source=parser.source,
+                account=destination,
+                account_map=_account_map(store),
+            )
+            if check.refusal is not None:
+                return check.refusal
             store.refile_artefact(artefact_id, destination)
             summary = ImportSummary(artefact_new=False)
             reconcile_batch(
@@ -2850,7 +2863,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             settle_review_flags(store)
         return (
             f"{row['origin']} assigned to {destination} and read by "
-            f"{parser.source}: {summary.describe()}"
+            f"{parser.source}: {summary.describe()}; {check.corroboration}"
         )
 
     def assign_statement_section(artefact_id: int, section_key: str, account_id: str) -> str:
