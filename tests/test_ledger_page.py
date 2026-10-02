@@ -578,8 +578,13 @@ class TestThePagesAreUsableOnAPhone:
         column on a desktop, so its flags sat off-screen in a scrolling box."""
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert 'class="txns"' in page
-        assert "min-width" not in page
+        # The page's content, not its stylesheet: the shared stylesheet may
+        # mention any property, and what must not exist is an element sized
+        # wider than the screen.
+        content = page.split("</style>", 1)[1]
+
+        assert 'class="txns"' in content
+        assert "min-width" not in content
         assert "<th>Flags</th>" not in page
         assert "<th>Sources</th>" not in page
 
