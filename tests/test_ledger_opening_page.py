@@ -25,6 +25,7 @@ reach, so a save answers with the MASKED ledger.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from datetime import date
 from http.server import HTTPServer
@@ -208,6 +209,102 @@ class TestTwoAnchors:
         assert "£489.89" in shown
         assert "£4,000.00" in shown
         assert "overdrawn or owed £489.89" in shown, "the anchor is BELOW the prediction"
+
+
+#: With the opening at the end of 03-10, no row falls after 03-20, so a balance
+#: stated for any later day in March agrees when it is 4,489.89.
+AGREEING_LATER_DAYS = ("03-20", "03-21", "03-22", "03-23", "03-24", "03-25")
+
+
+def _outside_details(page: str) -> str:
+    return re.sub(r'<details class="agreeing">.*?</details>', "", page, flags=re.S)
+
+
+class TestALongRunOfAgreeingAnchorsFolds:
+    def test_FiveAgreeingLaterAnchors_FoldIntoOneSummaryStatingTheCount(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS[:5]:
+            lab.seed(f"2026-{day}", "4489.89")
+
+        page = lab.get().text
+
+        assert "5 later anchors agree with what the rows predict" in page
+        assert page.count('<details class="agreeing">') == 1
+        assert _outside_details(page).count('<span class="pill pill-ok">agrees</span>') == 0
+        assert page.count('<span class="pill pill-ok">agrees</span>') == 5
+        assert "defines the opening balance" in _outside_details(page)
+        assert_no_secret(page)
+
+    def test_ThreeAgreeingLaterAnchors_AreListedPlainlyWithNoFold(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS[:3]:
+            lab.seed(f"2026-{day}", "4489.89")
+
+        page = lab.get().text
+
+        assert '<details class="agreeing">' not in page
+        assert page.count('<span class="pill pill-ok">agrees</span>') == 3
+
+    def test_FourAgreeingLaterAnchors_FoldBecauseThreeIsTheMostShownPlainly(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS[:4]:
+            lab.seed(f"2026-{day}", "4489.89")
+
+        page = lab.get().text
+
+        assert "4 later anchors agree with what the rows predict" in page
+
+    def test_ADifferingAnchorAmongManyAgreeing_StaysVisibleOutsideTheFold(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS[:5]:
+            lab.seed(f"2026-{day}", "4489.89")
+        lab.seed("2026-03-26", STATED_SECOND)
+
+        page = lab.get().text
+        shown = lab.show_values().text
+
+        assert "5 later anchors agree with what the rows predict" in page
+        assert _outside_details(page).count('<span class="pill pill-bad">differs</span>') == 1
+        assert '<details class="agreeing">' in page and "1 later anchor(s) differ" in page
+        assert "overdrawn or owed £489.89" in _outside_details(shown)
+        assert_no_secret(page)
+
+    def test_OnlyDifferingAnchors_NeedNoFold(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS[:5]:
+            lab.seed(f"2026-{day}", STATED_SECOND)
+
+        page = lab.get().text
+
+        assert '<details class="agreeing">' not in page
+        assert page.count('<span class="pill pill-bad">differs</span>') == 5
+
+
+class TestANilBalanceIsJustNil:
+    def test_OpeningThatDerivesToNothing_PrintsNilWithNoFigure(self, lab):
+        """Rows through 03-10 sum to +6,750, so stating exactly that leaves an
+        opening of nothing."""
+        lab.seed("2026-03-10", "67.50")
+
+        for page in (lab.get().text, lab.show_values().text):
+            assert 'at the end of 2026-03-01:</strong> <span class="mono">nil</span>.' in page
+            assert "nil £" not in page
+
+
+class TestOnlyShowValuesIsAPrimaryButton:
+    def test_Masked_AnAccountWithNoAnchor_HasShowValuesAndSaveAsItsOnlyPrimaryButtons(self, lab):
+        page = lab.get().text
+        primary = re.findall(r'<(?:a|button)[^>]*class="button"[^>]*>([^<]*)<', page)
+
+        # The archive control belongs to the account's own feature, not to this
+        # page's navigation, and is the one other action the header carries.
+        assert sorted(primary) == ["Archive this account", "Save stated balance", "Show values"]
+
+    def test_Masked_MonthLinksAreOrdinaryLinksAtTheTop(self, lab):
+        page = lab.get(month="2026-04").text
+
+        assert 'class="tap" href="/ledger?ref=everyday&amp;month=2026-03"' in page
+        assert page.index("Previous month") < page.index("Opening balance and anchors")
 
 
 class TestMaskingHoldsWhateverTheQueryString:

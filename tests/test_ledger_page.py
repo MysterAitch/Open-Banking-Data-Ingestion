@@ -38,7 +38,7 @@ from test_ledger import (
 )
 
 #: Accounts the hook treats as having an Actual destination.
-BOUND = {CURRENT, "plain", "markup"}
+BOUND = {CURRENT, "plain", "markup", "balanced"}
 
 #: Every distinct string the household holds that a masked page must not show.
 SECRET_TEXT = (
@@ -74,6 +74,9 @@ def _plain_and_markup(store: Store) -> None:
             "markup", "src-a", "m1", date(2026, 3, 3), -1234,
             "<script>alert(1)</script>", counterparty='"><img src=x onerror=1>',
         ),
+        # A month that nets to exactly nothing, so its sums have no direction.
+        txn("balanced", "src-a", "z1", date(2026, 3, 1), -777, "OUT"),
+        txn("balanced", "src-a", "z2", date(2026, 3, 2), 777, "BACK"),
     )
 
 
@@ -188,14 +191,17 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
 
         assert "<th>Withheld from Actual</th><td>1 (void: 1)</td>" in page
 
-    def test_Page_ForAnUnboundAccount_SaysTheSumsAndPositionsDifferWithoutFigures(
+    def test_Page_ForAnUnboundAccount_SaysNothingIsSentSoThereIsNothingToCompare(
         self, served
     ):
-        """Nothing of an unbound account is sent, so its sums cannot agree."""
+        """Nothing of an unbound account is sent, so a verdict on whether the
+        two figures differ would be true and tell the reader nothing."""
         page = get(served, ref="savings-account", month="2026-03").text
 
-        assert "The two month sums differ." in page
-        assert "The two positions differ." in page
+        sentence = "Nothing in this account is sent to Actual, so there is nothing to compare."
+        assert page.count(sentence) == 2, "once under the month sums, once under the positions"
+        assert "The two month sums" not in page
+        assert "The two positions" not in page
 
     def test_Page_ForABoundAccountHoldingTransfers_SaysTheSumsAgree(self, served):
         """Transfers travel to Actual like any other row, so they no longer
@@ -274,6 +280,134 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
 
         assert 'href="/account?ref=current-account"' in page
         assert 'href="/"' in page
+
+
+NO_FLAG_COUNTS = (
+    "seen by more than one source, seen by one source only, pending, void, "
+    "transfers confirmed, transfers unpaired, open review flags, "
+    "and refused by the push builder"
+)
+
+
+class TestTheMonthSummaryShowsOnlyWhatIsNotZero:
+    def test_Summary_WhenSomeFlagCountsAreZero_NamesThemInOneSentence(self, served):
+        """March holds one row of every kind except one the push builder refuses."""
+        page = get(served, ref=CURRENT, month="2026-03").text
+
+        assert "None this month: refused by the push builder." in page
+        assert "<th>Refused by the push builder</th>" not in page
+
+    def test_Summary_WhenEveryFlagCountIsZero_NamesAllEightInOneSentence(self, served):
+        page = get(served, ref="plain", month="2026-03").text
+
+        assert f"None this month: {NO_FLAG_COUNTS}." in page
+        for label in (
+            "Seen by more than one source", "Pending", "Void", "Open review flags",
+            "Internal transfers, confirmed", "Internal transfers, claimed but unpaired",
+            "Seen by one source only", "Refused by the push builder",
+        ):
+            assert f"<th>{label}" not in page, label
+
+    def test_Summary_WhenEveryFlagCountIsZero_StillStatesTheAlwaysMeaningfulRows(self, served):
+        page = get(served, ref="plain", month="2026-03").text
+
+        for expected in (
+            "<th>Rows in the month</th><td>2</td>",
+            "<th>Rows per source</th><td>src-a: 2</td>",
+            "<th>Would be sent to Actual</th><td>2</td>",
+            "<th>Withheld from Actual</th><td>0 (none)</td>",
+        ):
+            assert expected in page, expected
+        assert "<th>Sum of the store&#x27;s rows (void excluded)</th>" in page
+        assert "<th>Sum of what would be sent to Actual</th>" in page
+
+    def test_Summary_WhenACountIsNotZero_IsNeverNamedAmongTheZeroOnes(self, served):
+        page = get(served, ref=CURRENT, month="2026-03").text
+        sentence = page.split("None this month:", 1)[1].split("</p>", 1)[0]
+
+        for nonzero in ("pending", "void", "transfers confirmed", "open review flags"):
+            assert nonzero not in sentence, nonzero
+        assert "<th>Pending</th><td>1</td>" in page
+
+
+class TestANilAmountIsJustNil:
+    def test_BalancedMonth_PrintsNilAloneWhereItsSumsAreNil(self, served):
+        masked = get(served, ref="balanced", month="2026-03").text
+
+        assert "<th>Sum of the store&#x27;s rows (void excluded)</th><td>nil</td>" in masked
+        assert "<th>Sum of what would be sent to Actual</th><td>nil</td>" in masked
+        assert "nil £" not in masked
+
+    def test_BalancedMonth_ShownValues_PrintNilAloneToo(self, served):
+        shown = post(served, ref="balanced").text
+
+        assert "<th>Sum of the store&#x27;s rows (void excluded)</th><td>nil</td>" in shown
+        assert "nil £" not in shown
+        assert "nil 0" not in shown
+
+    def test_BalancedMonth_RunningPositionPrintsNilAlone(self, served):
+        masked = get(served, ref="balanced", month="2026-03").text
+
+        assert "<th>Balance by the store&#x27;s own rows</th><td>nil</td>" in masked
+        assert "<th>Balance by what would be sent to Actual</th><td>nil</td>" in masked
+
+    def test_UnboundAccount_NothingSent_PrintsNilAloneAtTheSentFigures(self, served):
+        masked = get(served, ref="savings-account", month="2026-03").text
+        shown = post(served, ref="savings-account").text
+
+        for page in (masked, shown):
+            assert "<th>Sum of what would be sent to Actual</th><td>nil</td>" in page
+            assert "nil £" not in page
+
+    def test_NonNilSum_StillPrintsItsDirectionAndFigure(self, served):
+        masked = get(served, ref=CURRENT, month="2026-03").text
+        shown = post(served).text
+
+        assert "net in £" in masked
+        assert "<td>net in £" in shown or "<td>net out £" in shown
+
+
+class TestMonthLinksSitAtTheTop:
+    def test_Masked_PreviousAndNextAreOrdinaryLinksBeforeTheSummary(self, served):
+        page = get(served, ref=CURRENT, month="2026-03").text
+        top = page[: page.index("<th>Rows in the month</th>")]
+
+        for month in ("2026-02", "2026-04"):
+            link = f'href="/ledger?ref=current-account&amp;month={month}"'
+            assert link in top, month
+        assert 'class="button" href="/ledger?ref=current-account&amp;month=2026-02"' not in top
+        assert 'class="tap" href="/ledger?ref=current-account&amp;month=2026-02"' in top
+
+    def test_Masked_NoMonthStepIsAPrimaryButtonAnywhere(self, served):
+        page = get(served, ref=CURRENT, month="2026-03").text
+
+        assert 'class="button" href="/ledger' not in page
+        assert 'class="button" href="/account' not in page
+        assert 'class="button" href="/"' not in page
+
+    def test_Unmasked_StepsStayPostedFormsAndSitBeforeTheSummary(self, served):
+        page = post(served).text
+        top = page[: page.index("<th>Rows in the month</th>")]
+
+        assert 'name="month" value="2026-02"' in top
+        assert 'name="month" value="2026-04"' in top
+        assert 'href="/ledger?ref=current-account&amp;month=2026-02"' not in page
+        assert "Previous month, 2026-02" in top
+
+    def test_EmptyMonth_StillOffersBothStepsAndTheNewestMonthAtTheTop(self, served):
+        page = get(served, ref=CURRENT, month="2026-04").text
+        top = page.split("<h2>Running position</h2>")[0]
+
+        assert "Previous month, 2026-03" in top
+        assert "Next month, 2026-05" in top
+        assert "Newest month with rows, 2026-05" in top
+
+    def test_OldestMonth_HasNoPreviousLinkAndNewestHasNoNext(self, served):
+        oldest = get(served, ref=CURRENT, month="2026-01").text
+        newest = get(served, ref=CURRENT, month="2026-05").text
+
+        assert "Previous month" not in oldest
+        assert "Next month" not in newest
 
 
 class TestMonthNavigation:
@@ -439,10 +573,78 @@ class TestThePagesAreUsableOnAPhone:
         assert_tap_targets_are_thumb_sized(get(served, ref=CURRENT, month="2026-03").text)
         assert_tap_targets_are_thumb_sized(post(served).text)
 
-    def test_TheTransactionTable_ScrollsInsideItsOwnContainer(self, served):
+    def test_TheTransactions_AreAListNeedingNoSidewaysScroll(self, served):
+        """A seven-column table was wider than a phone and wider than the page
+        column on a desktop, so its flags sat off-screen in a scrolling box."""
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert '<div class="scroll"><table style="min-width:46rem">' in page
+        assert 'class="txns"' in page
+        assert "min-width" not in page
+        assert "<th>Flags</th>" not in page
+        assert "<th>Sources</th>" not in page
+
+
+def _transaction_items(page: str) -> list[str]:
+    block = page.split('<ul class="txns">', 1)[1].split("</ul>", 1)[0]
+    return [item for item in block.split("<li") if item.strip()]
+
+
+def _item_holding(page: str, text: str) -> str:
+    holding = [item for item in _transaction_items(page) if text in item]
+    assert len(holding) == 1, (text, len(holding))
+    return holding[0]
+
+
+class TestEachTransactionKeepsEverythingTheTableShowed:
+    def test_Salary_CarriesDateAmountDescriptionStatusAndSourceTogether(self, served):
+        item = _item_holding(post(served).text, "SALARY ZEBRA LTD")
+
+        assert 'class="mono nowrap">2026-03-09</span>' in item
+        assert 'class="mono nowrap">in £2,500.00</span>' in item
+        assert ">booked<" in item
+        assert ">src-b<" in item
+
+    def test_Coffee_SeenByBothSources_ListsBothAndIsNotFlaggedOneSource(self, served):
+        item = _item_holding(post(served).text, "COFFEE QUAGGA CAFE")
+
+        assert ">src-a<" in item and ">src-b<" in item
+        assert ">one source<" not in item
+
+    def test_Zebra_CarriesItsFlagsAndAnnotationBesideTheRow(self, served):
+        item = _item_holding(post(served).text, "ZEBRA " + PRIVATE_REFERENCE)
+
+        assert ">one source<" in item
+        assert ">absorbed 2 ids<" in item
+        assert f"category: {PRIVATE_CATEGORY}" in item
+        assert f"payee: {PRIVATE_PAYEE}" in item
+        assert "set by" in item
+
+    def test_Transfer_NamesTheOtherAccountBesideTheRow(self, served):
+        item = _item_holding(post(served).text, "TO SAVINGS")
+
+        assert ">transfer with savings-account<" in item
+
+    def test_UnpairedTransfer_ReviewAndVoidRows_EachCarryTheirOwnFlag(self, served):
+        page = post(served).text
+
+        assert ">transfer?<" in _item_holding(page, "TO SOMEWHERE")
+        review = _item_holding(page, "REVIEWED PAYMENT")
+        assert ">review<" in review and "kept apart by the same-source rule" in review
+        void = _item_holding(page, "VANISHED PENDING")
+        assert ">void<" in void and ">withheld from Actual: void<" in void
+        assert ">pending<" in _item_holding(page, "PENDING PARKING")
+
+    def test_RowWithNoFlagsOrAnnotation_SaysNeitherNor(self, served):
+        item = _item_holding(post(served).text, "SALARY ZEBRA LTD")
+
+        assert "withheld" not in item
+        assert "set by" not in item
+
+    def test_MaskedPage_HasTheSameItemsWithShapesInPlaceOfValues(self, served):
+        masked = _transaction_items(get(served, ref=CURRENT, month="2026-03").text)
+        shown = _transaction_items(post(served).text)
+
+        assert len(masked) == len(shown) == 8
 
 
 def _serve(tmp_path, ledger_data):

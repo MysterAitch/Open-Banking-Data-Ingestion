@@ -58,6 +58,9 @@ def assert_tap_targets_are_thumb_sized(markup: str) -> None:
     anchors = _ANCHOR_TAG.findall(markup)
     assert buttons or anchors, "a page with nothing to press is a dead end"
     for tag in buttons:
+        if 'class="tap"' in tag:
+            # A link-styled button, as thumb-tall as the `tap` links beside it.
+            continue
         assert 'class="button"' in tag, f"not styled as a tap target: {tag}"
         assert "width:100%" in tag, f"not full width: {tag}"
     for tag in anchors:

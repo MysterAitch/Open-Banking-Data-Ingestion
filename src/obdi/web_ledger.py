@@ -31,7 +31,14 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # runtime would close a cycle: web.py composes this module in.
     from .web import WebConfig
 
-_HOME = '<p><a class="button" href="/">Back to overview</a></p>'
+_HOME = '<p><a class="tap" href="/">Back to overview</a></p>'
+
+#: Agreeing anchors are listed plainly up to this many, and folded beyond it.
+#: A card with years of statements has one agreeing anchor a month, and the
+#: ones worth reading are the defining anchor and any that differ.
+_PLAIN_AGREEING_ANCHORS = 3
+
+_NOTHING_SENT = "Nothing in this account is sent to Actual, so there is nothing to compare."
 
 _esc = html.escape
 
@@ -62,7 +69,25 @@ def _direction_word(direction: str) -> str:
     return {"in": "net in", "out": "net out"}.get(direction, "nil")
 
 
+def _signed(word: str, direction: str, amount: str) -> str:
+    """A direction and its figure, or "nil" alone when there is no direction.
+
+    A nil figure printed after "nil" reads as an amount, and on a masked page
+    it is a row of nines.
+    Every place the page prints a direction beside a figure goes through here.
+    """
+    return "nil" if direction == "nil" else f"{word} {amount}"
+
+
+def _words(items: list[str]) -> str:
+    """A list in running prose, with the serial comma."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return ", ".join(items[:-1]) + ", and " + items[-1]
+
+
 def _row_flags(row: Any) -> str:
+    """The pills for what is unusual about a row, or nothing when nothing is."""
     flags = ""
     if row.one_source:
         flags += _flag(
@@ -117,7 +142,7 @@ def _row_flags(row: Any) -> str:
             "been folded into this row.",
             "pill-bad",
         )
-    return flags or '<span class="muted">none</span>'
+    return flags
 
 
 def _status_pill(status: str) -> str:
@@ -126,12 +151,19 @@ def _status_pill(status: str) -> str:
 
 
 def _row_html(row: Any) -> str:
+    """One transaction as a list item that wraps instead of scrolling.
+
+    The date and the figure share the first line, the description has the second,
+    and the status, sources, and flags wrap beneath.
+    A seven-column table was wider than a phone, and wider than the page column on
+    a desktop, so the flags were the part that sat out of sight.
+    """
     dates = ""
     if row.dates_differ:
         said = ", ".join(f"{source} {day}" for source, day in row.observed)
         dates = (
-            '<br><span class="warn" title="The sources dated this row '
-            f'differently.">dates differ: {_esc(said)}</span>'
+            '<p class="warn" title="The sources dated this row '
+            f'differently.">dates differ: {_esc(said)}</p>'
         )
     counterparty = (
         f'<br><span class="muted">{_esc(row.counterparty)}</span>'
@@ -139,58 +171,110 @@ def _row_html(row: Any) -> str:
         else ""
     )
     currency = "" if row.currency == "GBP" else f" {_esc(row.currency)}"
+    figure = _esc(_signed(row.direction, row.direction, row.amount))
+    if row.direction != "nil":
+        figure += currency
     notes = []
     if row.category:
         notes.append(f"category: {_esc(row.category)}")
     if row.payee:
         notes.append(f"payee: {_esc(row.payee)}")
     annotation = (
-        "<br>".join(notes) + f'<br><span class="muted">set by {_esc(row.annotated_by)}</span>'
+        '<p class="muted">'
+        + "<br>".join([*notes, f"set by {_esc(row.annotated_by)}"])
+        + "</p>"
         if row.annotated_by
-        else '<span class="muted">none</span>'
+        else ""
     )
     sources = "".join(
         f'<span class="pill pill-quiet">{_esc(source)}</span> ' for source in row.sources
     )
     return (
-        "<tr>"
-        f'<td class="mono nowrap">{_esc(row.dated.isoformat())}{dates}</td>'
-        f"<td><strong>{_esc(row.description)}</strong>{counterparty}</td>"
-        f'<td class="mono nowrap">{_esc(row.direction)} {_esc(row.amount)}{currency}</td>'
-        f"<td>{_status_pill(row.status)}</td>"
-        f"<td>{sources}</td>"
-        f"<td>{_row_flags(row)}</td>"
-        f"<td>{annotation}</td>"
-        "</tr>"
+        "<li>"
+        '<div class="txn-head">'
+        f'<span class="mono nowrap">{_esc(row.dated.isoformat())}</span>'
+        f'<span class="mono nowrap">{figure}</span>'
+        "</div>"
+        f"{dates}"
+        f"<p><strong>{_esc(row.description)}</strong>{counterparty}</p>"
+        f'<p class="pills">{_status_pill(row.status)} {sources}{_row_flags(row)}</p>'
+        f"{annotation}"
+        "</li>"
     )
 
 
-def _summary_html(summary: Any) -> str:
+#: The counts that mean something only when they are not zero: the table's label,
+#: and the phrase that names the count in the sentence listing the zero ones.
+_FLAG_COUNTS = (
+    ("multi_source", "Seen by more than one source", "seen by more than one source"),
+    (
+        "one_source",
+        "Seen by one source only, where several feed the account",
+        "seen by one source only",
+    ),
+    ("pending", "Pending", "pending"),
+    ("void", "Void", "void"),
+    ("transfers_confirmed", "Internal transfers, confirmed", "transfers confirmed"),
+    (
+        "transfers_claimed",
+        "Internal transfers, claimed but unpaired",
+        "transfers unpaired",
+    ),
+    ("review_open", "Open review flags", "open review flags"),
+)
+
+
+def _summary_html(summary: Any, *, bound: bool) -> str:
+    """The month's counts: the always-meaningful rows, then only the non-zero flags.
+
+    A zero is not dropped silently.
+    The sentence after the table names every flag count that is zero, so a
+    reader can tell "nothing of that kind" from "not looked for".
+    """
     reasons = _pairs(summary.withheld_by_reason)
+    rows = _count("Rows in the month", summary.rows) + _count(
+        "Rows per source", _pairs(summary.per_source)
+    )
+    zero: list[str] = []
+    for field, label, phrase in _FLAG_COUNTS:
+        number = getattr(summary, field)
+        if number:
+            rows += _count(label, number)
+        else:
+            zero.append(phrase)
+    rows += _count("Would be sent to Actual", summary.would_send)
+    rows += _count("Withheld from Actual", f"{summary.withheld} ({reasons})")
+    if summary.unsendable:
+        rows += _count("Refused by the push builder", summary.unsendable)
+    else:
+        zero.append("refused by the push builder")
+    verdict = (
+        _NOTHING_SENT
+        if not bound
+        else f"The two month sums {_differ(summary.sums_differ)}."
+    )
     return (
         '<div class="scroll"><table>'
-        + _count("Rows in the month", summary.rows)
-        + _count("Rows per source", _pairs(summary.per_source))
-        + _count("Seen by more than one source", summary.multi_source)
-        + _count("Seen by one source only, where several feed the account", summary.one_source)
-        + _count("Pending", summary.pending)
-        + _count("Void", summary.void)
-        + _count("Internal transfers, confirmed", summary.transfers_confirmed)
-        + _count("Internal transfers, claimed but unpaired", summary.transfers_claimed)
-        + _count("Open review flags", summary.review_open)
-        + _count("Would be sent to Actual", summary.would_send)
-        + _count("Withheld from Actual", f"{summary.withheld} ({reasons})")
-        + _count("Refused by the push builder", summary.unsendable)
+        + rows
         + _count(
             "Sum of the store's rows (void excluded)",
-            f"{_direction_word(summary.store_direction)} {summary.store_sum}",
+            _signed(
+                _direction_word(summary.store_direction),
+                summary.store_direction,
+                summary.store_sum,
+            ),
         )
         + _count(
             "Sum of what would be sent to Actual",
-            f"{_direction_word(summary.sent_direction)} {summary.sent_sum}",
+            _signed(
+                _direction_word(summary.sent_direction),
+                summary.sent_direction,
+                summary.sent_sum,
+            ),
         )
         + "</table></div>"
-        + f"<p><strong>The two month sums {_differ(summary.sums_differ)}.</strong></p>"
+        + (f'<p class="muted">None this month: {_words(zero)}.</p>' if zero else "")
+        + f"<p><strong>{_esc(verdict)}</strong></p>"
         + (
             '<p class="warn">The rows are in more than one currency, so these sums '
             "add unlike units.</p>"
@@ -228,19 +312,46 @@ def _anchor_row(line: Any) -> str:
         detail = " with what the rows predict"
     else:
         role = '<span class="pill pill-bad">differs</span>'
-        detail = (
-            " from what the rows predict by "
-            f"{_esc(_balance_word(line.difference_direction))} {_esc(line.difference)}"
+        difference = _signed(
+            _balance_word(line.difference_direction), line.difference_direction, line.difference
         )
+        detail = f" from what the rows predict by {_esc(difference)}"
     basis = _BASIS_WORDS.get(line.basis, line.basis)
+    if line.balance_direction == "nil":
+        balance = "nil"
+    else:
+        balance = (
+            f"{_esc(_balance_word(line.balance_direction))} "
+            f'<span class="mono nowrap">{_esc(line.balance)}</span>'
+        )
     return (
         "<li>"
         f"<p>{role}{detail}</p>"
-        f'<p>End of <span class="mono nowrap">{_esc(line.day)}</span>: '
-        f"{_esc(_balance_word(line.balance_direction))} "
-        f'<span class="mono nowrap">{_esc(line.balance)}</span></p>'
+        f'<p>End of <span class="mono nowrap">{_esc(line.day)}</span>: {balance}</p>'
         f'<p class="muted">{_esc(basis)}</p>'
         "</li>"
+    )
+
+
+def _anchors_html(anchors: tuple[Any, ...]) -> str:
+    """The anchors, with a long run of agreeing ones folded away.
+
+    The defining anchor and every differing one stay in view, since those are what
+    a reader came for.
+    The agreeing ones are a count to open rather than a list to scroll past.
+    """
+    agreeing = [line for line in anchors if not line.defines_opening and line.verdict == "agrees"]
+    if len(agreeing) <= _PLAIN_AGREEING_ANCHORS:
+        return '<ul class="anchors">' + "".join(_anchor_row(line) for line in anchors) + "</ul>"
+    folded = {id(line) for line in agreeing}
+    return (
+        '<ul class="anchors">'
+        + "".join(_anchor_row(line) for line in anchors if id(line) not in folded)
+        + "</ul>"
+        '<details class="agreeing"><summary>'
+        f"{len(agreeing)} later anchors agree with what the rows predict</summary>"
+        '<ul class="anchors">' + "".join(_anchor_row(line) for line in agreeing) + "</ul>"
+        "</details>"
     )
 
 
@@ -296,16 +407,13 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             "it, and neither the bank's records nor a held statement supplies one.</p>"
         )
     else:
-        body += (
-            '<ul class="anchors">'
-            + "".join(_anchor_row(line) for line in opening.anchors)
-            + "</ul>"
-        )
+        body += _anchors_html(opening.anchors)
         if opening.state == "derived":
+            figure = _signed(_balance_word(opening.direction), opening.direction, opening.opening)
             body += (
                 f'<p><strong>Opening balance, at the end of {_esc(opening.as_at)}:</strong> '
-                f'<span class="mono">{_esc(_balance_word(opening.direction))} '
-                f"{_esc(opening.opening)}</span>. It is the earliest anchor's balance less "
+                f'<span class="mono">{_esc(figure)}</span>. '
+                "It is the earliest anchor's balance less "
                 "the rows dated on or before that anchor.</p>"
             )
             if opening.single_anchor:
@@ -335,9 +443,10 @@ def _opening_html(view: Any, unmasked: bool) -> str:
     return body + _anchor_forms(view, view.ref, view.month)
 
 
-def _position_html(position: Any) -> str:
+def _position_html(position: Any, *, bound: bool) -> str:
     included = position.opening_included
     word = _balance_word if included else _direction_word
+    verdict = _NOTHING_SENT if not bound else f"The two positions {_differ(position.differs)}."
     return (
         "<h2>Running position</h2>"
         '<div class="scroll"><table>'
@@ -345,14 +454,18 @@ def _position_html(position: Any) -> str:
         + _count("Non-void rows counted", position.rows_counted)
         + _count(
             "Balance by the store's own rows" + (", plus the opening balance" if included else ""),
-            f"{word(position.store_direction)} {position.store_balance}",
+            _signed(
+                word(position.store_direction), position.store_direction, position.store_balance
+            ),
         )
         + _count(
             "Balance by what would be sent to Actual",
-            f"{word(position.sent_direction)} {position.sent_balance}",
+            _signed(
+                word(position.sent_direction), position.sent_direction, position.sent_balance
+            ),
         )
         + "</table></div>"
-        f"<p><strong>The two positions {_differ(position.differs)}.</strong> "
+        f"<p><strong>{_esc(verdict)}</strong> "
         + (
             "Both figures start from the account's derived opening balance, shown "
             "above."
@@ -378,16 +491,18 @@ _LIMITS = (
 )
 
 
-def _navigation(view: Any, unmasked: bool) -> str:
+def _month_links(view: Any, unmasked: bool) -> str:
+    """Previous, next, and newest month, as text links that wrap on a phone.
+
+    Stepping is a navigation and not the page's action, so it is never styled
+    as the primary button.
+    """
     ref = view.ref
-    links = ""
 
-    def button(label: str, href: str) -> str:
-        return f'<p><a class="button" href="{href}">{_esc(label)}</a></p>'
-
-    def month(label: str, target: str) -> str:
+    def step(label: str, target: str) -> str:
         if not unmasked:
-            return button(label, _url("/ledger", ref=ref, month=target))
+            href = _url("/ledger", ref=ref, month=target)
+            return f'<a class="tap" href="{href}">{_esc(label)}</a>'
         # Somebody reading several months of values asked for them once.
         # A link here would either drop them back to the masked view at every
         # step, or be an address that shows values; a posted form is neither.
@@ -395,18 +510,29 @@ def _navigation(view: Any, unmasked: bool) -> str:
             '<form method="post" action="/ledger">'
             f'<input type="hidden" name="ref" value="{_esc(ref)}">'
             f'<input type="hidden" name="month" value="{_esc(target)}">'
-            + submit_button(label)
-            + "</form>"
+            f'<button class="tap" type="submit">{_esc(label)}</button>'
+            "</form>"
         )
 
+    steps = []
     if view.previous_month:
-        links += month(f"Previous month, {view.previous_month}", view.previous_month)
+        steps.append(step(f"Previous month, {view.previous_month}", view.previous_month))
     if view.next_month:
-        links += month(f"Next month, {view.next_month}", view.next_month)
+        steps.append(step(f"Next month, {view.next_month}", view.next_month))
     if view.newest_month and view.newest_month != view.month:
-        links += month(f"Newest month with rows, {view.newest_month}", view.newest_month)
-    links += button("Shape of this account's data", _url("/account", ref=ref))
-    return links + _HOME
+        steps.append(step(f"Newest month with rows, {view.newest_month}", view.newest_month))
+    return f'<div class="monthnav">{"".join(steps)}</div>' if steps else ""
+
+
+def _navigation(view: Any, unmasked: bool) -> str:
+    """The way on from the foot of the page: more months, the shape page, home."""
+    shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
+    return (
+        _month_links(view, unmasked)
+        + shape
+        + "Shape of this account's data</a></p>"
+        + _HOME
+    )
 
 
 def _mode(view: Any, unmasked: bool) -> str:
@@ -490,7 +616,7 @@ def render_ledger(
         return render_page("Ledger", body)
 
     body += _mode(view, unmasked)
-    body += f"<h2>{_esc(view.month)}</h2>"
+    body += f"<h2>{_esc(view.month)}</h2>" + _month_links(view, unmasked)
     if view.state == "empty-month":
         body += (
             '<p class="warn"><strong>No rows are dated in this month.</strong> '
@@ -499,17 +625,13 @@ def render_ledger(
             "not a clean result.</p>"
         )
     else:
-        body += _summary_html(view.summary)
+        body += _summary_html(view.summary, bound=view.actual_bound)
     body += _opening_html(view, unmasked)
-    body += _position_html(view.position)
+    body += _position_html(view.position, bound=view.actual_bound)
     if view.state == "ok":
         body += (
             "<h2>Transactions, newest first</h2>"
-            '<div class="scroll"><table style="min-width:46rem"><tr>'
-            "<th>Date</th><th>Description</th><th>Amount</th><th>Status</th>"
-            "<th>Sources</th><th>Flags</th><th>Category and payee</th></tr>"
-            + "".join(_row_html(row) for row in view.rows)
-            + "</table></div>"
+            '<ul class="txns">' + "".join(_row_html(row) for row in view.rows) + "</ul>"
         )
     body += _LIMITS
     body += (

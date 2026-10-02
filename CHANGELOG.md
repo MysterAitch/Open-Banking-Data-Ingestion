@@ -56,6 +56,19 @@ transcription would add no reasoning that the subjects do not already carry.
 ### Changed
 - **An account's balance on the Position page and its running position on the
   ledger come from one function**, so the two pages cannot disagree.
+- **The ledger's month links sit under the month heading as ordinary links.**
+  Stepping through months had meant scrolling to a column of buttons at the
+  foot of the page, each as heavy as "Show values".
+- **The ledger's month summary lists only the counts that are not zero** and
+  names the zero ones in one sentence, so a count that matters stands out and a
+  zero is still accounted for.
+- **A nil amount reads "nil" alone**, without a masked figure beside it, and an
+  account not bound to Actual says nothing in it is sent, where it used to
+  report that two figures differ.
+- **A long run of agreeing balance anchors folds into one counted line.** The
+  anchor that defines the opening balance and any that differ stay in view.
+- **Ledger transactions are a wrapping list, not a table**, so every flag,
+  source, and note is visible on a phone without scrolling sideways.
 - **The home page is the Overview and nothing else.** Everything that used to
   sit beneath it has a page of its own: Bank connections, Actual sync, Coverage
   by source, Import, and Admin. The home page had grown by accretion until its

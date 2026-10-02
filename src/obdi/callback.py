@@ -199,6 +199,20 @@ def render_page(title: str, body: str) -> bytes:
  /* The headline figure of a position, an account, or an asset. */
  .figure {{ font-size: 1.35rem; font-weight: 700; margin: .3rem 0; }}
  .chart {{ margin: .6rem 0; }}
+ /* A step between months: a text link beside the heading it steps, and a
+    button only because stepping while values are shown must be a POST. It is
+    set after the bare-submit rule above so it wins over it. */
+ .monthnav {{ display: flex; flex-wrap: wrap; gap: 0 .9rem; margin: 0 0 .5rem; }}
+ .monthnav form {{ margin: 0; }}
+ form button.tap {{ display: inline-flex; width: auto; margin: 0; padding: 0 .5rem;
+            border: 0; background: none; color: #2563eb; font: inherit;
+            font-weight: 400; text-decoration: underline; }}
+ /* One transaction per item, so nothing sits in a sideways-scrolling table. */
+ .txns {{ list-style: none; margin: .5rem 0; padding: 0; }}
+ .txns li {{ padding: .6rem 0; border-bottom: 1px solid #8883; }}
+ .txns p {{ margin: .2rem 0; overflow-wrap: anywhere; }}
+ .txn-head {{ display: flex; justify-content: space-between; gap: .75rem; }}
+ .txns .pill {{ white-space: normal; }}
  details summary {{ cursor: pointer; min-height: 44px; display: flex;
                    align-items: center; opacity: .75; }}
  /* The flex layout above removes the browser's own disclosure marker, so a
