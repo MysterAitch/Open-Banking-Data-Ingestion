@@ -17,6 +17,7 @@ otherwise slip through.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import lru_cache
 
 from ..identity import content_key
@@ -26,6 +27,8 @@ from ..statement_columns import Row
 from .base import ParseError, StatementParser
 from .capital_one_pdf import read_statement as read_capital_one
 from .card_statement_pdf import read_statement as read_card_statement
+from .credit_union_pdf import StatementSection
+from .credit_union_pdf import read_document as read_credit_union_document
 from .credit_union_pdf import read_statement as read_credit_union
 from .halifax_account_pdf import read_statement as read_halifax_account
 from .nationwide_pdf import read_statement as read_nationwide
@@ -125,6 +128,26 @@ def _table(payload: bytes) -> list[Row]:
         return rows(temporary)
 
 
+@dataclass(frozen=True)
+class SectionReading:
+    """One account of a multi-account document, with the gate's verdict on it.
+
+    `refusal` is empty when the section's own rows carry its own opening
+    balance to its own closing one and every other rule a statement faces is
+    met; otherwise it says why, and the section yields no rows. The verdict is
+    per section, so one that fails leaves the others usable.
+    """
+
+    key: str
+    label: str
+    reading: StatementReading
+    refusal: str
+
+    @property
+    def rows(self) -> int:
+        return len(self.reading.transactions)
+
+
 class PdfStatementParser(StatementParser):
     """One bank's statement PDF, gated on the statement's own arithmetic."""
 
@@ -177,18 +200,23 @@ class PdfStatementParser(StatementParser):
         """
         return self.reader(_lines(payload))
 
-    def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
-        reading = self.read(payload)
+    def refusal_of(self, reading: StatementReading) -> str:
+        """Why a reading may not be stored, or "" when it may.
+
+        The one copy of the arithmetic gate: a whole statement and each
+        section of a multi-account document are judged by it, so a section
+        cannot pass a rule a statement would fail.
+        """
         if reading.notes:
-            raise ParseError("; ".join(reading.notes))
+            return "; ".join(reading.notes)
         if reading.opening_balance_minor is None or reading.closing_balance_minor is None:
-            raise ParseError(
+            return (
                 f"{self.source}: the statement's own opening and closing "
                 "balances could not both be found, so nothing can check the "
                 "rows against them - refusing rather than importing on trust"
             )
         if not reading.reconciles:
-            raise ParseError(
+            return (
                 f"{self.source}: the rows do not carry the statement's "
                 f"opening balance to its closing one - "
                 f"{reading.discrepancy_minor} minor units unexplained across "
@@ -196,6 +224,50 @@ class PdfStatementParser(StatementParser):
                 "credit read as a spend both look like this; the file is "
                 "kept, but nothing derived from it is stored"
             )
+        return ""
+
+    def sections(self, payload: bytes) -> list[SectionReading] | None:
+        """The accounts of a document that covers several, or None.
+
+        None is the answer for every format that prints one account per
+        document, and for a document of a sectioned format that happens to
+        hold one account: both are read whole by `parse`. A document whose
+        sections cannot be told apart raises `ParseError`.
+        """
+        return None
+
+    def parse_section(
+        self, payload: bytes, key: str, *, account_id: str
+    ) -> Iterator[Transaction]:
+        """One section's rows under `account_id`, after the same gate a statement faces."""
+        found = self.sections(payload)
+        if found is None:
+            raise ParseError(
+                f"{self.source}: this statement is not divided into accounts, so "
+                "there are no sections to read"
+            )
+        for item in found:
+            if item.key != key:
+                continue
+            if item.refusal:
+                raise ParseError(item.refusal)
+            yield from self.rows_of(item.reading, account_id)
+            return
+        raise ParseError(
+            f"{self.source}: the statement holds no section with key {key!r}"
+        )
+
+    def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
+        reading = self.read(payload)
+        reason = self.refusal_of(reading)
+        if reason:
+            raise ParseError(reason)
+        yield from self.rows_of(reading, account_id)
+
+    def rows_of(
+        self, reading: StatementReading, account_id: str
+    ) -> Iterator[Transaction]:
+        """A reading's rows as transactions, id-less, identified by content."""
         for row in reading.transactions:
             yield Transaction(
                 account_id=account_id,
@@ -232,9 +304,30 @@ class ColumnPdfStatementParser(PdfStatementParser):
     """
 
     grid_reader: Callable[[list[list[str]]], StatementReading]
+    #: Reads a document that may cover several accounts, one section each,
+    #: or returns None for one account; see `read_document`.
+    document_reader: Callable[
+        [list[list[str]]], list[StatementSection] | None
+    ] | None = None
 
     def read(self, payload: bytes) -> StatementReading:
         return self.grid_reader(_grid(payload))
+
+    def sections(self, payload: bytes) -> list[SectionReading] | None:
+        if self.document_reader is None:
+            return None
+        found = self.document_reader(_grid(payload))
+        if found is None:
+            return None
+        return [
+            SectionReading(
+                key=item.key,
+                label=item.label,
+                reading=item.reading,
+                refusal=self.refusal_of(item.reading),
+            )
+            for item in found
+        ]
 
 
 class SantanderCreditCardPdfParser(PdfStatementParser):
@@ -278,6 +371,7 @@ class CreditUnionStatementPdfParser(ColumnPdfStatementParser):
     #: only the real thing has.
     requires = ("Payee", "Source")
     grid_reader = staticmethod(read_credit_union)
+    document_reader = staticmethod(read_credit_union_document)
 
 
 class StarlingStatementPdfParser(PdfStatementParser):

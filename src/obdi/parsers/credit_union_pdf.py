@@ -50,31 +50,49 @@ Three things are deliberately NOT trusted:
                          interest and there are real rows where it does
                          not, so a parser that checked the relation would
                          refuse honest statements
+
+A DOCUMENT MAY COVER MANY ACCOUNTS. The issuer's "all accounts" export
+prints each account's pages one after another, the page numbering restarting
+at "Page 1" for each. `read_document` reads such a document one SECTION per
+account, each with its own label, rows and balances, and each is judged by
+the same arithmetic a single statement is (the gate lives with the parser
+class, which holds the one copy of it). Where the sections cannot be told
+apart with confidence the WHOLE document is refused: rows filed under the
+wrong account still balance on their own, so nothing downstream could notice.
+
+LABELS ARE MATCHED WITHOUT REGARD TO SPACING. The reader consumes the
+positional word grid, and there a label can arrive as one word with no space
+inside ("AccountName", "OpeningBalance", "Page1of1") while the text rendering
+of the same page shows it spaced. A rule that insisted on the space would
+read the page in one rendering and refuse it in the other.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date
 
+from .base import ParseError
 from .statement_reading import StatementReading, StatementRow
 
-#: Column names to the field each one carries. Both the first header line
-#: alone and the two lines merged appear here, because a continuation word
-#: that failed to extract is not a reason to refuse a statement - the first
-#: line already names every column unambiguously.
+#: Column names to the field each one carries, written without spaces because
+#: names are compared without them (see `_normalised`). Both the first header
+#: line alone and the two lines merged appear here, because a continuation
+#: word that failed to extract is not a reason to refuse a statement - the
+#: first line already names every column unambiguously.
 _FIELDS = {
     "date": "date",
     "source": "source",
     "payee": "payee",
     "debit": "debit",
-    "debit amount": "debit",
+    "debitamount": "debit",
     "credit": "credit",
-    "credit amount": "credit",
+    "creditamount": "credit",
     "interest": "interest",
-    "interest amount": "interest",
+    "interestamount": "interest",
     "transaction": "total",
-    "transaction total": "total",
+    "transactiontotal": "total",
     "balance": "balance",
 }
 
@@ -114,22 +132,24 @@ _TEXT_FIELDS = frozenset({"source", "payee"})
 #: What a statement's balance labels are, by their normalised text. Their
 #: figures are printed BENEATH them, so a label is recognised by itself and
 #: its figure is looked for on the rows that follow.
-_BALANCE_LABELS = {"opening balance": "opening", "closing balance": "closing"}
+_BALANCE_LABELS = {"openingbalance": "opening", "closingbalance": "closing"}
 
 #: How many rows beneath a balance label its figure may be. The opening
 #: balance's figure sits beneath the account's name, which sits beneath the
 #: label; further than that is a figure belonging to something else.
 _FIGURE_REACH = 3
 
-_PERIOD = re.compile(r"Period\s+\d{2}/\d{2}/\d{4}\s+to\s+(\d{2})/(\d{2})/(\d{4})")
-_ISSUED = re.compile(r"Date\s+of\s+Issue\s+(\d{2})/(\d{2})/(\d{4})")
-_OPENING = re.compile(rf"Opening\s+Balance\b.*?({_AMOUNT.pattern})")
-_CLOSING = re.compile(rf"Closing\s+Balance\b.*?({_AMOUNT.pattern})")
-_PAGE = re.compile(r"Page\s+(\d+)\s+of\s+(\d+)")
+#: Every phrase below tolerates NO space between its words, for the reason
+#: given in the module's account of labels.
+_PERIOD = re.compile(r"Period\s*\d{2}/\d{2}/\d{4}\s*to\s*(\d{2})/(\d{2})/(\d{4})")
+_ISSUED = re.compile(r"Date\s*of\s*Issue\s*(\d{2})/(\d{2})/(\d{4})")
+_OPENING = re.compile(rf"Opening\s*Balance.*?({_AMOUNT.pattern})")
+_CLOSING = re.compile(rf"Closing\s*Balance.*?({_AMOUNT.pattern})")
+_PAGE = re.compile(r"Page\s*(\d+)\s*of\s*(\d+)")
 
 #: The label whose value - on the row BENEATH it, in the same column - is
 #: the account this section covers.
-_ACCOUNT_LABEL = "account name"
+_ACCOUNT_LABEL = "accountname"
 
 #: A rate written into an account's name, which is how this issuer states a
 #: loan's terms. Anchored at the end because the name is what precedes it.
@@ -142,7 +162,12 @@ def _minor(text: str) -> int:
 
 
 def _normalised(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip().casefold()
+    """A label with its case and every space removed, for comparing labels.
+
+    Spaces go entirely rather than being collapsed: the word grid can deliver
+    "Opening Balance" as one word, and the two spellings must be one label.
+    """
+    return re.sub(r"\s+", "", text).casefold()
 
 
 def _amount(text: str) -> int | None:
@@ -177,6 +202,15 @@ def _rate_in(name: str) -> float | None:
     return float(found.group(1)) if found else None
 
 
+def _page_marks(grid: list[list[str]]) -> list[tuple[int, int, int]]:
+    """(row, page, of how many) for every page marker in a grid."""
+    return [
+        (position, int(mark.group(1)), int(mark.group(2)))
+        for position, row in enumerate(grid)
+        if (mark := _PAGE.search(" ".join(cell.strip() for cell in row if cell.strip())))
+    ]
+
+
 def sections(grid: list[list[str]]) -> list[list[list[str]]]:
     """One grid per account section of an export covering several accounts.
 
@@ -194,11 +228,7 @@ def sections(grid: list[list[str]]) -> list[list[list[str]]]:
     - and so the single-account case stays exactly what it is today: one
     section, read whole.
     """
-    marks = [
-        (position, int(mark.group(1)), int(mark.group(2)))
-        for position, row in enumerate(grid)
-        if (mark := _PAGE.search(" ".join(cell.strip() for cell in row if cell.strip())))
-    ]
+    marks = _page_marks(grid)
     # BEFORE a restart, not after a completion. The page number is printed
     # in the page HEADER, above the account name box, so a marker opens the
     # page it numbers - and a section therefore begins AT its "Page 1 of N"
@@ -447,24 +477,36 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
     from the first page that states it and never re-read, and a page with
     nothing on it is an ordinary page rather than a fault.
     """
-    reading = StatementReading()
     parts = sections(grid)
     if len(parts) > 1:
         # One statement is read into one account. A document of several
         # accounts read whole would take the first account's name, its
         # opening balance and the LAST account's closing balance, and file
-        # every row under one account.
-        reading.notes.append(
+        # every row under one account. `read_document` is the door that
+        # reads such a document one account at a time.
+        refused = StatementReading()
+        refused.notes.append(
             f"this statement covers {len(parts)} accounts (its page numbering "
             f"restarts {len(parts) - 1} time(s)) and so cannot be assigned to "
             "one account - refusing rather than filing every account's rows "
             "under one"
         )
-        return reading
+        return refused
+    return _read_one(grid)[0]
+
+
+def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
+    """One account's grid, read, with every account name it printed.
+
+    The names are returned beside the reading because the section reader
+    needs them to decide whether a boundary was found, and they are only
+    known while the rows are being walked.
+    """
+    reading = StatementReading()
     fields: dict[int, str] = {}
     issued: date | None = None
     account_name = ""
-    names_seen: set[str] = set()
+    names_seen: list[str] = []
     name_column: int | None = None
     # A section's last row is its closing balance; anything below it is a
     # summary of what has already been counted.
@@ -483,7 +525,8 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
         if name_column is not None:
             name = _nearest_text(row, name_column)
             if name:
-                names_seen.add(name)
+                if name not in names_seen:
+                    names_seen.append(name)
                 account_name = account_name or name
             name_column = None
         label = next(
@@ -538,7 +581,7 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
             # The figures are printed beneath the labels, so the table is
             # over at a closing label whether or not its figure is found.
             awaiting, reach = labels, _FIGURE_REACH
-            if "closing balance" in labels.values():
+            if "closingbalance" in labels.values():
                 below_the_table = True
             continue
 
@@ -588,4 +631,110 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
             "with no transactions on it, which is the one failure that looks "
             "exactly like a quiet month"
         )
-    return reading
+    return reading, names_seen
+
+
+@dataclass(frozen=True)
+class StatementSection:
+    """One account of a document that covers several.
+
+    `label` is what the document itself calls the account, as printed, and is
+    for showing a person. `key` is what identifies the account BETWEEN
+    documents, derived from the label by `section_key`.
+    """
+
+    key: str
+    label: str
+    reading: StatementReading
+
+
+def section_key(label: str) -> str:
+    """What names an account across documents, from the label it is printed under.
+
+    The label with a loan's rate removed (a rate changes and the account does
+    not), then reduced to its letters and digits in lower case, so a change of
+    case, spacing, or punctuation between two exports does not make one
+    account two.
+    """
+    return re.sub(r"[\W_]+", "", account_stem(label).casefold())
+
+
+def _numbering_is_whole(marks: list[tuple[int, int, int]]) -> bool:
+    """Whether a section's page markers are one complete, in-order run.
+
+    "Page 1 of 2" then "Page 2 of 2". A section that begins at a restart but
+    does not finish its own count has either lost a page or been cut in the
+    wrong place, and in both cases what lies beyond it is not known.
+    """
+    if not marks:
+        return False
+    total = marks[0][2]
+    return all(of == total for _, _, of in marks) and [
+        page for _, page, _ in marks
+    ] == list(range(1, total + 1))
+
+
+def read_document(grid: list[list[str]]) -> list[StatementSection] | None:
+    """The document's accounts, one section each, or None for a single account.
+
+    HOW A SECTION IS FOUND. The page numbering restarts at each account (see
+    `sections`), and the account's own label sits beneath "Account Name" on
+    every one of its pages. A boundary is accepted only when the evidence
+    agrees with itself:
+
+      each section's page markers form one complete run, "Page 1 of N" to
+      "Page N of N"
+      each section prints exactly one account, by `section_key`
+
+    Anything else is a boundary the document does not settle, and raises
+    `ParseError` for the WHOLE document. The alternative - reading the
+    sections that look fine - is the one that files an account's rows under
+    its neighbour, which the arithmetic gate cannot see because each walk
+    still balances on its own.
+
+    Two sections printing the same label are kept apart by an ordinal on BOTH
+    keys, so a document holding the label once and another holding it twice
+    do not silently agree about which one is which.
+
+    A single-account document returns None, and is read by `read_statement`
+    exactly as it always was.
+    """
+    parts = sections(grid)
+    if len(parts) < 2:
+        return None
+    found: list[tuple[str, str, StatementReading]] = []
+    for number, part in enumerate(parts, start=1):
+        if not _numbering_is_whole(_page_marks(part)):
+            raise ParseError(
+                f"this statement covers {len(parts)} accounts but the page "
+                f"numbering of section {number} is not one complete run of "
+                "pages - where the accounts begin and end cannot be told, so "
+                "the whole document is refused rather than guessed at"
+            )
+        reading, names = _read_one(part)
+        keys = {section_key(name) for name in names}
+        if not names or "" in keys:
+            raise ParseError(
+                f"this statement covers {len(parts)} accounts but section "
+                f"{number} prints no account name, so it cannot be told from "
+                "the others - the whole document is refused rather than "
+                "guessed at"
+            )
+        if len(keys) > 1:
+            raise ParseError(
+                f"this statement covers {len(parts)} accounts but section "
+                f"{number} names more than one account - a page marker was "
+                "lost, so the whole document is refused rather than guessed at"
+            )
+        found.append((names[0], section_key(names[0]), reading))
+    held = [key for _, key, _ in found]
+    seen: dict[str, int] = {}
+    result: list[StatementSection] = []
+    for label, key, reading in found:
+        if held.count(key) > 1:
+            seen[key] = seen.get(key, 0) + 1
+            unique = f"{key}#{seen[key]}"
+        else:
+            unique = key
+        result.append(StatementSection(key=unique, label=label, reading=reading))
+    return result
