@@ -26,6 +26,24 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.250] - 2026-10-02
+
+### Added
+- **A second credit card statement layout can be read**, written from the
+  masked layout of eight kept statements whose issuer the masking hides. It is
+  refused unless its table carries the previous balance to the new one. It has
+  not yet read a real statement, and its source name is a placeholder until
+  the issuer is confirmed.
+
+### Changed
+- **Kept statements says whether each recognised statement can actually be
+  read.** It tries the reading without storing anything: one that reads shows
+  its row count, and one its parser refuses is listed apart with the reason,
+  digits masked. Previously "recognised" was shown as "waiting only for an
+  account".
+- **Virgin Money statements are recognised by their period heading**, so a
+  payee's name on another statement cannot claim it.
+
 ## [0.4.249] - 2026-10-02
 
 ### Added

@@ -31,6 +31,11 @@ from collections.abc import Iterable
 #: a source prefix would be indistinguishable in a qualified reference.
 PROVIDERS = frozenset({"truelayer", "starling", "file"})
 
+#: The card statement whose issuer the masked shapes could not name. A
+#: placeholder, declared once so naming the issuer is a change to this line
+#: alone: the parser and the registry below both read it.
+UK_CARD_STATEMENT_SOURCE = "uk-card-statement-pdf"
+
 #: Sources that name a FILE FORMAT rather than a provider pipe: an
 #: exported statement identifies itself by the parser that read it, since
 #: the same bank's CSV and its API are different evidence with different
@@ -50,6 +55,7 @@ FILE_SOURCES = frozenset(
         "virgin-money-cc-pdf",
         "credit-union-pdf",
         "starling-statement-pdf",
+        UK_CARD_STATEMENT_SOURCE,
         # A statement kept before anyone has decided which bank wrote it,
         # let alone which account it belongs to. It becomes one of the
         # issuer names above once a parser claims it.

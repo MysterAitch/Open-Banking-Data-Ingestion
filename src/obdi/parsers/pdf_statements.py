@@ -21,8 +21,10 @@ from functools import lru_cache
 
 from ..identity import content_key
 from ..models import SourceTier, Transaction
+from ..namespaces import UK_CARD_STATEMENT_SOURCE
 from ..statement_columns import Row
 from .base import ParseError, StatementParser
+from .card_statement_pdf import read_statement as read_card_statement
 from .credit_union_pdf import read_statement as read_credit_union
 from .santander_pdf import read_statement as read_santander
 from .starling_pdf import read_statement as read_starling
@@ -144,10 +146,13 @@ class PdfStatementParser(StatementParser):
     def sniff(self, payload: bytes) -> bool:
         if not payload.startswith(PDF_MAGIC):
             return False
-        lines = _lines(payload)
+        # Whitespace is squeezed on both sides: the text layer doubles the gap
+        # inside a phrase on some documents ("Statement  period:"), and a phrase
+        # a parser requires must not depend on how wide that gap came out.
+        lines = [" ".join(line.split()).casefold() for line in _lines(payload)]
         wanted = (self.marker, *self.requires)
         return all(
-            any(word.casefold() in line.casefold() for line in lines)
+            any(" ".join(word.split()).casefold() in line for line in lines)
             for word in wanted
         )
 
@@ -224,16 +229,23 @@ class ColumnPdfStatementParser(PdfStatementParser):
 class SantanderCreditCardPdfParser(PdfStatementParser):
     source = "santander-cc-pdf"
     marker = "Santander"
-    #: The line its reader takes the closing balance from. A payee is free
-    #: text, so another bank's statement can name Santander (a direct debit
-    #: to one of its cards) without being one of its statements.
-    requires = ("Your new balance",)
+    #: The line its reader takes the closing balance from, colon included: the
+    #: colon is what separates it from another issuer's "Your new balance"
+    #: figure, which a card statement of a different layout also prints. A payee
+    #: is free text, so another bank's statement can name Santander (a direct
+    #: debit to one of its cards) without being one of its statements.
+    requires = ("Your new balance:",)
     reader = staticmethod(read_santander)
 
 
 class VirginMoneyCreditCardPdfParser(PdfStatementParser):
     source = "virgin-money-cc-pdf"
     marker = "Virgin Money"
+    #: The heading its reader takes the statement's dates from. A payee is free
+    #: text, so another issuer's statement can name Virgin Money (a payment to
+    #: one of its cards) without being one of its statements, and the name alone
+    #: then claims a document this reader cannot read.
+    requires = ("Statement period:",)
     reader = staticmethod(read_virgin)
 
 
@@ -284,6 +296,28 @@ class StarlingStatementPdfParser(PdfStatementParser):
 
     def read(self, payload: bytes) -> StatementReading:
         return self.table_reader(_table(payload))
+
+
+class UkCardStatementPdfParser(PdfStatementParser):
+    """A credit card statement whose issuer the masked shapes did not name.
+
+    Recognised by the table's own heading together with the summary labels and
+    the previous-statement row, never by the issuer's name: the name was masked
+    when the layout was read, and it is free text in every other statement's
+    payees. The source is a placeholder (`UK_CARD_STATEMENT_SOURCE`) to be
+    renamed once the issuer is known.
+    """
+
+    source = UK_CARD_STATEMENT_SOURCE
+    marker = "Date of transaction"
+    requires = (
+        "Summary of your account",
+        "BALANCE FROM",
+        "Balance Type",
+        "Minimum payment due",
+        "Your credit limit",
+    )
+    reader = staticmethod(read_card_statement)
 
 
 def _comparable(reading: StatementReading) -> tuple[object, ...]:
@@ -359,4 +393,5 @@ PDF_PARSERS: tuple[type[PdfStatementParser], ...] = (
     VirginMoneyCreditCardPdfParser,
     CreditUnionStatementPdfParser,
     StarlingStatementPdfParser,
+    UkCardStatementPdfParser,
 )

@@ -30,12 +30,15 @@ from obdi.parsers.pdf_statements import (
     CreditUnionStatementPdfParser,
     SantanderCreditCardPdfParser,
     StarlingStatementPdfParser,
+    UkCardStatementPdfParser,
     VirginMoneyCreditCardPdfParser,
 )
 from test_credit_union_statement import build_columned_pdf
 from test_starling_statement import CONTRACT as STARLING
 from test_starling_statement import build_starling_pdf
 from test_statement_shape import build_pdf
+from test_uk_card_statement import CONTRACT as UK_CARD
+from test_uk_card_statement import build_card_statement_pdf
 
 SANTANDER = [
     "Santander UK plc. Registered Office: 2 Triton Square",
@@ -114,6 +117,13 @@ CASES = {
         "Direct Payment",
         "Direct Payment",
         build=build_starling_pdf,
+    ),
+    UkCardStatementPdfParser: Case(
+        UK_CARD,
+        "EXAMPLE SHOP",
+        "Direct Payment",
+        "Direct Payment",
+        build=build_card_statement_pdf,
     ),
 }
 

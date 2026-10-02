@@ -323,17 +323,56 @@ class TestAssigningManyAtOnce:
     def test_PageOffersOneBulkForm_PerParserReadingTwoOrMore(
         self, serve, three_months
     ):
+        """March and May read; April is recognised and refused, so it is not
+        offered: a form that names it would promise a reading that fails."""
         page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
 
         assert page.count('action="/statements-assign"') == 1
-        assert "Give these 3 statements to" in page
-        form = page[page.index('action="/statements-assign"'):]
-        for name in (
-            "2026.03 - Example Card.pdf",
-            "2026.04 - Example Card.pdf",
-            "2026.05 - Example Card.pdf",
-        ):
-            assert str(_id_of(three_months, name)) in form.split("</form>")[0]
+        assert "Give these 2 statements to" in page
+        form = page[page.index('action="/statements-assign"'):].split("</form>")[0]
+        for name in ("2026.03 - Example Card.pdf", "2026.05 - Example Card.pdf"):
+            assert f'{_id_of(three_months, name)}' in form
+        ids = re.search(r'name="artefacts" value="([^"]*)"', form)
+        assert ids is not None
+        assert str(_id_of(three_months, "2026.04 - Example Card.pdf")) not in ids.group(
+            1
+        ).split(",")
+
+    def test_KeptStatements_AStatementItsParserRefuses_IsListedApartWithTheReason(
+        self, serve, three_months
+    ):
+        """Recognised is not readable. April's rows do not carry its opening
+        balance to its closing one, so it is not "waiting only for an account"."""
+        page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
+
+        assert "2 waiting only for an account" in page
+        assert "1 recognised but refused" in page
+        refused = _group(page, "Recognised, but the reading is refused (1)")
+        assert "2026.04 - Example Card.pdf" in refused
+        assert "unexplained" in refused, "the parser's own reason"
+        assert "/statement-assign" not in refused
+        waiting = _group(page, "Waiting only for an account (2)")
+        assert "2026.04 - Example Card.pdf" not in waiting
+
+    def test_KeptStatements_ARefusedStatementsReason_CarriesNoFigure(
+        self, serve, three_months
+    ):
+        """The gate's message states the discrepancy; on a GET it is masked.
+        April is out by 1,137.57 (1,234.56 brought forward, 3.00 spent, 99.99
+        stated)."""
+        page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
+
+        assert "113757" not in page and "1,137.57" not in page
+        assert "1,234.56" not in page and "123456" not in page
+
+    def test_KeptStatements_AReadableStatement_SaysHowManyRowsItReads(
+        self, serve, three_months
+    ):
+        page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
+
+        waiting = _group(page, "Waiting only for an account (2)")
+        assert "reads 7 rows" in waiting, "May"
+        assert "reads 2 rows" in waiting, "March"
 
     def test_BulkAssign_WhenOneStatementDoesNotBalance_ReadsTheOthersAndNamesTheRefusal(
         self, serve, three_months

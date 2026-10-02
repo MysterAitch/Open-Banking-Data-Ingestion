@@ -378,6 +378,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 if TYPE_CHECKING:
     from .models import Transaction
+    from .parsers.base import StatementParser
     from .rebuild import RebuildReport
 
 
@@ -2781,6 +2782,24 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     # always meet the same parsers. Reading a PDF's text is slow enough that
     # re-reading every kept statement on each page view is not affordable.
     parser_by_digest: dict[str, str | None] = {}
+    #: (rows read, why refused) per digest, from reading the statement
+    #: without storing anything.
+    #: A parser that recognises a statement may still refuse it, so
+    #: "recognised" alone told a person a statement was ready when its own
+    #: balances did not carry.
+    reading_by_digest: dict[str, tuple[int | None, str]] = {}
+
+    def _trial_reading(parser: StatementParser, payload: bytes) -> tuple[int | None, str]:
+        import re
+
+        from .errors import DataError
+
+        try:
+            return sum(1 for _ in parser.parse(payload, account_id=UNASSIGNED_ACCOUNT)), ""
+        except (DataError, ValueError) as exc:
+            # Shown on a GET: a refusal states a discrepancy in figures, so
+            # every digit is masked and the words are kept.
+            return None, re.sub(r"\d", "9", str(exc))[:300]
 
     def kept_statements() -> list[dict[str, object]]:
         """Every kept statement, however old and however many.
@@ -2804,10 +2823,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         "SELECT payload FROM raw_artefacts WHERE rowid = ?",
                         (row["rowid"],),
                     ).fetchone()
+                    payload = bytes(held["payload"])
                     try:
-                        parser_by_digest[digest] = detect(bytes(held["payload"])).source
+                        parser = detect(payload)
                     except (DataError, ValueError):
                         parser_by_digest[digest] = None
+                        reading_by_digest[digest] = (None, "")
+                    else:
+                        parser_by_digest[digest] = parser.source
+                        reading_by_digest[digest] = _trial_reading(parser, payload)
+                rows_read, refusal = reading_by_digest[digest]
                 listing.append(
                     {
                         "id": int(row["rowid"]),
@@ -2815,6 +2840,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         "fetched_at": str(row["fetched_at"]),
                         "account_ref": str(row["account_ref"]),
                         "parser": parser_by_digest[digest],
+                        "rows": rows_read,
+                        "refusal": refusal,
                     }
                 )
         return listing

@@ -5039,9 +5039,19 @@ class ConnectionHandler(
         entries = hook()
         labels = self._account_labels()
         can_assign = self.bound_config.assign_kept_statement is not None
+        # Recognised is not readable: a parser may claim a statement and then
+        # refuse it because its rows do not carry its own balances.
         waiting = [
             item for item in entries
-            if item["account_ref"] == UNASSIGNED_ACCOUNT and item["parser"]
+            if item["account_ref"] == UNASSIGNED_ACCOUNT
+            and item["parser"]
+            and not item.get("refusal")
+        ]
+        refused = [
+            item for item in entries
+            if item["account_ref"] == UNASSIGNED_ACCOUNT
+            and item["parser"]
+            and item.get("refusal")
         ]
         no_parser = [
             item for item in entries
@@ -5077,6 +5087,13 @@ class ConnectionHandler(
                 reader = (
                     html.escape(str(parser)) if parser else "no parser for this layout yet"
                 )
+                rows_read = item.get("rows")
+                refusal = str(item.get("refusal") or "")
+                if refusal:
+                    reader += f'<br><span class="warn">refused: {html.escape(refusal)}</span>'
+                elif isinstance(rows_read, int) and ref == UNASSIGNED_ACCOUNT:
+                    noun = "row" if rows_read == 1 else "rows"
+                    reader += f", reads {rows_read} {noun} and its balances carry"
                 kept = str(item["fetched_at"])[:16].replace("T", " ")
                 form = (
                     "<details><summary>Give it an account</summary>"
@@ -5133,11 +5150,18 @@ class ConnectionHandler(
                         + '<p><button type="submit">Assign them all and read in</button></p>'
                         "</form></div>"
                     )
+            refused_count = (
+                f"{len(refused)} recognised but refused, " if refused else ""
+            )
             body = (
                 f'<p class="muted">{len(waiting)} waiting only for an account, '
+                f"{refused_count}"
                 f"{len(no_parser)} with no parser yet, {len(assigned)} assigned.</p>"
                 + group(
                     "Waiting only for an account", waiting, assignable=True, lead=bulk
+                )
+                + group(
+                    "Recognised, but the reading is refused", refused, assignable=False
                 )
                 + group("No parser yet", no_parser, assignable=False)
                 + group("Assigned", assigned, assignable=False)

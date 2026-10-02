@@ -217,7 +217,8 @@ class TestAKeptStatementWithNoAccountAddsNoRows:
         assert (report.kept_unassigned, report.kept_readable) == (2, 1)
         described = report.describe()
         assert "2 kept statements" in described
-        assert "1 a parser can read once it has an account" in described
+        assert "1 a parser recognises" in described
+        assert "1 with no parser yet" in described
 
     def test_Rebuild_WithNoKeptStatements_SaysNothingAboutThem(self, tmp_path):
         from obdi.rebuild import rebuild_from_raw

@@ -140,10 +140,10 @@ class RebuildReport:
             unread = self.kept_unassigned - self.kept_readable
             lines.append(
                 f"  {self.kept_unassigned} kept {noun} with no account yet, so "
-                f"none was read into rows: {self.kept_readable} a parser can "
-                f"read once it has an account, {unread} with no parser yet "
-                "for its layout. Give one an account from the Statement shape "
-                "page."
+                f"none was read into rows: {self.kept_readable} a parser "
+                f"recognises, {unread} with no parser yet for its layout. "
+                "The Kept statements page says which, and whether each "
+                "recognised one can actually be read."
             )
         return "\n".join(lines)
 
