@@ -100,8 +100,14 @@ test('accounts existing in Actual but bound to nothing are named as strays', asy
 
 const hex = (seed) => seed.repeat(64).slice(0, 64);
 
+// The selection with nothing linked to look up: a context whose client is
+// never asked anything.
+async function chosen(expected, rows) {
+  const { choosePrunable, createLinkContext } = await import('./audit.mjs');
+  return choosePrunable(createLinkContext({}), 'act-1', expected, rows);
+}
+
 test('prunable rows are ours-and-unexpected only; yours are untouchable', async () => {
-  const { choosePrunable } = await import('./audit.mjs');
   const expected = new Set([`${hex('1')}:0`, `${hex('2')}:0`]);
   const rows = [
     { id: 'a', imported_id: `${hex('1')}:0` },
@@ -109,12 +115,13 @@ test('prunable rows are ours-and-unexpected only; yours are untouchable', async 
     { id: 'c', imported_id: null },
     { id: 'd', imported_id: `${hex('e')}:1`, is_child: true },
   ];
-  const prunable = choosePrunable(expected, rows);
+  const { prunable, left } = await chosen(expected, rows);
   assert.deepEqual(prunable, [{ id: 'b', imported_id: `${hex('e')}:0` }]);
+  assert.deepEqual(left, {});
 });
 
 test('an imported id that is not obdi-shaped is untouchable, like no id at all', async () => {
-  const { choosePrunable, isObdiImportedId } = await import('./audit.mjs');
+  const { isObdiImportedId } = await import('./audit.mjs');
   const expected = new Set([`${hex('1')}:0`]);
   const rows = [
     { id: 'a', imported_id: 'FITID-20260803-0001' },
@@ -122,8 +129,9 @@ test('an imported id that is not obdi-shaped is untouchable, like no id at all',
     { id: 'c', imported_id: `${hex('a')}:0`.toUpperCase() },
     { id: 'd', imported_id: `${hex('e')}:2` },
   ];
-  const prunable = choosePrunable(expected, rows);
+  const { prunable, left } = await chosen(expected, rows);
   assert.deepEqual(prunable, [{ id: 'd', imported_id: `${hex('e')}:2` }]);
+  assert.deepEqual(left, { foreign: 3 }, 'counted as orphaned by the audit, never removed');
   assert.equal(isObdiImportedId(`${hex('e')}:2`), true);
   assert.equal(isObdiImportedId('FITID-20260803-0001'), false);
 });
@@ -151,9 +159,9 @@ test('prune reports the foreign-id rows it deliberately left alone', async () =>
   assert.equal(report[0].foreign_ids, 1);
 });
 
-test('an orphan linked as a transfer is left in place and reported, never deleted', async () => {
+test('an orphan linked to a leg that cannot be found is left in place and reported, never deleted', async () => {
   // Deleting one leg of a linked pair makes Actual delete the other leg too,
-  // and the other leg is a row obdi still expects.
+  // so a link that cannot be inspected is not one that can be undone.
   const { pruneAccounts } = await import('./audit.mjs');
   const deleted = [];
   const client = {
@@ -403,44 +411,263 @@ test('a payment id is still ours and is not mistaken for an opening id', async (
 test('an opening row the expected set no longer names is prunable as ours', async () => {
   // The account stopped having an opening balance, so its row is an orphan,
   // and an orphan is deleted only if it is provably ours.
-  const { choosePrunable } = await import('./audit.mjs');
   const expected = new Set([`${hex('1')}:0`]);
   const rows = [
     { id: 'pay', imported_id: `${hex('1')}:0` },
     { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
   ];
-  assert.deepEqual(choosePrunable(expected, rows), [
+  assert.deepEqual((await chosen(expected, rows)).prunable, [
     { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
   ]);
 });
 
 test('an opening row the expected set still names is never pruned', async () => {
-  const { choosePrunable } = await import('./audit.mjs');
   const expected = new Set([`${hex('1')}:0`, 'obdi-opening:halifax-current']);
   const rows = [
     { id: 'pay', imported_id: `${hex('1')}:0` },
     { id: 'opening', imported_id: 'obdi-opening:halifax-current' },
   ];
-  assert.deepEqual(choosePrunable(expected, rows), []);
+  assert.deepEqual((await chosen(expected, rows)).prunable, []);
 });
 
 test('an opening row in the wrong account is an orphan there, and prunable', async () => {
   // A mis-binding leaves one account holding another's opening row; the id
   // names the account it belongs to, so it is not expected in this one.
-  const { choosePrunable } = await import('./audit.mjs');
   const expected = new Set([`${hex('1')}:0`, 'obdi-opening:this-one']);
   const rows = [{ id: 'stray', imported_id: 'obdi-opening:somebody-else' }];
-  assert.deepEqual(choosePrunable(expected, rows), [
+  assert.deepEqual((await chosen(expected, rows)).prunable, [
     { id: 'stray', imported_id: 'obdi-opening:somebody-else' },
   ]);
 });
 
-test('an opening row that is linked as a transfer is left in place like any linked orphan', async () => {
-  const { choosePrunable, countLinkedOrphans } = await import('./audit.mjs');
+test('an opening row that is linked to a leg that cannot be found is left, like any such orphan', async () => {
   const expected = new Set([`${hex('1')}:0`]);
   const rows = [{ id: 'o', imported_id: 'obdi-opening:x', transfer_id: 'partner' }];
-  assert.deepEqual(choosePrunable(expected, rows), []);
-  assert.equal(countLinkedOrphans(expected, rows), 1);
+  const { prunable, left } = await chosen(expected, rows);
+  assert.deepEqual(prunable, []);
+  assert.deepEqual(left, { partner_missing: 1 });
+});
+
+// ---- Linked orphans: the selection and the order of the calls, on a stand-in
+// engine. The real engine's behaviour is measured in
+// linked-orphans.engine.test.mjs; these pin the decisions and the sequence.
+
+const TO_NAT = 'payee-to-nat';
+const TO_MAIN = 'payee-to-main';
+
+// Two accounts, MAIN and NAT, holding the rows given. `calls` records every
+// change in order; an update that clears the link also clears the other side's
+// pointer only if the test says so (the real engine does not), and a delete
+// takes a row with it only if it is the one named.
+function twoAccounts({ main, nat }, behaviour = {}) {
+  const store = { 'act-main': main.map((r) => ({ ...r })), 'act-nat': nat.map((r) => ({ ...r })) };
+  const calls = [];
+  const all = () => [...store['act-main'], ...store['act-nat']];
+  return {
+    store,
+    calls,
+    getAccounts: async () => [
+      { id: 'act-main', name: 'MAIN' },
+      { id: 'act-nat', name: 'NAT' },
+    ],
+    getPayees: async () => [
+      { id: TO_NAT, transfer_acct: 'act-nat' },
+      { id: TO_MAIN, transfer_acct: 'act-main' },
+    ],
+    getTransactions: async (accountId, from, to) =>
+      store[accountId].filter((r) => r.date >= from && r.date <= to).map((r) => ({ ...r })),
+    updateTransaction: async (id, fields) => {
+      calls.push(['update', id, fields]);
+      if (behaviour.failUpdate === id) throw new Error('update refused');
+      Object.assign(all().find((r) => r.id === id), fields);
+    },
+    deleteTransaction: async (id) => {
+      calls.push(['delete', id]);
+      if (behaviour.failDelete) throw new Error('delete refused');
+      for (const rows of Object.values(store)) {
+        const at = rows.findIndex((r) => r.id === id);
+        if (at >= 0) rows.splice(at, 1);
+      }
+    },
+  };
+}
+
+const legPair = (orphanId, partnerId, partnerExtra = {}, orphanExtra = {}) => ({
+  main: [
+    {
+      id: orphanId,
+      imported_id: `${hex('a')}:0`,
+      date: '2026-09-07',
+      amount: -500,
+      payee: TO_NAT,
+      transfer_id: partnerId,
+      ...orphanExtra,
+    },
+  ],
+  nat: [
+    {
+      id: partnerId,
+      imported_id: `${hex('b')}:0`,
+      date: '2026-09-09',
+      amount: 500,
+      payee: TO_MAIN,
+      transfer_id: orphanId,
+      ...partnerExtra,
+    },
+  ],
+});
+
+const NAT_EXPECTS = [{ imported_id: `${hex('b')}:0` }];
+const MAIN_EXPECTS = [{ imported_id: `${hex('1')}:0` }];
+
+test('a linked orphan whose partner is ours is unlinked on both sides, then only the orphan is deleted', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = twoAccounts(legPair('o', 'p'));
+
+  const report = await pruneAccounts(
+    client,
+    { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+    { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 } },
+  );
+
+  assert.deepEqual(client.calls, [
+    ['update', 'p', { transfer_id: null, payee: null }],
+    ['update', 'o', { transfer_id: null, payee: null }],
+    ['delete', 'o'],
+  ]);
+  const main = report.find((e) => e.account_id === 'act-main');
+  assert.equal(main.removed, 1);
+  assert.equal(main.unlinked, 1);
+  assert.equal(client.store['act-nat'].length, 1, 'the partner is not deleted');
+});
+
+test('a linked orphan is left, with its reason, when the partner is not an obdi import', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  for (const imported_id of ['FITID-9', null]) {
+    const client = twoAccounts(legPair('o', 'p', { imported_id }));
+
+    const report = await pruneAccounts(
+      client,
+      { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+      { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 } },
+    );
+
+    assert.deepEqual(client.calls, [], String(imported_id));
+    const main = report.find((e) => e.account_id === 'act-main');
+    assert.deepEqual(main.left, { partner_not_ours: 1 });
+    assert.equal(main.removed, 0);
+  }
+});
+
+test('a linked orphan is left when either leg is reconciled or split, or the partner is linked elsewhere', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const cases = [
+    ['reconciled', {}, { reconciled: true }],
+    ['reconciled', { reconciled: true }, {}],
+    ['split', { is_parent: true }, {}],
+    ['split', {}, { is_parent: true }],
+    ['partner_linked_elsewhere', { transfer_id: 'somebody-else' }, {}],
+  ];
+  for (const [reason, partnerExtra, orphanExtra] of cases) {
+    const client = twoAccounts(legPair('o', 'p', partnerExtra, orphanExtra));
+
+    const report = await pruneAccounts(
+      client,
+      { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+      { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 } },
+    );
+
+    assert.deepEqual(client.calls, [], reason);
+    assert.deepEqual(report.find((e) => e.account_id === 'act-main').left, { [reason]: 1 });
+  }
+});
+
+test('a partner that no longer points back is not touched: only the orphan is cleared before the delete', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = twoAccounts(legPair('o', 'p', { transfer_id: null }));
+
+  await pruneAccounts(
+    client,
+    { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+    { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 } },
+  );
+
+  assert.deepEqual(client.calls, [
+    ['update', 'o', { transfer_id: null, payee: null }],
+    ['delete', 'o'],
+  ]);
+});
+
+test('the count shown covers linked orphans that will be removed: a lower one changes nothing at all', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = twoAccounts(legPair('o', 'p'));
+
+  const report = await pruneAccounts(
+    client,
+    { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+    { confirmed: { 'act-main': 0 }, settle: { holdMs: 0 } },
+  );
+
+  assert.deepEqual(client.calls, []);
+  assert.match(report.find((e) => e.account_id === 'act-main').refused, /holds 1, more than the 0/);
+});
+
+test('an unlink that fails stops the account before anything is deleted', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = twoAccounts(legPair('o', 'p'), { failUpdate: 'p' });
+
+  const report = await pruneAccounts(
+    client,
+    { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+    { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 } },
+  );
+
+  const main = report.find((e) => e.account_id === 'act-main');
+  assert.match(main.stopped, /unlinking failed \(update refused\)/);
+  assert.equal(main.removed, 0);
+  assert.equal(client.calls.some(([kind]) => kind === 'delete'), false);
+});
+
+test('the progress heartbeat counts linked orphans like any other', async () => {
+  const { pruneAccounts } = await import('./audit.mjs');
+  const client = twoAccounts(legPair('o', 'p'));
+  const beats = [];
+
+  await pruneAccounts(
+    client,
+    { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS },
+    { confirmed: { 'act-main': 1 }, settle: { holdMs: 0 }, onProgress: (beat) => beats.push(beat) },
+  );
+
+  assert.deepEqual(beats, [{ account_id: 'act-main', name: 'MAIN', done: 1, total: 1 }]);
+});
+
+test('the audit says how many orphans a removal will take and how many it leaves, by reason', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const pair = legPair('o', 'p', { imported_id: 'FITID-9' });
+  const client = {
+    ...twoAccounts({
+      main: [
+        ...pair.main,
+        { id: 'plain', imported_id: `${hex('c')}:0`, date: '2026-09-01', amount: -1 },
+        { id: 'fx', imported_id: 'FITID-1', date: '2026-09-01', amount: -2 },
+      ],
+      nat: pair.nat,
+    }),
+    getAccountBalance: async () => 0,
+  };
+
+  const report = await auditAccounts(client, { 'act-main': MAIN_EXPECTS, 'act-nat': NAT_EXPECTS });
+
+  const main = report.find((e) => e.account_id === 'act-main');
+  assert.equal(main.orphaned, 3);
+  assert.equal(main.orphaned_will_go, 1);
+  assert.deepEqual(main.orphaned_will_stay, { partner_not_ours: 1, foreign: 1 });
+  assert.equal(
+    main.orphaned_will_go + Object.values(main.orphaned_will_stay).reduce((a, b) => a + b, 0),
+    main.orphaned,
+    'the two add up to the ceiling',
+  );
 });
 
 test('prune counts an opening row it removes and still refuses an empty expected set', async () => {

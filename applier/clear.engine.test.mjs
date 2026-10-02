@@ -11,14 +11,17 @@
  *   one row carrying another importer's id      (FITID-0001)
  *   one obdi-shaped row that is a leg of a linked transfer (LEG_MAIN)
  * POT holds the other leg of that transfer (LEG_POT) and an ordinary row
- * (P5), and still expects both. The expectations were fixed before the first
- * run:
+ * (P5), and still expects both. The linked leg is removable - it is unlinked
+ * first, so POT's leg survives - which linked-orphans.engine.test.mjs covers
+ * in depth; here it counts towards the ceiling like any other orphan. The
+ * expectations were fixed before the first run:
  *   - MAIN expecting nothing, no confirmed count      -> skipped, 7 rows stay
- *   - MAIN expecting nothing, confirmed 3 (< 4)       -> refused "holds 4, 3", 7 rows stay
- *   - MAIN expecting nothing, confirmed 4 (= 4)       -> removed 4; hand, foreign, linked leg
- *                                                        and POT's leg all stay (3 rows in MAIN)
- *   - MAIN expecting P1 only, confirmed 2 (< 3)       -> refused "holds 3, 2", 7 rows stay
- *   - MAIN expecting P1 only, confirmed 3 (= 3)       -> removed 3; P1 and the other three kinds stay
+ *   - MAIN expecting nothing, confirmed 4 (< 5)       -> refused "holds 5, 4", 7 rows stay
+ *   - MAIN expecting nothing, confirmed 5 (= 5)       -> removed 5 (one unlinked first); hand and
+ *                                                        foreign stay (2 rows in MAIN); POT's leg
+ *                                                        stays, no longer linked
+ *   - MAIN expecting P1 only, confirmed 3 (< 4)       -> refused "holds 4, 3", 7 rows stay
+ *   - MAIN expecting P1 only, confirmed 4 (= 4)       -> removed 4; P1, hand and foreign stay
  */
 
 import assert from 'node:assert/strict';
@@ -145,12 +148,12 @@ test('ClearEmpty_WhenTheConfirmedCountIsLowerThanTheRowsHeld_NothingIsDeletedAnd
   await withBudget(async (ctx) => {
     await stocked(ctx);
 
-    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 3 } });
+    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 4 } });
 
     const entry = entryFor(report, ctx.main);
-    assert.equal(entry.holds, 4);
-    assert.equal(entry.confirmed, 3);
-    assert.match(entry.refused, /holds 4, more than the 3 confirmed/);
+    assert.equal(entry.holds, 5);
+    assert.equal(entry.confirmed, 4);
+    assert.match(entry.refused, /holds 5, more than the 4 confirmed/);
     assert.equal(entry.removed, undefined);
     await pause(500);
     assert.equal((await readRows(ctx.main)).length, 7);
@@ -158,36 +161,37 @@ test('ClearEmpty_WhenTheConfirmedCountIsLowerThanTheRowsHeld_NothingIsDeletedAnd
   });
 });
 
-test('ClearEmpty_WhenTheConfirmedCountIsRight_OnlyObdisUnlinkedRowsGoAndEverythingElseStays', async () => {
+test('ClearEmpty_WhenTheConfirmedCountIsRight_OnlyObdisRowsGoAndTheLinkedLegsPartnerSurvivesUnlinked', async () => {
   await withBudget(async (ctx) => {
     await stocked(ctx);
     const potBefore = await importedIds(ctx.pot);
 
-    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 4 } });
+    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 5 } });
 
     const entry = entryFor(report, ctx.main);
-    assert.equal(entry.removed, 4);
-    assert.equal(entry.linked_left, 1);
+    assert.equal(entry.removed, 5);
+    assert.equal(entry.unlinked, 1);
+    assert.equal(entry.linked_left, undefined);
     assert.equal(entry.foreign_ids, 1);
-    assert.equal(await settledCount(ctx.main, 3), 3);
+    assert.equal(await settledCount(ctx.main, 2), 2);
     await pause(500);
-    assert.deepEqual(await importedIds(ctx.main), [null, 'FITID-0001', LEG_MAIN.imported_id].sort());
-    assert.deepEqual(await importedIds(ctx.pot), potBefore, 'the other account is untouched');
-    const legRow = (await readRows(ctx.main)).find((r) => r.imported_id === LEG_MAIN.imported_id);
-    assert.ok(legRow.transfer_id, 'the linked leg is still linked to its partner');
+    assert.deepEqual(await importedIds(ctx.main), [null, 'FITID-0001'].sort());
+    assert.deepEqual(await importedIds(ctx.pot), potBefore, 'the other account kept every row');
+    const partner = (await readRows(ctx.pot)).find((r) => r.imported_id === LEG_POT.imported_id);
+    assert.equal(partner.transfer_id ?? null, null, 'the surviving leg no longer points at a deleted row');
   });
 });
 
 test('ClearEmpty_WhenTheConfirmedCountExceedsTheRowsHeld_ThePresentRowsGo', async () => {
-  // The confirmed count is a ceiling: the audit counts every orphan, linked
-  // legs and foreign ids included, so it normally exceeds what is deletable.
+  // The confirmed count is a ceiling: the audit counts every orphan, foreign
+  // ids included, so it normally exceeds what is deletable.
   await withBudget(async (ctx) => {
     await stocked(ctx);
 
-    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 6 } });
+    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 7 } });
 
-    assert.equal(entryFor(report, ctx.main).removed, 4);
-    assert.equal(await settledCount(ctx.main, 3), 3);
+    assert.equal(entryFor(report, ctx.main).removed, 5);
+    assert.equal(await settledCount(ctx.main, 2), 2);
   });
 });
 
@@ -199,10 +203,10 @@ test('ClearEmpty_WhenOneAccountIsNamed_TheOtherAccountsAreNotPruned', async () =
     ]);
     assert.equal((await readRows(ctx.pot)).length, 3);
 
-    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 4 } });
+    const report = await run(ctx, EXPECTS_NOTHING(ctx), { clear_empty: { [ctx.main]: 5 } });
 
     assert.equal(entryFor(report, ctx.pot), undefined);
-    await settledCount(ctx.main, 3);
+    await settledCount(ctx.main, 2);
     await pause(500);
     assert.equal((await readRows(ctx.pot)).length, 3, 'the stale POT row was not the press');
   });
@@ -212,11 +216,11 @@ test('Confirmed_WhenAnOrdinaryAccountHoldsMoreOrphansThanWereShown_NothingIsDele
   await withBudget(async (ctx) => {
     await stocked(ctx);
 
-    const report = await run(ctx, EXPECTS_P1(ctx), { confirmed: { [ctx.main]: 2 } });
+    const report = await run(ctx, EXPECTS_P1(ctx), { confirmed: { [ctx.main]: 3 } });
 
     const entry = entryFor(report, ctx.main);
-    assert.equal(entry.holds, 3);
-    assert.equal(entry.confirmed, 2);
+    assert.equal(entry.holds, 4);
+    assert.equal(entry.confirmed, 3);
     assert.ok(entry.refused);
     await pause(500);
     assert.equal((await readRows(ctx.main)).length, 7);
@@ -227,14 +231,14 @@ test('Confirmed_WhenAnOrdinaryAccountHoldsNoMoreThanWasShown_TheOrphansGo', asyn
   await withBudget(async (ctx) => {
     await stocked(ctx);
 
-    const report = await run(ctx, EXPECTS_P1(ctx), { confirmed: { [ctx.main]: 3 } });
+    const report = await run(ctx, EXPECTS_P1(ctx), { confirmed: { [ctx.main]: 4 } });
 
-    assert.equal(entryFor(report, ctx.main).removed, 3);
-    assert.equal(await settledCount(ctx.main, 4), 4);
+    assert.equal(entryFor(report, ctx.main).removed, 4);
+    assert.equal(await settledCount(ctx.main, 3), 3);
     await pause(500);
     assert.deepEqual(
       await importedIds(ctx.main),
-      [null, 'FITID-0001', LEG_MAIN.imported_id, P[0].imported_id].sort(),
+      [null, 'FITID-0001', P[0].imported_id].sort(),
     );
     assert.equal((await readRows(ctx.pot)).length, 2);
   });
@@ -246,8 +250,8 @@ test('Confirmed_WhenNoCountWasShownForTheAccount_TheOrdinaryPruneRunsAsBefore', 
 
     const report = await run(ctx, EXPECTS_P1(ctx), { confirmed: { [ctx.pot]: 5 } });
 
-    assert.equal(entryFor(report, ctx.main).removed, 3);
+    assert.equal(entryFor(report, ctx.main).removed, 4);
     assert.equal(entryFor(report, ctx.pot).removed, 0);
-    assert.equal(await settledCount(ctx.main, 4), 4);
+    assert.equal(await settledCount(ctx.main, 3), 3);
   });
 });

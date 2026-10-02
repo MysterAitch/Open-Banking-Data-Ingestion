@@ -79,7 +79,13 @@ from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_overview import overview_html
 from .web_position import PositionPages
-from .web_prune import PruneRefused, check_prune_post, counts_from_audit, prune_section
+from .web_prune import (
+    STAY_REASONS,
+    PruneRefused,
+    check_prune_post,
+    counts_from_audit,
+    prune_section,
+)
 from .web_sections import (
     HOME_LINK,
     HookTimer,
@@ -2619,6 +2625,7 @@ def _prune_result_row(result: dict[str, object]) -> str:
     accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
     removed_total = sum(_count_of(a.get("removed")) for a in accounts)
     refused_total = sum(1 for a in accounts if a.get("refused"))
+    stopped_total = sum(1 for a in accounts if a.get("stopped"))
     lines = []
     for account in accounts:
         name = html.escape(str(account.get("name") or account.get("account_id", "")))
@@ -2636,9 +2643,29 @@ def _prune_result_row(result: dict[str, object]) -> str:
             continue
         removed = _count_of(account.get("removed"))
         left: list[str] = []
+        unlinked = _count_of(account.get("unlinked"))
+        if unlinked:
+            left.append(
+                f"{unlinked} of them {'was' if unlinked == 1 else 'were'} a linked "
+                "transfer leg, unlinked first, and the other "
+                f"{'leg' if unlinked == 1 else 'legs'} kept"
+            )
         linked = _count_of(account.get("linked_left"))
         if linked:
-            left.append(f"{linked} linked transfer {'leg' if linked == 1 else 'legs'} left")
+            reasons = account.get("left")
+            why = (
+                "; ".join(
+                    f"{_count_of(number)} because "
+                    f"{html.escape(STAY_REASONS.get(str(reason), str(reason)))}"
+                    for reason, number in sorted(reasons.items())
+                )
+                if isinstance(reasons, dict)
+                else ""
+            )
+            left.append(
+                f"{linked} linked transfer {'leg' if linked == 1 else 'legs'} left"
+                + (f" ({why})" if why else "")
+            )
         foreign = _count_of(account.get("foreign_ids"))
         if foreign:
             left.append(
@@ -2647,17 +2674,27 @@ def _prune_result_row(result: dict[str, object]) -> str:
             )
         if removed or left:
             said = f"removed {removed} orphaned {'import' if removed == 1 else 'imports'}"
+            lines.append(f'<span class="muted">{name}: {"; ".join([said, *left])}</span>')
+        if account.get("stopped"):
+            # A stop means rows may be half-changed, so it is shown as a fault
+            # and not as a footnote to the count.
             lines.append(
-                f'<span class="muted">{name}: {"; ".join([said, *left])}</span>'
+                f'<span class="warn"><strong>{name}: stopped</strong> - '
+                f"{html.escape(str(account.get('stopped')))}</span>"
             )
-    pill = (
-        f'<span class="pill pill-ok">pruned ({removed_total} removed)</span>'
-        if not refused_total
-        else (
+    if stopped_total:
+        pill = (
+            f'<span class="pill pill-bad">prune stopped on {stopped_total} '
+            f"{'account' if stopped_total == 1 else 'accounts'}: "
+            f"{removed_total} removed</span>"
+        )
+    elif refused_total:
+        pill = (
             f'<span class="pill pill-bad">prune {"partly " if removed_total else ""}'
             f"refused: {removed_total} removed, {refused_total} refused</span>"
         )
-    )
+    else:
+        pill = f'<span class="pill pill-ok">pruned ({removed_total} removed)</span>'
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {pill}<br>'
         + "<br>".join(lines)

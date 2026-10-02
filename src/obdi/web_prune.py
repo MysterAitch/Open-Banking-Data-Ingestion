@@ -13,7 +13,21 @@ Counts only. This page is served on a GET, and a GET shows no monetary value.
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+#: Why an orphan the audit counted will stay, in words, keyed by the reason
+#: the applier gives (applier/audit.mjs, LEFT_REASONS, which owns what each
+#: means). A key this build does not know is shown as it came rather than
+#: dropped, so a newer applier cannot make rows stay silently.
+STAY_REASONS = {
+    "partner_missing": "the other leg of its transfer could not be found",
+    "partner_not_ours": "the other leg of its transfer is not an obdi import",
+    "reconciled": "a leg of its transfer is reconciled",
+    "split": "a leg of its transfer is split",
+    "partner_linked_elsewhere": "the other leg is linked to a different row",
+    "changed_during_removal": "the rows changed while the removal ran",
+    "foreign": "it carries an id from another importer",
+}
 
 #: One account losing this many rows is a large absolute loss whatever the
 #: size of the account, and a stale binding rarely leaves that many behind.
@@ -49,13 +63,21 @@ _FRAME = 'class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem;
 
 @dataclass(frozen=True)
 class OrphanCount:
-    """One bound account as the newest audit counted it."""
+    """One bound account as the newest audit counted it.
+
+    `orphaned` is the ceiling a removal is confirmed against. `will_go` and
+    `staying` split it into what the removal would take and what it would
+    leave, by reason; `will_go` is None when the audit did not say or its two
+    halves do not add up to `orphaned`, and the page then claims no split.
+    """
 
     account_id: str
     name: str
     expected: int
     present: int
     orphaned: int
+    will_go: int | None = None
+    staying: dict[str, int] = field(default_factory=dict)
 
 
 class PruneRefused(Exception):
@@ -91,6 +113,7 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
             continue
         if entry.get("missing_account") or entry.get("unbound_in_actual"):
             continue
+        will_go, staying = _split(entry, orphaned)
         found.append(
             OrphanCount(
                 str(entry.get("account_id", "")),
@@ -98,9 +121,51 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
                 expected,
                 present,
                 orphaned,
+                will_go,
+                staying,
             )
         )
     return found
+
+
+def _split(entry: dict[str, object], orphaned: int) -> tuple[int | None, dict[str, int]]:
+    """The audit's will-go and will-stay counts, or (None, {}) unless both are
+    present, whole, and add up to the orphaned count.
+
+    A split that does not add up would put a figure on the page the ceiling
+    does not support, so it is dropped rather than shown.
+    """
+    will_go = _whole(entry.get("orphaned_will_go"))
+    raw = entry.get("orphaned_will_stay")
+    if will_go is None or not isinstance(raw, dict):
+        return None, {}
+    staying: dict[str, int] = {}
+    for reason, number in raw.items():
+        count = _whole(number)
+        if count is None or count < 0:
+            return None, {}
+        if count:
+            staying[str(reason)] = count
+    if will_go < 0 or will_go + sum(staying.values()) != orphaned:
+        return None, {}
+    return will_go, staying
+
+
+def outcome_sentence(count: OrphanCount) -> str:
+    """What the removal will do with the orphans counted, as escaped HTML, or
+    an empty string when the audit gave no split."""
+    if count.will_go is None:
+        return ""
+    sentence = f"{count.will_go} will be removed"
+    if count.staying:
+        reasons = "; ".join(
+            f"{number} because {html.escape(STAY_REASONS.get(reason, reason))}"
+            for reason, number in sorted(count.staying.items())
+        )
+        sentence += f" and {sum(count.staying.values())} will stay ({reasons})"
+    else:
+        sentence += " and none will stay"
+    return sentence
 
 
 def expects_nothing(counts: list[OrphanCount]) -> list[OrphanCount]:
@@ -182,18 +247,30 @@ def _clear_form(count: OrphanCount) -> str:
         'style="margin:.6rem 0;padding:.6rem;border:1px solid #8884;border-radius:.4rem">'
         f"<p><strong>{label}</strong> <small><code>{ident}</code></small></p>"
         '<p class="muted">Nothing is sent for this account now. This deletes '
-        "obdi's own imported rows from it in Actual; linked transfer legs, rows "
-        "from another importer, and rows entered by hand are left. It cannot be "
+        "obdi's own imported rows from it in Actual. A row that is one leg of a "
+        "linked transfer is unlinked first and only that row is deleted, so the "
+        "other leg stays as an ordinary row; where that cannot be done safely "
+        "the row is left, as are rows from another importer. Rows entered by "
+        "hand are never touched. It cannot be "
         "undone from here, and binding the account again would re-send its rows "
         "on the next push. The audit counted "
-        f"{_rows(count.orphaned)} carrying an imported id; fewer are removed "
-        "when some are linked or belong to another importer.</p>"
+        f"{_rows(count.orphaned)} carrying an imported id{_outcome_clause(count)}</p>"
         + _warning(high_reasons(count))
         + f'<input type="hidden" name="clear_account" value="{ident}">'
         f'<input type="hidden" name="clear_count" value="{count.orphaned}">'
         '<label style="display:block;margin:.35rem 0">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand</label>" + _BUTTON.format(label=label) + "</form>"
+    )
+
+
+def _outcome_clause(count: OrphanCount) -> str:
+    sentence = outcome_sentence(count)
+    if sentence:
+        return f": {sentence}."
+    return (
+        "; fewer are removed when some belong to another importer or are "
+        "linked transfer legs that cannot be unlinked safely."
     )
 
 
@@ -209,15 +286,30 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
         shown = ordinary_orphans(counts)
         if shown:
             items = "".join(
-                f"<li>{html.escape(c.name)}: {_rows(c.orphaned)}</li>" for c in shown
+                f"<li>{html.escape(c.name)}: {_rows(c.orphaned)}"
+                + (f" ({outcome_sentence(c)})" if c.will_go is not None else "")
+                + "</li>"
+                for c in shown
             )
             total = sum(c.orphaned for c in shown)
+            if all(c.will_go is not None for c in shown):
+                go = sum(c.will_go or 0 for c in shown)
+                summary = (
+                    f"Total: {_rows(total)}, of which {go} will be removed and "
+                    f"{total - go} will stay."
+                )
+            else:
+                summary = (
+                    f"Total: {_rows(total)}. Rows from another importer, and "
+                    "linked transfer legs that cannot be unlinked safely, are "
+                    "counted but not removed, so fewer may go."
+                )
             listing = (
                 "<p>The newest audit counted these orphaned imports in accounts "
-                "that still expect rows:</p>"
-                f"<ul>{items}</ul><p>Total: {_rows(total)}. Linked transfer legs "
-                "and rows from another importer are counted but not removed, so "
-                "fewer may go.</p>"
+                "that still expect rows. A row that is one leg of a linked "
+                "transfer is unlinked first and only that row is deleted; the "
+                "other leg stays, as an ordinary row:</p>"
+                f"<ul>{items}</ul><p>{summary}</p>"
             )
             hidden = "".join(
                 f'<input type="hidden" name="confirmed" value="{c.orphaned}:'

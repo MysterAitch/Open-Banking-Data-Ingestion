@@ -22,7 +22,7 @@ import { test } from 'node:test';
 
 import * as api from '@actual-app/api';
 
-import { auditAccounts, choosePrunable, pruneAccounts } from './audit.mjs';
+import { auditAccounts, choosePrunable, createLinkContext, pruneAccounts } from './audit.mjs';
 import { applyAccounts, applyOpeningBalances } from './lib.mjs';
 
 async function quietly(work) {
@@ -379,7 +379,9 @@ test('OpeningPrune_WhenAPersonsOwnStartingBalanceHasNoImportedId_ItIsNeverTouche
     await applyAccounts(api, without.accounts);
 
     const rows = await readRows(ctx.main);
-    const prunable = choosePrunable(
+    const { prunable } = await choosePrunable(
+      createLinkContext(api),
+      ctx.main,
       new Set(without.accounts[ctx.main].map((r) => r.imported_id)),
       rows,
     );

@@ -28,6 +28,15 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.257] - 2026-10-02
 
+### Changed
+- **Removing orphaned imports from Actual now takes linked transfer legs
+  too.** They were skipped, because deleting one leg of a transfer makes Actual
+  delete the other, which obdi usually still expects; after the Space fold that
+  left 16 duplicates in the main account with no remedy. The other leg is now
+  unlinked first, only the orphan is deleted, and the other leg is checked
+  afterwards. The page says before the press how many will go and how many
+  will stay and why. Measured against an offline engine, not yet a live server.
+
 ### Fixed
 - **A second payment of the same amount is no longer merged into the first
   after an export has touched it.** The matcher judged "same source" by the

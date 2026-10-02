@@ -317,9 +317,10 @@ class TestTheClearingForm:
 
         assert "Nothing is sent for this account now" in form
         assert "deletes obdi's own imported rows from it in Actual" in form
-        assert "linked transfer legs" in form
+        assert "one leg of a linked transfer is unlinked first" in form
+        assert "the other leg stays as an ordinary row" in form
         assert "rows from another importer" in form
-        assert "rows entered by hand" in form
+        assert "Rows entered by hand are never touched" in form
         assert "cannot be undone from here" in form
         assert "binding the account again would re-send its rows on the next push" in form
 
@@ -734,3 +735,231 @@ class TestPruneResultsReadAsWordsAndARefusalIsAWarning:
 
         assert "4 removed" in rendered
         assert "1 refused" in rendered
+
+
+def split_account(
+    account_id: str,
+    name: str,
+    *,
+    present: int,
+    will_go: int,
+    staying: dict[str, int],
+    expected: int | None = None,
+) -> dict[str, object]:
+    orphaned = will_go + sum(staying.values())
+    entry = account(
+        account_id,
+        name,
+        expected=present + 5 if expected is None else expected,
+        present=present,
+        orphaned=orphaned,
+    )
+    entry["orphaned_will_go"] = will_go
+    entry["orphaned_will_stay"] = staying
+    return entry
+
+
+class TestThePageSaysBeforeThePressHowManyWillGoAndHowManyStay:
+    def test_GeneralForm_WhenSomeOrphansAreLinkedToOtherAccounts_SaysHowManyGoAndHowManyStayAndWhy(
+        self, serve
+    ):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "main-id",
+                            "Main",
+                            present=50,
+                            will_go=7,
+                            staying={"partner_not_ours": 2, "reconciled": 1},
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        form = general_form(page)
+        assert "Main: 10 rows (7 will be removed and 3 will stay" in form
+        assert "2 because the other leg of its transfer is not an obdi import" in form
+        assert "1 because a leg of its transfer is reconciled" in form
+        assert "Total: 10 rows, of which 7 will be removed and 3 will stay." in form
+
+    def test_GeneralForm_WhenNothingStays_SaysSoPlainly(self, serve):
+        page = page_of(
+            serve(
+                [audit(split_account("main-id", "Main", present=50, will_go=4, staying={}))],
+                prune_actual=Calls(),
+            )
+        )
+
+        assert "Main: 4 rows (4 will be removed and none will stay)" in general_form(page)
+
+    def test_GeneralForm_CarriesTheWholeOrphanedCountAsTheCeilingNotJustTheRemovableOnes(
+        self, serve
+    ):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "main-id", "Main", present=50, will_go=7, staying={"foreign": 3}
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        assert 'name="confirmed" value="10:main-id"' in general_form(page)
+
+    def test_ClearForm_SaysHowManyGoAndHowManyStay(self, serve):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "old-id",
+                            "Old Joint",
+                            present=0,
+                            expected=0,
+                            will_go=12,
+                            staying={"foreign": 1},
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        form = clear_form(page)
+        assert "13 rows carrying an imported id: 12 will be removed and 1 will stay" in form
+        assert "1 because it carries an id from another importer" in form
+        assert 'name="clear_count" value="13"' in form
+
+    def test_Page_WhenTheAuditGivesNoSplit_ClaimsNoneAndKeepsTheFewerMayGoWarning(self, serve):
+        page = page_of(
+            serve(
+                [audit(ordinary("a-id", "Alpha", present=50, orphaned=7))],
+                prune_actual=Calls(),
+            )
+        )
+
+        form = general_form(page)
+        assert "will be removed" not in form
+        assert "so fewer may go" in form
+
+    def test_Page_WhenTheSplitDoesNotAddUpToTheOrphanedCount_ClaimsNoSplit(self, serve):
+        entry = split_account("a-id", "Alpha", present=50, will_go=5, staying={"foreign": 2})
+        entry["orphaned"] = 9
+        page = page_of(serve([audit(entry)], prune_actual=Calls()))
+
+        form = general_form(page)
+        assert "will be removed" not in form
+        assert "Alpha: 9 rows" in form
+
+    def test_Page_WhenAReasonIsOneThisBuildDoesNotKnow_ItIsShownAsGivenAndEscaped(self, serve):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "a-id", "Alpha", present=50, will_go=1, staying={"<odd>": 2}
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        form = general_form(page)
+        assert "2 because &lt;odd&gt;" in form
+        assert "<odd>" not in form
+
+    def test_Page_ShowsCountsOnlyNeverAnAmount(self, serve):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "main-id", "Main", present=50, will_go=7, staying={"reconciled": 3}
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        assert "amount" not in page.lower().replace("amounts are shown", "")
+        assert "£" not in page
+
+    def test_HighCountWarning_StillTripsOnTheOrphanedTotalWhenMostOfThemWillStay(self, serve):
+        page = page_of(
+            serve(
+                [
+                    audit(
+                        split_account(
+                            "a-id", "Alpha", present=900, will_go=40, staying={"reconciled": 60}
+                        )
+                    )
+                ],
+                prune_actual=Calls(),
+            )
+        )
+
+        assert "Unexpectedly large removal" in general_form(page)
+
+    def test_PostedCount_IsStillCheckedAgainstTheOrphanedTotalAndNotTheRemovableOnes(self, serve):
+        calls = Calls()
+        base = serve(
+            [
+                audit(
+                    split_account("a-id", "Alpha", present=50, will_go=7, staying={"foreign": 3})
+                )
+            ],
+            prune_actual=calls,
+        )
+
+        stale = press(base, confirm="yes", confirmed="7:a-id")
+        assert stale.status_code == 400
+        assert calls.calls == []
+
+        accepted = press(base, confirm="yes", confirmed="10:a-id")
+        assert accepted.status_code == 200
+        assert calls.calls == [{"confirmed": {"a-id": 10}}]
+
+
+class TestPruneResultsSayWhatWasUnlinkedLeftAndStopped:
+    render = TestPruneResultsReadAsWordsAndARefusalIsAWarning.render
+
+    def test_Removed_SaysHowManyWereUnlinkedFirstAndWhyOthersWereLeft(self):
+        rendered = self.render(
+            {
+                "account_id": "main-id",
+                "name": "Main",
+                "removed": 711,
+                "unlinked": 16,
+                "linked_left": 2,
+                "left": {"partner_not_ours": 2},
+            }
+        )
+
+        assert "pruned (711 removed)" in rendered
+        assert "16 of them were a linked transfer leg, unlinked first" in rendered
+        assert "2 linked transfer legs left (2 because the other leg of its transfer" in rendered
+
+    def test_Stopped_ReadsAsAFaultWithTheReasonAndNotAsSuccess(self):
+        rendered = self.render(
+            {
+                "account_id": "main-id",
+                "name": "Main",
+                "removed": 3,
+                "stopped": "a -> b: the partner row is missing after the orphan was deleted",
+            }
+        )
+
+        assert "pill-ok" not in rendered
+        assert "prune stopped on 1 account: 3 removed" in rendered
+        assert "Main: stopped" in rendered
+        assert "the partner row is missing after the orphan was deleted" in rendered
