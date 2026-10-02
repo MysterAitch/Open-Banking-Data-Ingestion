@@ -27,6 +27,8 @@ from .base import ParseError, StatementParser
 from .capital_one_pdf import read_statement as read_capital_one
 from .card_statement_pdf import read_statement as read_card_statement
 from .credit_union_pdf import read_statement as read_credit_union
+from .halifax_account_pdf import read_statement as read_halifax_account
+from .nationwide_pdf import read_statement as read_nationwide
 from .santander_pdf import read_statement as read_santander
 from .starling_pdf import read_statement as read_starling
 from .statement_reading import StatementReading
@@ -307,6 +309,55 @@ class StarlingStatementPdfParser(PdfStatementParser):
         return self.table_reader(_table(payload))
 
 
+class NationwideStatementPdfParser(PdfStatementParser):
+    """A Nationwide FlexAccount statement: a current account for a month.
+
+    Money in is positive and money out negative, and an account in credit is a
+    positive balance. The table's rows carry a day and a month only, and the
+    Start and End balances sit in a panel beside it.
+
+    Recognised by the opening row's own label together with the panel's
+    labels, never by the building society's name: the name is free text in
+    every payee's line.
+    """
+
+    source = "nationwide-statement-pdf"
+    marker = "Balance from statement"
+    requires = ("Start balance", "End balance", "Sort code", "Statement date")
+    table_reader: Callable[[list[Row]], StatementReading] = staticmethod(read_nationwide)
+
+    def read(self, payload: bytes) -> StatementReading:
+        return self.table_reader(_table(payload))
+
+
+class HalifaxAccountStatementPdfParser(PdfStatementParser):
+    """A Halifax bank account statement: a current account for a month.
+
+    Money in is positive and money out negative, and an account in credit is a
+    positive balance. NOT the Halifax credit card (`UkCardStatementPdfParser`):
+    both documents name the bank, so the name decides nothing, and the two are
+    told apart by structure - the sort code and account number, the Money In
+    and Money Out columns, and the "Balance on" lines, none of which a card
+    statement has.
+
+    Recognised by the summary's labels AND the transactions heading, never by
+    the bank's name: the name is free text in every payee's line, and the
+    heading is what says the table is where the reader looks for it.
+    """
+
+    source = "halifax-statement-pdf"
+    marker = "Money In"
+    requires = (
+        "Money Out",
+        "Balance on",
+        "Your Account",
+        "Sort Code",
+        "Account Number",
+        "Your Transactions",
+    )
+    reader = staticmethod(read_halifax_account)
+
+
 class UkCardStatementPdfParser(PdfStatementParser):
     """A credit card statement whose issuer the masked shapes did not name.
 
@@ -425,6 +476,8 @@ PDF_PARSERS: tuple[type[PdfStatementParser], ...] = (
     VirginMoneyCreditCardPdfParser,
     CreditUnionStatementPdfParser,
     StarlingStatementPdfParser,
+    NationwideStatementPdfParser,
+    HalifaxAccountStatementPdfParser,
     UkCardStatementPdfParser,
     CapitalOneCreditCardPdfParser,
 )

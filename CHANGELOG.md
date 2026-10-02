@@ -34,6 +34,12 @@ transcription would add no reasoning that the subjects do not already carry.
   a real one: a statement is refused unless its rows reach the new balance and
   each column's printed total, so a wrong inference shows as a refusal on the
   Kept statements page rather than as wrong rows.
+- **Nationwide FlexAccount and Halifax bank account statements are read**, one
+  kept statement each, on the same terms: written from a masked layout, and
+  refused unless every printed running balance follows from the rows and the
+  rows reach the closing balance. The Halifax account is told from the Halifax
+  card by its structure, not its name. Every kept statement now has a parser;
+  whether each reads is for the Kept statements page to say.
 
 ## [0.4.254] - 2026-10-02
 

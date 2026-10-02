@@ -59,6 +59,8 @@ FILE_SOURCES = frozenset(
         "capital-one-cc-pdf",
         "credit-union-pdf",
         "starling-statement-pdf",
+        "nationwide-statement-pdf",
+        "halifax-statement-pdf",
         UK_CARD_STATEMENT_SOURCE,
         # A statement kept before anyone has decided which bank wrote it,
         # let alone which account it belongs to. It becomes one of the

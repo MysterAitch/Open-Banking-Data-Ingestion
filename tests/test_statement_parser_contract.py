@@ -29,6 +29,8 @@ from obdi.parsers.pdf_statements import (
     PDF_PARSERS,
     CapitalOneCreditCardPdfParser,
     CreditUnionStatementPdfParser,
+    HalifaxAccountStatementPdfParser,
+    NationwideStatementPdfParser,
     SantanderCreditCardPdfParser,
     StarlingStatementPdfParser,
     UkCardStatementPdfParser,
@@ -36,6 +38,10 @@ from obdi.parsers.pdf_statements import (
 )
 from test_capital_one_statement import CONTRACT as CAPITAL_ONE
 from test_credit_union_statement import build_columned_pdf
+from test_halifax_account_statement import CONTRACT as HALIFAX_ACCOUNT
+from test_halifax_account_statement import build_halifax_account_pdf
+from test_nationwide_statement import CONTRACT as NATIONWIDE
+from test_nationwide_statement import build_nationwide_pdf
 from test_starling_statement import CONTRACT as STARLING
 from test_starling_statement import build_starling_pdf
 from test_statement_shape import build_pdf
@@ -119,6 +125,20 @@ CASES = {
         "Direct Payment",
         "Direct Payment",
         build=build_starling_pdf,
+    ),
+    HalifaxAccountStatementPdfParser: Case(
+        HALIFAX_ACCOUNT,
+        "EXAMPLE SHOP",
+        "Direct Payment",
+        "Direct Payment",
+        build=build_halifax_account_pdf,
+    ),
+    NationwideStatementPdfParser: Case(
+        NATIONWIDE,
+        "EXAMPLE SHOP",
+        "Direct Payment",
+        "Direct Payment",
+        build=build_nationwide_pdf,
     ),
     UkCardStatementPdfParser: Case(
         UK_CARD,
