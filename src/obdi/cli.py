@@ -64,6 +64,7 @@ from .replay import (
     build_transfer_pairs,
     unbound_accounts,
 )
+from .review_settlement import settle_review_flags
 from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .spaces import ArchiveNote
@@ -914,6 +915,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 summary=ImportSummary(artefact_new=False),
             )
             fold_space_copies(store, _account_map(store))
+            settle_review_flags(store)
         after = store.counts().get("transactions", 0)
     return (
         f"replayed {source} for {account_ref}: {len(transactions)} parsed, "
@@ -2417,11 +2419,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return apply_to_group(store, label, value, kind=kind or "category")
 
-    def review_report_text() -> str:
+    def review_report_text(masked: bool) -> str:
         from .review_report import review_report
 
         with Store(db_path) as store:
-            return review_report(store).describe()
+            return review_report(store).describe(
+                masked=masked, unmask_hint="press the Show values button on this page"
+            )
 
     def identity_health_text() -> str:
         from .identity_health import identity_health
@@ -2755,6 +2759,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, incoming, digest=str(row["digest"]), summary=summary
             )
             summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
+            settle_review_flags(store)
         return (
             f"{row['origin']} assigned to {destination} and read by "
             f"{parser.source}: {summary.describe()}"
@@ -3829,10 +3834,15 @@ def main(argv: list[str] | None = None) -> int:
         "envelope (with provisioning), drop it for the applier container",
     )
 
-    subcommands.add_parser(
+    review_report_command = subcommands.add_parser(
         "review-report",
-        help="calibration numbers for the review queue: reasons, clusters, "
-        "and how many flags match a declared recurring payment",
+        help="what the open review flags are made of, by class, account, "
+        "source, and age; descriptions are masked unless --show-values is given",
+    )
+    review_report_command.add_argument(
+        "--show-values",
+        action="store_true",
+        help="also print the descriptions of the largest flagged clusters (private)",
     )
 
     subcommands.add_parser(
@@ -4317,7 +4327,12 @@ def main(argv: list[str] | None = None) -> int:
         from .review_report import review_report
 
         with Store(db_path) as store:
-            print(review_report(store).describe())
+            print(
+                review_report(store).describe(
+                    masked=not args.show_values,
+                    unmask_hint="add --show-values to see descriptions",
+                )
+            )
         return 0
     if args.command == "identity-health":
         from .identity_health import identity_health

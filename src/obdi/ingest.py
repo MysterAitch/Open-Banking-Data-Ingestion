@@ -21,6 +21,7 @@ from .identity import artefact_digest, entity_id_for
 from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
 from .models import RawArtefact, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
+from .review_settlement import settle_review_flags
 from .space_attribution import fold_space_copies
 from .store import Store
 
@@ -252,6 +253,7 @@ def import_file(
     reconcile_batch(store, incoming, digest=digest, summary=summary)
     if account_map is not None:
         summary.folded += fold_space_copies(store, account_map).newly_folded
+    settle_review_flags(store)
     return summary
 
 

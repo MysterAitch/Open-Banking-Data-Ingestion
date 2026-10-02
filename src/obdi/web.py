@@ -519,8 +519,10 @@ class WebConfig:
     #: bare for a prune with no counts to confirm, and with `clear_empty` or
     #: `confirmed` (Actual account id -> rows the person was shown) otherwise.
     prune_actual: Callable[..., str] | None = None
-    #: The review queue decomposed: reasons, clusters, declaration matches.
-    review_report_text: Callable[[], str] | None = None
+    #: The review queue decomposed by class, account, source, and age. Called
+    #: with True for the masked rendering (counts only) and False for the one
+    #: that adds descriptions, which only a request made on purpose receives.
+    review_report_text: Callable[[bool], str] | None = None
     #: The uncategorised worklist as data: coverage, then groups with the
     #: evidence needed to judge them (a real example, how many distinct
     #: strings, whether it is a reference code rather than a payee).
@@ -3822,7 +3824,7 @@ class ConnectionHandler(
             self._actual_history()
             return
         if route == "/review-report":
-            self._review_report()
+            self._review_report(masked=True)
             return
         if route == "/date-lag":
             self._date_lag()
@@ -5565,18 +5567,36 @@ class ConnectionHandler(
             f"{html.escape(label)} as {html.escape(value)}.</p>"
         )
 
-    def _review_report(self) -> None:
+    def _review_report(self, *, masked: bool) -> None:
+        """The report, masked when fetched and unmasked only when posted for.
+
+        The unmasked rendering names the payees of the largest flagged
+        clusters, so it follows `_balance_reconciliation`: no address shows
+        it, and the answer is marked not to be kept.
+        """
         hook = self.bound_config.review_report_text
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
         try:
-            text = hook()
+            text = hook(masked)
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
             )
             return
+        showing = (
+            '<p class="muted">Showing the MASKED rendering: counts, account '
+            "names, source names, and age bands only.</p>"
+            '<form method="post" action="/review-report">'
+            '<button class="button" type="submit" style="width:100%">'
+            "Show values</button></form>"
+            if masked
+            else '<p class="warn">Showing the UNMASKED rendering: the '
+            "descriptions of the largest flagged clusters are visible.</p>"
+            '<p><a class="button" href="/review-report">'
+            "Back to the masked rendering</a></p>"
+        )
         body = (
             "<h2>Review queue report</h2>"
             "<p>A flag marks a transaction stored as new that looks like a "
@@ -5587,13 +5607,18 @@ class ConnectionHandler(
             "that resolves these yet. The "
             '<a href="/review">Categorise</a> page is a different queue '
             "(payments with no category) and does not clear them.</p>"
-            "<p>The queue decomposed - flag reasons, largest clusters, and "
-            "how many flags match a declared standing order or direct "
-            "debit. The raw material for calibrating the matcher.</p>"
+            "<p>What the open flags are made of: each is given the "
+            "strongest proof on file that it is two payments, and a rule "
+            "closes the ones already proven on every rebuild and import. "
+            "What stays open, by class, account, source, and age, is the "
+            "real question.</p>"
+            f"{showing}"
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
-        self._respond(200, render_page("Review queue report", body))
+        self._respond(
+            200, render_page("Review queue report", body), no_store=not masked
+        )
 
     def _date_lag(self) -> None:
         hook = self.bound_config.date_lag_text
@@ -5871,6 +5896,9 @@ class ConnectionHandler(
             return
         if route == "/balance-reconciliation":
             self._balance_reconciliation(masked=False)
+            return
+        if route == "/review-report":
+            self._review_report(masked=False)
             return
         if route == "/review-apply":
             self._review_apply()

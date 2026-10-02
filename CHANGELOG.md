@@ -28,7 +28,20 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.256] - 2026-10-02
 
+### Changed
+- **Review flags the evidence already answers are closed by a rule.** A flag
+  never changed any sum, nothing could close one, and over a thousand stood
+  open. Many asked what the store already knew: the flagged row had since been
+  voided or folded, or the bank had listed it and its look-alike under two ids
+  in one response. Those are now cleared after every pull and rebuild; a flag
+  with any unproven look-alike stays open for a person.
+- **The review report says what the open flags are made of**, by kind of
+  proof, account, source pair, age, and number of look-alikes. Not yet measured
+  on the real store: the rebuild's summary line carries the count settled.
+
 ### Fixed
+- **The review report no longer shows payee descriptions on a plain page
+  load.** They appear only in answer to "Show values", like every other page.
 - **Every page fits a 360-pixel phone.** The Actual audit's long identities, a
   long statement file name, and a long refusal each pushed a page sideways; the
   navigation took three rows before the page began. A browser test now loads

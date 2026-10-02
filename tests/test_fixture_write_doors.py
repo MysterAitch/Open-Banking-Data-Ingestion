@@ -54,6 +54,12 @@ JUSTIFIED = {
     "whole incident - the observed_date migration was skipped on every real store while "
     "the unstamped fixtures above passed, and the live instance rebuilt twice into an "
     "empty derived layer before anybody noticed",
+    ("test_review_settlement.py", "transactions"): "a flag whose ROW HAS GONE, which "
+    "no door produces: the rebuild deletes open flags before it deletes rows, so a "
+    "flag outliving its row is a state the pass defends against rather than one the "
+    "application makes. The void and no-live-neighbour rows beside it are reachable "
+    "through the pending lifecycle, and the rebuild-driven tests there prove that "
+    "route; here they are set directly so that one store holds a flag of every class",
     ("test_actual_push.py", "transactions"): "two rows sharing one imported id "
     "(content key plus occurrence), which the doors now prevent twice over. Within "
     "one account ingest allocates each occurrence against the rows already held; "

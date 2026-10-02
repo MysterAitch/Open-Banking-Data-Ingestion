@@ -53,8 +53,8 @@ REPORTS: tuple[tuple[str, str, str], ...] = (
     (
         "/review-report",
         "Review queue report",
-        "Why is each transaction flagged for review, which clusters are largest, and "
-        "how many match a declared standing order or direct debit?",
+        "What are the open review flags made of: how many are already proven to be "
+        "two payments, and which accounts, sources, and ages hold the rest?",
     ),
 )
 

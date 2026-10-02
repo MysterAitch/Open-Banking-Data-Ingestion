@@ -44,7 +44,7 @@ def _get(tmp_path, route: str, **hooks: object) -> str:
 class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
     def test_ReportWithFlags_SaysWhatAFlagIsAndThatNoPageResolvesThem(self, tmp_path):
         page = _get(
-            tmp_path, "/review-report", review_report_text=lambda: "9 open flag(s)"
+            tmp_path, "/review-report", review_report_text=lambda masked: "9 open flag(s)"
         )
 
         assert "9 open flag(s)" in page
@@ -53,7 +53,7 @@ class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
 
     def test_ReportWithFlags_PointsAtCategoriseOnlyAsADifferentQueue(self, tmp_path):
         page = _get(
-            tmp_path, "/review-report", review_report_text=lambda: "9 open flag(s)"
+            tmp_path, "/review-report", review_report_text=lambda masked: "9 open flag(s)"
         )
 
         assert 'href="/review"' in page
@@ -61,12 +61,66 @@ class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
 
     def test_ReportWithNoFlags_StillSaysWhatAFlagIsAndWhereTheyAreDecided(self, tmp_path):
         page = _get(
-            tmp_path, "/review-report", review_report_text=lambda: "0 open flag(s)"
+            tmp_path, "/review-report", review_report_text=lambda masked: "0 open flag(s)"
         )
 
         assert "0 open flag(s)" in page
         assert "There is no page that resolves these yet" in page
 
+class TestTheReviewQueueReportIsMaskedUnlessPostedFor:
+    @staticmethod
+    def _config(tmp_path) -> WebConfig:
+        return WebConfig(
+            client_id="client-1",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            review_report_text=lambda masked: f"example masked={masked}",
+        )
+
+    @staticmethod
+    def _request(config: WebConfig, method: str, path: str) -> httpx.Response:
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            return httpx.request(
+                method, f"http://127.0.0.1:{httpd.server_port}{path}", timeout=20
+            )
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_Page_Fetched_ShowsTheMaskedRenderingAndOffersAForm(self, tmp_path):
+        response = self._request(self._config(tmp_path), "GET", "/review-report")
+
+        assert "example masked=True" in response.text
+        assert "MASKED rendering" in response.text
+        assert '<form method="post" action="/review-report">' in response.text
+
+    @pytest.mark.parametrize("query", ["values=1", "unmask=1", "show=1", "masked=0"])
+    def test_Page_FetchedWithAnyQuery_StaysMasked(self, tmp_path, query):
+        response = self._request(self._config(tmp_path), "GET", f"/review-report?{query}")
+
+        assert "example masked=True" in response.text
+        assert "example masked=False" not in response.text
+
+    def test_Page_WhenPostedFor_ShowsTheValuesAndIsNotKept(self, tmp_path):
+        response = self._request(self._config(tmp_path), "POST", "/review-report")
+
+        assert "example masked=False" in response.text
+        assert "UNMASKED rendering" in response.text
+        assert response.headers["Cache-Control"] == "no-store"
+
+    def test_Page_Fetched_IsNotMarkedNoStore(self, tmp_path):
+        response = self._request(self._config(tmp_path), "GET", "/review-report")
+
+        assert response.headers.get("Cache-Control") != "no-store"
+
+
+class TestTheCategorisePageNamesTheOtherQueue:
     def test_CategorisePage_SaysItIsNotTheQueueTheReportLists(self, tmp_path):
         overview = {"covered": 1, "eligible": 2, "transfer_legs": 0, "groups": []}
         page = _get(tmp_path, "/review", categorise_overview=lambda: overview)

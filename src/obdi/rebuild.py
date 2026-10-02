@@ -44,6 +44,8 @@ from .namespaces import API_SOURCES, UNASSIGNED_ACCOUNT
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
+from .review_report import FlagClass
+from .review_settlement import SettleReport, settle_review_flags
 from .space_attribution import fold_space_copies
 from .store import Store
 
@@ -92,6 +94,10 @@ class RebuildReport:
     space_folded: int = 0
     space_ambiguous: int = 0
     space_unmatched: int = 0
+    #: Review flags the evidence already answered and the pass closed, by the
+    #: class of proof, and the open flags that remain - see `review_settlement`.
+    review_settled: dict[FlagClass, int] = field(default_factory=dict)
+    review_still_open: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -148,6 +154,11 @@ class RebuildReport:
                 f"report under the main account and the bank's feed files under "
                 f"the Space. {self.space_ambiguous} more could not be paired "
                 f"one to one and stay counted in the main account."
+            )
+        if self.review_settled:
+            lines.append(
+                "  "
+                + SettleReport(self.review_settled, self.review_still_open).describe()
             )
         if self.kept_unassigned:
             noun = "statement" if self.kept_unassigned == 1 else "statements"
@@ -540,6 +551,13 @@ def rebuild_from_raw(
         report.space_folded = folds.folded
         report.space_ambiguous = folds.ambiguous
         report.space_unmatched = folds.unmatched
+    # After the fold, because a row folded into a Space row is history and its
+    # flag is one of the questions this closes. It runs with or without an
+    # account map: most of what it settles has nothing to do with Spaces.
+    with instrumentation.phase("review-settlement"):
+        settled = settle_review_flags(store)
+    report.review_settled = settled.settled
+    report.review_still_open = settled.still_open
     with instrumentation.phase("transfer-pairing"):
         report.transfers_paired = pair_transfers_across_store(store)
     after_counts = {

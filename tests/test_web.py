@@ -1114,7 +1114,7 @@ class TestReviewReportPage:
             client_secret="tlcs_live_abcdefghij1234567890",
             redirect_uri="https://obdi.example.com/callback",
             connection_store=ConnectionStore(tmp_path / "c.json"),
-            review_report_text=lambda: "662 open flag(s)\n  amount_mismatch: 419",
+            review_report_text=lambda masked: "662 open flag(s)\n  amount_mismatch: 419",
         )
         handler = type(
             "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
