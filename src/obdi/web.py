@@ -5803,6 +5803,15 @@ class ConnectionHandler(
         host = (self.headers.get("Host") or "").strip().casefold()
         return urlparse(origin).netloc.casefold() != host
 
+    def _discard_small_body(self, limit: int = 64 * 1024) -> None:
+        """Read and drop a request body of at most `limit` bytes."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if 0 < length <= limit:
+            self.rfile.read(length)
+
     def do_POST(self) -> None:
         began = time.perf_counter()
         route = urlparse(self.path).path.rstrip("/") or "/"
@@ -5817,8 +5826,13 @@ class ConnectionHandler(
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
         if self._is_cross_site():
-            # Refused before the body is read, so a forged request cannot
-            # even consume the request stream.
+            # Refused before the body is parsed. A small body is discarded
+            # unread-as-a-form first, because closing a socket that still
+            # holds unread bytes makes Windows reset the connection and the
+            # refusal never reaches the browser: the test posting to every
+            # route failed one run in three for exactly that. Bounded, so a
+            # forged upload cannot make the server read what it will refuse.
+            self._discard_small_body()
             self._respond(
                 403,
                 error_page(
