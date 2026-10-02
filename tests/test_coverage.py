@@ -760,7 +760,7 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "DISAGREE"
+        assert outline["verdict"] == "does not agree: 1 unexplained row needs a look"
         assert outline["warn"] is True
         sides = outline["sides"]
         assert [side["heading"] for side in sides] == [
@@ -802,9 +802,64 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "agree once sibling attribution is counted"
+        assert outline["verdict"] == "differs as expected"
         assert outline["warn"] is False
         assert "transactions" in outline["figures"]
+
+    def test_Outline_OnlyAProvenTransferLeg_ReadsAsExpectedNotAsAgreement(self):
+        agreement = self._found(
+            [
+                txn(
+                    "starling", 3, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "differs as expected"
+        assert outline["warn"] is False
+
+    def test_Outline_SeveralUnexplainedRows_CountsThemAmongExplainedOnes(self):
+        agreement = self._found(
+            [
+                txn("starling-csv", 2, -7000, account="starling-personal", desc="COUNCIL TAX"),
+                txn("starling", 2, -7000, account="starling-space-bills", desc="COUNCIL TAX"),
+                txn("starling", 4, -450, account="starling-personal", desc="NETFLIX"),
+                txn("starling-csv", 5, -990, account="starling-personal", desc="SPOTIFY"),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "does not agree: 2 unexplained rows need a look"
+        assert outline["warn"] is True
+
+    def test_Outline_WithoutSiblingScope_KeepsTheVerdictAndSaysWhatToCompare(self):
+        rows = [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+            txn("starling", 4, -450, account="starling-personal", desc="NETFLIX"),
+        ]
+        (agreement,) = agreements(rows)
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "disagree - nothing here says why"
+        assert outline["warn"] is True
+        note = str(outline["note"])
+        assert "cannot tell expected differences from real ones" in note
+        assert "Compare the two sources' rows" in note
+        assert "DISAGREE" not in repr(outline)
+
+    def test_Outline_WhenAgreeing_CarriesNoNote(self):
+        outline = self._found([]).outline()
+
+        assert outline["verdict"] == "agree"
+        assert outline.get("note", "") == ""
 
     def test_Outline_PlainAgreement_CarriesNoSides(self):
         agreement = self._found([])

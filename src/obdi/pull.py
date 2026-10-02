@@ -49,6 +49,11 @@ STARLING_CONNECTION = "starling-api"
 #: cycle incremental again.
 RANGE_LADDER_DAYS = (365, 180, 90, 30)
 
+#: What the provider's refusal says when the ask exceeds its maximum range.
+#: The ladder keys on it and so does the attempts page, which marks these
+#: refusals as the ladder working rather than as a fault.
+RANGE_REFUSAL_MARK = "QUERY_EXCEEDING_MAX_TIME_RANGE"
+
 
 def _refusal_detail(exc: Exception) -> str:
     """The exception plus any harvested headers - Retry-After is the provider
@@ -803,7 +808,7 @@ def pull_starling(
                 if (
                     fetched is None
                     and since is None
-                    and "QUERY_EXCEEDING_MAX_TIME_RANGE" in (last_refusal or "")
+                    and RANGE_REFUSAL_MARK in (last_refusal or "")
                 ):
                     # Observed live (2026-08-05..09): the provider began
                     # refusing the ten-year cursorless ask outright - and a
@@ -829,9 +834,7 @@ def pull_starling(
                                 "needs attended backfill"
                             )
                             break
-                        if "QUERY_EXCEEDING_MAX_TIME_RANGE" not in (
-                            last_refusal or ""
-                        ):
+                        if RANGE_REFUSAL_MARK not in (last_refusal or ""):
                             break
 
             if fetched is None:

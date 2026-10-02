@@ -56,6 +56,7 @@ from .navigation import current_route
 from .overview import Overview
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
+from .pull import RANGE_REFUSAL_MARK
 from .secrets import SecretError, read_secret
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .statement_shape import ShapeReport
@@ -756,6 +757,18 @@ def _short_ref(ref: str) -> str:
     return ref
 
 
+def _is_range_refusal(row: dict[str, object]) -> bool:
+    """A refusal the pull's range ladder asked for, not a fault.
+
+    Keyed on the provider's own wording in the recorded detail: the ledger
+    keeps the status and code but the Starling refusal carries its reason
+    only there. A 429 is a quota answer and never matches.
+    """
+    return row.get("outcome") == "refused" and RANGE_REFUSAL_MARK in str(
+        row.get("detail", "")
+    )
+
+
 def _trigger_of(request_meta: object) -> str:
     try:
         meta = json.loads(str(request_meta or ""))
@@ -1027,7 +1040,13 @@ def _agreements_html(entries: object) -> str:
             f"<p><strong>{html.escape(str(entry.get('sources')))}</strong> "
             f"[{html.escape(str(entry.get('window')))}]: "
             f"<strong{warn}>{html.escape(str(entry.get('verdict')))}</strong><br>"
-            f'<span class="muted">{html.escape(str(entry.get("figures")))}</span></p>'
+            f'<span class="muted">{html.escape(str(entry.get("figures")))}</span>'
+            + (
+                f'<br><span class="muted">{html.escape(str(entry.get("note")))}</span>'
+                if entry.get("note")
+                else ""
+            )
+            + "</p>"
         )
         raw_sides = entry.get("sides")
         if isinstance(raw_sides, list) and raw_sides:
@@ -3936,6 +3955,12 @@ class ConnectionHandler(
             "ledger whose buckets sum to that side's own total. Alarms lead: "
             "a transposed date passes every count, and a missing month that "
             "another source contradicts is a file worth fetching.</p>"
+            '<p class="muted">A pair reads <strong>differs as expected</strong> '
+            "when every row only one source holds is explained here: money "
+            "reported under a sibling account (a Starling Space, say), or an "
+            "internal transfer whose other leg is held in another account. "
+            "Anything else reads <strong>does not agree</strong>, with the "
+            "count of unexplained rows to look at.</p>"
         ]
         raw_transposed = report.get("transposed")
         if isinstance(raw_transposed, list) and raw_transposed:
@@ -4036,7 +4061,9 @@ class ConnectionHandler(
             f'{html.escape(str(r.get("attempted_at", ""))[:19].replace("T", " "))}'
             "</strong> "
             + (
-                f'<span class="pill pill-bad">refused {r.get("http_status")} '
+                '<span class="pill pill-quiet">range refused - narrowing</span>'
+                if _is_range_refusal(r)
+                else f'<span class="pill pill-bad">refused {r.get("http_status")} '
                 f'{html.escape(str(r.get("error_code", "")))}</span>'
                 if r.get("outcome") == "refused"
                 else f'<span class="pill pill-ok">'
@@ -4070,6 +4097,21 @@ class ConnectionHandler(
             "and the ceiling probes.</p>"
             "<p>A deep-ladder row may cover several provider calls, so deep "
             "rows are a known under-count of quota spend.</p>"
+            + (
+                '<p class="muted">Refusals marked <strong>range refused - '
+                "narrowing</strong> are the Starling pull asking for the "
+                "widest window first and narrowing it step by step until the "
+                "provider accepts one; the accepted window then lands in the "
+                "row after it. They need no action. The pull does not "
+                "remember the answer, so the same refusal comes back each "
+                "time it asks for the full history again.</p>"
+                if any(
+                    _is_range_refusal(r)
+                    for r in (raw_rows if isinstance(raw_rows, list) else [])
+                    if isinstance(r, dict)
+                )
+                else ""
+            )
             + (
                 "<h2>Calls in the last 24 hours</h2>"
                 "<table><tr><th>connection</th><th>account</th><th>calls</th>"
@@ -5101,6 +5143,10 @@ class ConnectionHandler(
         body = (
             "<h2>Categorise</h2>"
             + note
+            + '<p class="muted">This is not the queue the '
+            '<a href="/review-report">review queue report</a> lists. That '
+            "one holds possible duplicate reports; this one holds payments "
+            "with no category.</p>"
             + f"<p>{covered} of {eligible} eligible transaction(s) carry a "
             f"category{share}. {legs} confirmed transfer leg(s) are excluded - "
             "money that stayed in the household is not spending.</p>"
@@ -5192,6 +5238,14 @@ class ConnectionHandler(
             return
         body = (
             "<h2>Review queue report</h2>"
+            "<p>A flag marks a transaction stored as new that looks like a "
+            "duplicate report: another transaction in the same account "
+            "matches it on value and date, and only the same-source rule "
+            "kept them apart. Each needs a person to confirm it is a "
+            "repeated payment and not a duplicate report. There is no page "
+            "that resolves these yet. The "
+            '<a href="/review">Categorise</a> page is a different queue '
+            "(payments with no category) and does not clear them.</p>"
             "<p>The queue decomposed - flag reasons, largest clusters, and "
             "how many flags match a declared standing order or direct "
             "debit. The raw material for calibrating the matcher.</p>"

@@ -42,8 +42,20 @@ transcription would add no reasoning that the subjects do not already carry.
 - **The roster says "bound", not "syncing".** The old word read as live while
   nothing had been applied for seven weeks.
 - **Entries that share a label show a reference beside each.**
+- **The review queue report says what a flag is, and that no page resolves
+  flags yet.** Categorise says it is a different queue, and the Overview no
+  longer tells you to "decide" them.
+- **Cross-source agreement no longer shouts DISAGREE over differences it
+  explains.** A pair reads "differs as expected", or "does not agree" with the
+  count of unexplained rows.
+- **Rebuild problems are grouped with counts and say what they mean**: each
+  listed artefact was skipped and produced no rows, and unchanged account
+  totals mean nothing the store held was lost.
+- **Fetch attempts marks Starling's range-narrowing refusals quietly** and says
+  they need no action. Other refusals keep the warning.
 
 ### Known limits
+- Review flags cannot be resolved from any page.
 - No action is offered yet for a payment that differs in Actual, for an
   imported id held by two rows there, or for imported rows in an account that
   now expects nothing. The page says so in each case.

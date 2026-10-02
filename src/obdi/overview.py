@@ -115,7 +115,10 @@ _KINDS: dict[str, tuple[int, str]] = {
     "push-stale": (NOW, "Open Actual sync and check that the applier is running."),
     "consent": (SOON, "Reconnect the bank before consent lapses."),
     "disk": (SOON, "Free space on the data volume or enlarge it."),
-    "review": (HOUSEKEEPING, "Open the review queue report and decide the flagged rows."),
+    "review": (
+        HOUSEKEEPING,
+        "Open the review queue report to see what is flagged; no page resolves them yet.",
+    ),
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
 }
 

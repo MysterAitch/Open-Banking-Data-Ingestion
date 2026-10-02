@@ -104,8 +104,31 @@ class RebuildReport:
             elif before == 0 and after > 0:
                 marker = " (new)"
             lines.append(f"  {account}: {before} -> {after}{marker}")
+        # Identical lines collapse to one with a count: a store holding thirty
+        # undecodable statements printed thirty copies and buried the account
+        # lines that say whether anything was lost.
+        grouped: dict[str, int] = {}
         for problem in self.problems:
-            lines.append(f"  problem: {problem}")
+            grouped[problem] = grouped.get(problem, 0) + 1
+        for problem, count in grouped.items():
+            noun = "artefact" if count == 1 else "artefacts"
+            lines.append(f"  problem: {problem} ({count} {noun})")
+        if self.problems:
+            lines.append(
+                "  Each artefact listed as a problem was skipped: the replay "
+                "could not read it, so it produced no rows. Layer 0 still "
+                "holds it."
+            )
+            if self.account_changes and not changed:
+                lines.append(
+                    "  The account totals are unchanged, so these problems "
+                    "lost nothing the store held."
+                )
+            elif changed:
+                lines.append(
+                    "  Where an account's total changed above, check whether "
+                    "a skipped artefact fed it."
+                )
         return "\n".join(lines)
 
 

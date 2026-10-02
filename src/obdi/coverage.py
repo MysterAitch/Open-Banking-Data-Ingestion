@@ -206,7 +206,7 @@ class Agreement:
         return "DISAGREE"
 
     def outline(self) -> dict[str, object]:
-        """The same verdict as `describe`, shaped as a per-source ledger.
+        """The same judgement as `describe`, in page wording, as a per-source ledger.
 
         One prose line carrying four kinds of fact proved unreadable in live
         use - and a first structured cut still demanded forensic
@@ -218,13 +218,24 @@ class Agreement:
         logs and terminals. Plain data on purpose - it crosses the web
         boundary without types.
         """
+        # Capitals are reserved for `describe`, the terminal form: a page that
+        # shouted DISAGREE over pairs it then went on to explain taught its
+        # reader to ignore the word.
+        note = ""
         if self.agrees:
             verdict, warn = "agree", False
         elif not self.reconciled:
-            verdict, warn = "DISAGREE", True
+            verdict, warn = "disagree - nothing here says why", True
+            note = _UNRECONCILED_NOTE
+        elif self.unexplained:
+            count = len(self.unexplained)
+            verdict = (
+                f"does not agree: {count} unexplained "
+                f"{'row needs' if count == 1 else 'rows need'} a look"
+            )
+            warn = True
         else:
-            verdict = self._reconciled_verdict()
-            warn = verdict == "DISAGREE"
+            verdict, warn = "differs as expected", False
 
         sides: list[dict[str, object]] = []
         if not self.agrees and self.reconciled:
@@ -293,6 +304,7 @@ class Agreement:
             "window": f"{self.overlap_from} .. {self.overlap_to}",
             "verdict": verdict,
             "warn": warn,
+            "note": note,
             "figures": (
                 f"{self.left_count} vs {self.right_count} transactions; "
                 f"net {format_amount(self.left_net_minor)} vs "
@@ -300,6 +312,17 @@ class Agreement:
             ),
             "sides": sides,
         }
+
+
+#: Said where the verdict has no row-by-row breakdown behind it, because
+#: without one nothing separates an excused difference from a real one.
+_UNRECONCILED_NOTE = (
+    "No row-by-row comparison ran for this pair, so the page cannot tell "
+    "expected differences from real ones. Compare the two sources' rows for "
+    "this account over the window above, the dates at either end first, and "
+    "decide whether the gap is a missing file or one source reporting the "
+    "same money under another account."
+)
 
 
 def _attribution_clause(attributed: Sequence[SiblingAttribution]) -> str:

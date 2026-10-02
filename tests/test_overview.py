@@ -296,6 +296,18 @@ class TestTheOverviewsOwnChecks:
         assert item.message.startswith("1 transaction is flagged")
         assert item.accounts == ("current-account",)
 
+    def test_ReviewFlags_Remedy_DoesNotPromiseADecisionNoPageCanTake(self, tmp_path):
+        """Nothing resolves a review flag yet, so the item says where to read
+        them and that they cannot be cleared, where it used to say "decide"."""
+        path = tmp_path / "h.sqlite3"
+        with Store(path) as store:
+            build_household(store)
+
+        (item,) = [i for i in assemble(path).items if i.kind == "review"]
+
+        assert "decide" not in item.remedy
+        assert "no page resolves them yet" in item.remedy
+
     def test_ReviewFlags_WhenNoneIsOpen_RaisesNothing(self, household):
         assert [i for i in assemble(household).items if i.kind == "review"] == []
 
