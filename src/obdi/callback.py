@@ -138,8 +138,10 @@ def render_page(title: str, body: str) -> bytes:
  .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
          font-size: .85em; word-break: break-all; }}
  /* A date or an amount is read whole. The monospace rule above breaks
-    anywhere, which is right for a long identifier and split "2026-06-28"
-    and "£1,234.56" across three lines in a narrow table cell. */
+    anywhere, which is right for a long identifier and split a date or an
+    amount across three lines in a narrow table cell.
+    No example figure here: this text is in every page, and a page that
+    must show no amount is tested by looking for one. */
  .nowrap {{ white-space: nowrap; word-break: normal; }}
  .warn {{ color: #b45309; font-weight: 600; }}
  .bad {{ color: #b91c1c; font-weight: 600; }}
