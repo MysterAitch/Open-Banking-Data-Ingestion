@@ -37,6 +37,11 @@ transcription would add no reasoning that the subjects do not already carry.
   imported there (from 20 rows up), or 250 in all. The server works this out
   from the newest audit, not from the form.
 
+- **Identity health says whether a provider id with no row of its own is a
+  missing payment or a renumbered one.** If the provider listed it in one
+  response beside the id that holds the row, they are two payments and one is
+  missing. If it never did, the Overview treats it as housekeeping.
+
 ### Changed
 - **A removal never deletes more rows than were shown.** If Actual holds more
   than the count confirmed, nothing is deleted in that account and both numbers

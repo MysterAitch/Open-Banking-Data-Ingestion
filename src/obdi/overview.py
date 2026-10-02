@@ -26,11 +26,15 @@ from collections import Counter
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .alerts import Finding
 from .coverage import SILENT_FEED_DAYS
 from .store import Store
+
+if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
+    from .identity_health import IdentityHealth
 
 #: Where a person goes to act on each kind of attention item. Declared once,
 #: here, because the navigation strip and the items below must agree about them.
@@ -295,27 +299,46 @@ def _plural(count: int, singular: str, plural: str | None = None) -> str:
 def _identity_items(store: Store) -> list[AttentionItem]:
     from .identity_health import identity_health
 
-    health = identity_health(store)
+    return identity_items_from(identity_health(store))
+
+
+def identity_items_from(health: IdentityHealth) -> list[AttentionItem]:
+    """The identity report as at most one item, weighed by what is proven.
+
+    A payment held twice, or one proven to lack a row, is money counted
+    wrongly.
+    An id never listed beside the id that holds its row is what a provider
+    renumbering one payment looks like, so alone it is housekeeping.
+    """
     if not (health.folded or health.surplus):
         return []
     concerned = tuple(
         sorted({t.account_id for t in health.tallies if t.folded or t.surplus})
     )
+    proven = health.folded_listed_together
+    unproven = health.folded - proven
     parts = []
-    if health.folded:
+    if proven:
         parts.append(
-            f"{_plural(health.folded, 'payment')} a provider reported "
-            f"{'has' if health.folded == 1 else 'have'} no row of their own"
+            f"{_plural(proven, 'payment')} a provider reported "
+            f"{'has' if proven == 1 else 'have'} no row of "
+            f"{'its' if proven == 1 else 'their'} own"
         )
     if health.surplus:
         parts.append(
             f"{_plural(health.surplus, 'payment')} "
             f"{'is' if health.surplus == 1 else 'are'} held by more than one row"
         )
+    if unproven:
+        parts.append(
+            f"{_plural(unproven, 'provider id')} {'has' if unproven == 1 else 'have'} "
+            f"no row of {'its' if unproven == 1 else 'their'} own and may be one "
+            "payment the provider renumbered"
+        )
     return [
         AttentionItem(
             kind="identity-health",
-            severity=NOW,
+            severity=NOW if proven or health.surplus else HOUSEKEEPING,
             message="Identity health: " + ", and ".join(parts) + ".",
             remedy=_KINDS["identity-health"][1],
             href="/identity-health",

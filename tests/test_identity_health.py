@@ -117,6 +117,60 @@ class TestProviderIdsAgainstTheRowsThatHoldThem:
         assert report.folded == 1
         assert report.surplus == 0
 
+    def test_Report_WhenTheProviderListedBothIdsInOneResponse_TheFoldIsProvenTwoPayments(
+        self, tmp_path
+    ):
+        """One response naming both ids cannot be one payment named twice."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            _feed(store, [_payment("pay-1", 1), _payment("pay-lost", 2)], cycle=1)
+            _fold_into(store, "pay-1", "pay-lost")
+            report = identity_health(store)
+
+        (tally,) = report.tallies
+        assert (tally.folded, tally.folded_listed_together) == (1, 1)
+        assert report.folded_listed_together == 1
+        assert "1 listed in one response beside the id that holds the row" in report.describe()
+
+    def test_Report_WhenTheIdsWereNeverListedTogether_TheFoldMayBeOnePaymentRenumbered(
+        self, tmp_path
+    ):
+        """Each id arrived in a response of its own: what a provider giving a
+        payment a new id looks like, and not proof of a missing payment."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            _feed(store, [_payment("pay-renumbered", 1)], cycle=1)
+            _fold_into(store, "pay-1", "pay-renumbered")
+            report = identity_health(store)
+
+        (tally,) = report.tallies
+        assert (tally.folded, tally.folded_listed_together) == (1, 0)
+        assert "1 never listed beside it" in report.describe()
+        assert "renumber" in report.describe()
+
+    def test_Report_WhenTheAbsorbedIdIsInNoResponseHeld_CountsItAsNeverListedTogether(
+        self, tmp_path
+    ):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            _fold_into(store, "pay-1", "pay-lost")
+            report = identity_health(store)
+
+        (tally,) = report.tallies
+        assert (tally.folded, tally.folded_listed_together) == (1, 0)
+
+    def test_Report_WhenARowsTwoIdsWereListedTogetherButBothHaveRows_ProvesNothingFolded(
+        self, tmp_path
+    ):
+        """History, not loss: the opposite case must not be counted as proof."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            _three_payments_months_apart(store)
+            _fold_into(store, "pay-1", "pay-2")
+            report = identity_health(store)
+
+        (tally,) = report.tallies
+        assert (tally.folded, tally.folded_listed_together) == (0, 0)
+
     def test_Report_WhenAFoldedPaymentLaterRegainedItsOwnRow_CountsNothingFolded(
         self, tmp_path
     ):

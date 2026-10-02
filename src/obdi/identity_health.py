@@ -66,6 +66,11 @@ class ProviderIdTally:
     folded: int = 0
     #: Rows beyond the payments the source reported: a payment held twice.
     surplus: int = 0
+    #: Of `folded`, how many are proven to be separate payments: the provider
+    #: named the id beside the row's other id in ONE response.
+    #: The rest were never named together, which is what a provider giving one
+    #: payment a new id looks like, and is not proof either way.
+    folded_listed_together: int = 0
 
 
 @dataclass
@@ -80,6 +85,10 @@ class IdentityHealth:
     @property
     def surplus(self) -> int:
         return sum(tally.surplus for tally in self.tallies)
+
+    @property
+    def folded_listed_together(self) -> int:
+        return sum(tally.folded_listed_together for tally in self.tallies)
 
     def describe(self) -> str:
         lines = ["Rows sharing an identity (content key + occurrence):"]
@@ -105,7 +114,14 @@ class IdentityHealth:
                 f"{tally.reported} reported, {tally.held} held"
             )
             if tally.folded:
-                line += f" - {tally.folded} with no row of their own"
+                apart = tally.folded - tally.folded_listed_together
+                line += (
+                    f" - {tally.folded} with no row of their own: "
+                    f"{tally.folded_listed_together} listed in one response beside "
+                    "the id that holds the row, so a separate payment; "
+                    f"{apart} never listed beside it, as when a provider "
+                    "renumbers one payment"
+                )
             if tally.surplus:
                 line += f" - {tally.surplus} more row(s) than ids"
             if tally.absorbing_rows:
@@ -115,9 +131,12 @@ class IdentityHealth:
                 )
             lines.append(line)
         if self.folded:
+            proven = self.folded_listed_together
             lines.append(
-                f"  TOTAL: {self.folded} payment(s) a provider reported have no "
-                "row of their own - folded into another row by the matcher"
+                f"  TOTAL: {self.folded} provider id(s) have no row of their own. "
+                f"{proven} are proven separate payments folded into another row; "
+                f"{self.folded - proven} were never listed beside the id that holds "
+                "the row, which is what one payment given a new id looks like"
             )
         else:
             lines.append("  every provider id reported has a row of its own")
@@ -130,15 +149,12 @@ class IdentityHealth:
         return "\n".join(lines)
 
 
-def _folded_and_surplus(rows: dict[str, set[str]]) -> tuple[int, int]:
-    """How many payments lack a row, and how many rows are one too many.
+def _groups(rows: dict[str, set[str]]) -> list[tuple[list[str], set[str]]]:
+    """Rows and provider ids as the sightings connect them: (entities, ids).
 
-    Counted within each group of rows and ids that sightings connect, never
-    across the whole account: a payment folded away in March and a payment
-    held twice in June are two faults, and totals alone would let one hide
-    the other.
-    Within a group, more ids than rows is payments without a row of their
-    own, and more rows than ids is a payment held more than once.
+    Counted within each group, never across the whole account: a payment
+    folded away in March and a payment held twice in June are two faults, and
+    totals alone would let one hide the other.
     """
     group_of: dict[str, str] = {}
 
@@ -152,15 +168,68 @@ def _folded_and_surplus(rows: dict[str, set[str]]) -> tuple[int, int]:
         for provider_id in ids:
             group_of[find(f"row:{entity}")] = find(f"id:{provider_id}")
 
-    rows_in: dict[str, int] = {}
-    ids_in: dict[str, int] = {}
-    for node in list(group_of):
-        counted = rows_in if node.startswith("row:") else ids_in
-        root = find(node)
-        counted[root] = counted.get(root, 0) + 1
-    folded = sum(max(ids_in.get(root, 0) - held, 0) for root, held in rows_in.items())
-    surplus = sum(max(held - ids_in.get(root, 0), 0) for root, held in rows_in.items())
+    members: dict[str, tuple[list[str], set[str]]] = {}
+    for entity, ids in rows.items():
+        entities, held_ids = members.setdefault(find(f"row:{entity}"), ([], set()))
+        entities.append(entity)
+        held_ids.update(ids)
+    return list(members.values())
+
+
+def _folded_and_surplus(rows: dict[str, set[str]]) -> tuple[int, int]:
+    """How many payments lack a row, and how many rows are one too many.
+
+    Within a group, more ids than rows is payments without a row of their
+    own, and more rows than ids is a payment held more than once.
+    """
+    groups = _groups(rows)
+    folded = sum(max(len(ids) - len(entities), 0) for entities, ids in groups)
+    surplus = sum(max(len(entities) - len(ids), 0) for entities, ids in groups)
     return folded, surplus
+
+
+def _listed_together(store: Store, ids: set[str]) -> bool:
+    """Whether one landed response names two of these provider ids.
+
+    Read from the raw payloads, because the sightings cannot say: a row keeps
+    one sighting per response, so two ids of one row arriving together leave
+    only one of them on record.
+    A pending snapshot is set aside, as it is when the ids are counted.
+    """
+    placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
+    ordered = sorted(ids)
+    for index, first in enumerate(ordered):
+        for second in ordered[index + 1 :]:
+            found = store.connection.execute(
+                "SELECT 1 FROM raw_artefacts "  # noqa: S608
+                "WHERE instr(payload, CAST(? AS BLOB)) > 0 "
+                "AND instr(payload, CAST(? AS BLOB)) > 0 "
+                # Placeholders only - the interpolation builds "?,?", never data.
+                f"AND source NOT IN ({placeholders}) LIMIT 1",
+                (first, second, *PENDING_SNAPSHOT_SOURCES),
+            ).fetchone()
+            if found is not None:
+                return True
+    return False
+
+
+def _folded_listed_together(store: Store, rows: dict[str, set[str]]) -> int:
+    """Of the payments with no row of their own, how many are proven separate.
+
+    Only groups that hold a fold are read, so a healthy store costs nothing.
+    """
+    proven = 0
+    for entities, ids in _groups(rows):
+        folded = len(ids) - len(entities)
+        if folded <= 0:
+            continue
+        together = sum(
+            1
+            for entity in entities
+            if len(rows[entity]) > 1 and _listed_together(store, rows[entity])
+        )
+        proven += min(folded, together)
+    return proven
 
 
 def shared_identity_groups(
@@ -251,6 +320,9 @@ def identity_health(store: Store) -> IdentityHealth:
                 absorbing_rows=sum(1 for ids in rows.values() if len(ids) > 1),
                 folded=folded,
                 surplus=surplus,
+                folded_listed_together=(
+                    _folded_listed_together(store, rows) if folded else 0
+                ),
             )
         )
     return report

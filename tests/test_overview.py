@@ -257,8 +257,48 @@ class TestTheOverviewsOwnChecks:
 
         item = next(i for i in overview.items if i.kind == "identity-health")
         assert item.href == "/identity-health"
-        assert item.severity == NOW
+        # The household's fold is planted as a sighting, with no response that
+        # lists both ids, so it is unproven; the proven cases are below.
+        assert item.severity == HOUSEKEEPING
         assert "current-account" in item.accounts
+
+    @pytest.mark.parametrize(
+        ("folded", "together", "surplus", "severity", "says"),
+        [
+            (1, 1, 0, NOW, "1 payment a provider reported has no row of its own"),
+            (1, 0, 0, HOUSEKEEPING, "may be one payment the provider renumbered"),
+            (2, 1, 0, NOW, "1 payment a provider reported has no row of its own"),
+            (0, 0, 3, NOW, "3 payments are held by more than one row"),
+            (1, 0, 2, NOW, "2 payments are held by more than one row"),
+        ],
+    )
+    def test_IdentityHealth_OnlyAProvenLossOrADoubleIsDataAtRisk(
+        self, folded, together, surplus, severity, says
+    ):
+        """An id that was never listed beside the id holding its row is what a
+        renumbered payment looks like, and must not shout as a lost one."""
+        from obdi.identity_health import IdentityHealth, ProviderIdTally
+        from obdi.overview import identity_items_from
+
+        health = IdentityHealth(
+            tallies=[
+                ProviderIdTally(
+                    account_id="acct",
+                    source="feed",
+                    reported=10,
+                    held=10,
+                    absorbing_rows=folded,
+                    folded=folded,
+                    surplus=surplus,
+                    folded_listed_together=together,
+                )
+            ]
+        )
+
+        (item,) = identity_items_from(health)
+
+        assert item.severity == severity
+        assert says in item.message
 
     def test_IdentityHealth_WhenEveryPaymentHasItsOwnRow_RaisesNothing(self, household):
         assert [i for i in assemble(household).items if i.kind == "identity-health"] == []
