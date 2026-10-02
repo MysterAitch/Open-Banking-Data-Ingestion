@@ -29,9 +29,12 @@ from obdi.parsers.pdf_statements import (
     PDF_PARSERS,
     CreditUnionStatementPdfParser,
     SantanderCreditCardPdfParser,
+    StarlingStatementPdfParser,
     VirginMoneyCreditCardPdfParser,
 )
 from test_credit_union_statement import build_columned_pdf
+from test_starling_statement import CONTRACT as STARLING
+from test_starling_statement import build_starling_pdf
 from test_statement_shape import build_pdf
 
 SANTANDER = [
@@ -104,6 +107,13 @@ CASES = {
         "Direct Payment",
         "Direct Payment",
         build=build_columned_pdf,
+    ),
+    StarlingStatementPdfParser: Case(
+        STARLING,
+        "EXAMPLE SHOP",
+        "Direct Payment",
+        "Direct Payment",
+        build=build_starling_pdf,
     ),
 }
 

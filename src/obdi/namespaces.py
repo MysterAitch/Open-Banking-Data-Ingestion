@@ -49,6 +49,7 @@ FILE_SOURCES = frozenset(
         "santander-cc-pdf",
         "virgin-money-cc-pdf",
         "credit-union-pdf",
+        "starling-statement-pdf",
         # A statement kept before anyone has decided which bank wrote it,
         # let alone which account it belongs to. It becomes one of the
         # issuer names above once a parser claims it.

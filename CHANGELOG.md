@@ -37,6 +37,15 @@ transcription would add no reasoning that the subjects do not already carry.
 - **Statements of one kind can be given an account together**, in file-name
   order. One the balance check refuses is reported by name and the rest are
   still read.
+- **A Starling certified statement PDF can be read.** It is refused unless its
+  rows carry the opening balance to the closing one and match its own totals
+  of payments in and out. Written from the statement's masked layout; it has
+  not yet read a real one.
+
+### Changed
+- **Santander and credit-union statements are recognised by their own table
+  words**, so a payee's name on another bank's statement cannot make two
+  parsers claim it.
 
 ### Fixed
 - **A statement the balance check refuses stays waiting for an account.** It

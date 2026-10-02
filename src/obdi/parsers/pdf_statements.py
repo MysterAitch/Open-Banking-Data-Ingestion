@@ -21,9 +21,11 @@ from functools import lru_cache
 
 from ..identity import content_key
 from ..models import SourceTier, Transaction
+from ..statement_columns import Row
 from .base import ParseError, StatementParser
 from .credit_union_pdf import read_statement as read_credit_union
 from .santander_pdf import read_statement as read_santander
+from .starling_pdf import read_statement as read_starling
 from .statement_reading import StatementReading
 from .virgin_money_pdf import read_statement as read_virgin
 
@@ -86,6 +88,28 @@ def _grid(payload: bytes) -> list[list[str]]:
         temporary = Path(scratch) / "statement.pdf"
         temporary.write_bytes(payload)
         return aligned(rows(temporary))
+
+
+@lru_cache(maxsize=_READINGS_KEPT)
+def _table(payload: bytes) -> list[Row]:
+    """The document's cells WITH their right edges, before any column is chosen.
+
+    The third reading of a page, for a table whose figures are right-aligned
+    beneath left-aligned headings. `_grid` has already filed each word under
+    the column whose LEFT edge is nearest, which puts a wide figure and a
+    narrow one beneath the same heading into different columns - and the
+    information that would put them back (where the figure ENDS) is gone by
+    the time a grid exists. Cached for the same reason as the other two.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from ..statement_columns import rows
+
+    with tempfile.TemporaryDirectory() as scratch:
+        temporary = Path(scratch) / "statement.pdf"
+        temporary.write_bytes(payload)
+        return rows(temporary)
 
 
 class PdfStatementParser(StatementParser):
@@ -200,6 +224,10 @@ class ColumnPdfStatementParser(PdfStatementParser):
 class SantanderCreditCardPdfParser(PdfStatementParser):
     source = "santander-cc-pdf"
     marker = "Santander"
+    #: The line its reader takes the closing balance from. A payee is free
+    #: text, so another bank's statement can name Santander (a direct debit
+    #: to one of its cards) without being one of its statements.
+    requires = ("Your new balance",)
     reader = staticmethod(read_santander)
 
 
@@ -221,7 +249,41 @@ class CreditUnionStatementPdfParser(ColumnPdfStatementParser):
 
     source = "credit-union-pdf"
     marker = "Credit Union"
+    #: Two of its table's column names. A payee is free text, so a current
+    #: account's statement can carry the words "Credit Union" (a direct debit
+    #: to one) without being a credit union's statement; the heading is what
+    #: only the real thing has.
+    requires = ("Payee", "Source")
     grid_reader = staticmethod(read_credit_union)
+
+
+class StarlingStatementPdfParser(PdfStatementParser):
+    """A Starling certified statement: a current account over several months.
+
+    Money in is positive and money out negative, and an account in credit is
+    a positive balance - the opposite of the card parsers' owed-is-negative,
+    which is a fact about cards and not about this layout.
+
+    Recognised by the Summary's labels AND the table's own heading, never by
+    the bank's name: the name is free text in every payee's line, and the
+    heading is what says the columns are where the reader looks for them.
+    """
+
+    source = "starling-statement-pdf"
+    marker = "Payments Out"
+    requires = (
+        "Payments In",
+        "Opening Balance",
+        "Closing Balance",
+        "Sort code",
+        "Account Number",
+        "END OF",
+        "TRANSACTION",
+    )
+    table_reader: Callable[[list[Row]], StatementReading] = staticmethod(read_starling)
+
+    def read(self, payload: bytes) -> StatementReading:
+        return self.table_reader(_table(payload))
 
 
 def _comparable(reading: StatementReading) -> tuple[object, ...]:
@@ -296,4 +358,5 @@ PDF_PARSERS: tuple[type[PdfStatementParser], ...] = (
     SantanderCreditCardPdfParser,
     VirginMoneyCreditCardPdfParser,
     CreditUnionStatementPdfParser,
+    StarlingStatementPdfParser,
 )
