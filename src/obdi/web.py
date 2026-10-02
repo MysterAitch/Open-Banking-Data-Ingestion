@@ -85,6 +85,7 @@ from .web_prune import (
     check_prune_post,
     counts_from_audit,
     prune_section,
+    removal_split,
 )
 from .web_sections import (
     HOME_LINK,
@@ -2709,8 +2710,12 @@ def _prune_result_row(result: dict[str, object]) -> str:
 #: difference: the two totals being compared, the person's own rows
 #: (counted precisely so they are never read as a fault), the row count
 #: on a stray account, and the account's own identity.
+#: `orphaned_will_go` is not a difference of its own: it says what a removal
+#: would do with the orphans already counted under `orphaned`, and is worded
+#: in that sentence. Read as a category, it showed as one the page did not
+#: know, beside the count it was explaining.
 _AUDIT_NON_DIFFERENCE_KEYS = frozenset(
-    {"expected", "present", "human", "rows", "account_id", "name"}
+    {"expected", "present", "human", "rows", "account_id", "name", "orphaned_will_go"}
 )
 
 #: The difference categories with a fixed place in the detail line, in
@@ -2879,12 +2884,31 @@ def _audit_difference_sentences(
                 "has a clearing form of its own"
             )
         elif key == "orphaned":
+            will_go, staying = removal_split(account, n)
+            if will_go is None:
+                # An audit that gave no split, or one that does not add up to
+                # the count: no figure is claimed for what a removal would do.
+                remedy = (
+                    "Remove orphaned imports deletes those that are obdi's "
+                    "own, unlinking a leg of a linked transfer first; a row "
+                    "with another importer's id is left alone"
+                )
+            else:
+                left = sum(staying.values())
+                reasons = "; ".join(
+                    f"{count} because {STAY_REASONS.get(reason, reason)}"
+                    for reason, count in sorted(staying.items())
+                )
+                remedy = (
+                    f"Remove orphaned imports will remove {will_go} and leave "
+                    + (f"{left} ({reasons})" if left else "none")
+                    + "; one that is a leg of a linked transfer is unlinked "
+                    "first, so the other leg stays"
+                )
             sentences.append(
                 f"{n} {'row' if n == 1 else 'rows'} in Actual carry an imported "
                 "id this account does not expect, usually left by an earlier "
-                "binding or mapping. Remove orphaned imports deletes those "
-                "that are obdi's own, except legs of linked transfers; a row "
-                "with another importer's id is left alone"
+                f"binding or mapping. {remedy}"
             )
         elif key == "diverged":
             sentences.append(

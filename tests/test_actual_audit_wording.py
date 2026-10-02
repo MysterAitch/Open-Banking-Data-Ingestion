@@ -151,6 +151,55 @@ class TestAuditSaysWhatEachDifferenceMeansAndWhatToDo:
         assert "1 transfer pair not linked - the next push links what it can" in page
         assert "transfers linked 2 of 3 pair(s)" in page
 
+    def test_OrphansTheRemovalWillTake_AreSaidInWords_NotAsAnUnknownCategory(self):
+        """Met on the deployed instance: the audit began reporting how many
+        orphans a removal would take, and the page read that count as "not a
+        category this page knows" beside a sentence saying linked transfer
+        legs are never removed, which had stopped being true."""
+        page = _render(
+            _account(orphaned=727, orphaned_will_go=727, orphaned_will_stay={})
+        )
+
+        assert "727 rows in Actual carry an imported id this account does not expect" in page
+        assert "Remove orphaned imports will remove 727 and leave none" in page
+        assert "unlinked first" in page
+        assert "not a category this page knows" not in page
+        assert "orphaned_will_go" not in page
+        assert "except legs of linked transfers" not in page
+
+    def test_OrphansTheRemovalWillLeave_AreCountedWithTheirReasons(self):
+        page = _render(
+            _account(
+                orphaned=10,
+                orphaned_will_go=7,
+                orphaned_will_stay={"partner_not_ours": 2, "reconciled": 1},
+            )
+        )
+
+        assert "Remove orphaned imports will remove 7 and leave 3" in page
+        assert "2 because the other leg of its transfer is not an obdi import" in page
+        assert "1 because a leg of its transfer is reconciled" in page
+
+    def test_AnAuditWithNoSplit_ClaimsNone(self):
+        """An audit taken by an older applier, or a split that does not add up
+        to the orphaned count, must not put a figure on the page."""
+        older = _render(_account(orphaned=5))
+        wrong = _render(
+            _account(orphaned=5, orphaned_will_go=9, orphaned_will_stay={})
+        )
+
+        for page in (older, wrong):
+            assert "will remove" not in page
+            assert "Remove orphaned imports deletes those that are obdi's own" in page
+            assert "not a category this page knows" not in page
+
+    def test_OnlyOrphansThatWillGo_DoNotMakeACleanAccountDiffer(self):
+        page = web._actual_rows(
+            lambda: [_audit(_account(orphaned_will_go=0, orphaned_will_stay={}))], True
+        )
+
+        assert "audit clean" in page
+
     def test_CategoryThePageHasNeverHeardOf_StillReadsAsADifference(self):
         page = web._actual_rows(lambda: [_audit(_account(wrong_sign=37))], True)
 

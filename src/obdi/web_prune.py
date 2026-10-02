@@ -113,7 +113,7 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
             continue
         if entry.get("missing_account") or entry.get("unbound_in_actual"):
             continue
-        will_go, staying = _split(entry, orphaned)
+        will_go, staying = removal_split(entry, orphaned)
         found.append(
             OrphanCount(
                 str(entry.get("account_id", "")),
@@ -128,7 +128,9 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
     return found
 
 
-def _split(entry: dict[str, object], orphaned: int) -> tuple[int | None, dict[str, int]]:
+def removal_split(
+    entry: dict[str, object], orphaned: int
+) -> tuple[int | None, dict[str, int]]:
     """The audit's will-go and will-stay counts, or (None, {}) unless both are
     present, whole, and add up to the orphaned count.
 

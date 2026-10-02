@@ -41,6 +41,9 @@ transcription would add no reasoning that the subjects do not already carry.
   only; nothing existing is altered.
 
 ### Fixed
+- **The audit detail says in words what a removal will take.** After 0.4.257
+  it showed the new count as "not a category this page knows", beside a
+  sentence still saying linked transfer legs are never removed.
 - **The rebuild check a deploy gates on names a store it cannot open.** The
   data volume filled, the check died with a traceback where its reason should
   have been, and the deploy reported a failed rebuild with nothing beside it.
