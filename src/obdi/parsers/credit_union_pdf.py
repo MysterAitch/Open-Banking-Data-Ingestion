@@ -98,7 +98,28 @@ _DATE = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
 #: character would read half a statement on a file that encodes it
 #: differently. The symbol is never load-bearing here - the column decides
 #: the direction - so accepting whatever arrives costs nothing.
-_AMOUNT = re.compile(r"-?\s*[^\s\d]?\s*-?[\d,]+\.\d{2}")
+#:
+#: Up to TWO characters, because a pound sign decoded one byte at a time
+#: arrives as two, and a balance written that way was not a figure at all.
+_AMOUNT = re.compile(r"-?\s*[^\s\d]{0,2}\s*-?[\d,]+\.\d{2}")
+
+#: A currency symbol, which is what separates a stray zero printed in the
+#: payee zone from a payee that merely contains digits ("Ref 12.50").
+_SYMBOL = re.compile(r"[^\w\s.,-]")
+
+#: The fields whose cells are text. A figure that falls in one of them is
+#: furniture and is no part of what the row says.
+_TEXT_FIELDS = frozenset({"source", "payee"})
+
+#: What a statement's balance labels are, by their normalised text. Their
+#: figures are printed BENEATH them, so a label is recognised by itself and
+#: its figure is looked for on the rows that follow.
+_BALANCE_LABELS = {"opening balance": "opening", "closing balance": "closing"}
+
+#: How many rows beneath a balance label its figure may be. The opening
+#: balance's figure sits beneath the account's name, which sits beneath the
+#: label; further than that is a figure belonging to something else.
+_FIGURE_REACH = 3
 
 _PERIOD = re.compile(r"Period\s+\d{2}/\d{2}/\d{4}\s+to\s+(\d{2})/(\d{2})/(\d{4})")
 _ISSUED = re.compile(r"Date\s+of\s+Issue\s+(\d{2})/(\d{2})/(\d{4})")
@@ -250,7 +271,16 @@ def _merged(names: dict[int, str], continuation: list[str]) -> dict[int, str]:
 
 
 def _cells(row: list[str], fields: dict[int, str]) -> dict[str, str]:
-    """A row's cells by the field each one falls under."""
+    """A row's cells by the field each one falls under.
+
+    A DATE set left of every heading belongs to the date column: the real
+    statements start each date a little before the word "Date", in a column
+    that no heading names, and dropping it left every row undated. Only a
+    date is rescued there - anything else in the margin is not a row's own.
+
+    A figure with a currency symbol in a text field is a stray zero the
+    statement prints in the payee zone, and is left out of the description.
+    """
     columns = sorted(fields)
     found: dict[str, str] = {}
     for index, cell in enumerate(row):
@@ -259,10 +289,90 @@ def _cells(row: list[str], fields: dict[int, str]) -> dict[str, str]:
             continue
         owner = _owner(index, columns)
         if owner is None:
+            if _DATE.fullmatch(text) and "date" in fields.values():
+                found["date"] = f"{found.get('date', '')} {text}".strip()
             continue
         field = fields[owner]
+        if field in _TEXT_FIELDS and _AMOUNT.fullmatch(text) and _SYMBOL.search(text):
+            continue
         found[field] = f"{found.get(field, '')} {text}".strip()
     return found
+
+
+def _figures(row: list[str]) -> dict[int, int]:
+    """A row's amounts by position, when the row holds nothing else.
+
+    A row of figures under a row of labels is nothing but figures; a row
+    that also carries text is a transaction or a heading and is not this.
+    """
+    cells = {index: cell.strip() for index, cell in enumerate(row) if cell.strip()}
+    found = {
+        index: minor
+        for index, text in cells.items()
+        if (minor := _amount(text)) is not None
+    }
+    return found if cells and len(found) == len(cells) else {}
+
+
+def _balance_labels(row: list[str]) -> dict[int, str] | None:
+    """The labels of a row that names a balance, or None if it names none.
+
+    Every non-empty cell is returned, not only the balance labels, because a
+    figure beneath the row belongs to the nearest label at or left of it and
+    that label may be "Interest Due" rather than a balance.
+    """
+    cells = {
+        index: _normalised(cell) for index, cell in enumerate(row) if cell.strip()
+    }
+    if not any(text in _BALANCE_LABELS for text in cells.values()):
+        return None
+    return cells
+
+
+def _nearest_text(row: list[str], column: int) -> str:
+    """The text cell of a row nearest a column, within a few cells of it.
+
+    The account's name is set beneath its label but not always in the same
+    column: on the real statements it starts one cell LEFT of the label.
+    """
+    near = [
+        (abs(index - column), index, cell.strip())
+        for index, cell in enumerate(row)
+        if cell.strip() and abs(index - column) <= 3
+    ]
+    return min(near)[2] if near else ""
+
+
+def _assign_balances(
+    reading: StatementReading, labels: dict[int, str], figures: dict[int, int]
+) -> None:
+    """File each figure beneath a row of labels under the label it belongs to.
+
+    The nearest label at or left of a figure owns it, the way a heading owns
+    a column. A figure with no label to its left, or two figures for one
+    label, cannot be placed with confidence - and an opening or closing
+    balance taken from the wrong one would be what the rows are checked
+    against - so the statement is refused instead.
+    """
+    claimed: dict[int, int] = {}
+    for index, minor in sorted(figures.items()):
+        owner = max((label for label in labels if label <= index), default=None)
+        if owner is None or owner in claimed:
+            reading.notes.append(
+                "a figure beneath a row of balance labels cannot be matched to "
+                "exactly one label - refusing rather than taking a balance from "
+                "the wrong one"
+            )
+            return
+        claimed[owner] = minor
+    for owner, minor in claimed.items():
+        kind = _BALANCE_LABELS.get(labels[owner])
+        if kind == "opening" and reading.opening_balance_minor is None:
+            # First page only, for the reason given where the same-row
+            # opening balance is read.
+            reading.opening_balance_minor = minor
+        elif kind == "closing":
+            reading.closing_balance_minor = minor
 
 
 def _read_row(reading: StatementReading, cells: dict[str, str]) -> None:
@@ -338,14 +448,32 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
     nothing on it is an ordinary page rather than a fault.
     """
     reading = StatementReading()
+    parts = sections(grid)
+    if len(parts) > 1:
+        # One statement is read into one account. A document of several
+        # accounts read whole would take the first account's name, its
+        # opening balance and the LAST account's closing balance, and file
+        # every row under one account.
+        reading.notes.append(
+            f"this statement covers {len(parts)} accounts (its page numbering "
+            f"restarts {len(parts) - 1} time(s)) and so cannot be assigned to "
+            "one account - refusing rather than filing every account's rows "
+            "under one"
+        )
+        return reading
     fields: dict[int, str] = {}
     issued: date | None = None
     account_name = ""
+    names_seen: set[str] = set()
     name_column: int | None = None
     # A section's last row is its closing balance; anything below it is a
     # summary of what has already been counted.
     below_the_table = False
     skip_next = False
+    # The labels of a balance row whose figures are still awaited, and how
+    # many rows are left to find them in.
+    awaiting: dict[int, str] | None = None
+    reach = 0
 
     for position, row in enumerate(grid):
         if skip_next:
@@ -353,8 +481,10 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
             continue
 
         if name_column is not None:
-            if not account_name and name_column < len(row):
-                account_name = row[name_column].strip()
+            name = _nearest_text(row, name_column)
+            if name:
+                names_seen.add(name)
+                account_name = account_name or name
             name_column = None
         label = next(
             (
@@ -394,6 +524,24 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
             below_the_table = True
             continue
 
+        if awaiting is not None:
+            figures = _figures(row)
+            if figures:
+                _assign_balances(reading, awaiting, figures)
+                awaiting = None
+                continue
+            reach -= 1
+            if reach == 0:
+                awaiting = None
+        labels = _balance_labels(row)
+        if labels is not None:
+            # The figures are printed beneath the labels, so the table is
+            # over at a closing label whether or not its figure is found.
+            awaiting, reach = labels, _FIGURE_REACH
+            if "closing balance" in labels.values():
+                below_the_table = True
+            continue
+
         names = _named_columns(row)
         if set(_fields_of(names).values()) >= _REQUIRED:
             following = grid[position + 1] if position + 1 < len(grid) else []
@@ -409,6 +557,12 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
         if fields and not below_the_table:
             _read_row(reading, _cells(row, fields))
 
+    if len(names_seen) > 1:
+        reading.notes.append(
+            "this statement names more than one account "
+            f"({', '.join(sorted(names_seen))}) and so cannot be assigned to "
+            "one account"
+        )
     reading.account_name = account_name
     rate = _rate_in(account_name)
     if rate is not None:

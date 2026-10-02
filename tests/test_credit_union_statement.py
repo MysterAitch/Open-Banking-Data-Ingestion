@@ -97,6 +97,61 @@ LOAN = [
 ]
 
 
+#: The layout of a real annual statement, which the sections above are not.
+#: Four things differ, and each one refused every real statement read:
+#:
+#:   the dates      are set a little LEFT of the "Date" heading, in a column
+#:                  of their own that no heading names
+#:   the balances   are printed BENEATH their labels, one cell further right
+#:                  for the opening balance and directly below for the
+#:                  closing one, with the account's name between the
+#:                  opening label and its figure
+#:   the payee      zone holds a zero amount on every row, which is not a
+#:                  payee
+#:   the loan       ends in a line of labels ("Interest Due", a closing
+#:                  position, "Closing Balance") with a figure under each
+#:
+#: Column 0 is the margin the dates sit in, columns 1 to 9 are the headings.
+REAL_X = (20.0, 60.0, 200.0, 330.0, 560.0, 760.0, 940.0, 1120.0, 1280.0, 1480.0)
+REAL_HEADER = "|Date|Source|Payee||Debit|Credit|Interest|Transaction|Balance"
+REAL_CONTINUATION = "|||||Amount|Amount|Amount|Total"
+
+#: Working: 800.00 + 25.00 + 2.49 - 300.00 - 2.49 = 525.00.
+REAL_SAVINGS = [
+    "Example Credit Union Limited",
+    "|||||||Page 1 of 1",
+    "||Account Name|||||Opening Balance",
+    "|Regular Saver",
+    "||||||||£800.00",
+    "|Period 01/05/2025 to 31/05/2025",
+    REAL_HEADER,
+    REAL_CONTINUATION,
+    "04/05/2025||DD Lodgement||£0.00||£25.00||25.00|825.00",
+    "09/05/2025||Div - Regular Saver||£0.00||£2.49||2.49|827.49",
+    "17/05/2025||Internet Transfer|J SMITH|£0.00|£300.00|||300.00|527.49",
+    "24/05/2025||tx||£0.00|£2.49|||2.49|525.00",
+    "||||||||Closing Balance",
+    "||||||||£525.00",
+]
+
+#: Working: -500.00 + 155.00 + 2.49 = -342.51 (a loan's balances are negated).
+REAL_LOAN = [
+    "Example Credit Union Limited",
+    "|||||||Page 1 of 1",
+    "||Account Name|||||Opening Balance",
+    "|Personal -9.50%",
+    "||||||||£500.00",
+    "|Period 01/05/2025 to 31/05/2025",
+    REAL_HEADER,
+    REAL_CONTINUATION,
+    "12/05/2025||tx||£0.00||£155.00|£4.00|159.00|345.00",
+    "26/05/2025||tx||£0.00||£2.49|£2.49|2.49|342.51",
+    "||Interest Due||||Closing Loan Position *||Closing Balance",
+    "||£12.00||||£354.51||£342.51",
+    "||* Closing Loan Position = Loan Balance + Closing Interest on 31/05/2025",
+]
+
+
 def grid(lines: list[str]) -> list[list[str]]:
     """The fixture as the column reader would hand it over.
 
@@ -110,7 +165,7 @@ def grid(lines: list[str]) -> list[list[str]]:
     ]
 
 
-def build_columned_pdf(lines: list[str]) -> bytes:
+def build_columned_pdf(lines: list[str], xs: tuple[float, ...] = COLUMN_X) -> bytes:
     """The same fixture as a real wide page, each cell at its own point.
 
     Delegates the file itself to the positioned builder the column tests
@@ -122,7 +177,7 @@ def build_columned_pdf(lines: list[str]) -> bytes:
     for index, line in enumerate(lines):
         for column, cell in enumerate(line.split("|")):
             if cell.strip():
-                placements.append((COLUMN_X[column], 700.0 - index * 20.0, cell.strip()))
+                placements.append((xs[column], 700.0 - index * 20.0, cell.strip()))
     return build_positioned_pdf(placements)
 
 
@@ -456,8 +511,290 @@ class TestTheArithmeticGate:
         assert "BOTH money columns" in " ".join(reading.notes)
 
 
+class TestARealAnnualStatement:
+    """The layout the real statements have, which refused every one of them."""
+
+    def test_AnAnnualSavingsStatement_ReadsIntoItsRows(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert not reading.notes
+        assert [
+            (row.value_date, row.description, row.amount_minor)
+            for row in reading.transactions
+        ] == [
+            (date(2025, 5, 4), "DD Lodgement", 2500),
+            (date(2025, 5, 9), "Div - Regular Saver", 249),
+            (date(2025, 5, 17), "Internet Transfer J SMITH", -30000),
+            (date(2025, 5, 24), "tx", -249),
+        ]
+        assert reading.account_name == "Regular Saver"
+        assert reading.statement_date == date(2025, 5, 31)
+
+    def test_AnAnnualSavingsStatement_ReconcilesFromItsStatedBalances(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert reading.opening_balance_minor == 80000
+        assert reading.closing_balance_minor == 52500
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_AnAnnualLoanStatement_ReadsWithItsBalancesNegated(self):
+        reading = read_statement(grid(REAL_LOAN))
+
+        assert not reading.notes
+        assert reading.opening_balance_minor == -50000
+        assert reading.closing_balance_minor == -34251
+        assert [row.amount_minor for row in reading.transactions] == [15500, 249]
+        assert reading.reconciles, reading.discrepancy_minor
+
+
+class TestADateLeftOfItsHeading:
+    def test_ADateSetLeftOfTheDateHeading_StillBelongsToTheDateColumn(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert reading.transactions[0].value_date == date(2025, 5, 4)
+
+    def test_ATextCellSetLeftOfTheDateHeading_IsNotTakenForADate(self):
+        # Only a date is rescued from the margin. Anything else there is
+        # not a row's own date, so the row is still refused.
+        undated = [
+            line.replace("24/05/2025||tx", "ref 24||tx") for line in REAL_SAVINGS
+        ]
+
+        reading = read_statement(grid(undated))
+
+        assert "no date" in " ".join(reading.notes)
+
+    def test_AnImpossibleDateInTheMargin_IsRefused_RatherThanRounded(self):
+        impossible = [line.replace("04/05/2025", "31/02/2025") for line in REAL_SAVINGS]
+
+        reading = read_statement(grid(impossible))
+
+        assert "31/02/2025" in " ".join(reading.notes)
+
+
+class TestBalancesPrintedBeneathTheirLabels:
+    def test_TheOpeningBalance_IsTheFigureBeneathItsLabel_PastTheAccountName(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert reading.opening_balance_minor == 80000
+
+    def test_TheClosingBalance_IsTheFigureDirectlyBeneathItsLabel(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert reading.closing_balance_minor == 52500
+
+    def test_ALabelWithNoFigureBeneathIt_LeavesTheBalanceUnstated(self):
+        # The door then refuses the statement for want of a balance to
+        # check the rows against, rather than importing on trust.
+        bare = [line for line in REAL_SAVINGS if "£525.00" not in line]
+
+        reading = read_statement(grid(bare))
+
+        assert reading.closing_balance_minor is None
+
+    def test_AFigureTooFarBelowItsLabel_IsNotItsBalance(self):
+        # A figure three rows on belongs to whatever sits there, and is
+        # reached only if it is a figure row of its own beneath a label.
+        far = [
+            *REAL_SAVINGS[:-1],
+            "||Account Name",
+            "|Regular Saver",
+            "||Period",
+            "||||||||£525.00",
+        ]
+
+        reading = read_statement(grid(far))
+
+        assert reading.closing_balance_minor is None
+
+    def test_TheFigureBeneathEachLabelOfALoansClosingLine_GoesToItsOwnLabel(self):
+        # Three labels, three figures, and only one is the closing balance.
+        # The closing position is the loan balance plus interest and would
+        # not walk from the opening one.
+        reading = read_statement(grid(REAL_LOAN))
+
+        assert reading.closing_balance_minor == -34251
+
+    def test_AFigureLeftOfEveryLabelAboveIt_IsRefused_NotGuessedAt(self):
+        stray = [
+            line.replace("||£12.00||||£354.51||£342.51", "|£7.00|£12.00||||£354.51||£342.51")
+            for line in REAL_LOAN
+        ]
+
+        reading = read_statement(grid(stray))
+
+        assert reading.notes
+        assert "label" in " ".join(reading.notes)
+
+    def test_TwoFiguresBeneathOneLabel_AreRefused_NotPickedBetween(self):
+        doubled = [
+            line.replace("||||||||£525.00", "||||||||£525.00|£526.00")
+            for line in REAL_SAVINGS
+        ]
+
+        reading = read_statement(grid(doubled))
+
+        assert reading.notes
+        assert "label" in " ".join(reading.notes)
+
+    def test_RowsBelowAClosingLabel_AreNotReadAsTransactions(self):
+        # The closing balance's figure is on the row beneath its label, so
+        # the table must end at the label: a dated summary under the figure
+        # has already been counted in it.
+        with_summary = [
+            *REAL_SAVINGS,
+            "01/05/2025||Interest to date||||£12.00||12.00|525.00",
+        ]
+
+        reading = read_statement(grid(with_summary))
+
+        assert len(reading.transactions) == 4
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_ABalanceOnTheLabelsOwnRow_IsStillRead(self):
+        # The layout the earlier fixtures encode, kept working.
+        reading = read_statement(grid(SAVINGS))
+
+        assert reading.opening_balance_minor == 80000
+        assert reading.closing_balance_minor == 52500
+
+
+class TestAFigureWithNoDateThatIsNoneOfThose:
+    def test_AFigureBeneathNoLabel_IsStillRefusedAsUndated(self):
+        # The guard: a row that carries an amount, has no date, and is none
+        # of the known kinds of summary line is not guessed at.
+        unknown = [
+            *REAL_SAVINGS[:-2],
+            "||Mystery Fee|||£10.00|||10.00|515.00",
+            *REAL_SAVINGS[-2:],
+        ]
+
+        reading = read_statement(grid(unknown))
+
+        assert "no date" in " ".join(reading.notes)
+
+    def test_AFigureInTheCreditColumnBeneathALabelRow_IsNotATransaction(self):
+        # On a loan the figure under the closing-position label falls in
+        # the credit column, which read as an undated payment in.
+        reading = read_statement(grid(REAL_LOAN))
+
+        assert "no date" not in " ".join(reading.notes)
+        assert len(reading.transactions) == 2
+
+    def test_ASummaryFigureBeneathNoLabel_AfterTheTable_IsRefusedOnALoan(self):
+        orphaned = [line for line in REAL_LOAN if "Interest Due" not in line]
+
+        reading = read_statement(grid(orphaned))
+
+        assert "no date" in " ".join(reading.notes)
+
+
+class TestTheCurrencySymbolsThatArrive:
+    def test_ASymbolThatArrivesAsTwoCharacters_IsStillAnAmount(self):
+        # A pound sign decoded one byte at a time arrives as two
+        # characters, and an opening balance written that way was not a
+        # figure at all.
+        garbled = [line.replace("£", "Â£") for line in REAL_SAVINGS]
+
+        reading = read_statement(grid(garbled))
+
+        assert reading.opening_balance_minor == 80000
+        assert [row.amount_minor for row in reading.transactions] == [
+            2500,
+            249,
+            -30000,
+            -249,
+        ]
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_AWordBesideADigitGroup_IsNotAnAmount(self):
+        # The symbol allowance is two characters, not a licence to read any
+        # text as money.
+        reading = read_statement(grid(REAL_SAVINGS))
+        padded = [line.replace("£25.00", "abc25.00") for line in REAL_SAVINGS]
+
+        refused = read_statement(grid(padded))
+
+        assert reading.reconciles
+        assert not refused.reconciles
+
+
+class TestAFigureInTheTextColumns:
+    def test_AZeroAmountInThePayeeZone_IsNotPartOfTheDescription(self):
+        reading = read_statement(grid(REAL_SAVINGS))
+
+        assert [row.description for row in reading.transactions] == [
+            "DD Lodgement",
+            "Div - Regular Saver",
+            "Internet Transfer J SMITH",
+            "tx",
+        ]
+
+    def test_APayeeThatMerelyContainsDigits_KeepsItsText(self):
+        # Two letters before the digits is within what an amount's symbol
+        # may be, so only the absence of a currency symbol keeps this text.
+        referenced = [
+            line.replace("J SMITH", "Re 12.50") for line in REAL_SAVINGS
+        ]
+
+        reading = read_statement(grid(referenced))
+
+        assert reading.transactions[2].description == "Internet Transfer Re 12.50"
+
+
+class TestAnAllAccountsStatement:
+    def test_ADocumentOfSeveralAccounts_IsRefused_BecauseItCannotBeOneAccounts(self):
+        reading = read_statement(grid([*REAL_SAVINGS, *REAL_LOAN]))
+
+        assert "2 accounts" in " ".join(reading.notes)
+        assert "one account" in " ".join(reading.notes)
+
+    def test_ADocumentOfSeveralAccounts_ReadsNoRows_RatherThanTheFirstAccountsOnly(self):
+        reading = read_statement(grid([*REAL_SAVINGS, *REAL_LOAN]))
+
+        assert reading.transactions == []
+
+    def test_AMultiPageStatementOfOneAccount_IsNotAnAllAccountsStatement(self):
+        reading = read_statement(grid(LOAN))
+
+        assert not reading.notes
+
+    def test_ASingleAccountWhoseNameChangesPartWay_IsRefused(self):
+        # With the page markers lost, a second account name is the other
+        # evidence that two accounts share the document.
+        renamed = [
+            *REAL_SAVINGS[:6],
+            "||Account Name",
+            "|Another Saver",
+            *REAL_SAVINGS[6:],
+        ]
+
+        reading = read_statement(grid(renamed))
+
+        assert "more than one account" in " ".join(reading.notes)
+
+    def test_TheImportDoor_RefusesAnAllAccountsDocument_WithThatReason(self):
+        document = build_columned_pdf([*REAL_SAVINGS, *REAL_LOAN], REAL_X)
+
+        with pytest.raises(ParseError) as refused:
+            list(CreditUnionStatementPdfParser().parse(document, account_id="x"))
+
+        assert "one account" in str(refused.value)
+
+
 class TestTheWholeDocument:
     """The same statements as real pages, read through the import door."""
+
+    def test_ARealShapedAnnualStatement_IsReadThroughTheImportDoor(self):
+        rows = list(
+            CreditUnionStatementPdfParser().parse(
+                build_columned_pdf(REAL_SAVINGS, REAL_X), account_id="credit-union-saver"
+            )
+        )
+
+        assert [row.amount_minor for row in rows] == [2500, 249, -30000, -249]
+        assert rows[0].value_date == date(2025, 5, 4)
+        assert rows[2].description == "Internet Transfer J SMITH"
 
     def test_AWideSavingsTable_IsReadAsColumns_NotAsRunTogetherText(self):
         rows = list(

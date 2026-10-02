@@ -36,6 +36,14 @@ transcription would add no reasoning that the subjects do not already carry.
   statements page will say.
 - **A Santander first statement opens from the previous balance its summary
   states**, where its table prints "Opening balance" with no figure.
+- **Credit union statements keep their dates.** The dates are printed a little
+  left of the "Date" heading and were dropped, so every row read as undated
+  and all seven real statements were refused. Opening and closing balances
+  printed beneath their labels are now found too.
+
+### Changed
+- **A credit union statement covering several accounts is refused, and says
+  why**: it cannot be given to one account.
 
 ## [0.4.252] - 2026-10-02
 
