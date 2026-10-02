@@ -42,7 +42,7 @@ from datetime import date, timedelta
 from .accounts import AccountRef
 from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
 from .identity_health import provider_ids_by_row, shared_identity_groups
-from .masking import Structural
+from .masking import Structural, Total
 from .models import Transaction, TransactionStatus
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .spaces import ArchiveNote
@@ -158,8 +158,8 @@ class MonthSummary:
     #: More than one currency among the rows, so the sums add unlike units.
     mixed_currency: Structural[bool]
 
-    store_sum: Money
-    sent_sum: Money
+    store_sum: Total[Money]
+    sent_sum: Total[Money]
 
 
 @dataclass(frozen=True)
@@ -175,8 +175,8 @@ class Position:
     sent_direction: Structural[str]
     differs: Structural[bool]
 
-    store_balance: Money
-    sent_balance: Money
+    store_balance: Total[Money]
+    sent_balance: Total[Money]
 
 
 @dataclass(frozen=True)
@@ -194,9 +194,9 @@ class AnchorLine:
     #: Which way the anchor sits from what the rows predict, "nil" if it agrees.
     difference_direction: Structural[str]
 
-    balance: Money
+    balance: Total[Money]
     #: Zero for the defining anchor and for one that agrees.
-    difference: Money
+    difference: Total[Money]
 
 
 @dataclass(frozen=True)
@@ -217,7 +217,7 @@ class OpeningView:
     #: be removed from the page.
     stated_days: Structural[tuple[str, ...]]
 
-    opening: Money
+    opening: Total[Money]
 
 
 @dataclass(frozen=True)

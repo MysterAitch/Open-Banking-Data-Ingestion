@@ -12,6 +12,7 @@ the DATA carries every structural fact a masked page needs.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from datetime import date
 
@@ -33,7 +34,13 @@ from obdi.ledger import (
     Position,
     build_ledger,
 )
-from obdi.masking import Disclosed, Structural, mask_text, structural_field_names
+from obdi.masking import (
+    MASKED_TOTAL,
+    Disclosed,
+    Structural,
+    mask_text,
+    structural_field_names,
+)
 from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.replay import (
     ActualAccountBinding,
@@ -611,8 +618,8 @@ class TestStructureIsDeclaredNotAssumed:
         masked = Disclosed(ledger, unmasked=False).opening
         shown = Disclosed(ledger, unmasked=True).opening
 
-        assert [line.balance for line in masked.anchors] == ["£9,999.99", "£9,999.99"]
-        assert masked.opening == "£9,999.99"
+        assert [line.balance for line in masked.anchors] == [MASKED_TOTAL, MASKED_TOTAL]
+        assert masked.opening == MASKED_TOTAL
         assert [line.verdict for line in masked.anchors] == ["", "differs"]
         assert [line.balance for line in shown.anchors] == ["£4,517.89", "£4,000.00"]
         assert shown.opening == "£4,530.39"
@@ -640,7 +647,21 @@ class TestStructureIsDeclaredNotAssumed:
 
         assert view.rows[0].dated
         assert PRIVATE_PAYEE not in " ".join(row.payee for row in view.rows)
-        assert view.summary.store_sum == mask_text("£1,647.39")
+        assert view.summary.store_sum == MASKED_TOTAL
+
+    def test_Masked_EverySumAndBalance_HidesItsSize_WhileAPaymentKeepsItsShape(
+        self, household
+    ):
+        """A payment's length says little; a balance's says how much there is."""
+        view = Disclosed(ledger_of(household), unmasked=False)
+
+        assert view.summary.store_sum == MASKED_TOTAL
+        assert view.summary.sent_sum == MASKED_TOTAL
+        assert view.position.store_balance == MASKED_TOTAL
+        assert view.position.sent_balance == MASKED_TOTAL
+        amounts = {row.amount for row in view.rows}
+        assert MASKED_TOTAL not in amounts
+        assert all(re.fullmatch(r"£9[9,]*\.99", amount) for amount in amounts)
 
 
 class TestMasking:

@@ -51,7 +51,10 @@ transcription would add no reasoning that the subjects do not already carry.
 - **A masked balance or total shows as one fixed token, whatever its size.**
   Elsewhere masking keeps a value's length, which is harmless for one payment
   and is most of the answer for a net worth: the number of digits. On the
-  Position page every figure is a total, so none keeps its length.
+  Position page every figure is a total, so none keeps its length. The ledger's
+  balances, sums, and anchor figures follow the same rule; a single payment
+  there still shows its shape. The statement-shape and balance-reconciliation
+  pages have not been reviewed for this and are unchanged.
 
 ### Changed
 - **An account's balance on the Position page and its running position on the

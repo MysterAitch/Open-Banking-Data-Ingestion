@@ -23,7 +23,7 @@ from .callback import render_page
 from .errors import DataError
 from .ledger import ANCHOR_QUERIES, QUERIES_PER_PAGE, Ledger, LedgerRequestError
 from .logs import say
-from .masking import Disclosed
+from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -546,8 +546,10 @@ def _mode(view: Any, unmasked: bool) -> str:
         )
     return (
         '<p class="muted">Values are masked: every digit shows as 9 and every letter '
-        "as X, with length, case, and punctuation kept. Counts, dates, sources, "
-        "directions, and flags are real.</p>"
+        "as X, with length, case, and punctuation kept. A balance or a sum shows "
+        f"as {MASKED_TOTAL} whatever its size, since its number of digits would "
+        "say how much there is. Counts, dates, sources, directions, and flags "
+        "are real.</p>"
         '<form method="post" action="/ledger">'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
         f'<input type="hidden" name="month" value="{_esc(view.month)}">'
