@@ -52,6 +52,29 @@ SIBLING_SAME_SIGN_WINDOW_DAYS = 2
 #: a distant opposite-signed row is coincidence, not evidence.
 SIBLING_OPPOSITE_SIGN_WINDOW_DAYS = 1
 
+
+def same_movement_days(
+    amount_minor: int, on: date, other_amount_minor: int, other_on: date
+) -> int | None:
+    """Days apart when two sightings are one movement filed under sibling accounts.
+
+    The single statement of "same payment" across sibling accounts: an equal,
+    same-signed amount within `SIBLING_SAME_SIGN_WINDOW_DAYS`. The report's
+    attribution and the Space fold both call it, so what the report calls
+    explained and what the store counts once cannot drift apart.
+    Description is deliberately not compared: the sources word one payment
+    differently, and the feed's reference is rarely the aggregator's.
+    That is fit for deciding ownership between a main account and its OWN
+    Space, where one-to-one pairing backs it up. It would not be fit across
+    unrelated accounts - two payments of one round figure at two banks on one
+    day match - which is why the fold's target set must be positively known.
+    """
+    if amount_minor != other_amount_minor:
+        return None
+    distance = abs((other_on - on).days)
+    return distance if distance <= SIBLING_SAME_SIGN_WINDOW_DAYS else None
+
+
 #: How many unexplained rows the flat description prints before summarising.
 #: The residue is the finding, so some of it must always be visible - but a
 #: line is not a dump.
@@ -491,17 +514,21 @@ def _attribute(
     residue: list[UnexplainedRow] = []
     for item in sorted(rows, key=lambda t: (t.value_date, t.amount_minor, t.description)):
         candidates = []
-        for sign, window_days in (
-            (1, SIBLING_SAME_SIGN_WINDOW_DAYS),
-            (-1, SIBLING_OPPOSITE_SIGN_WINDOW_DAYS),
-        ):
-            window = timedelta(days=window_days)
-            for j in by_amount.get(sign * item.amount_minor, ()):
-                if j in used:
-                    continue
-                distance = abs(pool[j].value_date - item.value_date)
-                if distance <= window:
-                    candidates.append((distance, 0 if sign == 1 else 1, j))
+        for j in by_amount.get(item.amount_minor, ()):
+            if j in used:
+                continue
+            days = same_movement_days(
+                item.amount_minor, item.value_date, pool[j].amount_minor, pool[j].value_date
+            )
+            if days is not None:
+                candidates.append((timedelta(days=days), 0, j))
+        opposite_window = timedelta(days=SIBLING_OPPOSITE_SIGN_WINDOW_DAYS)
+        for j in by_amount.get(-item.amount_minor, ()):
+            if j in used:
+                continue
+            distance = abs(pool[j].value_date - item.value_date)
+            if distance <= opposite_window:
+                candidates.append((distance, 1, j))
         if candidates:
             _, flipped, j = min(candidates)
             used.add(j)

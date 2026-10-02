@@ -43,7 +43,7 @@ from .accounts import AccountRef
 from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
-from .models import Transaction, TransactionStatus
+from .models import Transaction
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .spaces import ArchiveNote
 from .store import Store
@@ -144,6 +144,8 @@ class MonthSummary:
     one_source: Structural[int]
     pending: Structural[int]
     void: Structural[int]
+    #: Main-account rows that copy a payment held under a Space.
+    folded: Structural[int]
     transfers_confirmed: Structural[int]
     transfers_claimed: Structural[int]
     review_open: Structural[int]
@@ -151,7 +153,7 @@ class MonthSummary:
     withheld: Structural[int]
     withheld_by_reason: Structural[tuple[tuple[str, int], ...]]
     unsendable: Structural[int]
-    #: Void rows are history, not money, and are in neither sum.
+    #: Void and folded rows are history, not money, and are in neither sum.
     store_direction: Structural[str]
     sent_direction: Structural[str]
     sums_differ: Structural[bool]
@@ -289,7 +291,9 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
 def running_balance(
     opening_minor: int, rows: Iterable[Transaction], through: date | None = None
 ) -> int:
-    """The balance by the store's own rows: the opening plus every non-void row.
+    """The balance by the store's own rows: the opening plus every row that is money.
+
+    A void or folded row is history and is never counted.
 
     Rows are counted when dated on or before `through` (all of them when None).
     The ledger's running position and the position page both call this, so the
@@ -298,7 +302,7 @@ def running_balance(
     return opening_minor + sum(
         t.amount_minor
         for t in rows
-        if t.status is not TransactionStatus.VOID
+        if not t.status.is_history
         and (through is None or t.value_date <= through)
     )
 
@@ -483,8 +487,8 @@ def _ledger_for(
     )
 
     def totals(pairs: list[tuple[Transaction, LedgerRow]]) -> tuple[int, int, int]:
-        """(store sum, sent sum, rows counted) over the non-void pairs."""
-        money = [(t, row) for t, row in pairs if t.status is not TransactionStatus.VOID]
+        """(store sum, sent sum, rows counted) over the pairs that are money."""
+        money = [(t, row) for t, row in pairs if not t.status.is_history]
         store_sum = sum(t.amount_minor for t, _ in money)
         sent_sum = sum(
             t.amount_minor for t, row in money if not row.withheld and not row.unsendable
@@ -532,6 +536,7 @@ def _ledger_for(
             one_source=sum(1 for row in month_rows if row.one_source),
             pending=sum(1 for row in month_rows if row.status == "pending"),
             void=sum(1 for row in month_rows if row.status == "void"),
+            folded=sum(1 for row in month_rows if row.status == "folded"),
             transfers_confirmed=sum(1 for r in month_rows if r.transfer == "confirmed"),
             transfers_claimed=sum(1 for r in month_rows if r.transfer == "claimed"),
             review_open=sum(1 for row in month_rows if row.review_open),

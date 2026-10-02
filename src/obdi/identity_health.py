@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .store import Store
+from .store import FOLDED_SIGHTING_PREFIX, Store
 
 #: Artefact sources whose records name a payment by an id it will NOT keep.
 #: A pending snapshot's id is replaced when the payment settles, so one
@@ -279,6 +279,8 @@ def provider_ids_by_row(
         "FROM transaction_sources s "
         "JOIN transactions t ON t.entity_id = s.entity_id "
         "WHERE s.source_id IS NOT NULL AND s.source_id != '' "
+        # A sighting copied onto a Space row names no provider id of its own.
+        "AND s.source_id NOT LIKE ? "
         "AND (? IS NULL OR t.account_id = ?) "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM raw_artefacts a "
@@ -286,7 +288,7 @@ def provider_ids_by_row(
         # Placeholders only - the interpolation builds "?,?", never data.
         f"  AND a.source IN ({placeholders})"
         ")",
-        (account_id, account_id, *PENDING_SNAPSHOT_SOURCES),
+        (FOLDED_SIGHTING_PREFIX + "%", account_id, account_id, *PENDING_SNAPSHOT_SOURCES),
     ).fetchall()
 
     ids_by_row: dict[tuple[str, str], dict[str, set[str]]] = {}

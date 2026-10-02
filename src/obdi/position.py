@@ -64,7 +64,7 @@ from itertools import accumulate
 from .balance_anchors import CURRENCY, EffectiveOpening, effective_opening
 from .ledger import Money, direction_of, running_balance
 from .masking import Structural, Total
-from .models import Transaction, TransactionStatus
+from .models import Transaction
 from .overview import held_by_account
 from .store import Store
 from .valuations import AssetKind
@@ -247,7 +247,7 @@ class _Cumulative:
 
     def __init__(self, opening_minor: int, rows: Iterable[Transaction]) -> None:
         counted = sorted(
-            (t for t in rows if t.status is not TransactionStatus.VOID),
+            (t for t in rows if not t.status.is_history),
             key=lambda t: t.value_date,
         )
         self._dates = [t.value_date for t in counted]
@@ -263,7 +263,7 @@ class _Cumulative:
 
 def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition, int | None]:
     opening = item.opening
-    live = [t for t in item.rows if t.status is not TransactionStatus.VOID]
+    live = [t for t in item.rows if not t.status.is_history]
     newest = max((t.value_date for t in live), default=None)
     known = opening.opening_minor is not None and opening.as_at is not None
     state = COUNTED if known else WITHHELD if opening.readings else NO_OPENING
@@ -407,7 +407,7 @@ def _provisional_history(
         t.value_date
         for item in movers
         for t in item.rows
-        if t.status is not TransactionStatus.VOID
+        if not t.status.is_history
     ]
     if known:
         year, month = (int(part) for part in known[0].month.split("-"))

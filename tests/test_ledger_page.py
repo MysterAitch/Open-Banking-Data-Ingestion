@@ -318,7 +318,7 @@ class TestTheMonthSummaryShowsOnlyWhatIsNotZero:
             "<th>Withheld from Actual</th><td>0 (none)</td>",
         ):
             assert expected in page, expected
-        assert "<th>Sum of the store&#x27;s rows (void excluded)</th>" in page
+        assert "<th>Sum of the store&#x27;s rows (void and folded excluded)</th>" in page
         assert "<th>Sum of what would be sent to Actual</th>" in page
 
     def test_Summary_WhenACountIsNotZero_IsNeverNamedAmongTheZeroOnes(self, served):
@@ -334,14 +334,20 @@ class TestANilAmountIsJustNil:
     def test_BalancedMonth_PrintsNilAloneWhereItsSumsAreNil(self, served):
         masked = get(served, ref="balanced", month="2026-03").text
 
-        assert "<th>Sum of the store&#x27;s rows (void excluded)</th><td>nil</td>" in masked
+        assert (
+            "<th>Sum of the store&#x27;s rows (void and folded excluded)</th><td>nil</td>"
+            in masked
+        )
         assert "<th>Sum of what would be sent to Actual</th><td>nil</td>" in masked
         assert "nil £" not in masked
 
     def test_BalancedMonth_ShownValues_PrintNilAloneToo(self, served):
         shown = post(served, ref="balanced").text
 
-        assert "<th>Sum of the store&#x27;s rows (void excluded)</th><td>nil</td>" in shown
+        assert (
+            "<th>Sum of the store&#x27;s rows (void and folded excluded)</th><td>nil</td>"
+            in shown
+        )
         assert "nil £" not in shown
         assert "nil 0" not in shown
 

@@ -33,6 +33,7 @@ from .jsontypes import JsonObject, text
 from .jsontypes import rows as json_rows
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
+from .space_attribution import fold_space_copies
 from .store import Store
 
 #: The first-party Starling path is not an aggregator connection, but it
@@ -567,6 +568,9 @@ def pull_truelayer(
         # so the same window is simply offered again next cycle.
         tiers.stamp(store, "truelayer", connection.connection_id, tier_choice)
 
+    # The aggregator cannot see Spaces, so this is where its copies of Space
+    # payments arrive.
+    summary.folded += fold_space_copies(store, account_map).newly_folded
     result.summary = summary
     return result
 
@@ -920,5 +924,7 @@ def pull_starling(
                     )
             reconcile_batch(store, transactions, digest=digest, summary=summary)
 
+    # The feed's Space rows may be the other half of a copy already held.
+    summary.folded += fold_space_copies(store, account_map).newly_folded
     result.summary = summary
     return result

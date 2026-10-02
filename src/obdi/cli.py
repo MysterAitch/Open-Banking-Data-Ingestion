@@ -65,6 +65,7 @@ from .replay import (
     unbound_accounts,
 )
 from .secrets import SecretError, read_secret, truelayer_readiness
+from .space_attribution import fold_space_copies
 from .spaces import ArchiveNote
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
@@ -912,6 +913,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 digest=str(row["digest"]),
                 summary=ImportSummary(artefact_new=False),
             )
+            fold_space_copies(store, _account_map(store))
         after = store.counts().get("transactions", 0)
     return (
         f"replayed {source} for {account_ref}: {len(transactions)} parsed, "
@@ -2068,7 +2070,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             path = Path(tmp) / safe_name
             path.write_bytes(payload)
             with Store(db_path) as store:
-                summary = import_file(store, path, account_id=account)
+                summary = import_file(
+                    store, path, account_id=account, account_map=_account_map(store)
+                )
                 # The cross-source verdict at the moment it becomes
                 # answerable: does this file agree with every other
                 # source of the same account over the period they share?
@@ -2750,6 +2754,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             reconcile_batch(
                 store, incoming, digest=str(row["digest"]), summary=summary
             )
+            summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
         return (
             f"{row['origin']} assigned to {destination} and read by "
             f"{parser.source}: {summary.describe()}"
@@ -4044,7 +4049,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         with Store(db_path) as store:
             try:
-                summary = import_file(store, args.path, account_id=args.account)
+                summary = import_file(
+                    store,
+                    args.path,
+                    account_id=args.account,
+                    account_map=_account_map(store),
+                )
             except DataError as exc:
                 print(f"Refused to import: {exc}", file=sys.stderr)
                 return 1

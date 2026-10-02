@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ from .accounts import (
     read_registry_file,
 )
 from .errors import DataError
-from .models import RawArtefact, SourceTier, Transaction, Valuation
+from .models import RawArtefact, SourceTier, Transaction, TransactionStatus, Valuation
 from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
@@ -671,6 +672,15 @@ _UPSERT_TRANSACTION_SQL = """
         matched_entity_id = excluded.matched_entity_id,
         last_seen_at = excluded.last_seen_at
 """
+
+#: Begins the provider id of a sighting COPIED onto a Space row from the
+#: main-account row folded into it; the rest names that row.
+#: It is what lets every pass delete exactly the copies it made, and what keeps
+#: a copy out of the matcher's memory of provider ids and out of the
+#: per-account coverage view, where the source never delivered anything.
+FOLDED_SIGHTING_PREFIX = "folded-from:"
+
+_COPY_PATTERN = FOLDED_SIGHTING_PREFIX + "%"
 
 _RECORD_SOURCE_SQL = """
     INSERT INTO transaction_sources
@@ -2529,8 +2539,9 @@ class Store:
             "SELECT DISTINCT s.entity_id, s.source, s.source_id "
             "FROM transaction_sources s "
             "JOIN transactions t ON t.entity_id = s.entity_id "
-            "WHERE t.account_id = ? AND s.source_id IS NOT NULL AND s.source_id != ''",
-            (account_id,),
+            "WHERE t.account_id = ? AND s.source_id IS NOT NULL AND s.source_id != '' "
+            "AND s.source_id NOT LIKE ?",
+            (account_id, _COPY_PATTERN),
         ).fetchall()
         return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
 
@@ -2689,6 +2700,56 @@ class Store:
             )
         return findings
 
+    def genuine_sightings(self) -> dict[str, dict[str, str]]:
+        """entity id -> source -> the earliest date that source gave it, or ''.
+
+        Only what a source itself reported: sightings copied onto a Space row
+        by `replace_space_folds` are not included.
+        """
+        sightings: dict[str, dict[str, str]] = {}
+        for row in self.connection.execute(
+            "SELECT entity_id, source, MIN(observed_date) AS observed_date "
+            "FROM transaction_sources "
+            "WHERE source_id IS NULL OR source_id NOT LIKE ? "
+            "GROUP BY entity_id, source ORDER BY source",
+            (_COPY_PATTERN,),
+        ):
+            sightings.setdefault(row["entity_id"], {})[row["source"]] = (
+                row["observed_date"] or ""
+            )
+        return sightings
+
+    def replace_space_folds(self, folds: Mapping[str, str]) -> None:
+        """Make `folds` - folded entity id to the Space row's entity id - the
+        store's folds, replacing the previous pass's.
+
+        Delete-and-rewrite, as the pairing table is, because a fold is a
+        derived fact about the evidence held now: a fold that outlived its
+        evidence would hide a real payment, and a copied sighting that
+        outlived its fold would claim a source saw a payment it did not.
+        A folded row keeps its own sightings; the Space row gains a copy of
+        each, marked by `FOLDED_SIGHTING_PREFIX` on its provider id.
+        """
+        execute = self.connection.execute
+        execute("DELETE FROM transaction_sources WHERE source_id LIKE ?", (_COPY_PATTERN,))
+        execute(
+            "UPDATE transactions SET status = ? WHERE status = ?",
+            (TransactionStatus.BOOKED.value, TransactionStatus.FOLDED.value),
+        )
+        for folded_id, space_id in sorted(folds.items()):
+            execute(
+                "UPDATE transactions SET status = ? WHERE entity_id = ?",
+                (TransactionStatus.FOLDED.value, folded_id),
+            )
+            execute(
+                "INSERT OR IGNORE INTO transaction_sources "
+                "(entity_id, source, source_id, artefact_digest, observed_date, first_seen_at) "
+                "SELECT ?, source, ?, artefact_digest, observed_date, first_seen_at "
+                "FROM transaction_sources WHERE entity_id = ?",
+                (space_id, FOLDED_SIGHTING_PREFIX + folded_id, folded_id),
+            )
+        self.connection.commit()
+
     def transactions_by_sighting(self) -> list[Transaction]:
         """Each transaction once per DISTINCT source that observed it.
 
@@ -2712,18 +2773,19 @@ class Store:
         fall back to their stored source, so old stores degrade to the previous
         behaviour rather than vanishing from the report. Sightings recorded
         before the date column fall back the same way, for the same reason.
+
+        A FOLDED row is left out, and so is any sighting copied onto a Space
+        row from one: the reports ask what each source delivered into each
+        account, and a source that cannot see a Space delivered nothing into
+        it. Counting the copy would set the aggregator's few folded rows
+        against everything the Space holds and report the rest as unexplained.
         """
-        sightings: dict[str, dict[str, str]] = {}
-        for row in self.connection.execute(
-            "SELECT entity_id, source, MIN(observed_date) AS observed_date "
-            "FROM transaction_sources GROUP BY entity_id, source ORDER BY source"
-        ):
-            sightings.setdefault(row["entity_id"], {})[row["source"]] = (
-                row["observed_date"] or ""
-            )
+        sightings = self.genuine_sightings()
 
         expanded = []
         for transaction in self.all_transactions():
+            if transaction.status is TransactionStatus.FOLDED:
+                continue
             seen = sightings.get(transaction.entity_id) or {
                 transaction.source: transaction.value_date.isoformat()
             }

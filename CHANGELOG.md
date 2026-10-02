@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.254] - 2026-10-02
+
+### Fixed
+- **A payment made from a Starling Space is counted once, in the Space.** The
+  aggregator and the Starling export cannot see Spaces and report a Space's
+  bill under the main account, while Starling's own feed files it under the
+  Space; both rows were kept, and one main account's rows summed to a net
+  outflow of tens of thousands that never happened. The main-account copy is
+  now kept as history ("folded") and left out of every sum, balance, and push.
+- **Only an account known to be a Space of that main account can take a fold**:
+  declared so in the registry, or shown by the feed's own account and category
+  structure. Sharing a source proves nothing - one aggregator feeds several
+  banks - and copies that cannot be paired one to one stay counted and are
+  reported by the rebuild. Not yet measured on the real store: the rebuild's
+  folded count, and the main account's total afterwards, are the check.
+
 ## [0.4.253] - 2026-10-02
 
 ### Fixed

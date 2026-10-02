@@ -144,12 +144,13 @@ class EffectiveOpening:
 def _counts_toward(basis: str, transaction: Transaction) -> bool:
     """Whether a row is part of the balance an anchor of this basis states.
 
-    A void row is history, never money. A PENDING row is not in a bank's or a
-    statement's booked balance, so counting it against one would report a
-    false difference for every payment still settling; a person stating a
-    balance is taken to mean the account as they see it, pending included.
+    A void or folded row is history, never money. A PENDING row is not in a
+    bank's or a statement's booked balance, so counting it against one would
+    report a false difference for every payment still settling; a person
+    stating a balance is taken to mean the account as they see it, pending
+    included.
     """
-    if transaction.status is TransactionStatus.VOID:
+    if transaction.status.is_history:
         return False
     return not (basis != STATED and transaction.status is TransactionStatus.PENDING)
 
@@ -181,7 +182,7 @@ def derive_opening(
             if t.value_date <= anchor.day and _counts_toward(anchor.basis, t)
         )
 
-    if any(t.currency != CURRENCY for t in held if t.status is not TransactionStatus.VOID):
+    if any(t.currency != CURRENCY for t in held if not t.status.is_history):
         # Summing pounds with another currency's units would give a figure
         # that is wrong by an amount nobody could name.
         return EffectiveOpening(
@@ -202,7 +203,7 @@ def derive_opening(
             AnchorReading(later, False, expected, later.balance_minor - expected)
         )
 
-    dated = [t.value_date for t in held if t.status is not TransactionStatus.VOID]
+    dated = [t.value_date for t in held if not t.status.is_history]
     first_row = min(dated) if dated else None
     as_at = (
         first.day

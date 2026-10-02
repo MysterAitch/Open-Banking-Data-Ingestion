@@ -44,6 +44,7 @@ from .namespaces import API_SOURCES, UNASSIGNED_ACCOUNT
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
+from .space_attribution import fold_space_copies
 from .store import Store
 
 
@@ -86,6 +87,11 @@ class RebuildReport:
     kept_unassigned: int = 0
     #: Of those, how many a parser recognises and could read once assigned.
     kept_readable: int = 0
+    #: Main-account rows folded into the Space rows they copy, and the
+    #: space-blind rows the fold left counted - see `space_attribution`.
+    space_folded: int = 0
+    space_ambiguous: int = 0
+    space_unmatched: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -135,6 +141,14 @@ class RebuildReport:
                     "  Where an account's total changed above, check whether "
                     "a skipped artefact fed it."
                 )
+        if self.space_folded or self.space_ambiguous:
+            lines.append(
+                f"  {self.space_folded} main-account row(s) folded into their Space "
+                f"rows - the same payment, which the aggregator and the export "
+                f"report under the main account and the bank's feed files under "
+                f"the Space. {self.space_ambiguous} more could not be paired "
+                f"one to one and stay counted in the main account."
+            )
         if self.kept_unassigned:
             noun = "statement" if self.kept_unassigned == 1 else "statements"
             unread = self.kept_unassigned - self.kept_readable
@@ -517,6 +531,15 @@ def rebuild_from_raw(
                     emit_events=False,
                 )
 
+    # Before pairing, so a main-account copy of a Space payment is not
+    # offered as one leg of a transfer. Without an account map there is no way
+    # to know which accounts are siblings, so nothing is folded.
+    if account_map is not None:
+        with instrumentation.phase("space-fold"):
+            folds = fold_space_copies(store, account_map)
+        report.space_folded = folds.folded
+        report.space_ambiguous = folds.ambiguous
+        report.space_unmatched = folds.unmatched
     with instrumentation.phase("transfer-pairing"):
         report.transfers_paired = pair_transfers_across_store(store)
     after_counts = {

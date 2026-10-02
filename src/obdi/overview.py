@@ -502,20 +502,22 @@ def _order_items(items: Sequence[AttentionItem]) -> tuple[AttentionItem, ...]:
 def held_by_account(
     store: Store,
 ) -> tuple[dict[str, tuple[int, date]], dict[str, set[str]]]:
-    """Rows (void ones excluded, as the ledger excludes them), the newest
-    row's date, and every source that has sighted any of them."""
+    """Rows (history excluded, as the ledger excludes it: void and folded),
+    the newest row's date, and every source that has sighted any of them."""
     held = {
         str(row["account_id"]): (int(row["rows"]), date.fromisoformat(str(row["newest"])))
         for row in store.connection.execute(
             "SELECT account_id, COUNT(*) AS rows, MAX(value_date) AS newest "
-            "FROM transactions WHERE status != 'void' GROUP BY account_id"
+            "FROM transactions WHERE status NOT IN ('void', 'folded') GROUP BY account_id"
         )
     }
     sources: dict[str, set[str]] = {}
     for row in store.connection.execute(
-        "SELECT account_id, source FROM transactions WHERE status != 'void' "
+        "SELECT account_id, source FROM transactions "
+        "WHERE status NOT IN ('void', 'folded') "
         "UNION SELECT t.account_id, s.source FROM transaction_sources s "
-        "JOIN transactions t ON t.entity_id = s.entity_id WHERE t.status != 'void'"
+        "JOIN transactions t ON t.entity_id = s.entity_id "
+        "WHERE t.status NOT IN ('void', 'folded')"
     ):
         sources.setdefault(str(row["account_id"]), set()).add(str(row["source"]))
     return held, sources

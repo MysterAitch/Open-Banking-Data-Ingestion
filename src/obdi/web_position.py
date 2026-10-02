@@ -545,7 +545,7 @@ _LIMITS = (
     "every missing or surplus row before that anchor and nothing here can tell; a "
     "second anchor turns it into a test, and a later one that differs is flagged.</li>"
     "<li>Pending rows are included, as the ledger's running position includes them; "
-    "void rows never are.</li>"
+    "void rows and folded copies of Space payments never are.</li>"
     "<li>An asset is worth what it was last observed to be worth, as of the date shown, "
     "and no newer. Its age is stated and nothing here revalues it.</li>"
     "<li>Only pounds are added up. Anything in another currency is left out.</li>"

@@ -16,10 +16,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 from . import instrumentation
+from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
 from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
 from .models import RawArtefact, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
+from .space_attribution import fold_space_copies
 from .store import Store
 
 
@@ -35,6 +37,9 @@ class ImportSummary:
     matched: int = 0
     superseded: int = 0
     needs_review: int = 0
+    #: Main-account rows newly folded into the Space rows they copy, by the
+    #: pass the caller ran after the batch; see `space_attribution`.
+    folded: int = 0
 
     def describe(self) -> str:
         offered = ""
@@ -44,10 +49,15 @@ class ImportSummary:
                 f" of {self.rows_offered} row(s) in the file - {skipped} "
                 "skipped, which is a fault unless you know why"
             )
+        folded = (
+            f", folded {self.folded} main-account row(s) into their Space rows"
+            if self.folded
+            else ""
+        )
         return (
             f"parsed {self.parsed}{offered}, new {self.inserted}, "
             f"matched {self.matched}, superseded {self.superseded}, "
-            f"for review {self.needs_review}"
+            f"for review {self.needs_review}{folded}"
         )
 
 
@@ -186,7 +196,15 @@ def media_type_of(payload: bytes, path: Path) -> str:
     return "text/csv"
 
 
-def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
+def import_file(
+    store: Store,
+    path: Path,
+    *,
+    account_id: str,
+    account_map: AccountMap | None = None,
+) -> ImportSummary:
+    """Land a file, resolve its rows, and - given the account map - fold any
+    main-account row that copies a Space payment."""
     # The account becomes a query key across every layer, so it is checked
     # at the door rather than trusted from whoever posted it. The rule
     # existed and had no live call site: every writer invented its own or
@@ -232,6 +250,8 @@ def import_file(store: Store, path: Path, *, account_id: str) -> ImportSummary:
     # payment arriving by file and by API must resolve identically.
     summary = ImportSummary(artefact_new=is_new_artefact, rows_offered=offered)
     reconcile_batch(store, incoming, digest=digest, summary=summary)
+    if account_map is not None:
+        summary.folded += fold_space_copies(store, account_map).newly_folded
     return summary
 
 
@@ -254,7 +274,11 @@ def pair_transfers_across_store(store: Store) -> int:
     exclude a movement from spending; only this pass's findings are counted
     here, so the number means "pairs found" rather than "flags written".
     """
-    pairs = pair_transfer_entities(store.all_transactions())
+    # A folded row is a second report of a payment, not a movement, so it must
+    # not be offered as the leg of a transfer.
+    pairs = pair_transfer_entities(
+        t for t in store.all_transactions() if t.status is not TransactionStatus.FOLDED
+    )
     store.replace_transfer_pairs(pairs)
     store.connection.commit()
     return len(pairs)
@@ -406,7 +430,7 @@ def _reconcile(
 
     if (
         result.existing is not None
-        and result.existing.status is TransactionStatus.BOOKED
+        and result.existing.status in (TransactionStatus.BOOKED, TransactionStatus.FOLDED)
         and transaction.status is TransactionStatus.PENDING
     ):
         # Settlement runs one way.

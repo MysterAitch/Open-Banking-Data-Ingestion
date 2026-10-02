@@ -257,7 +257,7 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
         '<div class="scroll"><table>'
         + rows
         + _count(
-            "Sum of the store's rows (void excluded)",
+            "Sum of the store's rows (void and folded excluded)",
             _signed(
                 _direction_word(summary.store_direction),
                 summary.store_direction,
@@ -451,7 +451,7 @@ def _position_html(position: Any, *, bound: bool) -> str:
         "<h2>Running position</h2>"
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
-        + _count("Non-void rows counted", position.rows_counted)
+        + _count("Rows counted (void and folded excluded)", position.rows_counted)
         + _count(
             "Balance by the store's own rows" + (", plus the opening balance" if included else ""),
             _signed(

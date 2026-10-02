@@ -60,6 +60,19 @@ class TransactionStatus(StrEnum):
     #: either settled under another identity or released without settling.
     #: Kept in the store as history, excluded from spending and replay.
     VOID = "void"
+    #: A main-account row that is a second report of a payment the bank's own
+    #: feed filed under one of the account's Spaces.
+    #: Kept as history so the Space's row is not double counted: 711 aggregator
+    #: rows in one main account matched Bills Space rows and summed to a net
+    #: outflow that never happened.
+    #: Derived by `space_attribution`, never set by a source, and recomputed
+    #: from the rows and their sightings on every pass.
+    FOLDED = "folded"
+
+    @property
+    def is_history(self) -> bool:
+        """History, not money: in no sum, no balance, and not sent to Actual."""
+        return self in (TransactionStatus.VOID, TransactionStatus.FOLDED)
 
 
 class MatchTier(StrEnum):

@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING
 
 from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef
 from .masking import Structural
-from .models import Transaction, TransactionStatus
+from .models import Transaction
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .store import Store
@@ -551,7 +551,7 @@ def final_movement_count(
         1
         for row in parent_rows
         if row.is_internal_transfer
-        and row.status is not TransactionStatus.VOID
+        and not row.status.is_history
         and row.entity_id not in paired
         and row.value_date > after
     )

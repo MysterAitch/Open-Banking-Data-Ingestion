@@ -95,7 +95,7 @@ def resolve_vanished_pending(
         counterpart = None
         candidates = store.connection.execute(
             "SELECT entity_id, amount_minor, description FROM transactions "
-            "WHERE account_id = ? AND status = 'booked' "
+            "WHERE account_id = ? AND status IN ('booked', 'folded') "
             "AND value_date BETWEEN ? AND ?",
             (
                 account_id,

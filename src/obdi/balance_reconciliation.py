@@ -44,8 +44,8 @@ EXAMPLES_SHOWN = 3
 
 #: Statuses whose rows are never part of a booked running balance.
 #: A pending row is not in the bank's booked balance and moves date when it
-#: settles, and a void row is history kept for audit.
-_UNBOOKED = ("pending", "void")
+#: settles, and a void or folded row is history kept for audit.
+_UNBOOKED = ("pending", "void", "folded")
 
 
 @dataclass(frozen=True)
