@@ -404,10 +404,10 @@ class TestIdentityHealthPage:
         assert response.status_code == 500
         assert "the store would not open" in response.text
 
-    def test_HomePage_LinksToTheReport(self, tmp_path):
+    def test_ReportsIndex_LinksToTheReport(self, tmp_path):
         httpd = _serve(_config(tmp_path, identity_health_text=lambda: "report"))
         try:
-            home = httpx.get(f"http://127.0.0.1:{httpd.server_port}/").text
+            home = httpx.get(f"http://127.0.0.1:{httpd.server_port}/reports").text
         finally:
             httpd.shutdown()
 

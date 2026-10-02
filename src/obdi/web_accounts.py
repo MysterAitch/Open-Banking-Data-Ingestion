@@ -96,7 +96,7 @@ def submit_button(label: str) -> str:
 #: editing the address bar, which is the friction these pages remove.
 BACK_LINKS = (
     '<p><a class="button" href="/accounts">Back to declared accounts</a></p>'
-    '<p><a class="button" href="/">Back to connections</a></p>'
+    '<p><a class="button" href="/">Back to overview</a></p>'
 )
 
 
@@ -314,7 +314,7 @@ def accounts_page(records: list[AccountRecord], *, today: date) -> bytes:
             "everywhere a document is filed.</p>"
         )
         + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
-        + '<p><a class="button" href="/">Back to connections</a></p>',
+        + '<p><a class="button" href="/">Back to overview</a></p>',
     )
 
 

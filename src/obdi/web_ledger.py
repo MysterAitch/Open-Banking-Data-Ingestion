@@ -29,7 +29,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # runtime would close a cycle: web.py composes this module in.
     from .web import WebConfig
 
-_HOME = '<p><a class="button" href="/">Back to connections</a></p>'
+_HOME = '<p><a class="button" href="/">Back to overview</a></p>'
 
 _esc = html.escape
 

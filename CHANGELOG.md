@@ -55,6 +55,16 @@ transcription would add no reasoning that the subjects do not already carry.
   so.** Deleting it would make Actual delete the other leg too.
 
 ### Added
+- **The home page opens on an Overview.** "Needs attention" lists everything that
+  currently needs a person, most serious first, each with what to do and a link
+  to where it is done; when nothing does, it says so along with what was checked
+  and when. Below it, one row per account - not one per source - with its state,
+  newest row, when the provider last answered, and links to its ledger.
+  Previously the first screen was a Reconnect button for every bank, and three
+  accounts went sixty days without data with nothing on the page saying so.
+- **Every page carries the same navigation strip**, and two index pages,
+  `/reports` and `/evidence`, say in one sentence what question each report
+  answers. Previously the only navigation was "Back to connections".
 - **An account can be marked archived, and unmarked, with one press.** Starling
   stops listing an archived Space instead of saying it is archived, so such an
   account read "quiet since" for ever and, since 0.4.239, raised a silent-feed

@@ -83,6 +83,10 @@ ignore = [
 # Tests describe scenarios rather than expose an API, and their fixtures are
 # self-evidently typed by what they return.
 "tests/*" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "S105", "S106"]
+# These import a fixture from a sibling test module, and a test naming it as a
+# parameter reads to the linter as redefining the import. That is how pytest
+# shares a fixture without a conftest holding the scenario's helpers.
+"tests/test_overview*.py" = ["F811"]
 # Scripts are operator tools run by hand, not a library surface.
 "scripts/*" = ["ANN001", "ANN201", "S105", "S106"]
 

@@ -435,7 +435,7 @@ class TestTheHomepageShowsWhatIsHeld:
         # A reporting extra must never take down the page that manages
         # connections - the store may legitimately be mid-write during a
         # backfill, which is exactly when someone is refreshing.
-        assert "Bank connections" in page
+        assert "Needs attention" in page
 
 
 class TestTheAuthorisersAddressIsTheRealOne:
@@ -579,7 +579,7 @@ class TestExtendingHistoryFromThePage:
 
         assert response.status_code == 502
         assert "invalid_date_range" in response.text
-        assert "Back to connections" in response.text
+        assert "Back to overview" in response.text
 
 
     def test_Extend_ResultPages_KeepTheButtons_ForRepeatedPressing(self, tmp_path):
@@ -2860,7 +2860,7 @@ class TestBrowsingRawArtefactsFromThePage:
             httpd.shutdown()
 
         assert response.status_code == 404
-        assert "Back to connections" in response.text
+        assert "Back to overview" in response.text
 
 
 class TestAuthorisationFailureIsEvidence:

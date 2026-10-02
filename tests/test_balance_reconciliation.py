@@ -625,10 +625,10 @@ class TestBalanceReconciliationPage:
         assert response.status_code == 500
         assert "the store would not open" in response.text
 
-    def test_HomePage_LinksToTheReport(self, tmp_path):
+    def test_ReportsIndex_LinksToTheReport(self, tmp_path):
         config = _config(tmp_path, balance_reconciliation_text=lambda masked: "report")
 
-        assert 'href="/balance-reconciliation"' in _get(config, "/").text
+        assert 'href="/balance-reconciliation"' in _get(config, "/reports").text
 
 
 class TestBalanceReconciliationCommand:

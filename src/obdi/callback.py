@@ -30,6 +30,7 @@ from typing import Protocol
 from urllib.parse import parse_qs, urlparse
 
 from .buildinfo import describe
+from .navigation import navigation_html
 
 
 class CodeHandler(Protocol):
@@ -141,8 +142,34 @@ def render_page(title: str, body: str) -> bytes:
  .ok {{ opacity: .75; }}
  input {{ font-size: 1rem; padding: .7rem; width: 100%; box-sizing: border-box;
          border-radius: .4rem; border: 1px solid #8886; }}
+ /* Navigation: a wrapping row of links, each thumb-tall, none a full-width
+    button, so the page's own action stays the heaviest thing on it. */
+ .sitenav ul {{ list-style: none; margin: 0 0 1rem; padding: 0; display: flex;
+               flex-wrap: wrap; gap: .3rem; }}
+ .sitenav a {{ display: flex; align-items: center; min-height: 44px; padding: 0 .75rem;
+              box-sizing: border-box; border-radius: .5rem; border: 1px solid #8886;
+              color: inherit; text-decoration: none; }}
+ .sitenav a[aria-current="page"] {{ background: #2563eb; border-color: #2563eb;
+              color: #fff; font-weight: 600; }}
+ /* A link that is not a button but is still a thumb-sized target. */
+ .linklist {{ list-style: none; margin: 0; padding: 0; }}
+ a.tap {{ display: inline-flex; align-items: center; min-height: 44px;
+         padding: 0 .5rem; box-sizing: border-box; }}
+ .pill-warn {{ background: #b4530922; color: #b45309; }}
+ .overview h2 {{ font-size: 1.2rem; margin: 1.6rem 0 .4rem; }}
+ /* The Overview: what needs a person is the heaviest thing on the page, and a
+    healthy answer is one calm line. */
+ .attention {{ list-style: none; margin: .5rem 0; padding: 0; }}
+ .attention li {{ margin: .6rem 0; padding: .7rem .9rem; border-radius: .5rem;
+                 border: 1px solid #8884; border-left: .4rem solid #b91c1c; }}
+ .attention li.soon {{ border-left-color: #b45309; }}
+ .attention li.housekeeping {{ border-left-color: #8886; }}
+ .attention p {{ margin: .25rem 0; }}
+ .allclear {{ margin: .5rem 0; padding: .6rem .9rem; border-radius: .5rem;
+             border: 1px solid #16a34a55; }}
+ .legend {{ font-size: .85rem; margin: .5rem 0; padding-left: 1.1rem; }}
 </style></head>
-<body><h1>{html.escape(title)}</h1>{body}
+<body>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
 <footer style="margin-top:2rem;opacity:.6;font-size:.85rem">
 obdi {html.escape(describe())}</footer></body></html>
 """.encode()

@@ -44,7 +44,16 @@ _BUTTON_TAG = re.compile(r"<button[^>]*>")
 _ANCHOR_TAG = re.compile(r"<a [^>]*>")
 
 
+_NAV_BLOCK = re.compile(r"<nav .*?</nav>", re.S)
+
+
 def assert_tap_targets_are_thumb_sized(markup: str) -> None:
+    """Every control is a full-width button or a `tap` link (min-height 44px).
+
+    The navigation strip is a different element with its own sizing, asserted
+    in test_navigation.py, so it is set aside here.
+    """
+    markup = _NAV_BLOCK.sub("", markup)
     buttons = _BUTTON_TAG.findall(markup)
     anchors = _ANCHOR_TAG.findall(markup)
     assert buttons or anchors, "a page with nothing to press is a dead end"
@@ -52,7 +61,9 @@ def assert_tap_targets_are_thumb_sized(markup: str) -> None:
         assert 'class="button"' in tag, f"not styled as a tap target: {tag}"
         assert "width:100%" in tag, f"not full width: {tag}"
     for tag in anchors:
-        assert 'class="button"' in tag, f"not styled as a tap target: {tag}"
+        assert 'class="button"' in tag or 'class="tap' in tag, (
+            f"not styled as a tap target: {tag}"
+        )
 
 
 class Lab:

@@ -168,6 +168,10 @@ class Lab:
         """The holdings row for one account, so assertions cannot be satisfied
         by a neighbouring row."""
         page = self.get("/").text
+        # The Overview above names every account too, with its own ledger
+        # link; the holdings rows are the ones inside their own section.
+        assert '<section id="held">' in page, "the holdings section has lost its anchor"
+        page = page.split('<section id="held">', 1)[1]
         marker = f"/ledger?ref={quote(ref, safe='')}"
         pieces = page.split('<div class="row"')
         rows = [piece for piece in pieces if marker in piece]

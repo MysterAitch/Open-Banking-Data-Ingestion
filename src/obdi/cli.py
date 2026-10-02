@@ -53,6 +53,7 @@ from .ingest import import_file, pair_transfers_across_store, unconfirmed_transf
 from .ledger import Ledger
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
+from .overview import Overview, OverviewCache, build_overview
 from .probing import StepRefused, sca_note, walk_history
 from .pull import pull_starling, pull_truelayer
 from .replay import (
@@ -2895,6 +2896,42 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return store.declared_accounts()
 
+    overview_cache = OverviewCache()
+
+    def overview(fresh: bool = False) -> Overview:
+        """The home page's Overview, reused for a short stated interval.
+
+        The alert's own evaluation supplies the findings, so the page and the
+        notification can never disagree about what is wrong. The result is
+        stamped with when it was assembled, so a reused one says how old it is.
+        """
+        return overview_cache.get(assemble_overview, fresh=fresh)
+
+    def assemble_overview() -> Overview:
+        now = datetime.now(UTC)
+        try:
+            labels = display_labels()
+        except Exception:
+            # A name is a convenience; the Overview must not depend on the
+            # provider-label scan succeeding.
+            labels = {}
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            return build_overview(
+                store,
+                now=now,
+                findings=lambda: collect_alert_findings(db_path, now=now),
+                canonical_for_ref=lambda ref: _canonical_for_ref(account_map, ref),
+                watched=_scheduled_sources(),
+                labels=labels,
+                actual_bound=(
+                    {binding.canonical_id for binding in _actual_bindings()}
+                    if os.getenv("ACTUAL_SYNC_ID", "").strip()
+                    else None
+                ),
+                rebuild_status=rebuild_status_for(db_path),
+            )
+
     def declare_account(record: AccountRecord) -> AccountRecord:
         """Declare or edit one account, from the page rather than the host.
 
@@ -2944,6 +2981,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         archive_account=archive_account_hook,
         unarchive_account=unarchive_account_hook,
         archive_notes=archive_notes,
+        overview=overview,
         account_feeders=account_feeders,
         push_actual=push_actual_hook,
         actual_status=actual_status,

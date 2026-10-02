@@ -51,6 +51,8 @@ from .doctor import shape_problems
 from .ledger import Ledger
 from .logs import say
 from .namespaces import QUEUE_KINDS, validate_connection_name
+from .navigation import current_route
+from .overview import Overview
 from .providers.truelayer import build_auth_link, exchange_code
 from .secrets import SecretError, read_secret
 from .spaces import RECOVERY_BOUND, ArchiveNote
@@ -64,7 +66,9 @@ from .web_accounts import (
     archive_label,
     picker_labels,
 )
+from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
+from .web_overview import overview_html
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
 #: join onto a directory. The point is not the sanitising - that already
@@ -582,6 +586,11 @@ class WebConfig:
     #: A note for each archived account and each Space the provider's listings
     #: say has left, keyed by reference. Read-only, counts and dates only.
     archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None
+    #: The home page's Overview: what needs a person, and one row per account.
+    #: Read-only and figure-free, because it is served by GET. None means the
+    #: page SAYS no checks ran, rather than showing an empty list. The argument
+    #: asks for a fresh assembly rather than a recently held one.
+    overview: Callable[[bool], Overview] | None = None
 
     def current_client_secret(self) -> str:
         value = self.client_secret
@@ -632,7 +641,7 @@ def _connection_rows(store: ConnectionStore, rename_available: bool = False) -> 
     return "".join(rows)
 
 
-HOME_LINK = '<p><a class="button" href="/">Back to connections</a></p>'
+HOME_LINK = '<p><a class="button" href="/">Back to overview</a></p>'
 
 #: What the provider's own OAuth codes mean, in words. Deliberately
 #: describes the CLASS of cause rather than asserting which one occurred -
@@ -3259,6 +3268,8 @@ def render_index(
     #: Defaults True so every existing caller is unchanged; only a deployment with
     #: no provider configured at all passes False, and then the page says so.
     bank_authorisation: bool = True,
+    overview: Callable[[bool], Overview] | None = None,
+    fresh_overview: bool = False,
 ) -> bytes:
     # The import form picks its destination FIRST (the preview verifies
     # the file against what that account already holds), so the picker's
@@ -3271,34 +3282,42 @@ def render_index(
         with contextlib.suppress(Exception):
             upload_labels = picker_labels(upload_labels, declared_accounts())
     upload_picker = account_picker(upload_labels)
+    # Everything below the Overview is the page as it was, wrapped in anchored
+    # sections so the navigation can reach it. Each will move onto its own page.
     body = f"""
 {_credential_banner(bank_authorisation)}
 {_rebuild_running_banner(rebuild_status, rebuild_busy_note)}
 {_backfill_running_banner(backfill_status)}
+{overview_html(overview, fresh=fresh_overview)}
+<div class="overview"><h2 id="sections">Everything else, by section</h2>
+<p class="muted">Connections and consent, what is held per source, Actual sync, extend
+history, reports and evidence, import, and admin. Each will get a page of its own.</p></div>
+<section id="connections">
 {_connection_rows(store, rename_available=rename_connection is not None)}
 {_starling_row(starling_status)}
+</section>
+<section id="held">
 {_holdings_rows(holdings, display_labels, account_timelines, account_feeders,
                 source_connections, feed_warnings, archive_notes)}
 {_knowledge_rows(provider_knowledge)}
 {_scheduler_row(scheduler_heartbeat)}
+</section>
+<section id="actual">
 {_actual_rows(actual_status, push_actual is not None, actual_roster, actual_queue,
               audit_available=audit_actual is not None,
               actual_heartbeat=actual_heartbeat,
               prune_available=prune_actual is not None)}
+</section>
+<section id="extend">
 {_extend_rows(extendables)}
+</section>
+<section id="reports-and-evidence">
+<p><a class="button" href="/reports">Reports</a></p>
+<p><a class="button" href="/evidence">Evidence</a></p>
 <p><a class="button" href="/accounts">Declared accounts</a></p>
-<p><a class="button" href="/artefacts">Browse raw artefacts</a></p>
-<p><a class="button" href="/attempts">Fetch attempts</a>
-<a class="button" href="/fetch-timeline">Fetch timeline</a></p>
-<p><a class="button" href="/agreements">Cross-source agreement report</a></p>
-<p><a class="button" href="/spaces">Historical Starling Spaces (recovered)</a></p>
 <p><a class="button" href="/review">Categorise (uncategorised worklist)</a></p>
-<p><a class="button" href="/statement-shape">Statement shape (PDF layout, values masked)</a></p>
-<p><a class="button" href="/review-report">Review queue report</a></p>
-<p><a class="button" href="/date-lag">Settlement lag report</a></p>
-<p><a class="button" href="/balance-walk">Balance walk report</a></p>
-<p><a class="button" href="/identity-health">Identity health (counts only)</a></p>
-<p><a class="button" href="/balance-reconciliation">Balance reconciliation (figures masked)</a></p>
+</section>
+<section id="import">
 <h2>Import a file</h2>
 <p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
 then verify the file against what that account already holds, before
@@ -3309,11 +3328,16 @@ anything is stored.</p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
 </form>
+</section>
+<section id="add-bank">
 {_add_a_bank_section(bank_authorisation)}
+</section>
+<section id="admin">
 {_probe_section_html(starling_probe_available, probe_suggestions)}
 {_danger_zone(rebuild_available, forget_available, rebuild_status, recent_rebuilds)}
+</section>
 """
-    return render_page("Bank connections", body)
+    return render_page("Overview", body)
 
 
 #: Typed by hand to disclose a statement's real contents. A phrase costs
@@ -3322,7 +3346,7 @@ anything is stored.</p>
 DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 
 
-class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
+class ConnectionHandler(AccountPages, LedgerPages, IndexPages, BaseHTTPRequestHandler):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
     #: Statements awaiting an explicit disclosure confirmation. Same
@@ -3376,11 +3400,15 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
         began = time.perf_counter()
+        # The layout marks the current section from this, and a handler thread
+        # can serve several requests, so it is reset rather than left behind.
+        marked = current_route.set(route)
         try:
             self._dispatch_get(parsed, route)
         except Exception as exc:
             self._report_fault("GET", route, exc)
         finally:
+            current_route.reset(marked)
             _report_slow_route("GET", route, time.perf_counter() - began)
 
     def _report_fault(self, method: str, route: str, exc: Exception) -> None:
@@ -3438,6 +3466,12 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
             return
         if route == "/ledger":
             self._ledger_get(params)
+            return
+        if route == "/reports":
+            self._reports_index()
+            return
+        if route == "/evidence":
+            self._evidence_index()
             return
         if route == "/accounts":
             self._accounts_page()
@@ -3603,6 +3637,8 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
                     "declared_accounts", self.bound_config.declared_accounts
                 ),
                 archive_notes=timed("archive_notes", self.bound_config.archive_notes),
+                overview=timed("overview", self.bound_config.overview),
+                fresh_overview=params.get("fresh", [""])[0] == "1",
             )
             render_seconds = time.perf_counter() - render_began
             threshold = float(os.environ.get("OBDI_WEB_SLOW_RENDER_SECS", "2.0"))
@@ -6071,8 +6107,7 @@ class ConnectionHandler(AccountPages, LedgerPages, BaseHTTPRequestHandler):
             render_page(
                 f"Connected {name}",
                 f"<p>Consent lasts {days} days and cannot be extended by software.</p>"
-                f"{note}"
-                '<p><a class="button" href="/">Back to connections</a></p>',
+                f"{note}" + HOME_LINK,
             ),
         )
 
