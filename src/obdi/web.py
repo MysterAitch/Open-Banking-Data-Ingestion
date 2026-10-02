@@ -84,6 +84,7 @@ from .web_empty import (
 )
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
+from .web_marker import marker_lines, marker_result_row
 from .web_overview import overview_html
 from .web_position import PositionPages
 from .web_prune import (
@@ -525,6 +526,8 @@ class WebConfig:
     actual_queue: Callable[[], list[dict[str, object]]] | None = None
     #: Queue a read-only audit: the applier reads Actual back and reports.
     audit_actual: Callable[[], str] | None = None
+    #: Queue a write of the sync marker alone: no store rows are read or moved.
+    marker_actual: Callable[[], str] | None = None
     #: The sync history behind the homepage's newest handful. Either the
     #: bare list of results, or a mapping of {"results", "total",
     #: "unreadable"} - the reading side caps and skips, and a page can
@@ -3078,6 +3081,7 @@ _RESULT_ROWS: dict[str, Callable[[dict[str, object]], str]] = {
     "audit": _audit_result_row,
     "prune": _prune_result_row,
     "empty": empty_result_row,
+    "marker": marker_result_row,
 }
 
 
@@ -3190,12 +3194,13 @@ def _actual_rows(
     actual_heartbeat: Callable[[], str] | None = None,
     prune_available: bool = False,
     empty_available: bool = False,
+    marker_available: bool = False,
 ) -> str:
-    """The budget sync, visible and pressable: the two-line state first (the
-    last push, the newest audit), then what is in flight, then the buttons
-    (the push the heaviest), then the latest results, then the roster and the
-    destructive prune and empty folded away as reference and rarely-used
-    controls, the empty last."""
+    """The budget sync, visible and pressable: the state lines first (the
+    last push, the newest audit, the sync marker), then what is in flight,
+    then the buttons (the push the heaviest), then the latest results, then
+    the roster and the destructive prune and empty folded away as reference
+    and rarely-used controls, the empty last."""
     if actual_status is None and not push_available:
         return ""
     roster_html = ""
@@ -3281,6 +3286,15 @@ def _actual_rows(
         if audit_available
         else ""
     )
+    marker_button = (
+        '<form method="post" action="/marker-actual">'
+        '<p><button class="button" type="submit" '
+        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
+        'background:#8882;color:inherit">'
+        "Write a sync marker now</button></p></form>"
+        if marker_available
+        else ""
+    )
     prune_button = (
         prune_section(counts_from_audit(_newest_of_kind(results, "audit")))
         if prune_available
@@ -3298,13 +3312,18 @@ def _actual_rows(
         "queues a push after each pull cycle, every six hours.</p>"
         "<p>The audit reads each bound account back from Actual and "
         "reports differences without changing anything - rows without an "
-        "imported id are yours and are only counted.</p></details>"
+        "imported id are yours and are only counted.</p>"
+        "<p>The sync marker is an off-budget account with no transactions "
+        "whose name is the time obdi last wrote to the budget. Every "
+        "successful push renames it, and so does its own button; an audit "
+        "only reads it, and a removal never touches it.</p></details>"
     )
     return (
         summary_html
         + queued_html
         + button
         + audit_button
+        + marker_button
         + ("<h3>Latest results</h3>" + "".join(rows) if rows else "")
         + (
             '<p><a class="tap" href="/actual-history">Full sync history</a></p>'
@@ -3368,7 +3387,8 @@ def _stamp_z(result: dict[str, object]) -> str:
 
 
 def _actual_summary(results: list[dict[str, object]]) -> str:
-    """Two lines a person can read at a glance: the last push, the newest audit.
+    """The lines a person can read at a glance: the last push, the newest audit,
+    and the sync marker (web_marker.py).
 
     Counts and words only. A GET never shows an amount, and the audit's
     per-account detail lives behind a fold on its own row.
@@ -3428,7 +3448,7 @@ def _actual_summary(results: list[dict[str, object]]) -> str:
                 f'<p><span class="pill pill-ok">audit clean</span> The newest audit '
                 f"({_stamp_z(audit)}) found no differences in {len(accounts)} accounts.</p>"
             )
-    return f'<div class="leadlines">{first}{second}</div>'
+    return f'<div class="leadlines">{first}{second}{marker_lines(results)}</div>'
 
 
 def _knowledge_rows(
@@ -6222,6 +6242,9 @@ class ConnectionHandler(
         if route == "/audit-actual":
             self._audit_actual()
             return
+        if route == "/marker-actual":
+            self._marker_actual()
+            return
         if route == "/prune-actual":
             self._prune_actual(self._read_form())
             return
@@ -6759,6 +6782,37 @@ class ConnectionHandler(
                 "<p>Read-only: the applier reads each bound account back "
                 "from Actual and reports differences on the Actual sync "
                 "page - nothing is changed on either side.</p>" + BACK_TO_ACTUAL,
+            ),
+        )
+
+    def _marker_actual(self) -> None:
+        hook = self.bound_config.marker_actual
+        if hook is None:
+            self._respond(
+                404,
+                error_page("Not available", "<p>The marker is not wired.</p>", BACK_TO_ACTUAL),
+            )
+            return
+        try:
+            summary = hook()
+        except Exception as exc:
+            self._respond(
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
+            )
+            return
+        print(f"actual marker queued via page: {summary}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Marker queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>The applier renames the sync marker account in Actual to "
+                "the time it writes it; nothing else in the budget changes "
+                "and it reads nothing from the store. The result appears on "
+                "the Actual sync page.</p>" + BACK_TO_ACTUAL,
             ),
         )
 

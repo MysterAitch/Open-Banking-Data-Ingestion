@@ -58,6 +58,10 @@ class EmptyAccount:
     rows: int
     bound: bool
     human: int | None
+    #: The sync marker (web_marker.py): obdi's own account, which the audit
+    #: reports beside its account list rather than in it. It is deleted with
+    #: the rest, and the next push writes it again.
+    marker: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,7 +78,7 @@ class EmptyPlan:
 
     @property
     def unbound(self) -> tuple[EmptyAccount, ...]:
-        return tuple(a for a in self.accounts if not a.bound)
+        return tuple(a for a in self.accounts if not a.bound and not a.marker)
 
     @property
     def unclassified_rows(self) -> int:
@@ -132,7 +136,36 @@ def plan_from_audit(
         accounts.append(
             EmptyAccount(account_id, str(entry.get("name") or account_id), rows, not stray, human)
         )
+    accounts.extend(_marker_accounts(audit, {a.account_id for a in accounts}))
     return EmptyPlan(tuple(accounts)), None
+
+
+def _marker_accounts(audit: dict[str, object], seen: set[str]) -> list[EmptyAccount]:
+    """The sync marker accounts the audit reported beside its account list.
+
+    An empty is checked against what it was told, and refuses a budget holding
+    an account it was not told about, so a marker the audit saw but did not
+    list as an account has to be told here. An entry of a shape this build
+    does not expect is left out: the applier then refuses, loudly, rather than
+    this page guessing a count.
+    """
+    marker = audit.get("marker")
+    raw = marker.get("accounts") if isinstance(marker, dict) else None
+    found: list[EmptyAccount] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        account_id, rows = entry.get("account_id"), _whole(entry.get("rows"))
+        if not isinstance(account_id, str) or not account_id or account_id in seen:
+            continue
+        if rows is None or rows < 0:
+            continue
+        found.append(
+            EmptyAccount(
+                account_id, str(entry.get("name") or account_id), rows, False, None, marker=True
+            )
+        )
+    return found
 
 
 def _rows(n: int) -> str:
@@ -147,7 +180,12 @@ def _listing(plan: EmptyPlan) -> str:
     items = "".join(
         f'<li style="{_WRAP}">{html.escape(a.name)}: {_rows(a.rows)} '
         f"<small><code>{html.escape(a.account_id)}</code></small>"
-        + ("" if a.bound else " - <em>not bound to an obdi account</em>")
+        + (
+            " - <em>the sync marker, obdi's own account (holds no transactions; "
+            "the next push writes it again)</em>"
+            if a.marker
+            else ("" if a.bound else " - <em>not bound to an obdi account</em>")
+        )
         + "</li>"
         for a in plan.accounts
     )

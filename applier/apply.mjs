@@ -36,6 +36,7 @@ import {
   provisionAccounts,
   withBudget,
 } from './lib.mjs';
+import { writeMarker } from './marker.mjs';
 
 // The Python side loads .env, so this must too - otherwise a correctly
 // configured project reports a missing setting, which reads as a config
@@ -75,9 +76,11 @@ async function main() {
     const applied = await applyAccounts(client, accounts);
     const opening = await applyOpeningBalances(client, openings);
     const linked = await linkTransfers(client, transfers);
-    return { provisioned, applied, opening, linked };
+    const marker = await writeMarker(client, new Date());
+    return { provisioned, applied, opening, linked, marker };
   });
 
+  console.log(`Sync marker ${outcome.marker.action}: "${outcome.marker.name}"`);
   for (const line of [
     ...outcome.provisioned.lines,
     ...outcome.applied.lines,

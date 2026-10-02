@@ -605,6 +605,15 @@ def build_empty_envelope(shown: Mapping[str, int]) -> dict[str, object]:
     return {"version": ENVELOPE_VERSION, "kind": "empty", "empty_accounts": dict(shown)}
 
 
+def build_marker_envelope() -> dict[str, object]:
+    """The request to write the sync marker and nothing else.
+
+    No accounts, rows, or pairs: the applier reads none of them for this kind,
+    so the request can be built without opening the store at all.
+    """
+    return {"version": ENVELOPE_VERSION, "kind": "marker"}
+
+
 def queue_push(
     envelope: dict[str, object], actual_dir: Path, prefix: str = "push"
 ) -> Path:

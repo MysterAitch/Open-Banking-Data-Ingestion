@@ -36,6 +36,13 @@ transcription would add no reasoning that the subjects do not already carry.
   applier refuses if Actual holds more than the page showed. Afterwards a push
   rebuilds the budget. Measured against an offline engine, not a live server.
 
+- **A sync marker says whether a device has caught up.** Actual shows no "data
+  as of" anywhere, and a phone showing an old budget looked the same as one
+  showing a current one. obdi now keeps one empty off-budget account in Actual
+  named for the time of its last write ("02 Oct 20:41Z obdi marker"); a device
+  that has caught up shows that name in its sidebar. Written by every push and
+  by a button on the Actual page.
+
 ### Changed
 - **A push is skipped while an empty is pending**, so the scheduler cannot
   import into accounts that are about to disappear.

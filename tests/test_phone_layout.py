@@ -46,6 +46,7 @@ from obdi.navigation import DESTINATIONS
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_empty import empty_section, plan_from_audit
+from obdi.web_sections import render_actual
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -340,6 +341,48 @@ def test_EmptyActualSection_WithManyAccountsAndAVeryLongName_DoesNotScrollSidewa
         # The form is reachable: its controls are on screen, not pushed aside.
         assert page.get_by_role("button", name="Empty Actual completely").is_visible()
         assert page.locator("input[name=phrase]").is_visible()
+    finally:
+        page.close()
+
+
+def test_ActualPage_WithTheSyncMarkerLinesShown_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object,
+) -> None:
+    """The longest marker wording: a write, then an audit that found an older
+    marker twice, so every line and the button are on the page."""
+    older = "01 Oct 08:00Z obdi marker"
+    results: list[dict[str, object]] = [
+        {
+            "ok": True,
+            "request": "p",
+            "finished_at": "2026-10-02T20:41:09.000Z",
+            "added": 1,
+            "provisioned": 0,
+            "marker": {"name": "02 Oct 20:41Z obdi marker", "found": 1, "action": "renamed"},
+        },
+        {
+            "ok": True,
+            "kind": "audit",
+            "request": "a",
+            "finished_at": "2026-10-02T20:50:00.000Z",
+            "accounts": [],
+            "marker": {"found": 2, "name": older, "names": [older, older]},
+        },
+    ]
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        body = render_actual(
+            push_actual=lambda: "q",
+            audit_actual=lambda: "q",
+            marker_actual=lambda: "q",
+            actual_status=lambda: results,
+        ).decode()
+        assert "server is behind" in body
+        assert "Write a sync marker now" in body
+        page.set_content(body)
+        _assert_fits(_measure(page))
     finally:
         page.close()
 

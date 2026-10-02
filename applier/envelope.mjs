@@ -109,13 +109,16 @@ export function parseEnvelope(payload) {
         ? payload.accounts
         : {};
     const kind =
-      payload.kind === 'audit' || payload.kind === 'prune' || payload.kind === 'empty'
+      payload.kind === 'audit' ||
+      payload.kind === 'prune' ||
+      payload.kind === 'empty' ||
+      payload.kind === 'marker'
         ? payload.kind
         : 'push';
     return {
       // 'audit' asks for a read-back-and-compare instead of an import;
-      // anything else is a push, so an unknown kind cannot silently
-      // become a write.
+      // 'marker' asks only for the sync marker to be written and carries
+      // nothing else the applier reads; anything else is a push.
       kind,
       // Only a prune has counts to confirm; on any other kind they are not
       // even read, so a stray key cannot widen what a push or audit does.

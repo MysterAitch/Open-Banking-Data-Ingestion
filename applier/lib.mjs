@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 import { isOpeningImportedId, readAccountRows } from './audit.mjs';
+import { isMarkerName } from './marker.mjs';
 import { indexPairRows, judgePair } from './transfers.mjs';
 import { makeYielder } from './turn.mjs';
 
@@ -80,6 +81,18 @@ export async function withBudget(work) {
 
 export async function provisionAccounts(client, provision) {
   if (!provision.length) return { bindings: [], lines: [] };
+  // Accounts are reused BY NAME, so a label that reads as the sync marker
+  // would adopt the marker as one of obdi's accounts (or be renamed away by
+  // the next marker write). Refused whole, before any account is created.
+  const reserved = provision
+    .map((entry) => (entry.label ?? '').trim() || entry.canonical_id)
+    .filter(isMarkerName);
+  if (reserved.length) {
+    throw new Error(
+      `account name(s) ${reserved.map((n) => JSON.stringify(n)).join(', ')} are reserved ` +
+        'for the sync marker (they end with its suffix); nothing was created',
+    );
+  }
   const existing = await client.getAccounts();
   const byName = new Map(existing.map((account) => [account.name, account.id]));
   const bindings = [];

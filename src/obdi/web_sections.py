@@ -294,6 +294,7 @@ def render_actual(
     rebuild_status: Callable[[], dict[str, object]] | None = None,
     rebuild_busy_note: Callable[[], str | None] | None = None,
     empty_actual: Callable[..., str] | None = None,
+    marker_actual: Callable[[], str] | None = None,
 ) -> bytes:
     from . import web
 
@@ -306,6 +307,7 @@ def render_actual(
         actual_heartbeat=actual_heartbeat,
         prune_available=prune_actual is not None,
         empty_available=empty_actual is not None,
+        marker_available=marker_actual is not None,
     )
     body = (
         web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
@@ -461,6 +463,7 @@ class SectionPages:
             audit_actual=config.audit_actual,
             prune_actual=config.prune_actual,
             empty_actual=config.empty_actual,
+            marker_actual=config.marker_actual,
             actual_heartbeat=timer.wrap("actual_heartbeat", config.actual_heartbeat),
             rebuild_status=timer.wrap("rebuild_status", config.rebuild_status),
             rebuild_busy_note=timer.wrap("rebuild_busy_note", config.rebuild_busy_note),

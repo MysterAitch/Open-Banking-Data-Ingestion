@@ -38,6 +38,7 @@ import {
   provisionAccounts,
   withBudget as openBudget,
 } from './lib.mjs';
+import { readMarker, writeMarker } from './marker.mjs';
 import { auditTransfers } from './transfers.mjs';
 
 const BASE = (process.env.OBDI_ACTUAL_DIR ?? '/data/actual').trim();
@@ -72,9 +73,22 @@ export function failedResult(name, error) {
 
 // `onProgress` receives {phase, done, total} as a long request advances; the
 // watcher keeps the latest and writes it into the heartbeat.
-// `withBudget` is a parameter only so a test can hand in a budget without a
-// server; the watcher always uses the real one.
-export async function processRequest(name, onProgress = () => {}, withBudget = openBudget) {
+// `withBudget` and `now` are parameters only so a test can hand in a budget
+// without a server and a clock with a known instant; the watcher always uses
+// the real ones.
+//
+// Which kinds write the sync marker is decided HERE and nowhere else: a push
+// writes it as its last step (so a push that failed leaves the old marker),
+// the marker kind writes it alone, an audit only reads it (an audit changes
+// nothing, and the page says so), a prune neither reads nor writes it, and an
+// empty deletes it with every other account (the next push writes it again).
+export async function processRequest(
+  name,
+  onProgress = () => {},
+  withBudget = openBudget,
+  now = () => new Date(),
+) {
+  const run = withBudget;
   const requestPath = join(REQUESTS, name);
   const payload = JSON.parse(await readFile(requestPath, 'utf8'));
   const {
@@ -105,23 +119,36 @@ export async function processRequest(name, onProgress = () => {}, withBudget = o
     };
   }
 
+  if (kind === 'marker') {
+    const marker = await run((client) => writeMarker(client, now()));
+    return {
+      ok: true,
+      kind: 'marker',
+      request: name,
+      finished_at: now().toISOString(),
+      marker,
+    };
+  }
+
   if (kind === 'audit') {
-    const { report, pairs } = await withBudget(async (client) => ({
+    const { report, pairs, marker } = await run(async (client) => ({
       report: await auditAccounts(client, accounts),
       pairs: await auditTransfers(client, transfers),
+      marker: await readMarker(client),
     }));
     return {
       ok: true,
       kind: 'audit',
       request: name,
-      finished_at: new Date().toISOString(),
+      finished_at: now().toISOString(),
       accounts: report,
       transfers: pairs,
+      marker,
     };
   }
 
   if (kind === 'prune') {
-    const report = await withBudget((client) =>
+    const report = await run((client) =>
       pruneAccounts(client, accounts, {
         clear_empty,
         confirmed,
@@ -132,19 +159,22 @@ export async function processRequest(name, onProgress = () => {}, withBudget = o
       ok: true,
       kind: 'prune',
       request: name,
-      finished_at: new Date().toISOString(),
+      finished_at: now().toISOString(),
       accounts: report,
     };
   }
 
-  const outcome = await withBudget(async (client) => {
+  const outcome = await run(async (client) => {
     const provisioned = await provisionAccounts(client, provision);
     const applied = await applyAccounts(client, accounts);
     const opening = await applyOpeningBalances(client, openings);
     const linked = await linkTransfers(client, transfers, {
       onProgress: ({ done, total }) => onProgress({ phase: 'linking', done, total }),
     });
-    return { provisioned, applied, opening, linked };
+    // Last, and inside the same session, so it reaches the server with the
+    // rows it vouches for and is never written by a push that threw.
+    const marker = await writeMarker(client, now());
+    return { provisioned, applied, opening, linked, marker };
   });
 
   if (outcome.provisioned.bindings.length) {
@@ -158,11 +188,12 @@ export async function processRequest(name, onProgress = () => {}, withBudget = o
   return {
     ok: true,
     request: name,
-    finished_at: new Date().toISOString(),
+    finished_at: now().toISOString(),
     added: outcome.applied.added,
     provisioned: outcome.provisioned.bindings.length,
     transfers: outcome.linked.counts,
     opening_balances: outcome.opening.counts,
+    marker: outcome.marker,
     lines: [
       ...outcome.provisioned.lines,
       ...outcome.applied.lines,
@@ -249,12 +280,16 @@ async function tick() {
         `${result.refused ? `; refused: ${result.refused}` : ''}` +
         `${result.stopped ? `; stopped: ${result.stopped}` : ''})`;
     } else if (result.ok) {
-      line =
-        result.kind === 'audit'
-          ? `${name}: audited ${result.accounts.length} account(s)`
-          : `${name}: applied (${result.added} added, ${result.provisioned} provisioned, ` +
-            `${result.transfers?.linked ?? 0} transfer(s) linked, ` +
-            `${result.transfers?.failed ?? 0} failed)`;
+      if (result.kind === 'audit') {
+        line = `${name}: audited ${result.accounts.length} account(s)`;
+      } else if (result.kind === 'marker') {
+        line = `${name}: marker ${result.marker.action} as "${result.marker.name}"`;
+      } else {
+        line =
+          `${name}: applied (${result.added} added, ${result.provisioned} provisioned, ` +
+          `${result.transfers?.linked ?? 0} transfer(s) linked, ` +
+          `${result.transfers?.failed ?? 0} failed)`;
+      }
     }
     console.log(line);
   }

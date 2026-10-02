@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY audit.mjs empty.mjs envelope.mjs lease.mjs lib.mjs transfers.mjs turn.mjs watcher.mjs apply.mjs ./
+COPY audit.mjs empty.mjs envelope.mjs lease.mjs lib.mjs marker.mjs transfers.mjs turn.mjs watcher.mjs apply.mjs ./
 
 # Prove the whole import graph resolves at BUILD time. A file missing from
 # the COPY list above otherwise surfaces only as a crash loop on the host -

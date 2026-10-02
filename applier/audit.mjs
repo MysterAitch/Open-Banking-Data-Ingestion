@@ -27,6 +27,7 @@
  * transfers.mjs, which the linking push shares.
  */
 
+import { isMarkerName } from './marker.mjs';
 import { makeYielder } from './turn.mjs';
 
 export function partitionAccount(expectedRows, actualRows) {
@@ -122,6 +123,9 @@ export async function auditAccounts(client, accounts) {
   // them is the human's call.
   for (const account of known) {
     if (Object.prototype.hasOwnProperty.call(accounts, account.id)) continue;
+    // The sync marker is obdi's own, holds no rows by design, and is not a
+    // difference between the budget and the store (see marker.mjs).
+    if (isMarkerName(account.name)) continue;
     const rows = await ctx.rowsOf(account.id);
     report.push({
       account_id: account.id,

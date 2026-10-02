@@ -1022,6 +1022,22 @@ def settle_emptied_budgets_for(db_path: Path) -> int | None:
     return settle_emptied_budgets(Path(map_path), _actual_dir(db_path))
 
 
+def queue_actual_marker(db_path: Path) -> str:
+    """Ask the applier to write the sync marker, and nothing else.
+
+    Not refused while a rebuild is replaying the store, unlike a push, audit,
+    or prune: those read or move store rows, which a rebuild leaves half
+    populated, whereas this request carries none and the marker it writes names
+    only the time of the write.
+    """
+    from .actual_push import build_marker_envelope, queue_push
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
+    queued = queue_push(build_marker_envelope(), _actual_dir(db_path), prefix="marker")
+    return f"queued {queued.name}: the sync marker will be renamed to the time it is written"
+
+
 def queue_actual_audit(db_path: Path) -> str:
     """Ask the applier to read Actual back and report differences.
 
@@ -2308,6 +2324,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)
 
+    def marker_actual_hook() -> str:
+        return queue_actual_marker(db_path)
+
     def prune_actual_hook(
         clear_empty: Mapping[str, int] | None = None,
         confirmed: Mapping[str, int] | None = None,
@@ -3266,6 +3285,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_roster=actual_roster,
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
+        marker_actual=marker_actual_hook,
         prune_actual=prune_actual_hook,
         empty_actual=empty_actual_hook,
         actual_history=actual_history,
