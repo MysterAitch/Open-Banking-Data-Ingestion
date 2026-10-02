@@ -58,10 +58,17 @@ class StatementParser(ABC):
     encoding: str = "utf-8"
 
     def sniff(self, payload: bytes) -> bool:
-        """Whether this parser recognises the payload's header row."""
+        """Whether this parser recognises the payload's header row.
+
+        Bytes that are not text in this parser's encoding are simply not its
+        file.
+        A decode error used to escape from here, so a real PDF - which carries
+        bytes above 127 straight after its header - stopped detection at the
+        first text parser asked and never reached a PDF parser.
+        """
         try:
             header = self._header(payload)
-        except ParseError:
+        except (ParseError, UnicodeDecodeError):
             return False
         return all(column in header for column in self.expected_headers)
 

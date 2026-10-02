@@ -22,22 +22,31 @@ from obdi.ingest import import_file
 from obdi.store import Store
 from test_statement_shape import build_pdf
 
-SANTANDER = build_pdf(
-    [
-        "Santander UK plc. Registered Office: 2 Triton Square",
-        "Statement Date: 11th July 2026      Page No: 4 / 4",
-        "Account credit limit:            3,000.00",
-        "Balance brought forward from previous statement          1,234.56",
-        "29th Jun    Santander Credit Card Fee                        3.00",
-        "30th Jun    EXAMPLE SHOP LTD LONDON GB                      45.00",
-        "30th Jun    EXAMPLE SHOP LTD LONDON            CR           15.00",
-        "1st Jul     Some Merchant Inc Somewhere US                   12.57",
-        "3rd Jul     Direct Payment                     CR        1,197.56",
-        "5th Jul     Another Shop Birmingham GB                      12.00",
-        "Purchase Interest              5.42",
-        "Your new balance:                                        99.99",
-    ]
-)
+SANTANDER_LINES = [
+    "Santander UK plc. Registered Office: 2 Triton Square",
+    "Statement Date: 11th July 2026      Page No: 4 / 4",
+    "Account credit limit:            3,000.00",
+    "Balance brought forward from previous statement          1,234.56",
+    "29th Jun    Santander Credit Card Fee                        3.00",
+    "30th Jun    EXAMPLE SHOP LTD LONDON GB                      45.00",
+    "30th Jun    EXAMPLE SHOP LTD LONDON            CR           15.00",
+    "1st Jul     Some Merchant Inc Somewhere US                   12.57",
+    "3rd Jul     Direct Payment                     CR        1,197.56",
+    "5th Jul     Another Shop Birmingham GB                      12.00",
+    "Purchase Interest              5.42",
+    "Your new balance:                                        99.99",
+]
+
+SANTANDER = build_pdf(SANTANDER_LINES)
+
+#: Stated, not left to the builder's default: the statement as any real PDF
+#: writer would emit it, with the line of bytes above 127 that follows the
+#: header and says the file is binary.
+SANTANDER_AS_WRITTEN = build_pdf(SANTANDER_LINES, binary_marker=True)
+
+#: Plain ASCII throughout, which no real statement is; kept so that the
+#: text-only path is still read.
+SANTANDER_PLAIN = build_pdf(SANTANDER_LINES, binary_marker=False)
 
 BROKEN = build_pdf(
     [
@@ -93,6 +102,134 @@ class TestAStatementLandsLikeAnyOtherFile:
 
             assert again.inserted == 0
             assert len(store.all_transactions()) == 7
+
+
+class TestAStatementAsARealWriterMakesIt:
+    """Seven rows, as for the plain fixture: the marker changes no content."""
+
+    def test_Import_ReadsItsRows(self, tmp_path):
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(SANTANDER_AS_WRITTEN)
+        with Store(tmp_path / "s.sqlite3") as store:
+            summary = import_file(store, path, account_id="santander-cc")
+
+            assert summary.inserted == 7
+
+    def test_Import_OfAPlainAsciiPdf_ReadsTheSameRows(self, tmp_path):
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(SANTANDER_PLAIN)
+        with Store(tmp_path / "s.sqlite3") as store:
+            assert import_file(store, path, account_id="santander-cc").inserted == 7
+
+    def test_Rebuild_ReplaysItWithoutAProblem_AndKeepsItsRows(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(SANTANDER_AS_WRITTEN)
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, path, account_id="santander-cc")
+            report = rebuild_from_raw(store)
+
+            assert report.problems == []
+            assert len(store.all_transactions()) == 7
+
+    def test_Rebuild_OfAStatementNoParserReads_FiledUnderAnAccount_SaysNoParser(
+        self, tmp_path
+    ):
+        """The rebuild's line must name the situation, since "cannot decode
+        byte" sends the reader looking for a corrupt file."""
+        from obdi.rebuild import rebuild_from_raw
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _keep(store, UNKNOWN_BANK, account="some-card")
+            report = rebuild_from_raw(store)
+
+        assert len(report.problems) == 1
+        assert "no parser yet" in report.problems[0]
+        assert "codec" not in report.problems[0]
+
+
+UNKNOWN_BANK = build_pdf(["Some Other Bank", "Closing balance 10.00"])
+
+
+def _keep(store: Store, payload: bytes, *, account: str = "(unassigned)") -> None:
+    """Land a statement the way the statement-shape page keeps one."""
+    from datetime import UTC, datetime
+
+    from obdi.identity import artefact_digest
+    from obdi.models import RawArtefact
+
+    store.land_artefact(
+        RawArtefact(
+            source="statement",
+            account_ref=account,
+            fetched_at=datetime.now(UTC),
+            media_type="application/pdf",
+            digest=artefact_digest(payload),
+            payload=payload,
+            origin="statement.pdf",
+        )
+    )
+
+
+class TestAKeptStatementWithNoAccountAddsNoRows:
+    """A statement is kept before anyone decides whose it is.
+
+    Until it is given an account, a rebuild must not read it into rows: it
+    would file them under "(unassigned)", an account that does not exist.
+    Real PDFs used to fail before reaching a parser, which hid this; once
+    they could be read, a kept statement a parser recognises would have
+    become seven rows nobody asked for.
+    """
+
+    def test_Rebuild_WhenAParserCouldReadIt_StillAddsNoRows_AndCountsIt(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _keep(store, SANTANDER_AS_WRITTEN)
+            report = rebuild_from_raw(store)
+
+            assert store.all_transactions() == []
+        assert report.problems == []
+        assert (report.kept_unassigned, report.kept_readable) == (1, 1)
+        assert "1 kept statement" in report.describe()
+
+    def test_Rebuild_WhenNoParserReadsIt_AddsNoRows_AndIsNotAProblem(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _keep(store, UNKNOWN_BANK)
+            report = rebuild_from_raw(store)
+
+            assert store.all_transactions() == []
+        assert report.problems == []
+        assert (report.kept_unassigned, report.kept_readable) == (1, 0)
+        assert "no parser yet" in report.describe()
+
+    def test_Rebuild_WithOneOfEach_CountsBothAndSaysHowManyAParserCanRead(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _keep(store, SANTANDER_AS_WRITTEN)
+            _keep(store, UNKNOWN_BANK)
+            report = rebuild_from_raw(store)
+
+        assert (report.kept_unassigned, report.kept_readable) == (2, 1)
+        described = report.describe()
+        assert "2 kept statements" in described
+        assert "1 a parser can read once it has an account" in described
+
+    def test_Rebuild_WithNoKeptStatements_SaysNothingAboutThem(self, tmp_path):
+        from obdi.rebuild import rebuild_from_raw
+
+        path = tmp_path / "statement.pdf"
+        path.write_bytes(SANTANDER_AS_WRITTEN)
+        with Store(tmp_path / "s.sqlite3") as store:
+            import_file(store, path, account_id="santander-cc")
+            report = rebuild_from_raw(store)
+
+        assert report.kept_unassigned == 0
+        assert "kept statement" not in report.describe()
 
 
 class TestTheGateHolds:

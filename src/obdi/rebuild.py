@@ -40,7 +40,7 @@ from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
 from .matching import CandidateIndex
 from .models import Transaction
-from .namespaces import API_SOURCES
+from .namespaces import API_SOURCES, UNASSIGNED_ACCOUNT
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
@@ -80,6 +80,12 @@ class RebuildReport:
     #: the batch commits once, at its end - so adding it to the banked
     #: figure would report progress a crash could take back.
     records_in_flight: int = 0
+    #: Statements kept before anyone decided whose they are.
+    #: They are evidence, not a problem, and are never read into rows: the
+    #: rows would be filed under an account that does not exist.
+    kept_unassigned: int = 0
+    #: Of those, how many a parser recognises and could read once assigned.
+    kept_readable: int = 0
 
     def describe(self) -> str:
         lines = [
@@ -129,6 +135,16 @@ class RebuildReport:
                     "  Where an account's total changed above, check whether "
                     "a skipped artefact fed it."
                 )
+        if self.kept_unassigned:
+            noun = "statement" if self.kept_unassigned == 1 else "statements"
+            unread = self.kept_unassigned - self.kept_readable
+            lines.append(
+                f"  {self.kept_unassigned} kept {noun} with no account yet, so "
+                f"none was read into rows: {self.kept_readable} a parser can "
+                f"read once it has an account, {unread} with no parser yet "
+                "for its layout. Give one an account from the Statement shape "
+                "page."
+            )
         return "\n".join(lines)
 
 
@@ -393,6 +409,17 @@ def rebuild_from_raw(
 
         if source in _NON_TRANSACTIONAL:
             report.artefacts_skipped += 1
+            continue
+
+        if account_ref == UNASSIGNED_ACCOUNT:
+            # Kept before anyone decided whose it is, so it is not replayed.
+            # Asking which parser would take it costs one read and tells the
+            # person how many are waiting only on an account.
+            report.kept_unassigned += 1
+            report.artefacts_skipped += 1
+            with contextlib.suppress(DataError, ValueError):
+                detect(payload)
+                report.kept_readable += 1
             continue
 
         summary = ImportSummary(artefact_new=False)

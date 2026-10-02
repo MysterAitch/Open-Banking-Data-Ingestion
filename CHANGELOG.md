@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.246] - 2026-10-02
+
+### Fixed
+- **A real PDF statement reaches the PDF parsers.** Every real PDF carries a
+  line of binary bytes after its header; the text parsers were asked first,
+  failed to decode it, and the error stopped detection there. No real PDF could
+  be imported, and each rebuild reported the kept ones as decode problems. The
+  test fixtures were plain ASCII, so nothing showed it; they now carry the
+  marker by default.
+
+### Changed
+- **A kept statement with no account is never read into rows.** A rebuild now
+  counts them apart from problems, and says how many a parser can read once
+  given an account and how many have no parser for their layout yet.
+
 ## [0.4.245] - 2026-10-02
 
 ### Fixed

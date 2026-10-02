@@ -19,6 +19,7 @@ def build_pdf(
     *,
     per_page: int = 0,
     page_groups: list[list[str]] | None = None,
+    binary_marker: bool = True,
 ) -> bytes:
     """A valid PDF containing `lines`, on one page or several.
 
@@ -51,6 +52,12 @@ def build_pdf(
     needs words placed at distinct x offsets, and would read everything here as
     one column. That is a real constraint on which issuer a generated statement
     can imitate, not an oversight.
+
+    `binary_marker`, on by default, adds the comment line of four bytes above
+    127 that real writers put after the header to say the file is binary.
+    Without it this file is plain ASCII, which no real statement is: every
+    fixture decoded as text, so nothing showed that a real PDF failed the text
+    parsers' sniff with a decode error and never reached a PDF parser.
     """
     if page_groups is not None:
         pages = list(page_groups)
@@ -85,6 +92,8 @@ def build_pdf(
     objects.append(b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>")
 
     out = bytearray(b"%PDF-1.4\n")
+    if binary_marker:
+        out += b"%\xe2\xe3\xcf\xd3\n"
     offsets = []
     for number, body in enumerate(objects, start=1):
         offsets.append(len(out))

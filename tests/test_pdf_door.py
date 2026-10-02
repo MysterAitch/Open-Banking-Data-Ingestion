@@ -43,6 +43,21 @@ class TestTheRefusalNamesTheSituation:
         assert "PDF" in message
         assert "header row" not in message, "a PDF has no header row to blame"
 
+    def test_APdfAsARealWriterMakesIt_IsRecognisedAsAPdf_NotAsUndecodableText(self):
+        """Every real PDF carries a line of bytes above 127 after its header,
+        which says "this file is binary". The text parsers were asked first,
+        failed to decode it, and the failure escaped: no real PDF ever reached
+        a PDF parser, and thirty-one kept statements were reported at each
+        rebuild as a decode problem. The fixtures were plain ASCII and passed."""
+        real = build_pdf(["Statement of account", "Opening balance 1,234.56"])
+        assert real[9:15] == b"%\xe2\xe3\xcf\xd3\n", "the fixture must carry the marker"
+
+        with pytest.raises(ParseError) as refused:
+            detect(real)
+
+        assert "PDF" in str(refused.value)
+        assert "statement-shape" in str(refused.value)
+
     def test_TheRefusal_PointsAtHowToGetAParser(self):
         with pytest.raises(ParseError) as refused:
             detect(STATEMENT)
