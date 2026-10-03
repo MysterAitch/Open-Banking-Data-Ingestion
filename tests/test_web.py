@@ -3417,9 +3417,18 @@ class TestTheRecoveredSpacesPage:
             "transfers": 522,
             "also_known_as": [],
             "declared": False,
+            "state": "not declared",
+            "unfinished": True,
         }
         space.update(overrides)
         return space
+
+    def _finished(self) -> dict:
+        return self._space(
+            declared=True,
+            state="declared and bound; its own feed has not been asked for yet",
+            unfinished=False,
+        )
 
     def test_SpacesPage_WhenSpacesFound_ShowsEachWithTheEvidenceBehindIt(self):
         # A count on its own is a claim. The transfer count and the span are
@@ -3454,20 +3463,20 @@ class TestTheRecoveredSpacesPage:
         assert "no historical Spaces" in markup
         assert "<form" not in markup
 
-    def test_SpacesPage_WhenEverythingAlreadyDeclared_OffersNoAction(self):
+    def test_SpacesPage_WhenEverythingIsDeclaredAndBound_OffersNoAction(self):
         # Split by the behaviour seam rather than showing a button that would
         # do nothing: a control that is present but inert is worse than absent,
         # because pressing it teaches the reader the wrong thing.
-        markup = _spaces_html([self._space(declared=True)])
+        markup = _spaces_html([self._finished()])
 
         assert "<form" not in markup
-        assert "already declared" in markup
+        assert "declared and bound" in markup
 
-    def test_SpacesPage_WhenSomeUndeclared_ActionSaysHowManyItWillCreate(self):
-        markup = _spaces_html([self._space(), self._space(declared=True)])
+    def test_SpacesPage_WhenSomeAreUnfinished_ActionSaysHowManyItWillFinish(self):
+        markup = _spaces_html([self._space(), self._finished()])
 
         assert "<form" in markup
-        assert "1 account" in markup
+        assert "Declare and bind 1 Space<" in markup
 
     def test_SpacesPage_WhenSpaceWasRenamed_ShowsWhatItUsedToBeCalled(self):
         markup = _spaces_html([self._space(also_known_as=["Rent 2021"])])

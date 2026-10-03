@@ -443,6 +443,10 @@ class TestTheCommand:
         from obdi.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
+        # Declaring also binds, so the apply needs somewhere to record the binding.
+        monkeypatch.setenv(
+            "OBDI_ACCOUNT_MAP", str(store_with_a_deleted_space.parent / "accounts.json")
+        )
         assert (
             main(["--db", str(store_with_a_deleted_space), "recover-spaces", "--apply"])
             == 0
@@ -505,6 +509,7 @@ class TestTheCommand:
             )
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "accounts.json"))
         assert main(["--db", str(path), "recover-spaces", "--apply"]) == 0
 
         with Store(path) as store:
@@ -526,6 +531,9 @@ class TestTheCommand:
         from obdi.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
+        monkeypatch.setenv(
+            "OBDI_ACCOUNT_MAP", str(store_with_a_deleted_space.parent / "accounts.json")
+        )
         for _ in range(2):
             main(
                 ["--db", str(store_with_a_deleted_space), "recover-spaces", "--apply"]

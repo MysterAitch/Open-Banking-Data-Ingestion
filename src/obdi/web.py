@@ -66,6 +66,7 @@ from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
 from .pull import RANGE_REFUSAL_MARK
 from .secrets import SecretError, read_secret
+from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .statement_shape import ShapeReport
 from .timings import Timings
@@ -520,11 +521,11 @@ class WebConfig:
     #: the movements they made. REPORT ONLY - reading this changes nothing,
     #: which is what lets the page be opened without deciding anything.
     historical_spaces: Callable[[], list[dict[str, object]]] | None = None
-    #: Declare the recovered Spaces as accounts. Separate from the report on
-    #: purpose: this one writes accounts into a store of real financial
-    #: history, and the first run of the recovery offered the live current
-    #: account as a deleted Space. Returns the refs it created.
-    declare_spaces: Callable[[], list[str]] | None = None
+    #: Declare the recovered Spaces as accounts and bind their categories.
+    #: Separate from the report on purpose: this one writes accounts into a
+    #: store of real financial history, and the first run of the recovery
+    #: offered the live current account as a deleted Space. Returns what it did.
+    declare_spaces: Callable[[], SpacesPress] | None = None
     #: The merged layer summarised per account - the same computed-shape
     #: analysis as an artefact, over what the store believes after matching.
     account_shape: Callable[..., dict[str, object] | None] | None = None
@@ -1254,8 +1255,13 @@ def _spaces_html(spaces: list[dict[str, object]]) -> str:
     The offer is split by BEHAVIOUR rather than shown-and-disabled: a control
     that is present but inert teaches the reader that pressing it does nothing,
     which is exactly the lesson to avoid on the one control here that writes.
+
+    Each Space shows where it stands (`space_binding.SpaceState`), and the one
+    press finishes every unfinished Space: declaring one that has no account and
+    binding one whose category no account claims. A Space whose category is
+    bound to a different account is listed and left alone.
     """
-    undeclared = [space for space in spaces if not space.get("declared")]
+    unfinished = [space for space in spaces if space.get("unfinished")]
     parts: list[str] = [
         # Said whether anything was found or not - a count without it implies a
         # completeness this method cannot have. Two of the four archived Spaces
@@ -1277,8 +1283,8 @@ def _spaces_html(spaces: list[dict[str, object]]) -> str:
         "so nothing will ever corroborate them.</p>"
     )
     parts.append(
-        "<table><tr><th>Space</th><th>Canonical name</th>"
-        "<th>First .. last movement</th><th>Transfers</th><th></th></tr>"
+        "<table><tr><th>Space</th><th>First .. last movement</th>"
+        "<th>Transfers</th><th>State</th></tr>"
     )
     for space in spaces:
         aka = space.get("also_known_as") or []
@@ -1289,11 +1295,7 @@ def _spaces_html(spaces: list[dict[str, object]]) -> str:
             if isinstance(aka, list) and aka
             else ""
         )
-        state = (
-            '<span class="muted">already declared</span>'
-            if space.get("declared")
-            else ""
-        )
+        state = html.escape(str(space.get("state", "")))
         # Narrowed rather than coerced: the count is the evidence a reader
         # judges the span by, so a value that is not a number is worth showing
         # as absent instead of quietly becoming zero.
@@ -1303,8 +1305,8 @@ def _spaces_html(spaces: list[dict[str, object]]) -> str:
         )
         parts.append(
             "<tr>"
-            f"<td>{html.escape(str(space.get('name', '')))}{former}</td>"
-            f"<td><code>{html.escape(str(space.get('ref', '')))}</code></td>"
+            f"<td>{html.escape(str(space.get('name', '')))}{former}"
+            f"<br><code>{html.escape(str(space.get('ref', '')))}</code></td>"
             f"<td>{html.escape(str(space.get('first_seen', '')))} .. "
             f"{html.escape(str(space.get('last_seen', '')))}</td>"
             f"<td>{transfers}</td>"
@@ -1313,22 +1315,23 @@ def _spaces_html(spaces: list[dict[str, object]]) -> str:
         )
     parts.append("</table>")
 
-    if not undeclared:
+    if not unfinished:
         parts.append(
-            "<p>Every recovered Space is already declared. Nothing to do - "
-            "re-running the recovery mints no new accounts, because each ref "
-            "is derived from the Space's own uid.</p>"
+            f"<p>{html.escape(NOTHING_TO_DO)} Re-running the recovery mints no "
+            "new accounts, because each ref is derived from the Space's own "
+            "uid.</p>"
         )
         return "".join(parts)
 
-    noun = "account" if len(undeclared) == 1 else "accounts"
+    noun = "Space" if len(unfinished) == 1 else "Spaces"
     parts.append(
         '<form method="post" action="/declare-spaces">'
-        f"<p>Creating these adds <strong>{len(undeclared)} {noun}</strong> to "
-        "the registry, with their dates marked as inferred. It is safe to "
-        "repeat: refs derive from each Space's uid, so a second press creates "
-        "nothing further.</p>"
-        f'<button type="submit">Declare {len(undeclared)} {noun}</button>'
+        "<p>The press gives each Space without an account one, with its dates "
+        "marked as inferred, and binds each Space's category to its account so "
+        "the pull can ask for its history. A Space whose category is bound to a "
+        "different account is left alone. It is safe to repeat: a second press "
+        "finds nothing left and says so.</p>"
+        f'<button type="submit">Declare and bind {len(unfinished)} {noun}</button>'
         "</form>"
     )
     return "".join(parts)
@@ -4359,12 +4362,13 @@ class ConnectionHandler(
         self._respond(200, render_page("Historical Starling Spaces", "".join(parts)))
 
     def _declare_spaces(self) -> None:
-        """Create accounts for the recovered Spaces.
+        """Declare the recovered Spaces and bind their categories.
 
         The only writing path here, and deliberately a POST reached from the
         page that showed the evidence rather than a link anybody could follow.
-        Safe to repeat: each ref derives from the Space's own uid, so a second
-        press declares nothing further.
+        Safe to repeat: a second press finds nothing unfinished and says so.
+        A refusal that is known before anything is written (a rebuild running,
+        the account map not configured) is shown as one, with nothing changed.
         """
         hook = self.bound_config.declare_spaces
         if hook is None:
@@ -4372,23 +4376,32 @@ class ConnectionHandler(
                 404, error_page("Not available", "<p>No Space recovery wired.</p>")
             )
             return
-        created = hook()
-        noun = "account" if len(created) == 1 else "accounts"
-        body = (
-            f"<p>Declared <strong>{len(created)} {noun}</strong>, dates marked "
-            "as inferred.</p>"
-            if created
-            else "<p>Nothing to declare - every recovered Space already has an "
-            "account.</p>"
-        )
-        rows = "".join(f"<li><code>{html.escape(ref)}</code></li>" for ref in created)
+        back = '<p><a href="/spaces">Back to the Spaces</a></p>' + HOME_LINK
+        try:
+            pressed = hook()
+        except (ValueError, RuntimeError) as exc:
+            self._respond(
+                400,
+                error_page(
+                    "Could not declare and bind",
+                    f"<p>{html.escape(str(exc))}.</p><p>Nothing was declared or "
+                    "bound.</p>",
+                    back,
+                ),
+            )
+            return
+        rows = "".join(f"<li>{html.escape(line)}</li>" for line in pressed.lines())
         listing = f"<ul>{rows}</ul>" if rows else ""
+        notes = ""
+        if pressed.failed:
+            notes += f'<p class="warn">{html.escape(RETRY_NOTE)}</p>'
+        if pressed.bound:
+            notes += f"<p>{html.escape(WHAT_HAPPENS_NEXT)}</p>"
         self._respond(
             200,
             render_page(
-                "Spaces declared",
-                f'{body}{listing}<p><a href="/spaces">Back to the Spaces'
-                f"</a></p>{HOME_LINK}",
+                "Spaces declared and bound",
+                f"<p>{html.escape(pressed.summary())}</p>{listing}{notes}{back}",
             ),
         )
 

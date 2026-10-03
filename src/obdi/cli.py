@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -81,6 +81,7 @@ from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
+from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
@@ -201,6 +202,115 @@ def _apply_bind(
             ) from exc
     _persist_binding(map_file, source, provider_ref, canonical)
     return moved
+
+
+def _bind_refusal(db_path: Path, canonical: str) -> str:
+    """The map file path when a bind may proceed; otherwise raises.
+
+    The one statement of what a bind needs before it touches anything, shared by
+    the pages' bind and by the Spaces press, which checks it for every Space
+    BEFORE declaring any, so a refusal leaves nothing half-done.
+
+    The name rule is the registry's own, not a second copy: this door once
+    carried a regex that had drifted and allowed a name identical to a
+    PROVIDER, so an account could be bound to "starling" and be
+    indistinguishable from the pipe it arrived through.
+    """
+    from .namespaces import validate_canonical_name
+
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        raise ValueError(busy)
+    validate_canonical_name(canonical)
+    map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path:
+        raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
+    return map_path
+
+
+def bind_to_canonical(db_path: Path, provider_ref: str, canonical: str) -> str:
+    """The CLI bind, callable from a page: map entry plus label moves.
+
+    Accepts either a bare provider ref (the extend rows post these, and they
+    are TrueLayer's) or a source-qualified one like "starling:uid" (the holdings
+    rows and the Spaces press post these) - which is what makes Starling
+    accounts and Spaces bindable from a page at all.
+
+    The canonical id becomes a query key across every layer, so it stays
+    lowercase-slug shaped.
+    """
+    source, provider_ref = _split_bind_ref(provider_ref)
+    canonical = canonical.strip().lower()
+    map_path = _bind_refusal(db_path, canonical)
+    moved = _apply_bind(
+        db_path,
+        Path(map_path),
+        _account_map(db_path),
+        source,
+        provider_ref,
+        canonical,
+    )
+    short = f"{provider_ref[:8]}..." if len(provider_ref) > 12 else provider_ref
+    return (
+        f"bound {short} -> {canonical}: {moved} stored "
+        "row(s) moved; artefacts and the attempt ledger follow the new name"
+    )
+
+
+def finish_recovered_spaces(db_path: Path) -> SpacesPress:
+    """Declare each recovered Space that has no account and bind each one's
+    category to its account, leaving any already bound to a different account.
+
+    Every refusal that can be known up front is raised before the first write,
+    so a press either starts or does not: declaring first and discovering that
+    the account map is not configured would leave exactly the declared-but-
+    unbound state this exists to repair. Declaring comes before binding because
+    that half-state is already named and listed on the Spaces page, where a
+    category bound to an account nobody declared would be a third.
+
+    The bind is `bind_to_canonical`, the pages' own door, so the guards and the
+    row moves are not restated here. A bind that is refused after the account
+    was declared is reported, not raised: the others still finish, and pressing
+    again retries only that one.
+    """
+    from .space_attribution import provider_mains_by_space_uid
+    from .spaces import account_for, recover
+
+    with Store(db_path) as store:
+        found = recover(store)
+        account_map = _account_map(store)
+        states = space_states(store, account_map, found)
+        mains = provider_mains_by_space_uid(store, account_map)
+        declared_refs = {str(record.ref) for record in store.declared_accounts()}
+    by_uid = {space.uid: space for space in found}
+    disagreeing = tuple((s.ref, s.bound_to) for s in states if s.disagrees)
+    todo = [s for s in states if s.unfinished]
+    if not todo:
+        return SpacesPress((), (), disagreeing, ())
+    for state in todo:
+        _bind_refusal(db_path, state.ref)
+
+    declared: list[str] = []
+    bound: list[str] = []
+    failed: list[tuple[str, str]] = []
+    for state in todo:
+        if not state.declared:
+            main = mains.get(state.uid)
+            record = account_for(
+                by_uid[state.uid],
+                AccountRef(main) if main and main in declared_refs else None,
+            )
+            with Store(db_path) as store:
+                store.declare_account(record)
+            declared.append(state.ref)
+        if state.binding == UNBOUND:
+            try:
+                bind_to_canonical(db_path, f"starling:{state.uid}", state.ref)
+            except ValueError as exc:
+                failed.append((state.ref, str(exc)))
+                continue
+            bound.append(state.ref)
+    return SpacesPress(tuple(declared), tuple(bound), disagreeing, tuple(failed))
 
 
 def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
@@ -1791,52 +1901,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             "if the provider granted the window - press again to walk further."
         )
 
-    def _guard_canonical(canonical: str) -> None:
-        """One rule for account names, shared with the registry - the bind
-        form was previously the only place that knew it."""
-        from .namespaces import validate_canonical_name
-
-        validate_canonical_name(canonical)
-
     def bind_account(provider_ref: str, canonical: str) -> str:
-        """The CLI bind, callable from the page: map entry plus label moves.
-
-        Accepts either a bare provider ref (the extend rows post these, and
-        they are TrueLayer's) or a source-qualified canonical like
-        "starling:uid" (the holdings rows post these) - which is what makes
-        Starling accounts and Spaces bindable from the page at all.
-
-        Validation here rather than in the page: the canonical id becomes a
-        query key across every layer, so it stays lowercase-slug shaped.
-        """
-        busy = rebuild_in_progress_note(db_path)
-        if busy:
-            raise ValueError(busy)
-        source, provider_ref = _split_bind_ref(provider_ref)
-        canonical = canonical.strip().lower()
-        # The shared rule, not a second copy of it. This door carried its
-        # own regex, which had drifted: it allowed a name identical to a
-        # PROVIDER, so an account could be bound to "starling" and then be
-        # indistinguishable from the pipe it arrived through.
-        _guard_canonical(canonical)
-        map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
-        if not map_path:
-            raise RuntimeError("OBDI_ACCOUNT_MAP is not set")
-        moved = _apply_bind(
-            db_path,
-            Path(map_path),
-            _account_map(db_path),
-            source,
-            provider_ref,
-            canonical,
-        )
-        return (
-            f"bound {_short(provider_ref)} -> {canonical}: {moved} stored "
-            "row(s) moved; artefacts and the attempt ledger follow the new name"
-        )
-
-    def _short(ref: str) -> str:
-        return f"{ref[:8]}..." if len(ref) > 12 else ref
+        return bind_to_canonical(db_path, provider_ref, canonical)
 
     def provider_knowledge() -> list[dict[str, object]]:
         """Everything the pulls have LEARNT, per connection - the empirical
@@ -3258,58 +3324,35 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return list(coverage(store.transactions_by_sighting()))
 
     def historical_spaces_report() -> list[dict[str, object]]:
-        """Recovered Spaces, with whether each already has an account.
+        """Recovered Spaces, with where each stands.
 
-        Read-only. The declaration is a separate hook reached by POST, because
-        this one writes accounts into a store of real financial history and
+        Read-only. The press is a separate hook reached by POST, because
+        it writes accounts into a store of real financial history and
         the recovery's first live run offered the current account as a deleted
         Space - reporting first is what turned that into a line somebody read.
         """
-        from .spaces import account_for, recover
+        from .spaces import recover
 
         with Store(db_path) as store:
             found = recover(store)
-            already = {str(record.ref) for record in store.declared_accounts()}
+            states = space_states(store, _account_map(store), found)
         return [
             {
-                "ref": str(account_for(space).ref),
+                "ref": state.ref,
                 "name": space.name,
                 "first_seen": space.first_seen.isoformat(),
                 "last_seen": space.last_seen.isoformat(),
                 "transfers": space.transfers,
                 "also_known_as": list(space.also_known_as),
-                "declared": str(account_for(space).ref) in already,
+                "declared": state.declared,
+                "state": state.describe(),
+                "unfinished": state.unfinished,
             }
-            for space in found
+            for space, state in zip(found, states, strict=True)
         ]
 
-    def declare_spaces() -> list[str]:
-        """Declare every recovered Space that has no account yet.
-
-        Idempotent by construction rather than by remembering: each ref derives
-        from the Space's own uid, so a second press recomputes the same names
-        and declares nothing new.
-        """
-        from .space_attribution import provider_mains_by_space_uid
-        from .spaces import account_for, recover
-
-        created: list[str] = []
-        with Store(db_path) as store:
-            found = recover(store)
-            already = {str(record.ref) for record in store.declared_accounts()}
-            mains = provider_mains_by_space_uid(store, _account_map(store))
-            for space in found:
-                # The provider's own structure names the main account, and it
-                # is only a parent once it is itself declared.
-                main = mains.get(space.uid)
-                record = account_for(
-                    space, AccountRef(main) if main and main in already else None
-                )
-                if str(record.ref) in already:
-                    continue
-                store.declare_account(record)
-                created.append(str(record.ref))
-        return created
+    def declare_spaces() -> SpacesPress:
+        return finish_recovered_spaces(db_path)
 
     def agreement_report() -> dict[str, object]:
         """The standing cross-source review, computed fresh on request.
@@ -4791,16 +4834,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "recover-spaces":
-        from .spaces import (
-            RECOVERY_BOUND,
-            account_for,
-            former_names_note,
-            recover,
-        )
+        from .space_binding import RETRY_NOTE, WHAT_HAPPENS_NEXT
+        from .spaces import RECOVERY_BOUND, former_names_note, recover
 
         with Store(db_path) as store:
             found = recover(store)
-            declared = store.declared_accounts()
+            states = space_states(store, _account_map(store), found)
         # Said on every run, found or not, because a count without it implies a
         # completeness this method cannot have. The sentence and its reasoning
         # live beside the recovery in spaces.py, so the web page that reports
@@ -4812,48 +4851,34 @@ def main(argv: list[str] | None = None) -> int:
                 "through is still returned by the savings-goals endpoint"
             )
             return 0
-        # Refs already spoken for, so a re-run keeps each Space's own name and
-        # two Spaces that shared a name stay apart. Existing accounts map to
-        # no uid, which reserves their ref without claiming it for anybody.
-        already = {str(record.ref) for record in declared}
-        from .space_attribution import provider_mains_by_space_uid
-
-        with Store(db_path) as store:
-            mains = provider_mains_by_space_uid(store, _account_map(store))
-        for space in found:
-            # The record is built by spaces.account_for, not here: the web page
-            # declares the same thing, and a label assembled twice is a label
-            # that drifts on one path while both keep producing something
-            # plausible. Its reasoning - why the span is in the label, why the
-            # dates say they are inferred - lives with it.
-            main = mains.get(space.uid)
-            record = account_for(space, AccountRef(main) if main and main in already else None)
-            held_parent = next(
-                (r.parent for r in declared if r.ref == record.ref and r.parent), None
-            )
-            if held_parent is not None:
-                # Re-declaring must not clear a parent already set, by a person
-                # or by an earlier run.
-                record = replace(record, parent=held_parent)
-            ref = str(record.ref)
+        for space, standing in zip(found, states, strict=True):
             former = former_names_note(space)
             span = f"{space.first_seen.isoformat()} .. {space.last_seen.isoformat()}"
-            seen_before = " [already declared]" if ref in already else ""
             print(
-                f"{ref}  '{space.name}'{former}  {span}  "
-                f"{space.transfers:,} transfer(s){seen_before}"
+                f"{standing.ref}  '{space.name}'{former}  {span}  "
+                f"{space.transfers:,} transfer(s)  [{standing.describe()}]"
             )
-            if not args.apply:
-                continue
-            with Store(db_path) as store:
-                store.declare_account(record)
-        if args.apply:
-            print(f"\n{len(found)} Space(s) declared, dates marked inferred")
-        else:
+        if not args.apply:
             print(
-                f"\n{len(found)} Space(s) found. Nothing was declared - "
-                "re-run with --apply to create these accounts"
+                f"\n{len(found)} Space(s) found. Nothing was declared or bound - "
+                "re-run with --apply to declare and bind the unfinished ones"
             )
+            return 0
+        # The same press the Spaces page makes, so the two cannot disagree
+        # about what finishing a Space means.
+        try:
+            pressed = finish_recovered_spaces(db_path)
+        except (ValueError, RuntimeError) as exc:
+            print(f"{exc}. Nothing was declared or bound.", file=sys.stderr)
+            return 2
+        print()
+        for line in pressed.lines():
+            print(line)
+        print(pressed.summary())
+        if pressed.failed:
+            print(RETRY_NOTE)
+        if pressed.bound:
+            print(WHAT_HAPPENS_NEXT)
         return 0
 
     if args.command == "rebuild-status":
