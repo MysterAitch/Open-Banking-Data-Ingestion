@@ -26,6 +26,25 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.277] - 2026-10-03
+
+### Fixed
+- **The same-money rule may use a statement row the cross-source page has
+  excused.** On the real card one closing's charge was printed as a row that
+  is also a proven transfer leg, so it was excused and the rule could not see
+  the row it needed. The page now says why a row is excused.
+
+### Added
+- **Each row an explanation names says which account it is in**, whether it is
+  a round-up or transfer leg and with which account it is paired, and for a
+  reversed row whether an opposite entry lies within three days.
+- **The ledger measures whether reversed rows are money**: how many are
+  counted, how many the export lists, how many have an opposite entry, and
+  whether a change is explained by leaving them out. Nothing about how they
+  are counted has changed; the figures are there to decide it.
+- **Round-ups that did not become a paired leg are broken down**, with their
+  dates, and so are Space-side arrivals with no partner in the main account.
+
 ## [0.4.276] - 2026-10-03
 
 ### Added
