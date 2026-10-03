@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.274] - 2026-10-03
+
+### Fixed
+- **A statement's closing charge is folded from the feed row dated within the
+  same period.** On the real card the feed dates the charge on the period's
+  first day and the statement lists it on the last, so each period was over by
+  that row. The rule now targets the period's own difference. Both earlier
+  rules looked at or past the closing, where the row is the next statement's,
+  and folded nothing; the band around the closing is removed.
+
 ## [0.4.273] - 2026-10-03
 
 ### Fixed
