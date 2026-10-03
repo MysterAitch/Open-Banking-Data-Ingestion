@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.281] - 2026-10-04
+
+### Fixed
+- **A routine cycle asks for days that no request has ever covered.** Three
+  cards were fetched when authorised, then by nothing for sixty days, and since
+  0.4.238 only through short recent windows, so early August to late September
+  was never asked for and the owner found the cards stale. Each cycle now finds
+  such spans from the record of what landed and asks for those still within the
+  provider's unattended reach, oldest first, at most two per connection.
+
+### Added
+- **The Connections page says when a hole exists**, as "covered from A to B,
+  with N days not asked for", and whether each span is still within reach. It
+  said only "covered to", the newest edge.
+- **The Overview announces an uncovered span that can still be fetched.**
+
 ## [0.4.280] - 2026-10-04
 
 ### Fixed
