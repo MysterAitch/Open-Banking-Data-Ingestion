@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.273] - 2026-10-03
+
+### Fixed
+- **A card payment's round-up is held as a transfer out of the main account.**
+  Starling reports a round-up inside the payment's own feed item and gives the
+  main account no separate row for the money leaving, so the main account was
+  over by every round-up ever made while each Space was right. The ledger says
+  how many round-ups the feed carries, including when it carries none.
+
 ## [0.4.272] - 2026-10-03
 
 ### Fixed
