@@ -370,17 +370,31 @@ def derive_opening(
     if not ordered:
         return EffectiveOpening(account, (), None, None, unusable_statements)
 
-    def counts_on(anchor: Anchor, t: Transaction) -> date:
-        if anchor.basis == STATEMENT and placed:
-            return placed.get(t.entity_id, t.value_date)
-        return t.value_date
+    #: (dates are placed by the statement, pending rows count) -> the days the
+    #: rows count on, sorted, and the running total of their amounts. Anchors
+    #: that agree on both questions share one sort, so each anchor is a bisection.
+    totals: dict[tuple[bool, bool], tuple[list[date], list[int]]] = {}
 
     def through(anchor: Anchor) -> int:
-        return sum(
-            t.amount_minor
-            for t in held
-            if counts_on(anchor, t) <= anchor.day and _counts_toward(anchor.basis, t)
-        )
+        by_statement = anchor.basis == STATEMENT and bool(placed)
+        shape = (by_statement, anchor.basis == STATED)
+        if shape not in totals:
+            counted = sorted(
+                (
+                    placed.get(t.entity_id, t.value_date)
+                    if by_statement and placed
+                    else t.value_date,
+                    t.amount_minor,
+                )
+                for t in held
+                if _counts_toward(anchor.basis, t)
+            )
+            totals[shape] = (
+                [day for day, _ in counted],
+                [0, *accumulate(minor for _, minor in counted)],
+            )
+        days, running = totals[shape]
+        return running[bisect_right(days, anchor.day)]
 
     if any(t.currency != CURRENCY for t in held if not t.status.is_history):
         # Summing pounds with another currency's units would give a figure

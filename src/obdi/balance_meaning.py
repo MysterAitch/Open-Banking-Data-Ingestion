@@ -150,19 +150,27 @@ class _Held:
 
 def _held(store: Store, main: str, sources: Iterable[str]) -> _Held:
     wanted = set(sources)
+    # A Space fold leaves a copied sighting on the Space row naming the folded
+    # one; the same-money fold (`same_money_fold`) leaves none, and a row it
+    # folded is not a Space payment. The names are an uncorrelated subquery so
+    # they are gathered once: no index serves a lookup by provider id, and a
+    # per-row EXISTS scanned every sighting for every row.
     rows = store.connection.execute(
         "SELECT t.entity_id, t.amount_minor, t.status, t.value_date, "
         "t.is_internal_transfer, s.source, s.observed_date, "
-        # A Space fold leaves a copied sighting on the Space row naming the
-        # folded one; the same-money fold (`same_money_fold`) leaves none, and a
-        # row it folded is not a Space payment.
-        "EXISTS (SELECT 1 FROM transaction_sources c "
-        "WHERE c.source_id = ? || t.entity_id) AS space_folded "
+        "t.entity_id IN (SELECT substr(c.source_id, ?) FROM transaction_sources c "
+        "WHERE substr(c.source_id, 1, ?) = ?) AS space_folded "
         "FROM transactions t LEFT JOIN transaction_sources s "
         "ON s.entity_id = t.entity_id "
         "AND (s.source_id IS NULL OR s.source_id NOT LIKE ?) "
         "WHERE t.account_id = ?",
-        (FOLDED_SIGHTING_PREFIX, FOLDED_SIGHTING_PREFIX + "%", main),
+        (
+            len(FOLDED_SIGHTING_PREFIX) + 1,
+            len(FOLDED_SIGHTING_PREFIX),
+            FOLDED_SIGHTING_PREFIX,
+            FOLDED_SIGHTING_PREFIX + "%",
+            main,
+        ),
     ).fetchall()
     sighted: dict[str, dict[str, str]] = defaultdict(dict)
     facts: dict[str, tuple[int, str, str, bool, bool]] = {}
