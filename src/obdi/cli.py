@@ -68,6 +68,7 @@ from .replay import (
     unbound_accounts,
 )
 from .review_settlement import settle_review_flags
+from .same_money_fold import fold_same_money
 from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .spaces import ArchiveNote
@@ -952,6 +953,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 summary=ImportSummary(artefact_new=False),
             )
             fold_space_copies(store, _account_map(store))
+            fold_same_money(store, _account_map(store))
             settle_review_flags(store)
         after = store.counts().get("transactions", 0)
     return (
@@ -2985,6 +2987,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, incoming, digest=str(row["digest"]), summary=summary
             )
             summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
+            summary.same_money_folded += fold_same_money(
+                store, _account_map(store)
+            ).newly_folded
             settle_review_flags(store)
         return (
             f"{row['origin']} assigned to {destination} and read by "

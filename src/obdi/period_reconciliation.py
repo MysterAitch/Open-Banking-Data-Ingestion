@@ -87,6 +87,12 @@ STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS)
 STATEMENT_SIDE = "statement"
 FEED_SIDE = "feed"
 
+#: How many days after a statement's closing a feed may date a row that belongs
+#: to it. A card feed posts a statement's last charges on the statement date
+#: itself, which by date is the first day of the NEXT period; two days covers a
+#: weekend's posting without reaching the following statement's own rows.
+BOUNDARY_DAYS = 2
+
 
 class Locus(StrEnum):
     """Which explanation of a differing period holds."""
@@ -118,6 +124,8 @@ class Leftover:
     description: str
     #: Why the cross-source page already excuses it, or "" when it does not.
     excuse: str = ""
+    #: The stored row, or "" for a sibling-account match, which names none.
+    entity_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -152,6 +160,25 @@ class Period:
     #: exact opposite, or None.
     cancelled_by_next: date | None = None
     cancels_previous: date | None = None
+    #: Feed rows `same_money_fold` folded as the same money as this statement's
+    #: leftover rows, and what they sum to. They no longer count, so the period's
+    #: held rows already exclude them.
+    folded_feed_rows: int = 0
+    folded_minor: int = 0
+    #: The statement's rows the folded ones are the same money as: its leftovers,
+    #: counting those dated beyond the span the pairing compared. With the feed's
+    #: row folded away the feed's latest row can fall before the statement's own,
+    #: and the pairing's span shrinks past them.
+    folded_statement_rows: int = 0
+
+    @property
+    def leftovers_unequal(self) -> bool:
+        """Both sides hold leftovers and they are not the same money."""
+        return bool(
+            self.statement_only
+            and self.feed_only
+            and self.statement_only_minor != self.feed_only_minor
+        )
 
     @property
     def surplus_minor(self) -> int:
@@ -298,8 +325,25 @@ def _period_lines(period: Period, *, masked: bool) -> list[str]:
                 f"    Statement-only rows sum to {format_amount(period.statement_only_minor)}; "
                 f"feed-only rows sum to {format_amount(period.feed_only_minor)}."
             )
+    if period.folded_feed_rows:
+        lines.append(
+            f"    {_plural(period.folded_feed_rows, 'feed row')} "
+            f"{'was' if period.folded_feed_rows == 1 else 'were'} folded as the same money "
+            f"as {_plural(period.folded_statement_rows, 'statement row')}: a folded row no "
+            "longer counts and is withheld from the push (one already in Actual becomes an "
+            "orphan the removal pass takes out). The statement's rows stay counted."
+        )
+        if not masked:
+            lines.append(
+                f"    The folded rows sum to {format_amount(period.folded_minor)}."
+            )
     for locus in period.loci:
         lines.append("    " + _locus_sentence(period, locus))
+    if period.leftovers_unequal and not period.agrees:
+        lines.append(
+            "    The statement-only and feed-only rows sum to different figures: the "
+            "leftovers are not the same money."
+        )
     if period.cancelled_by_next is not None:
         lines.append(
             f"    The next period, ending {period.cancelled_by_next}, differs by exactly "
@@ -374,7 +418,7 @@ def _leftovers_of(
     for agreement in found:
         spans.append((agreement.overlap_from, agreement.overlap_to))
         unmatched = [
-            (leg.source, leg.row_date, leg.amount_minor, leg.description, "")
+            (leg.source, leg.row_date, leg.amount_minor, leg.description, "", leg.entity_id)
             for leg in agreement.unexplained
         ]
         unmatched += [
@@ -384,6 +428,7 @@ def _leftovers_of(
                 leg.amount_minor,
                 leg.description,
                 "a proven internal transfer",
+                leg.entity_id,
             )
             for leg in agreement.confirmed_transfer_legs
         ]
@@ -394,10 +439,11 @@ def _leftovers_of(
                 match.amount_minor,
                 match.description,
                 f"matched to a row filed under {match.sibling_account}",
+                "",
             )
             for match in agreement.attributed
         ]
-        for source, row_date, amount, description, excuse in unmatched:
+        for source, row_date, amount, description, excuse, entity_id in unmatched:
             rows.append(
                 Leftover(
                     STATEMENT_SIDE if source in STATEMENT_SOURCES else FEED_SIDE,
@@ -406,6 +452,7 @@ def _leftovers_of(
                     amount,
                     description,
                     excuse,
+                    entity_id,
                 )
             )
     if not spans:
@@ -504,6 +551,19 @@ def _mark_cancellations(periods: list[Period]) -> list[Period]:
     ]
 
 
+def held_in(
+    window: _Window, counted: Iterable[Transaction], membership: Membership
+) -> list[Transaction]:
+    """The rows the store counts in one period: the single statement of it, for
+    the report and for the fold's proof that a fold makes a period agree."""
+    if window.kind is PeriodKind.INSIDE:
+        # The statement's own rows, whatever else the store holds in those days.
+        return [r for r in counted if r.entity_id in window.statement.members]
+    return [
+        r for r in counted if window.first_day <= membership.placement(r) <= window.last_day
+    ]
+
+
 def _periods_against(
     feed: str,
     windows: list[_Window],
@@ -511,18 +571,26 @@ def _periods_against(
     sightings: list[Transaction],
     paired: tuple[list[Leftover], date, date] | None,
     membership: Membership,
+    folded: Sequence[Transaction] = (),
 ) -> list[Period]:
     built: list[Period] = []
     for window in windows:
         kind, first_day, last_day = window.kind, window.first_day, window.last_day
         movement = window.movement_minor
         inside_kind = kind is PeriodKind.INSIDE
-        if inside_kind:
-            # The statement's own rows, whatever else the store holds in those days.
-            held = [r for r in counted if r.entity_id in window.statement.members]
-        else:
-            held = [r for r in counted if first_day <= membership.placement(r) <= last_day]
+        held = held_in(window, counted, membership)
         held_minor = sum(r.amount_minor for r in held)
+        folded_here = (
+            [
+                r
+                for r in folded
+                if r.source == feed
+                and first_day <= r.value_date <= last_day + timedelta(days=BOUNDARY_DAYS)
+                and _earliest_window(windows, r.value_date) is window
+            ]
+            if feed and not inside_kind
+            else []
+        )
         statement_only: tuple[Leftover, ...] = ()
         feed_only: tuple[Leftover, ...] = ()
         fully_paired = False
@@ -537,6 +605,18 @@ def _periods_against(
             # after some date may simply have had nothing to report, and only
             # a row outside the pairing's span is one it never compared.
             fully_paired = all(covered_from <= r.value_date <= covered_to for r in held)
+        statement_rows = len(statement_only)
+        if folded_here and paired is not None:
+            _, covered_from, covered_to = paired
+            fed = {s.entity_id for s in sightings if s.source not in STATEMENT_SOURCES}
+            statement_rows += sum(
+                1
+                for s in sightings
+                if s.source in STATEMENT_SOURCES
+                and s.entity_id not in fed
+                and first_day <= s.value_date <= last_day
+                and not covered_from <= s.value_date <= covered_to
+            )
         surplus = held_minor - movement
         single = (
             tuple(
@@ -565,23 +645,63 @@ def _periods_against(
                 statement_only,
                 feed_only,
                 single,
+                folded_feed_rows=len(folded_here),
+                folded_minor=sum(r.amount_minor for r in folded_here),
+                folded_statement_rows=statement_rows if folded_here else 0,
             )
         )
     return built
 
 
-def period_reconciliation(
+def _earliest_window(windows: Sequence[_Window], day: date) -> _Window | None:
+    """The first chain period (earliest closing) a row dated `day` could belong
+    to, counting the days up to `BOUNDARY_DAYS` after each closing."""
+    for window in sorted(
+        (w for w in windows if w.kind is not PeriodKind.INSIDE), key=lambda w: w.last_day
+    ):
+        if window.first_day <= day <= window.last_day + timedelta(days=BOUNDARY_DAYS):
+            return window
+    return None
+
+
+@dataclass(frozen=True)
+class AccountEvidence:
+    """Everything the report and the fold both need to know about one account.
+
+    Gathered once, in `gather_evidence`, so the report's periods and the fold's
+    decisions are made from the same pairing and cannot disagree.
+    """
+
+    account: str
+    membership: Membership
+    #: Statement rows' periods, earliest closing first; empty when none can be made.
+    windows: list[_Window]
+    #: The rows the store counts for a statement's arithmetic.
+    counted: list[Transaction]
+    #: Each source's sighting of each of the account's rows.
+    sightings: list[Transaction]
+    #: Sources other than the statements that hold rows for the account.
+    feeds: tuple[str, ...]
+    #: Per feed ("" when there is none): the leftovers of the pairing and the span
+    #: it covers, or None when the sources share no days.
+    paired: Mapping[str, tuple[list[Leftover], date, date] | None]
+    #: Rows folded as the same money as a statement's, which `counted` omits.
+    folded: list[Transaction]
+    #: Why nothing could be tested, or "".
+    withheld: str = ""
+
+    @property
+    def statements(self) -> int:
+        return len(self.membership.statements)
+
+
+def gather_evidence(
     store: Store,
     *,
     sibling_accounts: Mapping[str, Collection[str]] | None = None,
     account: str | None = None,
-) -> PeriodReport:
-    """Each account with a held statement, period by period.
-
-    `sibling_accounts` is what the cross-source page passes to `agreements`;
-    handing in the same mapping is what keeps this report's leftovers the ones
-    that page shows. `account` limits the report to one account.
-    """
+) -> list[AccountEvidence]:
+    """The evidence for each account with a held statement, in account order."""
     statements, _unusable = statement_balances(store, account)
     by_account: dict[str, list[StatementBalance]] = {}
     for anchor in statements:
@@ -601,56 +721,85 @@ def period_reconciliation(
             (reading.statement_date, reading.closing_balance_minor)
         ] = (reading.opening_balance_minor, first_row)
 
+    if not by_account:
+        return []
     held = store.transactions_by_sighting()
     found = agreements(held, sibling_accounts=sibling_accounts or {}, always_reconcile=True)
+    folded_ids = store.statement_folded_ids()
 
-    accounts: list[AccountPeriods] = []
+    evidence: list[AccountEvidence] = []
     for ref, anchors in sorted(by_account.items()):
         membership = statement_membership(store, ref, anchors)
-        ordered = membership.statements
-        if len(ordered) < 2:
-            accounts.append(
-                AccountPeriods(
-                    ref,
-                    len(ordered),
-                    withheld=(
-                        "Only one statement is held, so no period between statements "
-                        "exists and nothing can be tested."
-                    ),
-                )
+        rows = store.transactions_for_account(ref)
+        counted = [t for t in rows if _counts_toward(STATEMENT, t)]
+        folded = [t for t in rows if t.entity_id in folded_ids]
+        withheld = ""
+        if len(membership.statements) < 2:
+            withheld = (
+                "Only one statement is held, so no period between statements "
+                "exists and nothing can be tested."
             )
-            continue
-        counted = [
-            t
-            for t in store.transactions_for_account(ref)
-            if _counts_toward(STATEMENT, t)
-        ]
-        if any(t.currency != "GBP" for t in counted):
-            accounts.append(
-                AccountPeriods(
-                    ref,
-                    len(ordered),
-                    withheld="The rows are not all in GBP, so no sum of them is meaningful.",
-                )
-            )
-            continue
+        elif any(t.currency != "GBP" for t in counted):
+            withheld = "The rows are not all in GBP, so no sum of them is meaningful."
         sightings = [t for t in held if t.account_id == ref]
         feeds = tuple(sorted({t.source for t in sightings} - STATEMENT_SOURCES))
-        windows = _movement_periods(ordered, openings.get(ref, {}))
-        built: list[Period] = []
+        paired: dict[str, tuple[list[Leftover], date, date] | None] = {}
         for feed in feeds or ("",):
-            pairs = [
-                a
-                for a in found
-                if a.account_id == ref
-                and feed
-                and feed in (a.left, a.right)
-                and ({a.left, a.right} - {feed}) <= STATEMENT_SOURCES
-            ]
+            paired[feed] = _leftovers_of(
+                [
+                    a
+                    for a in found
+                    if a.account_id == ref
+                    and feed
+                    and feed in (a.left, a.right)
+                    and ({a.left, a.right} - {feed}) <= STATEMENT_SOURCES
+                ]
+            )
+        evidence.append(
+            AccountEvidence(
+                ref,
+                membership,
+                [] if withheld else _movement_periods(membership.statements, openings.get(ref, {})),
+                counted,
+                sightings,
+                feeds,
+                paired,
+                folded,
+                withheld,
+            )
+        )
+    return evidence
+
+
+def period_reconciliation(
+    store: Store,
+    *,
+    sibling_accounts: Mapping[str, Collection[str]] | None = None,
+    account: str | None = None,
+) -> PeriodReport:
+    """Each account with a held statement, period by period.
+
+    `sibling_accounts` is what the cross-source page passes to `agreements`;
+    handing in the same mapping is what keeps this report's leftovers the ones
+    that page shows. `account` limits the report to one account.
+    """
+    accounts: list[AccountPeriods] = []
+    for item in gather_evidence(store, sibling_accounts=sibling_accounts, account=account):
+        if item.withheld:
+            accounts.append(AccountPeriods(item.account, item.statements, withheld=item.withheld))
+            continue
+        built: list[Period] = []
+        for feed, paired in item.paired.items():
             built += _mark_cancellations(
                 _periods_against(
-                    feed, windows, counted, sightings, _leftovers_of(pairs), membership
+                    feed,
+                    item.windows,
+                    item.counted,
+                    item.sightings,
+                    paired,
+                    item.membership,
+                    item.folded,
                 )
             )
-        accounts.append(AccountPeriods(ref, len(ordered), tuple(built), feeds))
+        accounts.append(AccountPeriods(item.account, item.statements, tuple(built), item.feeds))
     return PeriodReport(tuple(accounts))

@@ -347,7 +347,9 @@ def fold_space_copies(store: Store, account_map: AccountMap) -> FoldReport:
     plan = plan_folds(
         rows, store.genuine_sightings(), feeds, space_parents(store, account_map)
     )
-    before = {row.entity_id for row in rows if row.status is TransactionStatus.FOLDED}
+    # Only this pass's folds: a row folded as the same money as a statement's
+    # (`same_money_fold`) is that pass's to report and to release.
+    before = store.space_folded_ids()
     store.replace_space_folds(plan.folds)
     after = set(plan.folds)
     return FoldReport(

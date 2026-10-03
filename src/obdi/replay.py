@@ -239,7 +239,9 @@ def build_payload(
 
 #: The reasons a row is kept out of the payload, as the words a reader sees.
 WITHHELD_VOID = "void"
-WITHHELD_FOLDED = "a copy of a payment held under a Space"
+WITHHELD_FOLDED = (
+    "a copy of a payment held under a Space, or the same money a statement itemises"
+)
 WITHHELD_UNBOUND = "no Actual binding"
 
 
@@ -259,8 +261,10 @@ def withheld_reason(transaction: Transaction, *, bound: bool) -> str | None:
     # a different row (already in the payload) or never happened.
     if transaction.status is TransactionStatus.VOID:
         return WITHHELD_VOID
-    # A main-account copy of a payment held under a Space: the Space's row is
-    # the one sent, so the payment reaches the budget once.
+    # A main-account copy of a payment held under a Space (the Space's row is
+    # the one sent), or a feed row that is the same money as a statement's rows
+    # (the statement's are the ones sent): either way the payment reaches the
+    # budget once.
     if transaction.status is TransactionStatus.FOLDED:
         return WITHHELD_FOLDED
     if not bound:

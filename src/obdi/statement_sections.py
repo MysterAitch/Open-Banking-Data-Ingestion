@@ -45,6 +45,7 @@ from .parsers.base import StatementParser
 from .parsers.pdf_statements import PdfStatementParser, SectionReading
 from .parsers.uk_banks import detect
 from .review_settlement import settle_review_flags
+from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
 from .store import Store
 
@@ -345,6 +346,7 @@ def assign_section(
     summary = ImportSummary(artefact_new=False)
     reconcile_batch(store, prepared.incoming, digest=prepared.digest, summary=summary)
     summary.folded += fold_space_copies(store, account_map).newly_folded
+    summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)
     return (
         f"{prepared.origin}, the account labelled {masked(prepared.label)}, assigned to "

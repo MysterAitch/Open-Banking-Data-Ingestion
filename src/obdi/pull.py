@@ -34,6 +34,7 @@ from .jsontypes import rows as json_rows
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .review_settlement import settle_review_flags
+from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
 from .store import Store
 
@@ -572,6 +573,7 @@ def pull_truelayer(
     # The aggregator cannot see Spaces, so this is where its copies of Space
     # payments arrive.
     summary.folded += fold_space_copies(store, account_map).newly_folded
+    summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)
     result.summary = summary
     return result
@@ -928,6 +930,7 @@ def pull_starling(
 
     # The feed's Space rows may be the other half of a copy already held.
     summary.folded += fold_space_copies(store, account_map).newly_folded
+    summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)
     result.summary = summary
     return result

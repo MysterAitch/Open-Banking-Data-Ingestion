@@ -51,6 +51,7 @@ from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
+from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
 from .statement_sections import replay_batches
 from .store import Store
@@ -105,6 +106,9 @@ class RebuildReport:
     space_folded: int = 0
     space_ambiguous: int = 0
     space_unmatched: int = 0
+    #: Feed rows folded as the same money a statement itemises - see
+    #: `same_money_fold`.
+    same_money_folded: int = 0
     #: Review flags the evidence already answered and the pass closed, by the
     #: class of proof, and the open flags that remain - see `review_settlement`.
     review_settled: dict[FlagClass, int] = field(default_factory=dict)
@@ -165,6 +169,14 @@ class RebuildReport:
                 f"report under the main account and the bank's feed files under "
                 f"the Space. {self.space_ambiguous} more could not be paired "
                 f"one to one and stay counted in the main account."
+            )
+        if self.same_money_folded:
+            lines.append(
+                f"  {self.same_money_folded} feed row(s) folded as the same money a "
+                "statement itemises differently (the statement's own rows stay "
+                "counted). A folded row no longer counts and is withheld from the "
+                "push; one already in Actual becomes an orphan that the removal "
+                "pass takes out."
             )
         if self.review_settled:
             lines.append(
@@ -634,6 +646,10 @@ def rebuild_from_raw(
     report.review_still_open = settled.still_open
     with instrumentation.phase("transfer-pairing"):
         report.transfers_paired = pair_transfers_across_store(store)
+    # After pairing, because a confirmed transfer leg is never folded and the
+    # pairing table is how the pass knows one.
+    with instrumentation.phase("same-money-fold"):
+        report.same_money_folded = fold_same_money(store, account_map).folded
     after_counts = {
         str(row[0]): int(row[1])
         for row in store.connection.execute(

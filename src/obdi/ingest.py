@@ -22,6 +22,7 @@ from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
 from .review_settlement import settle_review_flags
+from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
 from .store import Store
 
@@ -41,6 +42,9 @@ class ImportSummary:
     #: Main-account rows newly folded into the Space rows they copy, by the
     #: pass the caller ran after the batch; see `space_attribution`.
     folded: int = 0
+    #: Feed rows newly folded as the same money as a statement's rows, by the
+    #: pass the caller ran after the batch; see `same_money_fold`.
+    same_money_folded: int = 0
 
     def describe(self) -> str:
         offered = ""
@@ -55,10 +59,16 @@ class ImportSummary:
             if self.folded
             else ""
         )
+        same_money = (
+            f", folded {self.same_money_folded} feed row(s) as the same money a "
+            "statement itemises (withheld from the push)"
+            if self.same_money_folded
+            else ""
+        )
         return (
             f"parsed {self.parsed}{offered}, new {self.inserted}, "
             f"matched {self.matched}, superseded {self.superseded}, "
-            f"for review {self.needs_review}{folded}"
+            f"for review {self.needs_review}{folded}{same_money}"
         )
 
 
@@ -253,6 +263,7 @@ def import_file(
     reconcile_batch(store, incoming, digest=digest, summary=summary)
     if account_map is not None:
         summary.folded += fold_space_copies(store, account_map).newly_folded
+    summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)
     return summary
 

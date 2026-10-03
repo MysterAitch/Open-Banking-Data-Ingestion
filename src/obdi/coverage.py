@@ -23,7 +23,7 @@ under arithmetic that was never going to match.
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from itertools import combinations
 
@@ -164,6 +164,10 @@ class UnexplainedRow:
     row_date: date
     amount_minor: int
     description: str
+    #: The stored row this sighting is of, for a caller that has to act on the row
+    #: rather than describe it. Not part of equality: the row's identity is not
+    #: what makes two leftovers the same finding.
+    entity_id: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -560,6 +564,7 @@ def _attribute(
                     row_date=item.value_date,
                     amount_minor=item.amount_minor,
                     description=item.description,
+                    entity_id=item.entity_id,
                 )
             )
     return matched, residue
@@ -659,6 +664,7 @@ def agreements(
                         row_date=t.value_date,
                         amount_minor=t.amount_minor,
                         description=t.description,
+                        entity_id=t.entity_id,
                     )
                     for t in sorted(
                         proven, key=lambda t: (t.value_date, t.amount_minor, t.description)

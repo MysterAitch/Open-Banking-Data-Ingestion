@@ -2921,11 +2921,20 @@ class Store:
         each, marked by `FOLDED_SIGHTING_PREFIX` on its provider id.
         """
         execute = self.connection.execute
-        execute("DELETE FROM transaction_sources WHERE source_id LIKE ?", (_COPY_PATTERN,))
+        # Only the rows THIS pass folded come back: a row folded as the same
+        # money as a statement's rows (`replace_statement_folds`) has no copy
+        # on any Space row, and is that pass's to release, not this one's.
         execute(
-            "UPDATE transactions SET status = ? WHERE status = ?",
-            (TransactionStatus.BOOKED.value, TransactionStatus.FOLDED.value),
+            "UPDATE transactions SET status = ? WHERE status = ? AND entity_id IN "
+            "(SELECT substr(source_id, ?) FROM transaction_sources WHERE source_id LIKE ?)",
+            (
+                TransactionStatus.BOOKED.value,
+                TransactionStatus.FOLDED.value,
+                len(FOLDED_SIGHTING_PREFIX) + 1,
+                _COPY_PATTERN,
+            ),
         )
+        execute("DELETE FROM transaction_sources WHERE source_id LIKE ?", (_COPY_PATTERN,))
         for folded_id, space_id in sorted(folds.items()):
             execute(
                 "UPDATE transactions SET status = ? WHERE entity_id = ?",
@@ -2937,6 +2946,59 @@ class Store:
                 "SELECT ?, source, ?, artefact_digest, observed_date, first_seen_at "
                 "FROM transaction_sources WHERE entity_id = ?",
                 (space_id, FOLDED_SIGHTING_PREFIX + folded_id, folded_id),
+            )
+        self.connection.commit()
+
+    def space_folded_ids(self) -> set[str]:
+        """Rows folded into a Space row: the ones a copied sighting names."""
+        return {
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT t.entity_id FROM transactions t WHERE t.status = ? AND t.entity_id IN "
+                "(SELECT substr(source_id, ?) FROM transaction_sources WHERE source_id LIKE ?)",
+                (TransactionStatus.FOLDED.value, len(FOLDED_SIGHTING_PREFIX) + 1, _COPY_PATTERN),
+            )
+        }
+
+    def statement_folded_ids(self) -> set[str]:
+        """Rows folded as the same money as a statement's rows: every folded row
+        that is not a Space fold. They have no copy anywhere, which is what tells
+        the two passes' folds apart without a marker to keep in step."""
+        folded = {
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT entity_id FROM transactions WHERE status = ?",
+                (TransactionStatus.FOLDED.value,),
+            )
+        }
+        return folded - self.space_folded_ids()
+
+    def release_statement_folds(self) -> None:
+        """Count every row folded as the same money as a statement's again, in
+        the open transaction: the pass that decides the folds reads the rows as
+        they would be without them, and `replace_statement_folds` commits."""
+        for entity_id in self.statement_folded_ids():
+            self.connection.execute(
+                "UPDATE transactions SET status = ? WHERE entity_id = ?",
+                (TransactionStatus.BOOKED.value, entity_id),
+            )
+
+    def replace_statement_folds(self, entity_ids: Collection[str]) -> None:
+        """Make `entity_ids` the rows folded as the same money as a statement's,
+        replacing the previous pass's.
+
+        Release-and-rewrite, as `replace_space_folds` is, because the fold is a
+        derived fact about the evidence held now and one that outlived it would
+        hide real spending. Only a BOOKED row is folded, so a row a Space fold
+        already took is left to that pass. Sightings are never touched: the
+        folded row keeps every one it had.
+        """
+        execute = self.connection.execute
+        self.release_statement_folds()
+        for entity_id in sorted(entity_ids):
+            execute(
+                "UPDATE transactions SET status = ? WHERE entity_id = ? AND status = ?",
+                (TransactionStatus.FOLDED.value, entity_id, TransactionStatus.BOOKED.value),
             )
         self.connection.commit()
 

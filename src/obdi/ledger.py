@@ -216,7 +216,8 @@ class MonthSummary:
     one_source: Structural[int]
     pending: Structural[int]
     void: Structural[int]
-    #: Main-account rows that copy a payment held under a Space.
+    #: Rows that copy a payment counted elsewhere: held under a Space, or the same
+    #: money a statement itemises (`replay.WITHHELD_FOLDED` says both).
     folded: Structural[int]
     transfers_confirmed: Structural[int]
     transfers_claimed: Structural[int]
