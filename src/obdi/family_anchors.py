@@ -148,9 +148,10 @@ class OpeningEvidence:
     #: Nil at the end of the day before `created`; None when `missing` says why not.
     opened: FamilyAnchor | None
     missing: str
-    #: Category uids that are accounted for: the family's own, every main
-    #: account's, and every Space the provider still lists. A Space transfer
-    #: naming any other category has no leg held.
+    #: Category uids that are accounted for apart from the family's Spaces
+    #: (which count only once they hold rows, `walk_family`): every main
+    #: account's own, and every Space each account's newest listing still
+    #: names. A Space transfer naming any other category has no leg held.
     known_categories: frozenset[str]
 
 
@@ -194,16 +195,18 @@ def opening_evidence(store: Store, main: str, families: Families) -> OpeningEvid
 
     own = families.provider_ids.get(main, frozenset())
     known: set[str] = set(own)
-    for space in families.spaces_of(main):
-        known |= families.provider_ids.get(space, frozenset())
     created: set[datetime] = set()
     defaults: set[str] = set()
+    # Only each account's NEWEST listing says what is listed now: an earlier one
+    # still names a Space that has since closed.
+    newest_listing: dict[str, tuple[str, object]] = {}
     for row in store.connection.execute(
-        "SELECT source, payload FROM raw_artefacts WHERE source IN (?, 'starling-accounts')",
+        "SELECT source, account_ref, fetched_at, payload FROM raw_artefacts "
+        "WHERE source IN (?, 'starling-accounts') ORDER BY fetched_at, rowid",
         (LISTING_SOURCE,),
     ):
         if row["source"] == LISTING_SOURCE:
-            known |= _listed_uids(row["payload"]) or frozenset()
+            newest_listing[str(row["account_ref"])] = (str(row["fetched_at"]), row["payload"])
             continue
         try:
             decoded = json.loads(row["payload"])
@@ -221,6 +224,8 @@ def opening_evidence(store: Store, main: str, families: Families) -> OpeningEvid
             stamp = _instant(str(account.get("createdAt") or ""))
             if stamp is not None:
                 created.add(stamp)
+    for _, payload in newest_listing.values():
+        known |= _listed_uids(payload) or frozenset()
     known.discard("")
 
     asked: list[datetime] = []
@@ -266,11 +271,54 @@ def opening_evidence(store: Store, main: str, families: Families) -> OpeningEvid
 
 
 @dataclass(frozen=True)
+class SpaceFetch:
+    """The last time the provider was asked for a closed Space's own feed."""
+
+    #: "refused" or "empty": an answer with rows leaves nothing unheld.
+    outcome: str
+    on: date
+
+
+@dataclass(frozen=True)
 class UnheldLegs:
     """Movements to or from a Space whose own rows are not held."""
 
     legs: int = 0
     first: date | None = None
+    #: The category uids of those Spaces.
+    uids: tuple[str, ...] = ()
+    #: What asking the provider for them last produced, one per Space asked.
+    fetches: tuple[SpaceFetch, ...] = ()
+
+
+def space_fetches(store: Store, uids: Iterable[str]) -> tuple[SpaceFetch, ...]:
+    """The newest recorded ask of each closed Space's feed that did not yield rows.
+
+    Read from the attempt ledger rows `pull.py` writes for a closed Space
+    (their `detail` begins with its mark); a Space whose last ask yielded rows
+    is not here, since its rows are then held.
+    """
+    found: list[SpaceFetch] = []
+    for uid in sorted(set(uids)):
+        row = store.connection.execute(
+            "SELECT attempted_at, outcome, detail FROM fetch_attempts "
+            "WHERE source = 'starling-feed' AND account_ref = ? AND detail LIKE 'closed-space%' "
+            "ORDER BY attempted_at DESC LIMIT 1",
+            (f"starling:{uid}",),
+        ).fetchone()
+        if row is None:
+            continue
+        outcome = (
+            "refused"
+            if row["outcome"] == "refused"
+            else "empty"
+            if str(row["detail"]).startswith("closed-space: answered empty")
+            else ""
+        )
+        when = _instant(str(row["attempted_at"]))
+        if outcome and when is not None:
+            found.append(SpaceFetch(outcome, when.date()))
+    return tuple(found)
 
 
 def unheld_space_legs(rows: Iterable[Transaction], known_categories: frozenset[str]) -> UnheldLegs:
@@ -295,7 +343,11 @@ def unheld_space_legs(rows: Iterable[Transaction], known_categories: frozenset[s
         if str(t.raw.get("counterPartyType", "")).upper() == SPACE_COUNTERPARTY
         and str(t.raw.get("counterPartyUid", "") or "").strip() in gone
     ]
-    return UnheldLegs(len(legs), min((t.value_date for t in legs), default=None))
+    return UnheldLegs(
+        len(legs),
+        min((t.value_date for t in legs), default=None),
+        tuple(sorted({str(t.raw.get("counterPartyUid", "")).strip() for t in legs})),
+    )
 
 
 #: Artefact digest -> (source, balances) for a CSV export, or None when the
@@ -386,9 +438,11 @@ __all__ = [
     "FamilyAnchor",
     "FamilyAnchors",
     "OpeningEvidence",
+    "SpaceFetch",
     "UnheldLegs",
     "families_of",
     "family_anchors",
     "opening_evidence",
+    "space_fetches",
     "unheld_space_legs",
 ]

@@ -52,6 +52,23 @@ STARLING_CONNECTION = "starling-api"
 #: cycle incremental again.
 RANGE_LADDER_DAYS = (365, 180, 90, 30)
 
+#: Prefixes the `detail` of every attempt-ledger row for a CLOSED Space's feed,
+#: so the three answers the provider can give stay distinguishable without a
+#: new outcome value (coverage and the timeline read anything but "landed" as
+#: a failure, and an empty feed is an ordinary landing): a refusal is outcome
+#: "refused", an answer with rows is "landed" with the mark, and an empty
+#: answer is "landed" with the mark and the empty word after it. The unheld-leg
+#: note on the ledger page reads these rows back (`family_anchors.space_fetches`).
+CLOSED_SPACE_MARK = "closed-space"
+CLOSED_SPACE_EMPTY = "closed-space: answered empty"
+
+#: A closed Space's settled answer (a refusal that is not the provider's quota
+#: or range answer, or an empty feed) is not asked for again for this long.
+#: Nothing can arrive in a closed Space's feed, so asking every cycle spends
+#: quota to learn what was already learnt; a month later a changed answer, such
+#: as access granted, is still noticed.
+CLOSED_SPACE_RETRY_DAYS = 30
+
 #: What the provider's refusal says when the ask exceeds its maximum range.
 #: The ladder keys on it and so does the attempts page, which marks these
 #: refusals as the ladder working rather than as a fault.
@@ -579,6 +596,77 @@ def pull_truelayer(
     return result
 
 
+def _closed_space_categories(
+    store: Store,
+    account_map: AccountMap,
+    account_uid: str,
+    live: list[starling.Category],
+    result: PullResult,
+) -> list[starling.Category]:
+    """Spaces this account's own feed names that the provider no longer lists.
+
+    The provider's listing omits a closed Space, so nothing else would ever ask
+    for its feed and the other leg of every transfer into it would stay
+    missing. Asked about only once a Space has been declared as a closed one
+    (`recover-spaces` or the Spaces page), so an account with none reads no
+    feed artefacts here; and only when the Space's category is bound to its own
+    account, because rows landed under an unbound name could never join the
+    family. An unbound one is said so in the notes.
+    """
+    from .spaces import SPACE_KIND, closed_spaces
+
+    live_refs = {str(account_map.resolve("starling", category.uid)) for category in live}
+    declared = [
+        ref
+        for ref in account_map.declared_refs()
+        if (record := account_map.record(ref)) is not None
+        and record.kind == SPACE_KIND
+        and str(ref) not in live_refs
+    ]
+    if not declared:
+        return []
+    found: list[starling.Category] = []
+    for space in closed_spaces(store, account_uid, [category.uid for category in live]):
+        if str(account_map.resolve("starling", space.uid)).startswith("starling:"):
+            result.notes.append(
+                f"closed Space {space.uid[:8]} is named by the feed but unbound - bind its "
+                "category to its declared account and the next pull fetches its history"
+            )
+            continue
+        found.append(starling.Category(uid=space.uid, name=space.name, is_space=True))
+    return found
+
+
+def _closed_space_settled(store: Store, ref: str) -> bool:
+    """Whether a closed Space's last answer was final and recent enough to keep.
+
+    Final: an empty feed, or a refusal that is neither the provider's quota
+    answer (429) nor its range answer (which the ladder owns), nor a server
+    fault. Those can change, but not within a cycle, and asking again each
+    cycle only spends quota.
+    """
+    row = store.connection.execute(
+        "SELECT attempted_at, outcome, http_status, detail FROM fetch_attempts "
+        "WHERE source = 'starling-feed' AND account_ref = ? AND detail LIKE ? "
+        "ORDER BY attempted_at DESC LIMIT 1",
+        (ref, f"{CLOSED_SPACE_MARK}%"),
+    ).fetchone()
+    if row is None:
+        return False
+    status = row["http_status"]
+    final = (
+        row["outcome"] == "landed" and str(row["detail"]).startswith(CLOSED_SPACE_EMPTY)
+    ) or (
+        row["outcome"] == "refused"
+        and isinstance(status, int)
+        and 400 <= status < 500
+        and status != 429
+        and RANGE_REFUSAL_MARK not in str(row["detail"])
+    )
+    cutoff = datetime.now(UTC) - timedelta(days=CLOSED_SPACE_RETRY_DAYS)
+    return final and str(row["attempted_at"]) > cutoff.isoformat()
+
+
 def pull_starling(
     store: Store,
     token: str,
@@ -672,7 +760,12 @@ def pull_starling(
             except starling.StarlingError as exc:
                 result.notes.append(f"identifiers for {account_uid}: {exc}")
 
-        for category in categories:
+        closed = _closed_space_categories(store, account_map, account_uid, categories, result)
+        closed_uids = {category.uid for category in closed}
+        for category in [*categories, *closed]:
+            closed_here = category.uid in closed_uids
+            if closed_here and _closed_space_settled(store, f"starling:{category.uid}"):
+                continue
             if category.is_space:
                 # A Space is bound by its own id, so it can be given a
                 # recognisable canonical name and a destination of its own.
@@ -696,6 +789,7 @@ def pull_starling(
                 _account_uid: str = account_uid,
                 _category_uid: str = category.uid,
                 _ref: str = qualified_ref,
+                _closed: bool = closed_here,
             ) -> tuple[list[JsonObject], str] | None:
                 """One ask, landed with its ledger row; None on refusal.
 
@@ -730,7 +824,8 @@ def pull_starling(
                         request_meta=request_meta,
                         outcome="refused",
                         http_status=getattr(exc, "status", None),
-                        detail=_refusal_detail(exc),
+                        detail=(f"{CLOSED_SPACE_MARK}: " if _closed else "")
+                        + _refusal_detail(exc),
                     )
                     result.notes.append(
                         f"feed for category {_category_uid} refused: {exc}"
@@ -757,6 +852,11 @@ def pull_starling(
                     request_meta=request_meta,
                     outcome="landed",
                     http_status=200,
+                    detail=(
+                        (CLOSED_SPACE_MARK if got_items else CLOSED_SPACE_EMPTY)
+                        if _closed
+                        else ""
+                    ),
                     artefact_digest=got.digest,
                 )
                 store.land_artefact(got)

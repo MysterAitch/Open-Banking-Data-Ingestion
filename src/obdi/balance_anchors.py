@@ -100,6 +100,7 @@ from .family_anchors import (
     OpeningEvidence,
     UnheldLegs,
     family_anchors,
+    space_fetches,
     unheld_space_legs,
 )
 from .models import SourceTier, Transaction, TransactionStatus
@@ -632,6 +633,7 @@ def walk_family(
     main: str,
     anchors: FamilyAnchors,
     members: Mapping[str, Sequence[Transaction]],
+    held_categories: frozenset[str] = frozenset(),
 ) -> FamilyWalk:
     """Each family balance against the counted rows of the main account and
     every Space in `members` (keyed by account, main included). Pure.
@@ -672,7 +674,7 @@ def walk_family(
         tuple(readings),
         anchors.refused_figures,
         evidence=anchors.evidence,
-        unheld=unheld_space_legs(every, anchors.evidence.known_categories)
+        unheld=unheld_space_legs(every, anchors.evidence.known_categories | held_categories)
         if anchors.evidence
         else UnheldLegs(),
         before_opening=(
@@ -704,6 +706,10 @@ def effective_opening(
     gathered = _gather(store, ref, families)
     held = store.transactions_for_account(ref) if rows is None else rows
     anchors = list(gathered.own)
+    balance_only = is_balance_only(store.declared_kind(ref))
+    unitemised = (
+        derive_unitemised(ref, gathered.own, held) if balance_only else ()
+    )
     walk: FamilyWalk | None = None
     if (
         gathered.family is not None
@@ -717,11 +723,26 @@ def effective_opening(
         anchors += family_main_anchors(
             [*([opened] if opened else []), *gathered.family.anchors], members
         )
-        walk = walk_family(ref, gathered.family, {ref: held, **members})
-    balance_only = is_balance_only(store.declared_kind(ref))
-    unitemised = (
-        derive_unitemised(ref, gathered.own, held) if balance_only else ()
-    )
+        # A Space counts as held only once it has rows: a bound Space whose
+        # feed answered empty or was refused still leaves its transfers one-sided.
+        held_ids = frozenset(
+            uid
+            for space, space_rows in members.items()
+            if space_rows
+            for uid in families.provider_ids.get(space, frozenset())
+        )
+        # The family's sum counts what the account's own opening counts: typed
+        # rows are ordinary rows, and the rows derived for a balance-only account
+        # are added once, here and in its own reading, never in the Spaces'.
+        walk = walk_family(
+            ref,
+            gathered.family,
+            {ref: [*held, *unitemised], **members},
+            held_categories=held_ids,
+        )
+        if walk.unheld.legs:
+            fetches = space_fetches(store, walk.unheld.uids)
+            walk = replace(walk, unheld=replace(walk.unheld, fetches=fetches))
     opening = derive_opening(
         ref,
         anchors,

@@ -326,6 +326,13 @@ class FamilyView:
     #: Transfer legs to a Space whose rows are not held, and the first one's date.
     unheld_legs: Structural[int]
     unheld_first: Structural[str]
+    #: Of the Spaces those legs name, how many the provider refused when asked
+    #: for their history and how many it answered with nothing, each with the
+    #: newest date ("" for none).
+    unheld_refused: Structural[int]
+    unheld_refused_on: Structural[str]
+    unheld_empty: Structural[int]
+    unheld_empty_on: Structural[str]
 
 
 @dataclass(frozen=True)
@@ -431,6 +438,14 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         before_opening=walk.before_opening,
         unheld_legs=walk.unheld.legs,
         unheld_first=walk.unheld.first.isoformat() if walk.unheld.first else "",
+        unheld_refused=sum(1 for f in walk.unheld.fetches if f.outcome == "refused"),
+        unheld_refused_on=max(
+            (f.on.isoformat() for f in walk.unheld.fetches if f.outcome == "refused"), default=""
+        ),
+        unheld_empty=sum(1 for f in walk.unheld.fetches if f.outcome == "empty"),
+        unheld_empty_on=max(
+            (f.on.isoformat() for f in walk.unheld.fetches if f.outcome == "empty"), default=""
+        ),
         lines=tuple(
             FamilyLine(
                 day=reading.day.isoformat(),

@@ -168,6 +168,51 @@ def recover(store: object) -> list[HistoricalSpace]:
     )
 
 
+def closed_spaces(
+    store: Store, account_uid: str, live_uids: Iterable[str]
+) -> list[HistoricalSpace]:
+    """Spaces the account's OWN landed feed moved money through that the provider
+    no longer lists, judged against `live_uids` (what it lists now).
+
+    `recover` judges against every listing ever held, which is right for
+    declaring accounts but not for asking the provider for a history: a Space
+    listed once and archived since is just as closed. Only feed artefacts whose
+    request named this account are read, so one account's Space is never
+    fetched under another.
+    """
+    connection = store.connection
+    main_categories: set[str] = set()
+    for row in connection.execute(
+        "SELECT payload FROM raw_artefacts WHERE source = 'starling-accounts'"
+    ):
+        try:
+            decoded = json.loads(row["payload"])
+        except (ValueError, TypeError):
+            continue
+        accounts = decoded.get("accounts") if isinstance(decoded, dict) else None
+        for account in accounts if isinstance(accounts, list) else []:
+            if isinstance(account, dict) and account.get("defaultCategory"):
+                main_categories.add(str(account["defaultCategory"]))
+    items: list[Mapping[str, object]] = []
+    for row in connection.execute(
+        "SELECT a.payload FROM raw_artefacts a WHERE a.source = 'starling-feed' "
+        "AND EXISTS (SELECT 1 FROM artefact_origins o WHERE o.digest = a.digest "
+        "AND o.account_ref = a.account_ref AND o.source = a.source AND o.origin LIKE ?)",
+        (f"%/feed/account/{account_uid}/category/%",),
+    ):
+        try:
+            decoded = json.loads(row["payload"])
+        except (ValueError, TypeError):
+            continue
+        feed = decoded.get("feedItems") if isinstance(decoded, dict) else None
+        items.extend(item for item in (feed or []) if isinstance(item, dict))
+    return historical_spaces(
+        feed_items=items,
+        current_space_uids=set(live_uids),
+        main_account_categories=main_categories,
+    )
+
+
 def canonical_ref(name: str, *, uid: str) -> str:
     """The canonical name this Space is declared under, derived from its uid.
 

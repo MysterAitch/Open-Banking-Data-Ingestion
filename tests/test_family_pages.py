@@ -504,8 +504,9 @@ class TestSpaceTransfersWithNoHeldOtherLeg:
         assert "2 transfer leg(s) go to or from a Space whose own rows are not held" in page
         assert "the first on" in page
         assert "2026-09-08" in page
-        assert "The whole account cannot balance until that Space is recovered" in page
+        assert "The whole account cannot balance until that Space's rows are held" in page
         assert "recover-spaces" in page
+        assert "the next pull fetches its history" in page
         assert 'href="/spaces"' in page
 
     def test_Ledger_WhenLegsGoToAnUnheldSpace_TheWalkDiffersFromTheFirstAnchorAfterThem(

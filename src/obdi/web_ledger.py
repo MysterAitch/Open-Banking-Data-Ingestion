@@ -448,10 +448,29 @@ def _family_html(family: Any) -> str:
             f'<p class="warn"><strong>{_esc(str(family.unheld_legs))} transfer leg(s) go '
             "to or from a Space whose own rows are not held, the first on "
             f'<span class="mono nowrap">{_esc(family.unheld_first)}</span>.</strong> The '
-            "whole account cannot balance until that Space is recovered: run the "
-            '<span class="mono">recover-spaces</span> command or open the '
-            '<a class="tap" href="/spaces">Spaces page</a>.</p>'
+            "whole account cannot balance until that Space's rows are held."
         )
+        if family.unheld_refused:
+            body += (
+                f" The provider refused the request for the history of "
+                f"{_esc(str(family.unheld_refused))} of them on "
+                f'<span class="mono nowrap">{_esc(family.unheld_refused_on)}</span>, so they '
+                "cannot be fetched and recovering them will not help."
+            )
+        if family.unheld_empty:
+            body += (
+                f" The provider answered the request for the history of "
+                f"{_esc(str(family.unheld_empty))} of them on "
+                f'<span class="mono nowrap">{_esc(family.unheld_empty_on)}</span> with '
+                "nothing."
+            )
+        if family.unheld_legs and not (family.unheld_refused or family.unheld_empty):
+            body += (
+                " Declare it with the <span class=\"mono\">recover-spaces</span> command or "
+                'the <a class="tap" href="/spaces">Spaces page</a> and bind its category in '
+                "the account map, and the next pull fetches its history."
+            )
+        body += "</p>"
     if family.refused_figures:
         body += (
             f'<p class="warn">{_esc(str(family.refused_figures))} printed end-of-day '

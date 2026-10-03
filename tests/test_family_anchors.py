@@ -45,7 +45,13 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import AccountBinding, AccountMap
+from obdi.accounts import (
+    BALANCE_ONLY_KIND,
+    AccountBinding,
+    AccountMap,
+    AccountRecord,
+    AccountRef,
+)
 from obdi.actual_push import opening_balances
 from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
 from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
@@ -63,6 +69,7 @@ from obdi.providers import starling, truelayer
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.replay import ActualAccountBinding
 from obdi.store import Store
+from obdi.typed_transactions import record_typed_transaction
 from test_space_attribution import (
     BILLS,
     FEED,
@@ -617,6 +624,55 @@ class TestTheAccountOpenedAtNil:
         assert opening.single_anchor is False
         assert opening.family is not None
         assert opening.family.anchors == 0
+
+
+class TestTypedAndUnitemisedRowsInTheFamilySum:
+    """A typed row is an ordinary row and is counted wherever it is typed. Rows
+    are derived from stated balances (`derive_unitemised`) for a balance-only
+    account alone; a Starling main account is not one, so it has none. Were one
+    declared so, its derived rows are counted once, in the family's sum and in
+    its own reading."""
+
+    def walk(self, home: Household):
+        walked = effective_opening(home.store, MAIN, families=families(home)).family
+        assert walked is not None
+        return walked
+
+    def test_TypedRowInASpace_IsCountedInTheFamilySum(self, opened):
+        record_typed_transaction(opened.store, BILLS, "2026-09-03", "out", "10.00", "Typed")
+
+        walked = self.walk(opened)
+
+        assert walked.first_differing is not None
+        assert walked.first_differing.day == date(2026, 9, 11)
+        assert walked.first_differing.difference_minor == 1000
+
+    def test_StarlingMainAccount_HasNoUnitemisedRows(self, opened):
+        record_stated_anchor(opened.store, MAIN, "2026-09-10", "3375.00")
+        record_stated_anchor(opened.store, MAIN, "2026-09-20", "3100.00")
+
+        opening = effective_opening(opened.store, MAIN, families=families(opened))
+
+        assert opening.balance_only is False
+        assert opening.unitemised == ()
+
+    def test_MainDeclaredBalanceOnly_CountsItsUnitemisedRowOnceInTheFamilySum(self, opened):
+        # Main held 3375.00 on the 10th (by hand, the household's table); stating
+        # 3100.00 on the 20th leaves 185.00 unexplained after the grocer and the
+        # transfer, derived as one row dated the 20th.
+        opened.store.declare_account(
+            AccountRecord(ref=AccountRef(MAIN), kind=BALANCE_ONLY_KIND)
+        )
+        record_stated_anchor(opened.store, MAIN, "2026-09-10", "3375.00")
+        record_stated_anchor(opened.store, MAIN, "2026-09-20", "3100.00")
+
+        opening = effective_opening(opened.store, MAIN, families=families(opened))
+
+        assert [t.amount_minor for t in opening.unitemised] == [-18500]
+        assert opening.family is not None
+        assert opening.family.first_differing is not None
+        assert opening.family.first_differing.day == date(2026, 9, 20)
+        assert opening.family.first_differing.difference_minor == 18500
 
 
 class TestSpaceTransfersWhoseOtherLegIsNotHeld:
