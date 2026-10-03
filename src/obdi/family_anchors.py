@@ -346,17 +346,9 @@ def _round_ups_in(payload: bytes) -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(carried), frozenset(unreadable)
 
 
-def feed_round_ups(store: Store, account: str) -> tuple[int, int]:
-    """(feed items carrying a round-up, those whose round-up cannot be read),
-    among the feed artefacts that sighted the account's rows.
-
-    Counted from the landed feeds and never from a stored row's raw:
-    a row keeps the raw of whichever sighting created it, so a payment an
-    export or an aggregator reported first shows no round-up of its own, and a
-    count taken from rows changed with the order the sources arrived in.
-    Each item is counted once however many fetches returned it.
-    """
-    digests = [
+def feed_digests(store: Store, account: str) -> list[str]:
+    """The landed feed artefacts that sighted a row of `account`, each once."""
+    return [
         str(row["artefact_digest"])
         for row in store.connection.execute(
             "SELECT DISTINCT s.artefact_digest FROM transaction_sources s "
@@ -366,17 +358,36 @@ def feed_round_ups(store: Store, account: str) -> tuple[int, int]:
         )
         if row["artefact_digest"]
     ]
+
+
+def feed_payload(store: Store, digest: str) -> bytes:
+    """The landed bytes of an artefact, empty when none are held."""
+    row = store.connection.execute(
+        "SELECT payload FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+    ).fetchone()
+    payload = row["payload"] if row is not None else b""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    return bytes(payload or b"")
+
+
+def feed_round_ups(
+    store: Store, account: str, digests: Sequence[str] | None = None
+) -> tuple[int, int]:
+    """(feed items carrying a round-up, those whose round-up cannot be read),
+    among the feed artefacts that sighted the account's rows.
+
+    Counted from the landed feeds and never from a stored row's raw:
+    a row keeps the raw of whichever sighting created it, so a payment an
+    export or an aggregator reported first shows no round-up of its own, and a
+    count taken from rows changed with the order the sources arrived in.
+    Each item is counted once however many fetches returned it.
+    """
     carried: set[str] = set()
     unreadable: set[str] = set()
-    for digest in digests:
+    for digest in feed_digests(store, account) if digests is None else digests:
         if digest not in _FEED_ROUND_UPS:
-            row = store.connection.execute(
-                "SELECT payload FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
-            ).fetchone()
-            payload = row["payload"] if row is not None else b""
-            if isinstance(payload, str):
-                payload = payload.encode("utf-8")
-            _FEED_ROUND_UPS[digest] = _round_ups_in(bytes(payload or b""))
+            _FEED_ROUND_UPS[digest] = _round_ups_in(feed_payload(store, digest))
         found, unread = _FEED_ROUND_UPS[digest]
         carried |= found
         unreadable |= unread
@@ -666,6 +677,8 @@ __all__ = [
     "export_sequence",
     "families_of",
     "family_anchors",
+    "feed_digests",
+    "feed_payload",
     "feed_round_ups",
     "held_exports",
     "opening_evidence",

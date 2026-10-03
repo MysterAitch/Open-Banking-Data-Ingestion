@@ -61,6 +61,7 @@ from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import MANUAL_SOURCE, UNITEMISED_SOURCE
 from .replay import ReplayError, to_actual_transaction, withheld_reason
+from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
 from .store import Store
 from .typed_transactions import TypedEntry, typed_entries
@@ -98,8 +99,10 @@ ANCHOR_QUERIES = 8
 #: source states a balance, and the last lists the feed artefacts that sighted
 #: the account's rows, whose round-ups are counted
 #: (`family_anchors.feed_round_ups`). Each such artefact not yet read adds one
-#: more, once per process. None depends on what the evidence turns out to say.
-FAMILY_QUERIES = 7
+#: more, once per process. The last is the confirmed transfer pairs, which say
+#: whether each round-up leg and each Space leg has a partner
+#: (`round_up_accounts`). None depends on what the evidence turns out to say.
+FAMILY_QUERIES = 8
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -355,6 +358,8 @@ class FamilyView:
     round_up_legs: Structural[int]
     round_up_legs_paired: Structural[int]
     round_ups_unreadable: Structural[int]
+    #: The round-ups that did not become a paired leg (`round_up_accounts`).
+    round_up_gaps: Structural[RoundUpGaps]
     #: Why each of the first changes happened, by exact arithmetic, and what the
     #: held exports are like (`fault_explanation`); every field of it is structural.
     explanation: Structural[WalkExplanation | None]
@@ -485,6 +490,7 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         round_up_legs=walk.round_ups.legs,
         round_up_legs_paired=walk.round_ups.paired,
         round_ups_unreadable=walk.round_ups.unreadable,
+        round_up_gaps=walk.round_up_gaps,
         explanation=walk.explanation,
         structure=walk_report(walk) if walk.readings else None,
         lines=tuple(

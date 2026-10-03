@@ -445,14 +445,41 @@ def _row_note(note: Any) -> str:
     """One row, named by who dated it when, which way it moved, and its status."""
     dated = ", ".join(f"{_esc(source)} {_mono(day)}" for source, day in note.dates)
     seen = ", ".join(_esc(source) for source in note.sources) or "no source"
+    kind = "a round-up leg" if note.round_up_leg else "a transfer leg" if note.transfer else ""
+    pairing = (
+        f", confirmed paired with {_esc(note.partner_account)}"
+        if note.pairing == "paired"
+        else " with no pair"
+        if note.pairing == "unpaired"
+        else ""
+    )
     extras = "".join(
         (
-            ", a transfer leg" if note.transfer else "",
+            f", {kind}{pairing}" if kind else "",
             f"; {_esc(note.why)}" if note.why and note.why != note.status else "",
             "; the export's own figure for it differs" if note.figure_differs else "",
+            f"; in {_esc(note.account)}" if note.account else "",
+            f"; {_CARRIES[note.carries]}" if note.carries else "",
+            (
+                "; a counter-item lies within three days"
+                if note.counter_item
+                else "; no counter-item within three days"
+            )
+            if note.counter_item is not None
+            else "",
         )
     )
     return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
+
+
+#: What `round_up_accounts.carrier_state` says, in the words of a row's note.
+_CARRIES = {
+    "unreadable": "carries a round-up that cannot be read",
+    "nothing": "carries a round-up of nothing",
+    "no leg": "carries a round-up with no leg held",
+    "leg paired": "carries a round-up whose leg is held and paired",
+    "leg unpaired": "carries a round-up whose leg is held and has no pair",
+}
 
 
 def _row_list(rows: Any) -> str:
@@ -529,6 +556,22 @@ def _hold_html(change: Any, hold: str) -> str:
             "a single counted row"
         )
         return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
+    if hold == "reversed-rows":
+        return (
+            f"<p>The change equals {'minus ' if change.reversed_negated else ''}the sum of the "
+            f"{_plural(change.reversed_rows.count, 'reversed row')} the store counts in the "
+            "window:</p>" + _row_list(change.reversed_rows)
+        )
+    if hold == "reversed-left-out":
+        left = (
+            "nothing is left to explain"
+            if change.reversed_left == "nil"
+            else "the unlisted rows still counted sum to what is left, exactly"
+        )
+        return (
+            f"<p>Leave the {_plural(change.reversed_rows.count, 'reversed row')} out of the "
+            f"count and {left}.</p>"
+        )
     if hold == "straddling":
         return (
             "<p>The change equals the sum of the "
@@ -559,6 +602,26 @@ def _hold_html(change: Any, hold: str) -> str:
     )
 
 
+def _reversed_html(found: Any) -> str:
+    """How many counted rows are reversed, and what the export and the rows say of them.
+
+    Said even when there are none: three counts, over the whole account, are
+    what says whether a reversed row is money.
+    """
+    sentence = (
+        f"{found.counted} counted row is reversed."
+        if found.counted == 1
+        else f"{found.counted} counted rows are reversed."
+    )
+    if found.counted:
+        sentence += (
+            f" The export lists {found.listed} of them, and {found.counter_item} "
+            f"{'has' if found.counter_item == 1 else 'have'} a counter-item, a row of the "
+            "opposite direction and equal size within three days."
+        )
+    return f'<p class="muted">{_esc(sentence)}</p>'
+
+
 def _explanations_html(explanation: Any) -> str:
     """Why each of the first changes happened, and what the held exports are like."""
     if explanation is None:
@@ -574,6 +637,7 @@ def _explanations_html(explanation: Any) -> str:
             f"no balance, and {facts.unsighted:,} "
             f"{'has' if facts.unsighted == 1 else 'have'} no sighting in the store.</p>"
         )
+    body += _reversed_html(explanation.reversed)
     for change in explanation.changes:
         start = _mono(change.after) if change.after else "the start"
         body += (
@@ -604,8 +668,80 @@ def _round_ups_html(family: Any) -> str:
         f'<p class="muted">{_esc(str(family.round_ups_carried))} feed row(s) carry a '
         f"round-up. {_esc(str(family.round_up_legs))} round-up leg(s) to a Space are held, "
         f"and {_esc(str(family.round_up_legs_paired))} of them are paired with a row in that "
-        f"Space. {unreadable}</p>"
+        f"Space. {unreadable}</p>" + _round_up_gaps_html(family.round_up_gaps)
     )
+
+
+def _counted(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def _days_html(days: Any, total: int) -> str:
+    if not days:
+        return ""
+    named = ", ".join(_mono(day) for day in days)
+    more = f", and {total - len(days)} more" if total > len(days) else ""
+    return f'<p class="muted">Dated {named}{more}.</p>'
+
+
+def _round_up_gaps_html(gaps: Any) -> str:
+    """What became of the round-ups that are not a paired leg, in counts and days.
+
+    Each sentence is said even when its count is nil, since a nil is what shows
+    a reading to be complete.
+    """
+    if gaps.no_leg:
+        parts = [
+            _counted(
+                gaps.no_leg_of_nothing, "is a round-up of nothing", "are round-ups of nothing"
+            ),
+            _counted(gaps.no_leg_incoming, "is on an incoming item", "are on incoming items"),
+            _counted(
+                gaps.no_leg_reversed_or_declined,
+                "is on a reversed or declined item",
+                "are on reversed or declined items",
+            ),
+            _counted(gaps.no_leg_unreadable, "could not be read", "could not be read"),
+            _counted(gaps.no_leg_other, "is other", "are other"),
+        ]
+        body = (
+            f'<p class="muted">Of the '
+            f"{_counted(gaps.no_leg, 'feed row that carries', 'feed rows that carry')} a "
+            f"round-up and {'holds' if gaps.no_leg == 1 else 'hold'} no leg, "
+            f"{', '.join(parts[:-1])}, and {parts[-1]}.</p>"
+        )
+    else:
+        body = '<p class="muted">Every feed row that carries a round-up holds a leg.</p>'
+    if gaps.unpaired_legs:
+        body += (
+            f'<p class="muted">Of the '
+            f"{_counted(gaps.unpaired_legs, 'round-up leg that has', 'round-up legs that have')} "
+            "no pair in a Space, "
+            f"{_counted(gaps.unpaired_on_reversed, 'is', 'are')} on a reversed payment, "
+            f"{_counted(gaps.unpaired_to_unheld_space, 'goes', 'go')} to a Space whose rows "
+            f"are not held, and {_counted(gaps.unpaired_other, 'is', 'are')} other.</p>"
+            + _days_html(gaps.unpaired_days, gaps.unpaired_legs)
+        )
+    else:
+        body += '<p class="muted">No round-up leg is without a pair in a Space.</p>'
+    if gaps.space_in_unpaired:
+        subject = _counted(
+            gaps.space_in_unpaired,
+            "incoming transfer leg in a Space has",
+            "incoming transfer legs in a Space have",
+        )
+        body += (
+            f'<p class="muted">{subject} '
+            "no partner in the main account: round-ups the main feed did not report, or "
+            "transfers whose main row is missing.</p>"
+            + _days_html(gaps.space_in_unpaired_days, gaps.space_in_unpaired)
+        )
+    else:
+        body += (
+            '<p class="muted">No incoming transfer leg in a Space lacks a partner in the '
+            "main account.</p>"
+        )
+    return body
 
 
 def _family_html(family: Any, ref: str = "") -> str:

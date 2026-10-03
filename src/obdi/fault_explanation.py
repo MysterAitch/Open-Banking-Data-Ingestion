@@ -29,7 +29,14 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
   combined              none of those alone, but the three taken together
                         equal the change exactly
   one row              a single counted row, or the negative of one
-  straddling            the rows whose date from the source and stored date fall
+  reversed rows        the sum, or minus the sum, of the counted rows whose
+                        status is reversed: whether such a row is money at all
+                        is not settled, and this is the test that says whether
+                        it alone accounts for the change
+  reversed left out    leave those rows out of the count and either nothing is
+                        left to explain, or the unlisted rows still counted sum
+                        to what is left
+  straddling           the rows whose date from the source and stored date fall
                         on different sides of this balance, which would mean the
                         source's dating is not being applied to them
   an unheld Space       a transfer leg to a Space whose rows are not held
@@ -49,17 +56,24 @@ and sightings that match no row are counted but not listed.
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from itertools import accumulate
 from typing import TYPE_CHECKING
 
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
 from .masking import Structural
 from .models import Transaction, TransactionStatus
+from .round_up_accounts import (
+    Carrier,
+    carrier_state,
+    feed_carriers,
+    feed_uids_by_entity,
+    legs_by_payment,
+)
 from .sighting_placement import SightingPlacement
 from .store import Store
 
@@ -82,7 +96,12 @@ STRADDLING = "straddling"
 UNHELD_SPACE = "unheld-space"
 ROW_COUNTS = "row-counts"
 EXPORT_OPENING = "export-opening"
+REVERSED_ROWS = "reversed-rows"
+REVERSED_LEFT_OUT = "reversed-left-out"
 NONE = "none"
+
+#: How near in days a row must lie to be another's counter-item.
+COUNTER_ITEM_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -104,6 +123,18 @@ class RowNote:
     why: Structural[str] = ""
     transfer: Structural[bool] = False
     figure_differs: Structural[bool] = False
+    #: The account the row is held in, as "the main account" or "the Space <name>".
+    account: Structural[str] = ""
+    #: The row is a round-up leg, made beside a payment that carried a round-up.
+    round_up_leg: Structural[bool] = False
+    #: For a transfer leg: "paired" or "unpaired", and the account of its partner.
+    pairing: Structural[str] = ""
+    partner_account: Structural[str] = ""
+    #: What became of the round-up the row carries (`round_up_accounts.carrier_state`), or "".
+    carries: Structural[str] = ""
+    #: For a reversed row: whether a row of the opposite direction and equal size
+    #: lies within `COUNTER_ITEM_DAYS`; None for any other row.
+    counter_item: Structural[bool | None] = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +165,12 @@ class ChangeExplanation:
     one_row: Structural[RowNote | None] = None
     one_row_negated: Structural[bool] = False
     straddling: Structural[RowSet] = field(default_factory=RowSet)
+    #: The counted rows in the window whose status is reversed, whether the change
+    #: equals minus their sum (rather than their sum), and what leaving them out
+    #: of the count leaves: "nil", "sum" (the unlisted rows still counted), or "".
+    reversed_rows: Structural[RowSet] = field(default_factory=RowSet)
+    reversed_negated: Structural[bool] = False
+    reversed_left: Structural[str] = ""
     #: Rows the export lists in the window, and sightings of it the store holds there.
     export_rows: Structural[int | None] = None
     store_sightings: Structural[int | None] = None
@@ -158,9 +195,27 @@ class ExportFacts:
 
 
 @dataclass(frozen=True)
+class ReversedFacts:
+    """Whether the counted rows with a reversed status are money, in counts.
+
+    Three numbers, taken over the whole account: they are what says whether a
+    reversal arrives as a changed status alone (the export omits the row, and no
+    counter-item exists) or beside a counter-item (the export lists both or
+    neither, and the pair nets to nil).
+    """
+
+    counted: Structural[int] = 0
+    #: Of those, the rows an export lists.
+    listed: Structural[int] = 0
+    #: Of those, the rows with a counter-item (`RowNote.counter_item`).
+    counter_item: Structural[int] = 0
+
+
+@dataclass(frozen=True)
 class WalkExplanation:
     changes: Structural[tuple[ChangeExplanation, ...]] = ()
     facts: Structural[ExportFacts | None] = None
+    reversed: Structural[ReversedFacts] = field(default_factory=ReversedFacts)
 
 
 @dataclass(frozen=True)
@@ -225,6 +280,124 @@ class _View:
     #: Counted rows whose two dates differ, once under each.
     by_source: _Dated
     by_stored: _Dated
+    #: Counted rows whose status is reversed, and those of them the source does not list.
+    reversed_counted: _Dated
+    reversed_unlisted: _Dated
+
+
+@dataclass(frozen=True)
+class RowAbout:
+    """What is knowable of a row beyond its dates, direction, and status."""
+
+    account: str
+    round_up_leg: bool
+    pairing: str
+    partner_account: str
+    carries: str
+    counter_item: bool | None
+
+
+class _RowFacts:
+    """The pairings, carriers, and counter-items of the family's rows, each read once, on first use.
+
+    The pairings and carriers are whole-account reads, so a page that names
+    twenty changes pays for them once and a page that names none pays nothing.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        main: str,
+        members: Mapping[str, Sequence[Transaction]],
+        by_entity: Mapping[str, Transaction],
+    ) -> None:
+        self.store = store
+        self.main = main
+        self.members = members
+        self.by_entity = by_entity
+        self._pairs: dict[str, str] | None = None
+        self._carriers: dict[str, Carrier] | None = None
+        self._uids: dict[str, frozenset[str]] = {}
+        self._legs: dict[str, Transaction] = {}
+        self._counters: dict[tuple[int, int], list[tuple[date, str]]] | None = None
+
+    @property
+    def pairs(self) -> dict[str, str]:
+        """Each entity of a confirmed transfer pair -> the other entity of its pair."""
+        if self._pairs is None:
+            self._pairs = {}
+            for debit, credit in self.store.confirmed_transfer_pairs():
+                self._pairs[debit] = credit
+                self._pairs[credit] = debit
+        return self._pairs
+
+    def _account_of(self, entity: str) -> str:
+        found = self.by_entity.get(entity)
+        if found is not None:
+            return found.account_id
+        row = self.store.connection.execute(
+            "SELECT account_id FROM transactions WHERE entity_id = ?", (entity,)
+        ).fetchone()
+        return str(row["account_id"]) if row is not None else ""
+
+    def _label(self, account: str) -> str:
+        if not account:
+            return "an account not held"
+        return "the main account" if account == self.main else f"the Space {account}"
+
+    def _carried(self, row: Transaction) -> str:
+        if self._carriers is None:
+            self._carriers = feed_carriers(self.store, self.main)
+            self._uids = feed_uids_by_entity(self.store, self.main)
+            self._legs = legs_by_payment(self.members.get(self.main, ()))
+        return carrier_state(
+            self._uids.get(row.entity_id, ()), self._carriers, self._legs, self.pairs.keys()
+        )
+
+    def counter_item(self, row: Transaction) -> bool:
+        """Whether another row of the opposite direction and equal size lies within
+        `COUNTER_ITEM_DAYS`, among every row the family holds that is not history.
+
+        The row's own confirmed transfer partner is never its counter-item: a
+        round-up leg is always matched by the Space's row, and counting that
+        would make every reversed leg look reversed-and-returned.
+        """
+        if self._counters is None:
+            counters: dict[tuple[int, int], list[tuple[date, str]]] = defaultdict(list)
+            for rows in self.members.values():
+                for other in rows:
+                    if not other.status.is_history:
+                        key = (abs(other.amount_minor), _sign(other.amount_minor))
+                        counters[key].append((other.value_date, other.entity_id))
+            for found in counters.values():
+                found.sort()
+            self._counters = counters
+        opposite = self._counters.get((abs(row.amount_minor), -_sign(row.amount_minor)), [])
+        last = row.value_date + timedelta(days=COUNTER_ITEM_DAYS)
+        partner = self.pairs.get(row.entity_id)
+        near = bisect_left(opposite, (row.value_date - timedelta(days=COUNTER_ITEM_DAYS), ""))
+        for when, entity in opposite[near:]:
+            if when > last:
+                break
+            if entity != partner:
+                return True
+        return False
+
+    def about(self, row: Transaction) -> RowAbout:
+        partner = self.pairs.get(row.entity_id)
+        pairing = ""
+        if row.is_internal_transfer:
+            pairing = "paired" if partner is not None else "unpaired"
+        return RowAbout(
+            account=self._label(row.account_id),
+            round_up_leg="roundUpOf" in row.raw,
+            pairing=pairing,
+            partner_account=self._label(self._account_of(partner)) if partner is not None else "",
+            carries="" if "roundUpOf" in row.raw else self._carried(row),
+            counter_item=(
+                self.counter_item(row) if row.status is TransactionStatus.REVERSED else None
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -237,6 +410,7 @@ class _Evidence:
     #: Folded main-account row -> the Space row its sightings were copied onto.
     folds: Mapping[str, str]
     by_entity: Mapping[str, Transaction]
+    facts: _RowFacts
 
     def counted(self, row: Transaction) -> bool:
         return not row.status.is_history and row.status is not TransactionStatus.PENDING
@@ -259,6 +433,7 @@ class _Evidence:
                 },
             }
             dates = tuple(sorted((s, d) for s, d in seen.items() if d))
+            about = self.facts.about(row)
             return RowNote(
                 (*dates, ("ledger", row.value_date.isoformat())),
                 "in" if row.amount_minor >= 0 else "out",
@@ -267,6 +442,12 @@ class _Evidence:
                 why,
                 row.is_internal_transfer,
                 figure_differs,
+                about.account,
+                about.round_up_leg,
+                about.pairing,
+                about.partner_account,
+                about.carries,
+                about.counter_item,
             )
 
         return build
@@ -338,6 +519,10 @@ def _day(text: str) -> date | None:
 
 def _direction(minor: int) -> str:
     return "in" if minor >= 0 else "out"
+
+
+def _sign(minor: int) -> int:
+    return 1 if minor >= 0 else -1
 
 
 def _csv_view(
@@ -456,6 +641,8 @@ def _view(
     unlisted: list[_Entry] = []
     by_source: list[_Entry] = []
     by_stored: list[_Entry] = []
+    reversed_counted: list[_Entry] = []
+    reversed_unlisted: list[_Entry] = []
     extra: list[_Entry] = []
     for account, rows in evidence.members.items():
         for row in rows:
@@ -467,10 +654,19 @@ def _view(
                 is_listed = (
                     row.entity_id in listed if listed is not None else row.entity_id in sighted
                 )
+                reversal = row.status is TransactionStatus.REVERSED
+                if reversal:
+                    reversed_counted.append(
+                        _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
+                    )
                 if not is_listed:
                     unlisted.append(
                         _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
                     )
+                    if reversal:
+                        reversed_unlisted.append(
+                            _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
+                        )
                 if day != row.value_date:
                     by_source.append(
                         _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
@@ -498,6 +694,8 @@ def _view(
         _Dated(figures),
         _Dated(by_source),
         _Dated(by_stored),
+        _Dated(reversed_counted),
+        _Dated(reversed_unlisted),
     )
 
 
@@ -526,6 +724,9 @@ def _explain_one(
     straddling: list[_Entry] = []
     export_rows: int | None = None
     store_sightings: int | None = None
+    reversal = view.reversed_counted.within(after, day)
+    reversal_negated = False
+    reversal_left = ""
     if delta == 0:
         holds.append(DISAGREEMENT)
     else:
@@ -549,6 +750,22 @@ def _explain_one(
             chosen = single if single is not None else flipped
             negated = single is None
             one_row = chosen.note() if chosen is not None else None
+        if reversal:
+            reversal_sum = sum(entry.minor for entry in reversal)
+            if reversal_sum and delta in (reversal_sum, -reversal_sum):
+                holds.append(REVERSED_ROWS)
+                reversal_negated = delta != reversal_sum
+            # Leaving the reversed rows out of the count moves the difference by their sum.
+            left_over = delta + reversal_sum
+            reversed_unlisted = view.reversed_unlisted.within(after, day)
+            still_unlisted = len(unlisted) - len(reversed_unlisted)
+            still_unlisted_sum = unlisted_sum - sum(entry.minor for entry in reversed_unlisted)
+            if left_over == 0:
+                reversal_left = "nil"
+            elif still_unlisted and -still_unlisted_sum == left_over:
+                reversal_left = "sum"
+            if reversal_left:
+                holds.append(REVERSED_LEFT_OUT)
         straddling = [
             e for e in view.by_source.within(after, day) if not _inside(e.other, after, day)
         ] + [e for e in view.by_stored.within(after, day) if not _inside(e.other, after, day)]
@@ -585,6 +802,9 @@ def _explain_one(
         one_row=one_row,
         one_row_negated=negated,
         straddling=_rowset(straddling),
+        reversed_rows=_rowset(reversal),
+        reversed_negated=reversal_negated,
+        reversed_left=reversal_left,
         export_rows=export_rows,
         store_sightings=store_sightings,
         rows_before=0 if after is None else everything.count(None, after),
@@ -618,7 +838,14 @@ def explain_walk(
     family = frozenset(members)
     by_entity = {row.entity_id: row for rows in members.values() for row in rows}
     folds = store.space_fold_map()
-    evidence = _Evidence(members, placement, store.sighting_sources(family), folds, by_entity)
+    evidence = _Evidence(
+        members,
+        placement,
+        store.sighting_sources(family),
+        folds,
+        by_entity,
+        _RowFacts(store, main, members, by_entity),
+    )
     anchor_digests = {
         (day, balance): digest
         for digest, reading in exports
@@ -674,7 +901,25 @@ def explain_walk(
                 opening_balance=opening_balance,
             )
         )
-    return WalkExplanation(tuple(explained), facts)
+    return WalkExplanation(
+        tuple(explained), facts, _reversed_facts(evidence, matched.values())
+    )
+
+
+def _reversed_facts(evidence: _Evidence, matches: Iterable[_Matches]) -> ReversedFacts:
+    """The whole account's reversed rows, counted in one pass."""
+    listed = {str(sighting["entity_id"]) for match in matches for _, sighting in match.pairs}
+    rows = [
+        row
+        for rows in evidence.members.values()
+        for row in rows
+        if evidence.counted(row) and row.status is TransactionStatus.REVERSED
+    ]
+    return ReversedFacts(
+        counted=len(rows),
+        listed=sum(1 for row in rows if row.entity_id in listed),
+        counter_item=sum(1 for row in rows if evidence.facts.counter_item(row)),
+    )
 
 
 def _facts(
@@ -701,11 +946,14 @@ __all__ = [
     "NAMED_ROWS",
     "NONE",
     "ONE_ROW",
+    "REVERSED_LEFT_OUT",
+    "REVERSED_ROWS",
     "ROW_COUNTS",
     "STRADDLING",
     "UNHELD_SPACE",
     "ChangeExplanation",
     "ExportFacts",
+    "ReversedFacts",
     "RowNote",
     "RowSet",
     "WalkExplanation",

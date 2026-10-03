@@ -101,6 +101,7 @@ from .family_anchors import (
     RoundUpTally,
     UnheldLegs,
     family_anchors,
+    feed_digests,
     feed_round_ups,
     round_up_tally,
     space_fetches,
@@ -110,6 +111,7 @@ from .fault_explanation import WalkExplanation, explain_walk
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
+from .round_up_accounts import RoundUpGaps, feed_carriers, legs_by_payment, round_up_gaps
 from .sighting_placement import SightingPlacement, sighting_placement
 from .statement_membership import statement_membership
 from .statement_terms import StatementBalance, statement_balances
@@ -249,6 +251,8 @@ class FamilyWalk:
     explanation: WalkExplanation | None = None
     #: The main account's round-ups, legs, and pairings, in counts.
     round_ups: RoundUpTally = field(default_factory=RoundUpTally)
+    #: What became of the round-ups that are not a paired leg (`round_up_accounts`).
+    round_up_gaps: RoundUpGaps = field(default_factory=RoundUpGaps)
 
     @property
     def opened(self) -> FamilyAnchor | None:
@@ -880,13 +884,20 @@ def effective_opening(
             held_categories=held_ids,
             sightings=sightings,
         )
-        paired = (
-            frozenset(entity for pair in store.confirmed_transfer_pairs() for entity in pair)
-            if any("roundUpOf" in t.raw for t in held)
-            else frozenset()
+        paired = frozenset(
+            entity for pair in store.confirmed_transfer_pairs() for entity in pair
         )
+        landed = feed_digests(store, ref)
         walk = replace(
-            walk, round_ups=round_up_tally(held, paired, feed_round_ups(store, ref))
+            walk,
+            round_ups=round_up_tally(held, paired, feed_round_ups(store, ref, landed)),
+            round_up_gaps=round_up_gaps(
+                carriers=feed_carriers(store, ref, landed),
+                legs=legs_by_payment(held),
+                paired=paired,
+                held_spaces=held_ids,
+                space_rows=[t for rows in members.values() for t in rows],
+            ),
         )
         if walk.unheld.legs:
             fetches = space_fetches(store, walk.unheld.uids)
