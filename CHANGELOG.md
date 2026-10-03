@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.272] - 2026-10-03
+
+### Fixed
+- **An export states a day's balance only where its own sequence is cut
+  cleanly.** Where a row dated later sat before a row dated earlier, the day's
+  figure was not the sum of the rows dated on or before it, and the anchor was
+  wrong by the straggler. A day holding an equal in and out is no longer
+  dropped.
+
+### Added
+- **The ledger explains each change in the difference by exact arithmetic**:
+  rows the export lists that are not counted, rows counted that it does not
+  list, a single row, an unheld Space. Rows are named by date, direction, and
+  source. Three guesses at a real account's faults had each been built and
+  found wrong, so the page now states the cause.
+
 ## [0.4.271] - 2026-10-03
 
 ### Changed
