@@ -54,6 +54,17 @@ UNATTENDED_REACH_DAYS = ROUTINE_WINDOW_DAYS
 #: no more than a day between cycles.
 HEAL_ASKS_PER_CONNECTION = 2
 
+#: The same bound for a pull that declares the customer present.
+#: An attended request does not spend the unattended allowance, which is the
+#: whole reason the unattended bound is two, so a person who pressed a button
+#: gets room for every account and card of a typical connection to have one hole
+#: closed in one press.
+#: It is still a bound, not "all": a refusal ends healing for the press whatever
+#: the bound is, so a provider that limits attended asks too is met after one
+#: refused call, and what remains is said on the page rather than retried.
+#: Whether any provider limits attended asks is not measured here.
+ATTENDED_HEAL_ASKS_PER_CONNECTION = 8
+
 #: A healing window reaches this many days past each edge of its hole.
 #: A window's edges are inclusive dates on the provider's side and a boundary
 #: payment has been seen to arrive on the wrong side of one, so the overlap

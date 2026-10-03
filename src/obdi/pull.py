@@ -28,6 +28,7 @@ from urllib.parse import parse_qs
 from . import cursor, tiers
 from .accounts import AccountMap
 from .asked_coverage import (
+    ATTENDED_HEAL_ASKS_PER_CONNECTION,
     HEAL_ASKS_PER_CONNECTION,
     canonical_resolver,
     coverage_by_account,
@@ -664,6 +665,8 @@ def _heal_unasked_spans(
 ) -> None:
     """Ask for the days no landed ask has covered, oldest first, within a bound.
 
+    The bound is the unattended one unless the pull declares the customer
+    present (`ATTENDED_HEAL_ASKS_PER_CONNECTION` says why they differ).
     Spans that have passed out of the provider's unattended reach are only
     reported: asking would spend allowance on a refusal, and the remedy is an
     attended extend.
@@ -691,7 +694,8 @@ def _heal_unasked_spans(
                 f"{name}: days not asked for, now beyond unattended fetching: "
                 f"{describe_spans(coverage.lost)}"
             )
-    for ask in heal_plan(found, today)[:HEAL_ASKS_PER_CONNECTION]:
+    bound = ATTENDED_HEAL_ASKS_PER_CONNECTION if psu_ip else HEAL_ASKS_PER_CONNECTION
+    for ask in heal_plan(found, today)[:bound]:
         kind, provider_id = targets[ask.account]
         source = "truelayer-card-booked" if kind == "card" else "truelayer-booked"
         try:

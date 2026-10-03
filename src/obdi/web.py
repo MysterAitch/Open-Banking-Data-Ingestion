@@ -46,6 +46,7 @@ from .accounts import AccountRecord, ArchiveOutcome
 from .actual_push import valid_progress
 from .alerts import consent_rung
 from .asked_coverage import Hole, describe_spans
+from .attended_fetch import PRESS_KIND, PressRefused
 from .balance_chart import BalanceChart
 from .callback import render_page
 from .classification import redact_summary
@@ -525,6 +526,10 @@ class WebConfig:
     #: person is present and waiting, honest because it stops the moment the
     #: provider says stop and never replays unattended.
     extend_max: Callable[..., str] | None = None
+    #: Start one connection's routine pull as an attended press, in the
+    #: background: (connection, requester address) to what was started, or a
+    #: PressRefused saying why nothing was. None hides every press.
+    fetch_now: Callable[[str, str | None], str] | None = None
     #: Starling Spaces that existed once and do not exist now, recovered from
     #: the movements they made. REPORT ONLY - reading this changes nothing,
     #: which is what lets the page be opened without deciding anything.
@@ -1873,7 +1878,17 @@ def _holdings_rows(
 EXTEND_CHOICES = (1, 7, 30, 90, 365, 730)
 
 
-def _freshness_line(account: ExtendableAccount) -> str:
+def _fetch_button(connection: str, label: str) -> str:
+    """The one press that runs a connection's routine pull, attended."""
+    return (
+        '<form method="post" action="/fetch-now" style="display:inline">'
+        f'<input type="hidden" name="connection" value="{html.escape(connection)}">'
+        '<button class="button" style="display:inline-block;padding:.4rem .7rem;'
+        f'border:0;cursor:pointer" type="submit">{html.escape(label)}</button></form>'
+    )
+
+
+def _freshness_line(account: ExtendableAccount, fetch_these: str = "") -> str:
     """One line saying how CURRENT the coverage is, loud when it is not.
 
     The scheduler covers to today on every six-hour cycle, so covered-to
@@ -1898,6 +1913,7 @@ def _freshness_line(account: ExtendableAccount) -> str:
             f"{account.covered_to.isoformat()}, with {missing} "
             f"day{'' if missing == 1 else 's'} not asked for: "
             f"{html.escape(describe_spans(account.holes))}"
+            + (f" - {fetch_these}" if fetch_these else "")
         )
     else:
         coverage = f"covered to {account.covered_to.isoformat()}"
@@ -2106,10 +2122,19 @@ def _backfill_running_banner(
         updated = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
         # A crashed thread must not banner forever: the ladder updates its
         # status every step, so a stale stamp means it is gone.
-        if ((now or datetime.now(UTC)) - updated).total_seconds() > 900:
+        # A press writes once at its start and once at its end, so it is given
+        # the length of its lease rather than the ladder's per-step allowance.
+        stale_after = 1800 if status.get("kind") == PRESS_KIND else 900
+        if ((now or datetime.now(UTC)) - updated).total_seconds() > stale_after:
             return ""
     connection = html.escape(str(status.get("connection", "")))
     stage = str(status.get("stage", ""))
+    if status.get("kind") == PRESS_KIND:
+        return (
+            f'<p class="warn">attended fetch running for {connection}: asking the '
+            "provider now, in the background - the result appears below when it "
+            "finishes, and pressing again meanwhile is refused</p>"
+        )
     detail = "fetching deep history"
     if stage == "ladder":
         target = status.get("target")
@@ -3701,8 +3726,12 @@ def _extend_suggestions(accounts: list[ExtendableAccount]) -> dict[str, str]:
 def _extend_rows(
     extendables: Callable[[], list[ExtendableAccount]] | None,
     only_ref: str | None = None,
+    fetch_now: bool = False,
 ) -> str:
     """The extend controls - all accounts on the homepage, ONE on a result.
+
+    `fetch_now` puts the connection's press beside any sentence that reports
+    days no request has covered.
 
     A result page repeats only the account that was just pressed: mid-probe,
     a wall of every account's buttons is where the wrong account gets
@@ -3784,7 +3813,12 @@ def _extend_rows(
                 and (account.earliest is None or account.probed_back_to < account.earliest)
                 else ""
             )
-            + _freshness_line(account)
+            + _freshness_line(
+                account,
+                _fetch_button(account.connection, "Fetch these now")
+                if fetch_now and account.holes
+                else "",
+            )
             + f"{note}{bind_form}<br>{controls}</div>"
         )
     return (
@@ -3817,6 +3851,112 @@ def _starling_row(
         '<div class="row"><strong>starling</strong><br>'
         '<span class="ok">first-party token - no consent clock, no expiry '
         "chore</span>" + listed + "</div>"
+    )
+
+
+def _press_sentence(result: Mapping[str, object]) -> str:
+    """What a finished press did, in counts and the provider's own words.
+
+    Masked like the rest of the page: names, dates, counts and error codes only.
+    """
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    parts = [
+        f"Last press finished {stamp} UTC: {result.get('asked', 0)} asked, "
+        f"{result.get('landed', 0)} landed"
+    ]
+    refused_total = _as_int(result.get("refused_total"))
+    parts[0] += f", {refused_total} refused"
+    if result.get("new_rows") is not None:
+        parts[0] += f", {result.get('new_rows')} new rows"
+    parts[0] += "."
+    raw = result.get("refused")
+    refusals = [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+    for refusal in refusals:
+        status = refusal.get("status")
+        code = str(refusal.get("code") or "")
+        reason = str(refusal.get("reason") or "")
+        parts.append(
+            "Refused"
+            + (f" with HTTP {status}" if status else "")
+            + (f" and code {html.escape(code)}" if code else "")
+            + (f': "{html.escape(reason)}"' if reason else "")
+            + "."
+        )
+    if refusals:
+        parts.append(
+            "The pull stopped at the refusal, so the connection's tier is not spent "
+            "and the asks after it were not made; the next pull asks them again."
+            if result.get("stopped")
+            else "Healing stopped at the refusal, so the asks after it were not made; "
+            "the asks before it stand."
+        )
+    spans = _as_int(result.get("spans_remaining"))
+    days = _as_int(result.get("days_remaining"))
+    lost = _as_int(result.get("days_lost"))
+    if spans:
+        parts.append(
+            f"{days} day{'' if days == 1 else 's'} in {spans} "
+            f"span{'' if spans == 1 else 's'} still not asked for: press again."
+        )
+    elif result.get("attended"):
+        parts.append("No days remain that no request has covered.")
+    if lost:
+        parts.append(
+            f"{lost} day{'' if lost == 1 else 's'} are beyond unattended reach: "
+            "the extend buttons below ask for those."
+        )
+    return " ".join(parts)
+
+
+def _as_int(value: object) -> int:
+    return value if isinstance(value, int) else 0
+
+
+def _fetch_now_rows(
+    store: ConnectionStore,
+    starling_status: Callable[[], dict[str, object] | None] | None,
+    backfill_status: Callable[[], dict[str, object]] | None,
+) -> str:
+    """One press per connection, with what its last press did beside it."""
+    status: dict[str, object] = {}
+    if backfill_status is not None:
+        with contextlib.suppress(Exception):
+            status = backfill_status() or {}
+    raw = status.get("presses")
+    presses = raw if isinstance(raw, dict) else {}
+    running = status.get("state") == "running" and status.get("kind") == PRESS_KIND
+    names = sorted(connection.connection_id for connection in store)
+    if starling_status is not None:
+        with contextlib.suppress(Exception):
+            if starling_status():
+                names.append("starling")
+    if not names:
+        return ""
+    rows = []
+    for name in names:
+        last = presses.get(name)
+        if running and status.get("connection") == name:
+            outcome = "Running now."
+        elif isinstance(last, dict):
+            outcome = _press_sentence(last)
+        else:
+            outcome = "Not pressed yet."
+        note = (
+            "<br>This provider has no customer-present distinction, so this is "
+            "the same pull the scheduler runs."
+            if name == "starling"
+            else ""
+        )
+        rows.append(
+            f'<div class="row"><strong>{html.escape(name)}</strong> '
+            f"{_fetch_button(name, 'Fetch now')}"
+            f'<br><span class="muted">{outcome}{note}</span></div>'
+        )
+    return (
+        "<h2>Fetch now</h2>"
+        "<p>Runs one connection's routine pull now, with you as the customer "
+        "present, so it does not spend the unattended allowance. It runs in the "
+        "background and the result appears here.</p>" + "".join(rows)
     )
 
 
@@ -6639,6 +6779,9 @@ class ConnectionHandler(
                 int(self.headers.get("Content-Length") or 0)
             ).decode("utf-8")))
             return
+        if route == "/fetch-now":
+            self._fetch_now(self._read_form())
+            return
         if route not in ("/extend", "/extend-max"):
             self._respond(404, error_page("Not found", "<p>Nothing is served here.</p>"))
             return
@@ -6717,6 +6860,48 @@ class ConnectionHandler(
                 + _extend_rows(self.bound_config.extendables, only_ref=account)
                 + BACK_TO_CONNECTIONS,
             ),
+        )
+
+    def _fetch_now(self, form: dict[str, list[str]]) -> None:
+        """Start one connection's attended routine pull, or say why not.
+
+        The address rule and the collision rule live in `attended_fetch`.
+        A refusal is an answer, not a fault: the sentence is shown as written.
+        """
+        hook = self.bound_config.fetch_now
+        if hook is None:
+            self._respond(
+                404,
+                error_page(
+                    "Not available", "<p>Fetching now is not wired.</p>", BACK_TO_CONNECTIONS
+                ),
+            )
+            return
+        connection = (form.get("connection", [""])[0] or "").strip()
+        if not connection:
+            self._respond(
+                400,
+                error_page("Bad request", "<p>A connection is required.</p>", BACK_TO_CONNECTIONS),
+            )
+            return
+        psu_ip = self._requester_address()
+        print(
+            f"attended fetch-now: connection={connection} requested_by={psu_ip or 'unknown'}",
+            file=sys.stderr,
+        )
+        try:
+            started = hook(connection, psu_ip)
+        except PressRefused as refused:
+            self._respond(
+                refused.status,
+                error_page(
+                    "Not started", f"<p>{html.escape(str(refused))}</p>", BACK_TO_CONNECTIONS
+                ),
+            )
+            return
+        self._respond(
+            200,
+            render_page("Fetch started", f"<p>{html.escape(started)}</p>" + BACK_TO_CONNECTIONS),
         )
 
     uploads: UploadSession = UploadSession()

@@ -36,6 +36,7 @@ from .accounts import (
 from .actual_push import ENVELOPE_VERSION
 from .alerts import Finding
 from .asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
+from .attended_fetch import STARLING_TARGET, start_press, write_status
 from .backup import BackupRefused, take_backup, verify_copy
 from .balance_chart import BalanceChart
 from .connections import ConnectionStore
@@ -71,7 +72,7 @@ from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
-from .pull import pull_starling, pull_truelayer
+from .pull import PullResult, pull_starling, pull_truelayer
 from .replay import (
     ActualAccountBinding,
     build_opening_entries,
@@ -1588,19 +1589,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         status_path = db_path.parent / "backfill-status.json"
 
         def _status(**fields: object) -> None:
-            with contextlib.suppress(OSError):
-                status_path.write_text(
-                    json.dumps(
-                        {
-                            "connection": name,
-                            "updated_at": datetime.now(UTC).strftime(
-                                "%Y-%m-%dT%H:%M:%SZ"
-                            ),
-                            **fields,
-                        }
-                    ),
-                    encoding="utf-8",
-                )
+            write_status(status_path, name, **fields)
 
         def run() -> None:
             from . import leases
@@ -3496,6 +3485,39 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 rebuild_status=rebuild_status_for(db_path),
             )
 
+    def fetch_now(name: str, psu_ip: str | None) -> str:
+        """One connection's routine pull from the page, attended; see `attended_fetch`."""
+
+        def pull(target: str, address: str | None, trigger: str) -> int | None:
+            captured: list[PullResult] = []
+            _pull(
+                target,
+                db_path,
+                None,
+                psu_ip=address,
+                trigger=trigger,
+                on_result=captured.append,
+                raise_errors=True,
+            )
+            summary = captured[0].summary if captured else None
+            return summary.inserted if summary is not None else None
+
+        def known() -> set[str]:
+            names = set(ConnectionStore(store_path).load())
+            if _starling_token_present():
+                names.add(STARLING_TARGET)
+            return names
+
+        return start_press(
+            name=name,
+            psu_ip=psu_ip,
+            db_path=db_path,
+            connections=known,
+            pull=pull,
+            account_map=_account_map,
+            busy_note=lambda: rebuild_in_progress_note(db_path),
+        )
+
     def declare_account(record: AccountRecord) -> AccountRecord:
         """Declare or edit one account, from the page rather than the host.
 
@@ -3524,6 +3546,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         declare_spaces=declare_spaces,
         extendables=extendables,
         extend_window=extend_window,
+        fetch_now=fetch_now,
         artefact_index=artefact_index,
         keep_statement=keep_statement,
         statement_digests_held=statement_digests_held,
@@ -4038,36 +4061,54 @@ def _pull(
     only_account: str | None = None,
     psu_ip: str | None = None,
     trigger: str | None = None,
+    on_result: Callable[[PullResult], None] | None = None,
+    raise_errors: bool = False,
 ) -> int:
+    """Pull one connection and say what happened.
+
+    `raise_errors` is for a caller that reports the refusal itself (the page's
+    press): a failure is raised with the provider's own parts intact rather
+    than printed and reduced to an exit code. `on_result` hands that caller
+    the result, which carries the count of new rows.
+    """
     account_map = _account_map(db_path)
+
+    def fail(code: int, message: str) -> int:
+        if raise_errors:
+            raise RuntimeError(message)
+        print(message, file=sys.stderr)
+        return code
 
     if target == "starling":
         try:
             token = read_secret("STARLING_PERSONAL_ACCESS_TOKEN")
         except SecretError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
+            return fail(2, str(exc))
         with Store(db_path) as store:
             result = pull_starling(
                 store,
                 token,
                 account_map=account_map,
                 since=since,
-                trigger=os.getenv("OBDI_TRIGGER", "").strip() or "direct",
+                trigger=trigger or os.getenv("OBDI_TRIGGER", "").strip() or "direct",
             )
         print(result.describe())
+        if on_result is not None:
+            on_result(result)
         return 0
 
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if not store_path:
-        print("Set OBDI_CONNECTION_STORE to the token store path.", file=sys.stderr)
-        return 2
+        return fail(2, "Set OBDI_CONNECTION_STORE to the token store path.")
 
     connection_store = ConnectionStore(store_path)
     connection = connection_store.load().get(target)
     if connection is None:
         known = ", ".join(sorted(connection_store.load())) or "none stored"
-        print(f"No connection named '{target}'. Known: {known}", file=sys.stderr)
+        message = f"No connection named '{target}'. Known: {known}"
+        if raise_errors:
+            raise RuntimeError(message)
+        print(message, file=sys.stderr)
         print("\nTo connect a bank: python scripts/truelayer_probe.py auth-link", file=sys.stderr)
         return 2
 
@@ -4075,8 +4116,7 @@ def _pull(
     try:
         client_secret = read_secret("TRUELAYER_CLIENT_SECRET")
     except SecretError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return fail(2, str(exc))
 
     with Store(db_path) as store:
         try:
@@ -4107,9 +4147,13 @@ def _pull(
                 deep=deep,
             )
         except RuntimeError as exc:
+            if raise_errors:
+                raise
             print(str(exc), file=sys.stderr)
             return 1
     print(result.describe())
+    if on_result is not None:
+        on_result(result)
     return 0
 
 

@@ -261,6 +261,7 @@ def render_connections(
     provider_knowledge: Callable[[], list[dict[str, object]]] | None = None,
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
+    fetch_now_available: bool = False,
 ) -> bytes:
     from . import web
 
@@ -276,7 +277,12 @@ def render_connections(
         + web._connection_rows(store, rename_available=rename_connection is not None)
         + web._starling_row(starling_status)
         + web._add_a_bank_section(bank_authorisation)
-        + web._extend_rows(extendables)
+        + (
+            web._fetch_now_rows(store, starling_status, backfill_status)
+            if fetch_now_available
+            else ""
+        )
+        + web._extend_rows(extendables, fetch_now=fetch_now_available)
         + web._knowledge_rows(provider_knowledge)
     )
     return render_page("Bank connections", body)
@@ -449,6 +455,7 @@ class SectionPages:
             provider_knowledge=timer.wrap("provider_knowledge", config.provider_knowledge),
             extendables=timer.wrap("extendables", config.extendables),
             backfill_status=timer.wrap("backfill_status", config.backfill_status),
+            fetch_now_available=config.fetch_now is not None,
         )
         timer.report("/connections")
         self._respond(200, page)
