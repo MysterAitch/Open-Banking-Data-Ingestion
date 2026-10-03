@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.268] - 2026-10-03
+
+### Fixed
+- **A statement's closing charge is found among the feed rows around its own
+  closing day.** The rule released in 0.4.266 folded nothing on the real card:
+  it took every feed row in the period, which included the previous statement's
+  charge, so one awkward first period disabled it for the whole account.
+- **The rebuild summary no longer counts a several-account statement whose
+  sections are all assigned as having no account.**
+
+### Maintenance
+- **Rebuild:** the cross-source pairing indexes each source's rows once rather
+  than once per comparison, and the same-money pass pairs only the accounts
+  that hold a statement.
+
 ## [0.4.267] - 2026-10-03
 
 ### Fixed

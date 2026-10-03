@@ -81,10 +81,9 @@ would still fold; nothing here tells that apart from the real thing. A band
 holding more than `MAX_BAND_ROWS` unmatched feed rows searches only the nearest
 ones, so it folds less, never more. Cost: the pass reads the whole store's
 sightings and pairs the sources of each account that holds a statement, after
-every import. On a synthetic store of 8,300 rows, 31 statements, and 50,000
-sightings that took 1.6 to 2.5 seconds, almost all of it reading the store and
-the pairing, and almost none the search here; a real store of that size was
-measured at 31.6 seconds, which the synthetic one does not reproduce.
+every import; almost all of the time is the reading and the pairing, and almost
+none the search here. A real store took ten times as long as a synthetic one of
+the same size, and what the synthetic one lacks has not been found.
 """
 
 from __future__ import annotations
