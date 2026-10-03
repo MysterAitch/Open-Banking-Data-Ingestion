@@ -41,10 +41,16 @@ class Verdict(StrEnum):
 
     #: The proof accepted a candidate: its feed rows are folded.
     FOLDED = "folded"
-    #: No unclaimed unmatched feed row was dated within the band of the closing.
-    NO_BAND_ROWS = "no-band-rows"
-    #: Band rows existed, but no subset of them summed to any subset of the
-    #: period's statement-only rows (which may be none).
+    #: The period's rows already sum to the statement's movement.
+    AGREES = "agrees"
+    #: The period differs, and no unmatched feed row the rule may fold is dated
+    #: in it (a confirmed transfer leg and a row a statement lists never are).
+    NO_FEED_ROWS = "no-feed-rows"
+    #: The period differs and holds feed rows, but no statement-only row: nothing
+    #: a statement itemises for them to be the same money as.
+    NO_STATEMENT_ROWS = "no-statement-rows"
+    #: No subset of the period's feed rows sums to the period's difference and to
+    #: some subset of its statement-only rows.
     NO_MATCH = "no-match"
     #: A candidate was found and the proof refused it.
     REFUSED = "refused"
@@ -57,17 +63,15 @@ class ClosingOutcome:
     closing: date
     feed: str
     verdict: Verdict
-    #: The band's first and last day: the closing's day either side by the boundary.
-    band: tuple[date, date]
-    #: Every unclaimed unmatched feed row dated in the band.
-    band_dates: tuple[date, ...]
-    #: How many of them the search took (the nearest), when bounded.
-    band_searched: int
-    #: Band rows an earlier closing had already claimed.
-    claimed_dates: tuple[date, ...]
+    #: The period's first and last day.
+    period: tuple[date, date]
+    #: Every unmatched feed row dated in the period that the rule may fold.
+    feed_dates: tuple[date, ...]
+    #: How many of them were combined into sets of more than one row, when bounded.
+    feed_searched: int
     #: Every statement-only row of the period.
     statement_dates: tuple[date, ...]
-    #: How many of them the search took (the nearest), when bounded.
+    #: How many of them the search took (the nearest the closing), when bounded.
     statement_searched: int
     #: The rows taken as a candidate (folded, or refused).
     taken_dates: tuple[date, ...] = ()
@@ -83,56 +87,60 @@ class ClosingOutcome:
                 f"only the nearest {self.statement_searched} of {len(self.statement_dates)} "
                 "statement-only rows were searched"
             )
-        if len(self.band_dates) > self.band_searched:
+        if len(self.feed_dates) > self.feed_searched:
             reached.append(
-                f"only the nearest {self.band_searched} of {len(self.band_dates)} "
-                "unmatched feed rows in the band were searched"
+                f"each unmatched feed row was tried alone, but only the latest "
+                f"{self.feed_searched} of {len(self.feed_dates)} were combined into sets"
             )
         return tuple(reached)
 
     def describe(self) -> str:
-        first, last = self.band
-        band = f"the band {first} to {last}"
+        first, last = self.period
+        period = f"the period {first} to {last}"
         statement = (
-            f"{plural(len(self.statement_dates), 'statement-only row')} in the period "
+            f"{plural(len(self.statement_dates), 'statement-only row')} "
             f"(dated {dated_list(self.statement_dates)})"
             if self.statement_dates
-            else "no statement-only row in the period"
+            else "no statement-only row"
         )
         if self.verdict is Verdict.FOLDED:
             text = (
                 f"the rule folds {plural(len(self.taken_dates), 'feed row')} from "
                 f"{self.feed} (dated {dated_list(self.taken_dates)}) as the same money as "
-                "statement-only rows."
+                f"statement-only rows, and {period} then agrees."
             )
-        elif self.verdict is Verdict.NO_BAND_ROWS:
+        elif self.verdict is Verdict.AGREES:
+            text = f"{period} already agrees with the statement, so there is nothing to fold."
+        elif self.verdict is Verdict.NO_FEED_ROWS:
             text = (
-                f"no unmatched feed row from {self.feed} within {band}, so there is "
-                "nothing to fold."
+                f"{period} holds no unmatched feed row from {self.feed} that the rule may "
+                "fold, so there is nothing to fold."
+            )
+        elif self.verdict is Verdict.NO_STATEMENT_ROWS:
+            text = (
+                f"{period} holds {plural(len(self.feed_dates), 'unmatched feed row')} from "
+                f"{self.feed} (dated {dated_list(self.feed_dates)}) but no statement-only "
+                "row, so none of them can be the same money as a statement row."
             )
         elif self.verdict is Verdict.NO_MATCH:
             text = (
-                f"{plural(len(self.band_dates), 'unmatched feed row')} from {self.feed} in "
-                f"{band} (dated {dated_list(self.band_dates)}), and {statement}: no subset of "
-                "the one sums to any subset of the other."
+                f"{period} holds {plural(len(self.feed_dates), 'unmatched feed row')} from "
+                f"{self.feed} (dated {dated_list(self.feed_dates)}) and {statement}: no subset "
+                "of the feed rows sums to the period's difference and to some subset of the "
+                "statement-only rows."
             )
         else:
             periods = " and ".join(f"{a} to {b}" for a, b in self.blocking)
             text = (
                 f"a candidate was found ({plural(len(self.taken_dates), 'feed row')} from "
-                f"{self.feed} dated {dated_list(self.taken_dates)}, summing to some of "
-                f"{statement}) but the statements' own arithmetic refused it: "
-                f"{'the period' if len(self.blocking) == 1 else 'the periods'} {periods} "
-                "would still differ after folding."
+                f"{self.feed} dated {dated_list(self.taken_dates)}, summing to the difference "
+                f"of {period} and to some of {statement}) but the statements' own arithmetic "
+                f"refused it: {'the period' if len(self.blocking) == 1 else 'the periods'} "
+                f"{periods} would still differ after folding."
             )
-        if self.claimed_dates:
-            text += (
-                f" {plural(len(self.claimed_dates), 'feed row')} dated "
-                f"{dated_list(self.claimed_dates)} in the band had been claimed by an "
-                "earlier closing."
-            )
-        for bound in self.bounds:
-            text += f" The search was bounded: {bound}."
+        if self.verdict in (Verdict.NO_MATCH, Verdict.REFUSED):
+            for bound in self.bounds:
+                text += f" The search was bounded: {bound}."
         return f"Closing {self.closing}: {text}"
 
     def to_json(self) -> dict[str, object]:
@@ -140,10 +148,9 @@ class ClosingOutcome:
             "closing": self.closing.isoformat(),
             "feed": self.feed,
             "verdict": self.verdict.value,
-            "band": [day.isoformat() for day in self.band],
-            "band_dates": [day.isoformat() for day in self.band_dates],
-            "band_searched": self.band_searched,
-            "claimed_dates": [day.isoformat() for day in self.claimed_dates],
+            "period": [day.isoformat() for day in self.period],
+            "feed_dates": [day.isoformat() for day in self.feed_dates],
+            "feed_searched": self.feed_searched,
             "statement_dates": [day.isoformat() for day in self.statement_dates],
             "statement_searched": self.statement_searched,
             "taken_dates": [day.isoformat() for day in self.taken_dates],
@@ -158,7 +165,7 @@ class ClosingOutcome:
                 raise TypeError(f"{key} is not a list")
             return tuple(date.fromisoformat(str(day)) for day in raw)
 
-        band = days("band")
+        period = days("period")
         blocking_raw = found["blocking"]
         if not isinstance(blocking_raw, list):
             raise TypeError("blocking is not a list")
@@ -166,10 +173,9 @@ class ClosingOutcome:
             closing=date.fromisoformat(str(found["closing"])),
             feed=str(found["feed"]),
             verdict=Verdict(str(found["verdict"])),
-            band=(band[0], band[1]),
-            band_dates=days("band_dates"),
-            band_searched=int(str(found["band_searched"])),
-            claimed_dates=days("claimed_dates"),
+            period=(period[0], period[1]),
+            feed_dates=days("feed_dates"),
+            feed_searched=int(str(found["feed_searched"])),
             statement_dates=days("statement_dates"),
             statement_searched=int(str(found["statement_searched"])),
             taken_dates=days("taken_dates"),

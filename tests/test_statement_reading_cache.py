@@ -220,7 +220,7 @@ class TestAStoredReadingThatCannotBeTrusted:
 
         report = fold_same_money(store)
 
-        assert report.folded == 9
+        assert report.folded == 8
         assert extractions.count == 1
         assert "stored reading" in capsys.readouterr().err
         extractions.fresh_process()

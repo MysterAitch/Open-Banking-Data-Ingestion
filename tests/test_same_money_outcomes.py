@@ -1,10 +1,11 @@
 """The statement-periods page says what the same-money rule did at each closing.
 
-The rule folded nothing on a real card and nothing said why. These tests build
-invented cards with known answers (`card_chain_corpus`, `card_variant_corpus`)
-and ask the page, in dates, counts, and source names only, what the rule saw and
-where it stopped. The outcome is the rule's own (`same_money_fold` builds it
-while it decides), so a verdict here is the rule's verdict, not the page's guess.
+The rule folded nothing on a real card, twice, and nothing said why. These tests
+build invented cards with known answers (`card_chain_corpus`,
+`card_variant_corpus`) and ask the page, in dates, counts, and source names only,
+what the rule saw and where it stopped. The outcome is the rule's own
+(`same_money_fold` builds it while it decides), so a verdict here is the rule's
+verdict, not the page's guess.
 """
 
 from __future__ import annotations
@@ -17,12 +18,34 @@ from pathlib import Path
 import pytest
 
 import obdi.same_money_fold as same_money_fold
-from card_chain_corpus import CHARGE, CLOSINGS, build_card, feed_row, land, statement_day
+from card_chain_corpus import (
+    CARD,
+    CHARGES,
+    CLOSINGS,
+    build_card,
+    feed_row,
+    first_day_of,
+    land,
+    pair_with_savings,
+)
 from card_variant_corpus import CLOSINGS as MINI_CLOSINGS
 from card_variant_corpus import Variant, build_mini_card
-from obdi.period_reconciliation import dated_list, gather_evidence, period_reconciliation
+from obdi.models import TransactionStatus
+from obdi.period_reconciliation import (
+    PeriodKind,
+    dated_list,
+    gather_evidence,
+    period_reconciliation,
+)
 from obdi.rebuild import rebuild_from_raw
-from obdi.same_money_fold import fold_same_money, plan_same_money
+from obdi.same_money_fold import (
+    _Attempt,
+    _Candidate,
+    _outcome_of,
+    _proven,
+    fold_same_money,
+    plan_same_money,
+)
 from obdi.same_money_outcome import AccountOutcome, Verdict
 from obdi.store import SCHEMA_VERSION, Store
 from test_period_reconciliation import MONEY_FIGURE, _held_statement
@@ -50,19 +73,35 @@ def verdicts(store: Store) -> list[Verdict]:
     return [closing.verdict for closing in AccountOutcome.from_text(kept).closings]
 
 
+def folded(store: Store) -> list[str]:
+    return sorted(
+        t.description
+        for t in store.transactions_for_account(CARD)
+        if t.status is TransactionStatus.FOLDED
+    )
+
+
 class TestWhereTheRuleFolds:
     def test_Page_WhenTheRuleFoldsEveryCharge_SaysEachClosingFoldedWithTheFeedRowsDate(
         self, store, tmp_path
     ):
+        """The first period already agrees; each later closing folds the one feed
+        row dated its period's first day, except the one whose period spans the
+        missing statement, where it is dated 12 March."""
         build_card(store, tmp_path)
         fold_same_money(store)
 
         text = page(store)
 
-        for closing in CLOSINGS:
+        assert (
+            f"Closing {CLOSINGS[0]}: the period 2025-09-19 to {CLOSINGS[0]} already agrees"
+            in text
+        )
+        for position, closing in enumerate(CLOSINGS[1:], start=1):
             line = closing_line(text, closing)
-            assert "the rule folds 1 feed row from truelayer" in line
-            assert f"(dated {closing + timedelta(days=1)})" in line
+            dated = date(2026, 3, 12) if position == 5 else first_day_of(position)
+            assert f"the rule folds 1 feed row from truelayer (dated {dated})" in line
+            assert f"the period {first_day_of(position)} to {closing} then agrees" in line
         assert "refused" not in text
 
     def test_Page_BeforeAnyPassHasRun_SaysNothingWasRecordedRatherThanGuessing(
@@ -111,89 +150,88 @@ class TestWhereTheRuleFolds:
 
 
 class TestWhereTheRuleStops:
-    def test_Page_WhenNoSubsetOfTheFeedRowsSumsToAnyOfTheStatementRows_SaysSoWithBothDateLists(
+    def test_Page_WhenNoSubsetOfTheFeedRowsMakesThePeriodAgree_SaysSoWithBothDateLists(
         self, store, tmp_path
     ):
         """One statement's feed row is a penny off, so it matches nothing."""
-        build_card(store, tmp_path, feed_charges={3: CHARGE + 1})
+        build_card(store, tmp_path, feed_charges={3: CHARGES[3] + 1})
         fold_same_money(store)
 
         line = closing_line(page(store), CLOSINGS[3])
 
         assert line == (
-            "Closing 2026-01-12: 1 unmatched feed row from truelayer in the band "
-            "2026-01-10 to 2026-01-14 (dated 2026-01-13), and 3 statement-only rows in the "
-            "period (dated 2026-01-12, 2026-01-12, 2026-01-12): no subset of the one sums "
-            "to any subset of the other."
+            "Closing 2026-01-12: the period 2025-12-11 to 2026-01-12 holds 1 unmatched feed "
+            "row from truelayer (dated 2025-12-11) and 3 statement-only rows (dated "
+            "2026-01-12, 2026-01-12, 2026-01-12): no subset of the feed rows sums to the "
+            "period's difference and to some subset of the statement-only rows."
         )
 
-    def test_Page_WhenNoFeedRowIsDatedNearTheClosing_SaysTheBandAndThatNothingWasToFold(
-        self, store, tmp_path
-    ):
-        build_card(store, tmp_path, charge_offset=3)
+    def test_Page_WhenThePeriodAlreadyAgrees_SaysThereWasNothingToFold(self, store, tmp_path):
+        build_card(store, tmp_path)
         fold_same_money(store)
 
-        line = closing_line(page(store), CLOSINGS[1])
+        line = closing_line(page(store), CLOSINGS[0])
 
         assert line == (
-            "Closing 2025-11-12: no unmatched feed row from truelayer within the band "
-            "2025-11-10 to 2025-11-14, so there is nothing to fold."
+            "Closing 2025-10-10: the period 2025-09-19 to 2025-10-10 already agrees with the "
+            "statement, so there is nothing to fold."
         )
 
-    def test_Page_WhenACandidateIsRefused_NamesThePeriodsThatWouldStillDiffer(
+    def test_Page_WhenTheOnlyFeedRowIsAConfirmedTransferLeg_SaysNoRowWasOpenToFolding(
         self, store, tmp_path
     ):
-        """A stray purchase dated 1 June sits in the period closing 10 June, so
-        the folds that touch that period are refused and the page names it."""
-        build_card(
-            store,
-            tmp_path,
-            extra_feed=[feed_row(333, date(2026, 6, 1), "Stray Purchase")],
-        )
+        build_card(store, tmp_path, transfer=False)
+        pair_with_savings(store, "Plan Charge 3")
         fold_same_money(store)
 
-        line = closing_line(page(store), CLOSINGS[6])
+        line = closing_line(page(store), CLOSINGS[3])
 
-        assert "a candidate was found (1 feed row from truelayer dated 2026-05-13" in line
-        assert "the period 2026-05-13 to 2026-06-10 would still differ" in line
-        assert "would still differ after folding" in line
+        assert line == (
+            "Closing 2026-01-12: the period 2025-12-11 to 2026-01-12 holds no unmatched feed "
+            "row from truelayer that the rule may fold, so there is nothing to fold."
+        )
 
-    def test_Page_WhenAnEarlierClosingClaimedTheBandsRow_SaysWhichRowWasClaimed(
+    def test_Page_WhenThePeriodDiffersAndNoStatementOnlyRowExists_SaysNoneCanBeTheSameMoney(
         self, store, tmp_path
     ):
-        _held_statement(
-            store, tmp_path, "s0", "10th May 2026", 10000, [("1st May", "Plain Purchase", 2231)]
-        )
-        _held_statement(
-            store,
-            tmp_path,
-            "s1",
-            statement_day(date(2026, 6, 10)),
-            12231,
-            [("10th Jun", "Part A", 389), ("10th Jun", "Part B", 111)],
-        )
-        _held_statement(
-            store,
-            tmp_path,
-            "s2",
-            statement_day(date(2026, 6, 11)),
-            12731,
-            [("11th Jun", "Part C", 678), ("11th Jun", "Part D", 222)],
-        )
-        land(
-            store,
-            feed_row(2231, date(2026, 5, 1), "Plain Purchase"),
-            feed_row(500, date(2026, 6, 11), "Combined One"),
-            feed_row(900, date(2026, 6, 12), "Combined Two"),
-        )
+        """A purchase only the feed holds, dated in the first period, which prints
+        nothing the feed never saw."""
+        build_mini_card(store, tmp_path, Variant.IN_PERIOD)
+        land(store, feed_row(777, date(2026, 1, 5), "Stray Purchase"))
         fold_same_money(store)
 
-        line = closing_line(page(store), date(2026, 6, 11))
+        line = closing_line(page(store), MINI_CLOSINGS[0])
 
-        assert "the rule folds 1 feed row from truelayer (dated 2026-06-12)" in line
-        assert (
-            "1 feed row dated 2026-06-11 in the band had been claimed by an earlier closing"
-            in line
+        assert line == (
+            "Closing 2026-01-10: the period 2025-12-29 to 2026-01-10 holds 1 unmatched feed "
+            "row from truelayer (dated 2026-01-05) but no statement-only row, so none of "
+            "them can be the same money as a statement row."
+        )
+
+    def test_Proof_WhenACandidateWouldLeaveItsOwnPeriodDiffering_RefusesItAndNamesThePeriod(
+        self, store, tmp_path
+    ):
+        """The proof is a backstop: a candidate drawn from the rule's own search
+        always makes its own period agree. This hands it a candidate that does
+        not (a row of the next period, offered for the one before), which is the
+        defect the backstop exists to catch, and reads what the page would say."""
+        build_card(store, tmp_path)
+        [item] = gather_evidence(store, sibling_accounts={})
+        chain = sorted(
+            (w for w in item.windows if w.kind is not PeriodKind.INSIDE), key=lambda w: w.last_day
+        )
+        [wrong] = [row for row in item.counted if row.description == "Plan Charge 3"]
+        offered = _Candidate(chain[2], "truelayer", (wrong,))
+
+        kept, refused = _proven(item, chain, [offered])
+        outcome = _outcome_of(
+            _Attempt(chain[2], "truelayer", False, [wrong], [], offered), refused, False
+        )
+
+        assert kept == []
+        assert outcome.verdict is Verdict.REFUSED
+        assert "the period 2025-11-13 to 2025-12-10 would still differ after folding" in (
+            outcome.describe()
         )
 
 
@@ -202,30 +240,52 @@ class TestWhereTheSearchIsBounded:
         self, store, tmp_path, monkeypatch
     ):
         monkeypatch.setattr(same_money_fold, "MAX_STATEMENT_ROWS", 2)
-        build_card(store, tmp_path)
+        build_card(store, tmp_path, feed_charges={3: CHARGES[3] + 1})
         fold_same_money(store)
 
-        line = closing_line(page(store), CLOSINGS[2])
+        line = closing_line(page(store), CLOSINGS[3])
 
         assert (
             "The search was bounded: only the nearest 2 of 3 statement-only rows were searched."
             in line
         )
-        assert "no subset of the one sums to any subset of the other" in line
 
-    def test_Page_WhenTheBandRowsExceedTheBound_SaysHowManyWereSearched(
+    def test_Page_WhenTheFeedRowsExceedTheSetBound_SaysEachWasStillTriedAlone(
         self, store, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr(same_money_fold, "MAX_BAND_ROWS", 1)
-        build_mini_card(store, tmp_path, Variant.ITEMISED_TWICE)
+        monkeypatch.setattr(same_money_fold, "MAX_SET_ROWS", 1)
+        build_mini_card(store, tmp_path, Variant.WITH_PURCHASE)
         fold_same_money(store)
 
-        line = closing_line(page(store), MINI_CLOSINGS[1])
+        line = closing_line(page(store), MINI_CLOSINGS[2])
 
         assert (
-            "The search was bounded: only the nearest 1 of 2 unmatched feed rows in the "
-            "band were searched." in line
+            "The search was bounded: each unmatched feed row was tried alone, but only the "
+            "latest 1 of 2 were combined into sets." in line
         )
+
+    def test_Fold_WhenAPeriodHoldsFarMoreRowsThanTheSetBound_StillFindsTheSingleRowAnswer(
+        self, store, tmp_path, monkeypatch
+    ):
+        """The period spanning the missing statement holds 31 feed rows, and its
+        answer is one of them: the bound limits sets, never the rows tried alone."""
+        monkeypatch.setattr(same_money_fold, "MAX_SET_ROWS", 3)
+        build_card(store, tmp_path)
+
+        report = fold_same_money(store)
+
+        assert report.folded == 8
+        assert "bounded" not in closing_line(page(store), CLOSINGS[5])
+
+    def test_Fold_WhenTheAnswerIsAPairBeyondTheSetBound_FoldsLessNeverMore(
+        self, store, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(same_money_fold, "MAX_SET_ROWS", 1)
+        build_mini_card(store, tmp_path, Variant.LISTED_TWICE)
+
+        report = fold_same_money(store)
+
+        assert report.folded == 2
 
 
 class TestWhereTheRuleDoesNotRun:
@@ -241,18 +301,44 @@ class TestWhereTheRuleDoesNotRun:
 class TestEachWayACardCanDifferFromTheNineStatementOne:
     """The variants in `card_variant_corpus`, each with the rule's measured answer.
 
-    Every answer below was predicted first and then measured; two predictions
-    were wrong and are recorded in the corpus module.
+    Every answer below was predicted first and then measured; the prediction
+    that was wrong is recorded in the corpus module. The four closings are, in
+    order, a first period that agrees and three that follow it.
     """
 
     @pytest.mark.parametrize(
         ("variant", "expected_folds", "expected_verdicts"),
         [
-            (Variant.ITEMISED, 4, [Verdict.FOLDED] * 4),
-            (Variant.FEED_TWICE, 0, [Verdict.NO_MATCH] * 4),
-            (Variant.ITEMISED_TWICE, 0, [Verdict.REFUSED] * 4),
-            (Variant.SAME_AMOUNT_BOTH, 0, [Verdict.NO_BAND_ROWS] * 4),
-            (Variant.TWIN_LATE, 0, [Verdict.NO_BAND_ROWS] * 4),
+            (
+                Variant.IN_PERIOD,
+                3,
+                [Verdict.AGREES, Verdict.FOLDED, Verdict.FOLDED, Verdict.FOLDED],
+            ),
+            (
+                Variant.AFTER_CLOSING,
+                0,
+                [Verdict.AGREES, Verdict.NO_MATCH, Verdict.NO_MATCH, Verdict.NO_MATCH],
+            ),
+            (
+                Variant.EQUAL_CHARGES,
+                0,
+                [Verdict.AGREES, Verdict.NO_MATCH, Verdict.AGREES, Verdict.AGREES],
+            ),
+            (
+                Variant.WITH_PURCHASE,
+                2,
+                [Verdict.AGREES, Verdict.FOLDED, Verdict.NO_MATCH, Verdict.FOLDED],
+            ),
+            (
+                Variant.FEED_TWICE,
+                2,
+                [Verdict.AGREES, Verdict.FOLDED, Verdict.NO_MATCH, Verdict.FOLDED],
+            ),
+            (
+                Variant.LISTED_TWICE,
+                4,
+                [Verdict.AGREES, Verdict.FOLDED, Verdict.FOLDED, Verdict.FOLDED],
+            ),
         ],
     )
     def test_Rule_OnEachVariantOfTheCard_FoldsAndStopsWhereTheCorpusSays(
@@ -265,58 +351,68 @@ class TestEachWayACardCanDifferFromTheNineStatementOne:
         assert report.folded == expected_folds
         assert verdicts(store) == expected_verdicts
 
-    def test_Page_WhenTheFeedPostsTheChargeTwice_ShowsTheShapeTheRealCardReported(
+    def test_Rule_WhenAPurchaseSharesThePeriod_LeavesTheChargeCountedBesideItAndSaysTheyDiffer(
         self, store, tmp_path
     ):
-        """One feed row dated the period's first day AND one row dated its
-        closing day, both of the difference's size: the closing-day row is held
-        by both sources, so it is not a leftover, and no statement-only row exists
-        for the rule to match the feed row to."""
+        """The period differs by the charge and the purchase together, so the
+        charge alone is not folded (that would leave the period differing by a
+        figure nobody has explained): both stay counted and the page says the
+        period differs."""
+        build_mini_card(store, tmp_path, Variant.WITH_PURCHASE)
+
+        fold_same_money(store)
+
+        assert "Plan Charge 2" not in folded(store)
+        assert "Genuine Purchase" not in folded(store)
+        text = page(store)
+        assert "The 6 rows the store counts differ from the statement's movement." in text
+
+    def test_Rule_WhenTheFeedPostsTheChargeTwiceAndTheStatementListsItOnce_FoldsNeither(
+        self, store, tmp_path
+    ):
         build_mini_card(store, tmp_path, Variant.FEED_TWICE)
+
+        fold_same_money(store)
+
+        assert "Plan Charge 2" not in folded(store)
+        assert "Plan Charge Again 2" not in folded(store)
+
+    def test_Rule_WhenTheStatementListsTheChargeTwiceToo_FoldsBothFeedRowsTogether(
+        self, store, tmp_path
+    ):
+        build_mini_card(store, tmp_path, Variant.LISTED_TWICE)
+
+        fold_same_money(store)
+
+        assert {"Plan Charge 2", "Plan Charge Again 2"} <= set(folded(store))
+        line = closing_line(page(store), MINI_CLOSINGS[2])
+        assert "the rule folds 2 feed rows from truelayer (dated 2026-02-11, 2026-02-14)" in line
+
+    def test_Page_WhenTheFeedDatesTheChargeTheDayAfterTheClosing_ShowsTheRowAsTheNextPeriodsOwn(
+        self, store, tmp_path
+    ):
+        """The premise two earlier versions of the rule were built on. The row is
+        listed under the NEXT period (its first day), where the statement lists a
+        different charge, so nothing is folded."""
+        build_mini_card(store, tmp_path, Variant.AFTER_CLOSING)
         fold_same_money(store)
 
         text = page(store)
 
         assert closing_line(text, MINI_CLOSINGS[1]) == (
-            "Closing 2026-02-10: 1 unmatched feed row from truelayer in the band "
-            "2026-02-08 to 2026-02-12 (dated 2026-02-11), and no statement-only row in the "
-            "period: no subset of the one sums to any subset of the other."
+            "Closing 2026-02-10: the period 2026-01-11 to 2026-02-10 holds 1 unmatched feed "
+            "row from truelayer (dated 2026-01-11) and 3 statement-only rows (dated "
+            "2026-02-10, 2026-02-10, 2026-02-10): no subset of the feed rows sums to the "
+            "period's difference and to some subset of the statement-only rows."
         )
         assert "Feed-only rows are dated: 2026-01-11 (truelayer)." in text
-        assert (
-            "The difference equals a single row held in this period: dated 2026-01-11, "
-            "held by truelayer (one of this period's feed-only leftovers); dated 2026-02-10, "
-            "held by santander-cc-pdf and truelayer (a row both sources hold, so not a "
-            "leftover)." in text
-        )
-
-    def test_Page_WhenTheFeedPostsTheChargeTwiceAndTheStatementItemisesIt_NamesTheBlockingPeriod(
-        self, store, tmp_path
-    ):
-        build_mini_card(store, tmp_path, Variant.ITEMISED_TWICE)
-        fold_same_money(store)
-
-        line = closing_line(page(store), MINI_CLOSINGS[0])
-
-        assert "a candidate was found (1 feed row from truelayer dated 2026-01-11" in line
-        assert "the period 2026-01-11 to 2026-02-10 would still differ after folding" in line
 
 
 class TestTheLeftoversAreListedByDateAndSource:
-    def test_Page_ForEachDifferingPeriod_ListsTheDatesAndSourcesOfBothLeftoverSides(
-        self, store, tmp_path
-    ):
-        build_mini_card(store, tmp_path, Variant.FEED_TWICE)
-        fold_same_money(store)
-
-        text = page(store)
-
-        assert "Feed-only rows are dated: 2026-02-11 (truelayer)." in text
-
     def test_Page_ForAPeriodWithStatementOnlyRows_ListsTheirDatesAndTheStatementSource(
         self, store, tmp_path
     ):
-        build_mini_card(store, tmp_path, Variant.ITEMISED_TWICE)
+        build_mini_card(store, tmp_path, Variant.AFTER_CLOSING)
         fold_same_money(store)
 
         text = page(store)
@@ -328,7 +424,7 @@ class TestTheLeftoversAreListedByDateAndSource:
 
     def test_Page_WhenAListIsLong_ShowsTwentyAndSaysHowManyMore(self, store, tmp_path):
         """The month the statement is missing holds thirty-one feed-only rows
-        once the charge dated 12 February is folded."""
+        once the charge dated 12 March is folded."""
         build_card(store, tmp_path)
         fold_same_money(store)
 
@@ -337,7 +433,7 @@ class TestTheLeftoversAreListedByDateAndSource:
         [listing] = [
             line
             for line in text.splitlines()
-            if line.strip().startswith("Feed-only rows are dated: 2026-02-13")
+            if line.strip().startswith("Feed-only rows are dated: 2026-02-12")
         ]
         assert listing.endswith(", and 11 more.")
         assert listing.count("(truelayer)") == 20
@@ -361,18 +457,14 @@ class TestTheMaskedPageStillCarriesNoValues:
         text = page(store)
 
         assert MONEY_FIGURE.search(text) is None, MONEY_FIGURE.search(text)
-        for private in ("6.95", "695", "Plan Charge", "Plan Part", "Ordinary", "Late Twin"):
+        for private in ("6.95", "695", "Plan Charge", "Plan Part", "Ordinary", "Genuine"):
             assert private not in text, private
         assert re.search(r"Closing \d{4}-\d\d-\d\d:", text)
 
 
 class TestTheRecordIsDerivedData:
-    @pytest.mark.parametrize(
-        "variant", [Variant.ITEMISED, Variant.FEED_TWICE, Variant.ITEMISED_TWICE, Variant.TWIN_LATE]
-    )
-    def test_Outcome_RoundTripsThroughItsStoredText_ForEachVerdict(
-        self, store, tmp_path, variant
-    ):
+    @pytest.mark.parametrize("variant", list(Variant))
+    def test_Outcome_RoundTripsThroughItsStoredText_ForEachVariant(self, store, tmp_path, variant):
         build_mini_card(store, tmp_path, variant)
         [outcome] = plan_same_money(gather_evidence(store, sibling_accounts={})).outcomes
 
@@ -388,6 +480,25 @@ class TestTheRecordIsDerivedData:
         text = page(store)
 
         assert "record for this account cannot be read" in text
+
+    def test_Page_WhenTheStoredRecordIsFromTheEarlierBandRule_SaysItCannotBeReadUntilThePassRuns(
+        self, store, tmp_path
+    ):
+        """A record written by the rule that searched a band around each closing
+        has no period in it. It is read as unreadable, not guessed at, and the
+        next import, pull, or rebuild rewrites it."""
+        build_card(store, tmp_path)
+        earlier = (
+            '{"account": "card", "feeds": ["truelayer"], "withheld": "", "unpaired": [], '
+            '"closings": [{"closing": "2025-10-10", "feed": "truelayer", "verdict": '
+            '"no-band-rows", "band": ["2025-10-08", "2025-10-12"], "band_dates": [], '
+            '"band_searched": 8, "claimed_dates": [], "statement_dates": [], '
+            '"statement_searched": 12, "taken_dates": [], "blocking": []}]}'
+        )
+        store.replace_same_money_outcomes({"card": earlier})
+        store.connection.commit()
+
+        assert "record for this account cannot be read" in page(store)
 
     def test_Store_OpenedAtTheVersionBeforeTheTable_GrowsItOnOpen(self, tmp_path):
         path = tmp_path / "old.sqlite3"

@@ -2,23 +2,23 @@
 
 A card's statements print three small charges on the last day of each period
 (an interest charge, a fee, a levy) where the aggregator's feed carries one row
-for their total, posted on the statement date, which by date is the first days
-of the NEXT period. The store holds all four rows, so each period after the
-first is over by the feed's row and the account's total is over by every feed
-row, while the statements' own arithmetic is exact.
+for their total, dated the FIRST day of the same period. The store holds all
+four rows, so each period is over by the feed's row and the account's total is
+over by every feed row, while the statements' own arithmetic is exact.
 
 The card, built from the constructed data below with every answer decided
 before the first run. Statements close 11 February, 11 March, 11 April 2026 and
 chain from 100.00 owed (spending raises what is owed; the store's sign is the
 reverse). Per statement, an ordinary purchase the feed also reports, and three
 itemised charges the statement prints on the 10th that the feed reports as ONE
-row for their total on the 12th:
+row for their total on the first day of the period. The first statement's
+period has no feed row: it agrees as it stands.
 
-    S1  20 Jan Alpha Grocer 12.37    10 Feb  2.11 + 2.50 + 3.16 = 7.77   feed 12 Feb 7.77
-    S2  14 Feb Charlie Cafe  5.43    10 Mar  1.11 + 2.22 + 4.44 = 7.77   feed 12 Mar 7.77
-    S3  12 Mar Echo Rail    40.73    10 Apr  1.20 + 1.30 + 2.50 = 5.00   feed 12 Apr 5.00
+    S1  20 Jan Alpha Grocer 12.37    10 Feb  2.11 + 2.50 + 3.16 = 7.77   no feed row
+    S2  14 Feb Charlie Cafe  5.43    10 Mar  1.11 + 2.22 + 4.44 = 7.77   feed 12 Feb 7.77
+    S3  12 Mar Echo Rail    40.73    10 Apr  1.20 + 1.30 + 2.50 = 5.00   feed 12 Mar 5.00
 
-S1 and S2 itemise the SAME total on purpose: a rule that took the neighbouring
+S1 and S2 itemise the SAME total on purpose: a rule that took a neighbouring
 month's feed row for its own would be satisfied by either. Closings (owed):
 120.14, 133.34, 179.07; the statements' spending sums to 79.07.
 """
@@ -66,7 +66,8 @@ ORDINARY: list[tuple[str, str, int, date]] = [
 ITEMISED: list[list[int]] = [[211, 250, 316], [111, 222, 444], [120, 130, 250]]
 CLOSINGS = ["11th Feb 2026", "11th Mar 2026", "11th Apr 2026"]
 CHARGE_DAYS = ["10th Feb", "10th Mar", "10th Apr"]
-FEED_DAYS = [date(2026, 2, 12), date(2026, 3, 12), date(2026, 4, 12)]
+#: The day the feed dates each statement's charge; the first statement has none.
+FEED_DAYS: list[date | None] = [None, date(2026, 2, 12), date(2026, 3, 12)]
 CHARGE_NAMES = ["Interest", "Late Fee", "Levy"]
 
 FIRST_PERIOD = "2026-01-20 to 2026-02-11"
@@ -75,6 +76,13 @@ THIRD_PERIOD = "2026-03-12 to 2026-04-11"
 
 #: The statements' own spending, in the store's sign.
 STATEMENT_TOTAL = -(1237 + 777 + 543 + 777 + 4073 + 500)
+
+#: The charge of a fourth statement that is not held, dated after the last
+#: closing: a feed with nothing after it leaves the last statement's rows
+#: outside the span the two sources are compared over. It is real spending the
+#: statements do not yet cover, so it is counted whatever is folded.
+TRAILING_FEED = 444
+AFTER_LAST_CLOSING = date(2026, 4, 12)
 
 
 def _row(
@@ -105,11 +113,12 @@ def land_feed(store: Store, *rows: Transaction, digest: str = "feed") -> None:
 
 
 def feed_rows(
-    totals: list[int | None] | None = None, *, days: list[date] | None = None
+    totals: list[int | None] | None = None, *, days: list[date | None] | None = None
 ) -> list[Transaction]:
     """The feed's rows: each ordinary purchase, and one row per statement for the
-    itemised total (None leaves a statement's total out of the feed)."""
-    wanted = totals if totals is not None else [sum(items) for items in ITEMISED]
+    itemised total (None leaves a statement's total, or its date, out of the
+    feed)."""
+    wanted = totals if totals is not None else [None, 777, 500]
     chosen = days if days is not None else FEED_DAYS
     rows = [
         _row(-minor, when, description)
@@ -118,8 +127,9 @@ def feed_rows(
     rows += [
         _row(-total, day, f"Combined Fees {position}")
         for position, (total, day) in enumerate(zip(wanted, chosen, strict=True))
-        if total is not None
+        if total is not None and day is not None
     ]
+    rows.append(_row(-TRAILING_FEED, AFTER_LAST_CLOSING, "Next Statements Charge"))
     return rows
 
 
@@ -179,18 +189,17 @@ class TestTheCardAShape:
     def test_Before_EveryPeriodAfterTheFirstIsOverAndTheTotalIsOverByEveryFeedRow(
         self, store, tmp_path
     ):
-        """Not the fold: the fault it exists for. Each feed row dated after a
-        closing lands in the next period: S2's and S3's periods are over by 7.77
-        each, and the account's total is over the statements' by all three feed
-        rows (7.77 + 7.77 + 5.00)."""
+        """Not the fold: the fault it exists for. S2's period is over by its
+        charge row (7.77) and S3's by its own (5.00), and the account's total is
+        over the statements' by both."""
         card_a(store, tmp_path)
 
         held = periods(store)
 
         assert held[FIRST_PERIOD].agrees
         assert held[SECOND_PERIOD].surplus_minor == -777
-        assert held[THIRD_PERIOD].surplus_minor == -777
-        assert total(store) == STATEMENT_TOTAL - 777 - 777 - 500
+        assert held[THIRD_PERIOD].surplus_minor == -500
+        assert total(store) == STATEMENT_TOTAL - TRAILING_FEED - 777 - 500
 
     def test_Fold_OverThreeConsecutiveMonths_FoldsEachFeedRowAndEveryPeriodAgrees(
         self, store, tmp_path
@@ -199,15 +208,11 @@ class TestTheCardAShape:
 
         report = fold_same_money(store)
 
-        assert (report.folded, report.newly_folded, report.released) == (3, 3, 0)
-        assert folded_descriptions(store) == [
-            "Combined Fees 0",
-            "Combined Fees 1",
-            "Combined Fees 2",
-        ]
+        assert (report.folded, report.newly_folded, report.released) == (2, 2, 0)
+        assert folded_descriptions(store) == ["Combined Fees 1", "Combined Fees 2"]
         held = periods(store)
         assert all(p.agrees for p in held.values())
-        assert total(store) == STATEMENT_TOTAL
+        assert total(store) == STATEMENT_TOTAL - TRAILING_FEED
 
     def test_Fold_KeepsTheStatementsRowsCountedAndTheFeedRowsSightings(self, store, tmp_path):
         card_a(store, tmp_path)
@@ -242,7 +247,7 @@ class TestTheCardAShape:
 
         text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
 
-        assert text.count("1 feed row was folded as the same money as 3 statement rows") == 3
+        assert text.count("1 feed row was folded as the same money as 3 statement rows") == 2
         assert "withheld from the push" in text
         assert "differ from" not in text
         assert MONEY_FIGURE.search(text) is None, MONEY_FIGURE.search(text)
@@ -261,7 +266,7 @@ class TestTheCardAShape:
 
         again = fold_same_money(store)
 
-        assert (again.folded, again.newly_folded, again.released) == (3, 0, 0)
+        assert (again.folded, again.newly_folded, again.released) == (2, 0, 0)
 
 
 class TestTheImportSummarySaysSo:
@@ -271,7 +276,7 @@ class TestTheImportSummarySaysSo:
         """The feed is held first; the three statements then arrive one file at a
         time through the door a person uses. The fold runs after each, so the
         rows are folded as the evidence arrives and every summary says how many
-        that file's arrival folded: three in all, and the wording names what it
+        that file's arrival folded: two in all, and the wording names what it
         means for the push."""
         land_feed(store, *feed_rows())
         summaries = []
@@ -289,15 +294,11 @@ class TestTheImportSummarySaysSo:
             summaries.append(import_file(store, path, account_id=ACCOUNT))
             owed = owed_after
 
-        assert sum(s.same_money_folded for s in summaries) == 3
+        assert sum(s.same_money_folded for s in summaries) == 2
         described = " ".join(s.describe() for s in summaries)
         assert "feed row(s) as the same money a statement itemises" in described
         assert "(withheld from the push)" in described
-        assert folded_descriptions(store) == [
-            "Combined Fees 0",
-            "Combined Fees 1",
-            "Combined Fees 2",
-        ]
+        assert folded_descriptions(store) == ["Combined Fees 1", "Combined Fees 2"]
 
 
 class TestWhatIsNotTheSameMoney:
@@ -317,8 +318,9 @@ class TestWhatIsNotTheSameMoney:
     ):
         """The sums are equal (7.77 and 7.77), but a second feed (a CSV export)
         also holds a 3.33 charge on 20 February that neither the statement nor
-        the aggregator has. Folding the aggregator's row leaves S2's period over
-        by 3.33, so the statement's arithmetic does not vouch for the fold."""
+        the aggregator has. The period differs by both rows together, which no
+        statement row sums to, so the statement's arithmetic does not vouch for
+        folding the aggregator's row alone."""
         card_a(store, tmp_path, itemised=[[], [111, 222, 444], []], totals=[None, 777, None])
         land_feed(
             store,
@@ -329,16 +331,14 @@ class TestWhatIsNotTheSameMoney:
         report = fold_same_money(store)
 
         assert report.folded == 0
-        assert periods(store)[SECOND_PERIOD].surplus_minor == -333
+        assert periods(store)[SECOND_PERIOD].surplus_minor == -1110
 
     def test_Fold_WhenAnUnrelatedFeedRowSharesThePeriod_FoldsNothingAndSaysTheyAreNotEqual(
         self, store, tmp_path
     ):
         """A 3.33 charge only the feed holds, on 20 February, in S2's period: the
-        feed-only rows there sum to 3.33 against the statement's 7.77. The
-        aggregator's 7.77 row for S2 is dated 12 March, so the rows the fold may
-        take for S2 are 3.33 and 7.77: not equal to the statement's, and none is
-        taken."""
+        feed-only rows there sum to 11.10 against the statement's 7.77, and the
+        period's difference is 11.10, which no statement row sums to."""
         card_a(store, tmp_path, itemised=[[], [111, 222, 444], []], totals=[None, 777, None])
         land_feed(store, _row(-333, date(2026, 2, 20), "Surprise Charge"))
 
@@ -359,30 +359,31 @@ class TestWhatIsNotTheSameMoney:
 
         assert report.folded == 0
 
-    def test_Fold_WhenTheFeedRowIsDatedBeyondTheBoundaryWindow_FoldsNothing(
+    def test_Fold_WhenTheFeedRowIsDatedAfterTheStatementsClosing_FoldsNothing(
         self, store, tmp_path
     ):
-        """The aggregator dates S2's combined row 15 March, four days after the
-        closing: outside the two days a posting on the statement date can lag."""
+        """The aggregator dates S2's combined row 12 April, after S2's closing:
+        by date it is the next period's, where the statement lists no such
+        charge. A statement's charge is looked for in its own period only."""
         card_a(
             store,
             tmp_path,
             itemised=[[], [111, 222, 444], []],
             totals=[None, 777, None],
-            days=[FEED_DAYS[0], date(2026, 3, 15), FEED_DAYS[2]],
+            days=[None, date(2026, 3, 12), None],
         )
 
         report = fold_same_money(store)
 
         assert report.folded == 0
 
-    def test_Fold_WhenTheFeedRowIsDatedInsideTheBoundaryWindow_Folds(self, store, tmp_path):
+    def test_Fold_WhenTheFeedRowIsDatedLaterInTheStatementsOwnPeriod_Folds(self, store, tmp_path):
         card_a(
             store,
             tmp_path,
             itemised=[[], [111, 222, 444], []],
             totals=[None, 777, None],
-            days=[FEED_DAYS[0], date(2026, 3, 13), FEED_DAYS[2]],
+            days=[None, date(2026, 2, 20), None],
         )
 
         report = fold_same_money(store)
@@ -398,27 +399,24 @@ class TestWhatIsNeverFolded:
             for t in store.transactions_for_account(ACCOUNT)
             if t.description == f"Combined Fees {which}"
         ]
-        land_feed(store, _row(777, date(2026, 2, 12), "Other Side", account="savings"))
+        land_feed(
+            store, _row(-leg.amount_minor, leg.value_date, "Other Side", account="savings")
+        )
         [other] = store.transactions_for_account("savings")
         store.replace_transfer_pairs([(leg.entity_id, other.entity_id)])
         store.connection.commit()
 
     @pytest.mark.parametrize(
         ("which", "expected"),
-        [
-            (0, []),
-            (1, ["Combined Fees 0"]),
-            (2, ["Combined Fees 0", "Combined Fees 1"]),
-        ],
-        ids=["first-statements-row", "middle-statements-row", "beyond-the-span"],
+        [(1, ["Combined Fees 2"]), (2, ["Combined Fees 1"])],
+        ids=["middle-statements-row", "last-statements-row"],
     )
-    def test_Fold_WhenTheFeedRowIsAConfirmedTransferLeg_LeavesItCountedAndFoldsOnlyWhatStillProves(
+    def test_Fold_WhenTheFeedRowIsAConfirmedTransferLeg_LeavesItCountedAndFoldsTheOther(
         self, store, tmp_path, which, expected
     ):
-        """The leg stays counted, so the period it is dated in stays over by it,
-        and the fold that would need that period to agree is refused with it:
-        the first statement's leg blocks the second period and so everything
-        after; the middle one blocks the third; the last one blocks nothing."""
+        """The leg stays counted, so the period it is dated in stays over by it
+        and is reported as differing; each period is judged on its own, so the
+        other statement's charge still folds."""
         self._with_pair(store, tmp_path, which)
 
         fold_same_money(store)
@@ -444,9 +442,9 @@ class TestWhatIsNeverFolded:
 
     def test_Fold_NeverUsesAnotherAccountsFeedRow(self, store, tmp_path):
         """The statement itemises 7.77 and the only 7.77 row in the store is another
-        account's, on the same day: nothing is folded in either account."""
+        account's, on the S2 period's first day: nothing is folded in either account."""
         card_a(store, tmp_path, itemised=[[], [111, 222, 444], []], totals=[None, None, None])
-        land_feed(store, _row(-777, date(2026, 3, 12), "Combined Fees 1", account="other-card"))
+        land_feed(store, _row(-777, date(2026, 2, 12), "Combined Fees 1", account="other-card"))
 
         report = fold_same_money(store)
 
@@ -471,10 +469,10 @@ class TestTheFoldIsDerivedAndReversible:
 
         assert "Combined Fees 2" not in folded_descriptions(store)
         assert report.released == 1
-        assert report.folded == 2
+        assert report.folded == 1
 
     def test_Fold_WhenAStatementLaterListsTheFeedRow_ReleasesIt(self, store, tmp_path):
-        """A later statement file whose rows include a 7.77 charge on 12 March
+        """A later statement file whose rows include a 7.77 charge on 12 February
         merges into the aggregator's row, so a statement now lists it: it is no
         longer 'the same money, described differently', it is the statement's own."""
         card_a(store, tmp_path, itemised=[[], [111, 222, 444], []], totals=[None, 777, None])
@@ -482,7 +480,7 @@ class TestTheFoldIsDerivedAndReversible:
         assert folded_descriptions(store) == ["Combined Fees 1"]
         _held_statement(
             store, tmp_path, "later", "11th Apr 2026", 13334,
-            [("12th Mar", "Combined Fees 1", 777)],
+            [("12th Feb", "Combined Fees 1", 777)],
         )  # fmt: skip
 
         fold_same_money(store)
@@ -499,16 +497,12 @@ class TestTheFoldIsDerivedAndReversible:
 
         fold_same_money(store)
 
-        assert folded_descriptions(store) == [
-            "Combined Fees 0",
-            "Combined Fees 1",
-            "Combined Fees 2",
-        ]
-        assert total(store) == STATEMENT_TOTAL
+        assert folded_descriptions(store) == ["Combined Fees 1", "Combined Fees 2"]
+        assert total(store) == STATEMENT_TOTAL - TRAILING_FEED
 
     def test_Fold_WhenReplayedFromRawInARebuild_FoldsTheSameRows(self, store, tmp_path):
         """The statements and the feed both as raw artefacts, replayed by a
-        rebuild: the same three rows are folded as by arrival."""
+        rebuild: the same two rows are folded as by arrival."""
         import json
 
         from obdi.providers import truelayer
@@ -532,19 +526,15 @@ class TestTheFoldIsDerivedAndReversible:
 
         report = rebuild_from_raw(store, account_map=account_map)
 
-        assert folded_descriptions(store) == [
-            "Combined Fees 0",
-            "Combined Fees 1",
-            "Combined Fees 2",
-        ]
-        assert report.same_money_folded == 3
-        assert total(store) == STATEMENT_TOTAL
+        assert folded_descriptions(store) == ["Combined Fees 1", "Combined Fees 2"]
+        assert report.same_money_folded == 2
+        assert total(store) == STATEMENT_TOTAL - TRAILING_FEED
 
 
 class TestTheSpaceFoldAndThisOneDoNotInterfere:
     def test_Folds_WhenAStarlingFamilySitsBesideACard_EachPassKeepsItsOwn(self, store, tmp_path):
         """A bill paid from a Starling Space (main row folded into the Space's) in
-        the same store as the card. Space fold: 1 row. Same-money fold: 3 rows.
+        the same store as the card. Space fold: 1 row. Same-money fold: 2 rows.
         Running either pass again releases neither's rows, and no row is folded
         by both."""
         from test_space_attribution import MAP
@@ -559,13 +549,13 @@ class TestTheSpaceFoldAndThisOneDoNotInterfere:
         card_folded = {
             t.entity_id for t in store.transactions_for_account(ACCOUNT) if t.status.is_history
         }
-        assert len(space_folded) == 1 and len(card_folded) == 3
+        assert len(space_folded) == 1 and len(card_folded) == 2
 
         space_report = fold_space_copies(store, MAP)
         same_report = fold_same_money(store)
 
         assert (space_report.folded, space_report.newly_folded, space_report.released) == (1, 0, 0)
-        assert (same_report.folded, same_report.newly_folded, same_report.released) == (3, 0, 0)
+        assert (same_report.folded, same_report.newly_folded, same_report.released) == (2, 0, 0)
         assert store.space_folded_ids() == space_folded
         assert store.statement_folded_ids() == card_folded
         assert store.space_folded_ids().isdisjoint(store.statement_folded_ids())

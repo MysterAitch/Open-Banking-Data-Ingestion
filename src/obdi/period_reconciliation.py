@@ -94,13 +94,6 @@ SAME_MONEY_PHASE = "same-money-fold"
 STATEMENT_SIDE = "statement"
 FEED_SIDE = "feed"
 
-#: How many days after a statement's closing a feed may date a row that belongs
-#: to it. A card feed posts a statement's last charges on the statement date
-#: itself, which by date is the first day of the NEXT period; two days covers a
-#: weekend's posting without reaching the following statement's own rows.
-BOUNDARY_DAYS = 2
-
-
 class Locus(StrEnum):
     """Which explanation of a differing period holds."""
 
@@ -624,13 +617,7 @@ def _periods_against(
         held = held_in(window, counted, membership)
         held_minor = sum(r.amount_minor for r in held)
         folded_here = (
-            [
-                r
-                for r in folded
-                if r.source == feed
-                and first_day <= r.value_date <= last_day + timedelta(days=BOUNDARY_DAYS)
-                and _earliest_window(windows, r.value_date) is window
-            ]
+            [r for r in folded if r.source == feed and first_day <= r.value_date <= last_day]
             if feed and not inside_kind
             else []
         )
@@ -698,17 +685,6 @@ def _periods_against(
             )
         )
     return built
-
-
-def _earliest_window(windows: Sequence[_Window], day: date) -> _Window | None:
-    """The first chain period (earliest closing) a row dated `day` could belong
-    to, counting the days up to `BOUNDARY_DAYS` after each closing."""
-    for window in sorted(
-        (w for w in windows if w.kind is not PeriodKind.INSIDE), key=lambda w: w.last_day
-    ):
-        if window.first_day <= day <= window.last_day + timedelta(days=BOUNDARY_DAYS):
-            return window
-    return None
 
 
 @dataclass(frozen=True)
