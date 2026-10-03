@@ -7,17 +7,25 @@ bookmark, paste into a note, or fetch from a script holds a value, and the
 response is sent `no-store` so a browser history does not either.
 
 THE TIMELINE HAS NO VERTICAL MAGNITUDE. A step's size is a figure, and a mark
-taller for a bigger step would draw the figure. Every mark is one height, rows
-say what KIND of step a mark is, and the only measure that varies is the date,
-which is not private. The values chart is where sizes are drawn.
+taller for a bigger step would draw the figure. Every mark is one height and
+width, rows say what KIND of change a mark is, and the only measures that vary
+are the date and a count, neither of which is private. The values chart is
+where sizes are drawn.
 
-THE SCALE, stated here and only here: a full view is `PIXELS_PER_DAY` wide per
-day, so about seven and a half years come to about ten thousand pixels, inside
-a container that scrolls sideways so the page itself does not. A `from`/`to`
-range is drawn so that the whole range is about `TARGET_RANGE_WIDTH` wide, no
-narrower than a full view and no wider per day than `MAX_PIXELS_PER_DAY`, so a
-month opens at day scale. The labels are drawn in a column beside the scrolling
-chart, so the row names and the figures stay in view while the dates scroll.
+THE TIMELINE FITS THE SCREEN and never scrolls: it is drawn in `VIEW_WIDTH`
+units and scaled to its container, with changes combined into bins by
+`balance_chart_bins`, which states how. A table of counts per period beneath it
+says where in time the changes are, and each period opens that period.
+
+THE VALUES CHART is the one that scrolls. A full view of it is `PIXELS_PER_DAY`
+wide per day, so about seven and a half years come to about ten thousand pixels,
+inside a container that scrolls sideways so the page itself does not. A
+`from`/`to` range is drawn so that the whole range is about `TARGET_RANGE_WIDTH`
+wide, no narrower than a full view and no wider per day than
+`MAX_PIXELS_PER_DAY`, so a month opens at day scale. The labels are drawn in a
+column beside the scrolling chart, so the figures stay in view while the dates
+scroll. It cannot scroll itself to a change, so a row of posted links opens it
+around each change in range.
 
 Charts are inline SVG with presentation attributes and no script, as the
 position page's is, so nothing is added to the shared stylesheet that pages
@@ -26,7 +34,6 @@ which must show no figure are searched against.
 
 from __future__ import annotations
 
-import calendar
 import html
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -36,6 +43,23 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .balance_chart import OWN, WHOLE, BalanceChart, SourceLine
+from .balance_chart_bins import (
+    DAY,
+    MONTH,
+    YEAR,
+    Change,
+    Period,
+    bins_of,
+    calendar_span,
+    changes_in,
+    choose_bin_unit,
+    count_by_kind,
+    empty_runs,
+    nominal_bin_width,
+    period_label,
+    period_unit,
+    periods_of,
+)
 from .callback import render_page
 from .errors import DataError
 from .fault_structure import (
@@ -48,7 +72,6 @@ from .fault_structure import (
     UNEXPLAINED,
     UNHELD,
     FaultStructure,
-    Step,
     StructureReport,
 )
 from .logs import say
@@ -66,14 +89,37 @@ MAX_PIXELS_PER_DAY = 240.0
 
 #: The one height of every mark on the timeline, whatever it stands for.
 MARK_HEIGHT = 14
-MARK_WIDTH = 5
-ROW_HEIGHT = 30
+ROW_HEIGHT = 38
 EDGE = 24
-LABEL_WIDTH = 88
 AXIS_WIDTH = 78
+
+#: The timeline's own units, not pixels: the browser scales the whole drawing
+#: to its container. The width is the phone's, so text is readable there and
+#: never much larger elsewhere.
+VIEW_WIDTH = 360
+PLOT_LEFT = 80
+PLOT_RIGHT = VIEW_WIDTH - 8
+_MARK_WIDEST = 14
+_MARK_NARROWEST = 4
+
+#: A view of this many days or fewer is labelled by month and day; a longer one
+#: by year and month, and one of more than `_YEARS_VIEW_DAYS` by year alone.
+_SHORT_VIEW_DAYS = 93
+_YEARS_VIEW_DAYS = 1100
+#: Past this many months every third is labelled, and a short view labels every
+#: day only up to this many days and every week beyond.
+_MONTHS_LABELLED_ALL = 14
+_EVERY_DAY_LABELLED = 19
+_DIM = ' fill-opacity=".8"'
 
 #: How many days of a long list are named before "and N more".
 _NAMED_DAYS = 12
+
+#: How many changes the values chart offers a link around, before "and N more".
+_CHANGE_LINKS = 20
+
+#: Days either side of a change that its values link opens.
+_CHANGE_WINDOW_DAYS = 3
 
 #: The most days a requested range may cover: it keeps a mistyped range from
 #: asking for a page of millions of pixels.
@@ -128,6 +174,12 @@ def _day_list(days: Sequence[date]) -> str:
 def _per_cent(share: float) -> str:
     text = f"{share * 100:.1f}".removesuffix(".0")
     return f"{text} per cent"
+
+
+def _oxford(items: Sequence[str]) -> str:
+    if len(items) <= 2:
+        return " and ".join(items)
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
 def _href(ref: str, start: date | None = None, end: date | None = None) -> str:
@@ -311,49 +363,16 @@ def _label(x: float, y: float, text: str, extra: str = "") -> str:
     )
 
 
-def _linked(href: str | None, inner: str) -> str:
-    return f'<a href="{href}">{inner}</a>' if href else inner
-
-
-def _axis(
-    scale: Scale,
-    *,
-    year_y: float | None,
-    month_y: Sequence[float],
-    lines: tuple[float, float] | None,
-    ref: str | None,
-) -> str:
+def _axis(scale: Scale, *, month_y: Sequence[float]) -> str:
     """Month ticks, each labelled with its month AND year, so any screenful says
-    the date; year labels above them; day labels where the scale has the room.
-
-    Labels link to a narrower range of the masked timeline when `ref` is given.
-    """
+    the date, and day labels where the scale has the room."""
     parts: list[str] = []
-    months = _months(scale)
     per_day = scale.per_day
-    for first in months:
+    for first in _months(scale):
         x = scale.x(first)
-        major = first.month == 1
-        if lines is not None:
-            parts.append(
-                f'<line x1="{x:.1f}" y1="{lines[0]:.1f}" x2="{x:.1f}" y2="{lines[1]:.1f}" '
-                f'stroke="currentColor" stroke-opacity="{".35" if major else ".14"}"/>'
-            )
-        last = first.replace(day=calendar.monthrange(first.year, first.month)[1])
-        href = _href(ref, first, last) if ref else None
         text = f"{first:%b} {first.year}"
         for y in month_y:
-            parts.append(_linked(href if y == month_y[0] else None, _label(x + 3, y, text)))
-    if year_y is not None:
-        years = {scale.start.year: scale.start}
-        years.update({m.year: m for m in months if m.month == 1})
-        for year, anchor in sorted(years.items()):
-            x = scale.x(max(anchor, scale.start))
-            span_start, span_end = date(year, 1, 1), date(year, 12, 31)
-            href = _href(ref, span_start, span_end) if ref else None
-            parts.append(
-                _linked(href, _label(x + 3, year_y, str(year), ' font-weight="700"'))
-            )
+            parts.append(_label(x + 3, y, text))
     step = 1 if per_day >= 60 else 7 if per_day >= 14 else 0
     if step:
         for offset in range(scale.days):
@@ -391,117 +410,333 @@ def _scroller(label_svg: str, chart_svg: str, name: str) -> str:
 # The masked timeline.
 
 
-def _rows(structure: FaultStructure) -> list[tuple[str, str, list[tuple[int, Step]]]]:
-    """(row name, kind, (number, step) pairs), in the order the rows are drawn."""
-    numbered = list(enumerate(structure.steps))
-    rows: list[tuple[str, str, list[tuple[int, Step]]]] = []
-    pairs = [(n, step) for n, step in numbered if step.kind == TRANSIENT]
+@dataclass(frozen=True)
+class _Row:
+    name: str
+    kind: str
+    changes: list[Change]
+
+
+def _rows(structure: FaultStructure, changes: Sequence[Change]) -> list[_Row]:
+    """The rows that hold a change in range, in the order they are drawn."""
+    rows: list[_Row] = []
+    pairs = [c for c in changes if c.kind == TRANSIENT]
     if pairs:
-        rows.append(("Timing pairs", TRANSIENT, pairs))
+        rows.append(_Row("Timing pairs", TRANSIENT, pairs))
     for size_class in structure.classes:
-        members = [(n, step) for n, step in numbered if step.size_class == size_class.letter]
-        rows.append((f"Size class {size_class.letter}", RECURRING, members))
+        members = [c for c in changes if c.size_class == size_class.letter]
+        if members:
+            rows.append(_Row(f"Size class {size_class.letter}", RECURRING, members))
     for kind in (UNEXPLAINED, UNHELD, EXPLAINED):
-        found = [(n, step) for n, step in numbered if step.kind == kind]
+        found = [c for c in changes if c.kind == kind]
         if found:
-            rows.append((KINDS[kind][0], kind, found))
+            rows.append(_Row(KINDS[kind][0], kind, found))
     return rows
 
 
-def _mark(scale: Scale, step: Any, y: float, kind: str, extra: str = "") -> str:
+class _Plot:
+    """Days to horizontal drawing units, for one range."""
+
+    def __init__(self, start: date, end: date) -> None:
+        self.start, self.end = start, end
+        self.days = (end - start).days + 1
+        self.width = PLOT_RIGHT - PLOT_LEFT
+
+    def edge(self, day: date) -> float:
+        """The left edge of `day`; a day after the range's last is its right edge."""
+        return PLOT_LEFT + (day - self.start).days / self.days * self.width
+
+    def centre(self, first: date, last: date) -> float:
+        return (self.edge(first) + self.edge(last + timedelta(days=1))) / 2
+
+
+def _mark(kind: str, x: float, y: float, width: float, *, extra: str, hollow: bool = False) -> str:
     colour = KINDS[kind][1]
+    paint = (
+        f'fill="none" stroke="{colour}" stroke-width="2"'
+        if hollow
+        else f'fill="{colour}" stroke="currentColor" stroke-width="1"'
+    )
     return (
-        f'<rect class="mark" data-kind="{kind}" x="{scale.x(step.day):.1f}" y="{y:.1f}" '
-        f'width="{MARK_WIDTH}" height="{MARK_HEIGHT}" fill="{colour}" stroke="currentColor" '
-        f'stroke-width="1"{extra}/>'
+        f'<rect x="{x - width / 2:.1f}" y="{y:.1f}" width="{width:.1f}" '
+        f'height="{MARK_HEIGHT}" {paint}{extra}/>'
     )
 
 
-def _timeline_svgs(structure: FaultStructure, scale: Scale, ref: str) -> tuple[str, str, str]:
-    """(label column, chart, description) of the timeline. No element's geometry
-    depends on a size: marks are one height and joins depend only on dates."""
-    rows = _rows(structure)
-    top = 44
-    height = top + ROW_HEIGHT * (len(rows) + 1) + 22
-    pad = (ROW_HEIGHT - MARK_HEIGHT) / 2
-    labels = [_label(4, top + ROW_HEIGHT / 2 + 4, "Levels")]
-    body = [
-        _axis(
-            scale,
-            year_y=12,
-            month_y=(28, height - 6),
-            lines=(top, height - 20),
-            ref=ref,
-        )
-    ]
+def _span_words(first: date, last: date) -> str:
+    return str(first) if first == last else f"{first} to {last}"
+
+
+def _levels_band(structure: FaultStructure, plot: _Plot, y: float) -> str:
+    """The levels as blocks that alternate in shade, with a divider at each boundary."""
+    parts: list[str] = []
+    drawn = 0
     last_level = len(structure.levels) - 1
     for index, level in enumerate(structure.levels):
-        left = scale.x(max(level.first_day, scale.start))
-        right = scale.x(min(level.until, scale.end)) + (scale.per_day if index == last_level else 0)
-        if right < scale.x(scale.start) or left > scale.x(scale.end) + scale.per_day:
+        stop = level.last_day + timedelta(days=1) if index == last_level else level.until
+        first, after = max(level.first_day, plot.start), min(stop, plot.end + timedelta(days=1))
+        if after <= first:
             continue
-        body.append(
-            f'<g><title>Level {index + 1}: stated balances from {level.first_day} to '
+        left, right = plot.edge(first), plot.edge(after)
+        if drawn:
+            parts.append(
+                f'<line class="level-divider" x1="{left:.1f}" y1="{y - 3:.1f}" '
+                f'x2="{left:.1f}" y2="{y + MARK_HEIGHT + 3:.1f}" stroke="currentColor" '
+                'stroke-opacity=".75" stroke-width=".7"/>'
+            )
+        parts.append(
+            f"<g><title>Level {index + 1}: stated balances from {level.first_day} to "
             f"{level.last_day} ({level.balances}); the difference does not change across "
             "them.</title>"
-            f'<rect class="level" x="{left:.1f}" y="{top + pad:.1f}" '
-            f'width="{max(right - left, 3):.1f}" height="{MARK_HEIGHT}" fill="currentColor" '
-            f'fill-opacity="{".16" if index % 2 else ".34"}" stroke="currentColor" '
-            'stroke-opacity=".6"/></g>'
+            f'<rect class="level" x="{left:.1f}" y="{y:.1f}" '
+            f'width="{max(right - left, .5):.1f}" height="{MARK_HEIGHT}" fill="currentColor" '
+            f'fill-opacity="{".34" if drawn % 2 == 0 else ".12"}"/></g>'
         )
-    for number, (name, kind, steps) in enumerate(rows, start=1):
+        drawn += 1
+    return "".join(parts)
+
+
+def _tick(x: float, top: float, bottom: float, opacity: str) -> str:
+    return (
+        f'<line x1="{x:.1f}" y1="{top:.1f}" x2="{x:.1f}" y2="{bottom:.1f}" '
+        f'stroke="currentColor" stroke-opacity="{opacity}"/>'
+    )
+
+
+def _tick_label(x: float, y: float, text: str, extra: str = "") -> str:
+    return (
+        f'<text x="{x:.1f}" y="{y:.1f}" font-size="10" fill="currentColor"{extra}>'
+        f"{_esc(text)}</text>"
+    )
+
+
+def _fitted_axis(plot: _Plot, *, bottom: float) -> str:
+    """Year or month labels above, month or day labels below, and a faint line
+    at each; a label is left out where its stretch is too narrow to hold it."""
+    parts: list[str] = []
+    long_view = plot.days > _SHORT_VIEW_DAYS
+    # The upper line names the year, or for a short view the month and year.
+    day = plot.start
+    while day <= plot.end:
+        if long_view:
+            first, last = calendar_span(YEAR, day)
+            text, need = str(day.year), 26
+        else:
+            first, last = calendar_span(MONTH, day)
+            text, need = f"{day:%b %Y}", 48
+        shown_first, shown_last = max(first, plot.start), min(last, plot.end)
+        left = plot.edge(shown_first)
+        parts.append(_tick(left, 4, bottom, ".4"))
+        if ((shown_last - shown_first).days + 1) / plot.days * plot.width >= need:
+            parts.append(_tick_label(left + 2, 11, text, ' font-weight="700"'))
+        day = last + timedelta(days=1)
+    # The lower line names months for a view of months and days for a short one;
+    # a view of years has none.
+    if long_view and plot.days <= _YEARS_VIEW_DAYS:
+        months = _month_starts(plot)
+        every = 1 if len(months) <= _MONTHS_LABELLED_ALL else 3
+        for first in months:
+            parts.append(_tick(plot.edge(first), 14, bottom, ".12"))
+            if (first.month - 1) % every == 0:
+                parts.append(_tick_label(plot.edge(first) + 2, 23, f"{first:%b}", _DIM))
+    elif not long_view:
+        every_day = plot.days <= _EVERY_DAY_LABELLED
+        for offset in range(plot.days):
+            day = plot.start + timedelta(days=offset)
+            if every_day or ((day.day - 1) % 7 == 0 and day.day < 29):
+                parts.append(_tick(plot.edge(day), 14, bottom, ".12"))
+                parts.append(_tick_label(plot.edge(day) + 2, 23, str(day.day), _DIM))
+    return "".join(parts)
+
+
+def _month_starts(plot: _Plot) -> list[date]:
+    return [
+        first
+        for first in (
+            date(year, month, 1)
+            for year in range(plot.start.year, plot.end.year + 1)
+            for month in range(1, 13)
+        )
+        if plot.start <= first <= plot.end
+    ]
+
+
+def _kind_phrase(kind: str, count: int) -> str:
+    """A count of changes of one kind, in words."""
+    if kind == TRANSIENT:
+        return _plural(count, "timing pair")
+    return f"{count} " + {
+        RECURRING: "of a recurring size",
+        UNEXPLAINED: "unexplained",
+        UNHELD: "beside an unheld Space",
+        EXPLAINED: "explained",
+    }[kind]
+
+
+def _range_summary(changes: Sequence[Change], start: date, end: date) -> str:
+    """What the range holds, in one line, before any chart."""
+    if not changes:
+        return (
+            f"<p><strong>No change falls in this range</strong>, {_mono(start)} to "
+            f"{_mono(end)}: the stated balances agree with the rows throughout it.</p>"
+        )
+    counts = count_by_kind(changes)
+    held = [_kind_phrase(kind, counts[kind]) for kind in KINDS if counts[kind]]
+    return (
+        f"<p><strong>{_plural(len(changes), 'change')} in this range</strong>, {_mono(start)} "
+        f"to {_mono(end)}: {_oxford(held)}; the first on {_mono(changes[0].day)}, the last on "
+        f"{_mono(changes[-1].day)}.</p>"
+    )
+
+
+def _longest_level_sentence(structure: FaultStructure, start: date, end: date) -> str:
+    """The longest level in view, with its span in words and not on the strip."""
+    best: tuple[int, date, date] | None = None
+    last_level = len(structure.levels) - 1
+    for index, level in enumerate(structure.levels):
+        stop = level.last_day if index == last_level else level.until
+        first, until = max(level.first_day, start), min(stop, end)
+        days = (until - first).days
+        if days > 0 and (best is None or days > best[0]):
+            best = (days, first, until)
+    if best is None:
+        return ""
+    days, first, until = best
+    return (
+        f"<p>The longest level in this range runs from {_mono(first)} until {_mono(until)} "
+        f"({_plural(days, 'day')}): the difference does not change across it.</p>"
+    )
+
+
+def _fitted_strip(
+    structure: FaultStructure, changes: Sequence[Change], plot: _Plot
+) -> tuple[str, str]:
+    """(chart, unit of its bins). No element's geometry depends on a size: marks
+    are one height and width, and joins depend only on dates."""
+    unit = choose_bin_unit(plot.days, plot.width)
+    mark_width = min(
+        _MARK_WIDEST,
+        max(_MARK_NARROWEST, nominal_bin_width(unit, plot.days, plot.width) - 2),
+    )
+    rows = _rows(structure, changes)
+    top = 32
+    height = top + ROW_HEIGHT * (len(rows) + 1) + 4
+    pad = (ROW_HEIGHT - MARK_HEIGHT) / 2
+    body = [_fitted_axis(plot, bottom=height - 2)]
+    body.append(_label(4, top + ROW_HEIGHT / 2 + 4, "Levels"))
+    body.append(_levels_band(structure, plot, top + pad))
+    for number, row in enumerate(rows, start=1):
         y0 = top + number * ROW_HEIGHT
-        labels.append(_label(4, y0 + ROW_HEIGHT / 2 + 4, name))
+        mark_y = y0 + ROW_HEIGHT - MARK_HEIGHT - 6
+        body.append(_label(4, y0 + ROW_HEIGHT / 2 + 8, row.name))
         body.append(
-            f'<line x1="{EDGE}" y1="{y0 + ROW_HEIGHT:.1f}" x2="{scale.width - EDGE:.1f}" '
+            f'<line x1="2" y1="{y0 + ROW_HEIGHT:.1f}" x2="{VIEW_WIDTH - 2}" '
             f'y2="{y0 + ROW_HEIGHT:.1f}" stroke="currentColor" stroke-opacity=".1"/>'
         )
-        for at, step in steps:
-            inside = scale.start <= step.day <= scale.end
-            if kind == TRANSIENT:
-                other = structure.steps[step.partner]
-                if step.partner < at or not (step.day <= scale.end and other.day >= scale.start):
-                    continue
-                mid = y0 + ROW_HEIGHT / 2
-                ends = "".join(
-                    _mark(scale, end, y0 + pad, kind)
-                    for end in (step, other)
-                    if scale.start <= end.day <= scale.end
-                )
-                left = scale.x(max(step.day, scale.start)) + MARK_WIDTH / 2
-                right = scale.x(min(other.day, scale.end)) + MARK_WIDTH / 2
-                body.append(
-                    f"<g><title>Timing pair: {step.day} and {other.day}, {step.gap_days} days "
-                    "apart. The two undo each other exactly.</title>"
-                    f'<path class="join" d="M{left:.1f},{mid:.1f} H{right:.1f}" '
-                    f'stroke="{KINDS[kind][1]}" stroke-width="2" fill="none"/>' + ends + "</g>"
-                )
-                continue
-            if not inside:
-                continue
-            what = KINDS[kind][0] + (f", size class {step.size_class}" if step.size_class else "")
+        for found in bins_of([c.day for c in row.changes], unit, plot.start, plot.end):
+            x = plot.centre(found.first, found.last)
+            noun = KINDS[row.kind][0].lower()
             body.append(
-                f"<g><title>{step.day}: {what}, stated by {_esc(step.source)}.</title>"
-                + _mark(scale, step, y0 + pad, kind)
+                f"<g><title>{_span_words(found.first, found.last)}: "
+                f"{_plural(found.count, 'change')}, {noun}.</title>"
+                + _mark(
+                    row.kind, x, mark_y, mark_width,
+                    extra=(
+                        f' class="mark" data-kind="{row.kind}" data-bin="{found.first}" '
+                        f'data-count="{found.count}"'
+                    ),
+                )
+                + (
+                    _tick_label(x, mark_y - 3, str(found.count), ' text-anchor="middle"')
+                    if found.count > 1
+                    else ""
+                )
                 + "</g>"
             )
-    in_range = [s for s in structure.steps if scale.start <= s.day <= scale.end]
+        if row.kind != TRANSIENT:
+            continue
+        for change in row.changes:
+            if change.partner_day is None:
+                continue
+            mid = mark_y + MARK_HEIGHT / 2
+            begins = plot.centre(change.day, change.day)
+            reaches = min(change.partner_day, plot.end)
+            ends = plot.centre(reaches, reaches)
+            cap = ""
+            if change.partner_day <= plot.end:
+                cap = _mark(
+                    row.kind, ends, mark_y, mark_width, hollow=True,
+                    extra=f' class="cap" data-kind="{row.kind}"',
+                )
+            body.append(
+                f"<g><title>Timing pair: {change.day} and {change.partner_day}, "
+                f"{(change.partner_day - change.day).days} days apart. The two undo each other "
+                "exactly.</title>"
+                f'<path class="join" d="M{begins:.1f},{mid:.1f} H{ends:.1f}" '
+                f'stroke="{KINDS[row.kind][1]}" stroke-width="2" fill="none"/>' + cap + "</g>"
+            )
     desc = (
-        f"From {scale.start} to {scale.end}: {_plural(len(in_range), 'step')} of the "
-        f"difference in {_plural(len(rows), 'row')} by kind, and "
-        f"{_plural(len(structure.levels), 'level')}. "
-        "Marks are all one height; sizes are not drawn."
+        f"From {plot.start} to {plot.end}: {_plural(len(changes), 'change')} of the "
+        f"difference in {_plural(len(rows), 'row')} by kind, and the levels between them. "
+        f"Each mark stands for the changes in one {unit}; a number beside it is how many. "
+        "Marks are all one size; sizes are not drawn."
     )
-    height_total = height
-    label_svg = _svg(
-        LABEL_WIDTH, height_total, "bc-rows", "Row names", "The kind of step each row holds.",
-        "".join(labels),
+    chart = (
+        '<svg role="img" aria-labelledby="bc-strip-t bc-strip-d" width="100%" '
+        f'viewBox="0 0 {VIEW_WIDTH} {height:.0f}" data-plot-left="{PLOT_LEFT}" '
+        f'data-plot-right="{PLOT_RIGHT}" xmlns="http://www.w3.org/2000/svg" '
+        'style="display:block;margin:.6rem 0;max-width:40rem">'
+        '<title id="bc-strip-t">Timeline of the changes in the difference</title>'
+        f'<desc id="bc-strip-d">{_esc(desc)}</desc>' + "".join(body) + "</svg>"
     )
-    chart_svg = _svg(
-        scale.width, height_total, "bc-strip", "Timeline of the changes in the difference",
-        desc, "".join(body),
+    return chart, unit
+
+
+def _counts_table(
+    ref: str, changes: Sequence[Change], start: date, end: date
+) -> str:
+    """Counts per period, each period a link that opens it, and the empty ones in a line."""
+    unit = period_unit((end - start).days + 1)
+    periods = periods_of(changes, unit, start, end)
+    kinds = [k for k in KINDS if any(p.counts[k] for p in periods)]
+    held = [p for p in periods if p.total]
+    head = "<tr><th>Period</th>" + "".join(f"<th>{_esc(KINDS[k][0])}</th>" for k in kinds) + "</tr>"
+    rows = "".join(_period_row(ref, p, kinds) for p in held)
+    return (
+        "<h3>Where in time the changes are</h3>"
+        f"<table>{head}{rows}</table>"
+        + _nothing_line(periods, unit)
     )
-    return label_svg, chart_svg, desc
+
+
+def _period_row(ref: str, period: Period, kinds: Sequence[str]) -> str:
+    cells = "".join(f"<td>{period.counts[k] or ''}</td>" for k in kinds)
+    return (
+        f'<tr><td><a class="tap" href="{_href(ref, period.first, period.last)}">'
+        f"{_esc(period.label)}</a></td>{cells}</tr>"
+    )
+
+
+def _nothing_line(periods: Sequence[Period], unit: str) -> str:
+    """The periods that hold nothing, in one line: a run of three or more is one item."""
+    items: list[str] = []
+    for first, last in empty_runs(periods):
+        run = [p for p in periods if first.first <= p.first <= last.first]
+        if len(run) >= 3:
+            items.append(
+                f"from {period_label(unit, first.first)} to {period_label(unit, last.first)}"
+                if unit == DAY
+                else f"{period_label(unit, first.first)} to {period_label(unit, last.first)}"
+            )
+        else:
+            items.extend(
+                f"on {period_label(unit, p.first)}" if unit == DAY else period_label(unit, p.first)
+                for p in run
+            )
+    if not items:
+        return ""
+    lead = "Nothing" if unit == DAY else "Nothing in"
+    return f"<p>{lead} {_esc(_oxford(items))}.</p>"
 
 
 def _kind_legend(kinds: Sequence[str]) -> str:
@@ -637,15 +872,7 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
         return lambda value: panel[1] - (value - low) / span * (panel[1] - panel[0])
 
     y1, y2 = mapper(ticks1, p1), mapper(ticks2, p2)
-    body = [
-        _axis(
-            scale,
-            year_y=None,
-            month_y=(14, p1[1] + gap / 2 + 4, height - 8),
-            lines=None,
-            ref=None,
-        )
-    ]
+    body = [_axis(scale, month_y=(14, p1[1] + gap / 2 + 4, height - 8))]
     figures: list[str] = [
         _label(4, p1[0] - 18, "Balance", ' font-weight="700"'),
         _label(4, p2[0] - 18, "Difference", ' font-weight="700"'),
@@ -740,6 +967,33 @@ def _values_legend(chart: BalanceChart, kinds: Sequence[str]) -> str:
     return f'<ul class="legend" style="list-style:none;padding-left:0">{"".join(items)}</ul>'
 
 
+def _change_links(ref: str, changes: Sequence[Change]) -> str:
+    """A posted link per change, each opening the values chart around that change.
+
+    A GET link would answer masked, so each is a form, as the ledger's month
+    steps are while values are shown.
+    """
+    if not changes:
+        return ""
+    around = timedelta(days=_CHANGE_WINDOW_DAYS)
+    forms = "".join(
+        '<form method="post" action="/balance-chart" '
+        f'data-change="{change.day}">'
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<input type="hidden" name="from" value="{change.day - around}">'
+        f'<input type="hidden" name="to" value="{change.last_day + around}">'
+        f'<button class="tap" type="submit">{change.day}, '
+        f"{_esc(KINDS[change.kind][0].lower())}</button></form>"
+        for change in changes[:_CHANGE_LINKS]
+    )
+    more = len(changes) - _CHANGE_LINKS
+    return (
+        "<p>Open the values chart around a change:</p>"
+        f'<div class="monthnav">{forms}</div>'
+        + (f"<p>and {more} more, in the steps table below.</p>" if more > 0 else "")
+    )
+
+
 def _steps_table(structure: FaultStructure, scale: Scale) -> str:
     rows = []
     for step in structure.steps:
@@ -786,19 +1040,22 @@ def _page(title: str, message: str) -> bytes:
 
 
 def _heading(chart: Any) -> str:
+    """The scope as a title, short enough to leave the chart on the first screen."""
+    if chart.scope == WHOLE:
+        return "<h2>The whole account: the main account and its Spaces together</h2>"
+    return "<h2>This account's own stated balances</h2>"
+
+
+def _scope_note(chart: Any) -> str:
     if chart.scope == WHOLE:
         spaces = ", ".join(_esc(space) for space in chart.spaces)
         return (
-            "<h2>The whole account: the main account and its Spaces together</h2>"
             "<p>The balances are stated by sources that cannot see the Spaces, so they are "
             "checked against the rows of the main account and every Space"
             + (f" ({spaces})" if spaces else "")
             + ", where a transfer between them cancels.</p>"
         )
-    return (
-        "<h2>This account's own stated balances</h2>"
-        "<p>Each balance is checked against this account's own rows.</p>"
-    )
+    return "<p>Each balance is checked against this account's own rows.</p>"
 
 
 def _mode(view: Any, unmasked: bool, start: date | None, end: date | None) -> str:
@@ -818,9 +1075,9 @@ def _mode(view: Any, unmasked: bool, start: date | None, end: date | None) -> st
         else ""
     )
     return (
-        '<p class="muted">This timeline draws no size: every mark is one height, and the '
-        "rows say what kind of change each is. Sizes are figures, so they appear only on "
-        "the values chart, which opens in a new tab on request.</p>"
+        '<p class="muted">This timeline draws no size: every mark is the same shape, and '
+        "the rows say what kind of change each is. Sizes are figures, so they appear only "
+        "on the values chart, which opens in a new tab on request.</p>"
         f'<form method="post" action="/balance-chart" target="_blank">{fields}'
         + submit_button("Show values (opens in a new tab)")
         + "</form>"
@@ -877,21 +1134,25 @@ def render_balance_chart(
     if structure is None:  # pragma: no cover - a drawn chart always has one
         return _page("Balance differences", "No structure was built for this account.")
     scale = choose_scale(chart.first_day, chart.last_day, start, end)
-    body += _heading(view) + _mode(view, unmasked, start, end)
-    body += (
-        f"<p>Drawn from {_mono(scale.start)} to {_mono(scale.end)} at "
-        f"{scale.per_day:.2f} pixels a day. "
-        + (
-            "Everything held is drawn; the year and month labels below open a narrower range."
-            if start is None
-            else f'<a class="tap" href="{_href(view.ref)}">Draw everything held</a>'
-        )
-        + "</p>"
+    changes = changes_in(structure, scale.start, scale.end)
+    body += _heading(view)
+    everything = (
+        ""
+        if start is None
+        else f'<p><a class="tap" href="{_href(view.ref)}">Draw everything held</a></p>'
     )
-    in_range = [s for s in structure.steps if scale.start <= s.day <= scale.end]
     if unmasked:
+        body += (
+            _scope_note(view)
+            + _mode(view, unmasked, start, end)
+            + f"<p>Drawn from {_mono(scale.start)} to {_mono(scale.end)} at "
+            f"{scale.per_day:.2f} pixels a day.</p>"
+            + everything
+            + _range_summary(changes, scale.start, scale.end)
+            + _change_links(view.ref, changes)
+        )
         figures, drawing, _ = _values_svgs(chart, scale)
-        kinds = [k for k in KINDS if any(s.kind == k for s in in_range)]
+        kinds = [k for k in KINDS if any(c.kind == k for c in changes)]
         body += (
             f"<p>The present difference is <strong>{_esc(_pounds(structure.present_minor))}"
             f"</strong>, the sum of {_plural(len(structure.permanent), 'permanent change')}.</p>"
@@ -901,12 +1162,25 @@ def render_balance_chart(
             + _steps_table(structure, scale)
         )
     else:
-        labels, drawing, _ = _timeline_svgs(structure, scale, view.ref)
-        kinds = [k for k in KINDS if any(s.kind == k for s in in_range)]
+        body += _range_summary(changes, scale.start, scale.end)
+        if changes:
+            strip, unit = _fitted_strip(structure, changes, _Plot(scale.start, scale.end))
+            kinds = [k for k in KINDS if any(c.kind == k for c in changes)]
+            body += (
+                strip
+                + f"<p>Each mark stands for the changes in one {unit}, and a number beside a "
+                "mark is how many it holds.</p>"
+                + _longest_level_sentence(structure, scale.start, scale.end)
+                + _kind_legend(kinds)
+                + everything
+                + _counts_table(view.ref, changes, scale.start, scale.end)
+            )
+        else:
+            body += everything
         body += (
-            _scroller(labels, drawing, "Timeline of the changes in the difference")
-            + _kind_legend(kinds)
-            + '<h3>The structure in words</h3>'
+            _scope_note(view)
+            + _mode(view, unmasked, start, end)
+            + "<h3>The structure in words</h3>"
             + _structure_html(structure)
         )
     body += _links(view.ref)

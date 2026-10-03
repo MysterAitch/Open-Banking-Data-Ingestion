@@ -134,7 +134,10 @@ class TestTheMaskedTimelineHoldsNoSize:
         chart = mixed()
         page = Parsed(masked(chart))
 
-        assert len(page.find("rect", class_="mark")) == 11
+        # Eight monthly charges, each in its own month's bin; one pair, whose later
+        # end is a hollow cap and not a second change; one unexplained step.
+        assert len(page.find("rect", class_="mark")) == 10
+        assert len(page.find("rect", class_="cap")) == 1
         assert len(page.find("path", class_="join")) == 1
         assert len(page.find("rect", class_="level")) == len(chart.structure.whole.levels)
 
@@ -145,41 +148,34 @@ class TestTheMaskedTimelineHoldsNoSize:
 
 
 class TestTheTimelineScale:
-    def test_Timeline_WhenFullyDrawn_IsWideInProportionToTheDaysCovered(self):
+    def test_Timeline_WhenFullyDrawn_FitsTheScreenWhateverTheDaysCovered(self):
         page = Parsed(masked(mixed()))
 
         strip = svg_named(page, "bc-strip")
-        assert float(strip["width"]) == pytest.approx(
-            round(EDGE + corpus.STATED * PIXELS_PER_DAY), abs=1
-        )
+        assert strip["width"] == "100%"
+        assert strip["viewbox"].split()[2] == "360"
 
-    def test_Timeline_WhenDrawnInAScrollingContainer_ThePageItselfDoesNotNeedToScroll(self):
+    def test_Timeline_WhenMasked_NothingOnThePageIsASidewaysScrollingContainer(self):
         page = Parsed(masked(mixed()))
 
-        (region,) = page.find("div", role="region")
-        assert "overflow-x:auto" in region["style"]
-        assert region["tabindex"] == "0"
-        assert "min-width:0" in region["style"]
+        assert page.find("div", role="region") == []
 
     def test_Timeline_LabelsEveryMonthWithItsYear_SoAnyScreenfulSaysTheDate(self):
-        text = Parsed(masked(mixed())).text
+        page = Parsed(masked(mixed()))
 
-        for month in ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"):
-            assert f"{month} 2026" in text
+        assert "2026" in page.pieces
+        assert {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"} <= set(page.pieces)
 
-    def test_Timeline_WhenFullyDrawn_YearAndMonthLabelsLinkToANarrowerMaskedRange(self):
+    def test_Timeline_WhenFullyDrawn_TheCountsTableLinksEachMonthToANarrowerMaskedRange(self):
         page = Parsed(masked(mixed()))
 
         links = {a["href"] for a in page.find("a") if "from=" in a.get("href", "")}
-        assert f"/balance-chart?ref={MAIN}&from=2026-01-01&to=2026-12-31" in links
         assert f"/balance-chart?ref={MAIN}&from=2026-03-01&to=2026-03-31" in links
 
-    def test_Timeline_WhenAMonthIsRequested_IsDrawnAtDayScaleWithOnlyThatMonthsMarks(self):
+    def test_Timeline_WhenAMonthIsRequested_IsDrawnWithOnlyThatMonthsMarks(self):
         chart = mixed()
         page = Parsed(masked(chart, start=date(2026, 3, 1), end=date(2026, 3, 31)))
 
-        strip = svg_named(page, "bc-strip")
-        assert float(strip["width"]) == pytest.approx(EDGE + 31 * MAX_PIXELS_PER_DAY, abs=1)
         steps_in_march = [s for s in chart.structure.whole.steps if s.day.month == 3]
         assert len(page.find("rect", class_="mark")) == len(steps_in_march) == 1
 
