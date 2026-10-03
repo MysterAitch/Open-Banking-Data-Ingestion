@@ -103,6 +103,7 @@ from .family_anchors import (
     space_fetches,
     unheld_space_legs,
 )
+from .fault_explanation import WalkExplanation, explain_walk
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
@@ -209,6 +210,9 @@ class FaultChange:
     #: A transfer leg to a Space whose rows are not held falls in that window,
     #: which is explained by declaring the Space and not by finding a row.
     unheld: bool
+    #: The stating source, and the position of the balance in `FamilyWalk.readings`.
+    source: str = ""
+    index: int = -1
 
 
 @dataclass(frozen=True)
@@ -237,6 +241,9 @@ class FamilyWalk:
     #: cannot hold a movement before it was created, so any is a contradiction
     #: in the evidence, said aloud rather than folded into the opening.
     before_opening: int = 0
+    #: Why each of the first changes happened, by exact arithmetic
+    #: (`fault_explanation`); None until `effective_opening` has read the store.
+    explanation: WalkExplanation | None = None
 
     @property
     def opened(self) -> FamilyAnchor | None:
@@ -312,7 +319,7 @@ class FamilyWalk:
         earlier = self.opened.day if self.opened else None
         latest = earlier
         before = 0
-        for reading in self.readings:
+        for index, reading in enumerate(self.readings):
             if latest is None or reading.day > latest:
                 earlier, latest = latest, reading.day
             if reading.difference_minor is None:
@@ -324,6 +331,8 @@ class FamilyWalk:
                         reading.day,
                         start,
                         bisect_right(legs, reading.day) > bisect_right(legs, start),
+                        reading.sources[0],
+                        index,
                     )
                 )
             before = reading.difference_minor
@@ -869,6 +878,13 @@ def effective_opening(
         if walk.unheld.legs:
             fetches = space_fetches(store, walk.unheld.uids)
             walk = replace(walk, unheld=replace(walk.unheld, fetches=fetches))
+        if walk.readings:
+            walk = replace(
+                walk,
+                explanation=explain_walk(
+                    store, ref, walk, {ref: [*held, *unitemised], **members}, sightings
+                ),
+            )
     opening = derive_opening(
         ref,
         anchors,

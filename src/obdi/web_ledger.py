@@ -435,6 +435,154 @@ def _changes_html(family: Any) -> str:
     return body
 
 
+def _mono(text: object) -> str:
+    return f'<span class="mono nowrap">{_esc(str(text))}</span>'
+
+
+def _row_note(note: Any) -> str:
+    """One row, named by who dated it when, which way it moved, and its status."""
+    dated = ", ".join(f"{_esc(source)} {_mono(day)}" for source, day in note.dates)
+    seen = ", ".join(_esc(source) for source in note.sources) or "no source"
+    extras = "".join(
+        (
+            ", a transfer leg" if note.transfer else "",
+            f"; {_esc(note.why)}" if note.why and note.why != note.status else "",
+            "; the export's own figure for it differs" if note.figure_differs else "",
+        )
+    )
+    return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
+
+
+def _row_list(rows: Any) -> str:
+    if not rows.count:
+        return ""
+    items = "".join(f"<li>{_row_note(note)}</li>" for note in rows.named)
+    more = f"<li>and {rows.more} more</li>" if rows.more > 0 else ""
+    return f"<ul>{items}{more}</ul>"
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def _hold_html(change: Any, hold: str) -> str:
+    """The sentence for one explanation that holds. Said once, here."""
+    source = _esc(change.source)
+    if hold == "source-disagreement":
+        other = (
+            f"{_esc(change.previous_source)} and {source} stating different balances"
+            if change.previous_source
+            else f"{source} stating a balance that disagrees with the rows differently"
+        )
+        return (
+            f"<p>{source}'s own difference from the rows has not moved since its previous "
+            f"balance, so this change is {other}, not a row.</p>"
+        )
+    if hold == "listed-not-counted":
+        return (
+            "<p>The change equals the sum of the "
+            f"{_plural(change.listed_not_counted.count, 'row')} {source} lists in the window "
+            "that the store does not count:</p>"
+            + _row_list(change.listed_not_counted)
+        )
+    if hold == "counted-not-listed":
+        return (
+            "<p>The change equals minus the sum of the "
+            f"{_plural(change.counted_not_listed.count, 'row')} the store counts in the "
+            f"window that {source} does not list:</p>" + _row_list(change.counted_not_listed)
+        )
+    if hold == "different-figure":
+        return (
+            "<p>The change equals the sum of the differences between the figure "
+            f"{source} lists and the store's, for "
+            f"{_plural(change.different_figure.count, 'payment')}:</p>"
+            + _row_list(change.different_figure)
+        )
+    if hold == "combined":
+        return (
+            "<p>No one set of rows equals the change, but together they do exactly: the "
+            "rows the export lists that the store does not count, less the rows the store "
+            "counts that the export does not list, plus the differences in figure.</p>"
+            + (
+                f"<p>Listed, not counted ({change.listed_not_counted.count}):</p>"
+                + _row_list(change.listed_not_counted)
+                if change.listed_not_counted.count
+                else ""
+            )
+            + (
+                f"<p>Counted, not listed ({change.counted_not_listed.count}):</p>"
+                + _row_list(change.counted_not_listed)
+                if change.counted_not_listed.count
+                else ""
+            )
+            + (
+                f"<p>Listed under another figure ({change.different_figure.count}):</p>"
+                + _row_list(change.different_figure)
+                if change.different_figure.count
+                else ""
+            )
+        )
+    if hold == "one-row":
+        shape = "the negative of a single counted row" if change.one_row_negated else (
+            "a single counted row"
+        )
+        return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
+    if hold == "straddling":
+        return (
+            "<p>The change equals the sum of the "
+            f"{_plural(change.straddling.count, 'row')} whose date from {source} and stored "
+            "date fall on different sides of this balance. That would mean the source's own "
+            "dating is not being applied to them, which is a defect:</p>"
+            + _row_list(change.straddling)
+        )
+    if hold == "unheld-space":
+        return "<p>It coincides with a transfer to a Space whose rows are not held.</p>"
+    if hold == "row-counts":
+        return (
+            f"<p>The export lists {change.export_rows} "
+            f"{'row' if change.export_rows == 1 else 'rows'} in the window and the store "
+            f"holds {change.store_sightings} "
+            f"{'sighting' if change.store_sightings == 1 else 'sightings'} of it there: "
+            "identical rows collapsed into one, or a row sighted on a different day.</p>"
+        )
+    if hold == "export-opening":
+        return (
+            "<p>It equals the export's own opening balance: the export opens at a figure "
+            "other than nil, so rows before it are not held.</p>"
+        )
+    return (
+        "<p>None of these accounts for it. Counted rows by the source's dating: "
+        f"{change.rows_before} before the window, {change.rows_inside} inside it, "
+        f"{change.rows_after} after it.</p>"
+    )
+
+
+def _explanations_html(explanation: Any) -> str:
+    """Why each of the first changes happened, and what the held exports are like."""
+    if explanation is None:
+        return ""
+    body = ""
+    facts = explanation.facts
+    if facts is not None:
+        body += (
+            f"<p>The held {'export lists' if facts.exports == 1 else 'exports list'} "
+            f"{facts.rows:,} rows. In its own sequence {facts.out_of_order:,} "
+            f"{'is' if facts.out_of_order == 1 else 'are'} out of date order, "
+            f"{_plural(facts.uncut_days, 'day')} hold a row but have no clean cut and so state "
+            f"no balance, and {facts.unsighted:,} "
+            f"{'has' if facts.unsighted == 1 else 'have'} no sighting in the store.</p>"
+        )
+    for change in explanation.changes:
+        start = _mono(change.after) if change.after else "the start"
+        body += (
+            f"<div><p><strong>The change at the end of {_mono(change.day)}"
+            f"</strong> (after {start}, stated by {_esc(change.source)}):</p>"
+            + "".join(_hold_html(change, hold) for hold in change.holds)
+            + "</div>"
+        )
+    return body
+
+
 def _family_html(family: Any) -> str:
     """The walk of the whole account's stated balances against the rows of the
     main account and its Spaces together.
@@ -534,6 +682,7 @@ def _family_html(family: Any) -> str:
         f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
         f"</span>.</strong> {_esc(pattern)}</p>"
         + _changes_html(family)
+        + _explanations_html(family.explanation)
         + '<ul class="anchors">'
     )
     for line in family.lines:
@@ -599,10 +748,25 @@ def _own_first_difference(anchors: tuple[Any, ...]) -> str:
     reported apart from the whole-account walk (`_family_html`)."""
     for at, line in enumerate(anchors):
         if line.verdict == "differs":
+            stated = (
+                f"It is the {_esc(line.basis)} balance stated by {_esc(line.source)}"
+                if line.source
+                else f"It is a {_esc(line.basis)} balance"
+            )
+            walk = {
+                "agrees": "the whole-account walk agrees at that balance from the same source, "
+                "so the difference arises in the step from the whole account to this one's "
+                "own (the Spaces' rows taken off)",
+                "differs": "the whole-account walk differs at that same balance from the same "
+                "source, so the cause is the one explained there",
+                "": "the whole-account walk does not hold that balance, so it is tested "
+                "against this account's rows alone",
+            }[line.walk]
             return (
                 '<p class="warn">The account\'s own anchors first stop matching its rows at the '
                 f'end of <span class="mono nowrap">{_esc(line.day)}</span>; they last agreed at '
                 f'the end of <span class="mono nowrap">{_esc(anchors[at - 1].day)}</span>.</p>'
+                f"<p>{stated}, and {walk}.</p>"
             )
     return ""
 

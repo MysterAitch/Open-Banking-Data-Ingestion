@@ -2939,6 +2939,53 @@ class Store:
             found[row["source"]][row["entity_id"]] = row["observed_date"]
         return found
 
+    def sighting_sources(self, accounts: Collection[str]) -> dict[str, dict[str, str]]:
+        """Entity id -> source -> the earliest date that source gave the row ('' for
+        none), for the rows of `accounts`, sightings copied onto a Space row included.
+
+        The same reading as `sighting_days`, across every source, so a row can be
+        named by the day each source gave it.
+        """
+        if not accounts:
+            return {}
+        marks = ",".join("?" for _ in accounts)
+        found: dict[str, dict[str, str]] = {}
+        for row in self.connection.execute(
+            "SELECT s.entity_id AS entity_id, s.source AS source, "  # noqa: S608
+            "MIN(NULLIF(s.observed_date, '')) AS observed_date "
+            "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+            f"WHERE t.account_id IN ({marks}) GROUP BY s.entity_id, s.source",
+            tuple(accounts),
+        ):
+            found.setdefault(row["entity_id"], {})[row["source"]] = row["observed_date"] or ""
+        return found
+
+    def artefact_sightings(self, digests: Collection[str]) -> list[dict[str, object]]:
+        """What the artefacts with these digests reported, one entry per row of any
+        account: its entity id, the earliest date they gave it, and the row's own
+        account, amount, status, date, and whether it is an internal transfer.
+
+        Sightings copied onto a Space row are not an artefact's own report.
+        """
+        if not digests:
+            return []
+        marks = ",".join("?" for _ in digests)
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                "SELECT s.entity_id AS entity_id, "  # noqa: S608
+                "MIN(NULLIF(s.observed_date, '')) AS observed_date, "
+                "t.account_id AS account_id, t.amount_minor AS amount_minor, "
+                "t.status AS status, t.value_date AS value_date, "
+                "t.is_internal_transfer AS internal "
+                "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+                f"WHERE s.artefact_digest IN ({marks}) "
+                "AND (s.source_id IS NULL OR s.source_id NOT LIKE ?) "
+                "GROUP BY s.entity_id ORDER BY s.entity_id",
+                (*digests, _COPY_PATTERN),
+            )
+        ]
+
     def entities_sighted_by(
         self, account_id: str, digests: Collection[str]
     ) -> dict[str, set[str]]:
@@ -3001,6 +3048,17 @@ class Store:
                 (space_id, FOLDED_SIGHTING_PREFIX + folded_id, folded_id),
             )
         self.connection.commit()
+
+    def space_fold_map(self) -> dict[str, str]:
+        """Folded main-account row -> the Space row its sightings were copied onto."""
+        return {
+            str(row[0]): str(row[1])
+            for row in self.connection.execute(
+                "SELECT substr(source_id, ?), entity_id FROM transaction_sources "
+                "WHERE source_id LIKE ? GROUP BY source_id",
+                (len(FOLDED_SIGHTING_PREFIX) + 1, _COPY_PATTERN),
+            )
+        }
 
     def space_folded_ids(self) -> set[str]:
         """Rows folded into a Space row: the ones a copied sighting names."""

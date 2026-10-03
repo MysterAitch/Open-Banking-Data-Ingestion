@@ -30,10 +30,8 @@ WHICH BALANCES, all derived on demand from the held artefacts and never stored:
   certified statement   its opening (the end of the day before its first row),
                         each printed end-of-day balance that agrees with the
                         statement's own rows, and its closing balance
-  CSV export            the balance after the last row of each day. "Last" is
-                        found without trusting file order: each row gives the
-                        balance before it and after it, and the day's closing
-                        is the figure no row consumes (`_chain_ends`)
+  CSV export            the balance after the last row of each day that its own
+                        sequence cuts cleanly (`cut_anchors`)
   aggregator            the bank's earliest opening and latest closing, which
                         `balance_reconciliation` already derives. Only those
                         two: a day holding a folded row has a broken chain and
@@ -68,10 +66,12 @@ from __future__ import annotations
 
 import json
 import sys
+from bisect import bisect_right
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from itertools import accumulate, pairwise
 from urllib.parse import parse_qs, urlparse
 
 from .accounts import AccountMap
@@ -353,15 +353,38 @@ def unheld_space_legs(rows: Iterable[Transaction], known_categories: frozenset[s
     )
 
 
-#: Artefact digest -> (source, balances) for a CSV export, or None when the
-#: bytes are not a Starling export or state no balance. The bytes never change,
-#: so a reading is good for the life of the process.
-_CSV_BY_DIGEST: dict[str, tuple[str, tuple[tuple[date, int], ...]] | None] = {}
+@dataclass(frozen=True)
+class ExportRow:
+    """One row of an export, with the balance it states before and after it."""
+
+    day: date
+    amount_minor: int
+    before_minor: int
+    after_minor: int
 
 
-def _csv_days(
-    store: Store, digest: str, account: str
-) -> tuple[str, tuple[tuple[date, int], ...]] | None:
+@dataclass(frozen=True)
+class ExportReading:
+    """What a held export states: its rows in its own sequence and the anchors cut from it."""
+
+    source: str
+    #: The export's rows in the order its balance column follows, oldest first.
+    rows: tuple[ExportRow, ...]
+    #: (day, balance at the END of that day), only at clean cuts (`cut_anchors`).
+    anchors: tuple[tuple[date, int], ...]
+    #: Rows dated earlier than a row the sequence has already passed.
+    out_of_order: int = 0
+    #: Days that hold a row but have no clean cut, so state no anchor.
+    uncut_days: int = 0
+
+
+#: Artefact digest -> the export's reading, or None when the bytes are not a
+#: Starling export, state no balance, or follow no single sequence. The bytes
+#: never change, so a reading is good for the life of the process.
+_CSV_BY_DIGEST: dict[str, ExportReading | None] = {}
+
+
+def _csv_days(store: Store, digest: str, account: str) -> ExportReading | None:
     if digest not in _CSV_BY_DIGEST:
         row = store.connection.execute(
             "SELECT payload FROM raw_artefacts "
@@ -369,7 +392,7 @@ def _csv_days(
             (digest, account),
         ).fetchone()
         parser = StarlingCsvParser()
-        held: tuple[str, tuple[tuple[date, int], ...]] | None = None
+        held: ExportReading | None = None
         if row is not None and parser.sniff(bytes(row["payload"])):
             try:
                 figures = parser.running_balances(bytes(row["payload"]))
@@ -379,30 +402,101 @@ def _csv_days(
                     file=sys.stderr,
                 )
                 figures = []
-            held = (parser.source, _closing_balances(figures)) if figures else None
+            held = _read_export(parser.source, figures) if figures else None
         _CSV_BY_DIGEST[digest] = held
     return _CSV_BY_DIGEST[digest]
 
 
-def _closing_balances(rows: list[tuple[date, int, int]]) -> tuple[tuple[date, int], ...]:
-    """Each day's closing balance, and the earliest day's opening.
+def _links(ordered: Sequence[ExportRow]) -> int:
+    """How many rows' balance before them is the previous row's balance after it."""
+    return sum(1 for a, b in pairwise(ordered) if a.after_minor == b.before_minor)
 
-    A day whose balances do not form one chain is left out, never guessed: the
-    file's order is not trusted, so a day with two candidate ends has no
-    answer.
+
+def export_sequence(rows: Sequence[ExportRow]) -> tuple[ExportRow, ...] | None:
+    """The rows oldest first in the file's own order, newest first reversed, or None.
+
+    The file's order is the sequence its balance column follows. Which way it
+    runs is the way more rows follow each other (not all: a balance that moves
+    with a transfer the export does not list breaks a link, and a main-only
+    export breaks many). Where the links cannot tell, the dates do, and a file
+    whose dates run neither way is refused, because a guessed sequence would
+    place a day's cut wrongly.
     """
+    forward, backward = tuple(rows), tuple(reversed(rows))
+    ahead, behind = _links(forward), _links(backward)
+    if ahead != behind:
+        return forward if ahead > behind else backward
+    days = [r.day for r in rows]
+    if days == sorted(days):
+        return forward
+    if days == sorted(days, reverse=True):
+        return backward
+    return None
+
+
+def cut_anchors(
+    sequence: Sequence[ExportRow],
+) -> tuple[tuple[tuple[date, int], ...], int, int]:
+    """The balances an export states at the end of a day, as (anchors, rows out of
+    date order, days left without one).
+
+    THE RULE, stated here and only here: an export's balance after row k is the
+    sum of its first k rows, which is "every row dated on or before D" only where
+    no row dated after D comes before a row dated on or before it. A day is
+    therefore stated only at a CLEAN CUT of the export's own sequence, where its
+    last row is followed by nothing dated on or before it; the balance is the one
+    after that row. The day before the earliest row is always a clean cut, and
+    states the balance before the first row of the sequence. A day with no clean
+    cut states nothing, because a figure there would be the balance of rows
+    nobody could name.
+
+    A cut whose last row is dated that day is also refused where the day's own
+    rows form one chain that ends elsewhere: the file lists that day's rows in
+    an order its balances contradict, so which row is last is not known.
+
+    REJECTED. Taking each day's chain end from the rows dated that day alone
+    (what stood before): on an export whose sequence runs 2nd, 3rd, 2nd the
+    3rd's single row closes at a figure that omits the later 2nd-dated row, so
+    every balance it stated differed from the rows by that row's amount, and
+    the 2nd was either dropped or opened from the wrong figure.
+    """
+    if not sequence:
+        return (), 0, 0
+    days = sorted(r.day for r in sequence)
+    running = list(accumulate((r.day for r in sequence), max))
     by_day: dict[date, list[tuple[int, int]]] = defaultdict(list)
-    for day, amount, balance in rows:
-        by_day[day].append((balance - amount, balance))
+    for row in sequence:
+        by_day[row.day].append((row.before_minor, row.after_minor))
     found: dict[date, int] = {}
-    for day in sorted(by_day):
-        opening, closing, _ = _chain_ends(by_day[day])
-        if opening is None or closing is None:
+    opening, _, _ = _chain_ends(by_day[days[0]])
+    if sequence[0].day != days[0] or opening is None or opening == sequence[0].before_minor:
+        found[days[0] - timedelta(days=1)] = sequence[0].before_minor
+    uncut = 0
+    for day in sorted(set(days)):
+        count = bisect_right(days, day)
+        last = sequence[count - 1]
+        if running[count - 1] > day:
+            uncut += 1
             continue
-        if not found:
-            found[day - timedelta(days=1)] = opening
-        found[day] = closing
-    return tuple(sorted(found.items()))
+        if last.day == day:
+            _, closing, _ = _chain_ends(by_day[day])
+            if closing is not None and closing != last.after_minor:
+                uncut += 1
+                continue
+        found[day] = last.after_minor
+    out_of_order = sum(
+        1 for row, passed in zip(sequence[1:], running, strict=False) if row.day < passed
+    )
+    return tuple(sorted(found.items())), out_of_order, uncut
+
+
+def _read_export(source: str, figures: Sequence[tuple[date, int, int]]) -> ExportReading | None:
+    rows = [ExportRow(day, amount, balance - amount, balance) for day, amount, balance in figures]
+    sequence = export_sequence(rows)
+    if sequence is None:
+        return None
+    anchors, out_of_order, uncut = cut_anchors(sequence)
+    return ExportReading(source, sequence, anchors, out_of_order, uncut)
 
 
 def _held_csv_digests(store: Store, account: str) -> list[str]:
@@ -414,6 +508,16 @@ def _held_csv_digests(store: Store, account: str) -> list[str]:
             (account,),
         )
     ]
+
+
+def held_exports(store: Store, account: str) -> list[tuple[str, ExportReading]]:
+    """Each held export of `account` that states balances, with its digest, parsed once."""
+    found = []
+    for digest in _held_csv_digests(store, account):
+        held = _csv_days(store, digest, account)
+        if held is not None:
+            found.append((digest, held))
+    return found
 
 
 def family_anchors(store: Store, main: str, families: Families) -> FamilyAnchors:
@@ -428,8 +532,8 @@ def family_anchors(store: Store, main: str, families: Families) -> FamilyAnchors
             found.add(FamilyAnchor(item.day, item.balance_minor, item.source, day_end=True))
     for digest in _held_csv_digests(store, main):
         held = _csv_days(store, digest, main)
-        if held is not None and families.blind(held[0], main):
-            found.update(FamilyAnchor(day, minor, held[0]) for day, minor in held[1])
+        if held is not None and families.blind(held.source, main):
+            found.update(FamilyAnchor(day, minor, held.source) for day, minor in held.anchors)
     ordered = sorted(found, key=lambda a: (a.day, a.balance_minor, a.source))
     return FamilyAnchors(tuple(ordered), refused, opening_evidence(store, main, families))
 
@@ -437,14 +541,19 @@ def family_anchors(store: Store, main: str, families: Families) -> FamilyAnchors
 __all__ = [
     "CSV_SOURCE",
     "OPENED",
+    "ExportReading",
+    "ExportRow",
     "Families",
     "FamilyAnchor",
     "FamilyAnchors",
     "OpeningEvidence",
     "SpaceFetch",
     "UnheldLegs",
+    "cut_anchors",
+    "export_sequence",
     "families_of",
     "family_anchors",
+    "held_exports",
     "opening_evidence",
     "space_fetches",
     "unheld_space_legs",

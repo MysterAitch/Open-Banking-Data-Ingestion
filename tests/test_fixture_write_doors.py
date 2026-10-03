@@ -54,6 +54,15 @@ JUSTIFIED = {
     "whole incident - the observed_date migration was skipped on every real store while "
     "the unstamped fixtures above passed, and the live instance rebuilt twice into an "
     "empty derived layer before anybody noticed",
+    ("test_export_cuts.py", "transactions"): "a store that disagrees with the export it "
+    "came from: a listed row that is not held, and a held row under another figure. The "
+    "importer derives the rows and the artefact from the same bytes, so neither state can "
+    "be produced by it, and they are exactly the corruption the explanations exist to "
+    "name. The faults that CAN be reached (a void row, a surplus feed row, an unheld "
+    "Space) are all landed through the doors in the same file",
+    ("test_export_cuts.py", "transaction_sources"): "a sighting on another day than the "
+    "export gave the row, and a row's sightings removed: the same store-versus-artefact "
+    "disagreement as the transactions entry above, which the importer cannot produce",
     ("test_review_settlement.py", "transactions"): "a flag whose ROW HAS GONE, which "
     "no door produces: the rebuild deletes open flags before it deletes rows, so a "
     "flag outliving its row is a state the pass defends against rather than one the "

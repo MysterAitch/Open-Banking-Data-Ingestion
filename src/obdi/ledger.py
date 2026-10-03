@@ -54,6 +54,7 @@ from .balance_anchors import (
     effective_opening,
 )
 from .family_anchors import Families
+from .fault_explanation import WalkExplanation
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
@@ -276,6 +277,11 @@ class AnchorLine:
     balance_direction: Structural[str]
     #: Which way the anchor sits from what the rows predict, "nil" if it agrees.
     difference_direction: Structural[str]
+    #: The source that states it, "" where none does.
+    source: Structural[str]
+    #: What the whole-account walk says of the same balance from the same source:
+    #: "agrees", "differs", or "" where the walk does not hold it.
+    walk: Structural[str]
 
     balance: Total[Money]
     #: Zero for the defining anchor and for one that agrees.
@@ -340,6 +346,9 @@ class FamilyView:
     unheld_refused_on: Structural[str]
     unheld_empty: Structural[int]
     unheld_empty_on: Structural[str]
+    #: Why each of the first changes happened, by exact arithmetic, and what the
+    #: held exports are like (`fault_explanation`); every field of it is structural.
+    explanation: Structural[WalkExplanation | None]
 
 
 @dataclass(frozen=True)
@@ -456,6 +465,7 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         unheld_empty_on=max(
             (f.on.isoformat() for f in walk.unheld.fetches if f.outcome == "empty"), default=""
         ),
+        explanation=walk.explanation,
         lines=tuple(
             FamilyLine(
                 day=reading.day.isoformat(),
@@ -469,8 +479,16 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
     )
 
 
+def _verdict(agrees: bool | None) -> str:
+    return "" if agrees is None else "agrees" if agrees else "differs"
+
+
 def opening_view(opening: EffectiveOpening) -> OpeningView:
     lines = []
+    walked = {
+        (r.day, r.sources[0]): _verdict(r.agrees)
+        for r in (opening.family.readings if opening.family else ())
+    }
     for reading in opening.readings:
         anchor = reading.anchor
         difference = reading.difference_minor or 0
@@ -479,13 +497,9 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
                 day=anchor.day.isoformat(),
                 basis=anchor.basis,
                 defines_opening=reading.defines_opening,
-                verdict=(
-                    ""
-                    if reading.agrees is None
-                    else "agrees"
-                    if reading.agrees
-                    else "differs"
-                ),
+                verdict=_verdict(reading.agrees),
+                source=anchor.source,
+                walk=walked.get((anchor.day, anchor.source), ""),
                 balance_direction=direction_of(anchor.balance_minor),
                 difference_direction=direction_of(difference),
                 balance=Money(anchor.balance_minor, CURRENCY),
