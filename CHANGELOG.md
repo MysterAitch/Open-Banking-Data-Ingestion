@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.266] - 2026-10-03
+
+### Fixed
+- **A statement's own rows count in that statement's period, whatever date a
+  feed gave them.** A card whose statement rows had all merged onto feed rows
+  still failed six of eight balance checks: the merged row keeps the feed's
+  posting date, so a row near a statement date fell in the neighbouring period.
+- **The same money, itemised differently by a statement and a feed, is counted
+  once.** A card's statements print three rows where the feed carries one of
+  the same total a day later, and both were held. Where the two sides'
+  leftovers sum to exactly the same figure and the period then balances, the
+  feed's rows stop counting and the statement's stay.
+- **The period report's two false alarms**: an overlapping statement's own
+  period, and a zero-length period from a statement held in two files.
+
 ## [0.4.265] - 2026-10-03
 
 ### Added
