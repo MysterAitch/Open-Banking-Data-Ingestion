@@ -30,6 +30,12 @@ held statements, one more per artefact not yet read.
 
 THE OPENING BALANCE is derived in `balance_anchors`, which states how and what
 its one weakness is; here it only joins the running position.
+
+TYPED AND DERIVED ROWS are rows like any other here. A transaction a person typed
+is a stored row (`typed_transactions`) marked by its origin. The unitemised
+changes of an account tracked by its stated balances are not stored: they come
+from `effective_opening`, are added to the stored rows before anything is summed
+or listed, and are marked by their origin.
 """
 
 from __future__ import annotations
@@ -51,24 +57,27 @@ from .family_anchors import Families
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
+from .namespaces import MANUAL_SOURCE, UNITEMISED_SOURCE
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .spaces import ArchiveNote
 from .store import Store
+from .typed_transactions import TypedEntry, typed_entries
 
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
 #: review flags, and the two annotation kinds. An account with no rows adds
 #: the registry lookup that tells "declared but empty" from "unknown".
-QUERIES_PER_PAGE = 8
+QUERIES_PER_PAGE = 9
 
 #: Statements issued to look for the account's opening-balance anchors when it
 #: has no TrueLayer records and no held statements: the stated balances, the
 #: bank-record reconciliation (cards, rows, pending, sightings), the held
-#: statement listing, and the sections of "all accounts" statements assigned to
-#: accounts. Each TrueLayer artefact a row's balance has to be found in, and
-#: each held statement not yet read, adds statements beyond this, so a page for
-#: such an account costs more and the fixed figure is a floor.
-ANCHOR_QUERIES = 7
+#: statement listing, the sections of "all accounts" statements assigned to
+#: accounts, and the declared kind that says whether the stated balances are
+#: followed or checked. Each TrueLayer artefact a row's balance has to be found
+#: in, and each held statement not yet read, adds statements beyond this, so a
+#: page for such an account costs more and the fixed figure is a floor.
+ANCHOR_QUERIES = 8
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -113,8 +122,53 @@ def direction_of(minor: int) -> str:
     return "out" if minor < 0 else "nil"
 
 
+#: Where a row came from when it is not simply a feed's: a person typed it, or it
+#: is the arithmetic of two stated balances.
+ORIGIN_TYPED = "typed"
+ORIGIN_UNITEMISED = "unitemised"
+
+
+@dataclass(frozen=True)
+class TypedLine:
+    """One typed transaction, for the list from which it can be withdrawn."""
+
+    #: Minted at entry and carrying nothing about the payment.
+    entry_id: Structural[str]
+    day: Structural[str]
+    direction: Structural[str]
+    withdrawn: Structural[bool]
+
+    amount: Money
+    description: str
+
+
+@dataclass(frozen=True)
+class TypedLines:
+    #: The month on show, newest first, withdrawn ones included.
+    lines: Structural[tuple[TypedLine, ...]]
+    #: Live entries dated in other months, which are withdrawn from their own month.
+    live_elsewhere: Structural[int]
+    #: Entries withdrawn in all, whichever month.
+    withdrawn_total: Structural[int]
+
+
+@dataclass(frozen=True)
+class UnitemisedLine:
+    """One derived change: the movement between two stated balances no row explains."""
+
+    #: The later stated balance's date, which dates the change.
+    day: Structural[str]
+    #: The stated balance it follows, or "" for none.
+    since: Structural[str]
+    direction: Structural[str]
+
+    amount: Money
+
+
 @dataclass(frozen=True)
 class LedgerRow:
+    #: "typed", "unitemised", or "" for a row a source reported.
+    origin: Structural[str]
     dated: Structural[date]
     #: The date each source gave, where a source gave one: (source, ISO date).
     observed: Structural[tuple[tuple[str, str], ...]]
@@ -274,6 +328,9 @@ class OpeningView:
     stated_days: Structural[tuple[str, ...]]
     #: Set for a main account with known Spaces and a family balance stated.
     family: Structural[FamilyView | None]
+    #: The account is tracked by its stated balances alone, so a later stated
+    #: balance is followed rather than checked (see `balance_anchors`).
+    balance_only: Structural[bool]
 
     opening: Total[Money]
 
@@ -301,6 +358,10 @@ class Ledger:
     archive: Structural[ArchiveNote | None] = None
     #: Absent only for an account nothing is known about.
     opening: Structural[OpeningView | None] = None
+    #: What a person has typed into the account; empty for one that is unknown.
+    typed: Structural[TypedLines | None] = None
+    #: The changes derived from a balance-only account's stated balances.
+    unitemised: Structural[tuple[UnitemisedLine, ...]] = ()
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -372,6 +433,7 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
             r.anchor.day.isoformat() for r in opening.readings if r.anchor.basis == STATED
         ),
         family=family_view(opening.family),
+        balance_only=opening.balance_only,
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )
 
@@ -478,27 +540,42 @@ def _ledger_for(
     label: str,
     families: Families | None,
 ) -> Ledger:
-    rows = store.transactions_for_account(ref)
-    if not rows:
+    held = store.transactions_for_account(ref)
+    if not held:
         declared = store.declared_account(AccountRef(ref)) is not None
         empty = _empty(ref, label, "no-rows" if declared else "unknown", bound)
         if not declared:
             return empty
         # An account declared before any money moved can still have had its
         # balance stated, and that is exactly the figure a new account needs.
-        return replace(
-            empty, opening=opening_view(effective_opening(store, ref, [], families=families))
-        )
-    opening = effective_opening(store, ref, rows, families=families)
+        opening = effective_opening(store, ref, [], families=families)
+        entries = typed_entries(store, ref)
+        if not opening.unitemised:
+            return replace(
+                empty, opening=opening_view(opening), typed=typed_lines(entries, "")
+            )
+        # A balance-only account holds no rows of its own, and what its stated
+        # balances imply is its ledger.
+    else:
+        opening = effective_opening(store, ref, held, families=families)
+        entries = typed_entries(store, ref)
+    rows = [*held, *opening.unitemised]
 
     other_side = _confirmed_other_sides(store, ref)
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
 
     sightings = _sightings(store, ref)
+    # A derived row has no source in the sense this list means: nothing fed it.
     account_sources = sorted(
-        {source for seen in sightings.values() for source in seen}
-        | {t.source for t in rows if t.entity_id not in sightings}
+        (
+            {source for seen in sightings.values() for source in seen}
+            | {t.source for t in rows if t.entity_id not in sightings}
+        )
+        - {UNITEMISED_SOURCE}
     )
+    # Typed rows are listed as a source but do not make an account "fed by
+    # more than one": a typed row is not a feed another feed failed to match.
+    feeds = [source for source in account_sources if source != MANUAL_SOURCE]
     identity_groups = {
         (key, occurrence) for _, key, occurrence, _ in shared_identity_groups(store, ref)
     }
@@ -534,10 +611,18 @@ def _ledger_for(
             held[1].split(":", 1)[0] for held in (category, payee) if held is not None
         }
         observed_dates = {day for day in seen.values() if day}
+        origin = (
+            ORIGIN_UNITEMISED
+            if t.source == UNITEMISED_SOURCE
+            else ORIGIN_TYPED
+            if MANUAL_SOURCE in seen
+            else ""
+        )
         built.append(
             (
                 t,
                 LedgerRow(
+                    origin=origin,
                     dated=t.value_date,
                     observed=tuple(
                         (source, day) for source, day in sorted(seen.items()) if day
@@ -547,7 +632,11 @@ def _ledger_for(
                     status=str(t.status),
                     sources=tuple(sorted(seen)),
                     dates_differ=len(seen) > 1 and len(observed_dates) > 1,
-                    one_source=len(account_sources) > 1 and len(seen) == 1,
+                    # What a person typed, or the account's own arithmetic, is not
+                    # a feed that failed to report it.
+                    one_source=(
+                        len(feeds) > 1 and len(seen) == 1 and origin == ""
+                    ),
                     transfer=(
                         "confirmed"
                         if t.transfer_confirmed
@@ -669,7 +758,57 @@ def _ledger_for(
         position=position,
         rows=tuple(row for _, row in in_month),
         opening=opening_view(opening),
+        typed=typed_lines(entries, shown),
+        unitemised=unitemised_lines(opening),
     )
+
+
+def typed_lines(entries: Iterable[TypedEntry], month: str) -> TypedLines:
+    """The typed entries of one month as the page lists them, and the rest as counts.
+
+    Only the month on show is listed, so a mortgage typed into for years does
+    not make the page grow with it, and a withdrawal is made from the month the
+    entry is dated in.
+    """
+    shown: list[TypedLine] = []
+    elsewhere = 0
+    withdrawn = 0
+    for entry in sorted(entries, key=lambda e: (e.day, e.entry_id), reverse=True):
+        if entry.withdrawn:
+            withdrawn += 1
+        if month and _month_of(entry.day) == month:
+            shown.append(
+                TypedLine(
+                    entry_id=entry.entry_id,
+                    day=entry.day.isoformat(),
+                    direction=direction_of(entry.amount_minor),
+                    withdrawn=entry.withdrawn,
+                    amount=Money(entry.amount_minor, CURRENCY),
+                    description=entry.description,
+                )
+            )
+        elif not entry.withdrawn:
+            elsewhere += 1
+    return TypedLines(
+        lines=tuple(shown), live_elsewhere=elsewhere, withdrawn_total=withdrawn
+    )
+
+
+def unitemised_lines(opening: EffectiveOpening) -> tuple[UnitemisedLine, ...]:
+    """Each derived change with the stated balance it follows, oldest first."""
+    stated = sorted(r.anchor.day for r in opening.readings if r.anchor.basis == STATED)
+    lines = []
+    for row in sorted(opening.unitemised, key=lambda t: t.value_date):
+        earlier = max((day for day in stated if day < row.value_date), default=None)
+        lines.append(
+            UnitemisedLine(
+                day=row.value_date.isoformat(),
+                since=earlier.isoformat() if earlier else "",
+                direction=direction_of(row.amount_minor),
+                amount=Money(row.amount_minor, CURRENCY),
+            )
+        )
+    return tuple(lines)
 
 
 def _confirmed_other_sides(store: Store, ref: str) -> dict[str, str]:

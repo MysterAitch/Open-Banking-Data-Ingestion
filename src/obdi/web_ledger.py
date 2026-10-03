@@ -95,6 +95,19 @@ def _words(items: list[str]) -> str:
 def _row_flags(row: Any) -> str:
     """The pills for what is unusual about a row, or nothing when nothing is."""
     flags = ""
+    if row.origin == "typed":
+        flags += _flag(
+            "typed",
+            "A person typed this transaction. It is evidence like any other, and "
+            "can be withdrawn from the typed transactions list below.",
+        )
+    elif row.origin == "unitemised":
+        flags += _flag(
+            "unitemised change",
+            "Derived from the account's stated balances: the difference between two "
+            "of them that no row explains. It is never stored, so restating a "
+            "balance changes it.",
+        )
     if row.one_source:
         flags += _flag(
             "one source",
@@ -304,16 +317,25 @@ def _balance_word(direction: str) -> str:
     return _BALANCE_WORDS.get(direction, direction)
 
 
-def _anchor_row(line: Any) -> str:
+def _anchor_row(line: Any, *, balance_only: bool = False) -> str:
     """One anchor as a list item: its verdict first, then when, what, and whence.
 
     A list and not a table.
     Four columns did not fit a phone: the verdict, which is the reason for
     reading the section, was the column cut off at the right-hand edge.
+
+    On a balance-only account a later STATED balance is followed, never tested,
+    so it is not given the verdict of a check it did not pass.
     """
     if line.defines_opening:
         role = '<span class="pill pill-quiet">defines the opening balance</span>'
         detail = ""
+    elif balance_only and line.basis == "stated":
+        role = '<span class="pill pill-quiet">followed</span>'
+        detail = (
+            ": this account is tracked by its stated balances, so the balance "
+            "follows this figure"
+        )
     elif line.verdict == "agrees":
         role = '<span class="pill pill-ok">agrees</span>'
         detail = " with what the rows predict"
@@ -340,7 +362,7 @@ def _anchor_row(line: Any) -> str:
     )
 
 
-def _anchors_html(anchors: tuple[Any, ...]) -> str:
+def _anchors_html(anchors: tuple[Any, ...], *, balance_only: bool = False) -> str:
     """The anchors, with a long run of agreeing ones folded away.
 
     The defining anchor and every differing one stay in view, since those are what
@@ -348,16 +370,22 @@ def _anchors_html(anchors: tuple[Any, ...]) -> str:
     The agreeing ones are a count to open rather than a list to scroll past.
     """
     agreeing = [line for line in anchors if not line.defines_opening and line.verdict == "agrees"]
+
+    def row(line: Any) -> str:
+        return _anchor_row(line, balance_only=balance_only)
+
     if len(agreeing) <= _PLAIN_AGREEING_ANCHORS:
-        return '<ul class="anchors">' + "".join(_anchor_row(line) for line in anchors) + "</ul>"
+        return '<ul class="anchors">' + "".join(row(line) for line in anchors) + "</ul>"
     folded = {id(line) for line in agreeing}
     return (
         '<ul class="anchors">'
-        + "".join(_anchor_row(line) for line in anchors if id(line) not in folded)
+        + "".join(row(line) for line in anchors if id(line) not in folded)
         + "</ul>"
         '<details class="agreeing"><summary>'
-        f"{len(agreeing)} later anchors agree with what the rows predict</summary>"
-        '<ul class="anchors">' + "".join(_anchor_row(line) for line in agreeing) + "</ul>"
+        f"{len(agreeing)} later anchors "
+        + ("are followed" if balance_only else "agree with what the rows predict")
+        + "</summary>"
+        '<ul class="anchors">' + "".join(row(line) for line in agreeing) + "</ul>"
         "</details>"
     )
 
@@ -441,6 +469,14 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         f'<input type="hidden" name="ref" value="{_esc(ref)}">'
         f'<input type="hidden" name="month" value="{_esc(month)}">'
     )
+    way_round = (
+        "start with a minus sign if the account is overdrawn or owed"
+        + (
+            ", which a mortgage or any other loan always is"
+            if view.opening.balance_only
+            else ""
+        )
+    )
     save = (
         '<form method="post" action="/ledger-anchor">'
         + hidden
@@ -448,7 +484,7 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         '<p><label>Date the balance applies to, the END of that day<br>'
         '<input type="date" name="day" required></label></p>'
         '<p><label>Balance at the end of that day, in pounds and pence<br>'
-        '<span class="muted">start with a minus sign if the account is overdrawn or owed</span><br>'
+        f'<span class="muted">{way_round}</span><br>'
         '<input name="amount" inputmode="decimal" autocomplete="off" required>'
         "</label></p>" + submit_button("Save stated balance") + "</form>"
     )
@@ -482,7 +518,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             "it, and neither the bank's records nor a held statement supplies one.</p>"
         )
     else:
-        body += _anchors_html(opening.anchors)
+        body += _anchors_html(opening.anchors, balance_only=opening.balance_only)
         if sum(1 for line in opening.anchors if line.basis == "statement") >= 2:
             body += (
                 '<p class="muted"><a class="tap" '
@@ -497,7 +533,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
                 "It is the earliest anchor's balance less "
                 "the rows dated on or before that anchor.</p>"
             )
-            if opening.single_anchor:
+            if opening.single_anchor and not opening.balance_only:
                 body += (
                     '<p class="warn">An opening derived from a single anchor absorbs every '
                     "missing or surplus row before that anchor into the opening figure, and "
@@ -522,6 +558,137 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             "opening balance to its closing one - and are not used.</p>"
         )
     return body + _family_html(opening.family) + _anchor_forms(view, view.ref, view.month)
+
+
+def _unitemised_html(view: Any) -> str:
+    """The changes derived from a balance-only account's stated balances.
+
+    Said once, here: what such a change is, and why the rows between two stated
+    balances come off it. Nothing is listed for any other kind of account.
+    """
+    opening = view.opening
+    if opening is None or not opening.balance_only:
+        return ""
+    body = (
+        "<h2>Unitemised changes</h2>"
+        '<p class="muted">This account is tracked by its stated balances. Between two '
+        "consecutive ones the balance moved by the difference, less any rows dated "
+        "between them, typed or otherwise; what is left is shown here as one change "
+        "dated at the later balance. Where the rows explain the whole difference "
+        "there is no change. They are worked out from the stated balances each time "
+        "and never stored, so removing or restating a balance changes them.</p>"
+    )
+    if not view.unitemised:
+        stated = sum(1 for line in opening.anchors if line.basis == "stated")
+        return body + (
+            "<p>None: "
+            + (
+                "the rows between the stated balances explain every difference."
+                if stated >= 2
+                else "it takes two stated balances for there to be a difference."
+            )
+            + "</p>"
+        )
+    items = "".join(
+        "<li>"
+        f'<div class="txn-head"><span class="mono nowrap">{_esc(line.day)}</span>'
+        f'<span class="mono nowrap">'
+        f"{_esc(_signed(line.direction, line.direction, line.amount))}</span></div>"
+        + (
+            f'<p class="muted">since the balance stated for the end of {_esc(line.since)}</p>'
+            if line.since
+            else ""
+        )
+        + "</li>"
+        for line in view.unitemised
+    )
+    return body + f'<ul class="txns">{items}</ul>'
+
+
+def _typed_html(view: Any, *, ref: str, month: str) -> str:
+    """The form that types a transaction in, and the list it can be withdrawn from.
+
+    Nothing typed is ever put back into the form: the figure and the description
+    are empty on every rendering, masked or not, because a pre-filled field is a
+    value on a page reachable by an address. Both controls are secondary: the
+    page's primary action is showing values.
+    """
+    typed = view.typed
+    if typed is None:
+        return ""
+    hidden = (
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<input type="hidden" name="month" value="{_esc(month)}">'
+    )
+    way_round = (
+        "in raises the balance, which for a mortgage or any loan owed is a payment "
+        "towards nil; out lowers it, which is interest or a further borrowing"
+        if view.opening is not None and view.opening.balance_only
+        else "in is money arriving in this account, out is money leaving it"
+    )
+    form = (
+        '<form method="post" action="/ledger-typed">'
+        + hidden
+        + '<p><label>Date of the transaction<br>'
+        '<input type="date" name="day" required></label></p>'
+        '<p><label>Direction<br>'
+        f'<span class="muted">{_esc(way_round)}</span><br>'
+        '<select name="direction" required>'
+        '<option value="" selected disabled>Choose in or out</option>'
+        '<option value="in">in</option><option value="out">out</option>'
+        "</select></label></p>"
+        '<p><label>Figure, in pounds and pence, without a sign<br>'
+        '<input name="amount" inputmode="decimal" autocomplete="off" required>'
+        "</label></p>"
+        '<p><label>Description<br>'
+        '<input name="description" autocomplete="off" maxlength="140" required>'
+        "</label></p>" + submit_button("Save typed transaction", secondary=True) + "</form>"
+    )
+    items = ""
+    for line in typed.lines:
+        figure = _esc(_signed(line.direction, line.direction, line.amount))
+        if line.withdrawn:
+            tail = '<p><span class="pill pill-quiet">withdrawn</span></p>'
+        else:
+            tail = (
+                '<form method="post" action="/ledger-typed-withdraw">'
+                + hidden
+                + f'<input type="hidden" name="entry" value="{_esc(line.entry_id)}">'
+                + submit_button("Withdraw this typed transaction", secondary=True)
+                + "</form>"
+            )
+        items += (
+            "<li>"
+            '<div class="txn-head">'
+            f'<span class="mono nowrap">{_esc(line.day)}</span>'
+            f'<span class="mono nowrap">{figure}</span>'
+            "</div>"
+            f"<p><strong>{_esc(line.description)}</strong></p>"
+            f"{tail}"
+            "</li>"
+        )
+    notes = ""
+    if typed.live_elsewhere:
+        notes += (
+            f"<p class=\"muted\">{_esc(str(typed.live_elsewhere))} more typed "
+            "transaction(s) are dated in other months: step to that month to withdraw one.</p>"
+        )
+    if typed.withdrawn_total:
+        notes += (
+            f"<p class=\"muted\">{_esc(str(typed.withdrawn_total))} typed transaction(s) "
+            "withdrawn in all. They stay in the record as evidence and count nowhere.</p>"
+        )
+    return (
+        "<h2>Typed transactions</h2>"
+        '<p class="muted">For an account no feed reports, such as a mortgage at another '
+        "bank. Each one is kept as evidence and counted like any other row, and "
+        "becomes one row with the bank's if a feed later reports the same payment. "
+        "The figure and description you type are never shown on any page you can "
+        "bookmark; after saving, this page comes back masked.</p>"
+        + form
+        + (f'<ul class="txns">{items}</ul>' if items else "")
+        + notes
+    )
 
 
 def _position_html(position: Any, *, bound: bool) -> str:
@@ -695,7 +862,11 @@ def render_ledger(
             '<p class="warn"><strong>This account holds no transactions at all.</strong> '
             "It is declared, but nothing has been imported or fetched for it, or "
             "its feed has been silent since it was set up. This is not a clean "
-            "month.</p>" + _opening_html(view, unmasked) + _navigation(view, unmasked)
+            "month.</p>"
+            + _opening_html(view, unmasked)
+            + _unitemised_html(view)
+            + _typed_html(view, ref=view.ref, month=view.month)
+            + _navigation(view, unmasked)
         )
         return render_page("Ledger", body)
 
@@ -712,6 +883,8 @@ def render_ledger(
         body += _summary_html(view.summary, bound=view.actual_bound)
     body += _opening_html(view, unmasked)
     body += _position_html(view.position, bound=view.actual_bound)
+    body += _unitemised_html(view)
+    body += _typed_html(view, ref=view.ref, month=view.month)
     if view.state == "ok":
         body += (
             "<h2>Transactions, newest first</h2>"
@@ -837,6 +1010,79 @@ class LedgerPages:
             month,
             unmasked=False,
             notice=f"Removed: the stated balance for the end of {day}.",
+            no_store=True,
+        )
+
+    def _typed_save_post(self, form: dict[str, list[str]]) -> None:
+        """Type a transaction in, then answer with the MASKED ledger.
+
+        The figure and the description go to the hook and no further: not into
+        the confirmation, not into a refusal, and not into the page that follows.
+        The page that follows is shown at the month the transaction is dated in,
+        which is the only part of it that is echoed, and only once the hook has
+        accepted it as a real date.
+        """
+        hook = self.bound_config.typed_save
+        if hook is None:
+            self._respond(404, _page("Not available", "Typing a transaction is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        day = (form.get("day", [""])[0] or "").strip()
+        try:
+            hook(
+                ref,
+                day,
+                (form.get("direction", [""])[0] or "").strip(),
+                form.get("amount", [""])[0] or "",
+                form.get("description", [""])[0] or "",
+            )
+        except DataError as exc:
+            self._anchor_refusal(400, "Transaction not saved", f"Nothing was saved. {exc}.")
+            return
+        except Exception as fault:
+            say("ledger.typed.save.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                "Transaction not saved",
+                "Nothing was saved, because of an unexpected fault.",
+            )
+            return
+        self._ledger(
+            ref,
+            day[:7],
+            unmasked=False,
+            notice=f"Saved: a typed transaction dated {day}. Nothing else changed.",
+            no_store=True,
+        )
+
+    def _typed_withdraw_post(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.typed_withdraw
+        if hook is None:
+            self._respond(
+                404, _page("Not available", "Withdrawing a typed transaction is not wired.")
+            )
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        try:
+            hook(ref, (form.get("entry", [""])[0] or "").strip())
+        except DataError as exc:
+            self._anchor_refusal(400, "Transaction not withdrawn", f"Nothing was withdrawn. {exc}.")
+            return
+        except Exception as fault:
+            say("ledger.typed.withdraw.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                "Transaction not withdrawn",
+                "Nothing was withdrawn, because of an unexpected fault.",
+            )
+            return
+        self._ledger(
+            ref,
+            month,
+            unmasked=False,
+            notice="Withdrawn: one typed transaction. It stays in the record as evidence "
+            "and counts nowhere.",
             no_store=True,
         )
 

@@ -48,23 +48,41 @@ and never a zero to assume.
 
 Dates are VALUE dates, the date the ledger and the Actual payload use, so the
 figure here and the figure on the ledger page are sums over the same rows.
+
+AN ACCOUNT TRACKED BY ITS STATED BALANCES ALONE (kind `accounts.BALANCE_ONLY_KIND`)
+is the one case where a later stated balance is not a check. A mortgage at
+another bank has no feed to check against, so its stated balances are the whole
+of what is known, and the difference between two consecutive ones is a movement
+nobody itemised. `derive_unitemised` turns each such difference, less the counted
+rows (typed or otherwise) dated after the earlier balance up to and including the
+later one, into a row dated at the later balance; where the rows explain the
+whole difference there is no row. The rows are DERIVED on demand and never
+stored, so removing or restating a stated balance changes them. With them
+included, every later stated balance agrees by construction, and a balance
+stated by another basis (a held statement) is still a real check.
+
+A liability is a negative balance, as everywhere else: a mortgage's balance is
+what is owed, so it is stated and held as a minus figure, a payment is a
+movement IN (towards nil), and interest is a movement OUT.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from itertools import accumulate
+from itertools import accumulate, pairwise
 
-from .accounts import AccountRef
+from .accounts import AccountRef, is_balance_only
 from .balance_reconciliation import RUNNING_BALANCE_SOURCE, balance_reconciliation
 from .errors import DataError
 from .family_anchors import Families, FamilyAnchor, FamilyAnchors, family_anchors
-from .models import Transaction, TransactionStatus
+from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
+from .namespaces import UNITEMISED_SOURCE
 from .statement_terms import statement_balances
 from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
 
@@ -225,6 +243,12 @@ class EffectiveOpening:
     #: The walk of the family's balances, for a main account with known Spaces
     #: and at least one family anchor; None otherwise.
     family: FamilyWalk | None = None
+    #: The account is tracked by its stated balances alone.
+    balance_only: bool = False
+    #: The rows derived from the stated balances of such an account, which the
+    #: readings already include. Every caller that sums an account's rows adds
+    #: these to the stored ones; they are empty for any other account.
+    unitemised: tuple[Transaction, ...] = ()
 
     @property
     def defining(self) -> Anchor | None:
@@ -311,6 +335,82 @@ def derive_opening(
     return EffectiveOpening(
         account, tuple(readings), opening, as_at, unusable_statements
     )
+
+
+#: What the payee reads in Actual, and the ledger, for a derived row.
+UNITEMISED_DESCRIPTION = "Unitemised change"
+
+
+def _unitemised_row(account: str, day: date, change_minor: int) -> Transaction:
+    """One derived movement, shaped like any other row so every consumer of rows
+    (the ledger, the position, the push) takes it without a special case.
+
+    Its content key folds in the account, the date, AND the figure. That is the
+    imported id Actual holds it under, and Actual keeps an existing row's values
+    when an id is re-imported, so a restated balance has to arrive under a NEW
+    id for the change to reach the budget; the superseded row is then an orphan
+    that the ordinary removal deletes. Updating in place would need the
+    applier to recognise a second id shape, which a changed id does not.
+    """
+    key = hashlib.sha256(
+        "\x1f".join(
+            ("obdi-unitemised", account, day.isoformat(), str(change_minor))
+        ).encode("utf-8")
+    ).hexdigest()
+    return Transaction(
+        account_id=account,
+        amount_minor=change_minor,
+        value_date=day,
+        booking_date=day,
+        description=UNITEMISED_DESCRIPTION,
+        source=UNITEMISED_SOURCE,
+        currency=CURRENCY,
+        tier=SourceTier.SYNTHETIC,
+        status=TransactionStatus.BOOKED,
+        entity_id=f"unitemised:{account}:{day.isoformat()}",
+        content_key=key,
+    )
+
+
+def derive_unitemised(
+    account: str, stated: Iterable[Anchor], rows: Iterable[Transaction]
+) -> tuple[Transaction, ...]:
+    """The movements between consecutive stated balances that no row explains.
+
+    For each later stated balance: the difference from the one before, less the
+    counted rows dated after that one up to and including this one. Nothing is
+    derived where that is nil, and rows before the first stated balance or after
+    the last are never touched. Pure, so the arithmetic can be shown without a store.
+    """
+    by_day = {a.day: a.balance_minor for a in stated if a.basis == STATED}
+    days = sorted(by_day)
+    held = [
+        t
+        for t in rows
+        if _counts_toward(STATED, t) and t.currency == CURRENCY
+    ]
+    derived: list[Transaction] = []
+    for earlier, later in pairwise(days):
+        explained = sum(t.amount_minor for t in held if earlier < t.value_date <= later)
+        change = by_day[later] - by_day[earlier] - explained
+        if change:
+            derived.append(_unitemised_row(account, later, change))
+    return tuple(derived)
+
+
+def unitemised_for_store(store: Store) -> list[Transaction]:
+    """The derived rows of every declared balance-only account, for the push."""
+    derived: list[Transaction] = []
+    for record in store.declared_accounts():
+        if not is_balance_only(record.kind):
+            continue
+        ref = str(record.ref)
+        derived.extend(
+            derive_unitemised(
+                ref, stated_anchors(store, ref), store.transactions_for_account(ref)
+            )
+        )
+    return derived
 
 
 def _asset_id(ref: str) -> str:
@@ -478,8 +578,14 @@ def effective_opening(
         }
         anchors += family_main_anchors(gathered.family.anchors, members)
         walk = walk_family(ref, gathered.family, {ref: held, **members})
-    opening = derive_opening(ref, anchors, held, unusable_statements=gathered.unusable)
-    return replace(opening, family=walk)
+    balance_only = is_balance_only(store.declared_kind(ref))
+    unitemised = (
+        derive_unitemised(ref, gathered.own, held) if balance_only else ()
+    )
+    opening = derive_opening(
+        ref, anchors, [*held, *unitemised], unusable_statements=gathered.unusable
+    )
+    return replace(opening, family=walk, balance_only=balance_only, unitemised=unitemised)
 
 
 def effective_openings(
@@ -506,6 +612,37 @@ def _parse_day(text: str) -> date:
         return date.fromisoformat(text.strip())
     except ValueError as exc:
         raise AnchorRefused("the date is not a real calendar date") from exc
+
+
+def parse_pounds_and_pence(amount_text: str) -> int:
+    """A typed figure in pounds and pence as signed minor units.
+
+    The one reading of a typed amount, shared by the stated-balance form and the
+    typed-transaction form so that two doors cannot come to accept different
+    figures. Every refusal is a fixed sentence: the figure typed is never quoted,
+    because a refusal page is reachable by an address.
+    """
+    typed = amount_text.strip()
+    if not _AMOUNT.match(typed):
+        raise AnchorRefused(
+            "the amount is not a decimal figure in pounds and pence, with at most two "
+            "decimal places"
+        )
+    try:
+        return parse_amount(typed, currency=CURRENCY)
+    except (DataError, ValueError, ArithmeticError):
+        # `from None`: the parser's own message quotes the text it was given.
+        raise AnchorRefused("the amount could not be read exactly") from None
+
+
+def parse_calendar_day(text: str) -> date:
+    """A typed date, written YYYY-MM-DD, that exists. Shared with the typed-transaction form."""
+    return _parse_day(text)
+
+
+def known_account(store: Store, ref: str) -> bool:
+    """Whether the account is declared or holds rows: the test every typed door applies."""
+    return _known_account(store, ref)
 
 
 def record_stated_anchor(
@@ -535,17 +672,7 @@ def record_stated_anchor(
         raise AnchorRefused("a balance cannot be stated for a date that has not happened yet")
     if currency != CURRENCY:
         raise AnchorRefused(f"only {CURRENCY} balances are held")
-    typed = amount_text.strip()
-    if not _AMOUNT.match(typed):
-        raise AnchorRefused(
-            "the amount is not a decimal figure in pounds and pence, with at most two "
-            "decimal places"
-        )
-    try:
-        minor = parse_amount(typed, currency=CURRENCY)
-    except (DataError, ValueError, ArithmeticError):
-        # `from None`: the parser's own message quotes the text it was given.
-        raise AnchorRefused("the amount could not be read exactly") from None
+    minor = parse_pounds_and_pence(amount_text)
     store.record_valuation_row(
         asset_id=_asset_id(ref),
         kind=ACCOUNT_BALANCE_KIND,

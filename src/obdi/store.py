@@ -41,7 +41,13 @@ from .accounts import (
 )
 from .errors import DataError
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus, Valuation
-from .namespaces import API_SOURCES, provenance_rank, stored_provenance_rank
+from .namespaces import (
+    API_SOURCES,
+    MANUAL_SOURCE,
+    MANUAL_WITHDRAWAL_SOURCE,
+    provenance_rank,
+    stored_provenance_rank,
+)
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
 #: the ONLY thing that makes an open do work, so a store at this version
@@ -1304,6 +1310,17 @@ class Store:
         return next(
             (record for record in self.declared_accounts() if record.ref == ref), None
         )
+
+    def declared_kind(self, ref: str) -> str:
+        """The kind an account is declared with, or "" when it is not declared.
+
+        One statement, because the balance derivation asks it of every account
+        it opens and `declared_account` reads the whole registry to answer.
+        """
+        row = self.connection.execute(
+            "SELECT kind FROM declared_accounts WHERE ref = ?", (ref,)
+        ).fetchone()
+        return str(row["kind"]) if row is not None else ""
 
     def forget_account(self, stable_id: AccountId) -> bool:
         """Remove a declared account and its windows. Returns whether
@@ -3164,6 +3181,13 @@ class Store:
         sections = self.connection.execute(
             "SELECT COUNT(*) FROM statement_sections"
         ).fetchone()[0]
+        # A transaction a person typed is an artefact, but no bank holds a
+        # second copy, so unlike every other artefact it cannot be fetched or
+        # re-uploaded. Its withdrawal is a decision of the same kind.
+        typed = self.connection.execute(
+            "SELECT COUNT(*) FROM raw_artefacts WHERE source IN (?, ?)",
+            (MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE),
+        ).fetchone()[0]
         return {
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
@@ -3171,6 +3195,7 @@ class Store:
             "declared accounts": int(declared),
             "stated balance anchors": int(stated),
             "statement section assignments": int(sections),
+            "typed transactions and withdrawals": int(typed),
         }
 
 

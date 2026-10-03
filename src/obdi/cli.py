@@ -890,12 +890,14 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
     if busy:
         raise ValueError(busy)
     from .ingest import ImportSummary, reconcile_batch
+    from .namespaces import MANUAL_SOURCE
     from .rebuild import (
-        _NON_TRANSACTIONAL,
+        _READS_NO_ROWS,
         _starling_defaults,
         parse_artefact_transactions,
         resolve_artefact_ref,
     )
+    from .typed_transactions import withdrawn_entry_ids
 
     with Store(db_path) as store:
         row = store.connection.execute(
@@ -906,7 +908,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
         if row is None:
             raise ValueError(f"no artefact with id {artefact_id}")
         source = str(row["source"])
-        if source in _NON_TRANSACTIONAL:
+        if source in _READS_NO_ROWS:
             raise ValueError(
                 f"{source} artefacts carry no transactions to replay"
             )
@@ -931,6 +933,16 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
         transactions = parse_artefact_transactions(
             source, row["payload"], account_ref, str(row["digest"])
         )
+        if source == MANUAL_SOURCE:
+            # A withdrawn entry reads into no row, however it is replayed.
+            retracted = withdrawn_entry_ids(
+                (str(r["source"]), r["payload"])
+                for r in store.connection.execute(
+                    "SELECT source, payload FROM raw_artefacts WHERE account_ref = ?",
+                    (account_ref,),
+                )
+            )
+            transactions = [t for t in transactions if t.source_id not in retracted]
         before = store.counts().get("transactions", 0)
         if transactions:
             reconcile_batch(
@@ -1129,10 +1141,10 @@ def _replay(db_path: Path, out: Path | None) -> int:
         )
         return 2
 
-    from .actual_push import opening_balances
+    from .actual_push import opening_balances, transactions_to_push
 
     with Store(db_path) as store:
-        transactions = store.all_transactions()
+        transactions = transactions_to_push(store)
         pairs = store.confirmed_transfer_pairs()
         openings = opening_balances(
             store, bindings, families=families_of(store, _account_map(store))
@@ -2652,6 +2664,27 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return remove_stated_anchor(store, ref, day)
 
+    def typed_save(ref: str, day: str, direction: str, amount: str, description: str) -> None:
+        from .typed_transactions import TypedRefused, record_typed_transaction
+
+        # A rebuild reads the artefacts once, at its start: an entry landed
+        # while it runs would be resolved live into a store about to be wiped
+        # and replayed without it.
+        busy = rebuild_in_progress_note(db_path)
+        if busy:
+            raise TypedRefused(f"nothing was typed in: {busy}")
+        with Store(db_path) as store:
+            record_typed_transaction(store, ref, day, direction, amount, description)
+
+    def typed_withdraw(ref: str, entry_id: str) -> None:
+        from .typed_transactions import TypedRefused, withdraw_typed_transaction
+
+        busy = rebuild_in_progress_note(db_path)
+        if busy:
+            raise TypedRefused(f"nothing was withdrawn: {busy}")
+        with Store(db_path) as store:
+            withdraw_typed_transaction(store, ref, entry_id)
+
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import queue_with_progress
 
@@ -3412,6 +3445,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         position_data=position_data,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,
+        typed_save=typed_save,
+        typed_withdraw=typed_withdraw,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,

@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .balance_anchors import effective_opening
+from .balance_anchors import effective_opening, unitemised_for_store
 from .family_anchors import Families
+from .models import Transaction
 from .replay import (
     ActualAccountBinding,
     OpeningBalance,
@@ -436,6 +437,18 @@ def queue_with_progress(actual_dir: Path) -> list[dict[str, object]]:
     return queued
 
 
+def transactions_to_push(store: Store) -> list[Transaction]:
+    """Every row the budget is built from: the stored ones, and the changes
+    derived from each balance-only account's stated balances.
+
+    The derived rows are never stored, so a caller that read `all_transactions`
+    alone would leave such an account's balance in Actual short by exactly what
+    its stated balances say changed. The one place the two are joined, used by
+    the push, the audit, the prune, and the manual replay alike.
+    """
+    return [*store.all_transactions(), *unitemised_for_store(store)]
+
+
 def build_envelope(
     store: Store,
     bindings: list[ActualAccountBinding],
@@ -444,7 +457,7 @@ def build_envelope(
     named_canonicals: set[str] | None = None,
     families: Families | None = None,
 ) -> dict[str, object]:
-    transactions = store.all_transactions()
+    transactions = transactions_to_push(store)
     openings = opening_balances(store, bindings, families=families)
     payload = build_payload(transactions, bindings, openings)
     # Two store rows sharing one imported id would reach Actual as one row:
@@ -556,7 +569,7 @@ def build_audit_envelope(
     included even when empty - an empty account can still hold orphans on
     the Actual side, and those are precisely what the audit exists to see.
     """
-    transactions = store.all_transactions()
+    transactions = transactions_to_push(store)
     openings = opening_balances(store, bindings, families=families)
     accounts = build_payload(transactions, bindings, openings)
     for binding in bindings:

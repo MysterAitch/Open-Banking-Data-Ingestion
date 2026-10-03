@@ -600,7 +600,15 @@ def resolve(
         for t in similar
         if one_payment(t, same_content=t.content_key == incoming.content_key)
     ]
-    rejected = tuple(t for t in similar if t not in near)
+    # Two typed rows kept apart are not a puzzle to put to the reviewer: the
+    # person typed both on purpose, and `could_be_one_payment` refuses to merge
+    # them for exactly that reason.
+    rejected = tuple(
+        t
+        for t in similar
+        if t not in near
+        and not (incoming.tier is SourceTier.MANUAL and t.tier is SourceTier.MANUAL)
+    )
 
     if not near:
         # The series check filters on exact amount itself, so the amount

@@ -19,7 +19,7 @@ from . import instrumentation
 from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
 from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
-from .models import RawArtefact, Transaction, TransactionStatus
+from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
 from .review_settlement import settle_review_flags
 from .space_attribution import fold_space_copies
@@ -543,6 +543,25 @@ def _reconcile(
         # Superseding with it put a settled payment back to pending, moved its
         # date, and - when the pending record was really a different payment -
         # replaced the settled one altogether.
+        sighting = replace(
+            transaction, entity_id=result.existing.entity_id, artefact_digest=digest
+        )
+        store.record_source(sighting)
+        existing.note_sighting(
+            sighting.entity_id, sighting.account_id, sighting.source, sighting.source_id
+        )
+        summary.matched += 1
+        return result.existing, result.existing.entity_id
+
+    if (
+        result.existing is not None
+        and transaction.tier is SourceTier.MANUAL
+        and result.existing.tier is not SourceTier.MANUAL
+    ):
+        # A typed row that matches a row a source reported is a sighting of it
+        # and says nothing new: the precise record absorbs the imprecise one.
+        # Superseding would replace a bank's description, date, and identity
+        # with what a person remembered, and move the row's imported id.
         sighting = replace(
             transaction, entity_id=result.existing.entity_id, artefact_digest=digest
         )

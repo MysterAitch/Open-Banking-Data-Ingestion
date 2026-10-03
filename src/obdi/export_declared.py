@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .buildinfo import describe as build_identifier
+from .namespaces import MANUAL_SOURCE
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, types only
     from .store import Store
@@ -146,6 +147,39 @@ def _stated_balances(store: Store) -> list[dict[str, object]]:
     ]
 
 
+def _typed_transactions(store: Store) -> list[dict[str, object]]:
+    """What a person typed into an account, and whether it was later withdrawn.
+
+    The entries are also layer-0 artefacts, so the raw export holds their bytes;
+    this lists them as a person reads them. Keyed by the entry id, which is
+    minted at entry and survives a rebuild, because they have no content
+    identity of their own to be matched by.
+    """
+    from .typed_transactions import typed_entries
+
+    refs = [
+        str(row[0])
+        for row in store.connection.execute(
+            "SELECT DISTINCT account_ref FROM raw_artefacts WHERE source = ? "
+            "ORDER BY account_ref",
+            (MANUAL_SOURCE,),
+        )
+    ]
+    return [
+        {
+            "account": entry.account,
+            "entry_id": entry.entry_id,
+            "date": entry.day.isoformat(),
+            "amount_minor": entry.amount_minor,
+            "currency": "GBP",
+            "description": entry.description,
+            "withdrawn": entry.withdrawn,
+        }
+        for ref in refs
+        for entry in typed_entries(store, ref)
+    ]
+
+
 def _statement_sections(store: Store) -> list[dict[str, object]]:
     """Which account a person gave each account of an "all accounts" statement.
 
@@ -205,6 +239,7 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     decisions = _review_decisions(store)
     balances = _stated_balances(store)
     sections = _statement_sections(store)
+    typed = _typed_transactions(store)
 
     def write(name: str, payload: object) -> None:
         (out_dir / name).write_text(
@@ -216,6 +251,7 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
     write("review-decisions.json", decisions)
     write("stated-balances.json", balances)
     write("statement-sections.json", sections)
+    write("typed-transactions.json", typed)
 
     counts = {
         "annotations": len(annotations),
@@ -223,6 +259,7 @@ def export_declared(store: Store, out_dir: Path) -> ExportResult:
         "review_decisions": len(decisions),
         "stated_balances": len(balances),
         "statement_sections": len(sections),
+        "typed_transactions": len(typed),
     }
     write(
         "manifest.json",

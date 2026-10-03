@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .accounts import (
+    BALANCE_ONLY_KIND,
     AccountRecord,
     AccountRef,
     ArchiveOutcome,
@@ -78,6 +79,7 @@ KIND_SUGGESTIONS = (
     "cash",
     "investment",
     "pension",
+    BALANCE_ONLY_KIND,
 )
 
 #: Sized for a thumb and consistent with every other action on the site.
@@ -226,6 +228,10 @@ def account_form(record: AccountRecord | None, declared: list[AccountRecord]) ->
             "kind",
             record.kind if record else "",
             "Kind",
+            note=(
+                f"type {BALANCE_ONLY_KIND} for an account tracked by the balances you "
+                "state for it alone, such as a mortgage at another bank"
+            ),
             suggestions="account-kinds",
         )
         + _text_field(
@@ -324,6 +330,13 @@ def accounts_page(records: list[AccountRecord], *, today: date) -> bytes:
             "accounts a provider has mentioned are already selectable "
             "everywhere a document is filed.</p>"
         )
+        + "<p>For an account obdi has no feed for, declare it, then open its ledger "
+        "to state its balance and type its transactions. Choose the kind "
+        f"<strong>{BALANCE_ONLY_KIND}</strong> if you would rather state its balance "
+        "now and then than itemise it: the change between two stated balances is "
+        "then counted as it happened, instead of being reported as a failed check. "
+        "A mortgage or any loan is owed, so its balance is stated as a minus "
+        "figure.</p>"
         + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
         + '<p><a class="button" href="/">Back to overview</a></p>',
     )

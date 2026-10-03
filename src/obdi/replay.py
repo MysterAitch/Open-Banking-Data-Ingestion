@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from .models import Transaction, TransactionStatus
+from .namespaces import UNITEMISED_SOURCE
 
 
 class ReplayError(RuntimeError):
@@ -117,6 +118,8 @@ def _notes_for(transaction: Transaction) -> str:
         parts.append("internal transfer (unpaired claim)")
     if transaction.status is TransactionStatus.PENDING:
         parts.append("pending")
+    if transaction.source == UNITEMISED_SOURCE:
+        parts.append("derived from the stated balances, not itemised")
     return " | ".join(parts)
 
 

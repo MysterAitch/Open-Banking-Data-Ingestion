@@ -61,7 +61,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import accumulate
 
-from .balance_anchors import CURRENCY, EffectiveOpening, effective_opening
+from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
 from .family_anchors import Families
 from .ledger import Money, direction_of, running_balance
 from .masking import Structural, Total
@@ -280,7 +280,13 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
         if known and opening.opening_minor is not None
         else None
     )
-    later = [r for r in opening.readings if r.agrees is not None]
+    # A balance-only account's stated balances agree by construction, so counting
+    # them as passed checks would report agreement nobody tested.
+    later = [
+        r
+        for r in opening.readings
+        if r.agrees is not None and not (opening.balance_only and r.anchor.basis == STATED)
+    ]
     # The same rows as the balance, so the two can only differ by the opening.
     moved_minor = running_balance(0, item.rows) if balance_minor is None and live else None
     first = min((t.value_date for t in live), default=None)
@@ -550,14 +556,18 @@ def read_position(
         rows = store.transactions_for_account(ref)
         declared = registry.get(ref)
         closed = declared.closed if declared is not None else None
+        opening = effective_opening(store, ref, rows, families=families)
         inputs.append(
             AccountInput(
                 ref=ref,
                 label=merged.get(ref) or ref,
                 kind=declared.kind if declared is not None else "",
                 archived=closed is not None and closed <= today,
-                opening=effective_opening(store, ref, rows, families=families),
-                rows=tuple(rows),
+                opening=opening,
+                # The derived rows are part of the balance the opening reads
+                # as agreeing with, so the balance and the month series must
+                # carry them too.
+                rows=(*rows, *opening.unitemised),
             )
         )
 

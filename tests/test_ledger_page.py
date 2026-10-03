@@ -273,7 +273,9 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
         page = get(served, ref=CURRENT, month="2026-03").text
 
         assert "value date" in page
-        assert "costs 8 statements" in page
+        from obdi.ledger import QUERIES_PER_PAGE
+
+        assert f"costs {QUERIES_PER_PAGE} statements" in page
 
     def test_Page_LinksToTheShapePageAndHome(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text

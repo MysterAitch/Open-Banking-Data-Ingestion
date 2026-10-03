@@ -26,6 +26,18 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.265] - 2026-10-03
+
+### Added
+- **A transaction can be typed into an account from its ledger page**, for
+  accounts obdi has no feed for. It is kept as evidence, so a rebuild replays
+  it, and it can be withdrawn. When a feed later reports the same payment the
+  typed entry becomes a sighting of the feed's row.
+- **An account can be tracked by its stated balances alone** (kind
+  `balance-only`): a mortgage, say. The change between two stated balances,
+  less any rows between them, shows as an unitemised change and is pushed to
+  Actual, where before every later stated balance read as a failed check.
+
 ## [0.4.264] - 2026-10-03
 
 ### Fixed

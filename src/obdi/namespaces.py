@@ -94,9 +94,23 @@ API_SOURCES = frozenset(
     }
 )
 
+#: What a person typed, as evidence. A typed transaction lands as its own
+#: artefact and parses into a row whose `source` is MANUAL_SOURCE; withdrawing
+#: it lands a SECOND artefact, under MANUAL_WITHDRAWAL_SOURCE, that retracts the
+#: first by its entry id, because a raw artefact is never edited or deleted.
+#: Neither names a pipe or a parser: the person is the witness.
+MANUAL_SOURCE = "manual"
+MANUAL_WITHDRAWAL_SOURCE = "manual-withdrawal"
+MANUAL_SOURCES = frozenset({MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE})
+
+#: The `source` of a row DERIVED from an account's stated balances (see
+#: `balance_anchors`). It is never stored and never lands as an artefact, so it
+#: is not in SOURCES: no query over raw evidence can meet it.
+UNITEMISED_SOURCE = "unitemised"
+
 #: Every value that may appear in raw_artefacts.source or
 #: fetch_attempts.source.
-SOURCES = API_SOURCES | FILE_SOURCES
+SOURCES = API_SOURCES | FILE_SOURCES | MANUAL_SOURCES
 
 #: Cooperative lease names. Both the Python side and the Node applier take
 #: leases in this set; a name that exists on only one side is a lease

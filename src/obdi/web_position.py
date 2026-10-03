@@ -24,6 +24,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
@@ -207,6 +208,14 @@ def _uncounted_card(view: Any) -> str:
             "No balance has been stated for it, and neither the bank's records nor a "
             "held statement supplies one."
         )
+        if not int(view.rows):
+            # A feedless account is the usual cause, and the two ways out differ.
+            reason += (
+                " It holds no rows, so it may be an account obdi has no feed for: "
+                "state a balance on its ledger, or declare its kind as "
+                f"{BALANCE_ONLY_KIND} on its account page to have it counted from "
+                "its first stated balance."
+            )
     through = (
         f"{_esc(_plural(int(view.rows), 'row'))} held, through {_esc(view.rows_through)}"
         if view.rows_through

@@ -40,7 +40,12 @@ from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
 from .matching import CandidateIndex
 from .models import Transaction
-from .namespaces import API_SOURCES, UNASSIGNED_ACCOUNT
+from .namespaces import (
+    API_SOURCES,
+    MANUAL_SOURCE,
+    MANUAL_WITHDRAWAL_SOURCE,
+    UNASSIGNED_ACCOUNT,
+)
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .providers import starling, truelayer
@@ -49,6 +54,7 @@ from .review_settlement import SettleReport, settle_review_flags
 from .space_attribution import fold_space_copies
 from .statement_sections import replay_batches
 from .store import Store
+from .typed_transactions import transaction_from_entry, withdrawn_entry_ids
 
 
 @dataclass
@@ -204,6 +210,10 @@ _TRANSACTIONAL = frozenset(
 #: Artefact sources that carry no transactions - evidence kept, not replayed.
 _NON_TRANSACTIONAL = frozenset(API_SOURCES - _TRANSACTIONAL)
 
+#: Artefacts that read into no row of their own: the provider facts above, and a
+#: withdrawal, which acts on the entry it names (`typed_transactions`).
+_READS_NO_ROWS = _NON_TRANSACTIONAL | {MANUAL_WITHDRAWAL_SOURCE}
+
 
 #: Artefact refs beginning with these are provider-qualified fallbacks
 #: ("source:provider_ref") and get resolved through the account map at
@@ -328,6 +338,8 @@ def parse_artefact_transactions(
             if transaction is not None:
                 transactions.append(replace(transaction, artefact_digest=digest))
         return transactions
+    if source == MANUAL_SOURCE:
+        return [transaction_from_entry(payload, account_ref, digest)]
     # File imports: source is the suffix (csv, qif, ...). The parser
     # registry re-detects from the bytes, exactly as the original import.
     parser = detect(payload)
@@ -441,6 +453,10 @@ def rebuild_from_raw(
         "record_count FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
     ).fetchall()
     starling_defaults = _starling_defaults(artefact_rows)
+    retracted = withdrawn_entry_ids(
+        ((str(row["source"]), row["payload"]) for row in artefact_rows),
+        report.problems,
+    )
 
     if instrumentation.enabled():
         # Each rebuild reports its own numbers, not the residue of the
@@ -453,7 +469,7 @@ def rebuild_from_raw(
     # instead of a floor that rises as the replay learns.
     sizes: dict[int, int] = {}
     for row in artefact_rows:
-        if str(row["source"]) in _NON_TRANSACTIONAL:
+        if str(row["source"]) in _READS_NO_ROWS:
             continue
         sizes[int(row["rowid"])] = _record_count(row["payload"])
     report.records_total = sum(sizes.values())
@@ -477,7 +493,7 @@ def rebuild_from_raw(
         digest = str(row["digest"])
         payload = row["payload"]
 
-        if source in _NON_TRANSACTIONAL:
+        if source in _READS_NO_ROWS:
             report.artefacts_skipped += 1
             continue
 
@@ -529,6 +545,10 @@ def rebuild_from_raw(
             report.problems.append(f"{source} for {account_ref}: {exc}")
             report.artefacts_skipped += 1
             continue
+        if source == MANUAL_SOURCE:
+            # Retracted by a withdrawal that may have arrived at any time: the
+            # entry stays in layer 0 and reads into no row.
+            transactions = [t for t in transactions if t.source_id not in retracted]
 
         if row["record_count"] is None:
             # Landed metadata, recorded once: how many transactions this

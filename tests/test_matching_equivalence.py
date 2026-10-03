@@ -15,7 +15,7 @@ record widening the window for one candidate but not its neighbour, an
 id-less repeat arriving while a settled reissue is in flight. Seeded, so
 any disagreement is reproducible by its seed alone.
 
-THE RESOLVE ORACLE IS NO LONGER VERBATIM, and the two amendments are the
+THE RESOLVE ORACLE IS NO LONGER VERBATIM, and the three amendments are the
 whole of the difference. Provider-id continuity changed what the matcher is
 meant to decide, so an oracle frozen at the old behaviour would have held
 the index to answers that are now known to be wrong (one payment held twice,
@@ -26,6 +26,8 @@ here as naive scans, independently of the index that implements them:
      the id the row carries now.
   2. For a source in SETTLEMENT_KEEPS_ID, a row that source has called by a
      different id is a different payment, at every later tier.
+  3. Two typed rows kept apart are not near-misses: a person typed both on
+     purpose, so the pair is not put to the reviewer as a puzzle.
 
 What a row has been called is memory the rows themselves do not hold, so
 there are two folds to agree with: one where that memory is only each row's
@@ -139,7 +141,12 @@ def _resolve_reference(
         for t in similar
         if one_payment(t, same_content=t.content_key == incoming.content_key)
     ]
-    rejected = tuple(t for t in similar if t not in near)
+    rejected = tuple(
+        t
+        for t in similar
+        if t not in near
+        and not (incoming.tier is SourceTier.MANUAL and t.tier is SourceTier.MANUAL)
+    )
 
     if not near:
         return MatchResult(

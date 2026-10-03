@@ -629,6 +629,11 @@ class WebConfig:
     anchor_save: Callable[[str, str, str, str], None] | None = None
     #: Remove the balance stated for (ref, day); whether there was one.
     anchor_remove: Callable[[str, str], bool] | None = None
+    #: Type a transaction into an account: (ref, day, direction, amount,
+    #: description), all as typed. Raises a DataError that never quotes any of them.
+    typed_save: Callable[[str, str, str, str, str], None] | None = None
+    #: Withdraw a typed transaction: (ref, entry id). Same refusal rule.
+    typed_withdraw: Callable[[str, str], None] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -6453,6 +6458,12 @@ class ConnectionHandler(
             return
         if route == "/ledger-anchor-remove":
             self._anchor_remove_post(self._read_form())
+            return
+        if route == "/ledger-typed":
+            self._typed_save_post(self._read_form())
+            return
+        if route == "/ledger-typed-withdraw":
+            self._typed_withdraw_post(self._read_form())
             return
         if route == "/statement-held":
             self._statement_held()

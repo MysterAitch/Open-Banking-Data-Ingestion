@@ -59,6 +59,21 @@ AccountId = NewType("AccountId", str)
 #: purpose, which is exactly why it is not the stable identity.
 AccountRef = NewType("AccountRef", str)
 
+#: The kind of an account tracked by its stated balances alone: a mortgage at
+#: another bank, a property. Kinds are free text everywhere else, but this one
+#: changes how the balance is derived (see `balance_anchors`), so it is spelt
+#: once here. It was chosen as a KIND rather than a new column because a kind
+#: needs no schema change and already travels through the registry file, the
+#: export, the backup, and a rebind; the cost is that such an account cannot also
+#: carry "mortgage" as its kind, so its display name says what it is.
+BALANCE_ONLY_KIND = "balance-only"
+
+
+def is_balance_only(kind: str) -> bool:
+    """Whether a declared kind says the account is tracked by its stated balances."""
+    return kind.strip().casefold() == BALANCE_ONLY_KIND
+
+
 #: Says what the identifier is when one turns up in a log line or a URL.
 ACCOUNT_ID_PREFIX = "acc_"
 
