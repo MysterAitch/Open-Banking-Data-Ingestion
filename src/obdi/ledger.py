@@ -346,6 +346,11 @@ class FamilyView:
     unheld_refused_on: Structural[str]
     unheld_empty: Structural[int]
     unheld_empty_on: Structural[str]
+    #: How the feed's round-ups stand, as counts (`family_anchors.RoundUpTally`).
+    round_ups_carried: Structural[int]
+    round_up_legs: Structural[int]
+    round_up_legs_paired: Structural[int]
+    round_ups_unreadable: Structural[int]
     #: Why each of the first changes happened, by exact arithmetic, and what the
     #: held exports are like (`fault_explanation`); every field of it is structural.
     explanation: Structural[WalkExplanation | None]
@@ -465,6 +470,10 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         unheld_empty_on=max(
             (f.on.isoformat() for f in walk.unheld.fetches if f.outcome == "empty"), default=""
         ),
+        round_ups_carried=walk.round_ups.carried,
+        round_up_legs=walk.round_ups.legs,
+        round_up_legs_paired=walk.round_ups.paired,
+        round_ups_unreadable=walk.round_ups.unreadable,
         explanation=walk.explanation,
         lines=tuple(
             FamilyLine(

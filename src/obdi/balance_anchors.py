@@ -98,8 +98,10 @@ from .family_anchors import (
     FamilyAnchor,
     FamilyAnchors,
     OpeningEvidence,
+    RoundUpTally,
     UnheldLegs,
     family_anchors,
+    round_up_tally,
     space_fetches,
     unheld_space_legs,
 )
@@ -244,6 +246,8 @@ class FamilyWalk:
     #: Why each of the first changes happened, by exact arithmetic
     #: (`fault_explanation`); None until `effective_opening` has read the store.
     explanation: WalkExplanation | None = None
+    #: The main account's round-ups, legs, and pairings, in counts.
+    round_ups: RoundUpTally = field(default_factory=RoundUpTally)
 
     @property
     def opened(self) -> FamilyAnchor | None:
@@ -875,6 +879,12 @@ def effective_opening(
             held_categories=held_ids,
             sightings=sightings,
         )
+        paired = (
+            frozenset(entity for pair in store.confirmed_transfer_pairs() for entity in pair)
+            if any("roundUpOf" in t.raw for t in held)
+            else frozenset()
+        )
+        walk = replace(walk, round_ups=round_up_tally(held, paired))
         if walk.unheld.legs:
             fetches = space_fetches(store, walk.unheld.uids)
             walk = replace(walk, unheld=replace(walk.unheld, fetches=fetches))

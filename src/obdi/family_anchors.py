@@ -78,6 +78,7 @@ from .accounts import AccountMap
 from .balance_reconciliation import _chain_ends
 from .models import Transaction
 from .parsers.uk_banks import StarlingCsvParser
+from .providers.starling import round_up_of
 from .space_attribution import space_parents
 from .spaces import LISTING_SOURCE, SPACE_COUNTERPARTY, _listed_uids, historical_spaces
 from .statement_terms import statement_day_balances
@@ -291,6 +292,47 @@ class UnheldLegs:
     fetches: tuple[SpaceFetch, ...] = ()
     #: The date of every leg, earliest first.
     days: tuple[date, ...] = ()
+
+
+@dataclass(frozen=True)
+class RoundUpTally:
+    """How the feed's round-ups stand, in counts.
+
+    Said even when every count is nil, because a feed that carries none is the
+    one thing that would show the round-up reading of the feed to be wrong.
+    """
+
+    #: Counted rows whose feed item carried a round-up, of any amount.
+    carried: int = 0
+    #: Round-up legs held in the main account.
+    legs: int = 0
+    #: Of those, the legs paired with a row of a Space.
+    paired: int = 0
+    #: Rows carrying a round-up that could not be read, so hold no leg.
+    unreadable: int = 0
+
+
+def round_up_tally(rows: Iterable[Transaction], paired_entities: frozenset[str]) -> RoundUpTally:
+    """Count the counted rows' round-ups, their legs, and the legs confirmed paired.
+
+    A stored row keeps the raw of the sighting that created it, so a payment
+    first sighted by an export or an aggregator shows no round-up of its own.
+    Every leg proves a payment that carried one, so `carried` is never fewer
+    than the legs held; an unreadable round-up on such a payment can still go
+    uncounted, and a zero one too.
+    """
+    carried = legs = paired = unreadable = 0
+    for row in rows:
+        if row.status.is_history:
+            continue
+        if "roundUpOf" in row.raw:
+            legs += 1
+            paired += row.entity_id in paired_entities
+            continue
+        reading = round_up_of(row.raw)
+        carried += reading.carried
+        unreadable += reading.unreadable
+    return RoundUpTally(max(carried, legs), legs, paired, unreadable)
 
 
 def space_fetches(store: Store, uids: Iterable[str]) -> tuple[SpaceFetch, ...]:
@@ -547,6 +589,7 @@ __all__ = [
     "FamilyAnchor",
     "FamilyAnchors",
     "OpeningEvidence",
+    "RoundUpTally",
     "SpaceFetch",
     "UnheldLegs",
     "cut_anchors",
@@ -555,6 +598,7 @@ __all__ = [
     "family_anchors",
     "held_exports",
     "opening_evidence",
+    "round_up_tally",
     "space_fetches",
     "unheld_space_legs",
 ]

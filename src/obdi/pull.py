@@ -1021,11 +1021,8 @@ def pull_starling(
 
             transactions = []
             for item in items:
-                transaction = starling.to_transaction(item, account_id=target)
-                if transaction is not None:
-                    transactions.append(
-                        replace(transaction, artefact_digest=digest)
-                    )
+                for transaction in starling.to_transactions(item, account_id=target):
+                    transactions.append(replace(transaction, artefact_digest=digest))
             reconcile_batch(store, transactions, digest=digest, summary=summary)
 
     # The feed's Space rows may be the other half of a copy already held.

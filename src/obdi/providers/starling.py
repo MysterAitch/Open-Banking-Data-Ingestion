@@ -353,6 +353,136 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     )
 
 
+#: What a round-up leg's identity adds to its payment's feed item uid.
+ROUND_UP_LEG_SUFFIX = ":round-up"
+
+#: The leg's own words, a payee-less description kept constant so that two
+#: round-ups of one amount on one day are told apart by occurrence alone.
+ROUND_UP_DESCRIPTION = "Round-up"
+
+
+@dataclass(frozen=True)
+class RoundUpReading:
+    """What a feed item's `roundUp` says, tolerantly read.
+
+    The shape is Starling's `AssociatedFeedRoundUp` as understood from its
+    published feed item: the Space's category as `goalCategoryUid` and the spare
+    change as an `amount` of `currency` and `minorUnits`. Nothing here has been
+    checked against a real feed item, so anything else is `unreadable` and
+    counted, never guessed at.
+    """
+
+    #: The item has a `roundUp` that is not null.
+    carried: bool = False
+    #: The item has one that cannot be read as a movement of money.
+    unreadable: bool = False
+    #: The spare change moved, and the category it moved to; nil when there is no leg.
+    amount_minor: int = 0
+    space_uid: str = ""
+
+    @property
+    def moves_money(self) -> bool:
+        return self.amount_minor > 0
+
+
+def round_up_of(item: JsonObject) -> RoundUpReading:
+    """Read an item's round-up: absent, nothing, a movement, or unreadable.
+
+    A round-up of nothing, or one with no amount, is not a movement and not a
+    fault. Anything present that cannot be read - and any round-up on an item
+    with no uid to derive the leg's identity from - is unreadable.
+    """
+    value = item.get("roundUp")
+    if value is None:
+        return RoundUpReading()
+    if not isinstance(value, dict):
+        return RoundUpReading(carried=True, unreadable=True)
+    amount = value.get("amount")
+    if amount is None:
+        return RoundUpReading(carried=True)
+    if not isinstance(amount, dict):
+        return RoundUpReading(carried=True, unreadable=True)
+    minor = amount.get("minorUnits")
+    space = value.get("goalCategoryUid")
+    if (
+        isinstance(minor, bool)
+        or not isinstance(minor, int)
+        or minor < 0
+        or amount.get("currency", "GBP") != "GBP"
+    ):
+        return RoundUpReading(carried=True, unreadable=True)
+    if minor == 0:
+        return RoundUpReading(carried=True)
+    uid = item.get("feedItemUid")
+    if not isinstance(space, str) or not space.strip() or not isinstance(uid, str) or not uid:
+        return RoundUpReading(carried=True, unreadable=True)
+    return RoundUpReading(carried=True, amount_minor=minor, space_uid=space.strip())
+
+
+def to_transactions(item: JsonObject, *, account_id: str) -> list[Transaction]:
+    """Every row one feed item yields: the item itself, then any round-up leg.
+
+    A card payment with round-ups on is ONE feed item in the main category at
+    the payment's own amount, and the money leaving for the Space is reported
+    nowhere in that category. The leg is therefore a second row beside the
+    payment rather than part of it: the payment's amount must stay the
+    payment's, because the export and the aggregator sight the payment at that
+    amount and every match depends on it.
+
+    A leg exists only for a payment going OUT that is not itself a transfer, so
+    an ordinary transfer, which has its own main-side item, never gains a
+    second one.
+    """
+    payment = to_transaction(item, account_id=account_id)
+    if payment is None:
+        return []
+    leg = _round_up_leg(item, payment)
+    return [payment] if leg is None else [payment, leg]
+
+
+def _round_up_leg(item: JsonObject, payment: Transaction) -> Transaction | None:
+    reading = round_up_of(item)
+    if (
+        not reading.moves_money
+        or payment.amount_minor >= 0
+        or payment.is_internal_transfer
+        or text(item, "counterPartyType").upper() == "CATEGORY"
+    ):
+        return None
+    uid = text(item, "feedItemUid") + ROUND_UP_LEG_SUFFIX
+    minor = -reading.amount_minor
+    raw: JsonObject = {
+        "feedItemUid": uid,
+        "roundUpOf": text(item, "feedItemUid"),
+        "amount": {"currency": "GBP", "minorUnits": reading.amount_minor},
+        "direction": "OUT",
+        "source": INTERNAL_SOURCE,
+        "status": text(item, "status"),
+        "transactionTime": text(item, "transactionTime") or text(item, "settlementTime"),
+        "counterPartyType": "CATEGORY",
+        "counterPartyUid": reading.space_uid,
+        "counterPartyName": "",
+    }
+    return Transaction(
+        account_id=payment.account_id,
+        amount_minor=minor,
+        currency=payment.currency,
+        value_date=payment.value_date,
+        booking_date=payment.booking_date,
+        description=ROUND_UP_DESCRIPTION,
+        counterparty="",
+        status=payment.status,
+        source="starling",
+        source_id=uid,
+        tier=SourceTier.AUTHORITATIVE,
+        is_internal_transfer=True,
+        content_key=content_key(
+            amount_minor=minor, value_date=payment.value_date, description=ROUND_UP_DESCRIPTION
+        ),
+        raw=raw,
+    )
+
+
 def _connection_of(request_meta: str) -> str:
     """The fetching connection, read from the request circumstances.
 

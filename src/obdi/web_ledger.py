@@ -583,6 +583,29 @@ def _explanations_html(explanation: Any) -> str:
     return body
 
 
+def _round_ups_html(family: Any) -> str:
+    """Counts of the feed's round-ups, said even when there are none.
+
+    A feed that carries no round-up at all is how a wrong reading of it would
+    show, so the nil case is a sentence of its own rather than silence.
+    """
+    unreadable = (
+        f"{_esc(str(family.round_ups_unreadable))} could not be read and hold no leg."
+    )
+    if not family.round_ups_carried and not family.round_up_legs:
+        return (
+            '<p class="muted">No row of the feed carries a round-up, so no round-up leg to a '
+            "Space is held. If this account's card payments do round up into a Space, the "
+            f"feed does not report it in the shape this page reads. {unreadable}</p>"
+        )
+    return (
+        f'<p class="muted">{_esc(str(family.round_ups_carried))} feed row(s) carry a '
+        f"round-up. {_esc(str(family.round_up_legs))} round-up leg(s) to a Space are held, "
+        f"and {_esc(str(family.round_up_legs_paired))} of them are paired with a row in that "
+        f"Space. {unreadable}</p>"
+    )
+
+
 def _family_html(family: Any) -> str:
     """The walk of the whole account's stated balances against the rows of the
     main account and its Spaces together.
@@ -656,6 +679,7 @@ def _family_html(family: Any) -> str:
                 "the account map, and the next pull fetches its history."
             )
         body += "</p>"
+    body += _round_ups_html(family)
     if family.refused_figures:
         body += (
             f'<p class="warn">{_esc(str(family.refused_figures))} printed end-of-day '

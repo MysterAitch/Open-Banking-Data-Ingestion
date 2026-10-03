@@ -347,8 +347,7 @@ def parse_artefact_transactions(
         decoded = json.loads(payload)
         transactions = []
         for item in json_rows(decoded, "feedItems"):
-            transaction = starling.to_transaction(item, account_id=account_ref)
-            if transaction is not None:
+            for transaction in starling.to_transactions(item, account_id=account_ref):
                 transactions.append(replace(transaction, artefact_digest=digest))
         return transactions
     if source == MANUAL_SOURCE:
