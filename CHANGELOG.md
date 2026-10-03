@@ -26,6 +26,17 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.271] - 2026-10-03
+
+### Changed
+- **Declaring a recovered Space also binds its category.** A pull asks for a
+  closed Space's history only once it is declared and bound, and no page could
+  bind a Space the provider no longer lists, so declaring led nowhere. The
+  Spaces page now shows each Space's state, and one press finishes whatever is
+  unfinished, including a Space already declared but not bound.
+- **`recover-spaces --apply` needs the account map**, because it now binds as
+  well, and leaves alone a Space whose category is bound to another account.
+
 ## [0.4.270] - 2026-10-03
 
 ### Added
