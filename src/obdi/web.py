@@ -64,9 +64,9 @@ from .navigation import current_route
 from .overview import Overview
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
-from .pull import RANGE_REFUSAL_MARK
 from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
+from .space_windows import RANGE_REFUSAL_MARK
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .statement_shape import ShapeReport
 from .timings import Timings

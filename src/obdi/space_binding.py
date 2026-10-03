@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from .accounts import AccountMap
-from .pull import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK
+from .space_windows import HistoryProgress, history_progress, span_of
 from .spaces import HistoricalSpace, account_for
 from .store import Store
 
@@ -29,12 +30,6 @@ PROVIDER = "starling"
 UNBOUND = "unbound"
 BOUND = "bound"
 ELSEWHERE = "elsewhere"
-
-#: What the pull's own question about a Space's feed has had back, if asked.
-NEVER_ASKED = ""
-LANDED = "landed"
-EMPTY = "empty"
-REFUSED = "refused"
 
 #: Said once, wherever a press has bound a Space, because the press itself
 #: fetches nothing and a person who stops reading here would otherwise wait for
@@ -57,9 +52,8 @@ class SpaceState:
     binding: str
     #: The account its category resolves to when that is not `ref`.
     bound_to: str
-    feed: str
-    #: The date of the newest answer, empty when never asked.
-    feed_on: str
+    #: Where its windowed history stands; None until it is declared and bound.
+    history: HistoryProgress | None
 
     @property
     def disagrees(self) -> bool:
@@ -87,13 +81,10 @@ class SpaceState:
         return f"declared and bound; {self._feed_words()}"
 
     def _feed_words(self) -> str:
-        if self.feed == LANDED:
-            return f"its own feed landed rows on {self.feed_on}"
-        if self.feed == EMPTY:
-            return f"its own feed landed empty on {self.feed_on}"
-        if self.feed == REFUSED:
-            return f"its own feed was refused on {self.feed_on}"
-        return "its own feed has not been asked for yet"
+        history = self.history
+        if history is None or (history.asked == 0 and history.too_long == 0):
+            return "its own feed has not been asked for yet"
+        return f"its own {history.describe()}"
 
 
 @dataclass(frozen=True)
@@ -146,35 +137,12 @@ RETRY_NOTE = (
 )
 
 
-def _feed_answer(store: Store, uid: str, ref: str) -> tuple[str, str]:
-    """The newest answer to the pull's question about this Space's own feed.
-
-    The attempt is filed under the provider-qualified name until a bind moves
-    it to the account, so both are read; only attempts the pull marked as a
-    closed Space's are counted, which keeps the main account's feed out.
-    """
-    row = store.connection.execute(
-        "SELECT attempted_at, outcome, detail FROM fetch_attempts "
-        "WHERE source = 'starling-feed' AND account_ref IN (?, ?) AND detail LIKE ? "
-        "ORDER BY attempted_at DESC LIMIT 1",
-        (f"{PROVIDER}:{uid}", ref, f"{CLOSED_SPACE_MARK}%"),
-    ).fetchone()
-    if row is None:
-        return NEVER_ASKED, ""
-    on = str(row["attempted_at"])[:10]
-    if row["outcome"] == "landed":
-        empty = str(row["detail"]).startswith(CLOSED_SPACE_EMPTY)
-        return (EMPTY if empty else LANDED), on
-    if row["outcome"] == "refused":
-        return REFUSED, on
-    return NEVER_ASKED, ""
-
-
 def space_states(
     store: Store, account_map: AccountMap, found: Sequence[HistoricalSpace]
 ) -> list[SpaceState]:
     """The state of each recovered Space, in the order `found` gives them."""
     declared = {str(record.ref) for record in store.declared_accounts()}
+    now = datetime.now(UTC)
     states: list[SpaceState] = []
     for space in found:
         ref = str(account_for(space).ref)
@@ -185,10 +153,12 @@ def space_states(
             binding, bound_to = BOUND, ""
         else:
             binding, bound_to = ELSEWHERE, resolved
-        feed, feed_on = (
-            _feed_answer(store, space.uid, ref)
+        history = (
+            history_progress(
+                store, (f"{PROVIDER}:{space.uid}", ref), span_of(space, now), now
+            )
             if ref in declared and binding == BOUND
-            else (NEVER_ASKED, "")
+            else None
         )
         states.append(
             SpaceState(
@@ -198,8 +168,7 @@ def space_states(
                 declared=ref in declared,
                 binding=binding,
                 bound_to=bound_to,
-                feed=feed,
-                feed_on=feed_on,
+                history=history,
             )
         )
     return states

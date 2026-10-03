@@ -31,6 +31,7 @@ while preserving the fact that it happened.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -275,6 +276,67 @@ def fetch_feed(
     # empty feed stays distinguishable from a feed never asked about, and so
     # the coverage trackers can read the window edges back.
     return rows(payload, "feedItems"), body, f"changesSince={stamp}"
+
+
+#: The query-string names of the bounded-window ask. UNCONFIRMED against the
+#: provider: built from its documented shape (a `transactions-between` path
+#: under the category feed taking these two timestamps) and not yet answered
+#: by it, so the first real pull is the confirmation and every refusal lands in
+#: the attempt ledger.
+WINDOW_MIN_PARAM = "minTransactionTimestamp"
+WINDOW_MAX_PARAM = "maxTransactionTimestamp"
+
+_WINDOW_STAMP = "%Y-%m-%dT%H:%M:%S.000Z"
+_WINDOW_SPEC = re.compile(
+    rf"^{WINDOW_MIN_PARAM}=(?P<lo>[0-9T:.\-]+Z)&{WINDOW_MAX_PARAM}=(?P<hi>[0-9T:.\-]+Z)$"
+)
+
+
+def window_spec(minimum: datetime, maximum: datetime) -> str:
+    """The ask in the API's own vocabulary: what the ledger and the origin record."""
+    lo = minimum.astimezone(UTC).strftime(_WINDOW_STAMP)
+    hi = maximum.astimezone(UTC).strftime(_WINDOW_STAMP)
+    return f"{WINDOW_MIN_PARAM}={lo}&{WINDOW_MAX_PARAM}={hi}"
+
+
+def parse_window_spec(asked: str) -> tuple[datetime, datetime] | None:
+    """The window a recorded ask named, or None for any other kind of ask."""
+    found = _WINDOW_SPEC.match(asked)
+    if found is None:
+        return None
+    return (
+        datetime.strptime(found["lo"], _WINDOW_STAMP).replace(tzinfo=UTC),
+        datetime.strptime(found["hi"], _WINDOW_STAMP).replace(tzinfo=UTC),
+    )
+
+
+def fetch_feed_between(
+    token: str,
+    account_uid: str,
+    category_uid: str,
+    *,
+    minimum: datetime,
+    maximum: datetime,
+    client: httpx.Client | None = None,
+) -> tuple[list[JsonObject], bytes, str]:
+    """Feed items whose transaction time lies in a bounded window.
+
+    `changesSince` runs from its stamp to now, so the provider's maximum range
+    (refused with QUERY_EXCEEDING_MAX_TIME_RANGE somewhere between 180 and 365
+    days) puts every older movement out of its reach; this ask names both ends.
+    Returns the items, the raw body for landing, and the window asked.
+    """
+    asked = window_spec(minimum, maximum)
+    payload, body = _get(
+        f"/api/v2/feed/account/{account_uid}/category/{category_uid}/transactions-between",
+        token,
+        client=client,
+        **{
+            WINDOW_MIN_PARAM: minimum.astimezone(UTC).strftime(_WINDOW_STAMP),
+            WINDOW_MAX_PARAM: maximum.astimezone(UTC).strftime(_WINDOW_STAMP),
+        },
+    )
+    return rows(payload, "feedItems"), body, asked
 
 
 def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:

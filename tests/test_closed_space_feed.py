@@ -37,14 +37,9 @@ from obdi.balance_anchors import effective_opening
 from obdi.family_anchors import families_of
 from obdi.ingest import import_file, pair_transfers_across_store
 from obdi.providers import starling
-from obdi.pull import (
-    CLOSED_SPACE_EMPTY,
-    CLOSED_SPACE_MARK,
-    CLOSED_SPACE_RETRY_DAYS,
-    STARLING_CONNECTION,
-    pull_starling,
-)
+from obdi.pull import STARLING_CONNECTION, pull_starling
 from obdi.rebuild import rebuild_from_raw
+from obdi.space_windows import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK, CLOSED_SPACE_RETRY_DAYS
 from obdi.store import Store
 
 MAIN = "starling-personal"
@@ -121,6 +116,12 @@ class Provider:
             starling, "fetch_identifiers", lambda token, uid: b'{"accountIdentifiers": []}'
         )
         monkeypatch.setattr(starling, "fetch_feed", self.feed)
+        monkeypatch.setattr(starling, "fetch_feed_between", self.between)
+
+    def between(self, token, account_uid, category_uid, *, minimum, maximum):
+        """A closed category is asked for in windows, never by `changesSince`."""
+        got, body, _ = self.feed(token, account_uid, category_uid)
+        return got, body, starling.window_spec(minimum, maximum)
 
     def feed(self, token, account_uid, category_uid, since=None, since_at=None):
         self.asks.append(category_uid)
@@ -213,14 +214,15 @@ class TestAClosedSpaceWithHistory:
         assert sorted(t.amount_minor for t in rows) == [-10000, 40000]
         assert [r["outcome"] for r in attempts_for(store, "cat-closed")] == ["landed"]
 
-    def test_Pull_AsksForTheClosedSpacesFeedTheWayANewlyBoundSpaceIs(self, store, monkeypatch):
+    def test_Pull_AsksForTheClosedSpacesHistoryInABoundedWindowNotFromAStampToNow(
+        self, store, monkeypatch
+    ):
         fake = Provider(monkeypatch, "history")
         first_pull_names_the_space(store)
         pull(store)
 
-        # A full ask: no cursor, so the provider's own ten-year default window.
         landed = attempts_for(store, "cat-closed")[0]
-        assert landed["asked"].startswith("changesSince=")
+        assert landed["asked"].startswith("minTransactionTimestamp=")
         assert fake.asks.count("cat-closed") == 1
 
     def test_Transfers_PairAcrossTheMainAndTheRecoveredSpace(self, store, monkeypatch):
@@ -310,7 +312,9 @@ class TestAClosedSpaceTheProviderRefuses:
             source="starling-feed",
             connection_id=STARLING_CONNECTION,
             account_ref="starling:cat-closed",
-            asked="changesSince=2026-01-01T00:00:00Z",
+            asked=starling.window_spec(
+                datetime(2026, 8, 3, tzinfo=UTC), datetime(2026, 10, 3, tzinfo=UTC)
+            ),
             request_meta="{}",
             outcome="refused",
             http_status=404,
@@ -329,7 +333,9 @@ class TestAClosedSpaceTheProviderRefuses:
             source="starling-feed",
             connection_id=STARLING_CONNECTION,
             account_ref="starling:cat-closed",
-            asked="changesSince=2026-01-01T00:00:00Z",
+            asked=starling.window_spec(
+                datetime(2026, 8, 3, tzinfo=UTC), datetime(2026, 10, 3, tzinfo=UTC)
+            ),
             request_meta="{}",
             outcome="refused",
             http_status=404,

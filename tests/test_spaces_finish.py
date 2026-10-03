@@ -26,7 +26,9 @@ import test_closed_space_feed as household
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import _account_map, build_web_config
 from obdi.cli import main as cli_main
-from obdi.pull import CLOSED_SPACE_MARK, STARLING_CONNECTION, pull_starling
+from obdi.providers import starling
+from obdi.pull import STARLING_CONNECTION, pull_starling
+from obdi.space_windows import CLOSED_SPACE_MARK
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 
@@ -371,9 +373,13 @@ class TestWhatThePageSaysOfEachSpacesFeed:
     @pytest.mark.parametrize(
         ("closed", "words"),
         [
-            ("history", "its own feed landed rows on"),
-            ("empty", "its own feed landed empty on"),
-            ("refused", "its own feed was refused on"),
+            ("history", "its own history complete over 1 window (1 with rows, 0 empty)"),
+            ("empty", "its own history complete over 1 window (0 with rows, 1 empty)"),
+            (
+                "refused",
+                "its own history incomplete: 0 of 1 window landed (0 with rows, 0 empty); "
+                "1 refused; newest ask refused (HTTP 404) on",
+            ),
         ],
     )
     def test_Page_AfterAPullHasAskedForIt_SaysWhatCameBackAndWhen(
@@ -388,16 +394,22 @@ class TestWhatThePageSaysOfEachSpacesFeed:
         finally:
             httpd.shutdown()
 
-        today = datetime.now(UTC).date().isoformat()
-        assert f"declared and bound; {words} {today}" in page
+        assert f"declared and bound; {words}" in page
+        if closed == "refused":
+            assert f"(HTTP 404) on {datetime.now(UTC).date().isoformat()}" in page
 
     def test_Page_WhenBoundButNeverAsked_SaysItsFeedHasNotBeenAskedForYet(self, lab):
         lab.press()
 
         assert "declared and bound; its own feed has not been asked for yet" in lab.spaces_page()
 
-    def test_Page_WhenAnOlderQuestionWasFollowedByANewerOne_SaysTheNewerAnswer(self, lab):
+    def test_Page_WhenAnOlderRefusalWasFollowedByALandingOverTheSpan_SaysTheHistoryIsComplete(
+        self, lab
+    ):
         lab.press()
+        everything = starling.window_spec(
+            datetime(2026, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC)
+        )
         for outcome, status, when in (
             ("refused", 404, datetime(2026, 9, 1, tzinfo=UTC)),
             ("landed", 200, datetime(2026, 9, 20, tzinfo=UTC)),
@@ -407,7 +419,7 @@ class TestWhatThePageSaysOfEachSpacesFeed:
                     source="starling-feed",
                     connection_id=STARLING_CONNECTION,
                     account_ref="starling:cat-closed",
-                    asked="changesSince=2026-01-01T00:00:00Z",
+                    asked=everything,
                     request_meta="{}",
                     outcome=outcome,
                     http_status=status,
@@ -415,7 +427,10 @@ class TestWhatThePageSaysOfEachSpacesFeed:
                     now=when,
                 )
 
-        assert "its own feed landed rows on 2026-09-20" in lab.spaces_page()
+        page = lab.spaces_page()
+
+        assert "its own history complete over 1 window (1 with rows, 0 empty); 1 refused" in page
+        assert "newest ask refused" not in page
 
     def test_Page_WhenTheAttemptWasFiledUnderTheBoundAccount_StillSaysWhatCameBack(self, lab):
         lab.press()
@@ -424,7 +439,9 @@ class TestWhatThePageSaysOfEachSpacesFeed:
                 source="starling-feed",
                 connection_id=STARLING_CONNECTION,
                 account_ref=RENT,
-                asked="changesSince=2026-01-01T00:00:00Z",
+                asked=starling.window_spec(
+                    datetime(2026, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC)
+                ),
                 request_meta="{}",
                 outcome="refused",
                 http_status=404,
@@ -432,7 +449,7 @@ class TestWhatThePageSaysOfEachSpacesFeed:
                 now=datetime(2026, 9, 22, tzinfo=UTC),
             )
 
-        assert "its own feed was refused on 2026-09-22" in lab.spaces_page()
+        assert "newest ask refused (HTTP 404) on 2026-09-22" in lab.spaces_page()
 
 
 class TestTheRecoverSpacesCommand:
