@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.270] - 2026-10-03
+
+### Added
+- **The statement-periods page says what the same-money rule did at each
+  closing**, and why it folded nothing where it did not, in dates, counts, and
+  source names. It also dates each leftover row and says whether a row equal
+  to the difference is a leftover or one both sources hold. The rule folded
+  nothing on a real card and nothing said why.
+
+### Maintenance
+- **Rebuild and pulls:** what each held statement says is kept after its first
+  reading, so the same-money pass and the statement-periods page no longer
+  extract every PDF again on each run. The pass's steps are timed separately,
+  and the slowest is named beside the slowest phase.
+
 ## [0.4.269] - 2026-10-03
 
 ### Fixed
