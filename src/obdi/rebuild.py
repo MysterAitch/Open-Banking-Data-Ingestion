@@ -53,7 +53,7 @@ from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
-from .statement_sections import replay_batches
+from .statement_sections import SectionBatches, replay_batches
 from .store import Store
 from .typed_transactions import transaction_from_entry, withdrawn_entry_ids
 
@@ -377,7 +377,7 @@ def _replay_sections(
     payload: bytes,
     account_map: AccountMap | None,
     candidate_cache: dict[str, CandidateIndex],
-) -> None:
+) -> SectionBatches:
     """Read each assigned section of one kept statement back into its account.
 
     Each section is its own batch, numbered on its own, exactly as it was when
@@ -401,6 +401,7 @@ def _replay_sections(
             )
             report.transactions += len(transactions)
         report.kept_sections_replayed += 1
+    return replay
 
 
 def rebuild_from_raw(
@@ -511,22 +512,27 @@ def rebuild_from_raw(
 
         if account_ref == UNASSIGNED_ACCOUNT:
             # Kept before anyone decided whose it is, so it is not replayed.
-            # Asking which parser would take it costs one read and tells the
-            # person how many are waiting only on an account.
-            report.kept_unassigned += 1
             report.artefacts_skipped += 1
-            with contextlib.suppress(DataError, ValueError):
-                detect(payload)
-                report.kept_readable += 1
             # The statement as a whole has no account, but an "all accounts"
             # document may have had some of its sections assigned: those are
             # declared state, which the artefact alone cannot reproduce, so
             # they are read back here or the rebuild would silently drop them.
+            # A document every one of whose sections is assigned is waiting
+            # for nothing, so it is not counted as waiting for an account.
+            waiting = True
             if source == "statement":
                 with instrumentation.phase("reconcile"):
-                    _replay_sections(
+                    replay = _replay_sections(
                         store, report, digest, bytes(payload), account_map, candidate_cache
                     )
+                waiting = not replay.every_section_assigned
+            if waiting:
+                # Asking which parser would take it costs one read and tells
+                # the person how many are waiting only on an account.
+                report.kept_unassigned += 1
+                with contextlib.suppress(DataError, ValueError):
+                    detect(payload)
+                    report.kept_readable += 1
             continue
 
         summary = ImportSummary(artefact_new=False)

@@ -509,42 +509,48 @@ def _leftovers(
     return still_over, right_over
 
 
+#: A source's rows under every account it feeds, by amount, in the order the
+#: sibling scope lists the accounts and then the order the rows were held.
+_SourceIndex = dict[int, list[Transaction]]
+
+
 def _attribute(
     rows: Sequence[Transaction],
     other_source: str,
-    pool: Sequence[Transaction],
+    index: _SourceIndex,
+    own_account: str,
 ) -> tuple[list[SiblingAttribution], list[UnexplainedRow]]:
     """Match each row to an unconsumed row of `other_source` in a sibling
-    account: equal amount within the same-sign window, or the exact opposite
-    within the tighter internal-move window. Same-sign wins a tie because it
-    is the stronger claim (the same movement, not a counterpart leg)."""
-    by_amount: dict[int, list[int]] = {}
-    for j, item in enumerate(pool):
-        by_amount.setdefault(item.amount_minor, []).append(j)
+    account (any account of the index but `own_account`): equal amount within
+    the same-sign window, or the exact opposite within the tighter internal-move
+    window. Same-sign wins a tie because it is the stronger claim (the same
+    movement, not a counterpart leg).
 
+    Ties of distance and sign go to the row held first, which is the order of
+    each amount's list in the index."""
     used: set[int] = set()
     matched: list[SiblingAttribution] = []
     residue: list[UnexplainedRow] = []
     for item in sorted(rows, key=lambda t: (t.value_date, t.amount_minor, t.description)):
-        candidates = []
-        for j in by_amount.get(item.amount_minor, ()):
-            if j in used:
+        candidates: list[tuple[timedelta, int, int, Transaction]] = []
+        for position, other in enumerate(index.get(item.amount_minor, ())):
+            if other.account_id == own_account or id(other) in used:
                 continue
             days = same_movement_days(
-                item.amount_minor, item.value_date, pool[j].amount_minor, pool[j].value_date
+                item.amount_minor, item.value_date, other.amount_minor, other.value_date
             )
             if days is not None:
-                candidates.append((timedelta(days=days), 0, j))
+                candidates.append((timedelta(days=days), 0, position, other))
         opposite_window = timedelta(days=SIBLING_OPPOSITE_SIGN_WINDOW_DAYS)
-        for j in by_amount.get(-item.amount_minor, ()):
-            if j in used:
+        for position, other in enumerate(index.get(-item.amount_minor, ())):
+            if other.account_id == own_account or id(other) in used:
                 continue
-            distance = abs(pool[j].value_date - item.value_date)
+            distance = abs(other.value_date - item.value_date)
             if distance <= opposite_window:
-                candidates.append((distance, 1, j))
+                candidates.append((distance, 1, position, other))
         if candidates:
-            _, flipped, j = min(candidates)
-            used.add(j)
+            _, flipped, _, other = min(candidates, key=lambda c: c[:3])
+            used.add(id(other))
             matched.append(
                 SiblingAttribution(
                     source=item.source,
@@ -552,8 +558,8 @@ def _attribute(
                     amount_minor=item.amount_minor,
                     description=item.description,
                     matched_source=other_source,
-                    sibling_account=pool[j].account_id,
-                    sibling_date=pool[j].value_date,
+                    sibling_account=other.account_id,
+                    sibling_date=other.value_date,
                     opposite_sign=bool(flipped),
                 )
             )
@@ -570,20 +576,20 @@ def _attribute(
     return matched, residue
 
 
-def _sibling_pool(
+def _source_index(
     by_source_account: Mapping[str, Mapping[str, Sequence[Transaction]]],
     scope: Mapping[str, Collection[str]],
     source: str,
-    account_id: str,
-) -> list[Transaction]:
-    """The rows `source` filed under its OTHER accounts - the places a
-    movement seen here by a different witness might actually live."""
-    rows: list[Transaction] = []
+) -> _SourceIndex:
+    """The rows `source` filed under every account it feeds, by amount: the
+    places a movement seen by a different witness might actually live. Built
+    once per source, because indexing it per comparison made the work grow with
+    accounts times rows."""
+    index: _SourceIndex = {}
     for sibling in scope.get(source, ()):
-        if sibling == account_id:
-            continue
-        rows.extend(by_source_account.get(source, {}).get(sibling, ()))
-    return rows
+        for item in by_source_account.get(source, {}).get(sibling, ()):
+            index.setdefault(item.amount_minor, []).append(item)
+    return index
 
 
 def agreements(
@@ -591,8 +597,13 @@ def agreements(
     *,
     sibling_accounts: Mapping[str, Collection[str]] | None = None,
     always_reconcile: bool = False,
+    only_accounts: Collection[str] | None = None,
 ) -> list[Agreement]:
     """Compare every pair of sources that describes the same account.
+
+    `only_accounts` limits the comparison to those accounts; every account's
+    rows still serve as siblings, so an attribution is found as it would be
+    without the limit.
 
     Pairs with no shared period are omitted entirely rather than reported as
     agreeing or disagreeing: having nothing to compare is a third outcome, and
@@ -624,8 +635,17 @@ def agreements(
                 transaction.account_id, []
             ).append(transaction)
 
+    indexes: dict[str, _SourceIndex] = {}
+
+    def _index_of(source: str) -> _SourceIndex:
+        if source not in indexes:
+            indexes[source] = _source_index(by_source_account, sibling_accounts or {}, source)
+        return indexes[source]
+
     found = []
     for account_id, sources in sorted(by_account.items()):
+        if only_accounts is not None and account_id not in only_accounts:
+            continue
         for left, right in combinations(sorted(sources), 2):
             left_from, left_to = _window(sources[left])
             right_from, right_to = _window(sources[right])
@@ -670,15 +690,28 @@ def agreements(
                         proven, key=lambda t: (t.value_date, t.amount_minor, t.description)
                     )
                 )
-                left_found, left_residue = _attribute(
-                    left_over,
-                    right,
-                    _sibling_pool(by_source_account, sibling_accounts, right, account_id),
+                # A side with nothing left over searches nothing: indexing a
+                # sibling pool for an empty search was most of this function's
+                # time on a store of many accounts.
+                left_found, left_residue = (
+                    _attribute(
+                        left_over,
+                        right,
+                        _index_of(right),
+                        account_id,
+                    )
+                    if left_over
+                    else ([], [])
                 )
-                right_found, right_residue = _attribute(
-                    right_over,
-                    left,
-                    _sibling_pool(by_source_account, sibling_accounts, left, account_id),
+                right_found, right_residue = (
+                    _attribute(
+                        right_over,
+                        left,
+                        _index_of(left),
+                        account_id,
+                    )
+                    if right_over
+                    else ([], [])
                 )
                 attributed = tuple(left_found + right_found)
                 unexplained = tuple(left_residue + right_residue)

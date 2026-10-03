@@ -724,7 +724,12 @@ def gather_evidence(
     if not by_account:
         return []
     held = store.transactions_by_sighting()
-    found = agreements(held, sibling_accounts=sibling_accounts or {}, always_reconcile=True)
+    found = agreements(
+        held,
+        sibling_accounts=sibling_accounts or {},
+        always_reconcile=True,
+        only_accounts=set(by_account),
+    )
     folded_ids = store.statement_folded_ids()
 
     evidence: list[AccountEvidence] = []

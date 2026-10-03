@@ -254,6 +254,47 @@ class TestRebuildingFromRaw:
         with Store(db) as store:
             assert store.counts()["transactions"] == NINE_ROWS[0]
 
+    def _two_accounts(self, db: Path) -> tuple[int, str, str]:
+        lines = document(
+            section("Regular Saver", 80000, [Move("04/05/2025", "DD Lodgement", 2500)]),
+            section("Christmas Club", 15000, [Move("05/05/2025", "DD Lodgement", 1000)]),
+        )
+        with Store(db) as store:
+            artefact = keep(store, pdf(lines, step=10), "two accounts.pdf")
+        return artefact, section_key("Regular Saver"), section_key("Christmas Club")
+
+    def test_Rebuild_WhenEverySectionOfADocumentIsAssigned_CountsNoStatementWaitingForAnAccount(
+        self, db
+    ):
+        """The statements page says '0 waiting only for an account, 1 covering
+        several accounts'; the rebuild summary must not say '1 kept statement
+        with no account yet'."""
+        artefact, saver, club = self._two_accounts(db)
+        wired = config(db)
+        wired.assign_statement_section(artefact, saver, SAVER)
+        wired.assign_statement_section(artefact, club, "credit-union-christmas")
+
+        with Store(db) as store:
+            report = rebuild_from_raw(store)
+
+        assert (report.kept_unassigned, report.kept_readable) == (0, 0)
+        assert report.kept_sections_replayed == 2
+        assert report.kept_sections_unassigned == 0
+        assert "no account yet" not in report.describe()
+
+    def test_Rebuild_WhenOneSectionOfADocumentIsUnassigned_CountsItAsWaitingForAnAccount(
+        self, db
+    ):
+        artefact, saver, _club = self._two_accounts(db)
+        config(db).assign_statement_section(artefact, saver, SAVER)
+
+        with Store(db) as store:
+            report = rebuild_from_raw(store)
+
+        assert report.kept_unassigned == 1
+        assert report.kept_sections_unassigned == 1
+        assert "1 kept statement with no account yet" in report.describe()
+
     def test_RebuildingTwice_GivesTheSameStore(self, nine):
         db, artefact = nine
         wired = config(db)

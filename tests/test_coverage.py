@@ -487,6 +487,33 @@ class TestSiblingAttribution:
         assert "agree once sibling attribution is counted" in text
         assert "starling-space-bills" in text
 
+    def test_Agreement_WhenLimitedToOneAccount_ReportsThatAccountExactlyAsWithoutTheLimit(self):
+        """The limit saves comparing accounts nobody asked about, and must not
+        change what is found for the one asked about: the sibling Space's rows
+        still explain the bill, and the other accounts are simply absent."""
+        rows = [
+            *self._bracket(),
+            txn(
+                "starling-csv", 2, -7000,
+                account="starling-personal", desc="COUNCIL TAX",
+            ),
+            txn(
+                "starling", 2, -7000,
+                account="starling-space-bills", desc="COUNCIL TAX",
+            ),
+            txn("starling", 1, -100, account="starling-space-savings"),
+            txn("starling-csv", 1, -100, account="starling-space-savings"),
+        ]
+
+        everything = agreements(rows, sibling_accounts=self.SIBLINGS)
+        limited = agreements(
+            rows, sibling_accounts=self.SIBLINGS, only_accounts={"starling-personal"}
+        )
+
+        assert [a.account_id for a in limited] == ["starling-personal"]
+        assert limited == [self._personal(everything)]
+        assert any(a.account_id == "starling-space-savings" for a in everything)
+
     def test_Agreement_SpaceTopUp_TheOppositeSpaceLegAccountsForTheMainLeg(self):
         found = agreements(
             [

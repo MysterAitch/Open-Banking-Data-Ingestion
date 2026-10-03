@@ -10,18 +10,27 @@ sum to the same figure", the periods after the first were over by the feed's
 row, and the account's total was over by every one of them, while the
 statements' own arithmetic was exact.
 
-Within one statement's period, the statement-only rows and the feed-only rows
-the pairing left unmatched (`period_reconciliation`'s, which is the
-cross-source page's own pairing) are the same money when ALL of:
+The rule, per statement closing, over the rows the pairing left unmatched
+(`period_reconciliation`'s, which is the cross-source page's own pairing). The
+feed rows that may be the statement's charges are the unmatched ones dated
+within `BOUNDARY_DAYS` either side of ITS CLOSING DAY, not anywhere in its
+period. A set of them is the same money as the statement's when ALL of:
 
-  - both sides are non-empty and sum to EXACTLY the same non-zero figure in
-    minor units;
-  - the feed rows are dated within the period or up to `BOUNDARY_DAYS` after
-    its closing, which is where a feed posts a statement's last charges;
-  - folding the feed rows makes every period they touch agree exactly with its
+  - its sum is EXACTLY the sum of some non-empty subset of that statement's
+    statement-only rows, in non-zero minor units (the statement may also print
+    rows the feed never saw, and those take no part);
+  - folding it makes every period it touches agree exactly with its
     statement's movement. The statement's own arithmetic is the proof: equal
     sums alone are a coincidence waiting to happen, and a fold that leaves the
     period differing has hidden something that is not a duplicate.
+
+Among the subsets of the band's rows the smallest is taken, and of equal size
+the one dated latest, because a feed posts a statement's charges on or after
+its closing. The choice is made once and is not retried when the proof refuses
+it: a stranger row of the charge's own amount on the closing day would
+otherwise stand in for the charge and leave the charge's own row double counted
+in the next period. Each statement's two searches are bounded by
+`MAX_STATEMENT_ROWS` and `MAX_BAND_ROWS`.
 
 Then the FEED-side rows are folded (status FOLDED, no longer counted, withheld
 from the push, sightings kept) and the statement's rows stay counted. They are
@@ -30,11 +39,15 @@ anchor check stays exact.
 
 Never folded: a row that is a confirmed transfer leg, a row some statement lists
 (it is the statement's own, however its dates fell in the pairing), a row
-outside the boundary window, or a row of another account. A period with
-leftovers on one side only is left alone. A feed row is taken for the EARLIEST
-statement it could belong to, so a neighbouring month's row is not claimed
-twice; if that statement's fold is refused, the next statement sees the row
-among its own candidates, the sums stop being equal, and it is refused too.
+outside the band, or a row of another account. A statement with leftovers on
+one side only is left alone. A feed row is claimed by the EARLIEST statement
+whose band holds it, so two closings within the boundary of each other do not
+claim one row twice.
+
+A period that differs for a reason that is not a charge (a feed-only purchase no
+statement lists) refuses the folds that touch it, and so, because the row it
+refused is still counted in the next period, the folds after it until that
+period is reconciled. That is the proof working: those periods do differ.
 
 The pass is a pure function of the stored rows, rewritten wholesale after every
 import, pull, and assignment and once at the end of a rebuild, so the outcome
@@ -44,27 +57,42 @@ It is modelled on `space_attribution`, and the two never touch each other's
 rows: a Space-folded row has a copied sighting on the Space row, and this
 pass's folds have none, which is how the store tells them apart.
 
-REJECTED. Folding the STATEMENT's side: the next statement's check would then
-need the feed's date to fall in the right period, which is the fault being
-fixed. Pairing rows one to one: three rows against one cannot pair. Folding on
-equal sums alone: see above. A wider boundary than two days (a month was
-tried on paper): it reaches the next statement's own rows, and a feed row of
-the right size in the next period becomes a candidate for this one.
+REJECTED. Taking every unclaimed feed row from the period's first day to two
+days past its closing, and requiring ALL the period's statement-only rows to
+equal ALL of them: on a real card the previous statement's charge sits on the
+first day of each period, so every period saw two feed rows, the sums were
+unequal, and one first period with an extra row disabled the rule for a whole
+real account (nothing folded, 8 of 10 periods still differing). Folding the
+STATEMENT's side: the next statement's check would then need the feed's date
+to fall in the right period, which is the fault being fixed. Pairing rows one
+to one: three rows against one cannot pair. Folding on equal sums alone: see
+above. A band wider than two days: it reaches the next closing's own charge,
+and a feed row of the right size there becomes a candidate for this statement.
+Retrying the next subset when the proof refuses the first: see above.
+Loosening the proof so a period that differs for another reason does not stop
+the folds after it: the proof is the only thing separating a duplicate from a
+purchase, and a fold that cannot make its own period agree proves nothing.
 
 NOT COVERED. A feed row dated beyond the span the pairing compared is treated
 as unmatched, which it is by construction (nothing in the statements is dated
 that late), but its statement-side partners are only the leftovers inside the
 span. Coincidental equal sums that also make the statement's arithmetic exact
-would still fold; nothing here tells that apart from the real thing. Cost: the
-pass runs the cross-source pairing over the whole store after each import where
-an account holds two statements; it has not been timed on a store of real size.
+would still fold; nothing here tells that apart from the real thing. A band
+holding more than `MAX_BAND_ROWS` unmatched feed rows searches only the nearest
+ones, so it folds less, never more. Cost: the pass reads the whole store's
+sightings and pairs the sources of each account that holds a statement, after
+every import. On a synthetic store of 8,300 rows, 31 statements, and 50,000
+sightings that took 1.6 to 2.5 seconds, almost all of it reading the store and
+the pairing, and almost none the search here; a real store of that size was
+measured at 31.6 seconds, which the synthetic one does not reproduce.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
+from itertools import combinations
 
 from .accounts import AccountMap
 from .models import Transaction
@@ -80,6 +108,14 @@ from .period_reconciliation import (
     held_in,
 )
 from .store import Store
+
+#: Bounds on the subset searches in `_candidates`, so the work per statement is
+#: fixed whatever a store holds: at most 2**12 statement-side sums and 2**8 - 1
+#: feed-side subsets. A real card's statements carried at most four statement-only
+#: rows and one feed-only row near each closing, so neither bound reaches a real
+#: period; a period past one folds less, never more.
+MAX_STATEMENT_ROWS = 12
+MAX_BAND_ROWS = 8
 
 
 @dataclass(frozen=True)
@@ -139,6 +175,43 @@ def _feed_candidates(
     return found
 
 
+def _statement_sums(leftovers: Sequence[Leftover], window: _Window) -> set[int]:
+    """Every non-zero total some non-empty subset of the window's statement-only
+    rows adds up to, taking at most `MAX_STATEMENT_ROWS` of them, nearest the
+    closing first."""
+    nearest = sorted(
+        (
+            leftover
+            for leftover in leftovers
+            if leftover.side == STATEMENT_SIDE
+            and not leftover.excuse
+            and window.first_day <= leftover.row_date <= window.last_day
+        ),
+        key=lambda leftover: (window.last_day - leftover.row_date, leftover.amount_minor),
+    )[:MAX_STATEMENT_ROWS]
+    sums: set[int] = set()
+    for leftover in nearest:
+        sums |= {total + leftover.amount_minor for total in sums} | {leftover.amount_minor}
+    sums.discard(0)
+    return sums
+
+
+def _band_rows(
+    feed_rows: Iterable[Transaction], claimed: set[str], window: _Window
+) -> list[Transaction]:
+    """The unclaimed feed rows dated within `BOUNDARY_DAYS` of the closing, the
+    latest first (a feed posts a statement's charges on or after its closing),
+    at most `MAX_BAND_ROWS` of them."""
+    near = [
+        row
+        for row in feed_rows
+        if row.entity_id not in claimed
+        and abs((row.value_date - window.last_day).days) <= BOUNDARY_DAYS
+    ]
+    near.sort(key=lambda row: (row.value_date, row.entity_id), reverse=True)
+    return near[:MAX_BAND_ROWS]
+
+
 def _candidates(
     evidence: AccountEvidence, chain: Sequence[_Window], claimed: set[str]
 ) -> list[_Candidate]:
@@ -149,26 +222,23 @@ def _candidates(
         leftovers, covered_from, covered_to = paired
         feed_rows = _feed_candidates(evidence, feed, leftovers, (covered_from, covered_to))
         for window in chain:
-            statement_only = [
-                leftover
-                for leftover in leftovers
-                if leftover.side == STATEMENT_SIDE
-                and not leftover.excuse
-                and window.first_day <= leftover.row_date <= window.last_day
-            ]
-            reach = window.last_day + timedelta(days=BOUNDARY_DAYS)
-            taking = [
-                row
-                for row in feed_rows.values()
-                if row.entity_id not in claimed and window.first_day <= row.value_date <= reach
-            ]
-            if not statement_only or not taking:
+            sums = _statement_sums(leftovers, window)
+            band = _band_rows(feed_rows.values(), claimed, window)
+            if not sums or not band:
                 continue
-            owed = sum(leftover.amount_minor for leftover in statement_only)
-            if owed == 0 or owed != sum(row.amount_minor for row in taking):
+            taking = next(
+                (
+                    subset
+                    for size in range(1, len(band) + 1)
+                    for subset in combinations(band, size)
+                    if sum(row.amount_minor for row in subset) in sums
+                ),
+                None,
+            )
+            if taking is None:
                 continue
             claimed.update(row.entity_id for row in taking)
-            found.append(_Candidate(window, tuple(taking)))
+            found.append(_Candidate(window, taking))
     return found
 
 

@@ -363,8 +363,16 @@ class SectionBatches:
     batches: list[tuple[str, list[Transaction]]] = field(default_factory=list)
     #: Sections the document holds that nobody has given an account.
     unassigned: int = 0
+    #: Sections the document holds, assigned or not; zero for a document that
+    #: reads as a single account or cannot be read.
+    sections: int = 0
     #: Why an assigned section could not be read back, one line each.
     problems: list[str] = field(default_factory=list)
+
+    @property
+    def every_section_assigned(self) -> bool:
+        """A several-account document that is waiting for nothing."""
+        return self.sections > 0 and self.unassigned == 0
 
 
 def replay_batches(
@@ -398,6 +406,7 @@ def replay_batches(
             )
         return result
     parser, found = read
+    result.sections = len(found)
     for item in found:
         held = assigned.pop(item.key, None)
         if held is None:
