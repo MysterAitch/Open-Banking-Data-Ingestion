@@ -906,7 +906,15 @@ def effective_opening(
             walk = replace(
                 walk,
                 explanation=explain_walk(
-                    store, ref, walk, {ref: [*held, *unitemised], **members}, sightings
+                    store,
+                    ref,
+                    walk,
+                    {ref: [*held, *unitemised], **members},
+                    sightings,
+                    {
+                        space: families.provider_ids.get(space, frozenset())
+                        for space in members
+                    },
                 ),
             )
     opening = derive_opening(

@@ -467,6 +467,13 @@ def _row_note(note: Any) -> str:
             )
             if note.counter_item is not None
             else "",
+            (
+                "; a Space arrival of the same size lies within three days"
+                if note.arrival_near
+                else "; no Space arrival of the same size within three days"
+            )
+            if note.arrival_near is not None
+            else "",
         )
     )
     return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
@@ -717,7 +724,7 @@ def _round_up_gaps_html(gaps: Any) -> str:
             f'<p class="muted">Of the '
             f"{_counted(gaps.unpaired_legs, 'round-up leg that has', 'round-up legs that have')} "
             "no pair in a Space, "
-            f"{_counted(gaps.unpaired_on_reversed, 'is', 'are')} on a reversed payment, "
+            f"{_counted(gaps.unpaired_on_reversed, 'is', 'are')} on a reversed or dropped payment, "
             f"{_counted(gaps.unpaired_to_unheld_space, 'goes', 'go')} to a Space whose rows "
             f"are not held, and {_counted(gaps.unpaired_other, 'is', 'are')} other.</p>"
             + _days_html(gaps.unpaired_days, gaps.unpaired_legs)

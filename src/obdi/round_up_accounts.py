@@ -22,8 +22,9 @@ THREE QUESTIONS, each answered once for the whole account:
                          item was reversed or declined, the round-up cannot be
                          read, or none of those
   legs with no pair      why a held round-up leg has no row in a Space: its
-                         payment was reversed, its Space's rows are not held,
-                         or neither
+                         payment was reversed or dropped (a counter-example to
+                         the leg's evidence would show here), its Space's rows
+                         are not held, or neither
   Space legs, no main    the incoming transfer legs in a Space with no partner in
                          the main account: round-ups the main feed did not
                          report, or transfers whose main row is missing
@@ -41,17 +42,14 @@ from datetime import date
 
 from .family_anchors import feed_digests, feed_payload
 from .masking import Structural
-from .models import Transaction, TransactionStatus
-from .providers.starling import round_up_of
+from .models import Transaction
+from .providers.starling import payment_unsettled, round_up_of
 from .store import Store
 
 #: How many dates are named before the rest are only counted.
 NAMED_DAYS = 20
 
 _ROUND_UP_KEY = b'"roundUp"'
-
-#: Statuses a feed item reports for a payment that did not settle as money.
-_UNSETTLED = frozenset({"REVERSED", "DECLINED"})
 
 
 @dataclass(frozen=True)
@@ -101,7 +99,7 @@ def _carriers_in(payload: bytes) -> dict[str, Carrier]:
             moves=reading.moves_money,
             unreadable=reading.unreadable,
             incoming=str(item.get("direction", "")).upper() == "IN",
-            unsettled=str(item.get("status", "")).upper() in _UNSETTLED,
+            unsettled=payment_unsettled(str(item.get("status", ""))),
         )
     return found
 
@@ -230,7 +228,7 @@ def round_up_gaps(
         if leg.entity_id in paired:
             continue
         days.append(leg.value_date)
-        if leg.status is TransactionStatus.REVERSED:
+        if payment_unsettled(str(leg.raw.get("status", ""))):
             reversed_legs += 1
         elif str(leg.raw.get("counterPartyUid", "")).strip() not in held_spaces:
             unheld += 1

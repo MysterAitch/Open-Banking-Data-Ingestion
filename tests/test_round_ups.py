@@ -208,8 +208,16 @@ class TestTheLegAFeedItemYields:
 
         assert legs == []
 
-    def test_Payment_WhenDeclined_YieldsNothingAtAll(self):
+    def test_Payment_WhenDeclined_YieldsNoPaymentRowAndOnlyTheBookedLeg(self):
         declined = card_payment("u-1", "Cafe", 450, 4, round_up=round_up_of(50), status="DECLINED")
+
+        (leg,) = starling.to_transactions(declined, account_id=MAIN)
+
+        assert (leg.source_id, leg.amount_minor) == ("u-1:round-up", -50)
+        assert leg.status is TransactionStatus.BOOKED
+
+    def test_Payment_WhenDeclinedAndCarryingNoRoundUp_YieldsNothingAtAll(self):
+        declined = card_payment("u-1", "Cafe", 450, 4, status="DECLINED")
 
         assert starling.to_transactions(declined, account_id=MAIN) == []
 

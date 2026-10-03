@@ -238,7 +238,7 @@ class TestARoundUpOnAReversedPayment:
         assert "a round-up leg, confirmed paired with the Space starling-space-bills" in page
         assert "No round-up leg is without a pair in a Space." in page
         assert (
-            "2 counted rows are reversed. The export lists 0 of them, and 0 have a "
+            "1 counted row is reversed. The export lists 0 of them, and 0 have a "
             "counter-item"
         ) in page
 
@@ -251,7 +251,7 @@ class TestARoundUpOnAReversedPayment:
         assert differences(store)[EIGHTH] == 1200
         assert counted_pairs(store) == 7
         assert (
-            "2 counted rows are reversed. The export lists 0 of them, and 1 has a counter-item"
+            "1 counted row is reversed. The export lists 0 of them, and 0 have a counter-item"
         ) in render(store)
 
     def test_Leg_WhenTheSpacesReturnHasNoMainSideRow_IsNamedAsAnUnpairedLegInTheSpace(self, make):
@@ -348,38 +348,40 @@ class TestRoundUpsThatNeverBecameALeg:
 
         gaps = walk_of(store).round_up_gaps
 
-        # Carriers: five in the household, and the five added here.
+        # Carriers: five in the household, and the five added here. The declined
+        # one holds a leg, since its round-up moved whatever became of the payment.
         assert walk_of(store).round_ups.carried == 10
-        assert walk_of(store).round_ups.legs == 5
-        assert gaps.no_leg == 5
+        assert walk_of(store).round_ups.legs == 6
+        assert gaps.no_leg == 4
         assert (
             gaps.no_leg_of_nothing,
             gaps.no_leg_incoming,
             gaps.no_leg_reversed_or_declined,
             gaps.no_leg_unreadable,
             gaps.no_leg_other,
-        ) == (1, 1, 1, 1, 1)
+        ) == (1, 1, 0, 1, 1)
 
     def test_Legs_WhenNoRowPairsThem_AreCountedByWhyAndDated(self, make):
         store = self.corpus(make)
 
         gaps = walk_of(store).round_up_gaps
 
-        assert gaps.unpaired_legs == 1
+        assert gaps.unpaired_legs == 2
+        assert gaps.unpaired_on_reversed == 1
         assert gaps.unpaired_to_unheld_space == 1
-        assert gaps.unpaired_days == (date(2026, 9, 11),)
+        assert gaps.unpaired_days == (date(2026, 9, 4), date(2026, 9, 11))
 
     def test_Page_WhenRoundUpsDidNotBecomeLegs_SaysWhyInCounts(self, make):
         page = render(self.corpus(make))
 
         assert (
-            "Of the 5 feed rows that carry a round-up and hold no leg, 1 is a round-up of "
-            "nothing, 1 is on an incoming item, 1 is on a reversed or declined item, 1 could "
+            "Of the 4 feed rows that carry a round-up and hold no leg, 1 is a round-up of "
+            "nothing, 1 is on an incoming item, 0 are on reversed or declined items, 1 could "
             "not be read, and 1 is other."
         ) in page
         assert (
-            "Of the 1 round-up leg that has no pair in a Space, 0 are on a reversed payment, "
-            "1 goes to a Space whose rows are not held, and 0 are other."
+            "Of the 2 round-up legs that have no pair in a Space, 1 is on a reversed or "
+            "dropped payment, 1 goes to a Space whose rows are not held, and 0 are other."
         ) in page
         assert "2026-09-11" in page
 

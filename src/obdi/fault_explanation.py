@@ -135,6 +135,10 @@ class RowNote:
     #: For a reversed row: whether a row of the opposite direction and equal size
     #: lies within `COUNTER_ITEM_DAYS`; None for any other row.
     counter_item: Structural[bool | None] = None
+    #: For a round-up leg with no pair: whether a row of its Space of the same size
+    #: coming in lies within `COUNTER_ITEM_DAYS`, paired with something else or not;
+    #: None for any other row.
+    arrival_near: Structural[bool | None] = None
 
 
 @dataclass(frozen=True)
@@ -295,6 +299,7 @@ class RowAbout:
     partner_account: str
     carries: str
     counter_item: bool | None
+    arrival_near: bool | None
 
 
 class _RowFacts:
@@ -310,11 +315,13 @@ class _RowFacts:
         main: str,
         members: Mapping[str, Sequence[Transaction]],
         by_entity: Mapping[str, Transaction],
+        space_uids: Mapping[str, frozenset[str]],
     ) -> None:
         self.store = store
         self.main = main
         self.members = members
         self.by_entity = by_entity
+        self.space_uids = space_uids
         self._pairs: dict[str, str] | None = None
         self._carriers: dict[str, Carrier] | None = None
         self._uids: dict[str, frozenset[str]] = {}
@@ -383,11 +390,31 @@ class _RowFacts:
                 return True
         return False
 
+    def arrival_near(self, leg: Transaction) -> bool:
+        """Whether the Space a round-up leg names holds a row coming in of the leg's size
+        within `COUNTER_ITEM_DAYS` of it.
+
+        Told apart from a pairing miss only by this: an arrival that is there
+        and unpaired, or paired with another leg, means the round-up reached the
+        Space and the pairing missed it; none means it may never have arrived.
+        """
+        named = str(leg.raw.get("counterPartyUid", "") or "").strip()
+        window = timedelta(days=COUNTER_ITEM_DAYS)
+        return any(
+            row.amount_minor == -leg.amount_minor
+            and not row.status.is_history
+            and abs(row.value_date - leg.value_date) <= window
+            for account, rows in self.members.items()
+            if named and named in self.space_uids.get(account, frozenset())
+            for row in rows
+        )
+
     def about(self, row: Transaction) -> RowAbout:
         partner = self.pairs.get(row.entity_id)
         pairing = ""
         if row.is_internal_transfer:
             pairing = "paired" if partner is not None else "unpaired"
+        unpaired_leg = "roundUpOf" in row.raw and partner is None
         return RowAbout(
             account=self._label(row.account_id),
             round_up_leg="roundUpOf" in row.raw,
@@ -397,6 +424,7 @@ class _RowFacts:
             counter_item=(
                 self.counter_item(row) if row.status is TransactionStatus.REVERSED else None
             ),
+            arrival_near=self.arrival_near(row) if unpaired_leg else None,
         )
 
 
@@ -448,6 +476,7 @@ class _Evidence:
                 about.partner_account,
                 about.carries,
                 about.counter_item,
+                about.arrival_near,
             )
 
         return build
@@ -819,8 +848,12 @@ def explain_walk(
     walk: FamilyWalk,
     members: Mapping[str, Sequence[Transaction]],
     placement: SightingPlacement,
+    space_uids: Mapping[str, frozenset[str]] | None = None,
 ) -> WalkExplanation:
     """Explain the first `EXPLAINED_CHANGES` changes of `walk`, and describe the exports.
+
+    `space_uids` is each Space account's provider ids, which tie a round-up leg's
+    named Space to the account whose rows are searched for its arrival.
 
     The family's sightings are read once, each export is read from its
     per-process memo, and each source's dating is built once and bisected per
@@ -844,7 +877,7 @@ def explain_walk(
         store.sighting_sources(family),
         folds,
         by_entity,
-        _RowFacts(store, main, members, by_entity),
+        _RowFacts(store, main, members, by_entity, space_uids or {}),
     )
     anchor_digests = {
         (day, balance): digest

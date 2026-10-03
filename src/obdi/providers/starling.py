@@ -491,25 +491,58 @@ def to_transactions(item: JsonObject, *, account_id: str) -> list[Transaction]:
     payment's, because the export and the aggregator sight the payment at that
     amount and every match depends on it.
 
-    A leg exists only for a payment going OUT that is not itself a transfer, so
-    an ordinary transfer, which has its own main-side item, never gains a
-    second one.
+    `_round_up_leg` says when a leg exists, which can be beside no payment row
+    at all.
     """
     payment = to_transaction(item, account_id=account_id)
-    if payment is None:
-        return []
-    leg = _round_up_leg(item, payment)
-    return [payment] if leg is None else [payment, leg]
+    leg = _round_up_leg(item, account_id=account_id)
+    rows = [] if payment is None else [payment]
+    return rows if leg is None else [*rows, leg]
 
 
-def _round_up_leg(item: JsonObject, payment: Transaction) -> Transaction | None:
+def payment_unsettled(status: str) -> bool:
+    """Whether a feed item's status names a payment that was reversed or yields no row.
+
+    A status the map does not know is dropped like a declined one, so it is
+    unsettled here too. Every reader of "on a reversed or dropped payment" asks
+    this, so the answer is given once.
+    """
+    mapped = STATUS_MAP.get(status.upper())
+    return mapped is None or mapped is TransactionStatus.REVERSED
+
+
+def _round_up_leg(item: JsonObject, *, account_id: str) -> Transaction | None:
+    """The OUT leg of an item's round-up, or None where the round-up did not leave the account.
+
+    The round-up of a reversed or dropped payment is made a leg too, whatever
+    the payment's direction and whether or not it yields a row, and that leg is
+    BOOKED: on the one real account examined, every such carrier's round-up had
+    arrived in its Space as a booked item, and the main category held nothing
+    for the money leaving, so the Space's family was over by exactly it.
+    That is evidence from one account and not a rule of the bank. The count of
+    legs with no pair in a Space (`round_up_accounts.round_up_gaps`, those on a
+    reversed or dropped payment) is where a counter-example would show.
+
+    An item that is money IN and neither reversed nor dropped is refused a leg:
+    nothing seen says a refund's round-up moves money out of the account.
+    A transfer, which has its own main-side item, never gains a second one.
+    """
     reading = round_up_of(item)
+    status = text(item, "status")
+    unsettled = payment_unsettled(status)
     if (
         not reading.moves_money
-        or payment.amount_minor >= 0
-        or payment.is_internal_transfer
+        or text(item, "source") == INTERNAL_SOURCE
         or text(item, "counterPartyType").upper() == "CATEGORY"
+        or (not unsettled and text(item, "direction").upper() != "OUT")
     ):
+        return None
+    when_text = text(item, "transactionTime") or text(item, "settlementTime")
+    if not when_text:
+        return None
+    when = datetime.fromisoformat(when_text.replace("Z", "+00:00")).date()
+    leg_status = TransactionStatus.BOOKED if unsettled else STATUS_MAP[status.upper()]
+    if leg_status is None:
         return None
     uid = text(item, "feedItemUid") + ROUND_UP_LEG_SUFFIX
     minor = -reading.amount_minor
@@ -526,20 +559,20 @@ def _round_up_leg(item: JsonObject, payment: Transaction) -> Transaction | None:
         "counterPartyName": "",
     }
     return Transaction(
-        account_id=payment.account_id,
+        account_id=account_id,
         amount_minor=minor,
-        currency=payment.currency,
-        value_date=payment.value_date,
-        booking_date=payment.booking_date,
+        currency="GBP",
+        value_date=when,
+        booking_date=when,
         description=ROUND_UP_DESCRIPTION,
         counterparty="",
-        status=payment.status,
+        status=leg_status,
         source="starling",
         source_id=uid,
         tier=SourceTier.AUTHORITATIVE,
         is_internal_transfer=True,
         content_key=content_key(
-            amount_minor=minor, value_date=payment.value_date, description=ROUND_UP_DESCRIPTION
+            amount_minor=minor, value_date=when, description=ROUND_UP_DESCRIPTION
         ),
         raw=raw,
     )
