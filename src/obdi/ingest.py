@@ -300,6 +300,112 @@ def unconfirmed_transfers(store: Store) -> list[Transaction]:
     ]
 
 
+def _numbered(transactions: list[Transaction]) -> list[Transaction]:
+    """Number each repeat of the same content within a batch.
+
+    Deterministic across re-parses, because it depends only on the order the
+    source presents its rows - which is what lets a re-downloaded export merge
+    while two genuinely repeated payments stay apart.
+    """
+    seen: dict[tuple[str, str], int] = {}
+    numbered: list[Transaction] = []
+    for transaction in transactions:
+        key = (transaction.account_id, transaction.content_key)
+        numbered.append(replace(transaction, occurrence=seen.get(key, 0)))
+        seen[key] = seen.get(key, 0) + 1
+    return numbered
+
+
+@dataclass(frozen=True)
+class MatcherPreview:
+    """What `reconcile_batch` would do with a batch, counted and not done."""
+
+    merged: int
+    new: int
+
+    @property
+    def total(self) -> int:
+        return self.merged + self.new
+
+    @property
+    def share_merged(self) -> float:
+        return self.merged / self.total if self.total else 0.0
+
+    @property
+    def clause(self) -> str:
+        return (
+            f"the matcher would merge {self.merged} of {self.total} rows onto "
+            f"rows this account already holds and add {self.new} new"
+        )
+
+    def describe(self) -> str:
+        return f"{self.clause[0].upper()}{self.clause[1:]}."
+
+
+def preview_reconcile(store: Store, transactions: list[Transaction]) -> MatcherPreview:
+    """Count how a batch would resolve against what is stored, writing nothing.
+
+    The same loop `_reconcile_all` runs - the same numbering, the same
+    `resolve`, a row claimed once it has answered, a merged row replacing its
+    candidate and a new row joining the candidates so a later row of the batch
+    can merge onto it - over indexes built from the store's rows and
+    sightings. The only stores touched are reads: no upsert, no sighting, no
+    review flag, and no batch is opened, so a caller can ask before deciding
+    whether to read the batch in. A new row is given a stand-in identity,
+    which never leaves the index.
+    """
+    by_account: dict[str, CandidateIndex] = {}
+    merged = 0
+    new = 0
+    for position, transaction in enumerate(_numbered(transactions)):
+        existing = by_account.get(transaction.account_id)
+        if existing is None:
+            existing = CandidateIndex(
+                store.transactions_for_account(transaction.account_id),
+                sightings=store.sighted_ids_for_account(transaction.account_id),
+            )
+            existing.begin_batch()
+            by_account[transaction.account_id] = existing
+        result = resolve(transaction, existing)
+        if result.existing is None:
+            occurrence = existing.free_occurrence(
+                transaction.account_id,
+                transaction.content_key,
+                wanted=transaction.occurrence,
+            )
+            stand_in = replace(
+                transaction,
+                occurrence=occurrence,
+                entity_id=f"preview-{position}",
+            )
+            existing.claim(stand_in.entity_id, transaction.source, transaction.source_id)
+            existing.append(stand_in)
+            new += 1
+            continue
+        held = result.existing
+        merged += 1
+        existing.claim(held.entity_id, transaction.source, transaction.source_id)
+        if held.status in (
+            TransactionStatus.BOOKED,
+            TransactionStatus.FOLDED,
+        ) and transaction.status is TransactionStatus.PENDING:
+            existing.note_sighting(
+                held.entity_id,
+                transaction.account_id,
+                transaction.source,
+                transaction.source_id,
+            )
+            continue
+        superseded = supersede(held, transaction)
+        existing.replace(
+            replace(
+                superseded,
+                occurrence=_occurrence_once_merged(held, superseded, existing),
+            )
+        )
+    return MatcherPreview(merged=merged, new=new)
+
+
 def reconcile_batch(
     store: Store,
     transactions: list[Transaction],
@@ -335,16 +441,7 @@ def reconcile_batch(
     result = summary or ImportSummary(artefact_new=True)
     result.parsed += len(transactions)
 
-    # Number each repeat of the same content within this batch. Deterministic
-    # across re-parses, because it depends only on the order the source
-    # presents its rows - which is what lets a re-downloaded export merge while
-    # two genuinely repeated payments stay apart.
-    seen: dict[tuple[str, str], int] = {}
-    numbered: list[Transaction] = []
-    for transaction in transactions:
-        key = (transaction.account_id, transaction.content_key)
-        numbered.append(replace(transaction, occurrence=seen.get(key, 0)))
-        seen[key] = seen.get(key, 0) + 1
+    numbered = _numbered(transactions)
 
     # Each account's history is read ONCE and then kept up to date in
     # memory as the batch resolves against it. dict.setdefault cannot be

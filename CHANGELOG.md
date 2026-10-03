@@ -26,6 +26,17 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.263] - 2026-10-03
+
+### Changed
+- **A doubtful statement assignment is asked about, not refused.** The guard
+  added in 0.4.261 refused a statement that plainly belonged to its account,
+  because the comparison it read pairs on dates more strictly than the matcher
+  does. A doubt now shows its evidence, including how many rows the matcher
+  would merge onto rows the account already holds, and offers "read it in
+  anyway". Where the matcher would merge four in five or more, the low-overlap
+  doubt is not raised.
+
 ## [0.4.262] - 2026-10-03
 
 ### Changed

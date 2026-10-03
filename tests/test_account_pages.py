@@ -123,7 +123,9 @@ def lab(tmp_path):
         calls["refiled"].append((artefact_id, account))
         return "starling-personal"
 
-    def assign_kept_statement(artefact_id: int, account: str) -> str:
+    def assign_kept_statement(
+        artefact_id: int, account: str, *, doubt_acknowledged: bool = False
+    ) -> str:
         calls["assigned"].append((artefact_id, account))
         return "read in: 12 rows"
 

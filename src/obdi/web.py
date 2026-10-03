@@ -39,7 +39,7 @@ from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import token_urlsafe
-from typing import NewType
+from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord, ArchiveOutcome
@@ -48,7 +48,7 @@ from .alerts import consent_rung
 from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
-from .coverage import SourceCoverage
+from .coverage import DoubtReport, SourceCoverage
 from .doctor import shape_problems
 from .ledger import Ledger
 from .logs import say
@@ -70,11 +70,14 @@ from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
 from .web_accounts import (
+    DOUBT_ACK_FIELD,
     NEW_ACCOUNT_FIELD,
     AccountPages,
     archive_controls,
     archive_label,
+    doubt_token,
     picker_labels,
+    submit_button,
 )
 from .web_empty import (
     EmptyPlan,
@@ -369,6 +372,39 @@ class ExtendableAccount:
     last_landed: str = ""
 
 
+class AssignKeptStatement(Protocol):
+    """Give a kept statement its account and read it in.
+
+    A doubt about whose the statement is stops it unless `doubt_acknowledged`.
+    """
+
+    def __call__(
+        self, artefact_id: int, account_id: str, *, doubt_acknowledged: bool = False
+    ) -> str: ...
+
+
+class AssignStatementSection(Protocol):
+    """The same for one account of an "all accounts" statement."""
+
+    def __call__(
+        self,
+        artefact_id: int,
+        section_key: str,
+        account_id: str,
+        *,
+        doubt_acknowledged: bool = False,
+    ) -> str: ...
+
+
+#: The fields a request names its account by: the picked one, and the typed one.
+_ACCOUNT_FIELDS = ("account", "account_other", NEW_ACCOUNT_FIELD)
+
+
+def _asked(fields: Mapping[str, str], names: tuple[str, ...]) -> dict[str, str]:
+    """The named fields a request actually carried, to be posted back as asked."""
+    return {name: fields[name] for name in names if name in fields}
+
+
 @dataclass
 class WebConfig:
     client_id: str
@@ -447,10 +483,15 @@ class WebConfig:
     #: Give a kept statement its account and read it in. Separate from
     #: keeping, because deciding whose a document is and deciding what
     #: it says are different acts, and only one of them can be undone.
-    assign_kept_statement: Callable[[int, str], str] | None = None
+    assign_kept_statement: AssignKeptStatement | None = None
     #: Give ONE account of a kept "all accounts" statement its account and read
     #: that section in: (artefact id, section key, account) to the outcome.
-    assign_statement_section: Callable[[int, str, str], str] | None = None
+    assign_statement_section: AssignStatementSection | None = None
+    #: The doubt assigning would raise, with the matcher's dry run beside it,
+    #: asked without writing anything: (artefact id, account) for a statement,
+    #: (artefact id, section key, account) for a section. None is no doubt.
+    review_kept_statement: Callable[[int, str], DoubtReport | None] | None = None
+    review_statement_section: Callable[[int, str, str], DoubtReport | None] | None = None
     #: Every kept statement, with no cap: id, origin (file name), fetched_at,
     #: account_ref, and the name of the parser that reads it (None when none does).
     kept_statements: Callable[[], list[dict[str, object]]] | None = None
@@ -5576,7 +5617,30 @@ class ConnectionHandler(
             return
         lines = []
         read_in = 0
+        waiting = 0
+        review = self.bound_config.review_kept_statement
         for name, ident in sorted(named):
+            try:
+                report = review(ident, account) if review is not None else None
+            except Exception:
+                # The assignment below says what is wrong in that case.
+                report = None
+            if report is not None:
+                waiting += 1
+                lines.append(
+                    f'<li class="account"><p><strong>{html.escape(name)}</strong></p>'
+                    '<p class="alarm">Needs confirming, and was not read in: '
+                    f"{html.escape(report.doubt)}</p>"
+                    + (f"<p>{html.escape(report.evidence)}</p>" if report.evidence else "")
+                    + '<form method="post" action="/statement-assign">'
+                    f'<input type="hidden" name="artefact" value="{ident}">'
+                    f'<input type="hidden" name="account" value="{html.escape(account)}">'
+                    f'<input type="hidden" name="{DOUBT_ACK_FIELD}" '
+                    f'value="{html.escape(doubt_token(str(ident), "", account))}">'
+                    + submit_button("It is this account's - read it in anyway", secondary=True)
+                    + "</form></li>"
+                )
+                continue
             try:
                 outcome = hook(ident, account)
             except Exception as exc:
@@ -5595,13 +5659,14 @@ class ConnectionHandler(
                 f'<li class="account"><p><strong>{html.escape(name)}</strong></p>'
                 f'<p class="{css}">{html.escape(outcome)}</p></li>'
             )
-        refused = len(named) - read_in
+        refused = len(named) - read_in - waiting
+        confirming = f", {waiting} needing confirmation" if waiting else ""
         self._respond(
             200,
             render_page(
                 "Statements read in",
-                f"<h2>Statements read in</h2><p>{read_in} read in, {refused} refused, "
-                f"each in file-name order.</p>"
+                f"<h2>Statements read in</h2><p>{read_in} read in, {refused} refused"
+                f"{confirming}, each in file-name order.</p>"
                 f'<ul class="accounts">{"".join(lines)}</ul>'
                 '<p><a class="button" href="/statements">Back to kept statements</a></p>'
                 + HOME_LINK,
@@ -5632,18 +5697,34 @@ class ConnectionHandler(
                 ),
             )
             return
+        # Asked before a typed new name is declared, so walking away from the
+        # doubt page leaves no account behind.
+        review = self.bound_config.review_kept_statement
+        acknowledged = self.doubt_acknowledged(
+            fields=fields,
+            action="/statement-assign",
+            carried=_asked(fields, ("artefact", *_ACCOUNT_FIELDS)),
+            artefact=artefact,
+            section="",
+            account=typed or picked,
+            review=(lambda: review(int(artefact), typed or picked))
+            if review is not None
+            else None,
+        )
+        if acknowledged is None:
+            return
         account = self.chosen_account(
             typed=typed,
             picked=picked,
             confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
             action="/statement-assign",
-            carry=lambda: {"artefact": artefact},
+            carry=lambda: _asked(fields, ("artefact", DOUBT_ACK_FIELD)),
             proceed_label="Declare it and read the statement in",
         )
         if account is None:
             return
         try:
-            outcome = hook(int(artefact), account)
+            outcome = hook(int(artefact), account, doubt_acknowledged=acknowledged)
         except Exception as exc:
             # The gate speaks here: a statement whose rows do not carry its
             # own balances is refused, and saying why is the whole point.
@@ -5722,18 +5803,32 @@ class ConnectionHandler(
                 ),
             )
             return
+        section_review = self.bound_config.review_statement_section
+        acknowledged = self.doubt_acknowledged(
+            fields=fields,
+            action="/statement-section-assign",
+            carried=_asked(fields, ("artefact", "section", *_ACCOUNT_FIELDS)),
+            artefact=artefact,
+            section=section,
+            account=typed or picked,
+            review=(lambda: section_review(int(artefact), section, typed or picked))
+            if section_review is not None
+            else None,
+        )
+        if acknowledged is None:
+            return
         account = self.chosen_account(
             typed=typed,
             picked=picked,
             confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
             action="/statement-section-assign",
-            carry=lambda: {"artefact": artefact, "section": section},
+            carry=lambda: _asked(fields, ("artefact", "section", DOUBT_ACK_FIELD)),
             proceed_label="Declare it and read the account in",
         )
         if account is None:
             return
         try:
-            outcome = hook(int(artefact), section, account)
+            outcome = hook(int(artefact), section, account, doubt_acknowledged=acknowledged)
         except Exception as exc:
             self._respond(
                 200,

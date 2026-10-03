@@ -20,28 +20,35 @@ before the run: 7 rows copied is "7 of 7", 7 rows shifted is "0 of 7".
 from __future__ import annotations
 
 import dataclasses
+import html
 import json
-from datetime import date
+import re
+import threading
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
 from credit_union_documents import Move, document, pdf, section
+from obdi.connections import ConnectionStore
 from obdi.coverage import (
     LOW_OVERLAP_MIN_ROWS,
     LOW_OVERLAP_THRESHOLD,
+    MATCHER_AGREES_THRESHOLD,
+    DoubtReport,
     agreements,
     assignment_corroboration,
     assignment_doubt,
 )
 from obdi.identity import content_key
-from obdi.ingest import reconcile_batch
+from obdi.ingest import ImportSummary, preview_reconcile, reconcile_batch
 from obdi.models import SourceTier, Transaction
 from obdi.parsers.credit_union_pdf import section_key
 from obdi.parsers.uk_banks import detect
 from obdi.statement_sections import read_sections
 from obdi.store import Store
+from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from section_harness import (
     UNASSIGNED,
     config,
@@ -53,7 +60,7 @@ from section_harness import (
 )
 from test_coverage import txn
 from test_kept_statements_page import DISTINCTIVE, SHORT_MONTH
-from test_pdf_import import SANTANDER_AS_WRITTEN
+from test_pdf_import import SANTANDER_AS_WRITTEN, SANTANDER_PLAIN
 
 WITNESS = "feedbank"
 STATEMENT_SOURCE = "santander-cc-pdf"
@@ -99,30 +106,47 @@ def _feed(
     *,
     copy: bool,
     only: tuple[int, ...] | None = None,
+    lag: int = 0,
+    relabel: bool = False,
+    tag: str = "",
 ) -> None:
-    """Land the witness's rows for `account`: copies of `rows`, or shifted ones."""
+    """Land the witness's rows for `account`: copies of `rows`, or shifted ones.
+
+    `lag` dates each copy that many days after the statement's row, and
+    `relabel` words it differently: together they are a feed that posts a card
+    purchase days after the statement dates it, under the merchant's own name.
+    The agreements pair such a row only within two days or on an identical
+    description; the matcher pairs on amount within a week. `tag` keeps the
+    provider ids of a second landing apart from the first's: the same id is
+    the same row to the matcher.
+    """
     landed = []
     for index, row in enumerate(rows):
         if only is not None and index not in only:
             continue
         amount = row.amount_minor if copy else row.amount_minor - SHIFT - index * 7
+        dated = row.value_date + timedelta(days=lag)
+        words = f"CARD PURCHASE {index}" if relabel else row.description
         landed.append(
             dataclasses.replace(
                 row,
+                description=words,
                 account_id=account,
                 source=WITNESS,
-                source_id=f"fb-{account}-{index}",
+                source_id=f"fb-{account}-{tag}{index}",
                 tier=SourceTier.AUTHORITATIVE,
                 amount_minor=amount,
+                value_date=dated,
+                booking_date=row.booking_date + timedelta(days=lag),
                 content_key=content_key(
                     amount_minor=amount,
-                    value_date=row.value_date,
-                    description=row.description,
+                    value_date=dated,
+                    description=words,
                 ),
             )
         )
     with Store(db) as store:
-        reconcile_batch(store, landed, digest=f"feed-{account}-{copy}")
+        reconcile_batch(store, landed, digest=f"feed-{account}-{copy}-{tag}")
 
 
 def _edges(db: Path, account: str, rows: list[Transaction]) -> None:
@@ -134,7 +158,7 @@ def _edges(db: Path, account: str, rows: list[Transaction]) -> None:
     """
     first = min(rows, key=lambda row: row.value_date)
     last = max(rows, key=lambda row: row.value_date)
-    _feed(db, account, [first, last], copy=False)
+    _feed(db, account, [first, last], copy=False, tag="edge")
 
 
 def _account_of(db: Path, artefact: int) -> str:
@@ -187,6 +211,51 @@ class TestAssignmentDoubtReadFromTheAgreements:
     def test_Constants_ArePinnedToTheValuesTheDocumentationJustifies(self):
         assert LOW_OVERLAP_MIN_ROWS == 5
         assert LOW_OVERLAP_THRESHOLD == 0.5
+        assert MATCHER_AGREES_THRESHOLD == 0.8
+
+    def test_ALowOverlapTheMatcherAgreesWith_IsNotDoubted(self):
+        found = _file_against_witness(matching=1, other=5)
+
+        assert _doubt(found) is not None
+        assert (
+            assignment_doubt(
+                found, source="stmt-pdf", account="acct", matcher_agrees=lambda: True
+            )
+            is None
+        )
+
+    def test_ALowOverlapTheMatcherDoesNotAgreeWith_IsStillDoubted(self):
+        found = _file_against_witness(matching=1, other=5)
+
+        assert (
+            assignment_doubt(
+                found, source="stmt-pdf", account="acct", matcher_agrees=lambda: False
+            )
+            is not None
+        )
+
+    def test_TheMatcherIsNotAskedWhenNothingIsDoubtedOnOverlap(self):
+        """Asking is a dry run over the account's history; a statement that
+        corroborates plainly must not pay for one."""
+
+        def asked() -> bool:
+            raise AssertionError("the matcher was asked although nothing was in doubt")
+
+        found = _file_against_witness(matching=6, other=0)
+
+        assert (
+            assignment_doubt(found, source="stmt-pdf", account="acct", matcher_agrees=asked)
+            is None
+        )
+
+    def test_AWrongDestinationDoubt_IsNotWithdrawnByTheMatcherAgreeing(self):
+        found = _file_against_witness(matching=1, other=5, siblings=4)
+
+        doubt = assignment_doubt(
+            found, source="stmt-pdf", account="acct", matcher_agrees=lambda: True
+        )
+
+        assert doubt is not None and "OTHER accounts" in doubt
 
     def test_AStatementWhoseRowsAllMatch_RaisesNoDoubt_AndSaysSo(self):
         found = _file_against_witness(matching=6, other=0)
@@ -407,7 +476,7 @@ class TestAssigningAKeptStatement:
         assert outcome.endswith("the statement stands uncorroborated")
 
 
-class TestTheBulkRouteWithOneRefusedAmongThree:
+class TestTheBulkRouteWithOneDoubtedAmongThree:
     @pytest.fixture
     def three(self, db: Path) -> dict[str, int]:
         _feed(db, ACCOUNT_C, _statement_rows(SANTANDER_AS_WRITTEN), copy=False)
@@ -422,7 +491,7 @@ class TestTheBulkRouteWithOneRefusedAmongThree:
                 ),
             }
 
-    def test_TheOthersAreReadIn_TheRefusedOneStaysWaiting_AndEachResultIsListed(
+    def test_TheOthersAreReadIn_TheDoubtedOneStaysWaiting_AndEachResultIsListed(
         self, db, three
     ):
         base, stop = serve_config(config(db))
@@ -441,9 +510,10 @@ class TestTheBulkRouteWithOneRefusedAmongThree:
 
         page = response.text
         assert response.status_code == 200
-        assert "2 read in, 1 refused" in page
-        assert "Not assigned: only 0 of the" in page
+        assert "2 read in, 0 refused, 1 needing confirmation" in page
+        assert "Needs confirming, and was not read in: only 0 of the" in page
         assert "7 rows between 2026-06-29 and 2026-07-11" in page
+        assert "The matcher would merge 0 of 7 rows onto rows this account already holds" in page
         assert page.index("2026.03") < page.index("2026.05") < page.index("2026.08")
         assert _account_of(db, three["2026.05 - Full.pdf"]) == UNASSIGNED
         assert _account_of(db, three["2026.03 - Short.pdf"]) == ACCOUNT_C
@@ -468,10 +538,99 @@ class TestTheBulkRouteWithOneRefusedAmongThree:
             assert hidden not in page, hidden
 
 
-class TestTheSingleRouteShowsARefusalAsOne:
-    def test_ARefusedStatement_IsShownAsNotReadIn_NotAsReadIn(self, db):
+    def test_TheDoubtedStatementsOwnForm_ReadsItInOnceConfirmed(self, db, three):
+        base, stop = serve_config(config(db))
+        try:
+            page = httpx.post(
+                f"{base}/statements-assign",
+                data={
+                    "artefacts": ",".join(str(i) for i in three.values()),
+                    "account": ACCOUNT_C,
+                },
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            action, fields = _form_with(page, "read it in anyway")
+            assert action == "/statement-assign"
+            assert fields["artefact"] == str(three["2026.05 - Full.pdf"])
+            followed = httpx.post(
+                f"{base}{action}", data=fields, headers={"Origin": base}, timeout=60
+            )
+        finally:
+            stop()
+
+        assert "<h2>Read in</h2>" in followed.text
+        assert "assigned over a stated doubt: only 0 of the statement's 7 rows" in html.unescape(
+            followed.text
+        )
+        assert _account_of(db, three["2026.05 - Full.pdf"]) == ACCOUNT_C
+
+
+def _form_with(page: str, label: str) -> tuple[str, dict[str, str]]:
+    """The action and hidden fields of the form whose button says `label`."""
+    for form in re.findall(r"<form .*?</form>", page, flags=re.DOTALL):
+        if label in html.unescape(form):
+            action = re.search(r'action="([^"]*)"', form)
+            assert action is not None
+            fields = {
+                html.unescape(name): html.unescape(value)
+                for name, value in re.findall(
+                    r'<input type="hidden" name="([^"]*)" value="([^"]*)"', form
+                )
+            }
+            return html.unescape(action.group(1)), fields
+    raise AssertionError(f"no form labelled {label!r} in the page")
+
+
+def _dump(db: Path) -> str:
+    """Every row of every table, so 'nothing was written' is a comparison."""
+    with Store(db) as store:
+        return "\n".join(store.connection.iterdump())
+
+
+ANYWAY = "read it in anyway"
+
+
+class TestTheSingleRouteAsksBeforeReadingInADoubtedStatement:
+    @pytest.fixture
+    def doubted(self, db):
         _feed(db, ACCOUNT_C, _statement_rows(SANTANDER_AS_WRITTEN), copy=False)
-        wired, artefact = _wired_with_statement(db)
+        return _wired_with_statement(db)
+
+    def test_ADoubtedStatement_IsAskedAbout_AndNothingIsReadIn(self, db, doubted):
+        wired, artefact = doubted
+        before = _dump(db)
+        base, stop = serve_config(wired)
+        try:
+            response = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        page = response.text
+        assert response.status_code == 409
+        assert "Is this the right account?" in page
+        assert (
+            "only 0 of the statement&#x27;s 7 rows between 2026-06-29 and 2026-07-11 "
+            f"match what {WITNESS} holds for {ACCOUNT_C}" in page
+        )
+        assert page.index("only 0 of the") < page.index("The matcher would merge 0 of 7 rows")
+        assert (
+            "The matcher would merge 0 of 7 rows onto rows this account already "
+            "holds and add 7 new." in page
+        )
+        assert "<h2>Read in</h2>" not in page
+        assert _account_of(db, artefact) == UNASSIGNED
+        assert _dump(db) == before
+
+    def test_TheConfirmationPage_OffersBackAsThePrimaryControl_AndAPostToProceed(
+        self, db, doubted
+    ):
+        wired, artefact = doubted
         base, stop = serve_config(wired)
         try:
             page = httpx.post(
@@ -483,10 +642,582 @@ class TestTheSingleRouteShowsARefusalAsOne:
         finally:
             stop()
 
-        assert "<h2>Not read in</h2>" in page
-        assert "Not assigned: only 0 of the" in page
-        assert "<h2>Read in</h2>" not in page
+        assert '<a class="button" href="/statements">Back to kept statements</a>' in page
+        assert "It is this account&#x27;s - read it in anyway" in page
+        action, fields = _form_with(page, ANYWAY)
+        assert action == "/statement-assign"
+        assert fields["artefact"] == str(artefact)
+        assert fields["account"] == ACCOUNT_C
+        assert "doubt_acknowledged" in fields
+        links = re.findall(r'href="([^"]*)"', page)
+        assert not [link for link in links if "assign" in link]
+        assert page.index("Back to kept statements") < page.index(
+            '<form method="post" action="/statement-assign">'
+        )
+
+    def test_AcknowledgingTheDoubt_ReadsTheStatementIn_AndTheSentenceQuotesIt(
+        self, db, doubted
+    ):
+        wired, artefact = doubted
+        base, stop = serve_config(wired)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            action, fields = _form_with(asked, ANYWAY)
+            response = httpx.post(
+                f"{base}{action}", data=fields, headers={"Origin": base}, timeout=60
+            )
+        finally:
+            stop()
+
+        page = response.text
+        assert response.status_code == 200
+        assert "<h2>Read in</h2>" in page
+        assert f"assigned to {ACCOUNT_C} and read by {STATEMENT_SOURCE}" in page
+        assert "assigned over a stated doubt: only 0 of the" in page
+        assert _account_of(db, artefact) == ACCOUNT_C
+
+    def test_AnAcknowledgementMadeForAnotherStatement_DoesNotReadThisOneIn(self, db):
+        # Two kept documents with the same rows, so both are doubted alike and
+        # only the acknowledgement's own artefact tells them apart.
+        _feed(db, ACCOUNT_C, _statement_rows(SANTANDER_AS_WRITTEN), copy=False)
+        with Store(db) as store:
+            first = keep(store, SANTANDER_AS_WRITTEN, "first.pdf")
+            second = keep(store, SANTANDER_PLAIN, "second.pdf")
+        base, stop = serve_config(config(db))
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(first), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            _, fields = _form_with(asked, ANYWAY)
+            replayed = httpx.post(
+                f"{base}/statement-assign",
+                data={**fields, "artefact": str(second)},
+                headers={"Origin": base},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        assert replayed.status_code == 409
+        assert "Is this the right account?" in replayed.text
+        assert _account_of(db, second) == UNASSIGNED
+        assert _account_of(db, first) == UNASSIGNED
+
+    def test_AnAcknowledgementMadeForAnotherAccount_DoesNotReadItIntoThisOne(self, db):
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        _feed(db, ACCOUNT_C, rows, copy=False)
+        _feed(db, "acct-d", rows, copy=False)
+        wired, artefact = _wired_with_statement(db)
+        base, stop = serve_config(wired)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            _, fields = _form_with(asked, ANYWAY)
+            replayed = httpx.post(
+                f"{base}/statement-assign",
+                data={**fields, "account": "acct-d"},
+                headers={"Origin": base},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        assert replayed.status_code == 409
         assert _account_of(db, artefact) == UNASSIGNED
+
+    def test_ThePage_CarriesCountsAndDates_ButNoAmountOrPayee(self, db, doubted):
+        wired, artefact = doubted
+        base, stop = serve_config(wired)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            action, fields = _form_with(asked, ANYWAY)
+            read_in = httpx.post(
+                f"{base}{action}", data=fields, headers={"Origin": base}, timeout=60
+            ).text
+        finally:
+            stop()
+
+        for page in (asked, read_in):
+            for hidden in ("ZEBRAQUARTZ", "7,654.32", "EXAMPLE SHOP", "Some Merchant"):
+                assert hidden not in page, hidden
+
+    def test_ACrossSitePost_IsRefused_AndReadsNothingIn(self, db, doubted):
+        wired, artefact = doubted
+        base, stop = serve_config(wired)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_C},
+                headers={"Origin": base},
+                timeout=60,
+            ).text
+            _, fields = _form_with(asked, ANYWAY)
+            forged = httpx.post(
+                f"{base}/statement-assign",
+                data=fields,
+                headers={"Origin": "https://evil.example"},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        assert forged.status_code == 403
+        assert _account_of(db, artefact) == UNASSIGNED
+
+
+class TestAStatementTheMatcherWouldMergeInFull:
+    """The measured case: the agreements pair rows within two days and a card
+    statement dates a purchase days before the feed posts it, so every row
+    merges by the matcher while the strict comparison matches almost none."""
+
+    LAG = 4
+
+    @pytest.fixture
+    def lagging(self, db):
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        _feed(db, ACCOUNT_A, rows, copy=True, lag=self.LAG, relabel=True)
+        _edges(db, ACCOUNT_A, rows)
+        return _wired_with_statement(db), rows
+
+    def test_TheStrictComparisonAlone_WouldDoubtIt(self, db, lagging):
+        """The premise: without the matcher's word this statement is doubted,
+        so the tests below prove the matcher is what lets it through."""
+        _, rows = lagging
+        incoming = [dataclasses.replace(row, account_id=ACCOUNT_A) for row in rows]
+        with Store(db) as store:
+            found = agreements(store.transactions_by_sighting() + incoming, sibling_accounts={})
+
+        assert "only " in (
+            assignment_doubt(found, source=STATEMENT_SOURCE, account=ACCOUNT_A) or ""
+        )
+
+    def test_ItIsReadIn_WithoutAnyPrompt_BecauseTheMatcherAgrees(self, db, lagging):
+        (wired, artefact), _ = lagging
+
+        outcome = wired.assign_kept_statement(artefact, ACCOUNT_A)
+
+        assert f"assigned to {ACCOUNT_A} and read by {STATEMENT_SOURCE}" in outcome
+        assert "new 0, matched 7" in outcome
+        assert "the matcher would merge 7 of 7 rows onto rows this account already holds" in outcome
+        assert "doubt" not in outcome
+        assert _account_of(db, artefact) == ACCOUNT_A
+
+    def test_TheRouteReadsItInStraightAway(self, db, lagging):
+        (wired, artefact), _ = lagging
+        base, stop = serve_config(wired)
+        try:
+            response = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_A},
+                headers={"Origin": base},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        assert response.status_code == 200
+        assert "<h2>Read in</h2>" in response.text
+        assert _account_of(db, artefact) == ACCOUNT_A
+
+    @pytest.mark.parametrize(
+        ("merging", "prompted"),
+        [(7, False), (6, False), (5, True), (3, True), (0, True)],
+    )
+    def test_TheMatcherAgreeingOnAtLeastFourFifths_IsWhatDecidesWhetherToAsk(
+        self, db, merging, prompted
+    ):
+        """6 of 7 is 86% and goes through; 5 of 7 is 71% and asks."""
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        _feed(
+            db,
+            ACCOUNT_A,
+            rows,
+            copy=True,
+            lag=self.LAG,
+            relabel=True,
+            only=tuple(range(merging)),
+        )
+        _edges(db, ACCOUNT_A, rows)
+        wired, artefact = _wired_with_statement(db)
+
+        report = wired.review_kept_statement(artefact, ACCOUNT_A)
+
+        if prompted:
+            assert report is not None
+            assert f"The matcher would merge {merging} of 7 rows" in report.evidence
+            assert f"add {7 - merging} new" in report.evidence
+        else:
+            assert report is None
+
+
+class TestTheMatcherDryRun:
+    def test_ItCountsWhatTheRealBatchThenDoes_AndWritesNothing(self, db):
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        _feed(db, ACCOUNT_A, rows, copy=True, lag=4, relabel=True, only=(0, 1, 2))
+        incoming = [dataclasses.replace(row, account_id=ACCOUNT_A) for row in rows]
+        before = _dump(db)
+
+        with Store(db) as store:
+            preview = preview_reconcile(store, incoming)
+
+        assert (preview.merged, preview.new) == (3, 4)
+        assert _dump(db) == before
+        with Store(db) as store:
+            real = reconcile_batch(
+                store, incoming, digest="real", summary=ImportSummary(artefact_new=False)
+            )
+        assert (real.matched + real.superseded, real.inserted) == (3, 4)
+
+    def test_TheReviewHook_LeavesStoreSightingsFlagsAndFilingUntouched(self, db):
+        _feed(db, ACCOUNT_C, _statement_rows(SANTANDER_AS_WRITTEN), copy=False)
+        wired, artefact = _wired_with_statement(db)
+        before = _dump(db)
+        flags = open_flags(db)
+
+        report = wired.review_kept_statement(artefact, ACCOUNT_C)
+
+        assert isinstance(report, DoubtReport)
+        assert _dump(db) == before
+        assert open_flags(db) == flags
+        assert _account_of(db, artefact) == UNASSIGNED
+
+    def test_TwoIdenticalRowsInABatch_CannotBothMergeOntoOneHeldRow(self, db):
+        """A held row answers one incoming row: the second of two identical
+        payments is a new row, exactly as in the real batch."""
+        row = _statement_rows(SANTANDER_AS_WRITTEN)[0]
+        _feed(db, ACCOUNT_A, [row], copy=True)
+        twice = [dataclasses.replace(row, account_id=ACCOUNT_A)] * 2
+
+        with Store(db) as store:
+            preview = preview_reconcile(store, twice)
+
+        assert (preview.merged, preview.new) == (1, 1)
+
+    def test_AnEmptyAccount_MergesNothing(self, db):
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        incoming = [dataclasses.replace(row, account_id="acct-empty") for row in rows]
+
+        with Store(db) as store:
+            preview = preview_reconcile(store, incoming)
+
+        assert (preview.merged, preview.new) == (0, 7)
+
+    def test_RowsRepeatedWithinABatch_AreSeparatePayments_NotOneSeenTwice(self, db):
+        """Rows of one batch see each other, as in the real loop: a repeat of
+        the same content from the same source is a second payment."""
+        rows = [
+            dataclasses.replace(row, account_id=ACCOUNT_A)
+            for row in _statement_rows(SANTANDER_AS_WRITTEN)
+        ]
+
+        with Store(db) as store:
+            preview = preview_reconcile(store, rows + rows[:2])
+
+        assert (preview.merged, preview.new) == (0, 9)
+
+
+class TestADestinationDoubtSurvivesTheMatcherAgreeing:
+    def test_RowsHeldUnderASibling_StillPromptEvenIfTheMatcherWouldMergeThemAll(
+        self, db, tmp_path
+    ):
+        _bind(tmp_path, pa=ACCOUNT_A, pb=ACCOUNT_B)
+        rows = _statement_rows(SANTANDER_AS_WRITTEN)
+        _feed(db, ACCOUNT_A, rows, copy=True)
+        _feed(db, ACCOUNT_B, rows, copy=True, lag=4, relabel=True)
+        _edges(db, ACCOUNT_B, rows)
+        wired, artefact = _wired_with_statement(db)
+        base, stop = serve_config(wired)
+        try:
+            response = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": str(artefact), "account": ACCOUNT_B},
+                headers={"Origin": base},
+                timeout=60,
+            )
+        finally:
+            stop()
+
+        page = response.text
+        assert response.status_code == 409
+        assert f"filed under OTHER accounts: {ACCOUNT_A} (7)" in page
+        assert "The matcher would merge 7 of 7 rows onto rows this account already holds" in page
+        assert _account_of(db, artefact) == UNASSIGNED
+
+
+# --- the two confirmations together ------------------------------------------
+
+
+class _Calls:
+    def __init__(self) -> None:
+        self.declared: list[str] = []
+        self.assigned: list[tuple[int, str, bool]] = []
+
+
+def _stub_server(tmp_path: Path, calls: _Calls, *, doubt: bool):
+    """A handler whose assignment is always doubted (or never), over a registry
+    that knows no account, so every typed name needs its own confirmation."""
+
+    def declare(record):
+        calls.declared.append(str(record.ref))
+        return record
+
+    def assign(artefact_id: int, account_id: str, *, doubt_acknowledged: bool = False) -> str:
+        calls.assigned.append((artefact_id, account_id, doubt_acknowledged))
+        return f"assigned to {account_id} and read by stub"
+
+    def review(artefact_id: int, account_id: str) -> DoubtReport | None:
+        if not doubt:
+            return None
+        return DoubtReport(doubt="only 0 of the statement's 9 rows match.", evidence="")
+
+    wired = WebConfig(
+        client_id="client-1",
+        client_secret="tlcs_live_abcdefghij1234567890",
+        redirect_uri="https://obdi.example.com/callback",
+        connection_store=ConnectionStore(tmp_path / "c.json"),
+        declared_accounts=lambda: [],
+        declare_account=declare,
+        assign_kept_statement=assign,
+        review_kept_statement=review,
+    )
+    handler = type(
+        "StubHandler",
+        (ConnectionHandler,),
+        {"config": wired, "session": AuthorisationSession()},
+    )
+    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_port}"
+
+    def stop() -> None:
+        httpd.shutdown()  # type: ignore[attr-defined]
+        httpd.server_close()  # type: ignore[attr-defined]
+
+    return base, stop
+
+
+def _post(base: str, path: str, data: dict[str, str]) -> httpx.Response:
+    return httpx.post(f"{base}{path}", data=data, headers={"Origin": base}, timeout=30)
+
+
+class TestANewAccountAndADoubtTogether:
+    def test_TheDoubtIsAnsweredFirst_ThenTheNewAccount_AndNeitherAnswerIsLost(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            first = _post(base, "/statement-assign", {"artefact": "4", "account_other": "acct-new"})
+            action, fields = _form_with(first.text, ANYWAY)
+            second = _post(base, action, fields)
+            action, fields = _form_with(second.text, "Declare it")
+            third = _post(base, action, fields)
+        finally:
+            stop()
+
+        assert "Is this the right account?" in first.text
+        assert "No such account" in second.text
+        assert calls.assigned == [(4, "acct-new", True)]
+        assert calls.declared == ["acct-new"]
+        assert third.status_code == 200
+
+    def test_TheNewAccountIsConfirmedFirst_ThenTheDoubt_AndNeitherAnswerIsLost(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            first = _post(
+                base,
+                "/statement-assign",
+                {
+                    "artefact": "4",
+                    "account_other": "acct-new",
+                    "confirm_new_account": "acct-new",
+                },
+            )
+            action, fields = _form_with(first.text, ANYWAY)
+            assert fields["confirm_new_account"] == "acct-new"
+            assert calls.declared == []
+            second = _post(base, action, fields)
+        finally:
+            stop()
+
+        assert "Is this the right account?" in first.text
+        assert calls.declared == ["acct-new"]
+        assert calls.assigned == [(4, "acct-new", True)]
+        assert second.status_code == 200
+
+    def test_AWalkedAwayDoubt_DeclaresNoAccount(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            _post(
+                base,
+                "/statement-assign",
+                {"artefact": "4", "account_other": "acct-new", "confirm_new_account": "acct-new"},
+            )
+        finally:
+            stop()
+
+        assert calls.declared == []
+        assert calls.assigned == []
+
+    def test_WithNoDoubt_TheNewAccountConfirmationIsTheOnlyQuestion(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=False)
+        try:
+            first = _post(base, "/statement-assign", {"artefact": "4", "account_other": "acct-new"})
+            action, fields = _form_with(first.text, "Declare it")
+            _post(base, action, fields)
+        finally:
+            stop()
+
+        assert "No such account" in first.text
+        assert calls.assigned == [(4, "acct-new", False)]
+
+
+# --- sections of an "all accounts" statement ----------------------------------
+
+
+class TestASectionAskedAboutBeforeItIsReadIn:
+    @pytest.fixture
+    def kept(self, db: Path) -> tuple[bytes, int]:
+        payload = _two_accounts()
+        with Store(db) as store:
+            return payload, keep(store, payload, "all accounts.pdf")
+
+    def test_ADoubtedSection_IsAskedAbout_NothingIsRecorded_ThenReadInOnceAcknowledged(
+        self, db, kept
+    ):
+        payload, artefact = kept
+        _feed(db, SAVER, _section_rows(payload), copy=False)
+        before = _dump(db)
+        base, stop = serve_config(config(db))
+        try:
+            asked = _post(
+                base,
+                "/statement-section-assign",
+                {"artefact": str(artefact), "section": SAVER_KEY, "account": SAVER},
+            )
+            unchanged = _dump(db)
+            action, fields = _form_with(asked.text, ANYWAY)
+            done = _post(base, action, fields)
+        finally:
+            stop()
+
+        assert asked.status_code == 409
+        assert "only 0 of the statement&#x27;s 6 rows" in asked.text
+        assert "The matcher would merge 0 of 6 rows" in asked.text
+        assert unchanged == before
+        assert fields["section"] == SAVER_KEY
+        assert "<h2>Read in</h2>" in done.text
+        assert "assigned over a stated doubt: only 0 of the statement's 6 rows" in html.unescape(
+            done.text
+        )
+        assert _assignments(db) == [(SAVER_KEY, SAVER)]
+
+    def test_AnAcknowledgementMadeForAnotherSection_DoesNotRecordThisOne(self, db):
+        payload = pdf(
+            document(
+                section("Regular Saver", 80000, SIX_MOVES),
+                section("Christmas Club", 15000, CLUB_MOVES),
+            ),
+            step=5.5,
+        )
+        with Store(db) as store:
+            artefact = keep(store, payload, "busy.pdf")
+        read = read_sections(payload)
+        assert read is not None
+        parser, _ = read
+        for key in (SAVER_KEY, section_key("Christmas Club")):
+            rows = list(parser.parse_section(payload, key, account_id="probe"))
+            _feed(db, SAVER, rows, copy=False, tag=key)
+        base, stop = serve_config(config(db))
+        try:
+            asked = _post(
+                base,
+                "/statement-section-assign",
+                {"artefact": str(artefact), "section": SAVER_KEY, "account": SAVER},
+            )
+            _, fields = _form_with(asked.text, ANYWAY)
+            replayed = _post(
+                base,
+                "/statement-section-assign",
+                {**fields, "section": section_key("Christmas Club")},
+            )
+        finally:
+            stop()
+
+        assert replayed.status_code == 409
+        assert "Is this the right account?" in replayed.text
+        assert _assignments(db) == []
+
+    def test_AcknowledgedAtTheHook_TheSectionIsRecorded_AndTheSentenceQuotesTheDoubt(
+        self, db, kept
+    ):
+        payload, artefact = kept
+        _feed(db, SAVER, _section_rows(payload), copy=False)
+        wired = config(db)
+
+        refused = wired.assign_statement_section(artefact, SAVER_KEY, SAVER)
+        outcome = wired.assign_statement_section(
+            artefact, SAVER_KEY, SAVER, doubt_acknowledged=True
+        )
+
+        assert refused.startswith("Not assigned:")
+        assert f"assigned to {SAVER} and read by" in outcome
+        assert "assigned over a stated doubt: only 0 of the statement's 6 rows" in outcome
+        assert _assignments(db) == [(SAVER_KEY, SAVER)]
+
+    def test_ASectionTheMatcherWouldMergeInFull_IsRecordedWithoutAPrompt(self, db, kept):
+        payload, artefact = kept
+        rows = _section_rows(payload)
+        _feed(db, SAVER, rows, copy=True, lag=4, relabel=True)
+        _edges(db, SAVER, rows)
+
+        outcome = config(db).assign_statement_section(artefact, SAVER_KEY, SAVER)
+
+        assert f"assigned to {SAVER} and read by" in outcome
+        assert "the matcher would merge 6 of 6 rows" in outcome
+        assert _assignments(db) == [(SAVER_KEY, SAVER)]
+
+
+class TestAcknowledgedAssignmentOfAWholeStatement:
+    def test_AcknowledgedAtTheHook_TheStatementIsFiledAndReadIn_QuotingTheDoubt(self, db):
+        _feed(db, ACCOUNT_C, _statement_rows(SANTANDER_AS_WRITTEN), copy=False)
+        wired, artefact = _wired_with_statement(db)
+
+        outcome = wired.assign_kept_statement(artefact, ACCOUNT_C, doubt_acknowledged=True)
+
+        assert f"assigned to {ACCOUNT_C} and read by {STATEMENT_SOURCE}" in outcome
+        assert outcome.endswith(
+            "assigned over a stated doubt: only 0 of the statement's 7 rows between "
+            f"2026-06-29 and 2026-07-11 match what {WITNESS} holds for {ACCOUNT_C}; "
+            "this is probably another account's statement."
+        )
+        assert _account_of(db, artefact) == ACCOUNT_C
+
+    def test_AcknowledgingWhereNothingIsDoubted_ReadsItInWithoutAnyDoubtSentence(self, db):
+        wired, artefact = _wired_with_statement(db)
+
+        outcome = wired.assign_kept_statement(artefact, "acct-new", doubt_acknowledged=True)
+
+        assert "doubt" not in outcome
+        assert _account_of(db, artefact) == "acct-new"
 
 
 # --- a section of an "all accounts" statement --------------------------------
@@ -502,6 +1233,16 @@ SIX_MOVES = [
     Move("07/05/2025", "Cash Deposit", 700),
     Move("08/05/2025", "Withdrawal", -450),
     Move("09/05/2025", "DD Lodgement", 900),
+]
+
+
+CLUB_MOVES = [
+    Move("04/05/2025", "Club Lodgement", 1200),
+    Move("05/05/2025", "Club Standing Order", 1300),
+    Move("06/05/2025", "Club Transfer In", 1400),
+    Move("07/05/2025", "Club Cash Deposit", 1500),
+    Move("08/05/2025", "Club Lodgement", 1600),
+    Move("09/05/2025", "Club Lodgement Two", 1700),
 ]
 
 

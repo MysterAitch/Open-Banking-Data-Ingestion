@@ -38,6 +38,7 @@ from .alerts import Finding
 from .backup import BackupRefused, take_backup, verify_copy
 from .connections import ConnectionStore
 from .coverage import (
+    DoubtReport,
     SourceCoverage,
     agreements,
     coverage,
@@ -397,6 +398,7 @@ if TYPE_CHECKING:
     from .parsers.base import StatementParser
     from .parsers.pdf_statements import SectionReading
     from .rebuild import RebuildReport
+    from .statement_sections import AssignmentCheck
 
 
 def _record_run(
@@ -2803,7 +2805,78 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             ).fetchone()
         return (int(row["rowid"]) if row else 0, held is None)
 
-    def assign_kept_statement(artefact_id: int, account_id: str) -> str:
+    def _checked_statement(
+        store: Store, artefact_id: int, destination: str
+    ) -> tuple[sqlite3.Row, StatementParser, list[Transaction], AssignmentCheck] | str:
+        """A kept statement read and checked against `destination`, or the sentence
+        that answers without reading it."""
+        from .parsers.uk_banks import detect
+        from .statement_sections import check_assignment
+
+        row = store.connection.execute(
+            "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
+            "WHERE rowid = ? AND source = 'statement'",
+            (artefact_id,),
+        ).fetchone()
+        if row is None:
+            return f"No kept statement {artefact_id}."
+        payload = bytes(row["payload"])
+        parser = detect(payload)
+        incoming = list(parser.parse(payload, account_id=destination))
+        # Asked BEFORE the refile: the parser's gate proves the document
+        # is consistent, not that it is this account's, and once refiled
+        # the rows' only undo is a refile and a rebuild.
+        check = check_assignment(
+            store,
+            incoming=incoming,
+            source=parser.source,
+            account=destination,
+            account_map=_account_map(store),
+        )
+        return row, parser, incoming, check
+
+    def review_kept_statement(artefact_id: int, account_id: str) -> DoubtReport | None:
+        """The doubt assigning a kept statement would raise, writing nothing.
+
+        None when there is no doubt, and also for everything `assign_kept_statement`
+        answers without reading rows or by raising: those need no confirmation.
+        """
+        from .namespaces import validate_canonical_name
+
+        destination = account_id.strip()
+        if not destination:
+            return None
+        try:
+            validate_canonical_name(destination)
+        except ValueError:
+            return None
+        with Store(db_path) as store:
+            try:
+                checked = _checked_statement(store, artefact_id, destination)
+            except (DataError, ValueError):
+                return None
+        if isinstance(checked, str):
+            return None
+        return checked[3].report
+
+    def review_statement_section(
+        artefact_id: int, section_key: str, account_id: str
+    ) -> DoubtReport | None:
+        """The doubt assigning one section would raise, writing nothing."""
+        from .statement_sections import review_section
+
+        with Store(db_path) as store:
+            return review_section(
+                store,
+                artefact_id=artefact_id,
+                section_key=section_key,
+                account=account_id,
+                account_map=_account_map(store),
+            )
+
+    def assign_kept_statement(
+        artefact_id: int, account_id: str, *, doubt_acknowledged: bool = False
+    ) -> str:
         """Give a kept statement its account, then read it in.
 
         The statement was landed before anyone decided whose it was, which
@@ -2818,11 +2891,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         later rebuild would then replay into the same refusal.
         Only a kept statement is assigned; any other artefact id is
         refused, because refiling a feed payload would corrupt its filing.
+
+        A doubt about whose the statement is stops the assignment unless
+        `doubt_acknowledged` says a person has seen it and chose to go on; the
+        result sentence then quotes it.
         """
         from .ingest import ImportSummary, reconcile_batch
         from .namespaces import validate_canonical_name
-        from .parsers.uk_banks import detect
-        from .statement_sections import check_assignment
 
         destination = account_id.strip()
         if not destination:
@@ -2832,28 +2907,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         except ValueError as exc:
             return f"Not assigned: {exc}"
         with Store(db_path) as store:
-            row = store.connection.execute(
-                "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
-                "WHERE rowid = ? AND source = 'statement'",
-                (artefact_id,),
-            ).fetchone()
-            if row is None:
-                return f"No kept statement {artefact_id}."
-            payload = bytes(row["payload"])
-            parser = detect(payload)
-            incoming = list(parser.parse(payload, account_id=destination))
-            # Asked BEFORE the refile: the parser's gate proves the document
-            # is consistent, not that it is this account's, and once refiled
-            # the rows' only undo is a refile and a rebuild.
-            check = check_assignment(
-                store,
-                incoming=incoming,
-                source=parser.source,
-                account=destination,
-                account_map=_account_map(store),
-            )
-            if check.refusal is not None:
-                return check.refusal
+            checked = _checked_statement(store, artefact_id, destination)
+            if isinstance(checked, str):
+                return checked
+            row, parser, incoming, check = checked
+            refusal = check.refusal(acknowledged=doubt_acknowledged)
+            if refusal is not None:
+                return refusal
             store.refile_artefact(artefact_id, destination)
             summary = ImportSummary(artefact_new=False)
             reconcile_batch(
@@ -2863,10 +2923,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             settle_review_flags(store)
         return (
             f"{row['origin']} assigned to {destination} and read by "
-            f"{parser.source}: {summary.describe()}; {check.corroboration}"
+            f"{parser.source}: {summary.describe()}; {check.outcome_note}"
         )
 
-    def assign_statement_section(artefact_id: int, section_key: str, account_id: str) -> str:
+    def assign_statement_section(
+        artefact_id: int,
+        section_key: str,
+        account_id: str,
+        *,
+        doubt_acknowledged: bool = False,
+    ) -> str:
         """Give one account of a kept "all accounts" statement its account.
 
         See `statement_sections.assign_section`: the statement stays
@@ -2882,6 +2948,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 section_key=section_key,
                 account=account_id,
                 account_map=_account_map(store),
+                doubt_acknowledged=doubt_acknowledged,
             )
 
     def statement_payload(artefact_id: int) -> tuple[str, bytes] | None:
@@ -3273,6 +3340,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statement_payload=statement_payload,
         assign_kept_statement=assign_kept_statement,
         assign_statement_section=assign_statement_section,
+        review_kept_statement=review_kept_statement,
+        review_statement_section=review_statement_section,
         kept_statements=kept_statements,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,

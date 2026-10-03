@@ -41,6 +41,7 @@ from .accounts import (
     closing_problem,
 )
 from .callback import render_page
+from .coverage import DoubtReport
 from .errors import DataError
 from .namespaces import validate_canonical_name
 from .spaces import FINAL_MOVEMENTS_MEANING
@@ -446,6 +447,51 @@ def unknown_account_page(
         + submit_button(proceed_label)
         + "</form>"
         + BACK_LINKS,
+    )
+
+
+#: The field that carries a person's "read it in anyway" past an assignment
+#: doubt. Its value is `doubt_token`, which names what it was given for, so a
+#: post built for one statement (or one account) says nothing about another.
+DOUBT_ACK_FIELD = "doubt_acknowledged"
+
+
+def doubt_token(artefact: str, section: str, account: str) -> str:
+    """What the acknowledgement of a doubt must say to apply to THIS request.
+
+    The artefact, the section of it (empty for a whole statement), and the
+    account it was to be read into: the doubt is about all three, and an
+    override of it for any other combination was never given.
+    """
+    return "|".join((artefact, section, account))
+
+
+def assignment_doubt_page(
+    report: DoubtReport, *, action: str, carried: dict[str, str], token: str
+) -> bytes:
+    """Show a doubt about an assignment and its evidence, and ask once.
+
+    The primary control walks away with nothing read in; the secondary one
+    re-posts exactly what was asked, plus the acknowledgement. Never a link
+    that assigns: reading a statement in is a POST.
+    """
+    hidden = "".join(
+        f'<input type="hidden" name="{html.escape(name)}" '
+        f'value="{html.escape(value)}">'
+        for name, value in {**carried, DOUBT_ACK_FIELD: token}.items()
+    )
+    evidence = f"<p>{html.escape(report.evidence)}</p>" if report.evidence else ""
+    return render_page(
+        "Is this the right account?",
+        "<h2>Is this the right account?</h2>"
+        f'<p class="alarm">{html.escape(report.doubt)}</p>'
+        + evidence
+        + "<p>Nothing has been read in. The statement is still kept, waiting "
+        "for an account.</p>"
+        '<p><a class="button" href="/statements">Back to kept statements</a></p>'
+        f'<form method="post" action="{html.escape(action)}">{hidden}'
+        + submit_button("It is this account's - read it in anyway", secondary=True)
+        + "</form>",
     )
 
 
@@ -856,6 +902,43 @@ class AccountPages:
             known=typed in known,
             nearest=nearest_name(typed, declared),
         )
+
+    def doubt_acknowledged(
+        self,
+        *,
+        fields: dict[str, str],
+        action: str,
+        carried: dict[str, str],
+        artefact: str,
+        section: str,
+        account: str,
+        review: Callable[[], DoubtReport | None] | None,
+    ) -> bool | None:
+        """Whether the person has answered this request's doubt, or None once asked.
+
+        True when the request carries an acknowledgement made for exactly this
+        artefact, section, and account. Otherwise the doubt is looked up, and
+        a real one is answered with the confirmation page (None: the caller
+        stops); no doubt, or nothing wired to ask, is False and the caller
+        carries on. A review that fails is no doubt rather than a refusal,
+        because the assignment itself says what is wrong in that case.
+        """
+        token = doubt_token(artefact, section, account)
+        if fields.get(DOUBT_ACK_FIELD) == token:
+            return True
+        if review is None:
+            return False
+        try:
+            report = review()
+        except Exception:
+            return False
+        if report is None:
+            return False
+        self._respond(
+            409,
+            assignment_doubt_page(report, action=action, carried=carried, token=token),
+        )
+        return None
 
     def chosen_account(
         self,

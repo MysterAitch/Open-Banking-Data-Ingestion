@@ -22,7 +22,7 @@ under arithmetic that was never going to match.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from itertools import combinations
@@ -999,6 +999,33 @@ LOW_OVERLAP_MIN_ROWS = 5
 #: contrary evidence.
 LOW_OVERLAP_THRESHOLD = 0.5
 
+#: The share of a statement's rows the real matcher would merge onto rows the
+#: account already holds, at or above which a low overlap is NOT doubted.
+#: The agreements pair rows by date within `WITHIN_ACCOUNT_WINDOW_DAYS`, while
+#: the matcher pairs a row of another source on exact amount within a week. A
+#: card statement dates a purchase by the transaction date and the feed by the
+#: posting date, a few days later, so the agreements under-count: measured on
+#: the deployment, seven sibling statements of one card read into an account
+#: with every row matched ("parsed 28, new 0, matched 28"), and the eighth was
+#: doubted for "only 6 of the statement's 13 rows" matching. A statement the
+#: matcher would merge in nearly full is the account's own whatever the strict
+#: comparison says; four fifths leaves room for the odd row the feed has not
+#: yet posted without letting through a statement of which a fifth is new. The
+#: destination doubt is never relaxed by this: rows matching ANOTHER account's
+#: are positive evidence, where a low overlap is only an absence of it.
+MATCHER_AGREES_THRESHOLD = 0.8
+
+
+@dataclass(frozen=True)
+class DoubtReport:
+    """A doubt about an assignment, with the evidence to answer it by."""
+
+    #: Why the statement probably is not this account's.
+    doubt: str
+    #: What the matcher would do with the rows, in counts, or "" when it
+    #: could not be asked.
+    evidence: str
+
 
 @dataclass(frozen=True)
 class _Overlap:
@@ -1053,7 +1080,11 @@ def _overlaps(
 
 
 def assignment_doubt(
-    found: Sequence[Agreement], *, source: str, account: str
+    found: Sequence[Agreement],
+    *,
+    source: str,
+    account: str,
+    matcher_agrees: Callable[[], bool] | None = None,
 ) -> str | None:
     """A sentence saying why a statement probably is not this account's, or None.
 
@@ -1067,6 +1098,10 @@ def assignment_doubt(
     - low overlap (fewer than `LOW_OVERLAP_THRESHOLD` of the rows match what a
       witness holds for THIS account, given at least `LOW_OVERLAP_MIN_ROWS`
       in the shared window).
+
+    `matcher_agrees` is asked only when the low-overlap doubt would fire, and
+    only a True answer withdraws it (see `MATCHER_AGREES_THRESHOLD`); it is a
+    callable because answering costs a dry run of the matcher.
 
     No agreement covering the account and source means no witness over the
     period: None, and the assignment proceeds uncorroborated rather than
@@ -1086,6 +1121,8 @@ def assignment_doubt(
         ):
             worst = overlap
     if worst is None:
+        return None
+    if matcher_agrees is not None and matcher_agrees():
         return None
     return (
         f"only {worst.matched} of the statement's {worst.file_rows} rows between "

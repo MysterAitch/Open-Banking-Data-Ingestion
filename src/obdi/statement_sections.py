@@ -30,9 +30,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .accounts import AccountMap
-from .coverage import agreements, assignment_corroboration, assignment_doubt
+from .coverage import (
+    MATCHER_AGREES_THRESHOLD,
+    DoubtReport,
+    agreements,
+    assignment_corroboration,
+    assignment_doubt,
+)
 from .errors import DataError
-from .ingest import ImportSummary, reconcile_batch
+from .ingest import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
 from .models import Transaction
 from .namespaces import validate_canonical_name
 from .parsers.base import StatementParser
@@ -91,16 +97,46 @@ class AssignmentCheck:
     doubt: str | None
     #: What it was checked against, in counts, for the result sentence.
     corroboration: str
+    #: The matcher's dry run over the rows, when one was needed to judge or to
+    #: explain a doubt.
+    preview: MatcherPreview | None = None
 
     @property
-    def refusal(self) -> str | None:
-        """The result sentence for a refused assignment, or None to proceed."""
+    def _stopped_doubt(self) -> str:
+        doubt = self.doubt or ""
+        return doubt if doubt.endswith(("?", ".")) else f"{doubt}."
+
+    def refusal(self, *, acknowledged: bool) -> str | None:
+        """The result sentence for a refused assignment, or None to proceed.
+
+        A doubt the person has acknowledged does not refuse: it is recorded in
+        the result sentence by `outcome_note` instead.
+        """
+        if self.doubt is None or acknowledged:
+            return None
+        return (
+            f"Not assigned: {self._stopped_doubt} Nothing was read in; "
+            "choose the account again."
+        )
+
+    @property
+    def report(self) -> DoubtReport | None:
+        """The doubt with the evidence beside it, for the confirmation page."""
         if self.doubt is None:
             return None
-        stop = "" if self.doubt.endswith(("?", ".")) else "."
+        return DoubtReport(
+            doubt=self._stopped_doubt,
+            evidence=self.preview.describe() if self.preview is not None else "",
+        )
+
+    @property
+    def outcome_note(self) -> str:
+        """What the result sentence says after the counts it was checked by."""
+        if self.doubt is None:
+            return self.corroboration
         return (
-            f"Not assigned: {self.doubt}{stop} Nothing was read in; "
-            "choose the account again."
+            f"{self.corroboration}; assigned over a stated doubt: "
+            f"{self._stopped_doubt}"
         )
 
 
@@ -127,10 +163,58 @@ def check_assignment(
         if not (row.account_id == account and row.source == source)
     ]
     found = agreements(held + incoming, sibling_accounts=account_map.accounts_by_source())
-    return AssignmentCheck(
-        doubt=assignment_doubt(found, source=source, account=account),
-        corroboration=assignment_corroboration(found, source=source, account=account),
+    previews: list[MatcherPreview] = []
+
+    def preview() -> MatcherPreview:
+        if not previews:
+            previews.append(preview_reconcile(store, incoming))
+        return previews[0]
+
+    def matcher_agrees() -> bool:
+        return preview().share_merged >= MATCHER_AGREES_THRESHOLD
+
+    doubt = assignment_doubt(
+        found, source=source, account=account, matcher_agrees=matcher_agrees
     )
+    if doubt is not None:
+        preview()
+    corroboration = assignment_corroboration(found, source=source, account=account)
+    if previews and doubt is None:
+        corroboration = f"{corroboration}; {previews[0].clause}"
+    return AssignmentCheck(
+        doubt=doubt,
+        corroboration=corroboration,
+        preview=previews[0] if previews else None,
+    )
+
+
+def review_section(
+    store: Store,
+    *,
+    artefact_id: int,
+    section_key: str,
+    account: str,
+    account_map: AccountMap,
+) -> DoubtReport | None:
+    """The doubt assigning this section would raise, if any, writing nothing.
+
+    None for anything `assign_section` would answer without reading rows (no
+    account, an invalid name, no such statement or account of it): those
+    refusals need no confirmation, and the assignment says them itself.
+    """
+    try:
+        prepared = _prepare_section(
+            store,
+            artefact_id=artefact_id,
+            section_key=section_key,
+            account=account,
+            account_map=account_map,
+        )
+    except (DataError, ValueError):
+        return None
+    if isinstance(prepared, str):
+        return None
+    return prepared.check.report
 
 
 def read_sections(payload: bytes) -> tuple[PdfStatementParser, list[SectionReading]] | None:
@@ -147,22 +231,29 @@ def read_sections(payload: bytes) -> tuple[PdfStatementParser, list[SectionReadi
     return None if found is None else (parser, found)
 
 
-def assign_section(
+@dataclass(frozen=True)
+class _PreparedSection:
+    """A section read and checked, and not yet recorded or read in."""
+
+    digest: str
+    origin: str
+    parser: PdfStatementParser
+    label: str
+    key: str
+    incoming: list[Transaction]
+    destination: str
+    check: AssignmentCheck
+
+
+def _prepare_section(
     store: Store,
     *,
     artefact_id: int,
     section_key: str,
     account: str,
     account_map: AccountMap,
-) -> str:
-    """Read one section of a kept statement into `account`, and remember the choice.
-
-    Read BEFORE it is recorded, so a section the gate refuses stays waiting
-    for an account instead of sitting under one with no rows - which a later
-    rebuild would replay into the same refusal. After the rows are in, the
-    same two passes follow as after every other import: the Space fold, and
-    the settlement of review flags the evidence already answers.
-    """
+) -> _PreparedSection | str:
+    """Read and check one section, or the sentence that answers without reading."""
     destination = account.strip()
     if not destination:
         return "No account was named, so nothing was assigned."
@@ -203,18 +294,62 @@ def assign_section(
         account=destination,
         account_map=account_map,
     )
-    if check.refusal is not None:
-        return check.refusal
-    digest = str(row["digest"])
-    store.assign_statement_section(digest, chosen.key, destination, chosen.label)
+    return _PreparedSection(
+        digest=str(row["digest"]),
+        origin=str(row["origin"]),
+        parser=parser,
+        label=chosen.label,
+        key=chosen.key,
+        incoming=incoming,
+        destination=destination,
+        check=check,
+    )
+
+
+def assign_section(
+    store: Store,
+    *,
+    artefact_id: int,
+    section_key: str,
+    account: str,
+    account_map: AccountMap,
+    doubt_acknowledged: bool = False,
+) -> str:
+    """Read one section of a kept statement into `account`, and remember the choice.
+
+    Read BEFORE it is recorded, so a section the gate refuses stays waiting
+    for an account instead of sitting under one with no rows - which a later
+    rebuild would replay into the same refusal. After the rows are in, the
+    same two passes follow as after every other import: the Space fold, and
+    the settlement of review flags the evidence already answers.
+
+    A doubt about whose the section is stops the assignment unless
+    `doubt_acknowledged` says a person has seen it and chose to go on; the
+    result sentence then quotes it.
+    """
+    prepared = _prepare_section(
+        store,
+        artefact_id=artefact_id,
+        section_key=section_key,
+        account=account,
+        account_map=account_map,
+    )
+    if isinstance(prepared, str):
+        return prepared
+    refusal = prepared.check.refusal(acknowledged=doubt_acknowledged)
+    if refusal is not None:
+        return refusal
+    store.assign_statement_section(
+        prepared.digest, prepared.key, prepared.destination, prepared.label
+    )
     summary = ImportSummary(artefact_new=False)
-    reconcile_batch(store, incoming, digest=digest, summary=summary)
+    reconcile_batch(store, prepared.incoming, digest=prepared.digest, summary=summary)
     summary.folded += fold_space_copies(store, account_map).newly_folded
     settle_review_flags(store)
     return (
-        f"{row['origin']}, the account labelled {masked(chosen.label)}, assigned to "
-        f"{destination} and read by {parser.source}: {summary.describe()}; "
-        f"{check.corroboration}"
+        f"{prepared.origin}, the account labelled {masked(prepared.label)}, assigned to "
+        f"{prepared.destination} and read by {prepared.parser.source}: "
+        f"{summary.describe()}; {prepared.check.outcome_note}"
     )
 
 
