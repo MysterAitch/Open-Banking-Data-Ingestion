@@ -576,6 +576,129 @@ class TestAStatementWhoseOpeningIsNotThePreviousClosing:
         assert (inside.first_day, inside.last_day) == (between.first_day, between.last_day)
 
 
+def _held_statement(
+    store: Store, root: Path, name: str, day: str, opening: int, rows: list[Row], *, note: str = ""
+) -> None:
+    """Hold one statement; `note` is a harmless extra line, so that two files of
+    the same statement are different bytes and so two artefacts."""
+    closing = opening + sum(minor for _, _, minor in rows)
+    lines = [
+        "Santander UK plc. Registered Office: 2 Triton Square",
+        f"Statement Date: {day}      Page No: 1 / 1",
+        "Account credit limit:            3,000.00",
+        f"Balance brought forward from previous statement          {_pounds(opening)}",
+        *(f"{when} {description}   {_pounds(minor)}" for when, description, minor in rows),
+        f"Your new balance:                                        {_pounds(closing)}",
+        *([note] if note else []),
+    ]
+    path = root / f"{name}.pdf"
+    path.write_bytes(build_pdf(lines))
+    import_file(store, path, account_id=ACCOUNT)
+
+
+class TestAStatementWhoseSpanStartsBeforeThePreviousClosing:
+    """A savings-style account with no feed. S1 closes 11 February at 132.56 owed
+    after 20 January 12.37 and 25 January 20.19. A longer statement closing 11 March
+    opens at 112.37, the balance before the 25 January row, and lists that row
+    again with 14 February 5.43 and 28 February 15.61, closing at 153.60.
+
+    Expected: between the closings the movement is 21.04 and the store counts
+    exactly that (the shared row counts once, in S1's period). Inside the longer
+    statement, from its own first row (25 January) to its closing, the movement is
+    41.23 and the three rows IT lists sum to exactly that. Clipped to the days
+    after S1's closing, the inside period compared two rows with a movement of
+    three, and differed by the shared row."""
+
+    def _built(self, store: Store, tmp_path: Path) -> None:
+        _held_statement(
+            store, tmp_path, "one", "11th Feb 2026", 10000,
+            [("20th Jan", "Alpha Grocer", 1237), ("25th Jan", "Bravo Fuel", 2019)],
+        )  # fmt: skip
+        _held_statement(
+            store, tmp_path, "long", "11th Mar 2026", 11237,
+            [
+                ("25th Jan", "Bravo Fuel", 2019),
+                ("14th Feb", "Charlie Cafe", 543),
+                ("28th Feb", "Delta Books", 1561),
+            ],
+        )  # fmt: skip
+
+    def test_InsidePeriod_RunsFromTheStatementsOwnFirstRowOverTheRowsItLists(
+        self, store, tmp_path
+    ):
+        self._built(store, tmp_path)
+
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+
+        inside = next(p for p in item.periods if p.kind is PeriodKind.INSIDE)
+        assert (inside.first_day, inside.last_day) == (date(2026, 1, 25), date(2026, 3, 11))
+        assert inside.movement_minor == -4123
+        assert inside.held_minor == -4123 and inside.held_rows == 3
+        assert inside.agrees
+
+    def test_BetweenPeriod_StillAgreesAndEveryPeriodAgrees(self, store, tmp_path):
+        self._built(store, tmp_path)
+
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+
+        assert [p.kind for p in item.periods] == [
+            PeriodKind.FIRST,
+            PeriodKind.BETWEEN,
+            PeriodKind.INSIDE,
+        ]
+        assert all(p.agrees for p in item.periods)
+
+
+class TestTheSameStatementHeldInTwoFiles:
+    """The 11 April statement held twice: two files, same period, same rows (the
+    second merged entirely into the first's rows). They are ONE statement.
+
+    Expected: three statements held, the three periods as without the copy, and
+    no period whose first day is after its last (the copy made a zero-length
+    period, 2026-04-11 to 2026-04-10, with no rows, that differed)."""
+
+    def _built(self, store: Store, tmp_path: Path) -> None:
+        build_world(store, tmp_path, World(feed=None))
+        _held_statement(
+            store, tmp_path, "copy", "11th Apr 2026", 15360, S3,
+            note="Duplicate copy for your records",
+        )  # fmt: skip
+
+    def test_Periods_WhenAStatementIsHeldTwice_AreTheSameAsHeldOnce(self, store, tmp_path):
+        self._built(store, tmp_path)
+
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+
+        assert item.statements == 3
+        assert [f"{p.first_day} to {p.last_day}" for p in item.periods] == [P1, P2, P3]
+        assert all(p.agrees for p in item.periods)
+        assert all(p.first_day <= p.last_day for p in item.periods)
+
+    def test_Text_WhenAStatementIsHeldTwice_NamesNoZeroLengthPeriod(self, store, tmp_path):
+        self._built(store, tmp_path)
+
+        text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
+
+        assert "2026-04-11 to 2026-04-10" not in text
+        assert "3 statements held" in text
+        assert "differ" not in text
+
+    def test_Periods_WhenTheCopyStatesADifferentClosing_AreTwoStatementsNotOne(
+        self, store, tmp_path
+    ):
+        """A second 11 April statement whose rows and closing differ is a
+        different statement and must not be merged into the first: the report
+        still holds both."""
+        build_world(store, tmp_path, World(feed=None))
+        _held_statement(
+            store, tmp_path, "other", "11th Apr 2026", 20262, [("1st Apr", "Golf Club", 100)]
+        )
+
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+
+        assert item.statements == 4
+
+
 @pytest.fixture
 def lab(tmp_path: Path, monkeypatch):
     db = tmp_path / "pages.sqlite3"

@@ -16,7 +16,13 @@ first statement has no earlier closing, so its period runs from its own first
 row. A statement whose printed opening balance is not the previous closing
 balance (a statement missing, or two documents disagreeing) also gets the
 period its own opening and closing state, because the two movements then
-differ.
+differ. That INSIDE period runs from the statement's own first row to its
+closing and holds the rows THAT statement lists, not the days after the
+previous closing: a long statement overlapping shorter ones starts earlier than
+that closing, and a window clipped to it compared part of the statement's rows
+with the whole of its movement. Two held files with the same closing and the
+same rows are one statement (`statement_membership`), so a duplicate adds no
+zero-length period.
 
 Which period a row is in is `statement_membership`'s decision, the same one the
 anchor checks use: the statement that lists a row places it, and only a row no
@@ -60,7 +66,7 @@ and the leftover rows themselves appear only in the unmasked rendering.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
@@ -71,7 +77,7 @@ from .coverage import Agreement, agreements
 from .models import Transaction
 from .money import format_amount
 from .parsers.pdf_statements import PDF_PARSERS
-from .statement_membership import Membership, statement_membership
+from .statement_membership import ListedStatement, Membership, statement_membership
 from .statement_terms import StatementBalance, held_statement_readings, statement_balances
 from .store import Store
 
@@ -407,34 +413,66 @@ def _leftovers_of(
     return rows, min(start for start, _ in spans), max(end for _, end in spans)
 
 
+@dataclass(frozen=True)
+class _Window:
+    """One period to test: its days, the statement's movement, and whose it is."""
+
+    kind: PeriodKind
+    first_day: date
+    last_day: date
+    movement_minor: int
+    statement: ListedStatement
+
+
 def _movement_periods(
-    anchors: list[StatementBalance],
+    statements: Sequence[ListedStatement],
     openings: Mapping[tuple[date, int], tuple[int, date | None]],
-) -> list[tuple[PeriodKind, date, date, int]]:
-    """(kind, first day, last day, the statement's movement) for each period."""
-    found: list[tuple[PeriodKind, date, date, int]] = []
-    for position, anchor in enumerate(anchors):
-        printed = openings.get((anchor.day, anchor.balance_minor))
+) -> list[_Window]:
+    """The periods to test, from the distinct statements, earliest closing first.
+
+    The INSIDE period of a statement whose printed opening is not the previous
+    closing runs from the statement's OWN first row, and is tested against the
+    rows that statement lists (`_periods_against`): a statement whose span
+    starts before the previous closing (a long statement over shorter annual
+    ones) would otherwise be compared in part, clipped to the days after that
+    closing, with the whole of its movement.
+    """
+    found: list[_Window] = []
+    for position, statement in enumerate(statements):
+        printed = openings.get((statement.day, statement.balance_minor))
         if position == 0:
             if printed is None or printed[1] is None:
                 continue
             found.append(
-                (PeriodKind.FIRST, printed[1], anchor.day, anchor.balance_minor - printed[0])
+                _Window(
+                    PeriodKind.FIRST,
+                    printed[1],
+                    statement.day,
+                    statement.balance_minor - printed[0],
+                    statement,
+                )
             )
             continue
-        previous = anchors[position - 1]
+        previous = statements[position - 1]
         first_day = previous.day + timedelta(days=1)
         found.append(
-            (
+            _Window(
                 PeriodKind.BETWEEN,
                 first_day,
-                anchor.day,
-                anchor.balance_minor - previous.balance_minor,
+                statement.day,
+                statement.balance_minor - previous.balance_minor,
+                statement,
             )
         )
         if printed is not None and printed[0] != previous.balance_minor:
             found.append(
-                (PeriodKind.INSIDE, first_day, anchor.day, anchor.balance_minor - printed[0])
+                _Window(
+                    PeriodKind.INSIDE,
+                    first_day if printed[1] is None else printed[1],
+                    statement.day,
+                    statement.balance_minor - printed[0],
+                    statement,
+                )
             )
     return found
 
@@ -468,15 +506,22 @@ def _mark_cancellations(periods: list[Period]) -> list[Period]:
 
 def _periods_against(
     feed: str,
-    windows: list[tuple[PeriodKind, date, date, int]],
+    windows: list[_Window],
     counted: list[Transaction],
     sightings: list[Transaction],
     paired: tuple[list[Leftover], date, date] | None,
     membership: Membership,
 ) -> list[Period]:
     built: list[Period] = []
-    for kind, first_day, last_day, movement in windows:
-        held = [r for r in counted if first_day <= membership.placement(r) <= last_day]
+    for window in windows:
+        kind, first_day, last_day = window.kind, window.first_day, window.last_day
+        movement = window.movement_minor
+        inside_kind = kind is PeriodKind.INSIDE
+        if inside_kind:
+            # The statement's own rows, whatever else the store holds in those days.
+            held = [r for r in counted if r.entity_id in window.statement.members]
+        else:
+            held = [r for r in counted if first_day <= membership.placement(r) <= last_day]
         held_minor = sum(r.amount_minor for r in held)
         statement_only: tuple[Leftover, ...] = ()
         feed_only: tuple[Leftover, ...] = ()
@@ -485,7 +530,9 @@ def _periods_against(
             rows, covered_from, covered_to = paired
             inside = [r for r in rows if first_day <= r.row_date <= last_day]
             statement_only = tuple(r for r in inside if r.side == STATEMENT_SIDE)
-            feed_only = tuple(r for r in inside if r.side == FEED_SIDE)
+            # A feed row is not one of the statement's own, so it is no part of
+            # what an INSIDE period holds.
+            feed_only = () if inside_kind else tuple(r for r in inside if r.side == FEED_SIDE)
             # Judged by the rows rather than the days: a source with no row
             # after some date may simply have had nothing to report, and only
             # a row outside the pairing's span is one it never compared.
@@ -559,7 +606,8 @@ def period_reconciliation(
 
     accounts: list[AccountPeriods] = []
     for ref, anchors in sorted(by_account.items()):
-        ordered = sorted(anchors, key=lambda a: (a.day, a.balance_minor))
+        membership = statement_membership(store, ref, anchors)
+        ordered = membership.statements
         if len(ordered) < 2:
             accounts.append(
                 AccountPeriods(
@@ -589,7 +637,6 @@ def period_reconciliation(
         sightings = [t for t in held if t.account_id == ref]
         feeds = tuple(sorted({t.source for t in sightings} - STATEMENT_SOURCES))
         windows = _movement_periods(ordered, openings.get(ref, {}))
-        membership = statement_membership(store, ref, anchors)
         built: list[Period] = []
         for feed in feeds or ("",):
             pairs = [
