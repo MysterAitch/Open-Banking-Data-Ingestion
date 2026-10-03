@@ -44,6 +44,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/account": "accounts",
     "/accounts": "accounts",
     "/ledger": "accounts",
+    "/balance-chart": "accounts",
     "/position": "position",
     "/declare-account": "accounts",
     "/edit-account": "accounts",

@@ -45,6 +45,7 @@ from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_push import valid_progress
 from .alerts import consent_rung
+from .balance_chart import BalanceChart
 from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
@@ -81,6 +82,7 @@ from .web_accounts import (
     picker_labels,
     submit_button,
 )
+from .web_balance_chart import BalanceChartPages
 from .web_empty import (
     EmptyPlan,
     check_empty_post,
@@ -622,6 +624,9 @@ class WebConfig:
     #: values included. Returning data rather than text is what lets the page
     #: decide, in one place, whether a reader may see the values.
     ledger_data: Callable[[str, str], Ledger] | None = None
+    #: One account's stated balances against its rows, as DATA with real values,
+    #: for the timeline and the values chart (`balance_chart`).
+    balance_chart_data: Callable[[str], BalanceChart] | None = None
     #: Everything held and what it comes to, as DATA with real values, for the
     #: same reason `ledger_data` is data: the page decides in one place whether
     #: a reader may see them.
@@ -3901,6 +3906,7 @@ DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 class ConnectionHandler(
     AccountPages,
     LedgerPages,
+    BalanceChartPages,
     PositionPages,
     IndexPages,
     SectionPages,
@@ -4025,6 +4031,9 @@ class ConnectionHandler(
             return
         if route == "/ledger":
             self._ledger_get(params)
+            return
+        if route == "/balance-chart":
+            self._balance_chart_get(params)
             return
         if route == "/position":
             self._position_get()
@@ -6483,6 +6492,10 @@ class ConnectionHandler(
         if route == "/ledger":
             # A POST because showing values is a decision, not a link.
             self._ledger_post(self._read_form())
+            return
+        if route == "/balance-chart":
+            # A POST because showing values is a decision, not a link.
+            self._balance_chart_post(self._read_form())
             return
         if route == "/position":
             # A POST because showing values is a decision, not a link.

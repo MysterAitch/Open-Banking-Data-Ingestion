@@ -55,6 +55,7 @@ from .balance_anchors import (
 )
 from .family_anchors import Families
 from .fault_explanation import WalkExplanation
+from .fault_structure import StructureReport, account_report, walk_report
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
@@ -357,6 +358,9 @@ class FamilyView:
     #: Why each of the first changes happened, by exact arithmetic, and what the
     #: held exports are like (`fault_explanation`); every field of it is structural.
     explanation: Structural[WalkExplanation | None]
+    #: What shape the changes take (`fault_structure`); a figure in it is a
+    #: `Total`, so it is shown masked or not without a figure.
+    structure: Structural[StructureReport | None]
 
 
 @dataclass(frozen=True)
@@ -396,6 +400,10 @@ class OpeningView:
     balance_only: Structural[bool]
     #: How each Space-blind source's balances were read, in counts.
     meanings: Structural[tuple[MeaningLine, ...]]
+    #: The shape of the changes in the account's OWN stated balances, for an
+    #: account whose chart is not the whole-account walk (`balance_chart`);
+    #: None where the family walk is the one shown, or nothing differs.
+    own_structure: Structural[StructureReport | None]
 
     opening: Total[Money]
 
@@ -478,6 +486,7 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         round_up_legs_paired=walk.round_ups.paired,
         round_ups_unreadable=walk.round_ups.unreadable,
         explanation=walk.explanation,
+        structure=walk_report(walk) if walk.readings else None,
         lines=tuple(
             FamilyLine(
                 day=reading.day.isoformat(),
@@ -536,6 +545,11 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
         balance_only=opening.balance_only,
         meanings=tuple(
             MeaningLine(m.source, m.steps, m.whole, m.main, m.verdict) for m in opening.meanings
+        ),
+        own_structure=(
+            account_report(opening)
+            if not (opening.family and opening.family.readings) and opening.differing
+            else None
         ),
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )

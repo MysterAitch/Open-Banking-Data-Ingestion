@@ -36,6 +36,7 @@ from .accounts import (
 from .actual_push import ENVELOPE_VERSION
 from .alerts import Finding
 from .backup import BackupRefused, take_backup, verify_copy
+from .balance_chart import BalanceChart
 from .connections import ConnectionStore
 from .coverage import (
     DoubtReport,
@@ -2713,6 +2714,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families=families_of(store, _account_map(store)),
             )
 
+    def balance_chart_data(ref: str) -> BalanceChart:
+        from .balance_chart import build_balance_chart  # deferred like the other data hooks
+
+        try:
+            label = display_labels().get(ref, "")
+        except Exception:
+            # A name is a convenience; the chart must not depend on the
+            # provider-label scan succeeding.
+            label = ""
+        with Store(db_path) as store:
+            return build_balance_chart(
+                store, ref, label=label, families=families_of(store, _account_map(store))
+            )
+
     def position_data() -> Position:
         from .position import read_position  # deferred like the other data hooks
 
@@ -3536,6 +3551,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         balance_reconciliation_text=balance_reconciliation_text,
         period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,
+        balance_chart_data=balance_chart_data,
         position_data=position_data,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,

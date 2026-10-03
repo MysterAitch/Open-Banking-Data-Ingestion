@@ -19,6 +19,7 @@ import html
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .balance_chart import OWN
 from .balance_meaning import READING_THRESHOLD
 from .callback import render_page
 from .errors import DataError
@@ -32,6 +33,7 @@ from .ledger import (
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
+from .web_balance_chart import structure_summary_html
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -606,12 +608,13 @@ def _round_ups_html(family: Any) -> str:
     )
 
 
-def _family_html(family: Any) -> str:
+def _family_html(family: Any, ref: str = "") -> str:
     """The walk of the whole account's stated balances against the rows of the
     main account and its Spaces together.
 
     Said once, here: what a family balance is, and what the main account's own
-    balance is taken to be from it.
+    balance is taken to be from it. The structure of its changes is
+    `web_balance_chart.structure_summary_html`.
     """
     if family is None:
         return ""
@@ -706,6 +709,7 @@ def _family_html(family: Any) -> str:
         f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
         f"</span>.</strong> {_esc(pattern)}</p>"
         + _changes_html(family)
+        + (structure_summary_html(family.structure, ref) if family.structure and ref else "")
         + _explanations_html(family.explanation)
         + '<ul class="anchors">'
     )
@@ -884,6 +888,10 @@ def _opening_html(view: Any, unmasked: bool) -> str:
                     "mis-dated between the anchors.</p>"
                 )
                 body += _own_first_difference(opening.anchors)
+                if opening.own_structure:
+                    body += structure_summary_html(
+                        opening.own_structure, view.ref, scope=OWN
+                    )
         else:
             body += (
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
@@ -898,7 +906,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
     return (
         body
         + _meaning_html(opening.meanings)
-        + _family_html(opening.family)
+        + _family_html(opening.family, view.ref)
         + _anchor_forms(view, view.ref, view.month)
     )
 
