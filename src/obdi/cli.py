@@ -35,6 +35,7 @@ from .accounts import (
 )
 from .actual_push import ENVELOPE_VERSION
 from .alerts import Finding
+from .asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
 from .backup import BackupRefused, take_backup, verify_copy
 from .balance_chart import BalanceChart
 from .connections import ConnectionStore
@@ -1481,6 +1482,17 @@ def _latest_asked(store: Store, canonical: str) -> tuple[date | None, str]:
     return covered, landed
 
 
+def _asked_from(asked: Mapping[str, Coverage], canonical: str) -> date | None:
+    """The oldest day any landed ask named for this account, if one is readable."""
+    found = asked.get(canonical)
+    return found.first if found is not None else None
+
+
+def _holes_of(asked: Mapping[str, Coverage], canonical: str) -> tuple[Hole, ...]:
+    found = asked.get(canonical)
+    return found.holes if found is not None else ()
+
+
 def extend_bounds(
     earliest: date | None, days: int, *, today: date
 ) -> tuple[date, date]:
@@ -1735,6 +1747,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             account_map = _account_map(store)
             held = store.transactions_by_sighting()
             connections = ConnectionStore(store_path).load()
+            asked = coverage_by_account(
+                store, canonical_resolver(account_map), datetime.now(UTC).date()
+            )
             for connection_id in sorted(connections):
                 target = connections[connection_id]
                 window_fact = store.provider_fact(
@@ -1782,6 +1797,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             unbound=canonical.startswith("truelayer:"),
                             covered_to=covered_to,
                             last_landed=last_landed,
+                            covered_from=_asked_from(asked, canonical),
+                            holes=_holes_of(asked, canonical),
                         )
                     )
                 # Cards join the extend rows with the same buttons: the
@@ -1818,6 +1835,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             unbound=canonical.startswith("truelayer:"),
                             covered_to=covered_to,
                             last_landed=last_landed,
+                            covered_from=_asked_from(asked, canonical),
+                            holes=_holes_of(asked, canonical),
                         )
                     )
         return found

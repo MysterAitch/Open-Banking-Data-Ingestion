@@ -45,6 +45,7 @@ from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_push import valid_progress
 from .alerts import consent_rung
+from .asked_coverage import Hole, describe_spans
 from .balance_chart import BalanceChart
 from .callback import render_page
 from .classification import redact_summary
@@ -374,6 +375,11 @@ class ExtendableAccount:
     #: silently, but "covered to" falling behind today is unambiguous.
     covered_to: date | None = None
     last_landed: str = ""
+    #: The oldest day any landed ask named, and the days inside the span from
+    #: there to `covered_to` that no landed ask covered (`asked_coverage` owns
+    #: the rule). A hole is what "covered to" alone cannot say.
+    covered_from: date | None = None
+    holes: tuple[Hole, ...] = ()
 
 
 class AssignKeptStatement(Protocol):
@@ -1883,8 +1889,20 @@ def _freshness_line(account: ExtendableAccount) -> str:
         if lag > 2
         else ""
     )
+    if account.holes and account.covered_from is not None:
+        # "covered to" alone would hide a span nothing asked for, so a hole
+        # replaces it with the span covered and what is missing inside it.
+        missing = sum(hole.days for hole in account.holes)
+        coverage = (
+            f"covered from {account.covered_from.isoformat()} to "
+            f"{account.covered_to.isoformat()}, with {missing} "
+            f"day{'' if missing == 1 else 's'} not asked for: "
+            f"{html.escape(describe_spans(account.holes))}"
+        )
+    else:
+        coverage = f"covered to {account.covered_to.isoformat()}"
     return (
-        f'<br><span class="muted">covered to {account.covered_to.isoformat()}'
+        f'<br><span class="muted">{coverage}'
         + (f", last landed {landed} UTC" if landed else "")
         + "</span>"
         + stale

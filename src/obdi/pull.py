@@ -27,6 +27,13 @@ from urllib.parse import parse_qs
 
 from . import cursor, tiers
 from .accounts import AccountMap
+from .asked_coverage import (
+    HEAL_ASKS_PER_CONNECTION,
+    canonical_resolver,
+    coverage_by_account,
+    describe_spans,
+    heal_plan,
+)
 from .connections import Connection, ConnectionStore, apply_refresh
 from .ingest import ImportSummary, reconcile_batch
 from .jsontypes import JsonObject, text
@@ -156,7 +163,9 @@ def pull_truelayer(
     only_account: str | None = None,
     psu_ip: str | None = None,
     trigger: str = "direct",
+    today: date | None = None,
 ) -> PullResult:
+    today = today or datetime.now(UTC).date()
     connection = ensure_access_token(
         connection,
         client_id=client_id,
@@ -175,7 +184,7 @@ def pull_truelayer(
     tier_choice = None
     if routine:
         tier_choice = tiers.select(store, "truelayer", connection.connection_id)
-        since = datetime.now(UTC).date() - timedelta(days=tier_choice.days)
+        since = today - timedelta(days=tier_choice.days)
         result.notes.append(
             f"tier {tier_choice.label}: asking {tier_choice.days}d window"
         )
@@ -515,6 +524,8 @@ def pull_truelayer(
     # Whether a provider counts those against the same unattended allowance
     # as the account asks is not established; the fetch ledger records each
     # refusal, which is where the answer will show.
+    cards: list[JsonObject] = []
+    refused_cards: set[str] = set()
     if deep or (routine and not only_account):
         try:
             cards, cards_body = truelayer.fetch_cards(
@@ -561,6 +572,7 @@ def pull_truelayer(
                     detail=_refusal_detail(exc),
                 )
                 result.notes.append(f"card {card_id}: {exc}")
+                refused_cards.add(card_id)
                 continue
             card_artefact = truelayer.artefact_for(
                 card_body,
@@ -600,6 +612,28 @@ def pull_truelayer(
                     summary=summary,
                 )
 
+    # The tiers above ask only the most recent days, so a feed unasked for
+    # longer than the widest tier leaves a span nothing would ever ask for.
+    # That is the sixty-day hole above, left behind by the cards and possible
+    # for an account after any outage or re-authorisation.
+    # The rule that finds it is `asked_coverage`'s; here it is only asked for,
+    # after the tier asks so they count, and never on a probe or a single named
+    # account.
+    if routine and not only_account:
+        _heal_unasked_spans(
+            store,
+            connection,
+            accounts=[text(account, "account_id") for account in accounts],
+            cards=[text(card, "account_id") for card in cards if text(card, "account_id")],
+            skip=refused_cards,
+            account_map=account_map,
+            request_meta=request_meta,
+            result=result,
+            summary=summary,
+            psu_ip=psu_ip,
+            today=today,
+        )
+
     if tier_choice is not None:
         # Stamped on COMPLETION: a refused cycle does not burn its tier,
         # so the same window is simply offered again next cycle.
@@ -612,6 +646,123 @@ def pull_truelayer(
     settle_review_flags(store)
     result.summary = summary
     return result
+
+
+def _heal_unasked_spans(
+    store: Store,
+    connection: Connection,
+    *,
+    accounts: list[str],
+    cards: list[str],
+    skip: set[str],
+    account_map: AccountMap,
+    request_meta: str,
+    result: PullResult,
+    summary: ImportSummary,
+    psu_ip: str | None,
+    today: date,
+) -> None:
+    """Ask for the days no landed ask has covered, oldest first, within a bound.
+
+    Spans that have passed out of the provider's unattended reach are only
+    reported: asking would spend allowance on a refusal, and the remedy is an
+    attended extend.
+    A refusal ends the cycle's healing with no further call, because the
+    allowance it measured is shared by whatever would be asked next.
+    A card whose tier ask was refused this cycle is left out for the same reason.
+    Each ask is its own ledger row and its own artefact, like every other ask.
+    """
+    targets: dict[str, tuple[str, str]] = {}
+    for provider_id in accounts:
+        targets[str(account_map.resolve("truelayer", provider_id))] = ("account", provider_id)
+    for provider_id in cards:
+        if provider_id not in skip:
+            targets[str(account_map.resolve("truelayer", provider_id))] = ("card", provider_id)
+    found = {
+        name: coverage
+        for name, coverage in coverage_by_account(
+            store, canonical_resolver(account_map), today
+        ).items()
+        if name in targets
+    }
+    for name, coverage in sorted(found.items()):
+        if coverage.lost:
+            result.notes.append(
+                f"{name}: days not asked for, now beyond unattended fetching: "
+                f"{describe_spans(coverage.lost)}"
+            )
+    for ask in heal_plan(found, today)[:HEAL_ASKS_PER_CONNECTION]:
+        kind, provider_id = targets[ask.account]
+        source = "truelayer-card-booked" if kind == "card" else "truelayer-booked"
+        try:
+            if kind == "card":
+                body, asked = truelayer.fetch_card_transactions(
+                    connection.access_token,
+                    provider_id,
+                    since=ask.first,
+                    until=ask.last,
+                    psu_ip=psu_ip,
+                )
+                records = json_rows(json.loads(body), "results")
+            else:
+                records, body, asked = truelayer.fetch_transactions(
+                    connection.access_token,
+                    provider_id,
+                    since=ask.first,
+                    until=ask.last,
+                    pending=False,
+                    psu_ip=psu_ip,
+                )
+        except truelayer.TrueLayerError as exc:
+            store.record_attempt(
+                source=source,
+                connection_id=connection.connection_id,
+                account_ref=f"truelayer:{provider_id}",
+                asked=f"healing since={ask.first} until={ask.last}",
+                request_meta=request_meta,
+                outcome="refused",
+                http_status=getattr(exc, "status", None),
+                error_code=str(getattr(exc, "code", "") or ""),
+                detail=_refusal_detail(exc),
+            )
+            result.notes.append(
+                f"healing {ask.first} to {ask.last} for {provider_id} refused, "
+                f"so no further healing this cycle: {exc}"
+            )
+            return
+        artefact = truelayer.artefact_for(
+            body,
+            account_id=provider_id,
+            kind="card-booked" if kind == "card" else "booked",
+            requested=asked,
+            request_meta=request_meta,
+        )
+        store.record_attempt(
+            source=source,
+            connection_id=connection.connection_id,
+            account_ref=f"truelayer:{provider_id}",
+            asked=asked,
+            request_meta=request_meta,
+            outcome="landed",
+            http_status=200,
+            artefact_digest=artefact.digest,
+        )
+        store.land_artefact(artefact)
+        result.notes.append(
+            f"healing {ask.first} to {ask.last} for {provider_id}: asked, "
+            f"{len(records)} record(s) answered"
+        )
+        if records:
+            transactions = [
+                replace(
+                    truelayer.to_card_transaction(record, account_id=ask.account)
+                    if kind == "card"
+                    else truelayer.to_transaction(record, account_id=ask.account),
+                    artefact_digest=artefact.digest,
+                )
+                for record in records
+            ]
+            reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
 
 
 def _closed_space_categories(

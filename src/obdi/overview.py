@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .alerts import Finding
+from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
 from .store import Store
 
@@ -67,6 +68,7 @@ _KIND_ORDER = (
     "silent-feed",
     "refusals",
     "stale-feed",
+    "uncovered-span",
     "shared-identity",
     "identity-health",
     "balance",
@@ -99,6 +101,11 @@ _KINDS: dict[str, tuple[int, str]] = {
         "Read the refusals in the fetch attempts, then reconnect or wait for the provider.",
     ),
     "stale-feed": (NOW, "Open the account and compare its feeds."),
+    "uncovered-span": (
+        NOW,
+        "The next scheduled cycle asks for these days, oldest first; if they stay listed, "
+        "open Connections and extend the history while the provider still serves them.",
+    ),
     "shared-identity": (
         NOW,
         "Open identity health; a rebuild from raw usually renumbers rows sharing an identity.",
@@ -151,6 +158,7 @@ _ALERT_GUARDS = {
 
 #: The checks the Overview itself runs on top of the alert's conditions.
 OVERVIEW_CHECKS = (
+    "uncovered spans",
     "identity health",
     "balance reconciliation",
     "review flags",
@@ -295,6 +303,42 @@ def _failed_check(name: str, error: BaseException) -> AttentionItem:
 
 def _plural(count: int, singular: str, plural: str | None = None) -> str:
     return f"{count} {singular if count == 1 else plural or singular + 's'}"
+
+
+def _uncovered_span_items(
+    store: Store,
+    canonical_for_ref: Callable[[str], str],
+    label_of: Callable[[str], str],
+    closed: Callable[[str], bool],
+    today: date,
+) -> list[AttentionItem]:
+    """Accounts and cards with days no ask has covered that can still be asked for.
+
+    Only holes within the provider's unattended reach are raised: those are
+    the ones a delay loses for good.
+    A hole that has passed out of reach is on the Connections page, where the
+    attended remedy is; raising it here would never clear.
+    The rule is `asked_coverage`'s, not re-derived.
+    """
+    items = []
+    for ref, coverage in sorted(coverage_by_account(store, canonical_for_ref, today).items()):
+        if closed(ref) or not coverage.reachable:
+            continue
+        days = sum(hole.days for hole in coverage.reachable)
+        items.append(
+            AttentionItem(
+                kind="uncovered-span",
+                severity=NOW,
+                message=(
+                    f"{label_of(ref)}: {_plural(days, 'day')} never asked for, "
+                    f"{describe_spans(coverage.reachable)}."
+                ),
+                remedy=_KINDS["uncovered-span"][1],
+                href=CONNECTIONS_HREF,
+                accounts=(ref,),
+            )
+        )
+    return items
 
 
 def _identity_items(store: Store) -> list[AttentionItem]:
@@ -570,7 +614,17 @@ def build_overview(
     def label_of(ref: str) -> str:
         return merged_labels.get(ref) or ref
 
+    def closed_by_today(ref: str) -> bool:
+        record = registry.get(ref)
+        return record is not None and record.closed is not None and record.closed <= now.date()
+
     own_checks: list[tuple[str, Callable[[], list[AttentionItem]]]] = [
+        (
+            "uncovered spans",
+            lambda: _uncovered_span_items(
+                store, canonical_for_ref, label_of, closed_by_today, now.date()
+            ),
+        ),
         ("identity health", lambda: _identity_items(store)),
         ("balance reconciliation", lambda: _balance_items(store, label_of)),
         ("review flags", lambda: _review_items(store)),
