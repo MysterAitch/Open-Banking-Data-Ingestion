@@ -20,6 +20,7 @@ which is marked not to be kept.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from contextlib import contextmanager
 from datetime import date
@@ -36,10 +37,12 @@ from obdi.family_anchors import families_of
 from obdi.replay import ActualAccountBinding
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
+from test_balance_meaning import BROKEN_ROWS, MAIN_ONLY_ROWS
 from test_family_anchors import (
     STATEMENT,
     drop_row,
     feed_rows,
+    import_export,
     import_statement,
     land_evidence,
     leg,
@@ -68,6 +71,7 @@ def serve(
     evidence: dict[str, str | None] | None = None,
     drop: tuple[tuple[str, int, int], ...] = (),
     extra: tuple = (),
+    export: list[str] | None = None,
 ):
     """The household over the application's own configuration.
 
@@ -84,6 +88,8 @@ def serve(
             *(opened_feed_rows() if evidence is not None else feed_rows()), *extra
         )
         import_statement(store, tmp_path, STATEMENT)
+        if export is not None:
+            import_export(store, tmp_path, export)
         if evidence is not None:
             land_evidence(store, **evidence)
         if faulted:
@@ -189,6 +195,19 @@ def feed_starts_late(tmp_path, monkeypatch):
 @pytest.fixture
 def no_creation_date(tmp_path, monkeypatch):
     with lab(tmp_path, monkeypatch, faulted=False, evidence={"created": None}) as served:
+        yield served
+
+
+@pytest.fixture
+def statement_and_main_only_export(tmp_path, monkeypatch):
+    """The real case: a whole-account statement and a main-account export."""
+    with lab(tmp_path, monkeypatch, faulted=False, export=MAIN_ONLY_ROWS) as served:
+        yield served
+
+
+@pytest.fixture
+def statement_and_broken_export(tmp_path, monkeypatch):
+    with lab(tmp_path, monkeypatch, faulted=False, export=BROKEN_ROWS) as served:
         yield served
 
 
@@ -435,6 +454,45 @@ class TestWhetherTheOpeningIsKnownToBeNil:
 
         assert_no_secret(served.ledger().text)
         assert_no_secret(served.position().text)
+
+
+class TestWhatEachSourcesBalanceMeans:
+    def test_Ledger_ForAStatementAndAnExportOfDifferentMeaning_SaysWhichReadingEachFollows(
+        self, statement_and_main_only_export
+    ):
+        page = ledger_text(statement_and_main_only_export)
+
+        assert (
+            "starling-csv's balance follows 2 of its 2 steps when read as the main account's "
+            "own, and 0 when read as the whole account's. It is therefore read as the main "
+            "account's own and tested against the main account's rows alone."
+        ) in re.sub(r"<[^>]+>", "", page)
+        assert (
+            "starling-statement-pdf's balance follows 0 of its 2 steps when read as the main "
+            "account's own, and 2 when read as the whole account's. It is therefore read as "
+            "the whole account's"
+        ) in re.sub(r"<[^>]+>", "", page)
+
+    def test_Ledger_ForAnExportThatFitsNeitherReading_SaysItIsUsedForNothing(
+        self, statement_and_broken_export
+    ):
+        page = re.sub(r"<[^>]+>", "", ledger_text(statement_and_broken_export))
+
+        assert "Neither reading fits, so its balances are used for nothing." in page
+
+    def test_Ledger_ForAMainOnlyExport_ListsItsAnchorsAsTheMainAccountsOwn(
+        self, statement_and_main_only_export
+    ):
+        page = ledger_text(statement_and_main_only_export)
+
+        assert "the export's own balance, read as the main account's" in page
+
+    def test_MaskedPages_ForSourcesOfDifferentMeaning_ShowNoFigure(
+        self, statement_and_main_only_export, statement_and_broken_export
+    ):
+        for served in (statement_and_main_only_export, statement_and_broken_export):
+            assert_no_secret(served.ledger().text)
+            assert_no_secret(served.position().text)
 
 
 class TestSpaceTransfersWithNoHeldOtherLeg:

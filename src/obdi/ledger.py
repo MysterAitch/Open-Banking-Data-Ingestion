@@ -87,11 +87,12 @@ ANCHOR_QUERIES = 8
 #: Space listings (creation date, categories), the feed requests held (how far
 #: back the feed reaches), and one read of the rows of each Space. Each export
 #: not yet read adds one more, as each statement does. An account with no known
-#: Spaces adds nothing: ANCHOR_QUERIES holds. The last two are what the opened
-#: anchor costs (`family_anchors.opening_evidence`), and are read for every
-#: main account with Spaces whether or not the evidence turns out to hold, so
-#: the cost does not depend on the answer.
-FAMILY_QUERIES = 4
+#: Spaces adds nothing: ANCHOR_QUERIES holds. The two after the listings are
+#: what the opened anchor costs (`family_anchors.opening_evidence`), and the
+#: next is the one read of the account's rows and sightings that decides what
+#: each blind source's balances mean (`balance_meaning`), read only when some
+#: blind source states one. None depends on what the evidence turns out to say.
+FAMILY_QUERIES = 5
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -328,6 +329,19 @@ class FamilyView:
 
 
 @dataclass(frozen=True)
+class MeaningLine:
+    """What a source's own rows say its stated balance means (`balance_meaning`)."""
+
+    source: Structural[str]
+    #: Steps that tell the two readings apart, and how many each explains.
+    steps: Structural[int]
+    whole: Structural[int]
+    main: Structural[int]
+    #: "whole", "main", "both", "neither", or "undecided".
+    verdict: Structural[str]
+
+
+@dataclass(frozen=True)
 class OpeningView:
     #: "none" (no anchor, so no opening balance), "derived", or "withheld"
     #: (anchors exist but an opening cannot be derived; `withheld` says why).
@@ -349,6 +363,8 @@ class OpeningView:
     #: The account is tracked by its stated balances alone, so a later stated
     #: balance is followed rather than checked (see `balance_anchors`).
     balance_only: Structural[bool]
+    #: How each Space-blind source's balances were read, in counts.
+    meanings: Structural[tuple[MeaningLine, ...]]
 
     opening: Total[Money]
 
@@ -467,6 +483,9 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
         ),
         family=family_view(opening.family),
         balance_only=opening.balance_only,
+        meanings=tuple(
+            MeaningLine(m.source, m.steps, m.whole, m.main, m.verdict) for m in opening.meanings
+        ),
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )
 

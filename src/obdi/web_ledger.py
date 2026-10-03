@@ -19,6 +19,7 @@ import html
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .balance_meaning import READING_THRESHOLD
 from .callback import render_page
 from .errors import DataError
 from .ledger import (
@@ -311,6 +312,7 @@ _BASIS_WORDS = {
     "statement": "a held statement's closing balance",
     "family": "the whole account's stated balance, less its Spaces' own rows",
     "opened": "the day before the account was created, with its feed held from then",
+    "export": "the export's own balance, read as the main account's",
 }
 
 
@@ -535,6 +537,60 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
     )
 
 
+def _own_first_difference(anchors: tuple[Any, ...]) -> str:
+    """Where the account's own anchors first stop agreeing with its own rows,
+    reported apart from the whole-account walk (`_family_html`)."""
+    for at, line in enumerate(anchors):
+        if line.verdict == "differs":
+            return (
+                '<p class="warn">The account\'s own anchors first stop matching its rows at the '
+                f'end of <span class="mono nowrap">{_esc(line.day)}</span>; they last agreed at '
+                f'the end of <span class="mono nowrap">{_esc(anchors[at - 1].day)}</span>.</p>'
+            )
+    return ""
+
+
+def _meaning_html(meanings: tuple[Any, ...]) -> str:
+    """For each source blind to the Spaces, what its own rows say its stated
+    balance means, in counts a person can check."""
+    if not meanings:
+        return ""
+    percent = round(READING_THRESHOLD * 100)
+    body = (
+        "<h3>What each source's stated balance means</h3>"
+        '<p class="muted">A source that cannot see this account\'s Spaces states a balance '
+        "that is either the whole account's (it moves with every payment it lists, "
+        "including those from a Space) or the main account's own (it skips those and "
+        "moves with each transfer to or from a Space). Each is tested against the "
+        "source's own consecutive balances; only steps that tell the two apart count, "
+        f"and a reading is adopted when it explains at least {percent}% of them.</p>"
+    )
+    for item in meanings:
+        name = f'<span class="mono">{_esc(item.source)}</span>'
+        if item.verdict == "undecided":
+            body += (
+                f'<p class="warn">{name}: no step between its balances tells the two readings '
+                "apart, so its balances are used for nothing.</p>"
+            )
+            continue
+        counts = (
+            f"{name}'s balance follows {item.main:,} of its {item.steps:,} steps when read as "
+            f"the main account's own, and {item.whole:,} when read as the whole account's."
+        )
+        outcome = {
+            "whole": "It is therefore read as the whole account's and tested against the "
+            "rows of the main account and its Spaces together.",
+            "main": "It is therefore read as the main account's own and tested against the "
+            "main account's rows alone.",
+            "both": "Both readings fit, so they cannot be told apart and its balances are "
+            "used for nothing.",
+            "neither": "Neither reading fits, so its balances are used for nothing.",
+        }[item.verdict]
+        css = "muted" if item.verdict in ("whole", "main") else "warn"
+        body += f'<p class="{css}">{counts} {outcome}</p>'
+    return body
+
+
 def _opening_html(view: Any, unmasked: bool) -> str:
     """The "Opening balance and anchors" section, and the forms that edit it."""
     opening = view.opening
@@ -582,6 +638,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
                     "from what the rows predict: rows are missing, duplicated, or "
                     "mis-dated between the anchors.</p>"
                 )
+                body += _own_first_difference(opening.anchors)
         else:
             body += (
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
@@ -593,7 +650,12 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             "could not supply a balance - unreadable, or its rows do not carry its "
             "opening balance to its closing one - and are not used.</p>"
         )
-    return body + _family_html(opening.family) + _anchor_forms(view, view.ref, view.month)
+    return (
+        body
+        + _meaning_html(opening.meanings)
+        + _family_html(opening.family)
+        + _anchor_forms(view, view.ref, view.month)
+    )
 
 
 def _unitemised_html(view: Any) -> str:

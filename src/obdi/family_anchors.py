@@ -19,6 +19,12 @@ name, which is the name looked up; an unbound source is blind, as it is in the
 fold. A source that feeds a Space is not blind and keeps its anchors as the
 main account's own.
 
+BLIND DOES NOT MEAN WHOLE-ACCOUNT. That a source cannot see Spaces says what it
+lists, not what its balance column adds up: it may be the main account's own
+balance. `balance_meaning` decides each source's reading from its own
+arithmetic; what this module returns are CANDIDATES, and only those a source
+read as the whole account's become family anchors.
+
 WHICH BALANCES, all derived on demand from the held artefacts and never stored:
 
   certified statement   its opening (the end of the day before its first row),
@@ -64,7 +70,7 @@ import json
 import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -79,6 +85,9 @@ from .store import Store
 
 #: The basis (and source name) of the nil anchor at an account's creation.
 OPENED = "opened"
+
+#: The CSV export's source name, which `balance_anchors` bases its own anchors on.
+CSV_SOURCE = StarlingCsvParser().source
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,9 @@ class FamilyAnchor:
     day: date
     balance_minor: int
     source: str
+    #: Stated for the end of the day itself rather than after its last row.
+    #: Not part of equality: it says how the figure was stated, not what it is.
+    day_end: bool = field(default=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -358,7 +370,7 @@ def family_anchors(store: Store, main: str, families: Families) -> FamilyAnchors
     statements, refused = statement_day_balances(store, main)
     for item in statements:
         if families.blind(item.source, main):
-            found.add(FamilyAnchor(item.day, item.balance_minor, item.source))
+            found.add(FamilyAnchor(item.day, item.balance_minor, item.source, day_end=True))
     for digest in _held_csv_digests(store, main):
         held = _csv_days(store, digest, main)
         if held is not None and families.blind(held[0], main):
@@ -368,6 +380,7 @@ def family_anchors(store: Store, main: str, families: Families) -> FamilyAnchors
 
 
 __all__ = [
+    "CSV_SOURCE",
     "OPENED",
     "Families",
     "FamilyAnchor",

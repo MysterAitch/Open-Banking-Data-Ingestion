@@ -17,6 +17,9 @@ the statement came from.
               of it a row falls on is decided by which statement LISTS the row
               where one does (`statement_membership`), by date otherwise.
   family      the main account's balance derived from a FAMILY anchor, below.
+  export      a Space-blind source's balances that `balance_meaning` reads as
+              the main account's OWN (a CSV export; a statement or the
+              aggregator take the `statement` and `bank` bases in that case).
   opened      nil at the end of the day before the account was created, where
               `family_anchors.opening_evidence` shows its whole history is
               held. It outranks every other basis, so it defines the opening
@@ -84,9 +87,12 @@ from datetime import UTC, date, datetime, timedelta
 from itertools import accumulate, pairwise
 
 from .accounts import AccountRef, is_balance_only
+from .balance_meaning import MAIN as READ_AS_MAIN
+from .balance_meaning import WHOLE, SourceMeaning, read_meanings
 from .balance_reconciliation import RUNNING_BALANCE_SOURCE, balance_reconciliation
 from .errors import DataError
 from .family_anchors import (
+    CSV_SOURCE,
     OPENED,
     Families,
     FamilyAnchor,
@@ -107,13 +113,14 @@ STATED = "stated"
 BANK = "bank"
 STATEMENT = "statement"
 FAMILY = "family"
+EXPORT = "export"
 
 #: Which basis wins when two anchors fall on one day, and so which of them
 #: defines the opening: what a person said outranks a document, and a
 #: document outranks a feed. The loser is then a check, which is the useful
 #: outcome when the two disagree. A family anchor comes last: it is a
 #: document's or a feed's figure with an assumption about the Spaces applied.
-_PRECEDENCE = {OPENED: -1, STATED: 0, STATEMENT: 1, BANK: 2, FAMILY: 3}
+_PRECEDENCE = {OPENED: -1, STATED: 0, STATEMENT: 1, BANK: 2, EXPORT: 2, FAMILY: 3}
 
 #: The one currency amounts are held in. Actual's budget is single-currency
 #: and `money.parse_amount` refuses any other, so a figure in another unit
@@ -304,6 +311,8 @@ class EffectiveOpening:
     #: readings already include. Every caller that sums an account's rows adds
     #: these to the stored ones; they are empty for any other account.
     unitemised: tuple[Transaction, ...] = ()
+    #: How each Space-blind source's balances were read, whichever way.
+    meanings: tuple[SourceMeaning, ...] = ()
 
     @property
     def defining(self) -> Anchor | None:
@@ -509,6 +518,16 @@ class _Gathered:
     family: FamilyAnchors | None
     #: Which rows the statements behind the account's STATEMENT anchors list.
     placed: Mapping[str, date] = field(default_factory=dict)
+    #: How each blind source's balances were read (`balance_meaning`).
+    meanings: tuple[SourceMeaning, ...] = ()
+
+
+def _own_basis(source: str) -> str:
+    """The basis a blind source's balances take when they prove to be the main
+    account's own."""
+    if source == RUNNING_BALANCE_SOURCE:
+        return BANK
+    return EXPORT if source == CSV_SOURCE else STATEMENT
 
 
 def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
@@ -542,13 +561,29 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
     if families is None or not spaces:
         return _Gathered(anchors, unusable, None, placed)
     stated = family_anchors(store, ref, families)
-    merged = tuple(
-        sorted(
-            {*stated.anchors, *bank_family},
-            key=lambda a: (a.day, a.balance_minor, a.source),
-        )
+    merged = sorted(
+        {*stated.anchors, *bank_family},
+        key=lambda a: (a.day, a.balance_minor, a.source),
     )
-    return _Gathered(anchors, unusable, replace(stated, anchors=merged), placed)
+    by_source: dict[str, list[tuple[date, int, bool]]] = {}
+    for candidate in merged:
+        by_source.setdefault(candidate.source, []).append(
+            (candidate.day, candidate.balance_minor, candidate.day_end)
+        )
+    meanings = read_meanings(store, ref, by_source)
+    verdicts = {m.source: m.verdict for m in meanings}
+    whole: list[FamilyAnchor] = []
+    for candidate in merged:
+        verdict = verdicts[candidate.source]
+        if verdict == WHOLE:
+            whole.append(candidate)
+        elif verdict == READ_AS_MAIN:
+            # The main account's own balance, tested against its own rows alone.
+            basis = _own_basis(candidate.source)
+            anchors.append(Anchor(candidate.day, candidate.balance_minor, basis))
+    return _Gathered(
+        anchors, unusable, replace(stated, anchors=tuple(whole)), placed, meanings
+    )
 
 
 def gather_anchors(
@@ -694,7 +729,13 @@ def effective_opening(
         unusable_statements=gathered.unusable,
         placed=gathered.placed,
     )
-    return replace(opening, family=walk, balance_only=balance_only, unitemised=unitemised)
+    return replace(
+        opening,
+        family=walk,
+        balance_only=balance_only,
+        unitemised=unitemised,
+        meanings=gathered.meanings,
+    )
 
 
 def effective_openings(
