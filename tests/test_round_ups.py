@@ -15,7 +15,12 @@ from __future__ import annotations
 import pytest
 
 from obdi.balance_anchors import effective_opening
-from obdi.family_anchors import families_of, unheld_space_legs
+from obdi.family_anchors import (
+    families_of,
+    feed_round_ups,
+    round_up_tally,
+    unheld_space_legs,
+)
 from obdi.ingest import pair_transfers_across_store
 from obdi.models import TransactionStatus
 from obdi.providers import starling
@@ -306,6 +311,35 @@ class TestWhatTheLedgerSaysOfRoundUps:
             assert (tally.carried, tally.legs, tally.paired, tally.unreadable) == (5, 4, 4, 0)
         finally:
             store.close()
+
+    @pytest.mark.parametrize("export_last", [False, True])
+    def test_FeedCount_WhicheverSourceArrivedFirst_CountsEachRoundUpTheFeedCarriesOnce(
+        self, tmp_path, export_last
+    ):
+        store = household_store(tmp_path, export_last=export_last)
+        try:
+            rebuild_from_raw(store, account_map=MAP)
+            # The same feed fetched again must not count its round-ups twice.
+            land_feed(store, main_feed(), origin=FEED_ORIGIN, asked="2026-09-03T00:00:00Z")
+            rebuild_from_raw(store, account_map=MAP)
+
+            assert feed_round_ups(store, MAIN) == (5, 0)
+        finally:
+            store.close()
+
+    def test_Tally_WhenNoStoredRowKeepsItsFeedItem_StillSaysWhatTheFeedCarries(self):
+        # A payment an export reported first keeps the export's raw, so nothing
+        # about its round-up can be read from the row.
+        legs = [
+            leg
+            for item in main_feed()
+            for leg in starling.to_transactions(item, account_id=MAIN)
+            if "roundUpOf" in leg.raw
+        ]
+
+        tally = round_up_tally(legs, frozenset(), feed=(5, 1))
+
+        assert (tally.carried, tally.legs, tally.paired, tally.unreadable) == (5, 4, 0, 1)
 
     def test_Tally_WhenTheFeedCarriesNoRoundUps_IsNilAcrossTheBoard(self, tmp_path):
         plain = [replace_item(item) for item in main_feed()]

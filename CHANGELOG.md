@@ -35,8 +35,15 @@ transcription would add no reasoning that the subjects do not already carry.
   that row. The rule now targets the period's own difference. Both earlier
   rules looked at or past the closing, where the row is the next statement's,
   and folded nothing; the band around the closing is removed.
+- **The count of round-ups the feed carries is taken from the landed feeds.**
+  It was read from stored rows, which keep the record of whichever source
+  reported a payment first, so the count changed with the order the sources
+  arrived in. This is the first published build to carry the round-up legs.
 
 ## [0.4.273] - 2026-10-03
+
+Not published: its build failed on tests of the round-up count, so no image
+exists under this version. The change below ships in 0.4.274.
 
 ### Fixed
 - **A card payment's round-up is held as a transfer out of the main account.**

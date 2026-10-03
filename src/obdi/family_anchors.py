@@ -302,36 +302,106 @@ class RoundUpTally:
     one thing that would show the round-up reading of the feed to be wrong.
     """
 
-    #: Counted rows whose feed item carried a round-up, of any amount.
+    #: Feed items that carried a round-up, of any amount.
     carried: int = 0
     #: Round-up legs held in the main account.
     legs: int = 0
     #: Of those, the legs paired with a row of a Space.
     paired: int = 0
-    #: Rows carrying a round-up that could not be read, so hold no leg.
+    #: Feed items carrying a round-up that could not be read, so hold no leg.
     unreadable: int = 0
 
 
-def round_up_tally(rows: Iterable[Transaction], paired_entities: frozenset[str]) -> RoundUpTally:
-    """Count the counted rows' round-ups, their legs, and the legs confirmed paired.
+#: Feed artefact digest -> (uids of its items that carry a round-up, uids of
+#: those whose round-up cannot be read). The bytes never change, so a reading
+#: is good for the life of the process.
+_FEED_ROUND_UPS: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
 
-    A stored row keeps the raw of the sighting that created it, so a payment
-    first sighted by an export or an aggregator shows no round-up of its own.
-    Every leg proves a payment that carried one, so `carried` is never fewer
-    than the legs held; an unreadable round-up on such a payment can still go
-    uncounted, and a zero one too.
+_ROUND_UP_KEY = b'"roundUp"'
+
+
+def _round_ups_in(payload: bytes) -> tuple[frozenset[str], frozenset[str]]:
+    # Most feeds carry no round-up at all, and a search of the bytes is far
+    # cheaper than decoding them to learn that.
+    if _ROUND_UP_KEY not in payload:
+        return frozenset(), frozenset()
+    try:
+        decoded = json.loads(payload)
+    except ValueError:
+        return frozenset(), frozenset()
+    items = decoded.get("feedItems") if isinstance(decoded, dict) else None
+    carried: set[str] = set()
+    unreadable: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        reading = round_up_of(item)
+        if not reading.carried:
+            continue
+        # An item with no uid of its own still counts, once per artefact.
+        uid = str(item.get("feedItemUid") or f"unnamed-{len(carried)}")
+        carried.add(uid)
+        if reading.unreadable:
+            unreadable.add(uid)
+    return frozenset(carried), frozenset(unreadable)
+
+
+def feed_round_ups(store: Store, account: str) -> tuple[int, int]:
+    """(feed items carrying a round-up, those whose round-up cannot be read),
+    among the feed artefacts that sighted the account's rows.
+
+    Counted from the landed feeds and never from a stored row's raw:
+    a row keeps the raw of whichever sighting created it, so a payment an
+    export or an aggregator reported first shows no round-up of its own, and a
+    count taken from rows changed with the order the sources arrived in.
+    Each item is counted once however many fetches returned it.
     """
-    carried = legs = paired = unreadable = 0
+    digests = [
+        str(row["artefact_digest"])
+        for row in store.connection.execute(
+            "SELECT DISTINCT s.artefact_digest FROM transaction_sources s "
+            "JOIN transactions t ON t.entity_id = s.entity_id "
+            "WHERE t.account_id = ? AND s.source = 'starling'",
+            (account,),
+        )
+        if row["artefact_digest"]
+    ]
+    carried: set[str] = set()
+    unreadable: set[str] = set()
+    for digest in digests:
+        if digest not in _FEED_ROUND_UPS:
+            row = store.connection.execute(
+                "SELECT payload FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+            ).fetchone()
+            payload = row["payload"] if row is not None else b""
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8")
+            _FEED_ROUND_UPS[digest] = _round_ups_in(bytes(payload or b""))
+        found, unread = _FEED_ROUND_UPS[digest]
+        carried |= found
+        unreadable |= unread
+    return len(carried), len(unreadable)
+
+
+def round_up_tally(
+    rows: Iterable[Transaction],
+    paired_entities: frozenset[str],
+    feed: tuple[int, int] = (0, 0),
+) -> RoundUpTally:
+    """The legs held and the legs confirmed paired, beside what the feed carries.
+
+    `feed` is `feed_round_ups`: the count of round-ups carried and unreadable
+    comes from the landed feeds, and only the legs come from the rows.
+    Every leg proves a payment that carried one, so `carried` is never fewer
+    than the legs held.
+    """
+    legs = paired = 0
     for row in rows:
-        if row.status.is_history:
+        if row.status.is_history or "roundUpOf" not in row.raw:
             continue
-        if "roundUpOf" in row.raw:
-            legs += 1
-            paired += row.entity_id in paired_entities
-            continue
-        reading = round_up_of(row.raw)
-        carried += reading.carried
-        unreadable += reading.unreadable
+        legs += 1
+        paired += row.entity_id in paired_entities
+    carried, unreadable = feed
     return RoundUpTally(max(carried, legs), legs, paired, unreadable)
 
 
@@ -596,6 +666,7 @@ __all__ = [
     "export_sequence",
     "families_of",
     "family_anchors",
+    "feed_round_ups",
     "held_exports",
     "opening_evidence",
     "round_up_tally",

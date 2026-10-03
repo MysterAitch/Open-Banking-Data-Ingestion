@@ -92,10 +92,13 @@ ANCHOR_QUERIES = 8
 #: what the opened anchor costs (`family_anchors.opening_evidence`), and the
 #: next is the one read of the account's rows and sightings that decides what
 #: each blind source's balances mean (`balance_meaning`), read only when some
-#: blind source states one, and the last is the one read of the days those
+#: blind source states one, the next is the one read of the days those
 #: sources gave the family's rows (`sighting_placement`), made only when a
-#: source states a balance. None depends on what the evidence turns out to say.
-FAMILY_QUERIES = 6
+#: source states a balance, and the last lists the feed artefacts that sighted
+#: the account's rows, whose round-ups are counted
+#: (`family_anchors.feed_round_ups`). Each such artefact not yet read adds one
+#: more, once per process. None depends on what the evidence turns out to say.
+FAMILY_QUERIES = 7
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")

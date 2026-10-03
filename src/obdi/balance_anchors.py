@@ -101,6 +101,7 @@ from .family_anchors import (
     RoundUpTally,
     UnheldLegs,
     family_anchors,
+    feed_round_ups,
     round_up_tally,
     space_fetches,
     unheld_space_legs,
@@ -884,7 +885,9 @@ def effective_opening(
             if any("roundUpOf" in t.raw for t in held)
             else frozenset()
         )
-        walk = replace(walk, round_ups=round_up_tally(held, paired))
+        walk = replace(
+            walk, round_ups=round_up_tally(held, paired, feed_round_ups(store, ref))
+        )
         if walk.unheld.legs:
             fetches = space_fetches(store, walk.unheld.uids)
             walk = replace(walk, unheld=replace(walk.unheld, fetches=fetches))
