@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.275] - 2026-10-03
+
+### Fixed
+- **An archived Space's history is fetched in bounded windows over the dates
+  its movements cover.** The only request obdi knew ran from a date to now, and
+  the provider refuses that beyond about half a year, so a Space last used
+  years ago came back empty and was then treated as having nothing. It is now
+  finished only when every window over its known span has landed, and the
+  Spaces page says how many have.
+
 ## [0.4.274] - 2026-10-03
 
 ### Fixed
