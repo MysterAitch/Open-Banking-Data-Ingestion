@@ -447,6 +447,8 @@ def rebuild_from_raw(
     store.connection.execute("DELETE FROM transaction_sources")
     # A new parser takes effect here, so what the old one read is forgotten.
     store.clear_statement_readings()
+    # The same-money pass rewrites these at the end of the rebuild.
+    store.clear_same_money_outcomes()
     # UNRESOLVED only. An unjudged flag is a claim the current rules make about
     # the current evidence, so re-deriving it is right: keeping it would
     # preserve doubts the rules have since learned to settle, and the queue

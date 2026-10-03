@@ -73,7 +73,9 @@ from .namespaces import (
 #: stamped 10 would never have grown it and the first assignment would fail.
 #:
 #: 11 -> 12: the `statement_readings` table, for the same reason as the last.
-SCHEMA_VERSION = 12
+#:
+#: 12 -> 13: the `same_money_outcomes` table, likewise.
+SCHEMA_VERSION = 13
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -449,6 +451,15 @@ CREATE TABLE IF NOT EXISTS statement_readings (
     source  TEXT NOT NULL,
     reading TEXT NOT NULL
 );
+
+-- DERIVED: what the last same-money pass concluded at each statement closing of
+-- an account, as `same_money_outcome.AccountOutcome` JSON (dates, counts, and
+-- source names only - no amount, so the masked page may show it). Rewritten
+-- wholesale by every pass and wiped by a rebuild.
+CREATE TABLE IF NOT EXISTS same_money_outcomes (
+    account TEXT PRIMARY KEY,
+    outcome TEXT NOT NULL
+);
 """
 
 
@@ -523,6 +534,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'transactions', 'transfers_paired',
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
+    'same_money_outcomes': ['account', 'outcome'],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
@@ -3020,6 +3032,27 @@ class Store:
     def clear_statement_readings(self) -> None:
         """Forget every kept reading, in the open transaction."""
         self.connection.execute("DELETE FROM statement_readings")
+
+    def replace_same_money_outcomes(self, outcomes: Mapping[str, str]) -> None:
+        """Make `outcomes` - account to the pass's account of itself - the kept
+        ones, replacing the last pass's. The caller commits."""
+        self.connection.execute("DELETE FROM same_money_outcomes")
+        for account, outcome in sorted(outcomes.items()):
+            self.connection.execute(
+                "INSERT INTO same_money_outcomes (account, outcome) VALUES (?, ?)",
+                (account, outcome),
+            )
+
+    def same_money_outcome(self, account: str) -> str | None:
+        """What the last same-money pass recorded for the account, or None."""
+        row = self.connection.execute(
+            "SELECT outcome FROM same_money_outcomes WHERE account = ?", (account,)
+        ).fetchone()
+        return None if row is None else str(row["outcome"])
+
+    def clear_same_money_outcomes(self) -> None:
+        """Forget what the last pass recorded, in the open transaction."""
+        self.connection.execute("DELETE FROM same_money_outcomes")
 
     def statement_folded_ids(self) -> set[str]:
         """Rows folded as the same money as a statement's rows: every folded row

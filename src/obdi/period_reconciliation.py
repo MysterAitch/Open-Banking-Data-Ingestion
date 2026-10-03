@@ -78,6 +78,8 @@ from .coverage import Agreement, agreements
 from .models import Transaction
 from .money import format_amount
 from .parsers.pdf_statements import PDF_PARSERS
+from .same_money_outcome import AccountOutcome, dated_list
+from .same_money_outcome import plural as _plural
 from .statement_membership import ListedStatement, Membership, statement_membership
 from .statement_terms import StatementBalance, held_statement_readings, statement_balances
 from .store import Store
@@ -141,6 +143,10 @@ class HeldRow:
     holders: tuple[str, ...]
     amount_minor: int
     description: str
+    #: STATEMENT_SIDE or FEED_SIDE when this row is itself one of the period's
+    #: leftovers, "" when it is not (both sources hold it, or the pairing
+    #: matched it).
+    leftover: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,6 +239,9 @@ class AccountPeriods:
     feeds: tuple[str, ...] = ()
     #: Why nothing could be tested, or "".
     withheld: str = ""
+    #: What the same-money rule did at each closing (`same_money_fold`), as
+    #: sentences, for an account a feed is paired against.
+    same_money: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -253,8 +262,13 @@ class PeriodReport:
         return "\n".join(lines)
 
 
-def _plural(count: int, singular: str, plural: str | None = None) -> str:
-    return f"{count} {singular if count == 1 else plural or singular + 's'}"
+def _leftover_dates(rows: Iterable[Leftover]) -> str:
+    """Each leftover's date and the source that holds it, earliest first. Never
+    an amount or a description: dates and sources are not private."""
+    return dated_list(
+        f"{row.row_date} ({row.source}{', excused' if row.excuse else ''})"
+        for row in sorted(rows, key=lambda r: (r.row_date, r.source))
+    )
 
 
 def _span(period: Period) -> str:
@@ -269,6 +283,19 @@ def _kind_phrase(period: Period) -> str:
     if period.kind is PeriodKind.BETWEEN:
         return "between this statement's closing balance and the previous one's"
     return "inside this statement, from its own opening balance to its closing one"
+
+
+def _leftover_clause(row: HeldRow) -> str:
+    """Whether the row a difference equals is itself one of the period's
+    leftovers, which decides whether the difference is a row only one side
+    holds or one both sides hold."""
+    if row.leftover == FEED_SIDE:
+        return " (one of this period's feed-only leftovers)"
+    if row.leftover == STATEMENT_SIDE:
+        return " (one of this period's statement-only leftovers)"
+    if len(row.holders) > 1:
+        return " (a row both sources hold, so not a leftover)"
+    return " (not one of this period's leftovers)"
 
 
 def _locus_sentence(period: Period, locus: Locus) -> str:
@@ -287,6 +314,7 @@ def _locus_sentence(period: Period, locus: Locus) -> str:
     if locus is Locus.SINGLE_ROW:
         named = "; ".join(
             f"dated {row.row_date}, held by {' and '.join(row.holders)}"
+            + (_leftover_clause(row) if period.feed else "")
             for row in period.single_rows
         )
         return f"The difference equals a single row held in this period: {named}."
@@ -314,6 +342,12 @@ def _period_lines(period: Period, *, masked: bool) -> list[str]:
             f"{_plural(len(period.statement_only), 'row')} only in the statements, "
             f"{_plural(len(period.feed_only), 'row')} only in the feed."
         )
+        if period.statement_only:
+            lines.append(
+                f"    Statement-only rows are dated: {_leftover_dates(period.statement_only)}."
+            )
+        if period.feed_only:
+            lines.append(f"    Feed-only rows are dated: {_leftover_dates(period.feed_only)}.")
         if not period.fully_paired:
             lines.append(
                 f"    Some rows counted here lie outside the span {period.feed} and the "
@@ -383,9 +417,13 @@ def _account_lines(item: AccountPeriods, *, masked: bool) -> list[str]:
     lines = [f"{item.account}: {_plural(item.statements, 'statement')} held"]
     if item.withheld:
         lines.append(f"  {item.withheld}")
+        lines.extend(f"  {sentence}" for sentence in item.same_money)
         return lines
     if item.feeds:
         lines.append(f"  Also held by: {', '.join(item.feeds)}.")
+        if item.same_money:
+            lines.append("  What the same-money rule did at each statement closing:")
+            lines.extend(f"    {sentence}" for sentence in item.same_money)
     else:
         lines.append(
             "  No source other than the statements holds rows for this account, so "
@@ -623,6 +661,9 @@ def _periods_against(
                 and not covered_from <= s.value_date <= covered_to
             )
         surplus = held_minor - movement
+        leftover_sides = {
+            row.entity_id: row.side for row in (*statement_only, *feed_only) if row.entity_id
+        }
         single = (
             tuple(
                 HeldRow(
@@ -630,6 +671,7 @@ def _periods_against(
                     _held_row_sources(r, sightings),
                     r.amount_minor,
                     r.description,
+                    leftover_sides.get(r.entity_id, ""),
                 )
                 for r in sorted(held, key=lambda r: (r.value_date, r.description))
                 if r.amount_minor == surplus
@@ -789,6 +831,32 @@ def gather_evidence(
     return evidence
 
 
+def _same_money_lines(store: Store, item: AccountEvidence) -> tuple[str, ...]:
+    """What the last same-money pass recorded for an account a feed is paired
+    against, as sentences. The record is the pass's own (`same_money_fold`
+    decides and records it); this only reads it, so the page never repeats the
+    rule beside it."""
+    if not item.feeds:
+        return ()
+    kept = store.same_money_outcome(item.account)
+    if kept is None:
+        return (
+            "The same-money pass has recorded nothing for this account yet: it runs "
+            "after every import, pull, and rebuild.",
+        )
+    try:
+        outcome = AccountOutcome.from_text(kept)
+    except (ValueError, KeyError, TypeError):
+        return ("The same-money pass's record for this account cannot be read.",)
+    if set(outcome.feeds) != set(item.feeds):
+        return (
+            f"The same-money pass last ran when {dated_list(outcome.feeds) or 'no feed'} held "
+            f"rows for this account, and {dated_list(item.feeds)} does now: the next import, "
+            "pull, or rebuild runs it again.",
+        )
+    return tuple(outcome.describe())
+
+
 def period_reconciliation(
     store: Store,
     *,
@@ -803,8 +871,13 @@ def period_reconciliation(
     """
     accounts: list[AccountPeriods] = []
     for item in gather_evidence(store, sibling_accounts=sibling_accounts, account=account):
+        same_money = _same_money_lines(store, item)
         if item.withheld:
-            accounts.append(AccountPeriods(item.account, item.statements, withheld=item.withheld))
+            accounts.append(
+                AccountPeriods(
+                    item.account, item.statements, withheld=item.withheld, same_money=same_money
+                )
+            )
             continue
         built: list[Period] = []
         for feed, paired in item.paired.items():
@@ -819,5 +892,9 @@ def period_reconciliation(
                     item.folded,
                 )
             )
-        accounts.append(AccountPeriods(item.account, item.statements, tuple(built), item.feeds))
+        accounts.append(
+            AccountPeriods(
+                item.account, item.statements, tuple(built), item.feeds, same_money=same_money
+            )
+        )
     return PeriodReport(tuple(accounts))

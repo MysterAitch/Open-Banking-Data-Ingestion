@@ -747,6 +747,14 @@ class TestThePageIsMaskedUnlessPostedFor:
         assert "1 row only in the statements, 3 rows only in the feed" in page
         assert "holds the statement's leftovers on top of the feed's" in page
 
+    def test_Page_Fetched_BeforeAPassHasSeenTheFeed_SaysThePassPredatesIt(self, lab):
+        """The lab's feed landed after the last statement import and no pass has
+        run since, so the record is of a store without the feed."""
+        page = html.unescape(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
+
+        assert "What the same-money rule did at each statement closing:" in page
+        assert "last ran when no feed held rows for this account, and truelayer does now" in page
+
     def test_Page_Fetched_ContainsNoFigurePayeeOrMoneyFigureAnywhereIncludingTheStylesheet(
         self, lab
     ):

@@ -49,6 +49,11 @@ statement lists) refuses the folds that touch it, and so, because the row it
 refused is still counted in the next period, the folds after it until that
 period is reconciled. That is the proof working: those periods do differ.
 
+Alongside the folds the pass records what it concluded at every closing of every
+account (`same_money_outcome`), built where the decision is made, so the
+statement-periods page can say why a closing folded nothing without a second
+copy of this rule.
+
 The pass is a pure function of the stored rows, rewritten wholesale after every
 import, pull, and assignment and once at the end of a rebuild, so the outcome
 does not depend on which source arrived first; a fold whose evidence goes away
@@ -92,7 +97,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from itertools import combinations
 
 from . import instrumentation
@@ -110,6 +115,7 @@ from .period_reconciliation import (
     gather_evidence,
     held_in,
 )
+from .same_money_outcome import AccountOutcome, ClosingOutcome, Verdict
 from .statement_terms import keep_statement_readings
 from .store import Store
 
@@ -137,12 +143,32 @@ class SameMoneyPlan:
     #: Folded row's entity id -> the closing day of the statement it is the same
     #: money as.
     folds: Mapping[str, date]
+    #: What the rule did for each account it looked at, in account order.
+    outcomes: tuple[AccountOutcome, ...] = ()
 
 
 @dataclass(frozen=True)
 class _Candidate:
     window: _Window
+    feed: str
     rows: tuple[Transaction, ...]
+
+
+@dataclass(frozen=True)
+class _Attempt:
+    """One closing against one feed: what was searched and what was found."""
+
+    window: _Window
+    feed: str
+    #: Every unclaimed unmatched feed row in the band, latest first; the search
+    #: takes at most `MAX_BAND_ROWS` of them.
+    band: Sequence[Transaction]
+    #: Band rows an earlier closing had claimed.
+    claimed: Sequence[Transaction]
+    #: Every statement-only row in the period, nearest the closing first; the
+    #: search takes at most `MAX_STATEMENT_ROWS` of them.
+    statement_rows: Sequence[Leftover]
+    candidate: _Candidate | None
 
 
 def _feed_candidates(
@@ -179,11 +205,9 @@ def _feed_candidates(
     return found
 
 
-def _statement_sums(leftovers: Sequence[Leftover], window: _Window) -> set[int]:
-    """Every non-zero total some non-empty subset of the window's statement-only
-    rows adds up to, taking at most `MAX_STATEMENT_ROWS` of them, nearest the
-    closing first."""
-    nearest = sorted(
+def _statement_rows(leftovers: Sequence[Leftover], window: _Window) -> list[Leftover]:
+    """The period's statement-only rows, nearest the closing first."""
+    return sorted(
         (
             leftover
             for leftover in leftovers
@@ -192,9 +216,15 @@ def _statement_sums(leftovers: Sequence[Leftover], window: _Window) -> set[int]:
             and window.first_day <= leftover.row_date <= window.last_day
         ),
         key=lambda leftover: (window.last_day - leftover.row_date, leftover.amount_minor),
-    )[:MAX_STATEMENT_ROWS]
+    )
+
+
+def _statement_sums(rows: Sequence[Leftover]) -> set[int]:
+    """Every non-zero total some non-empty subset of the rows adds up to, taking
+    at most `MAX_STATEMENT_ROWS` of them (the nearest, as `_statement_rows`
+    orders them)."""
     sums: set[int] = set()
-    for leftover in nearest:
+    for leftover in rows[:MAX_STATEMENT_ROWS]:
         sums |= {total + leftover.amount_minor for total in sums} | {leftover.amount_minor}
     sums.discard(0)
     return sums
@@ -202,60 +232,83 @@ def _statement_sums(leftovers: Sequence[Leftover], window: _Window) -> set[int]:
 
 def _band_rows(
     feed_rows: Iterable[Transaction], claimed: set[str], window: _Window
-) -> list[Transaction]:
-    """The unclaimed feed rows dated within `BOUNDARY_DAYS` of the closing, the
-    latest first (a feed posts a statement's charges on or after its closing),
-    at most `MAX_BAND_ROWS` of them."""
+) -> tuple[list[Transaction], list[Transaction]]:
+    """The feed rows dated within `BOUNDARY_DAYS` of the closing: the unclaimed
+    ones, the latest first (a feed posts a statement's charges on or after its
+    closing), and the ones an earlier closing had claimed. The search takes at
+    most `MAX_BAND_ROWS` of the first."""
     near = [
         row
         for row in feed_rows
-        if row.entity_id not in claimed
-        and abs((row.value_date - window.last_day).days) <= BOUNDARY_DAYS
+        if abs((row.value_date - window.last_day).days) <= BOUNDARY_DAYS
     ]
-    near.sort(key=lambda row: (row.value_date, row.entity_id), reverse=True)
-    return near[:MAX_BAND_ROWS]
+    free = [row for row in near if row.entity_id not in claimed]
+    free.sort(key=lambda row: (row.value_date, row.entity_id), reverse=True)
+    taken = sorted(
+        (row for row in near if row.entity_id in claimed),
+        key=lambda row: (row.value_date, row.entity_id),
+    )
+    return free, taken
 
 
-def _candidates(
+def _attempts(
     evidence: AccountEvidence, chain: Sequence[_Window], claimed: set[str]
-) -> list[_Candidate]:
-    found: list[_Candidate] = []
+) -> list[_Attempt]:
+    """Every closing against every feed paired with the statements, with the
+    candidate it found, if any."""
+    found: list[_Attempt] = []
     for feed, paired in evidence.paired.items():
         if not feed or paired is None:
             continue
         leftovers, covered_from, covered_to = paired
         feed_rows = _feed_candidates(evidence, feed, leftovers, (covered_from, covered_to))
         for window in chain:
-            sums = _statement_sums(leftovers, window)
-            band = _band_rows(feed_rows.values(), claimed, window)
-            if not sums or not band:
-                continue
-            taking = next(
-                (
-                    subset
-                    for size in range(1, len(band) + 1)
-                    for subset in combinations(band, size)
-                    if sum(row.amount_minor for row in subset) in sums
-                ),
-                None,
+            statement_rows = _statement_rows(leftovers, window)
+            sums = _statement_sums(statement_rows)
+            free, already = _band_rows(feed_rows.values(), claimed, window)
+            band = free[:MAX_BAND_ROWS]
+            taking = (
+                next(
+                    (
+                        subset
+                        for size in range(1, len(band) + 1)
+                        for subset in combinations(band, size)
+                        if sum(row.amount_minor for row in subset) in sums
+                    ),
+                    None,
+                )
+                if sums and band
+                else None
             )
-            if taking is None:
-                continue
-            claimed.update(row.entity_id for row in taking)
-            found.append(_Candidate(window, taking))
+            candidate = None
+            if taking is not None:
+                claimed.update(row.entity_id for row in taking)
+                candidate = _Candidate(window, feed, taking)
+            found.append(
+                _Attempt(
+                    window,
+                    feed,
+                    free,
+                    already,
+                    statement_rows,
+                    candidate,
+                )
+            )
     return found
 
 
 def _proven(
     evidence: AccountEvidence, chain: Sequence[_Window], candidates: Sequence[_Candidate]
-) -> list[_Candidate]:
-    """The candidates whose folds the statements' own arithmetic vouches for.
+) -> tuple[list[_Candidate], dict[int, tuple[_Window, ...]]]:
+    """The candidates whose folds the statements' own arithmetic vouches for, and
+    for each one refused (by `id`) the periods that still differed when it was.
 
     Every period a fold touches (its statement's, and any a folded row is dated
     in) must agree exactly once ALL the surviving folds are applied; a candidate
     that fails is dropped and the rest re-judged, until none changes.
     """
     active = list(candidates)
+    refused: dict[int, tuple[_Window, ...]] = {}
     while True:
         gone = {row.entity_id for c in active for row in c.rows}
         remaining = [row for row in evidence.counted if row.entity_id not in gone]
@@ -269,34 +322,103 @@ def _proven(
             touched = [candidate.window] + [
                 window
                 for window in chain
-                if any(
+                if window is not candidate.window
+                and any(
                     window.first_day <= row.value_date <= window.last_day
                     for row in candidate.rows
                 )
             ]
             if all(agrees[id(window)] for window in touched):
                 kept.append(candidate)
+            else:
+                refused[id(candidate)] = tuple(w for w in touched if not agrees[id(w)])
         if len(kept) == len(active):
-            return kept
+            return kept, refused
         active = kept
 
 
+def _outcome_of(
+    attempt: _Attempt, refused: Mapping[int, tuple[_Window, ...]], kept: bool
+) -> ClosingOutcome:
+    candidate = attempt.candidate
+    if candidate is None:
+        verdict = Verdict.NO_BAND_ROWS if not attempt.band else Verdict.NO_MATCH
+    else:
+        verdict = Verdict.FOLDED if kept else Verdict.REFUSED
+    blocking = (
+        ()
+        if candidate is None or kept
+        else tuple(
+            (window.first_day, window.last_day) for window in refused.get(id(candidate), ())
+        )
+    )
+    return ClosingOutcome(
+        closing=attempt.window.last_day,
+        feed=attempt.feed,
+        verdict=verdict,
+        band=(
+            attempt.window.last_day - timedelta(days=BOUNDARY_DAYS),
+            attempt.window.last_day + timedelta(days=BOUNDARY_DAYS),
+        ),
+        band_dates=tuple(sorted(row.value_date for row in attempt.band)),
+        band_searched=MAX_BAND_ROWS,
+        claimed_dates=tuple(row.value_date for row in attempt.claimed),
+        statement_dates=tuple(sorted(row.row_date for row in attempt.statement_rows)),
+        statement_searched=MAX_STATEMENT_ROWS,
+        taken_dates=(
+            ()
+            if candidate is None
+            else tuple(sorted(row.value_date for row in candidate.rows))
+        ),
+        blocking=blocking,
+    )
+
+
 def plan_same_money(evidence: Iterable[AccountEvidence]) -> SameMoneyPlan:
-    """Which feed rows are the same money as a statement's rows. Pure."""
+    """Which feed rows are the same money as a statement's rows, and what the
+    rule did at every closing it looked at. Pure."""
     folds: dict[str, date] = {}
+    outcomes: list[AccountOutcome] = []
     for item in evidence:
         if item.withheld:
+            outcomes.append(
+                AccountOutcome(item.account, item.feeds, withheld=item.withheld)
+            )
             continue
         chain = sorted(
             (w for w in item.windows if w.kind is not PeriodKind.INSIDE),
             key=lambda w: w.last_day,
         )
         if not chain:
+            outcomes.append(AccountOutcome(item.account, item.feeds))
             continue
-        for candidate in _proven(item, chain, _candidates(item, chain, set())):
+        attempts = _attempts(item, chain, set())
+        kept, refused = _proven(item, chain, [a.candidate for a in attempts if a.candidate])
+        kept_ids = {id(candidate) for candidate in kept}
+        for candidate in kept:
             for row in candidate.rows:
                 folds[row.entity_id] = candidate.window.last_day
-    return SameMoneyPlan(folds)
+        outcomes.append(
+            AccountOutcome(
+                item.account,
+                item.feeds,
+                unpaired=tuple(
+                    feed for feed, paired in item.paired.items() if feed and paired is None
+                ),
+                closings=tuple(
+                    sorted(
+                        (
+                            _outcome_of(
+                                a, refused, a.candidate is not None and id(a.candidate) in kept_ids
+                            )
+                            for a in attempts
+                        ),
+                        key=lambda o: (o.feed, o.closing),
+                    )
+                ),
+            )
+        )
+    return SameMoneyPlan(folds, tuple(outcomes))
 
 
 def fold_same_money(store: Store, account_map: AccountMap | None = None) -> SameMoneyReport:
@@ -320,6 +442,9 @@ def fold_same_money(store: Store, account_map: AccountMap | None = None) -> Same
         with instrumentation.phase(f"{SAME_MONEY_PHASE}/search"):
             plan = plan_same_money(evidence)
         with instrumentation.phase(f"{SAME_MONEY_PHASE}/writing"):
+            store.replace_same_money_outcomes(
+                {outcome.account: outcome.to_text() for outcome in plan.outcomes}
+            )
             store.replace_statement_folds(plan.folds)
     except BaseException:
         store.connection.rollback()
