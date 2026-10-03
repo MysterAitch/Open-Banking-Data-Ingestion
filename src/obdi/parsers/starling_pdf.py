@@ -25,9 +25,13 @@ Things the shape settles, and the one it does not:
                         says END OF DAY, so it is a day's closing balance
                         rather than a per-row running balance. Its figures
                         are read so they cannot be mistaken for a movement,
-                        and are NOT checked: which row of a day carries one
+                        and kept with the date of the row that prints them
+                        (`StatementReading.end_of_day_minor`). The parser
+                        does not judge them: which row of a day carries one
                         cannot be told from a masked page, and a check built
-                        on a guess would refuse honest statements
+                        on a guess would refuse honest statements. The
+                        statement's own rows are the judge, in
+                        `statement_terms`
   the header            appears once, on page one; later pages carry no
                         heading, so the columns found there serve the rest
   page furniture        is a block of text and single-glyph rows above the
@@ -137,6 +141,8 @@ class _Pending:
     amount_minor: int
     description_x: float
     words: list[str] = field(default_factory=list)
+    #: The end-of-day balance printed on this row, when one is.
+    printed_minor: int | None = None
 
 
 def _tidy(text: str) -> str:
@@ -302,10 +308,11 @@ def read_statement(table: list[Row]) -> StatementReading:
             pending = None
             continue
 
-        amount = _movement(money, columns, notes, stated)
-        if amount is None:
+        moved = _movement(money, columns, notes, stated)
+        if moved is None:
             pending = None
             continue
+        amount, printed = moved
         label = " ".join(c.text.strip() for c in (*kinds, *words) if c.text.strip())
         if not label:
             notes.append(
@@ -319,6 +326,7 @@ def read_statement(table: list[Row]) -> StatementReading:
             amount_minor=amount,
             description_x=words[0].x if words else columns.description_x,
             words=[label],
+            printed_minor=printed,
         )
         rows_in.append(pending)
 
@@ -329,6 +337,9 @@ def read_statement(table: list[Row]) -> StatementReading:
             amount_minor=row.amount_minor,
         )
         for row in rows_in
+    ]
+    reading.end_of_day_minor = [
+        (row.day, row.printed_minor) for row in rows_in if row.printed_minor is not None
     ]
     _conclude(reading, summary, table_opening, columns is not None)
     return reading
@@ -363,8 +374,9 @@ def _column_of(cell: Cell, columns: _Columns) -> str | None:
 
 def _movement(
     money: list[Cell], columns: _Columns, notes: list[str], stated: str
-) -> int | None:
-    """A dated row's signed amount, or None after saying why not.
+) -> tuple[int, int | None] | None:
+    """A dated row's signed amount and the end-of-day balance printed on it
+    (None when it prints none), or None after saying why not.
 
     Money in is positive and money out negative, the house convention. The
     column is the whole of the sign, so the magnitude is taken: a stray
@@ -400,9 +412,9 @@ def _movement(
         )
         return None
     if "in" in placed:
-        return abs(placed["in"])
+        return abs(placed["in"]), placed.get("balance")
     if "out" in placed:
-        return -abs(placed["out"])
+        return -abs(placed["out"]), placed.get("balance")
     notes.append(
         f"the row dated {stated} carries no figure under In or Out - a "
         "dated row that moved nothing is a row the walk would silently lose"

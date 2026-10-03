@@ -42,6 +42,12 @@ from .store import Store
 #: How many dates of each kind a rendering names before it only counts.
 EXAMPLES_SHOWN = 3
 
+#: The source whose records carry the running balance this module reads
+#: (`_bank_pair` takes it from TrueLayer's own record format and no other).
+#: Named so a caller asking "does that source see Spaces?" asks about the same
+#: source the figures came from.
+RUNNING_BALANCE_SOURCE = "truelayer"
+
 #: Statuses whose rows are never part of a booked running balance.
 #: A pending row is not in the bank's booked balance and moves date when it
 #: settles, and a void or folded row is history kept for audit.

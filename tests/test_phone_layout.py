@@ -517,6 +517,79 @@ def test_StatementPeriodsPage_WithValuesShown_DoesNotScrollSideways(
     )
 
 
+@pytest.fixture(scope="module")
+def family_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """A Starling household whose whole-account balances stop matching the rows,
+    with a Space whose reference has no break to wrap at."""
+    from obdi.accounts import AccountRecord, AccountRef
+    from test_family_anchors import STATEMENT, drop_row, feed_rows, import_statement
+    from test_space_attribution import BILLS, MAIN, MAP, Household
+
+    root = tmp_path_factory.mktemp("phone-family")
+    saved = {name: os.environ.get(name) for name in _ENV}
+    os.environ.update(_environment_for(root))
+    os.environ.pop("TRUELAYER_CLIENT_ID", None)
+    os.environ.pop("TRUELAYER_CLIENT_SECRET_FILE", None)
+    (root / "accounts.json").write_text(
+        f'{{"bindings": [{{"canonical_id": "{MAIN}", "source": "starling", '
+        '"provider_account_id": "acc-main"}]}',
+        encoding="utf-8",
+    )
+    db = root / "store.sqlite3"
+    with Store(db) as store:
+        for space in (BILLS, "starling-space-" + LONG_IDENTITY * 2):
+            store.declare_account(
+                AccountRecord(ref=AccountRef(space), kind="starling-space", parent=AccountRef(MAIN))
+            )
+        Household(store, MAP).arrive(*feed_rows())
+        import_statement(store, root, STATEMENT)
+        drop_row(store, MAIN, -9000, 22)
+    config = build_web_config(db)
+    assert config is not None
+    handler = type(
+        "FamilyHandler",
+        (ConnectionHandler,),
+        {"config": config, "session": AuthorisationSession()},
+    )
+    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}"
+    finally:
+        httpd.shutdown()  # type: ignore[attr-defined]
+        httpd.server_close()  # type: ignore[attr-defined]
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_LedgerPage_WithTheFamilyWalk_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object, family_base: str
+) -> None:
+    measured = _overflow(browser, f"{family_base}/ledger?ref=starling-personal&month=2026-09")
+    _assert_fits(measured)
+
+
+def test_LedgerPage_WithTheFamilyWalkAndValuesShown_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object, family_base: str
+) -> None:
+    measured = _overflow(
+        browser,
+        f"{family_base}/ledger?ref=starling-personal&month=2026-09",
+        press="Show values",
+    )
+    _assert_fits(measured)
+
+
+def test_PositionPage_WithTheFamilyWalk_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object, family_base: str
+) -> None:
+    _assert_fits(_overflow(browser, f"{family_base}/position"))
+
+
 def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(
     browser: object, corpus_base: str
 ) -> None:

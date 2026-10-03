@@ -14,6 +14,18 @@ the statement came from.
               by `balance_reconciliation` and never stored.
   statement   the closing balance of a held statement, derived on demand by
               `statement_terms.statement_balances` and never stored.
+  family      the main account's balance derived from a FAMILY anchor, below.
+
+A balance stated by a source that cannot see an account's Spaces is the balance
+of the whole FAMILY (the main account plus its known Spaces), and is never the
+main account's own: `family_anchors` says which sources and which balances. It
+is checked against the counted rows of the whole family, in which transfers
+between main and a Space cancel (`walk_family`). It reaches the main account
+only as a FAMILY anchor, the family balance less what the Spaces' own rows sum
+to on that day, which assumes every Space's history is held from its first row,
+that is, a Space's rows start from nil. The assumption is stated on the page;
+where a Space's history begins partway through its life, the main account's
+derived balance is off by what the Space held before its first row.
 
 Everything else is derived. The opening balance comes from the EARLIEST anchor
 alone,
@@ -41,13 +53,16 @@ figure here and the figure on the ledger page are sums over the same rows.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
-from dataclasses import dataclass
+from bisect import bisect_right
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
+from itertools import accumulate
 
 from .accounts import AccountRef
-from .balance_reconciliation import balance_reconciliation
+from .balance_reconciliation import RUNNING_BALANCE_SOURCE, balance_reconciliation
 from .errors import DataError
+from .family_anchors import Families, FamilyAnchor, FamilyAnchors, family_anchors
 from .models import Transaction, TransactionStatus
 from .money import parse_amount
 from .statement_terms import statement_balances
@@ -56,12 +71,14 @@ from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
 STATED = "stated"
 BANK = "bank"
 STATEMENT = "statement"
+FAMILY = "family"
 
 #: Which basis wins when two anchors fall on one day, and so which of them
 #: defines the opening: what a person said outranks a document, and a
 #: document outranks a feed. The loser is then a check, which is the useful
-#: outcome when the two disagree.
-_PRECEDENCE = {STATED: 0, STATEMENT: 1, BANK: 2}
+#: outcome when the two disagree. A family anchor comes last: it is a
+#: document's or a feed's figure with an assumption about the Spaces applied.
+_PRECEDENCE = {STATED: 0, STATEMENT: 1, BANK: 2, FAMILY: 3}
 
 #: The one currency amounts are held in. Actual's budget is single-currency
 #: and `money.parse_amount` refuses any other, so a figure in another unit
@@ -112,6 +129,84 @@ class AnchorReading:
 
 
 @dataclass(frozen=True)
+class FamilyReading:
+    """One family balance judged against the opening the earliest one defines."""
+
+    day: date
+    balance_minor: int
+    #: Every source that states this balance for this day.
+    sources: tuple[str, ...]
+    defines_opening: bool
+    #: What the family's rows predict at the day's end. None for the defining one.
+    expected_minor: int | None = None
+    #: Stated minus predicted: the amount of the one movement missing (positive)
+    #: or surplus (negative) between the defining anchor and this one, if it is one.
+    difference_minor: int | None = None
+
+    @property
+    def agrees(self) -> bool | None:
+        return None if self.difference_minor is None else self.difference_minor == 0
+
+
+@dataclass(frozen=True)
+class FamilyWalk:
+    """The family's counted rows walked against every family balance stated.
+
+    The earliest family balance defines the family's opening and every later one
+    is a check, exactly as for an account. A fault dated before the earliest
+    anchor is absorbed into the opening and cannot be seen here.
+    """
+
+    main: str
+    spaces: tuple[str, ...]
+    readings: tuple[FamilyReading, ...]
+    #: Printed end-of-day balances refused for disagreeing with their statement.
+    refused_figures: int = 0
+    #: Why no walk was made although anchors exist, or "".
+    withheld: str = ""
+
+    @property
+    def anchors(self) -> int:
+        return len(self.readings)
+
+    @property
+    def agreeing(self) -> int:
+        """Later balances the rows reproduce."""
+        return sum(1 for r in self.readings if r.agrees is True)
+
+    @property
+    def differing(self) -> list[FamilyReading]:
+        return [r for r in self.readings if r.agrees is False]
+
+    @property
+    def first_differing(self) -> FamilyReading | None:
+        return next(iter(self.differing), None)
+
+    @property
+    def last_agreeing(self) -> FamilyReading | None:
+        """The balance just before the first difference, which agrees (or defines)."""
+        first = self.first_differing
+        if first is None:
+            return None
+        return self.readings[self.readings.index(first) - 1]
+
+    @property
+    def constant(self) -> bool | None:
+        """Whether the difference is the same at every balance from the first
+        difference on (one movement missing or surplus between two days) rather
+        than changing (several). None when nothing differs."""
+        first = self.first_differing
+        if first is None:
+            return None
+        later = self.readings[self.readings.index(first) :]
+        return len({r.difference_minor for r in later}) == 1
+
+    @property
+    def sources(self) -> tuple[str, ...]:
+        return tuple(sorted({s for r in self.readings for s in r.sources}))
+
+
+@dataclass(frozen=True)
 class EffectiveOpening:
     account: str
     #: Every anchor, earliest first.
@@ -127,6 +222,9 @@ class EffectiveOpening:
     unusable_statements: int = 0
     #: Why an opening was not derived although anchors exist, or "".
     withheld: str = ""
+    #: The walk of the family's balances, for a main account with known Spaces
+    #: and at least one family anchor; None otherwise.
+    family: FamilyWalk | None = None
 
     @property
     def defining(self) -> Anchor | None:
@@ -233,33 +331,161 @@ def stated_anchors(store: Store, ref: str) -> list[Anchor]:
     ]
 
 
-def gather_anchors(store: Store, ref: str) -> tuple[list[Anchor], int]:
-    """Every anchor for the account, from all three bases, and how many held
-    statements could not supply one."""
+@dataclass(frozen=True)
+class _Gathered:
+    #: The account's OWN anchors: what it states about itself.
+    own: list[Anchor]
+    unusable: int
+    #: The balances sources blind to its Spaces state for the family; None when
+    #: the account has no known Spaces, so nothing was set aside.
+    family: FamilyAnchors | None
+
+
+def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
     anchors = stated_anchors(store, ref)
+    spaces = families.spaces_of(ref) if families is not None else ()
+    blind_bank = (
+        families is not None
+        and bool(spaces)
+        and families.blind(RUNNING_BALANCE_SOURCE, ref)
+    )
+    bank_family: list[FamilyAnchor] = []
     for report in balance_reconciliation(store, ref).accounts:
-        if report.account_id == ref:
-            anchors += [Anchor(b.day, b.balance_minor, BANK) for b in report.balances()]
+        if report.account_id != ref:
+            continue
+        for b in report.balances():
+            if blind_bank:
+                bank_family.append(FamilyAnchor(b.day, b.balance_minor, RUNNING_BALANCE_SOURCE))
+            else:
+                anchors.append(Anchor(b.day, b.balance_minor, BANK))
     statements, unusable = statement_balances(store, ref)
-    anchors += [Anchor(s.day, s.balance_minor, STATEMENT) for s in statements]
-    return anchors, unusable
+    for s in statements:
+        # A blind statement's balance is the family's, stated afresh and per
+        # day by `family_anchors`; keeping it here as well would hand the main
+        # account a whole-family figure as its own.
+        if families is not None and spaces and s.source and families.blind(s.source, ref):
+            continue
+        anchors.append(Anchor(s.day, s.balance_minor, STATEMENT))
+    if families is None or not spaces:
+        return _Gathered(anchors, unusable, None)
+    stated = family_anchors(store, ref, families)
+    merged = tuple(
+        sorted(
+            {*stated.anchors, *bank_family},
+            key=lambda a: (a.day, a.balance_minor, a.source),
+        )
+    )
+    return _Gathered(anchors, unusable, FamilyAnchors(merged, stated.refused_figures))
+
+
+def gather_anchors(
+    store: Store, ref: str, families: Families | None = None
+) -> tuple[list[Anchor], int]:
+    """The account's own anchors, from all three bases, and how many held
+    statements could not supply one. With `families`, a balance a source blind
+    to the account's Spaces states is not among them: it is the family's."""
+    gathered = _gather(store, ref, families)
+    return gathered.own, gathered.unusable
+
+
+def _counted_through(rows: Iterable[Transaction]) -> Callable[[date], int]:
+    """The sum of the rows that count, dated on or before a day, in no more
+    than a bisection per question."""
+    counted = sorted(
+        (t.value_date, t.amount_minor) for t in rows if _counts_toward(FAMILY, t)
+    )
+    days = [day for day, _ in counted]
+    totals = list(accumulate(minor for _, minor in counted))
+
+    def through(day: date) -> int:
+        at = bisect_right(days, day)
+        return totals[at - 1] if at else 0
+
+    return through
+
+
+def family_main_anchors(
+    anchors: Iterable[FamilyAnchor], space_rows: Mapping[str, Sequence[Transaction]]
+) -> list[Anchor]:
+    """The main account's balance at each family anchor: the family's less the
+    Spaces' own counted rows through that day (a Space's rows start from nil)."""
+    through = [_counted_through(rows) for rows in space_rows.values()]
+    return [
+        Anchor(a.day, a.balance_minor - sum(t(a.day) for t in through), FAMILY)
+        for a in anchors
+    ]
+
+
+def walk_family(
+    main: str,
+    anchors: FamilyAnchors,
+    members: Mapping[str, Sequence[Transaction]],
+) -> FamilyWalk:
+    """Each family balance against the counted rows of the main account and
+    every Space in `members` (keyed by account, main included). Pure.
+
+    Internal transfers appear as a row in each of two members and cancel in the
+    sum, so the family's rows are comparable with the family's balance where
+    neither account's own are.
+    """
+    spaces = tuple(sorted(ref for ref in members if ref != main))
+    every = [t for rows in members.values() for t in rows]
+    if any(t.currency != CURRENCY for t in every if not t.status.is_history):
+        return FamilyWalk(
+            main, spaces, (), anchors.refused_figures, "the rows are not all in GBP"
+        )
+    through = _counted_through(every)
+    by_figure: dict[tuple[date, int], set[str]] = {}
+    for a in anchors.anchors:
+        by_figure.setdefault((a.day, a.balance_minor), set()).add(a.source)
+    ordered = sorted(by_figure)
+    readings: list[FamilyReading] = []
+    opening = 0
+    for index, (day, balance) in enumerate(ordered):
+        sources = tuple(sorted(by_figure[(day, balance)]))
+        if index == 0:
+            opening = balance - through(day)
+            readings.append(FamilyReading(day, balance, sources, True))
+            continue
+        expected = opening + through(day)
+        readings.append(
+            FamilyReading(day, balance, sources, False, expected, balance - expected)
+        )
+    return FamilyWalk(main, spaces, tuple(readings), anchors.refused_figures)
 
 
 def effective_opening(
-    store: Store, ref: str, rows: list[Transaction] | None = None
+    store: Store,
+    ref: str,
+    rows: list[Transaction] | None = None,
+    *,
+    families: Families | None = None,
 ) -> EffectiveOpening:
     """The account's opening balance as the store can derive it right now.
 
     `rows` lets a caller that has already read the account's rows avoid
-    reading them again.
+    reading them again. `families` says which accounts are Spaces of which and
+    which sources are blind to them; without it every anchor is taken as the
+    account's own, which is right for any account with no known Spaces.
     """
-    anchors, unusable = gather_anchors(store, ref)
+    gathered = _gather(store, ref, families)
     held = store.transactions_for_account(ref) if rows is None else rows
-    return derive_opening(ref, anchors, held, unusable_statements=unusable)
+    anchors = list(gathered.own)
+    walk: FamilyWalk | None = None
+    if gathered.family is not None and gathered.family.anchors and families is not None:
+        members = {
+            space: store.transactions_for_account(space) for space in families.spaces_of(ref)
+        }
+        anchors += family_main_anchors(gathered.family.anchors, members)
+        walk = walk_family(ref, gathered.family, {ref: held, **members})
+    opening = derive_opening(ref, anchors, held, unusable_statements=gathered.unusable)
+    return replace(opening, family=walk)
 
 
-def effective_openings(store: Store, refs: Iterable[str]) -> dict[str, EffectiveOpening]:
-    return {ref: effective_opening(store, ref) for ref in refs}
+def effective_openings(
+    store: Store, refs: Iterable[str], *, families: Families | None = None
+) -> dict[str, EffectiveOpening]:
+    return {ref: effective_opening(store, ref, families=families) for ref in refs}
 
 
 def _known_account(store: Store, ref: str) -> bool:

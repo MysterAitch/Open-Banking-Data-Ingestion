@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 
 from .account_observations import Observation
 from .parsers.base import ParseError
@@ -54,7 +54,13 @@ def _parser_for(payload: bytes) -> PdfStatementParser | None:
 
 
 def _read_statement(payload: bytes, digest: str) -> StatementReading | None:
-    """One held PDF, read, or None - with the reason said aloud on stderr.
+    found = _read_with_source(payload, digest)
+    return None if found is None else found[1]
+
+
+def _read_with_source(payload: bytes, digest: str) -> tuple[str, StatementReading] | None:
+    """One held PDF, read, with the parser's source name, or None - with the
+    reason said aloud on stderr.
 
     A statement that cannot be read must not be contributed as an empty
     reading: the two look identical downstream.
@@ -78,7 +84,7 @@ def _read_statement(payload: bytes, digest: str) -> StatementReading | None:
         # The payload rather than the lines: a format whose table is
         # only legible by coordinate reads the page for itself, and the
         # parser is the one that knows which reading its document needs.
-        return parser.read(payload)
+        return parser.source, parser.read(payload)
     except Exception as exc:
         print(
             f"artefact {digest}: {parser.source} could not read it - {exc}",
@@ -189,13 +195,112 @@ class StatementBalance:
     account_ref: str
     day: date
     balance_minor: int
+    #: The parser's source name, "" for a section of an "all accounts"
+    #: statement. Not part of equality: a balance is the same fact whichever
+    #: way it is asked for.
+    source: str = field(default="", compare=False)
 
 
-#: Artefact digest -> its closing balance, or None when the document states no
-#: figure that can be trusted. A document's bytes never change, so a reading is
-#: valid for the life of the process, and a ledger page that re-extracted every
-#: held statement's text on each view would be unusable.
-_BALANCE_BY_DIGEST: dict[str, tuple[date, int] | None] = {}
+@dataclass(frozen=True)
+class StatementDayBalance:
+    """A balance a held statement states for the END of one day."""
+
+    account_ref: str
+    source: str
+    day: date
+    balance_minor: int
+
+
+@dataclass(frozen=True)
+class _Usable:
+    source: str
+    closing: tuple[date, int]
+    #: The statement's opening (the end of the day before its first row), each
+    #: printed end-of-day balance that agrees with its own rows, and its closing.
+    days: tuple[tuple[date, int], ...]
+    #: Printed end-of-day balances that disagreed with the statement's own rows
+    #: and were left out.
+    rejected: int
+
+
+def _day_balances(
+    reading: StatementReading, opening: int, closing: int, closing_day: date
+) -> tuple[tuple[tuple[date, int], ...], int]:
+    """The stated balances of a statement that reconciles, and how many printed
+    ones were refused.
+
+    A printed end-of-day balance is accepted only when it equals the
+    statement's opening balance plus every row dated on or before that day, so
+    a figure read from the wrong row or misplaced by the page never becomes an
+    anchor. The opening is the balance at the end of the day before the first
+    row, whatever date the period starts on, because nothing moves in between.
+    """
+    found: dict[date, int] = {closing_day: closing}
+    if reading.transactions:
+        first = min(row.value_date for row in reading.transactions)
+        found.setdefault(first - timedelta(days=1), opening)
+    rejected = 0
+    for day, printed in reading.end_of_day_minor:
+        walked = opening + sum(
+            row.amount_minor for row in reading.transactions if row.value_date <= day
+        )
+        # A figure that disagrees with the rows, or with another figure already
+        # taken for the same day, is refused.
+        if printed != walked or found.setdefault(day, printed) != printed:
+            rejected += 1
+    return tuple(sorted(found.items())), rejected
+
+
+#: Artefact digest -> what it states, or None when the document states no figure
+#: that can be trusted. A document's bytes never change, so a reading is valid
+#: for the life of the process, and a ledger page that re-extracted every held
+#: statement's text on each view would be unusable.
+_USABLE_BY_DIGEST: dict[str, _Usable | None] = {}
+
+
+def _usable(store: Store, digest: str, account: str) -> _Usable | None:
+    if digest not in _USABLE_BY_DIGEST:
+        found = _read_with_source(_payload_of(store, digest, account), digest[:12])
+        held: _Usable | None = None
+        if found is not None:
+            source, reading = found
+            opening = reading.opening_balance_minor
+            closing = reading.closing_balance_minor
+            if (
+                opening is not None
+                and closing is not None
+                and reading.statement_date is not None
+                and not reading.notes
+                and reading.reconciles
+            ):
+                days, rejected = _day_balances(reading, opening, closing, reading.statement_date)
+                held = _Usable(source, (reading.statement_date, closing), days, rejected)
+        _USABLE_BY_DIGEST[digest] = held
+    return _USABLE_BY_DIGEST[digest]
+
+
+def statement_day_balances(
+    store: Store, account_ref: str
+) -> tuple[list[StatementDayBalance], int]:
+    """Every end-of-day balance the account's held PDFs state, and how many
+    printed ones were refused for disagreeing with their own statement's rows.
+
+    Each is a fact about the day's END, in the store's sign convention: the
+    same SIGN RULE as `statement_balances`, which limits this to statements
+    whose rows carry their opening to their closing balance. The "all
+    accounts" statements' assigned sections are left to `statement_balances`.
+    """
+    balances: list[StatementDayBalance] = []
+    rejected = 0
+    for digest, account in _held_pdfs(store, account_ref):
+        held = _usable(store, digest, account)
+        if held is None:
+            continue
+        rejected += held.rejected
+        balances += [
+            StatementDayBalance(account, held.source, day, minor) for day, minor in held.days
+        ]
+    return balances, rejected
 
 
 def statement_balances(
@@ -217,23 +322,13 @@ def statement_balances(
     usable: list[StatementBalance] = []
     unusable = 0
     for digest, account in _held_pdfs(store, account_ref):
-        if digest not in _BALANCE_BY_DIGEST:
-            reading = _read_statement(_payload_of(store, digest, account), digest[:12])
-            held: tuple[date, int] | None = None
-            if (
-                reading is not None
-                and reading.statement_date is not None
-                and reading.closing_balance_minor is not None
-                and not reading.notes
-                and reading.reconciles
-            ):
-                held = (reading.statement_date, reading.closing_balance_minor)
-            _BALANCE_BY_DIGEST[digest] = held
-        known = _BALANCE_BY_DIGEST[digest]
+        known = _usable(store, digest, account)
         if known is None:
             unusable += 1
         else:
-            usable.append(StatementBalance(account, known[0], known[1]))
+            usable.append(
+                StatementBalance(account, known.closing[0], known.closing[1], known.source)
+            )
     # An assigned section states its own closing balance, judged by the same
     # rule: its own rows carry its own opening balance to it. A loan's is
     # already negative, because the reader holds what is owed as a negative

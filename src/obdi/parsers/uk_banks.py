@@ -9,6 +9,7 @@ misread it, which is the intended failure mode.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import date
 
 from ..identity import content_key
 from ..models import SourceTier, Transaction, TransactionStatus
@@ -46,6 +47,35 @@ class StarlingCsvParser(StatementParser):
             if key.startswith("Amount (") and key.endswith(")"):
                 return key, key[len("Amount (") : -1].strip().upper()
         raise ParseError("Starling export has no 'Amount (...)' column")
+
+    def running_balances(self, payload: bytes) -> list[tuple[date, int, int]]:
+        """(day, amount, balance after the row) for each row that states one.
+
+        The balance column is not part of any row's identity or content key,
+        and a merged row keeps only the first sighting's own record, so the
+        figures are read from the artefact itself when somebody wants them. A
+        file with no "Balance (...)" column, or one in a currency other than
+        the amount's, states none; a row whose balance is blank is skipped.
+        """
+        found: list[tuple[date, int, int]] = []
+        for row in self.rows(payload):
+            column, currency = self._amount_column(row)
+            balance_column = next(
+                (key for key in row if key.startswith("Balance (") and key.endswith(")")),
+                None,
+            )
+            if balance_column is None or not row[balance_column]:
+                continue
+            if balance_column[len("Balance (") : -1].strip().upper() != currency:
+                continue
+            found.append(
+                (
+                    parse_date(row["Date"], self.date_format),
+                    parse_amount(row[column], currency=currency),
+                    parse_amount(row[balance_column], currency=currency),
+                )
+            )
+        return found
 
     def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
         for row in self.rows(payload):

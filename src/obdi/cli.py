@@ -51,6 +51,7 @@ from .coverage import (
 from .coverage import report as coverage_report
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
+from .family_anchors import families_of
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .ledger import Ledger
 from .money import parse_amount
@@ -299,8 +300,15 @@ def build_push_envelope(store: Store, map_path: Path) -> dict[str, object]:
             for b in raw_bind
             if isinstance(b, dict) and b.get("canonical_id")
         }
-    labels = collect_display_labels(store, _account_map(store), connection_ids)
-    return build_envelope(store, bindings, labels, named_canonicals=named)
+    account_map = _account_map(store)
+    labels = collect_display_labels(store, account_map, connection_ids)
+    return build_envelope(
+        store,
+        bindings,
+        labels,
+        named_canonicals=named,
+        families=families_of(store, account_map),
+    )
 
 
 def queue_actual_push(db_path: Path) -> str:
@@ -967,7 +975,11 @@ def queue_actual_prune(
         return "no Actual-bound accounts to prune - push first."
     with Store(db_path) as store:
         envelope = build_prune_envelope(
-            store, bindings, clear_empty=clear_empty, confirmed=confirmed
+            store,
+            bindings,
+            clear_empty=clear_empty,
+            confirmed=confirmed,
+            families=families_of(store, _account_map(store)),
         )
     queued = queue_push(envelope, _actual_dir(db_path), prefix="prune")
     raw_accounts = envelope.get("accounts")
@@ -1070,7 +1082,9 @@ def queue_actual_audit(db_path: Path) -> str:
                 if isinstance(b, dict) and b.get("canonical_id")
             }
     with Store(db_path) as store:
-        envelope = build_audit_envelope(store, bindings)
+        envelope = build_audit_envelope(
+            store, bindings, families=families_of(store, _account_map(store))
+        )
         account_ids = {
             str(row[0])
             for row in store.connection.execute(
@@ -1120,7 +1134,9 @@ def _replay(db_path: Path, out: Path | None) -> int:
     with Store(db_path) as store:
         transactions = store.all_transactions()
         pairs = store.confirmed_transfer_pairs()
-        openings = opening_balances(store, bindings)
+        openings = opening_balances(
+            store, bindings, families=families_of(store, _account_map(store))
+        )
 
     payload = build_payload(transactions, bindings, openings)
     missing = unbound_accounts(transactions, bindings)
@@ -2604,6 +2620,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 bound=bound,
                 label=label,
                 archive=archive_notes_for(store, only=ref).get(ref),
+                families=families_of(store, _account_map(store)),
             )
 
     def position_data() -> Position:
@@ -2616,7 +2633,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # provider-label scan succeeding.
             labels = {}
         with Store(db_path) as store:
-            return read_position(store, labels=labels, today=datetime.now(UTC).date())
+            return read_position(
+                store,
+                labels=labels,
+                today=datetime.now(UTC).date(),
+                families=families_of(store, _account_map(store)),
+            )
 
     def anchor_save(ref: str, day: str, amount: str, currency: str) -> None:
         from .balance_anchors import record_stated_anchor

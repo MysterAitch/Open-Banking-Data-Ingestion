@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .balance_anchors import effective_opening
+from .family_anchors import Families
 from .replay import (
     ActualAccountBinding,
     OpeningBalance,
@@ -441,9 +442,10 @@ def build_envelope(
     labels: dict[str, str],
     *,
     named_canonicals: set[str] | None = None,
+    families: Families | None = None,
 ) -> dict[str, object]:
     transactions = store.all_transactions()
-    openings = opening_balances(store, bindings)
+    openings = opening_balances(store, bindings, families=families)
     payload = build_payload(transactions, bindings, openings)
     # Two store rows sharing one imported id would reach Actual as one row:
     # importTransactions treats the id as THE identity, so the second row is
@@ -518,16 +520,22 @@ def build_envelope(
 
 
 def opening_balances(
-    store: Store, bindings: list[ActualAccountBinding]
+    store: Store,
+    bindings: list[ActualAccountBinding],
+    *,
+    families: Families | None = None,
 ) -> list[OpeningBalance]:
     """The derived opening balance of each bound account that has one.
 
     An account with no anchor has none, and is simply absent: sending a zero
-    would assert that it opened empty, which nothing has established.
+    would assert that it opened empty, which nothing has established. With
+    `families`, a main account's opening is derived from the whole account's
+    stated balances less its Spaces' rows rather than from them as its own;
+    every account with no known Spaces derives exactly as it does without.
     """
     found: list[OpeningBalance] = []
     for binding in bindings:
-        opening = effective_opening(store, binding.canonical_id)
+        opening = effective_opening(store, binding.canonical_id, families=families)
         if opening.opening_minor is not None and opening.as_at is not None:
             found.append(
                 OpeningBalance(binding.canonical_id, opening.as_at, opening.opening_minor)
@@ -536,7 +544,10 @@ def opening_balances(
 
 
 def build_audit_envelope(
-    store: Store, bindings: list[ActualAccountBinding]
+    store: Store,
+    bindings: list[ActualAccountBinding],
+    *,
+    families: Families | None = None,
 ) -> dict[str, object]:
     """What obdi believes Actual should hold, for the applier to check.
 
@@ -546,7 +557,7 @@ def build_audit_envelope(
     the Actual side, and those are precisely what the audit exists to see.
     """
     transactions = store.all_transactions()
-    openings = opening_balances(store, bindings)
+    openings = opening_balances(store, bindings, families=families)
     accounts = build_payload(transactions, bindings, openings)
     for binding in bindings:
         accounts.setdefault(binding.actual_account_id, [])
@@ -571,6 +582,7 @@ def build_prune_envelope(
     *,
     clear_empty: Mapping[str, int] | None = None,
     confirmed: Mapping[str, int] | None = None,
+    families: Families | None = None,
 ) -> dict[str, object]:
     """The audit payload, marked kind=prune: the applier deletes rows
     that carry OUR imported ids but are absent from this expected set.
@@ -583,7 +595,7 @@ def build_prune_envelope(
     without them reads exactly as it always did.
     """
     envelope: dict[str, object] = {
-        **build_audit_envelope(store, bindings),
+        **build_audit_envelope(store, bindings, families=families),
         "kind": "prune",
     }
     if clear_empty:

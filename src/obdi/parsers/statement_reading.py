@@ -39,6 +39,11 @@ class StatementReading:
     #: identifies the account. Empty where the format states no name.
     account_name: str = ""
     transactions: list[StatementRow] = field(default_factory=list)
+    #: (day, balance) for each end-of-day balance the document prints, in page
+    #: order. Empty for a format that prints none. Kept as printed and NOT
+    #: judged here: `statement_terms` accepts one only when it agrees with the
+    #: statement's own rows.
+    end_of_day_minor: list[tuple[date, int]] = field(default_factory=list)
     rates: dict[str, float] = field(default_factory=dict)
     rate_windows: list[RateWindow] = field(default_factory=list)
     #: Why this reading is incomplete, if it is. Named rather than papered

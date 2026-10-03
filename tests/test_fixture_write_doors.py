@@ -87,6 +87,13 @@ JUSTIFIED = {
     "shared-identity flag has a row to mark - the state the allocation prevents, so no "
     "door produces it, and a flag for it still has to be shown on one and absent from "
     "the rows beside it",
+    ("test_family_anchors.py", "transactions"): "removes one payment the bank's balance "
+    "includes and the store holds no trace of, which is the state the family walk "
+    "exists to locate. Every door lands the statement's own rows, so a household "
+    "whose store lacks one of them can only be made by taking the row out afterwards, "
+    "as a bad merge would have",
+    ("test_family_anchors.py", "transaction_sources"): "the sightings of that same "
+    "removed row, so the store holds no trace of the payment at all",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",

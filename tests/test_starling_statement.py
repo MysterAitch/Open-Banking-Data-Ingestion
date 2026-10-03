@@ -44,7 +44,7 @@ from obdi.parsers.pdf_statements import (
     pdf_parser_for,
 )
 from obdi.parsers.uk_banks import detect
-from obdi.statement_terms import StatementBalance, statement_balances
+from obdi.statement_terms import StatementBalance, statement_balances, statement_day_balances
 from obdi.store import Store
 from test_credit_union_statement import SAVINGS, build_columned_pdf
 from test_statement_shape import build_pdf
@@ -705,3 +705,83 @@ class TestBalancesForAnchors:
             usable, _ = statement_balances(store)
 
         assert usable == [StatementBalance("starling-current", date(2026, 5, 31), 7525)]
+
+
+#: The balances STATEMENT prints, by the hand working beside it.
+PRINTED_END_OF_DAY = [
+    (date(2026, 3, 2), 93450),
+    (date(2026, 3, 5), 343450),
+    (date(2026, 3, 6), 333451),
+    (date(2026, 3, 9), 458407),
+    (date(2026, 3, 20), 158407),
+    (date(2026, 3, 31), 158007),
+]
+
+
+class TestEndOfDayBalancesForFamilyAnchors:
+    def test_Statement_KeepsEveryPrintedEndOfDayBalanceWithTheDateOfItsRow(self):
+        assert read(STATEMENT).end_of_day_minor == PRINTED_END_OF_DAY
+
+    def test_Statement_YieldsItsOpeningEachPrintedDayAndItsClosing(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            path = tmp_path / "march.pdf"
+            path.write_bytes(build_starling_pdf(STATEMENT))
+            import_file(store, path, account_id="starling-current")
+
+            found, refused = statement_day_balances(store, "starling-current")
+
+        # Opening 1000.00 stands at the end of 1 March: the first row is the 2nd.
+        # The 31st is both a printed figure and the closing balance: one anchor.
+        assert [(b.day, b.balance_minor) for b in found] == [
+            (date(2026, 3, 1), 100000),
+            *PRINTED_END_OF_DAY,
+        ]
+        assert {b.source for b in found} == {"starling-statement-pdf"}
+        assert refused == 0
+
+    def test_PrintedBalance_WhenItDisagreesWithTheRows_IsRefusedAndCounted(self, tmp_path):
+        # 3434.50 on the 5th is replaced by a figure the rows do not reach.
+        wrong = replaced(STATEMENT, "3434.50", "3435.50")
+        with Store(tmp_path / "s.sqlite3") as store:
+            path = tmp_path / "march.pdf"
+            path.write_bytes(build_starling_pdf(wrong))
+            import_file(store, path, account_id="starling-current")
+
+            found, refused = statement_day_balances(store, "starling-current")
+
+        assert date(2026, 3, 5) not in {b.day for b in found}
+        assert refused == 1
+
+    def test_AnOverdrawnStatement_YieldsNegativeBalancesOnEachOfItsDays(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            path = tmp_path / "april.pdf"
+            path.write_bytes(build_starling_pdf(OVERDRAWN))
+            import_file(store, path, account_id="starling-current")
+
+            found, _ = statement_day_balances(store, "starling-current")
+
+        # Opening 50.00 at the end of 2 April, the day before the only row (the
+        # 3rd), which prints -70.00; the closing balance on the 30th is the same.
+        assert [(b.day, b.balance_minor) for b in found] == [
+            (date(2026, 4, 2), 5000),
+            (date(2026, 4, 3), -7000),
+            (date(2026, 4, 30), -7000),
+        ]
+
+    def test_AStatementThatPrintsNoEndOfDayBalances_YieldsOnlyOpeningAndClosing(self, tmp_path):
+        bare = [
+            line.rsplit("|", 1)[0] + "|" if line.startswith("ROW|") else line
+            for line in OVERDRAWN
+        ]
+        with Store(tmp_path / "s.sqlite3") as store:
+            path = tmp_path / "april.pdf"
+            path.write_bytes(build_starling_pdf(bare))
+            import_file(store, path, account_id="starling-current")
+
+            found, refused = statement_day_balances(store, "starling-current")
+
+        assert [(b.day, b.balance_minor) for b in found] == [
+            (date(2026, 4, 2), 5000),
+            (date(2026, 4, 30), -7000),
+        ]
+        assert refused == 0

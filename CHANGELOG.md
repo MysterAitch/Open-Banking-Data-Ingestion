@@ -28,7 +28,20 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.264] - 2026-10-03
 
+### Fixed
+- **A Starling statement's balance is the whole account's, and is checked as
+  such.** The certified statement, the CSV export, and the aggregator cannot
+  see Spaces: their balance moves with every payment, including ones paid from
+  a Space. It was being filed as the main account's own, which put main's
+  opening balance out by whatever the Spaces held. It is now checked against
+  the main account and its Spaces together.
+
 ### Added
+- **The whole-account balance walk.** Every end-of-day balance the statement
+  and the export print becomes a checkpoint, and the main account's ledger says
+  the first day the rows stop reproducing the bank's balance, the last day they
+  agreed, and whether one movement or several explains it. Dates and counts on
+  a plain load; the differences after "Show values".
 - **A per-period reconciliation report.** Card statements read into an account
   a feed also covers left eight of nine balance checks differing, with
   leftovers on both sides and no way to tell whether they were the same money

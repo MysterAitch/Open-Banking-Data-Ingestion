@@ -110,6 +110,22 @@ def _account_card(view: Any) -> str:
         checks = f"{_plural(view.checks_agree, 'later check')} agree"
     else:
         checks = '<span class="muted">none: one balance stated, so nothing tests it</span>'
+    if view.family_anchors:
+        # The stated balances are the whole account's (main plus its Spaces), so
+        # a difference is located against the family's rows, not main's alone.
+        if view.family_first_differing:
+            checks += (
+                '<br><span class="warn">The whole account\'s stated balances '
+                f"({_esc(str(view.family_anchors))}) first stop matching the rows on "
+                f"{_esc(view.family_first_differing)}; the difference is "
+                f"{_esc(view.family_pattern)} after that.</span>"
+            )
+        else:
+            checks += (
+                '<br><span class="muted">Checked against the whole account '
+                f"(main plus its Spaces): {_esc(str(view.family_anchors))} stated "
+                "balances, all reproduced.</span>"
+            )
     flag = (
         '<p class="warn">The rows between its stated balances do not add up, so this '
         "balance may be wrong. It is still counted. "

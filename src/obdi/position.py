@@ -62,6 +62,7 @@ from datetime import date, timedelta
 from itertools import accumulate
 
 from .balance_anchors import CURRENCY, EffectiveOpening, effective_opening
+from .family_anchors import Families
 from .ledger import Money, direction_of, running_balance
 from .masking import Structural, Total
 from .models import Transaction
@@ -125,6 +126,13 @@ class AccountPosition:
     #: How many later anchors agree with, and differ from, what the rows predict.
     checks_agree: Structural[int]
     checks_differ: Structural[int]
+    #: Family balances stated for this main account (see `balance_anchors`),
+    #: and where the family's rows first stop reproducing them: an ISO day, ""
+    #: when they all do or the account has none. `family_pattern` is
+    #: "constant", "changing", or "".
+    family_anchors: Structural[int]
+    family_first_differing: Structural[str]
+    family_pattern: Structural[str]
     #: The newest non-void row's date, ISO, or "" when the account holds none.
     rows_through: Structural[str]
     rows_through_age_days: Structural[int]
@@ -287,6 +295,19 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
             archived=item.archived,
             checks_agree=sum(1 for r in later if r.agrees),
             checks_differ=len(opening.differing),
+            family_anchors=opening.family.anchors if opening.family else 0,
+            family_first_differing=(
+                opening.family.first_differing.day.isoformat()
+                if opening.family and opening.family.first_differing
+                else ""
+            ),
+            family_pattern=(
+                ""
+                if opening.family is None or opening.family.constant is None
+                else "constant"
+                if opening.family.constant
+                else "changing"
+            ),
             rows_through=newest.isoformat() if newest else "",
             rows_through_age_days=(today - newest).days if newest else 0,
             rows=len(live),
@@ -504,12 +525,18 @@ def build_position(
 
 
 def read_position(
-    store: Store, *, labels: Mapping[str, str], today: date
+    store: Store,
+    *,
+    labels: Mapping[str, str],
+    today: date,
+    families: Families | None = None,
 ) -> Position:
     """The position of everything the store holds, as at `today`.
 
     The accounts are the ones the Overview lists: every account holding a row
-    and every declared one, labelled as the Overview labels them.
+    and every declared one, labelled as the Overview labels them. `families`
+    says which accounts are Spaces of which and which sources are blind to
+    them, so a whole-account balance is never taken as a main account's own.
     """
     registry = {str(record.ref): record for record in store.declared_accounts()}
     merged = dict(labels)
@@ -529,7 +556,7 @@ def read_position(
                 label=merged.get(ref) or ref,
                 kind=declared.kind if declared is not None else "",
                 archived=closed is not None and closed <= today,
-                opening=effective_opening(store, ref, rows),
+                opening=effective_opening(store, ref, rows, families=families),
                 rows=tuple(rows),
             )
         )

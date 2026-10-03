@@ -21,7 +21,13 @@ from urllib.parse import quote
 
 from .callback import render_page
 from .errors import DataError
-from .ledger import ANCHOR_QUERIES, QUERIES_PER_PAGE, Ledger, LedgerRequestError
+from .ledger import (
+    ANCHOR_QUERIES,
+    FAMILY_QUERIES,
+    QUERIES_PER_PAGE,
+    Ledger,
+    LedgerRequestError,
+)
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
@@ -290,6 +296,7 @@ _BASIS_WORDS = {
     "stated": "stated by a person",
     "bank": "the bank's own running balance",
     "statement": "a held statement's closing balance",
+    "family": "the whole account's stated balance, less its Spaces' own rows",
 }
 
 
@@ -353,6 +360,74 @@ def _anchors_html(anchors: tuple[Any, ...]) -> str:
         '<ul class="anchors">' + "".join(_anchor_row(line) for line in agreeing) + "</ul>"
         "</details>"
     )
+
+
+def _family_html(family: Any) -> str:
+    """The walk of the whole account's stated balances against the rows of the
+    main account and its Spaces together.
+
+    Said once, here: what a family balance is, and what the main account's own
+    balance is taken to be from it.
+    """
+    if family is None:
+        return ""
+    body = (
+        "<h3>The whole account's stated balances</h3>"
+        '<p class="muted">A family balance is one stated by a source that cannot see '
+        "this account's Spaces (the certified statement, the export, the aggregator), so "
+        "it is the balance of the main account and every Space together and is checked "
+        "against the rows of all of them, where a transfer between them cancels.</p>"
+        '<p class="muted">This account\'s own balance is taken as that figure less what '
+        "each Space's rows sum to, which assumes every Space's rows start from nil: its "
+        "history is held from its first row.</p>"
+    )
+    if family.withheld:
+        return body + f'<p class="warn">Not walked: {_esc(family.withheld)}.</p>'
+    body += (
+        '<div class="scroll"><table>'
+        + _count("Spaces", ", ".join(family.spaces))
+        + _count("Stated by", ", ".join(family.sources))
+        + _count("Whole-account balances stated", family.anchors)
+        + _count("Later ones the rows reproduce", family.agreeing)
+        + _count("Later ones the rows do not reproduce", family.differing)
+        + _count("Earliest, which defines the opening", family.defining_day)
+        + "</table></div>"
+    )
+    if family.refused_figures:
+        body += (
+            f'<p class="warn">{_esc(str(family.refused_figures))} printed end-of-day '
+            "balance(s) disagreed with their own statement's rows and were not used.</p>"
+        )
+    if not family.differing:
+        return body + (
+            '<p><span class="pill pill-ok">agrees</span> The rows of the account and its '
+            "Spaces reproduce every later whole-account balance stated.</p>"
+        )
+    pattern = (
+        "The difference is the same at every later balance, so one movement is "
+        "missing or surplus between those two days."
+        if family.pattern == "constant"
+        else "The difference changes between later balances, so more than one "
+        "movement is missing or surplus."
+    )
+    body += (
+        '<p class="warn"><strong>The rows first stop reproducing the stated balance at the '
+        f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they last '
+        f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
+        f"</span>.</strong> {_esc(pattern)} A fault dated before "
+        f"{_esc(family.defining_day)} is absorbed into the opening and cannot be seen.</p>"
+        '<ul class="anchors">'
+    )
+    for line in family.lines:
+        side = "lower" if line.difference_direction == "out" else "higher"
+        body += (
+            f'<li><p><span class="pill pill-bad">differs</span> at the end of '
+            f'<span class="mono nowrap">{_esc(line.day)}</span>: the stated balance is '
+            f'{side} than the rows predict by '
+            f'<span class="mono nowrap">{_esc(line.difference)}</span></p>'
+            f'<p class="muted">{_esc(", ".join(line.sources))}</p></li>'
+        )
+    return body + "</ul>"
 
 
 def _anchor_forms(view: Any, ref: str, month: str) -> str:
@@ -446,7 +521,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             "could not supply a balance - unreadable, or its rows do not carry its "
             "opening balance to its closing one - and are not used.</p>"
         )
-    return body + _anchor_forms(view, view.ref, view.month)
+    return body + _family_html(opening.family) + _anchor_forms(view, view.ref, view.month)
 
 
 def _position_html(position: Any, *, bound: bool) -> str:
@@ -647,7 +722,8 @@ def render_ledger(
         f'<p class="muted">This page costs {QUERIES_PER_PAGE} statements however '
         f"many rows the account holds, plus {ANCHOR_QUERIES} to look for opening "
         "balance anchors and a few more for each held statement or bank record "
-        "that has not been read yet.</p>"
+        "that has not been read yet. A main account with Spaces adds "
+        f"{FAMILY_QUERIES} and one per Space to check the whole account's balances.</p>"
     )
     body += _navigation(view, unmasked)
     return render_page("Ledger", body)

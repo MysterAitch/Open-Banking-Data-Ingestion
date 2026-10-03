@@ -40,7 +40,14 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from .accounts import AccountRef
-from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
+from .balance_anchors import (
+    CURRENCY,
+    STATED,
+    EffectiveOpening,
+    FamilyWalk,
+    effective_opening,
+)
+from .family_anchors import Families
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
@@ -62,6 +69,16 @@ QUERIES_PER_PAGE = 8
 #: each held statement not yet read, adds statements beyond this, so a page for
 #: such an account costs more and the fixed figure is a floor.
 ANCHOR_QUERIES = 7
+
+#: What asking for the FAMILY reading adds to an account's page, on top of
+#: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
+#: statements, once per request and shared by every account asked about): for a
+#: main account with known Spaces, the held-statement listing again for the
+#: per-day balances, the listing of held exports, and one read of the rows of
+#: each Space. Each export not yet read adds one more, as each statement does.
+#: An account with no known Spaces adds nothing: ANCHOR_QUERIES holds.
+FAMILY_QUERIES = 2
+FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -203,6 +220,42 @@ class AnchorLine:
 
 
 @dataclass(frozen=True)
+class FamilyLine:
+    """One family balance that the family's rows do not reproduce."""
+
+    day: Structural[str]
+    sources: Structural[tuple[str, ...]]
+    difference_direction: Structural[str]
+
+    balance: Total[Money]
+    difference: Total[Money]
+
+
+@dataclass(frozen=True)
+class FamilyView:
+    """The family's balances walked against the family's rows (`walk_family`)."""
+
+    spaces: Structural[tuple[str, ...]]
+    sources: Structural[tuple[str, ...]]
+    anchors: Structural[int]
+    #: Later balances the rows reproduce, and ones they do not.
+    agreeing: Structural[int]
+    differing: Structural[int]
+    #: Printed balances refused for disagreeing with their own statement.
+    refused_figures: Structural[int]
+    withheld: Structural[str]
+    #: ISO days, "" when nothing differs: the first balance the rows stop
+    #: reproducing and the last one they reproduced before it.
+    first_differing: Structural[str]
+    last_agreeing: Structural[str]
+    #: "constant" (one movement missing or surplus between those two days),
+    #: "changing" (several), or "" when nothing differs.
+    pattern: Structural[str]
+    defining_day: Structural[str]
+    lines: Structural[tuple[FamilyLine, ...]]
+
+
+@dataclass(frozen=True)
 class OpeningView:
     #: "none" (no anchor, so no opening balance), "derived", or "withheld"
     #: (anchors exist but an opening cannot be derived; `withheld` says why).
@@ -219,6 +272,8 @@ class OpeningView:
     #: The dates of the anchors a person stated, which are the ones that can
     #: be removed from the page.
     stated_days: Structural[tuple[str, ...]]
+    #: Set for a main account with known Spaces and a family balance stated.
+    family: Structural[FamilyView | None]
 
     opening: Total[Money]
 
@@ -246,6 +301,37 @@ class Ledger:
     archive: Structural[ArchiveNote | None] = None
     #: Absent only for an account nothing is known about.
     opening: Structural[OpeningView | None] = None
+
+
+def family_view(walk: FamilyWalk | None) -> FamilyView | None:
+    if walk is None:
+        return None
+    first, last = walk.first_differing, walk.last_agreeing
+    return FamilyView(
+        spaces=walk.spaces,
+        sources=walk.sources,
+        anchors=walk.anchors,
+        agreeing=walk.agreeing,
+        differing=len(walk.differing),
+        refused_figures=walk.refused_figures,
+        withheld=walk.withheld,
+        first_differing=first.day.isoformat() if first else "",
+        last_agreeing=last.day.isoformat() if last else "",
+        pattern=(
+            "" if walk.constant is None else "constant" if walk.constant else "changing"
+        ),
+        defining_day=walk.readings[0].day.isoformat() if walk.readings else "",
+        lines=tuple(
+            FamilyLine(
+                day=reading.day.isoformat(),
+                sources=reading.sources,
+                difference_direction=direction_of(reading.difference_minor or 0),
+                balance=Money(reading.balance_minor, CURRENCY),
+                difference=Money(reading.difference_minor or 0, CURRENCY),
+            )
+            for reading in walk.differing
+        ),
+    )
 
 
 def opening_view(opening: EffectiveOpening) -> OpeningView:
@@ -285,6 +371,7 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
         stated_days=tuple(
             r.anchor.day.isoformat() for r in opening.readings if r.anchor.basis == STATED
         ),
+        family=family_view(opening.family),
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )
 
@@ -366,14 +453,20 @@ def build_ledger(
     bound: bool,
     label: str = "",
     archive: ArchiveNote | None = None,
+    families: Families | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
 
     `bound` is whether the account has an Actual destination; it is passed in
     because the bindings live in a file the store does not read. `archive` is
-    carried onto the result untouched.
+    carried onto the result untouched. `families` is which accounts are Spaces
+    of which and which sources are blind to them; without it every anchor is
+    the account's own (see FAMILY_QUERIES for what asking costs).
     """
-    return replace(_ledger_for(store, ref, month, bound=bound, label=label), archive=archive)
+    return replace(
+        _ledger_for(store, ref, month, bound=bound, label=label, families=families),
+        archive=archive,
+    )
 
 
 def _ledger_for(
@@ -383,6 +476,7 @@ def _ledger_for(
     *,
     bound: bool,
     label: str,
+    families: Families | None,
 ) -> Ledger:
     rows = store.transactions_for_account(ref)
     if not rows:
@@ -392,8 +486,10 @@ def _ledger_for(
             return empty
         # An account declared before any money moved can still have had its
         # balance stated, and that is exactly the figure a new account needs.
-        return replace(empty, opening=opening_view(effective_opening(store, ref, [])))
-    opening = effective_opening(store, ref, rows)
+        return replace(
+            empty, opening=opening_view(effective_opening(store, ref, [], families=families))
+        )
+    opening = effective_opening(store, ref, rows, families=families)
 
     other_side = _confirmed_other_sides(store, ref)
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
