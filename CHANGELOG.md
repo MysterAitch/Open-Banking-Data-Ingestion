@@ -26,6 +26,17 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.278] - 2026-10-03
+
+### Fixed
+- **The masked timeline of balance differences fits the screen.** It was drawn
+  ten thousand pixels wide for a few dozen marks, so the first screenful was an
+  empty band and the owner asked what it communicated. The whole range is now
+  drawn across the screen with nearby changes grouped and counted, a table
+  under it gives the changes per period with a link into each, and the level
+  band alternates shade at each change. The values chart stays wide, and gains
+  a link to a few days around each change.
+
 ## [0.4.277] - 2026-10-03
 
 ### Fixed
