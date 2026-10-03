@@ -223,12 +223,12 @@ class TestTheIndexPages:
         for route, _, _ in (*REPORTS, *EVIDENCE):
             assert route in routes, route
 
-    def test_Reports_ListsTheSixReportsEachWithOneSentence(self, base):
+    def test_Reports_ListsTheSevenReportsEachWithOneSentence(self, base):
         page = httpx.get(f"{base}/reports", timeout=20).text
 
         assert [route for route, _, _ in REPORTS] == [
             "/agreements", "/identity-health", "/balance-reconciliation",
-            "/balance-walk", "/date-lag", "/review-report",
+            "/period-reconciliation", "/balance-walk", "/date-lag", "/review-report",
         ]
         for route, title, question in REPORTS:
             assert f'href="{route}"' in page and title in page

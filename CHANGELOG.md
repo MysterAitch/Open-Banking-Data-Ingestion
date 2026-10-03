@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.264] - 2026-10-03
+
+### Added
+- **A per-period reconciliation report.** Card statements read into an account
+  a feed also covers left eight of nine balance checks differing, with
+  leftovers on both sides and no way to tell whether they were the same money
+  without reading amounts. For each period between statement balances the
+  report says whether the rows add up, how many rows each side holds alone, and
+  which exact relation explains the difference. It changes nothing.
+
 ## [0.4.263] - 2026-10-03
 
 ### Changed

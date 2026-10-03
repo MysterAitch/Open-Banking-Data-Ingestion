@@ -585,6 +585,7 @@ def agreements(
     transactions: Iterable[Transaction],
     *,
     sibling_accounts: Mapping[str, Collection[str]] | None = None,
+    always_reconcile: bool = False,
 ) -> list[Agreement]:
     """Compare every pair of sources that describes the same account.
 
@@ -598,6 +599,12 @@ def agreements(
     accounts - because a statement shows the main account's view of movements
     the feed files under a space. Attributions carry their evidence and the
     residue is reported, never swallowed.
+
+    A pair whose counts and nets agree is normally not paired row by row, since
+    nothing needs explaining. Equal totals do not prove equal rows, though: a
+    row only one source holds can be offset by a different row only the other
+    holds. `always_reconcile` pairs those too, for a caller whose question is
+    which rows are left over rather than whether the totals differ.
     """
     by_account: dict[str, dict[str, list[Transaction]]] = {}
     for transaction in transactions:
@@ -633,7 +640,7 @@ def agreements(
             reconciled = sibling_accounts is not None
             matched_count = 0
             if sibling_accounts is not None and (
-                left_count != right_count or left_net != right_net
+                always_reconcile or left_count != right_count or left_net != right_net
             ):
                 left_over, right_over = _leftovers(
                     in_left, in_right, WITHIN_ACCOUNT_WINDOW_DAYS

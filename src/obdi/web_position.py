@@ -68,6 +68,10 @@ def _ledger_href(ref: str) -> str:
     return f"/ledger?ref={_esc(quote(ref, safe=''))}"
 
 
+def _periods_href(ref: str) -> str:
+    return f"/period-reconciliation?ref={_esc(quote(ref, safe=''))}"
+
+
 def _days(days: int) -> str:
     return {0: "today", 1: "yesterday"}.get(days, f"{days} days ago")
 
@@ -109,7 +113,8 @@ def _account_card(view: Any) -> str:
     flag = (
         '<p class="warn">The rows between its stated balances do not add up, so this '
         "balance may be wrong. It is still counted. "
-        f'<a class="tap" href="{_ledger_href(view.ref)}">See its ledger</a></p>'
+        f'<a class="tap" href="{_ledger_href(view.ref)}">See its ledger</a> or '
+        f'<a class="tap" href="{_periods_href(view.ref)}">where, period by period</a></p>'
         if view.checks_differ
         else ""
     )

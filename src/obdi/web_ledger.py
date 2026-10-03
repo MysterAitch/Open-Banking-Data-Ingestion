@@ -408,6 +408,12 @@ def _opening_html(view: Any, unmasked: bool) -> str:
         )
     else:
         body += _anchors_html(opening.anchors)
+        if sum(1 for line in opening.anchors if line.basis == "statement") >= 2:
+            body += (
+                '<p class="muted"><a class="tap" '
+                f'href="/period-reconciliation?ref={_esc(quote(view.ref, safe=""))}">'
+                "Test the rows between the statements, period by period</a></p>"
+            )
         if opening.state == "derived":
             figure = _signed(_balance_word(opening.direction), opening.direction, opening.opening)
             body += (

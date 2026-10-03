@@ -1,0 +1,598 @@
+"""Where, between two statements, the rows held stop adding up - and what the gap looks like.
+
+A statement's closing balance is an anchor (`balance_anchors`). When the rows
+the store counts between two consecutive statement anchors do not add up to the
+statement's own movement, the anchor check says THAT something is wrong and
+nothing about WHERE or WHAT. When another source also covers the account, the
+usual suspect is the same money held twice, once from each source, dated or
+grouped differently: a statement printing one total where a feed itemises, or
+the reverse. This report puts that suspicion to the test, period by period,
+without stating a figure.
+
+A PERIOD is the stretch a statement covers. For the statement closing on day D
+after one that closed on day P it is the days after P up to and including D,
+and the statement's movement is the difference between the two closings. The
+first statement has no earlier closing, so its period runs from its own first
+row. A statement whose printed opening balance is not the previous closing
+balance (a statement missing, or two documents disagreeing) also gets the
+period its own opening and closing state, because the two movements then
+differ.
+
+SURPLUS is what the store counts beyond the statement's movement: the rows
+summed, less the movement. It carries the OPPOSITE sign to the difference
+`balance_anchors` reports (anchor less prediction), so that a row held twice
+shows as a surplus equal to that row.
+
+The unmatched rows on each side are taken from `coverage.agreements`, the
+pairing the cross-source page shows. This module has no matcher of its own: a
+second one would be a second opinion about which rows are the same payment, and
+the point of this report is to explain THAT page's leftovers.
+
+From the surplus and the leftovers, each differing period is placed in the
+first of these that holds, all compared exactly in minor units:
+
+  same money      the statement-only and feed-only leftovers sum to the same
+                  figure: the same money, described differently
+  statement leftovers
+                  the surplus equals the sum of the statement-only rows: the
+                  store holds the statement's leftovers on top of the feed's
+  feed leftovers  the surplus equals the sum of the feed-only rows
+  one row         the surplus equals a single row the store counts in the
+                  period, named by date and holder
+  none            none of those, which is the answer worth most: the fault is
+                  not a duplicate and needs a different explanation
+
+More than one can hold at once. Where the two leftovers sum equal, the surplus
+equals both sums, and the report says so rather than choosing.
+
+A surplus that one period holds and the next period holds with the opposite
+sign is a row dated on the wrong side of the statement date between them.
+
+Masked, the report states dates, counts, and which of the above holds. Figures
+and the leftover rows themselves appear only in the unmasked rendering.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
+from enum import StrEnum
+from itertools import pairwise
+
+from .balance_anchors import STATEMENT, _counts_toward
+from .coverage import Agreement, agreements
+from .models import Transaction
+from .money import format_amount
+from .parsers.pdf_statements import PDF_PARSERS
+from .statement_terms import StatementBalance, held_statement_readings, statement_balances
+from .store import Store
+
+#: The sources whose rows are a statement's own, as opposed to a feed's.
+STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS)
+
+STATEMENT_SIDE = "statement"
+FEED_SIDE = "feed"
+
+
+class Locus(StrEnum):
+    """Which explanation of a differing period holds."""
+
+    SAME_MONEY = "same-money"
+    STATEMENT_ON_TOP = "statement-on-top"
+    FEED_ONLY_SUM = "feed-only-sum"
+    SINGLE_ROW = "single-row"
+    NONE = "none"
+
+
+class PeriodKind(StrEnum):
+    #: The first statement held: no earlier closing, so the period starts at its first row.
+    FIRST = "first"
+    #: Between two consecutive closings.
+    BETWEEN = "between"
+    #: A statement whose own opening is not the previous closing.
+    INSIDE = "inside"
+
+
+@dataclass(frozen=True)
+class Leftover:
+    """A row one side holds that the pairing did not match to the other side."""
+
+    side: str
+    source: str
+    row_date: date
+    amount_minor: int
+    description: str
+    #: Why the cross-source page already excuses it, or "" when it does not.
+    excuse: str = ""
+
+
+@dataclass(frozen=True)
+class HeldRow:
+    """A row the store counts, by date and by who holds it."""
+
+    row_date: date
+    holders: tuple[str, ...]
+    amount_minor: int
+    description: str
+
+
+@dataclass(frozen=True)
+class Period:
+    kind: PeriodKind
+    #: The first and last day counted, both inclusive.
+    first_day: date
+    last_day: date
+    movement_minor: int
+    held_minor: int
+    held_rows: int
+    #: The other source the leftovers were taken against, or "" when none.
+    feed: str
+    #: Whether every row counted in the period lies inside the span the two
+    #: sources were paired over. False where one source alone holds some of
+    #: them, so the leftovers listed are only part.
+    fully_paired: bool
+    statement_only: tuple[Leftover, ...]
+    feed_only: tuple[Leftover, ...]
+    single_rows: tuple[HeldRow, ...]
+    #: The last day of the neighbouring period whose surplus is this one's
+    #: exact opposite, or None.
+    cancelled_by_next: date | None = None
+    cancels_previous: date | None = None
+
+    @property
+    def surplus_minor(self) -> int:
+        return self.held_minor - self.movement_minor
+
+    @property
+    def agrees(self) -> bool:
+        return self.surplus_minor == 0
+
+    @property
+    def statement_only_minor(self) -> int:
+        return sum(row.amount_minor for row in self.statement_only)
+
+    @property
+    def feed_only_minor(self) -> int:
+        return sum(row.amount_minor for row in self.feed_only)
+
+    @property
+    def loci(self) -> tuple[Locus, ...]:
+        """Every explanation that holds. Empty for a period that agrees."""
+        if self.agrees:
+            return ()
+        found: list[Locus] = []
+        if self.statement_only and self.feed_only and (
+            self.statement_only_minor == self.feed_only_minor
+        ):
+            found.append(Locus.SAME_MONEY)
+        if self.statement_only and self.surplus_minor == self.statement_only_minor:
+            found.append(Locus.STATEMENT_ON_TOP)
+        if self.feed_only and self.surplus_minor == self.feed_only_minor:
+            found.append(Locus.FEED_ONLY_SUM)
+        if self.single_rows:
+            found.append(Locus.SINGLE_ROW)
+        return tuple(found) or (Locus.NONE,)
+
+    @property
+    def cancelled(self) -> bool:
+        return self.cancelled_by_next is not None or self.cancels_previous is not None
+
+
+@dataclass(frozen=True)
+class AccountPeriods:
+    account: str
+    statements: int
+    periods: tuple[Period, ...] = ()
+    #: Other sources holding rows for the account.
+    feeds: tuple[str, ...] = ()
+    #: Why nothing could be tested, or "".
+    withheld: str = ""
+
+
+@dataclass(frozen=True)
+class PeriodReport:
+    accounts: tuple[AccountPeriods, ...]
+
+    def describe(self, *, masked: bool = True, unmask_hint: str = "") -> str:
+        lines = [f"{len(self.accounts)} account(s) with a held statement"]
+        if masked:
+            lines.append(
+                "  MASKED: dates, counts, and which explanation holds only"
+                + (f" - {unmask_hint}" if unmask_hint else "")
+            )
+        if not self.accounts:
+            lines.append("  No statement is held for any account, so there is nothing to test.")
+        for item in self.accounts:
+            lines.extend(_account_lines(item, masked=masked))
+        return "\n".join(lines)
+
+
+def _plural(count: int, singular: str, plural: str | None = None) -> str:
+    return f"{count} {singular if count == 1 else plural or singular + 's'}"
+
+
+def _span(period: Period) -> str:
+    if period.first_day == period.last_day:
+        return str(period.last_day)
+    return f"{period.first_day} to {period.last_day}"
+
+
+def _kind_phrase(period: Period) -> str:
+    if period.kind is PeriodKind.FIRST:
+        return "the first statement held, from its own first row"
+    if period.kind is PeriodKind.BETWEEN:
+        return "between this statement's closing balance and the previous one's"
+    return "inside this statement, from its own opening balance to its closing one"
+
+
+def _locus_sentence(period: Period, locus: Locus) -> str:
+    if locus is Locus.SAME_MONEY:
+        return (
+            "The statement-only and feed-only rows sum to the same figure: the "
+            "leftovers are the same money, described differently."
+        )
+    if locus is Locus.STATEMENT_ON_TOP:
+        return (
+            "The difference equals the sum of the statement-only rows: the store "
+            "holds the statement's leftovers on top of the feed's."
+        )
+    if locus is Locus.FEED_ONLY_SUM:
+        return "The difference equals the sum of the feed-only rows."
+    if locus is Locus.SINGLE_ROW:
+        named = "; ".join(
+            f"dated {row.row_date}, held by {' and '.join(row.holders)}"
+            for row in period.single_rows
+        )
+        return f"The difference equals a single row held in this period: {named}."
+    return (
+        "None of the above: the difference is not the statement's leftovers, the "
+        "feed's leftovers, or any single row held here."
+    )
+
+
+def _period_lines(period: Period, *, masked: bool) -> list[str]:
+    lines = [f"  Period {_span(period)} ({_kind_phrase(period)}):"]
+    held = _plural(period.held_rows, "row")
+    if period.agrees:
+        lines.append(f"    The {held} the store counts agree with the statement's movement.")
+    else:
+        lines.append(f"    The {held} the store counts differ from the statement's movement.")
+    if not period.feed:
+        lines.append(
+            "    No other source is compared here: the period is tested against the "
+            "statement's own rows only."
+        )
+    else:
+        lines.append(
+            f"    Unmatched against {period.feed} in this period: "
+            f"{_plural(len(period.statement_only), 'row')} only in the statements, "
+            f"{_plural(len(period.feed_only), 'row')} only in the feed."
+        )
+        if not period.fully_paired:
+            lines.append(
+                f"    Some rows counted here lie outside the span {period.feed} and the "
+                "statements were paired over, so the unmatched rows are counted only "
+                "inside it."
+            )
+    if not masked:
+        lines.append(
+            f"    Statement movement {format_amount(period.movement_minor)}; rows held "
+            f"{format_amount(period.held_minor)}; surplus {format_amount(period.surplus_minor)}."
+        )
+        if period.feed:
+            lines.append(
+                f"    Statement-only rows sum to {format_amount(period.statement_only_minor)}; "
+                f"feed-only rows sum to {format_amount(period.feed_only_minor)}."
+            )
+    for locus in period.loci:
+        lines.append("    " + _locus_sentence(period, locus))
+    if period.cancelled_by_next is not None:
+        lines.append(
+            f"    The next period, ending {period.cancelled_by_next}, differs by exactly "
+            "the opposite: a row is dated on the wrong side of the statement date "
+            f"{period.last_day}."
+        )
+    if period.cancels_previous is not None:
+        lines.append(
+            f"    The previous period, ending {period.cancels_previous}, differs by exactly "
+            "the opposite: a row is dated on the wrong side of the statement date "
+            f"{period.cancels_previous}."
+        )
+    if not masked:
+        for row in sorted(
+            (*period.statement_only, *period.feed_only),
+            key=lambda r: (r.row_date, r.side, r.amount_minor, r.description),
+        ):
+            excuse = f" ({row.excuse})" if row.excuse else ""
+            lines.append(
+                f"      {row.side}-only: {row.row_date} {format_amount(row.amount_minor)} "
+                f"{row.description!r} ({row.source}){excuse}"
+            )
+        for single in period.single_rows:
+            lines.append(
+                f"      held row: {single.row_date} {format_amount(single.amount_minor)} "
+                f"{single.description!r} ({' and '.join(single.holders)})"
+            )
+    return lines
+
+
+def _account_lines(item: AccountPeriods, *, masked: bool) -> list[str]:
+    lines = [f"{item.account}: {_plural(item.statements, 'statement')} held"]
+    if item.withheld:
+        lines.append(f"  {item.withheld}")
+        return lines
+    if item.feeds:
+        lines.append(f"  Also held by: {', '.join(item.feeds)}.")
+    else:
+        lines.append(
+            "  No source other than the statements holds rows for this account, so "
+            "each period is tested against the statement's own rows only."
+        )
+    for feed in item.feeds or ("",):
+        if len(item.feeds) > 1:
+            lines.append(f"  Against {feed}:")
+        for period in item.periods:
+            if period.feed == feed:
+                lines.extend(_period_lines(period, masked=masked))
+    return lines
+
+
+def _held_row_sources(
+    row: Transaction, sightings: Iterable[Transaction]
+) -> tuple[str, ...]:
+    """Everyone who saw this row on its date for its value, else the stored source."""
+    sources = sorted(
+        {
+            s.source
+            for s in sightings
+            if s.amount_minor == row.amount_minor and s.value_date == row.value_date
+        }
+    )
+    return tuple(sources) or (row.source,)
+
+
+def _leftovers_of(
+    found: Iterable[Agreement],
+) -> tuple[list[Leftover], date, date] | None:
+    """Every row either side of these pairings left unmatched, with the span they cover."""
+    rows: list[Leftover] = []
+    spans: list[tuple[date, date]] = []
+    for agreement in found:
+        spans.append((agreement.overlap_from, agreement.overlap_to))
+        unmatched = [
+            (leg.source, leg.row_date, leg.amount_minor, leg.description, "")
+            for leg in agreement.unexplained
+        ]
+        unmatched += [
+            (
+                leg.source,
+                leg.row_date,
+                leg.amount_minor,
+                leg.description,
+                "a proven internal transfer",
+            )
+            for leg in agreement.confirmed_transfer_legs
+        ]
+        unmatched += [
+            (
+                match.source,
+                match.row_date,
+                match.amount_minor,
+                match.description,
+                f"matched to a row filed under {match.sibling_account}",
+            )
+            for match in agreement.attributed
+        ]
+        for source, row_date, amount, description, excuse in unmatched:
+            rows.append(
+                Leftover(
+                    STATEMENT_SIDE if source in STATEMENT_SOURCES else FEED_SIDE,
+                    source,
+                    row_date,
+                    amount,
+                    description,
+                    excuse,
+                )
+            )
+    if not spans:
+        return None
+    return rows, min(start for start, _ in spans), max(end for _, end in spans)
+
+
+def _movement_periods(
+    anchors: list[StatementBalance],
+    openings: Mapping[tuple[date, int], tuple[int, date | None]],
+) -> list[tuple[PeriodKind, date, date, int]]:
+    """(kind, first day, last day, the statement's movement) for each period."""
+    found: list[tuple[PeriodKind, date, date, int]] = []
+    for position, anchor in enumerate(anchors):
+        printed = openings.get((anchor.day, anchor.balance_minor))
+        if position == 0:
+            if printed is None or printed[1] is None:
+                continue
+            found.append(
+                (PeriodKind.FIRST, printed[1], anchor.day, anchor.balance_minor - printed[0])
+            )
+            continue
+        previous = anchors[position - 1]
+        first_day = previous.day + timedelta(days=1)
+        found.append(
+            (
+                PeriodKind.BETWEEN,
+                first_day,
+                anchor.day,
+                anchor.balance_minor - previous.balance_minor,
+            )
+        )
+        if printed is not None and printed[0] != previous.balance_minor:
+            found.append(
+                (PeriodKind.INSIDE, first_day, anchor.day, anchor.balance_minor - printed[0])
+            )
+    return found
+
+
+def _mark_cancellations(periods: list[Period]) -> list[Period]:
+    """Pair each period whose surplus is the exact opposite of its neighbour's.
+
+    Only the chain of one period per statement is compared, in date order: an
+    INSIDE period repeats a stretch the chain already holds.
+    """
+    chain = sorted(
+        (p for p in periods if p.kind is not PeriodKind.INSIDE), key=lambda p: p.last_day
+    )
+    next_of: dict[date, date] = {}
+    previous_of: dict[date, date] = {}
+    for earlier, later in pairwise(chain):
+        if earlier.surplus_minor != 0 and earlier.surplus_minor == -later.surplus_minor:
+            next_of[earlier.last_day] = later.last_day
+            previous_of[later.last_day] = earlier.last_day
+    return [
+        p
+        if p.kind is PeriodKind.INSIDE
+        else replace(
+            p,
+            cancelled_by_next=next_of.get(p.last_day),
+            cancels_previous=previous_of.get(p.last_day),
+        )
+        for p in periods
+    ]
+
+
+def _periods_against(
+    feed: str,
+    windows: list[tuple[PeriodKind, date, date, int]],
+    counted: list[Transaction],
+    sightings: list[Transaction],
+    paired: tuple[list[Leftover], date, date] | None,
+) -> list[Period]:
+    built: list[Period] = []
+    for kind, first_day, last_day, movement in windows:
+        held = [r for r in counted if first_day <= r.value_date <= last_day]
+        held_minor = sum(r.amount_minor for r in held)
+        statement_only: tuple[Leftover, ...] = ()
+        feed_only: tuple[Leftover, ...] = ()
+        fully_paired = False
+        if paired is not None:
+            rows, covered_from, covered_to = paired
+            inside = [r for r in rows if first_day <= r.row_date <= last_day]
+            statement_only = tuple(r for r in inside if r.side == STATEMENT_SIDE)
+            feed_only = tuple(r for r in inside if r.side == FEED_SIDE)
+            # Judged by the rows rather than the days: a source with no row
+            # after some date may simply have had nothing to report, and only
+            # a row outside the pairing's span is one it never compared.
+            fully_paired = all(covered_from <= r.value_date <= covered_to for r in held)
+        surplus = held_minor - movement
+        single = (
+            tuple(
+                HeldRow(
+                    r.value_date,
+                    _held_row_sources(r, sightings),
+                    r.amount_minor,
+                    r.description,
+                )
+                for r in sorted(held, key=lambda r: (r.value_date, r.description))
+                if r.amount_minor == surplus
+            )
+            if surplus != 0
+            else ()
+        )
+        built.append(
+            Period(
+                kind,
+                first_day,
+                last_day,
+                movement,
+                held_minor,
+                len(held),
+                feed,
+                fully_paired,
+                statement_only,
+                feed_only,
+                single,
+            )
+        )
+    return built
+
+
+def period_reconciliation(
+    store: Store,
+    *,
+    sibling_accounts: Mapping[str, Collection[str]] | None = None,
+    account: str | None = None,
+) -> PeriodReport:
+    """Each account with a held statement, period by period.
+
+    `sibling_accounts` is what the cross-source page passes to `agreements`;
+    handing in the same mapping is what keeps this report's leftovers the ones
+    that page shows. `account` limits the report to one account.
+    """
+    statements, _unusable = statement_balances(store, account)
+    by_account: dict[str, list[StatementBalance]] = {}
+    for anchor in statements:
+        by_account.setdefault(anchor.account_ref, []).append(anchor)
+
+    openings: dict[str, dict[tuple[date, int], tuple[int, date | None]]] = {}
+    for filed_under, reading in held_statement_readings(store):
+        if (
+            filed_under not in by_account
+            or reading.statement_date is None
+            or reading.closing_balance_minor is None
+            or reading.opening_balance_minor is None
+        ):
+            continue
+        first_row = min((row.value_date for row in reading.transactions), default=None)
+        openings.setdefault(filed_under, {})[
+            (reading.statement_date, reading.closing_balance_minor)
+        ] = (reading.opening_balance_minor, first_row)
+
+    held = store.transactions_by_sighting()
+    found = agreements(held, sibling_accounts=sibling_accounts or {}, always_reconcile=True)
+
+    accounts: list[AccountPeriods] = []
+    for ref, anchors in sorted(by_account.items()):
+        ordered = sorted(anchors, key=lambda a: (a.day, a.balance_minor))
+        if len(ordered) < 2:
+            accounts.append(
+                AccountPeriods(
+                    ref,
+                    len(ordered),
+                    withheld=(
+                        "Only one statement is held, so no period between statements "
+                        "exists and nothing can be tested."
+                    ),
+                )
+            )
+            continue
+        counted = [
+            t
+            for t in store.transactions_for_account(ref)
+            if _counts_toward(STATEMENT, t)
+        ]
+        if any(t.currency != "GBP" for t in counted):
+            accounts.append(
+                AccountPeriods(
+                    ref,
+                    len(ordered),
+                    withheld="The rows are not all in GBP, so no sum of them is meaningful.",
+                )
+            )
+            continue
+        sightings = [t for t in held if t.account_id == ref]
+        feeds = tuple(sorted({t.source for t in sightings} - STATEMENT_SOURCES))
+        windows = _movement_periods(ordered, openings.get(ref, {}))
+        built: list[Period] = []
+        for feed in feeds or ("",):
+            pairs = [
+                a
+                for a in found
+                if a.account_id == ref
+                and feed
+                and feed in (a.left, a.right)
+                and ({a.left, a.right} - {feed}) <= STATEMENT_SOURCES
+            ]
+            built += _mark_cancellations(
+                _periods_against(feed, windows, counted, sightings, _leftovers_of(pairs))
+            )
+        accounts.append(AccountPeriods(ref, len(ordered), tuple(built), feeds))
+    return PeriodReport(tuple(accounts))

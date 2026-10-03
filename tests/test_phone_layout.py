@@ -31,7 +31,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -47,6 +47,8 @@ from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_empty import empty_section, plan_from_audit
 from obdi.web_sections import render_actual
+from test_period_reconciliation import World as PeriodWorld
+from test_period_reconciliation import build_world as build_period_world
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -211,6 +213,43 @@ def worst_case_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 os.environ[name] = value
 
 
+@pytest.fixture(scope="module")
+def periods_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Three statements and a feed under an account whose reference is very long,
+    with a period that differs, so the longest period sentences are on the page."""
+    root = tmp_path_factory.mktemp("phone-periods")
+    saved = {name: os.environ.get(name) for name in _ENV}
+    os.environ.update(_environment_for(root))
+    os.environ.pop("TRUELAYER_CLIENT_ID", None)
+    os.environ.pop("TRUELAYER_CLIENT_SECRET_FILE", None)
+    db = root / "store.sqlite3"
+    world = PeriodWorld()
+    assert world.feed is not None
+    world.feed.append((date(2026, 2, 20), -333, "Surprise Charge"))
+    with Store(db) as store:
+        build_period_world(store, root, world, account=LONG_IDENTITY)
+    config = build_web_config(db)
+    assert config is not None
+    handler = type(
+        "PhoneHandler",
+        (ConnectionHandler,),
+        {"config": config, "session": AuthorisationSession()},
+    )
+    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}"
+    finally:
+        httpd.shutdown()  # type: ignore[attr-defined]
+        httpd.server_close()  # type: ignore[attr-defined]
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 _ENV = (
     "OBDI_CONNECTION_STORE",
     "OBDI_ACCOUNT_MAP",
@@ -271,6 +310,7 @@ OTHER_ROUTES = [
     "/admin",
     "/statements",
     "/identity-health",
+    "/period-reconciliation",
     "/actual-history",
     "/import",
     "/accounts",
@@ -452,6 +492,29 @@ def test_LedgerPage_ForUnknownVeryLongReference_RefusalDoesNotScrollSideways(
     browser: object, worst_case_base: str
 ) -> None:
     _assert_fits(_overflow(browser, f"{worst_case_base}/ledger?ref={LONG_IDENTITY}{LONG_IDENTITY}"))
+
+
+def test_StatementPeriodsPage_WithADifferingPeriodAndVeryLongReference_DoesNotScrollSideways(
+    browser: object, periods_base: str
+) -> None:
+    measured = _overflow(browser, f"{periods_base}/period-reconciliation")
+    _assert_fits(measured)
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        page.goto(f"{periods_base}/period-reconciliation", wait_until="load")
+        assert "differ from the statement" in page.content(), "no differing period was measured"
+    finally:
+        page.close()
+
+
+def test_StatementPeriodsPage_WithValuesShown_DoesNotScrollSideways(
+    browser: object, periods_base: str
+) -> None:
+    _assert_fits(
+        _overflow(browser, f"{periods_base}/period-reconciliation", press="Show values")
+    )
 
 
 def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(

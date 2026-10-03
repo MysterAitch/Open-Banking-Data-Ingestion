@@ -611,6 +611,11 @@ class WebConfig:
     #: is whether to MASK the figures, and the page only passes False when
     #: the viewer asked for them.
     balance_reconciliation_text: Callable[[bool], str] | None = None
+    #: The rows between consecutive statement balances, period by period, and
+    #: which explanation of a gap holds. The arguments are whether to MASK the
+    #: figures (False only when the viewer asked) and the account reference to
+    #: limit to, "" for every account.
+    period_reconciliation_text: Callable[[bool, str], str] | None = None
     #: One account's ledger for a month ("" for the newest) as DATA, real
     #: values included. Returning data rather than text is what lets the page
     #: decide, in one place, whether a reader may see the values.
@@ -4068,6 +4073,9 @@ class ConnectionHandler(
         if route == "/balance-reconciliation":
             self._balance_reconciliation(masked=True)
             return
+        if route == "/period-reconciliation":
+            self._period_reconciliation(masked=True, ref=params.get("ref", [""])[0].strip())
+            return
         if route == "/artefacts":
             self._artefacts()
             return
@@ -6223,6 +6231,63 @@ class ConnectionHandler(
             200, render_page("Balance reconciliation", body), no_store=not masked
         )
 
+    def _period_reconciliation(self, *, masked: bool, ref: str) -> None:
+        """The report, masked when fetched and unmasked only when posted for.
+
+        Follows `_balance_reconciliation`: the figures and the leftover rows
+        answer only a request made on purpose, and the answer is marked not to
+        be kept. The account reference travels in the query on a fetch and in
+        a hidden field on the post, and is only ever a name.
+        """
+        hook = self.bound_config.period_reconciliation_text
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
+            return
+        try:
+            text = hook(masked, ref)
+        except Exception as exc:
+            self._respond(
+                500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
+            )
+            return
+        held = html.escape(ref, quote=True)
+        scope = (
+            f'<input type="hidden" name="ref" value="{held}">' if ref else ""
+        )
+        back = (
+            f"/period-reconciliation?ref={quote(ref, safe='')}"
+            if ref
+            else "/period-reconciliation"
+        )
+        showing = (
+            '<p class="muted">Showing the MASKED rendering: account names, '
+            "dates, counts, and which explanation holds only.</p>"
+            '<form method="post" action="/period-reconciliation">'
+            + scope
+            + '<button class="button" type="submit" style="width:100%">'
+            "Show values</button></form>"
+            if masked
+            else '<p class="warn">Showing the UNMASKED rendering: figures and the '
+            "unmatched rows are visible.</p>"
+            f'<p><a class="button" href="{html.escape(back, quote=True)}">'
+            "Back to the masked rendering</a></p>"
+        )
+        body = (
+            "<h2>Statement periods</h2>"
+            "<p>Between each pair of consecutive statement balances, the rows "
+            "the store counts are set against the statement's own movement. "
+            "Where they differ, the rows each source holds that the "
+            "cross-source page could not match are used to say whether the "
+            "same money is held twice, and whether the difference is undone "
+            "by the next period.</p>"
+            f"{showing}"
+            f'<pre class="scroll" style="white-space:pre-wrap">'
+            f"{html.escape(text)}</pre>" + HOME_LINK
+        )
+        self._respond(
+            200, render_page("Statement periods", body), no_store=not masked
+        )
+
     def _balance_walk(self) -> None:
         hook = self.bound_config.balance_walk_text
         if hook is None:
@@ -6403,6 +6468,11 @@ class ConnectionHandler(
             return
         if route == "/balance-reconciliation":
             self._balance_reconciliation(masked=False)
+            return
+        if route == "/period-reconciliation":
+            self._period_reconciliation(
+                masked=False, ref=self._read_form().get("ref", [""])[0].strip()
+            )
             return
         if route == "/review-report":
             self._review_report(masked=False)

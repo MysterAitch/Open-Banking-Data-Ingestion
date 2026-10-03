@@ -2531,6 +2531,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 masked=masked, unmask_hint="press the Show the figures button on this page"
             )
 
+    def period_reconciliation_text(masked: bool, ref: str) -> str:
+        from .period_reconciliation import period_reconciliation
+
+        with Store(db_path) as store:
+            return period_reconciliation(
+                store,
+                sibling_accounts=_account_map(store).accounts_by_source(),
+                account=ref or None,
+            ).describe(masked=masked, unmask_hint="press the Show values button on this page")
+
     def archive_notes_for(store: Store, *, only: str | None = None) -> dict[str, ArchiveNote]:
         from .spaces import archive_notes as read_archive_notes
 
@@ -3375,6 +3385,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         review_report_text=review_report_text,
         identity_health_text=identity_health_text,
         balance_reconciliation_text=balance_reconciliation_text,
+        period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,
         position_data=position_data,
         anchor_save=anchor_save,
@@ -4080,6 +4091,21 @@ def main(argv: list[str] | None = None) -> int:
         "that have no row of their own - counts and account names only",
     )
 
+    period_command = subcommands.add_parser(
+        "period-reconciliation",
+        help="between each pair of statement balances, whether the rows held add up "
+        "and which explanation of a gap holds; figures are masked unless "
+        "--show-values is given",
+    )
+    period_command.add_argument(
+        "--account", default="", help="limit the report to one account reference"
+    )
+    period_command.add_argument(
+        "--show-values",
+        action="store_true",
+        help="also print the figures and the unmatched rows (private)",
+    )
+
     reconciliation_command = subcommands.add_parser(
         "balance-reconciliation",
         help="compare the rows held with the bank's end-of-day balances; "
@@ -4571,6 +4597,22 @@ def main(argv: list[str] | None = None) -> int:
         # it until the numbers have shown what an acceptable answer is.
         with Store(db_path) as store:
             print(identity_health(store).describe())
+        return 0
+    if args.command == "period-reconciliation":
+        from .period_reconciliation import period_reconciliation
+
+        # Measures only: the exit code never carries the verdict.
+        with Store(db_path) as store:
+            print(
+                period_reconciliation(
+                    store,
+                    sibling_accounts=_account_map(store).accounts_by_source(),
+                    account=args.account or None,
+                ).describe(
+                    masked=not args.show_values,
+                    unmask_hint="add --show-values to see them",
+                )
+            )
         return 0
     if args.command == "balance-reconciliation":
         from .balance_reconciliation import balance_reconciliation

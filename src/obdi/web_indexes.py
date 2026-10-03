@@ -39,6 +39,12 @@ REPORTS: tuple[tuple[str, str, str], ...] = (
         "closing balances? Figures are masked until asked for.",
     ),
     (
+        "/period-reconciliation",
+        "Statement periods",
+        "Between each pair of statement balances, do the rows held add up to the "
+        "statement's movement, and if not, is the same money held twice?",
+    ),
+    (
         "/balance-walk",
         "Balance walk",
         "Do consecutive running balances differ by exactly the amounts held between "
