@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.267] - 2026-10-03
+
+### Fixed
+- **The Overview, Position, and a main account's ledger answer again.** On
+  0.4.266 they did not answer within ten minutes for an account with Spaces and
+  several thousand rows: reading what each export's balance means scanned every
+  sighting once per row, and each stated balance re-summed every row. Both now
+  cost in proportion to the account's size, and a scaling test holds them there.
+
 ## [0.4.266] - 2026-10-03
 
 ### Added
