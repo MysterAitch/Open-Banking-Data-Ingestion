@@ -289,6 +289,8 @@ class UnheldLegs:
     uids: tuple[str, ...] = ()
     #: What asking the provider for them last produced, one per Space asked.
     fetches: tuple[SpaceFetch, ...] = ()
+    #: The date of every leg, earliest first.
+    days: tuple[date, ...] = ()
 
 
 def space_fetches(store: Store, uids: Iterable[str]) -> tuple[SpaceFetch, ...]:
@@ -347,6 +349,7 @@ def unheld_space_legs(rows: Iterable[Transaction], known_categories: frozenset[s
         len(legs),
         min((t.value_date for t in legs), default=None),
         tuple(sorted({str(t.raw.get("counterPartyUid", "")).strip() for t in legs})),
+        days=tuple(sorted(t.value_date for t in legs)),
     )
 
 

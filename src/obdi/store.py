@@ -2886,6 +2886,32 @@ class Store:
             )
         return sightings
 
+    def sighting_days(
+        self, accounts: Collection[str], sources: Collection[str]
+    ) -> dict[str, dict[str, str]]:
+        """Source -> entity id -> the earliest date that source gave the row, for
+        the rows of `accounts` that those sources sighted, in one read.
+
+        A sighting copied onto a Space row from the main-account row folded into
+        it counts: the source saw that payment, and the Space row is where it
+        is now counted. A sighting that gave no date is left out.
+        """
+        found: dict[str, dict[str, str]] = {source: {} for source in sources}
+        if not found or not accounts:
+            return found
+        account_marks = ",".join("?" for _ in accounts)
+        source_marks = ",".join("?" for _ in found)
+        for row in self.connection.execute(
+            "SELECT s.source AS source, s.entity_id AS entity_id, "  # noqa: S608
+            "MIN(s.observed_date) AS observed_date "
+            "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+            f"WHERE t.account_id IN ({account_marks}) AND s.source IN ({source_marks}) "
+            "AND s.observed_date != '' GROUP BY s.source, s.entity_id",
+            (*accounts, *found),
+        ):
+            found[row["source"]][row["entity_id"]] = row["observed_date"]
+        return found
+
     def entities_sighted_by(
         self, account_id: str, digests: Collection[str]
     ) -> dict[str, set[str]]:

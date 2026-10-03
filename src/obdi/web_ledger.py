@@ -398,6 +398,43 @@ def _opening_note(family: Any) -> str:
     return f'<p class="{css}">{_esc(family.opening_note)}</p>'
 
 
+#: How many days of a long list of faults are named before "and N more".
+_LISTED_FAULT_DAYS = 20
+
+
+def _day_list(days: tuple[str, ...]) -> str:
+    named = ", ".join(
+        f'<span class="mono nowrap">{_esc(day)}</span>' for day in days[:_LISTED_FAULT_DAYS]
+    )
+    more = len(days) - _LISTED_FAULT_DAYS
+    return named + (f" and {more} more" if more > 0 else "")
+
+
+def _changes_html(family: Any) -> str:
+    """Where the faults are, by day: the stated balances at which the difference
+    from the rows changes, which are the places a movement is missing or surplus.
+
+    Dates and counts only, never a figure, so it reads the same masked or not.
+    """
+    days = family.change_days
+    if not days:
+        return ""
+    explained = family.unheld_change_days
+    body = (
+        f"<p>The difference changes on {len(days)} "
+        f"{'day' if len(days) == 1 else 'days'}: {_day_list(days)}. "
+        "Each change is one more movement missing or surplus, on or just before that day.</p>"
+    )
+    if explained:
+        body += (
+            f"<p>{len(explained)} of those "
+            f"{'changes coincides' if len(explained) == 1 else 'changes coincide'} with a "
+            f"transfer to a Space whose rows are not held ({_day_list(explained)}), which "
+            "needs that Space declared and not a row found.</p>"
+        )
+    return body
+
+
 def _family_html(family: Any) -> str:
     """The walk of the whole account's stated balances against the rows of the
     main account and its Spaces together.
@@ -496,7 +533,8 @@ def _family_html(family: Any) -> str:
         f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they last '
         f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
         f"</span>.</strong> {_esc(pattern)}</p>"
-        '<ul class="anchors">'
+        + _changes_html(family)
+        + '<ul class="anchors">'
     )
     for line in family.lines:
         side = "lower" if line.difference_direction == "out" else "higher"

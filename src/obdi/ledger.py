@@ -91,8 +91,10 @@ ANCHOR_QUERIES = 8
 #: what the opened anchor costs (`family_anchors.opening_evidence`), and the
 #: next is the one read of the account's rows and sightings that decides what
 #: each blind source's balances mean (`balance_meaning`), read only when some
-#: blind source states one. None depends on what the evidence turns out to say.
-FAMILY_QUERIES = 5
+#: blind source states one, and the last is the one read of the days those
+#: sources gave the family's rows (`sighting_placement`), made only when a
+#: source states a balance. None depends on what the evidence turns out to say.
+FAMILY_QUERIES = 6
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -312,6 +314,11 @@ class FamilyView:
     #: "constant" (one movement missing or surplus between those two days),
     #: "changing" (several), or "" when nothing differs.
     pattern: Structural[str]
+    #: ISO days, earliest first, on which the difference from the rows changes
+    #: (`FamilyWalk.changes`), and those of them that a transfer to a Space
+    #: whose rows are not held explains.
+    change_days: Structural[tuple[str, ...]]
+    unheld_change_days: Structural[tuple[str, ...]]
     defining_day: Structural[str]
     lines: Structural[tuple[FamilyLine, ...]]
     #: The account's creation date when the provider states it, and the day of
@@ -409,7 +416,10 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
     if walk is None:
         return None
     first, last = walk.first_differing, walk.last_agreeing
+    changes = walk.changes
     return FamilyView(
+        change_days=tuple(dict.fromkeys(c.day.isoformat() for c in changes)),
+        unheld_change_days=tuple(dict.fromkeys(c.day.isoformat() for c in changes if c.unheld)),
         spaces=walk.spaces,
         sources=walk.sources,
         anchors=walk.anchors,

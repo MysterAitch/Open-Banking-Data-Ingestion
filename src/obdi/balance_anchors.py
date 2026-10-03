@@ -106,6 +106,7 @@ from .family_anchors import (
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
+from .sighting_placement import SightingPlacement, sighting_placement
 from .statement_membership import statement_membership
 from .statement_terms import StatementBalance, statement_balances
 from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
@@ -150,6 +151,9 @@ class Anchor:
     day: date
     balance_minor: int
     basis: str
+    #: The source that states it, where one does. Not part of equality: it says
+    #: whose dating judges the anchor (`sighting_placement`), not what is stated.
+    source: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -189,6 +193,22 @@ class FamilyReading:
     @property
     def agrees(self) -> bool | None:
         return None if self.difference_minor is None else self.difference_minor == 0
+
+
+@dataclass(frozen=True)
+class FaultChange:
+    """A stated balance at which the difference from the rows CHANGED.
+
+    Balances that differ by the same amount are one fault; each change is one
+    more movement missing or surplus, somewhere after `after` and on or before `day`.
+    """
+
+    day: date
+    #: The day of the previous stated balance (the opening's, for the first).
+    after: date
+    #: A transfer leg to a Space whose rows are not held falls in that window,
+    #: which is explained by declaring the Space and not by finding a row.
+    unheld: bool
 
 
 @dataclass(frozen=True)
@@ -283,6 +303,33 @@ class FamilyWalk:
         return len({r.difference_minor for r in later}) == 1
 
     @property
+    def changes(self) -> tuple[FaultChange, ...]:
+        """Each stated balance whose difference from the rows is not the one
+        before it, earliest first. The difference before the first balance is
+        nil: the opening is nil, or defined by the earliest balance itself."""
+        found: list[FaultChange] = []
+        legs = self.unheld.days
+        earlier = self.opened.day if self.opened else None
+        latest = earlier
+        before = 0
+        for reading in self.readings:
+            if latest is None or reading.day > latest:
+                earlier, latest = latest, reading.day
+            if reading.difference_minor is None:
+                continue
+            if reading.difference_minor != before:
+                start = earlier if earlier is not None else reading.day
+                found.append(
+                    FaultChange(
+                        reading.day,
+                        start,
+                        bisect_right(legs, reading.day) > bisect_right(legs, start),
+                    )
+                )
+            before = reading.difference_minor
+        return tuple(found)
+
+    @property
     def sources(self) -> tuple[str, ...]:
         return tuple(sorted({s for r in self.readings for s in r.sources}))
 
@@ -351,6 +398,7 @@ def derive_opening(
     *,
     unusable_statements: int = 0,
     placed: Mapping[str, date] | None = None,
+    sightings: SightingPlacement | None = None,
 ) -> EffectiveOpening:
     """The opening balance, and each later anchor judged against it.
 
@@ -360,29 +408,54 @@ def derive_opening(
     `placed` is `statement_membership.Membership.placed`: for a STATEMENT anchor
     a row it names counts on that day rather than on its stored date, because
     the statement that lists a row is the authority on which side of its own
-    closing the row falls. Anchors of every other basis go by stored date.
+    closing the row falls. An anchor naming a source `sightings` dates rows for
+    is judged with the rows on that source's days (`sighting_placement`). Anchors
+    of every other basis go by stored date.
     """
     held = list(rows)
+    # One anchor per statement of it, so two sources stating one figure are two
+    # tests, each by its own dating.
+    distinct = {(a.day, a.balance_minor, a.basis, a.source): a for a in anchors}
+    # The opened anchor defines the opening whatever day it falls on: a stated
+    # balance dated before it is then a check that fails, as `walk_family` judges
+    # it, and never the definition of an opening that the nil one outranks.
     ordered = sorted(
-        set(anchors),
-        key=lambda a: (a.day, _PRECEDENCE.get(a.basis, len(_PRECEDENCE)), a.balance_minor),
+        distinct.values(),
+        key=lambda a: (
+            a.basis != OPENED,
+            a.day,
+            _PRECEDENCE.get(a.basis, len(_PRECEDENCE)),
+            a.balance_minor,
+            a.source,
+        ),
     )
     if not ordered:
         return EffectiveOpening(account, (), None, None, unusable_statements)
 
-    #: (dates are placed by the statement, pending rows count) -> the days the
-    #: rows count on, sorted, and the running total of their amounts. Anchors
-    #: that agree on both questions share one sort, so each anchor is a bisection.
-    totals: dict[tuple[bool, bool], tuple[list[date], list[int]]] = {}
+    #: (dates are placed by the statement, pending rows count, the source whose
+    #: dating places the rows) -> the days the rows count on, sorted, and the
+    #: running total of their amounts. Anchors that agree on all three share one
+    #: sort, so each anchor is a bisection.
+    totals: dict[tuple[bool, bool, str], tuple[list[date], list[int]]] = {}
 
     def through(anchor: Anchor) -> int:
         by_statement = anchor.basis == STATEMENT and bool(placed)
-        shape = (by_statement, anchor.basis == STATED)
+        by_source = (
+            anchor.source
+            if sightings is not None
+            and not by_statement
+            and anchor.basis not in (STATED, OPENED)
+            and sightings.places(anchor.source)
+            else ""
+        )
+        shape = (by_statement, anchor.basis == STATED, by_source)
         if shape not in totals:
             counted = sorted(
                 (
                     placed.get(t.entity_id, t.value_date)
                     if by_statement and placed
+                    else sightings.day(by_source, t)
+                    if by_source and sightings is not None
                     else t.value_date,
                     t.amount_minor,
                 )
@@ -595,7 +668,7 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
         elif verdict == READ_AS_MAIN:
             # The main account's own balance, tested against its own rows alone.
             basis = _own_basis(candidate.source)
-            anchors.append(Anchor(candidate.day, candidate.balance_minor, basis))
+            anchors.append(Anchor(candidate.day, candidate.balance_minor, basis, candidate.source))
     return _Gathered(
         anchors, unusable, replace(stated, anchors=tuple(whole)), placed, meanings
     )
@@ -611,11 +684,22 @@ def gather_anchors(
     return gathered.own, gathered.unusable
 
 
-def _counted_through(rows: Iterable[Transaction]) -> Callable[[date], int]:
+def _counted_through(
+    rows: Iterable[Transaction],
+    sightings: SightingPlacement | None = None,
+    source: str = "",
+) -> Callable[[date], int]:
     """The sum of the rows that count, dated on or before a day, in no more
-    than a bisection per question."""
+    than a bisection per question. Rows go by `source`'s dating where
+    `sightings` places for it, and by stored date otherwise."""
+    placed = sightings is not None and sightings.places(source)
     counted = sorted(
-        (t.value_date, t.amount_minor) for t in rows if _counts_toward(FAMILY, t)
+        (
+            sightings.day(source, t) if placed and sightings is not None else t.value_date,
+            t.amount_minor,
+        )
+        for t in rows
+        if _counts_toward(FAMILY, t)
     )
     days = [day for day, _ in counted]
     totals = list(accumulate(minor for _, minor in counted))
@@ -628,16 +712,28 @@ def _counted_through(rows: Iterable[Transaction]) -> Callable[[date], int]:
 
 
 def family_main_anchors(
-    anchors: Iterable[FamilyAnchor], space_rows: Mapping[str, Sequence[Transaction]]
+    anchors: Iterable[FamilyAnchor],
+    space_rows: Mapping[str, Sequence[Transaction]],
+    sightings: SightingPlacement | None = None,
 ) -> list[Anchor]:
     """The main account's balance at each family anchor: the family's less the
-    Spaces' own counted rows through that day (a Space's rows start from nil)."""
-    through = [_counted_through(rows) for rows in space_rows.values()]
+    Spaces' own counted rows through that day (a Space's rows start from nil),
+    those rows placed as the anchor's source places them."""
+    spaces: dict[str, list[Callable[[date], int]]] = {}
+
+    def through(source: str) -> list[Callable[[date], int]]:
+        if source not in spaces:
+            spaces[source] = [
+                _counted_through(rows, sightings, source) for rows in space_rows.values()
+            ]
+        return spaces[source]
+
     return [
         Anchor(
             a.day,
-            a.balance_minor - sum(t(a.day) for t in through),
+            a.balance_minor - sum(t(a.day) for t in through(a.source)),
             OPENED if a.source == OPENED else FAMILY,
+            a.source,
         )
         for a in anchors
     ]
@@ -648,13 +744,15 @@ def walk_family(
     anchors: FamilyAnchors,
     members: Mapping[str, Sequence[Transaction]],
     held_categories: frozenset[str] = frozenset(),
+    sightings: SightingPlacement | None = None,
 ) -> FamilyWalk:
     """Each family balance against the counted rows of the main account and
     every Space in `members` (keyed by account, main included). Pure.
 
     Internal transfers appear as a row in each of two members and cancel in the
     sum, so the family's rows are comparable with the family's balance where
-    neither account's own are.
+    neither account's own are. Each balance is judged with the rows placed as
+    its own source places them (`sighting_placement`).
     """
     spaces = tuple(sorted(ref for ref in members if ref != main))
     every = [t for rows in members.values() for t in rows]
@@ -662,25 +760,30 @@ def walk_family(
         return FamilyWalk(
             main, spaces, (), anchors.refused_figures, "the rows are not all in GBP"
         )
-    through = _counted_through(every)
-    by_figure: dict[tuple[date, int], set[str]] = {}
-    for a in anchors.anchors:
-        by_figure.setdefault((a.day, a.balance_minor), set()).add(a.source)
-    ordered = sorted(by_figure)
+    stored = _counted_through(every)
+    placed: dict[str, Callable[[date], int]] = {}
+
+    def through(source: str, day: date) -> int:
+        if sightings is None or not sightings.places(source):
+            return stored(day)
+        if source not in placed:
+            placed[source] = _counted_through(every, sightings, source)
+        return placed[source](day)
+
+    ordered = sorted({(a.day, a.balance_minor, a.source) for a in anchors.anchors})
     opened = anchors.opened
     readings: list[FamilyReading] = []
     # With the opened anchor the opening is nil and EVERY stated balance is a
     # check; without it the earliest stated balance defines the opening.
-    opening = opened.balance_minor - through(opened.day) if opened else 0
-    for index, (day, balance) in enumerate(ordered):
-        sources = tuple(sorted(by_figure[(day, balance)]))
+    opening = opened.balance_minor - stored(opened.day) if opened else 0
+    for index, (day, balance, source) in enumerate(ordered):
         if index == 0 and opened is None:
-            opening = balance - through(day)
-            readings.append(FamilyReading(day, balance, sources, True))
+            opening = balance - through(source, day)
+            readings.append(FamilyReading(day, balance, (source,), True))
             continue
-        expected = opening + through(day)
+        expected = opening + through(source, day)
         readings.append(
-            FamilyReading(day, balance, sources, False, expected, balance - expected)
+            FamilyReading(day, balance, (source,), False, expected, balance - expected)
         )
     return FamilyWalk(
         main,
@@ -725,6 +828,14 @@ def effective_opening(
         derive_unitemised(ref, gathered.own, held) if balance_only else ()
     )
     walk: FamilyWalk | None = None
+    stating = {a.source for a in anchors if a.source}
+    if gathered.family is not None:
+        stating |= {a.source for a in gathered.family.anchors}
+    sightings = sighting_placement(
+        store,
+        [ref, *(families.spaces_of(ref) if families is not None else ())],
+        stating - {OPENED},
+    )
     if (
         gathered.family is not None
         and (gathered.family.anchors or gathered.family.opened)
@@ -735,7 +846,7 @@ def effective_opening(
         }
         opened = gathered.family.opened
         anchors += family_main_anchors(
-            [*([opened] if opened else []), *gathered.family.anchors], members
+            [*([opened] if opened else []), *gathered.family.anchors], members, sightings
         )
         # A Space counts as held only once it has rows: a bound Space whose
         # feed answered empty or was refused still leaves its transfers one-sided.
@@ -753,6 +864,7 @@ def effective_opening(
             gathered.family,
             {ref: [*held, *unitemised], **members},
             held_categories=held_ids,
+            sightings=sightings,
         )
         if walk.unheld.legs:
             fetches = space_fetches(store, walk.unheld.uids)
@@ -763,6 +875,7 @@ def effective_opening(
         [*held, *unitemised],
         unusable_statements=gathered.unusable,
         placed=gathered.placed,
+        sightings=sightings,
     )
     return replace(
         opening,
