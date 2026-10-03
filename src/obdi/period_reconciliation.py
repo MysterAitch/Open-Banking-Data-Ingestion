@@ -18,6 +18,10 @@ balance (a statement missing, or two documents disagreeing) also gets the
 period its own opening and closing state, because the two movements then
 differ.
 
+Which period a row is in is `statement_membership`'s decision, the same one the
+anchor checks use: the statement that lists a row places it, and only a row no
+statement lists is placed by its date.
+
 SURPLUS is what the store counts beyond the statement's movement: the rows
 summed, less the movement. It carries the OPPOSITE sign to the difference
 `balance_anchors` reports (anchor less prediction), so that a row held twice
@@ -46,7 +50,9 @@ More than one can hold at once. Where the two leftovers sum equal, the surplus
 equals both sums, and the report says so rather than choosing.
 
 A surplus that one period holds and the next period holds with the opposite
-sign is a row dated on the wrong side of the statement date between them.
+sign is a row dated on the wrong side of the statement date between them. A row
+a statement lists cannot be one, whatever date it carries: that was the false
+alarm a merged row's feed date raised, and membership removed it.
 
 Masked, the report states dates, counts, and which of the above holds. Figures
 and the leftover rows themselves appear only in the unmasked rendering.
@@ -65,6 +71,7 @@ from .coverage import Agreement, agreements
 from .models import Transaction
 from .money import format_amount
 from .parsers.pdf_statements import PDF_PARSERS
+from .statement_membership import Membership, statement_membership
 from .statement_terms import StatementBalance, held_statement_readings, statement_balances
 from .store import Store
 
@@ -465,10 +472,11 @@ def _periods_against(
     counted: list[Transaction],
     sightings: list[Transaction],
     paired: tuple[list[Leftover], date, date] | None,
+    membership: Membership,
 ) -> list[Period]:
     built: list[Period] = []
     for kind, first_day, last_day, movement in windows:
-        held = [r for r in counted if first_day <= r.value_date <= last_day]
+        held = [r for r in counted if first_day <= membership.placement(r) <= last_day]
         held_minor = sum(r.amount_minor for r in held)
         statement_only: tuple[Leftover, ...] = ()
         feed_only: tuple[Leftover, ...] = ()
@@ -581,6 +589,7 @@ def period_reconciliation(
         sightings = [t for t in held if t.account_id == ref]
         feeds = tuple(sorted({t.source for t in sightings} - STATEMENT_SOURCES))
         windows = _movement_periods(ordered, openings.get(ref, {}))
+        membership = statement_membership(store, ref, anchors)
         built: list[Period] = []
         for feed in feeds or ("",):
             pairs = [
@@ -592,7 +601,9 @@ def period_reconciliation(
                 and ({a.left, a.right} - {feed}) <= STATEMENT_SOURCES
             ]
             built += _mark_cancellations(
-                _periods_against(feed, windows, counted, sightings, _leftovers_of(pairs))
+                _periods_against(
+                    feed, windows, counted, sightings, _leftovers_of(pairs), membership
+                )
             )
         accounts.append(AccountPeriods(ref, len(ordered), tuple(built), feeds))
     return PeriodReport(tuple(accounts))

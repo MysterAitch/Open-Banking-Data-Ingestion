@@ -13,7 +13,9 @@ the statement came from.
   bank        the bank's own running balance on its records, derived on demand
               by `balance_reconciliation` and never stored.
   statement   the closing balance of a held statement, derived on demand by
-              `statement_terms.statement_balances` and never stored.
+              `statement_terms.statement_balances` and never stored. Which side
+              of it a row falls on is decided by which statement LISTS the row
+              where one does (`statement_membership`), by date otherwise.
   family      the main account's balance derived from a FAMILY anchor, below.
 
 A balance stated by a source that cannot see an account's Spaces is the balance
@@ -72,7 +74,7 @@ import hashlib
 import re
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from itertools import accumulate, pairwise
 
@@ -83,7 +85,8 @@ from .family_anchors import Families, FamilyAnchor, FamilyAnchors, family_anchor
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
-from .statement_terms import statement_balances
+from .statement_membership import statement_membership
+from .statement_terms import StatementBalance, statement_balances
 from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
 
 STATED = "stated"
@@ -283,11 +286,17 @@ def derive_opening(
     rows: Iterable[Transaction],
     *,
     unusable_statements: int = 0,
+    placed: Mapping[str, date] | None = None,
 ) -> EffectiveOpening:
     """The opening balance, and each later anchor judged against it.
 
     Pure: the anchors and rows are handed in, so the arithmetic can be shown
     without a store and the same figures serve the page and the push.
+
+    `placed` is `statement_membership.Membership.placed`: for a STATEMENT anchor
+    a row it names counts on that day rather than on its stored date, because
+    the statement that lists a row is the authority on which side of its own
+    closing the row falls. Anchors of every other basis go by stored date.
     """
     held = list(rows)
     ordered = sorted(
@@ -297,11 +306,16 @@ def derive_opening(
     if not ordered:
         return EffectiveOpening(account, (), None, None, unusable_statements)
 
+    def counts_on(anchor: Anchor, t: Transaction) -> date:
+        if anchor.basis == STATEMENT and placed:
+            return placed.get(t.entity_id, t.value_date)
+        return t.value_date
+
     def through(anchor: Anchor) -> int:
         return sum(
             t.amount_minor
             for t in held
-            if t.value_date <= anchor.day and _counts_toward(anchor.basis, t)
+            if counts_on(anchor, t) <= anchor.day and _counts_toward(anchor.basis, t)
         )
 
     if any(t.currency != CURRENCY for t in held if not t.status.is_history):
@@ -439,6 +453,8 @@ class _Gathered:
     #: The balances sources blind to its Spaces state for the family; None when
     #: the account has no known Spaces, so nothing was set aside.
     family: FamilyAnchors | None
+    #: Which rows the statements behind the account's STATEMENT anchors list.
+    placed: Mapping[str, date] = field(default_factory=dict)
 
 
 def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
@@ -459,6 +475,7 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
             else:
                 anchors.append(Anchor(b.day, b.balance_minor, BANK))
     statements, unusable = statement_balances(store, ref)
+    anchoring: list[StatementBalance] = []
     for s in statements:
         # A blind statement's balance is the family's, stated afresh and per
         # day by `family_anchors`; keeping it here as well would hand the main
@@ -466,8 +483,10 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
         if families is not None and spaces and s.source and families.blind(s.source, ref):
             continue
         anchors.append(Anchor(s.day, s.balance_minor, STATEMENT))
+        anchoring.append(s)
+    placed = statement_membership(store, ref, anchoring).placed if anchoring else {}
     if families is None or not spaces:
-        return _Gathered(anchors, unusable, None)
+        return _Gathered(anchors, unusable, None, placed)
     stated = family_anchors(store, ref, families)
     merged = tuple(
         sorted(
@@ -475,7 +494,9 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
             key=lambda a: (a.day, a.balance_minor, a.source),
         )
     )
-    return _Gathered(anchors, unusable, FamilyAnchors(merged, stated.refused_figures))
+    return _Gathered(
+        anchors, unusable, FamilyAnchors(merged, stated.refused_figures), placed
+    )
 
 
 def gather_anchors(
@@ -583,7 +604,11 @@ def effective_opening(
         derive_unitemised(ref, gathered.own, held) if balance_only else ()
     )
     opening = derive_opening(
-        ref, anchors, [*held, *unitemised], unusable_statements=gathered.unusable
+        ref,
+        anchors,
+        [*held, *unitemised],
+        unusable_statements=gathered.unusable,
+        placed=gathered.placed,
     )
     return replace(opening, family=walk, balance_only=balance_only, unitemised=unitemised)
 

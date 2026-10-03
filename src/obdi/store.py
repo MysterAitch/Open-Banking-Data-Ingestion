@@ -23,7 +23,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -2885,6 +2885,29 @@ class Store:
                 row["observed_date"] or ""
             )
         return sightings
+
+    def entities_sighted_by(
+        self, account_id: str, digests: Collection[str]
+    ) -> dict[str, set[str]]:
+        """Artefact digest -> the account's rows that artefact reported.
+
+        A sighting records the artefact it came from, so this is what a held
+        document LISTS, whatever date and source the stored row has since taken.
+        Sightings copied onto a Space row are not a document's own listing.
+        """
+        listed: dict[str, set[str]] = {digest: set() for digest in digests}
+        if not listed:
+            return listed
+        marks = ",".join("?" for _ in listed)
+        for row in self.connection.execute(
+            "SELECT s.artefact_digest AS digest, s.entity_id AS entity_id "  # noqa: S608
+            "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+            f"WHERE t.account_id = ? AND s.artefact_digest IN ({marks}) "
+            "AND (s.source_id IS NULL OR s.source_id NOT LIKE ?)",
+            (account_id, *listed, _COPY_PATTERN),
+        ):
+            listed[row["digest"]].add(row["entity_id"])
+        return listed
 
     def replace_space_folds(self, folds: Mapping[str, str]) -> None:
         """Make `folds` - folded entity id to the Space row's entity id - the

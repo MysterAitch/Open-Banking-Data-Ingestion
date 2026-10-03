@@ -315,12 +315,13 @@ class TestOneTotalAgainstThreeItemisedRows:
 
 class TestAFeeDatedOnEitherSideOfAStatementDate:
     """The statement dates a 6.66 late fee on its own date, 11 March; the feed
-    dates it 12 March. Identity merges them into one row, which lands in P3.
+    dates it 12 March. Identity merges them into one row, which carries the
+    feed's date and so, by date alone, lands in P3.
 
-    Expected: P2 lacks the fee the statement counted, surplus +6.66; P3 holds it
-    though its statement does not, surplus -6.66. Each is cancelled by the other,
-    which is the only thing that names the cause; P3's difference equals the one
-    row held there, dated 12 March and held by truelayer."""
+    Expected: the statement that lists the row places it, so P2 holds it and P3
+    does not, and every period agrees. (Placed by date, as it once was, P2 was
+    short 6.66 and P3 over by 6.66, each cancelling the other: a fault the rows
+    did not have.)"""
 
     def _world(self) -> World:
         statement_two: list[Row] = [S2[0], S2[1], ("11th Mar", "Late Fee", 666)]
@@ -333,40 +334,55 @@ class TestAFeeDatedOnEitherSideOfAStatementDate:
             feed=[*FEED_S1, *FEED_S2, (date(2026, 3, 12), -666, "Late Fee"), *FEED_S3],
         )
 
-    def test_TwoPeriods_CancelEachOther(self, store, tmp_path):
-        periods = periods_of(report_for(store, tmp_path, self._world()))
-
-        assert periods[P2].surplus_minor == 666
-        assert periods[P3].surplus_minor == -666
-        assert periods[P2].cancelled_by_next == date(2026, 4, 11)
-        assert periods[P3].cancels_previous == date(2026, 3, 11)
-        assert periods[P1].agrees and not periods[P1].cancelled
-
-    def test_Text_NamesTheStatementDateAndTheRowOnTheWrongSideOfIt(self, store, tmp_path):
-        text = report_for(store, tmp_path, self._world()).describe(masked=True)
-
-        assert (
-            "The next period, ending 2026-04-11, differs by exactly the opposite: a row "
-            "is dated on the wrong side of the statement date 2026-03-11" in block(text, P2)
-        )
-        third = block(text, P3)
-        assert "a single row held in this period: dated 2026-03-12, held by truelayer" in third
-        assert "The previous period, ending 2026-03-11" in third
-
-    def test_Periods_WhenTheSurplusesMerelyHappenToDiffer_AreNotCalledCancelled(
+    def test_Periods_WhenTheStatementListsTheMergedRow_AllAgreeAndNoneIsCancelled(
         self, store, tmp_path
     ):
-        """Two different faults of different sizes must not read as one fee that
-        crossed a date: here P2 is short 6.66 and P3 is over by 3.33."""
+        periods = periods_of(report_for(store, tmp_path, self._world()))
+
+        assert all(p.agrees and not p.cancelled for p in periods.values())
+        assert periods[P2].held_minor == periods[P2].movement_minor
+        assert periods[P3].held_minor == periods[P3].movement_minor
+
+    def test_Text_SaysNothingAboutARowOnTheWrongSideOfTheStatementDate(self, store, tmp_path):
+        text = report_for(store, tmp_path, self._world()).describe(masked=True)
+
+        assert "wrong side" not in text
+        assert "differ" not in text
+
+    def test_Periods_WhenAnUnlistedRowIsAlsoHeld_OnlyItsOwnPeriodDiffers(self, store, tmp_path):
+        """The feed also holds a 3.33 charge on 20 March that no statement lists:
+        placed by its date, it makes P3 over by 3.33 and leaves P2 agreeing, and
+        a lone surplus is not called a cancellation."""
         world = self._world()
-        world.feed = [*FEED_S1, *FEED_S2, (date(2026, 3, 12), -666, "Late Fee"), *FEED_S3]
-        world.feed.append((date(2026, 3, 20), -333, "Surprise Charge"))
+        assert world.feed is not None
+        world.feed = [*world.feed, (date(2026, 3, 20), -333, "Surprise Charge")]
 
         periods = periods_of(report_for(store, tmp_path, world))
 
-        assert periods[P2].surplus_minor == 666
-        assert periods[P3].surplus_minor == -999
+        assert periods[P2].agrees
+        assert periods[P3].surplus_minor == -333
         assert not periods[P2].cancelled and not periods[P3].cancelled
+
+    def test_Cancellation_WhenTwoPeriodsDifferByOppositeFigures_NamesTheStatementDateBetween(
+        self,
+    ):
+        """The machinery that names a row dated on the wrong side of a statement
+        date still serves a row no statement lists (a feed row against a
+        statement that omits it cannot arise from merged rows). Two periods one
+        statement apart, over by 6.66 and short by 6.66, are paired."""
+        from obdi.period_reconciliation import Period, _mark_cancellations
+
+        def period(last: date, held: int) -> Period:
+            return Period(
+                PeriodKind.BETWEEN, date(2026, 1, 1), last, 0, held, 1, "", True, (), (), ()
+            )
+
+        marked = _mark_cancellations(
+            [period(date(2026, 3, 11), -666), period(date(2026, 4, 11), 666)]
+        )
+
+        assert marked[0].cancelled_by_next == date(2026, 4, 11)
+        assert marked[1].cancels_previous == date(2026, 3, 11)
 
 
 class TestARowOnlyTheFeedHolds:

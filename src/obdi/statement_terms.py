@@ -199,6 +199,9 @@ class StatementBalance:
     #: statement. Not part of equality: a balance is the same fact whichever
     #: way it is asked for.
     source: str = field(default="", compare=False)
+    #: The artefact digest the statement is held under, which every row it lists
+    #: carries on its sighting. Not part of equality, like `source`.
+    digest: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -327,7 +330,9 @@ def statement_balances(
             unusable += 1
         else:
             usable.append(
-                StatementBalance(account, known.closing[0], known.closing[1], known.source)
+                StatementBalance(
+                    account, known.closing[0], known.closing[1], known.source, digest
+                )
             )
     # An assigned section states its own closing balance, judged by the same
     # rule: its own rows carry its own opening balance to it. A loan's is
@@ -345,6 +350,7 @@ def statement_balances(
                     assignment.account_ref,
                     section.reading.statement_date,
                     section.reading.closing_balance_minor,
+                    digest=assignment.digest,
                 )
             )
         else:
