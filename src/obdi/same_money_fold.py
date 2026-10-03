@@ -29,6 +29,29 @@ period, and a set of them is the same money as the statement's when ALL of:
     a fold that cannot make a period agree has hidden something that is not a
     duplicate.
 
+The statement side asks only "does the statement itemise this money?", and an
+excuse the cross-source page gave a row (so that it is not reported as a
+discrepancy there) answers that neither way. So an excused statement-only row
+may be part of the subset, and the period's difference remains the real test.
+The feed side is the opposite, deliberately: an excused feed row is one the
+cross-source page has already explained as something else (a transfer leg), and
+folding it would explain it twice. Measured on a real card, the statement row
+that WAS the charge was excused, the rule searched only the others, and that one
+period kept differing. The excuses a statement-only row can carry, each judged
+by whether it says the row is not THIS account's money (that alone would bar it,
+since the statement side is what the period's movement is made of):
+  - a proven internal transfer: a leg printed in this account's statement, so
+    it is this account's money. The opposite leg is another account's row, which
+    this fold never touches.
+  - matched to a row filed under a sibling account: an equal row of the other
+    source exists under another account within days. That is a pairing
+    heuristic about where the OTHER source filed a copy, not a finding that
+    this statement's row is not its own; the sibling's row is not used here and
+    its arithmetic is untouched.
+Neither bars the row. Where an excused and an unexcused subset make the same
+sum, the one with fewer excused rows is taken, so an excuse is leaned on only
+when it has to be, and the page names which rows were used by date.
+
 Among the sets that qualify the smallest is taken, and of equal size the one
 dated latest. The reason is a period spanning a statement that is not held: it
 holds that statement's charge too, dated earlier, and where the two share an
@@ -184,6 +207,8 @@ class _Candidate:
     window: _Window
     feed: str
     rows: tuple[Transaction, ...]
+    #: The statement-only rows whose sum the feed rows equal.
+    statement: tuple[Leftover, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -237,28 +262,45 @@ def _feed_candidates(
 
 
 def _statement_rows(leftovers: Sequence[Leftover], window: _Window) -> list[Leftover]:
-    """The period's statement-only rows, nearest the closing first."""
+    """The period's statement-only rows, excused or not, nearest the closing
+    first."""
     return sorted(
         (
             leftover
             for leftover in leftovers
             if leftover.side == STATEMENT_SIDE
-            and not leftover.excuse
             and window.first_day <= leftover.row_date <= window.last_day
         ),
         key=lambda leftover: (window.last_day - leftover.row_date, leftover.amount_minor),
     )
 
 
-def _statement_sums(rows: Sequence[Leftover]) -> set[int]:
-    """Every non-zero total some non-empty subset of the rows adds up to, taking
-    at most `MAX_STATEMENT_ROWS` of them (the nearest, as `_statement_rows`
-    orders them)."""
-    sums: set[int] = set()
-    for leftover in rows[:MAX_STATEMENT_ROWS]:
-        sums |= {total + leftover.amount_minor for total in sums} | {leftover.amount_minor}
-    sums.discard(0)
-    return sums
+def _statement_subsets(rows: Sequence[Leftover]) -> dict[int, tuple[Leftover, ...]]:
+    """Every non-zero total some non-empty subset of the rows adds up to, with
+    the subset that makes it, taking at most `MAX_STATEMENT_ROWS` of them (the
+    nearest, as `_statement_rows` orders them). Of subsets with one total, the
+    one with fewest excused rows, then fewest rows, then the earliest in
+    `rows` order."""
+
+    def cost(subset: tuple[tuple[int, Leftover], ...]) -> tuple[int, int, tuple[int, ...]]:
+        return (
+            sum(1 for _, row in subset if row.excuse),
+            len(subset),
+            tuple(index for index, _ in subset),
+        )
+
+    best: dict[int, tuple[tuple[int, Leftover], ...]] = {}
+    for index, leftover in enumerate(rows[:MAX_STATEMENT_ROWS]):
+        grown = [
+            (total + leftover.amount_minor, (*subset, (index, leftover)))
+            for total, subset in best.items()
+        ]
+        grown.append((leftover.amount_minor, ((index, leftover),)))
+        for total, subset in grown:
+            if total not in best or cost(subset) < cost(best[total]):
+                best[total] = subset
+    best.pop(0, None)
+    return {total: tuple(row for _, row in subset) for total, subset in best.items()}
 
 
 def _period_rows(feed_rows: Iterable[Transaction], window: _Window) -> list[Transaction]:
@@ -269,13 +311,13 @@ def _period_rows(feed_rows: Iterable[Transaction], window: _Window) -> list[Tran
 
 
 def _smallest_set(
-    rows: Sequence[Transaction], difference: int, statement_sums: set[int]
+    rows: Sequence[Transaction], difference: int, statement_subsets: Mapping[int, object]
 ) -> tuple[Transaction, ...] | None:
     """The smallest set of the rows summing to the period's difference, if that
     sum is also one the statement's rows make; the earliest in `rows` order
     among sets of one size. Each row is tried alone whatever their number; sets
     of more are tried over the first `MAX_SET_ROWS` only."""
-    if difference == 0 or difference not in statement_sums:
+    if difference == 0 or difference not in statement_subsets:
         return None
     for row in rows:
         if row.amount_minor == difference:
@@ -308,15 +350,16 @@ def _attempts(evidence: AccountEvidence, chain: Sequence[_Window]) -> list[_Atte
             difference = sum(row.amount_minor for row in held) - window.movement_minor
             statement_rows = _statement_rows(leftovers, window)
             in_period = _period_rows(feed_rows.values(), window)
+            subsets = _statement_subsets(statement_rows)
             taking = (
-                _smallest_set(in_period, difference, _statement_sums(statement_rows))
+                _smallest_set(in_period, difference, subsets)
                 if difference and statement_rows and in_period
                 else None
             )
             candidate = None
             if taking is not None:
                 taken.update(row.entity_id for row in taking)
-                candidate = _Candidate(window, feed, taking)
+                candidate = _Candidate(window, feed, taking, subsets[difference])
             found.append(
                 _Attempt(window, feed, difference == 0, in_period, statement_rows, candidate)
             )
@@ -384,6 +427,12 @@ def _outcome_of(
             (window.first_day, window.last_day) for window in refused.get(id(candidate), ())
         )
     )
+    statement = sorted(attempt.statement_rows, key=lambda row: (row.row_date, row.excuse))
+    matched = (
+        []
+        if candidate is None
+        else sorted(candidate.statement, key=lambda row: (row.row_date, row.excuse))
+    )
     return ClosingOutcome(
         closing=attempt.window.last_day,
         feed=attempt.feed,
@@ -391,7 +440,7 @@ def _outcome_of(
         period=(attempt.window.first_day, attempt.window.last_day),
         feed_dates=tuple(sorted(row.value_date for row in attempt.feed_rows)),
         feed_searched=MAX_SET_ROWS,
-        statement_dates=tuple(sorted(row.row_date for row in attempt.statement_rows)),
+        statement_dates=tuple(row.row_date for row in statement),
         statement_searched=MAX_STATEMENT_ROWS,
         taken_dates=(
             ()
@@ -399,6 +448,9 @@ def _outcome_of(
             else tuple(sorted(row.value_date for row in candidate.rows))
         ),
         blocking=blocking,
+        statement_excuses=tuple(row.excuse for row in statement),
+        matched_dates=tuple(row.row_date for row in matched),
+        matched_excuses=tuple(row.excuse for row in matched),
     )
 
 

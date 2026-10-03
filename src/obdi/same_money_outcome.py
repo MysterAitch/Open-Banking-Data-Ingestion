@@ -13,7 +13,7 @@ description, so the masked page can show it.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -34,6 +34,15 @@ def dated_list(items: Iterable[object]) -> str:
     if len(shown) > LIST_CAP:
         text += f", and {len(shown) - LIST_CAP} more"
     return text
+
+
+def _with_excuses(dates: Sequence[date], excuses: Sequence[str]) -> str:
+    """Each date, followed by why that row is excused where it is. A record
+    written before excuses were kept has none, and its dates stand alone."""
+    return dated_list(
+        f"{day} [excused: {why}]" if why else day
+        for day, why in zip(dates, [*excuses, *[""] * len(dates)], strict=False)
+    )
 
 
 class Verdict(StrEnum):
@@ -69,7 +78,7 @@ class ClosingOutcome:
     feed_dates: tuple[date, ...]
     #: How many of them were combined into sets of more than one row, when bounded.
     feed_searched: int
-    #: Every statement-only row of the period.
+    #: Every statement-only row of the period the rule may search, in date order.
     statement_dates: tuple[date, ...]
     #: How many of them the search took (the nearest the closing), when bounded.
     statement_searched: int
@@ -78,6 +87,13 @@ class ClosingOutcome:
     #: For a refused candidate, the periods (first and last day) that would
     #: still differ after the fold, the blocking period among them.
     blocking: tuple[tuple[date, date], ...] = ()
+    #: Why each of `statement_dates` is excused, in the same order, "" for one
+    #: that is not.
+    statement_excuses: tuple[str, ...] = ()
+    #: The statement-only rows a candidate's sum was made from (date order), and
+    #: why each is excused, "" for one that is not.
+    matched_dates: tuple[date, ...] = ()
+    matched_excuses: tuple[str, ...] = ()
 
     @property
     def bounds(self) -> tuple[str, ...]:
@@ -99,15 +115,21 @@ class ClosingOutcome:
         period = f"the period {first} to {last}"
         statement = (
             f"{plural(len(self.statement_dates), 'statement-only row')} "
-            f"(dated {dated_list(self.statement_dates)})"
+            f"(dated {_with_excuses(self.statement_dates, self.statement_excuses)})"
             if self.statement_dates
             else "no statement-only row"
         )
         if self.verdict is Verdict.FOLDED:
+            matched = (
+                f"{plural(len(self.matched_dates), 'statement-only row')} "
+                f"(dated {_with_excuses(self.matched_dates, self.matched_excuses)})"
+                if self.matched_dates
+                else "statement-only rows"
+            )
             text = (
                 f"the rule folds {plural(len(self.taken_dates), 'feed row')} from "
                 f"{self.feed} (dated {dated_list(self.taken_dates)}) as the same money as "
-                f"statement-only rows, and {period} then agrees."
+                f"{matched}, and {period} then agrees."
             )
         elif self.verdict is Verdict.AGREES:
             text = f"{period} already agrees with the statement, so there is nothing to fold."
@@ -155,6 +177,9 @@ class ClosingOutcome:
             "statement_searched": self.statement_searched,
             "taken_dates": [day.isoformat() for day in self.taken_dates],
             "blocking": [[a.isoformat(), b.isoformat()] for a, b in self.blocking],
+            "statement_excuses": list(self.statement_excuses),
+            "matched_dates": [day.isoformat() for day in self.matched_dates],
+            "matched_excuses": list(self.matched_excuses),
         }
 
     @staticmethod
@@ -169,6 +194,15 @@ class ClosingOutcome:
         blocking_raw = found["blocking"]
         if not isinstance(blocking_raw, list):
             raise TypeError("blocking is not a list")
+        def texts(key: str) -> tuple[str, ...]:
+            raw = found.get(key, [])
+            if not isinstance(raw, list):
+                raise TypeError(f"{key} is not a list")
+            return tuple(str(item) for item in raw)
+
+        def optional_days(key: str) -> tuple[date, ...]:
+            return days(key) if key in found else ()
+
         return ClosingOutcome(
             closing=date.fromisoformat(str(found["closing"])),
             feed=str(found["feed"]),
@@ -182,6 +216,9 @@ class ClosingOutcome:
             blocking=tuple(
                 (date.fromisoformat(str(a)), date.fromisoformat(str(b))) for a, b in blocking_raw
             ),
+            statement_excuses=texts("statement_excuses"),
+            matched_dates=optional_days("matched_dates"),
+            matched_excuses=texts("matched_excuses"),
         )
 
 

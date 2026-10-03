@@ -36,6 +36,14 @@ statement-only and feed-only rows sum to different figures while the difference
 still equals the feed row and one statement row. The last period prints two rows
 (the charge and one other) where the rest print three.
 
+The real card's second period differed from that: the excused row was the CHARGE
+itself, so the rows the rule used (dated 2025-10-30 and twice on the closing
+day) never summed to the difference. `build_card(transfer_row="Plan Part
+1-charge")` is that shape. KNOWN ANSWER: the feed row folds and all eight
+periods agree, as with the default; on the rule before excused statement rows
+were usable, that closing alone folded nothing and its period kept differing by
+the charge.
+
 With `equal_charges` the answer PREDICTED was the same eight folds; MEASURED:
 nothing folds and every period already agrees. The identity layer merges each
 feed row with the statement charge row of the same amount a day away, so no
@@ -312,6 +320,7 @@ def build_card(
     equal_charges: bool = False,
     missing_charge: int | None = None,
     transfer: bool = True,
+    transfer_row: str = "Transfer Leg",
 ) -> Card:
     """The whole corpus: statements in order (the missing month's statement is
     simply never held), then the feed. `skip` leaves held statements out, for
@@ -320,7 +329,9 @@ def build_card(
     another date; `equal_charges`
     makes every charge one amount; `missing_charge` sets the amount of the
     statement that is not held (the default is its own, or the one amount);
-    `transfer` confirms the second statement's transfer leg."""
+    `transfer` confirms the second statement's transfer leg, or, with
+    `transfer_row` naming another of that statement's rows (the real card's
+    shape: the CHARGE is the excused one), that row instead."""
     card = Card(store, root, equal=equal_charges)
     if missing_charge is not None:
         gap_charge = missing_charge
@@ -345,5 +356,5 @@ def build_card(
     feed += extra_feed
     land(store, *feed)
     if transfer and 1 not in skip:
-        confirm_transfer(store)
+        pair_with_savings(store, transfer_row)
     return card

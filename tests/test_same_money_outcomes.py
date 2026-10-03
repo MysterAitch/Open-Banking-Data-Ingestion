@@ -10,6 +10,7 @@ verdict, not the page's guess.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import date, timedelta
@@ -29,7 +30,7 @@ from card_chain_corpus import (
     pair_with_savings,
 )
 from card_variant_corpus import CLOSINGS as MINI_CLOSINGS
-from card_variant_corpus import Variant, build_mini_card
+from card_variant_corpus import SIBLING_SCOPE, Variant, build_mini_card
 from obdi.models import TransactionStatus
 from obdi.period_reconciliation import (
     PeriodKind,
@@ -446,6 +447,118 @@ class TestTheLeftoversAreListedByDateAndSource:
 
         assert listed.endswith(tail)
         assert listed.count("2026-") == min(count, 20)
+
+
+class TestAnExcusedStatementRow:
+    """The variants about excuses in `card_variant_corpus`, each with its known answer.
+
+    Period 2 closes on 2026-03-10 and starts on 2026-02-11, where the feed dates
+    its charge.
+    """
+
+    CLOSING = MINI_CLOSINGS[2]
+
+    def test_Rule_WhenTheStatementRowThatIsTheChargeIsExcused_FoldsTheFeedRowAndSaysWhy(
+        self, store, tmp_path
+    ):
+        build_mini_card(store, tmp_path, Variant.EXCUSED_CHARGE)
+
+        report = fold_same_money(store)
+
+        assert report.folded == 3
+        assert "Plan Charge 2" in folded(store)
+        assert closing_line(page(store), self.CLOSING) == (
+            "Closing 2026-03-10: the rule folds 1 feed row from truelayer (dated 2026-02-11) "
+            "as the same money as 1 statement-only row (dated 2026-03-10 [excused: a proven "
+            "internal transfer]), and the period 2026-02-11 to 2026-03-10 then agrees."
+        )
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+        assert all(period.agrees for period in item.periods)
+
+    def test_Page_WhenAStatementRowIsExcused_SaysWhyInThePeriodsLeftoverList(
+        self, store, tmp_path
+    ):
+        build_mini_card(store, tmp_path, Variant.EXCUSED_CHARGE)
+        fold_same_money(store)
+
+        assert (
+            "Statement-only rows are dated: 2026-03-10 (santander-cc-pdf), 2026-03-10 "
+            "(santander-cc-pdf), 2026-03-10 (santander-cc-pdf, excused: a proven internal "
+            "transfer)."
+        ) in page(store)
+
+    def test_Rule_WhenExcusedAndPlainStatementRowsShareTheChargesAmount_FoldsOnceUsingThePlainOne(
+        self, store, tmp_path
+    ):
+        build_mini_card(store, tmp_path, Variant.EXCUSED_AND_PLAIN)
+
+        fold_same_money(store)
+
+        assert [name for name in folded(store) if name.endswith("2")] == ["Plan Charge 2"]
+        assert closing_line(page(store), self.CLOSING) == (
+            "Closing 2026-03-10: the rule folds 1 feed row from truelayer (dated 2026-02-11) "
+            "as the same money as 1 statement-only row (dated 2026-03-10), and the period "
+            "2026-02-11 to 2026-03-10 then agrees."
+        )
+
+    def test_Rule_WhenTheFeedRowEqualToTheDifferenceIsExcused_DoesNotFoldItAndThePeriodStaysOver(
+        self, store, tmp_path
+    ):
+        """The cross-source page has explained that feed row as a transfer leg;
+        folding it as well would explain it twice."""
+        build_mini_card(store, tmp_path, Variant.EXCUSED_FEED)
+
+        fold_same_money(store)
+
+        assert "Plan Charge 2" not in folded(store)
+        assert verdicts(store) == [
+            Verdict.AGREES,
+            Verdict.FOLDED,
+            Verdict.NO_FEED_ROWS,
+            Verdict.FOLDED,
+        ]
+        [item] = period_reconciliation(store, sibling_accounts={}).accounts
+        assert [p.agrees for p in item.periods if p.last_day == self.CLOSING] == [False]
+
+    def test_Rule_WhenTheStatementRowIsExcusedBySiblingAttribution_FoldsAndLeavesTheSiblingAlone(
+        self, store, tmp_path
+    ):
+        """An equal row of the feed under another account says where a COPY was
+        filed, not that the statement's row is not its own; the sibling's row is
+        never used here."""
+        build_mini_card(store, tmp_path, Variant.SIBLING_EXCUSED_CHARGE)
+
+        plan = plan_same_money(gather_evidence(store, sibling_accounts=SIBLING_SCOPE))
+
+        [outcome] = plan.outcomes
+        [closing] = [c for c in outcome.closings if c.closing == self.CLOSING]
+        assert closing.verdict is Verdict.FOLDED
+        assert closing.matched_excuses == ("matched to a row filed under other-card",)
+        assert closing.describe().count("excused: matched to a row filed under other-card") == 1
+        [sibling] = store.transactions_for_account("other-card")
+        assert sibling.entity_id not in plan.folds
+
+    def test_Rule_WhenNothingIsExcused_FoldsExactlyAsBefore(self, store, tmp_path):
+        build_mini_card(store, tmp_path, Variant.IN_PERIOD)
+
+        fold_same_money(store)
+
+        assert "excused" not in closing_line(page(store), self.CLOSING)
+
+    def test_Outcome_WhenTheStoredRecordPredatesExcuses_StillReadsAndSaysNothingOfThem(
+        self, store, tmp_path
+    ):
+        build_mini_card(store, tmp_path, Variant.IN_PERIOD)
+        [outcome] = plan_same_money(gather_evidence(store, sibling_accounts={})).outcomes
+        stored = json.loads(outcome.to_text())
+        for closing in stored["closings"]:
+            for key in ("statement_excuses", "matched_dates", "matched_excuses"):
+                del closing[key]
+
+        reread = AccountOutcome.from_text(json.dumps(stored))
+
+        assert all(c.statement_excuses == () and c.matched_dates == () for c in reread.closings)
+        assert all("excused" not in line for line in reread.describe())
 
 
 class TestTheMaskedPageStillCarriesNoValues:

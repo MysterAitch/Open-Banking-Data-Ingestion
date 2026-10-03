@@ -113,6 +113,12 @@ class PeriodKind(StrEnum):
     INSIDE = "inside"
 
 
+#: The excuse of a leftover that is a proven leg of an internal transfer.
+TRANSFER_EXCUSE = "a proven internal transfer"
+#: What an excuse for a row matched to a sibling account begins with; the account follows.
+SIBLING_EXCUSE = "matched to a row filed under "
+
+
 @dataclass(frozen=True)
 class Leftover:
     """A row one side holds that the pairing did not match to the other side."""
@@ -259,8 +265,8 @@ def _leftover_dates(rows: Iterable[Leftover]) -> str:
     """Each leftover's date and the source that holds it, earliest first. Never
     an amount or a description: dates and sources are not private."""
     return dated_list(
-        f"{row.row_date} ({row.source}{', excused' if row.excuse else ''})"
-        for row in sorted(rows, key=lambda r: (r.row_date, r.source))
+        f"{row.row_date} ({row.source}{', excused: ' + row.excuse if row.excuse else ''})"
+        for row in sorted(rows, key=lambda r: (r.row_date, r.source, r.excuse))
     )
 
 
@@ -463,7 +469,7 @@ def _leftovers_of(
                 leg.row_date,
                 leg.amount_minor,
                 leg.description,
-                "a proven internal transfer",
+                TRANSFER_EXCUSE,
                 leg.entity_id,
             )
             for leg in agreement.confirmed_transfer_legs
@@ -474,7 +480,7 @@ def _leftovers_of(
                 match.row_date,
                 match.amount_minor,
                 match.description,
-                f"matched to a row filed under {match.sibling_account}",
+                f"{SIBLING_EXCUSE}{match.sibling_account}",
                 "",
             )
             for match in agreement.attributed

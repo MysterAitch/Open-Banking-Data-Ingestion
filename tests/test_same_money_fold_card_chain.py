@@ -312,6 +312,43 @@ class TestWhichOfEqualRowsIsHidden:
         assert all(chain(store).values())
 
 
+class TestTheRealCardsExcusedChargeRow:
+    """The second period's statement row that IS the charge is the excused one.
+
+    Known answer in `card_chain_corpus`: the charge folds, like the other seven.
+    """
+
+    def test_Fold_WhenTheSecondChargeRowIsATransferLeg_FoldsAllEightAndEveryPeriodAgrees(
+        self, store, tmp_path
+    ):
+        build_card(store, tmp_path, transfer_row="Plan Part 1-charge")
+
+        report = fold_same_money(store)
+
+        assert report.folded == 8
+        assert folded(store) == charge_rows(*range(1, 9))
+        assert all(chain(store).values())
+
+    def test_Page_WhenTheSecondStatementsChargeRowIsExcused_SaysWhyAndWhichRowTheFoldUsed(
+        self, store, tmp_path
+    ):
+        build_card(store, tmp_path, transfer_row="Plan Part 1-charge")
+        fold_same_money(store)
+
+        text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
+
+        assert (
+            "Closing 2025-11-12: the rule folds 1 feed row from truelayer (dated 2025-10-11) "
+            "as the same money as 1 statement-only row (dated 2025-11-12 [excused: a proven "
+            "internal transfer]), and the period 2025-10-11 to 2025-11-12 then agrees."
+        ) in text
+        assert (
+            "Statement-only rows are dated: 2025-10-30 (santander-cc-pdf), 2025-11-12 "
+            "(santander-cc-pdf), 2025-11-12 (santander-cc-pdf), 2025-11-12 "
+            "(santander-cc-pdf, excused: a proven internal transfer)."
+        ) in text
+
+
 class TestWhatIsNeverFolded:
     def test_Fold_WhenTheChargeRowIsAConfirmedTransferLeg_LeavesItCounted(self, store, tmp_path):
         """The leg stays counted, so its period stays over by it: that period is
