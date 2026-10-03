@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.279] - 2026-10-03
+
+### Fixed
+- **A round-up on a reversed or declined payment is held as a transfer out of
+  the main account.** On the real account the Space had received each such
+  round-up while the main account held no leg for it, so the whole account was
+  over by exactly that arrival. The leg is booked whatever became of the
+  payment; one whose round-up never arrived shows as an unpaired leg, counted
+  on the page.
+
+### Added
+- **An unpaired round-up leg says whether the Space holds an arrival of the
+  same size within three days**, which tells a pairing miss from a round-up
+  that never arrived.
+
 ## [0.4.278] - 2026-10-03
 
 ### Fixed

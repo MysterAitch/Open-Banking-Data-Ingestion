@@ -158,6 +158,19 @@ class TestARoundUpOfAReversedPayment:
         assert leg.status is TransactionStatus.BOOKED
         assert len(store.confirmed_transfer_pairs()) == 6
 
+    def test_Leg_WhenTheReversedPaymentIsLeftAtNil_IsStillMadeAndThePaymentAddsNothing(self):
+        # The shape a real account showed: its reversed rows added nothing to
+        # any difference, read as money in only because nil is not money out,
+        # and were counted as carriers on reversed items and not incoming ones.
+        payment, leg = starling.to_transactions(
+            card_payment("f-nil", "Parcel", 0, 6, status="REVERSED", round_up=round_up_of(30)),
+            account_id=MAIN,
+        )
+
+        assert (payment.status, payment.amount_minor) == (TransactionStatus.REVERSED, 0)
+        assert (leg.status, leg.amount_minor) == (TransactionStatus.BOOKED, -30)
+        assert leg.is_internal_transfer
+
 
 class TestARoundUpOfADeclinedPayment:
     def test_Leg_WhenThePaymentYieldsNoRow_StandsAloneBookedAndPaired(self, make):
