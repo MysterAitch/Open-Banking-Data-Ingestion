@@ -26,6 +26,15 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.280] - 2026-10-04
+
+### Fixed
+- **A card-only provider's cards are fetched.** A newly connected card issuer
+  answered the account list with "not supported" rather than an empty list,
+  which ended the pull before the card pass, so the connection held consent and
+  fetched nothing. That answer now means no current accounts, and the cards are
+  asked for; any other refusal of the account list still stops the pull.
+
 ## [0.4.279] - 2026-10-03
 
 ### Fixed

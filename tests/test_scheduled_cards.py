@@ -47,21 +47,24 @@ def _connection() -> Connection:
 class Provider:
     """What the fake provider was asked, and how it answers."""
 
-    def __init__(self, monkeypatch, *, cards, card_txns=None, card_list_error=None) -> None:
+    def __init__(
+        self,
+        monkeypatch,
+        *,
+        cards,
+        card_txns=None,
+        card_list_error=None,
+        account_list_error=None,
+    ) -> None:
         self.card_list_calls = 0
         self.card_windows: list[tuple[str, dict]] = []
         self.account_asks: list[str] = []
         self._card_txns = card_txns or {}
         self._cards = cards
         self._card_list_error = card_list_error
+        self._account_list_error = account_list_error
 
-        monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_accounts",
-            lambda _token, **_kw: (
-                [{"account_id": "acc-1", "display_name": "Current", "account_type": "T"}],
-                b'{"results": []}',
-            ),
-        )
+        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", self._list_accounts)
         monkeypatch.setattr(
             "obdi.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}")
         )
@@ -69,6 +72,14 @@ class Provider:
         monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", self._list_cards)
         monkeypatch.setattr(
             "obdi.pull.truelayer.fetch_card_transactions", self._card_transactions
+        )
+
+    def _list_accounts(self, _token, **_kwargs):
+        if self._account_list_error is not None:
+            raise self._account_list_error
+        return (
+            [{"account_id": "acc-1", "display_name": "Current", "account_type": "T"}],
+            b'{"results": []}',
         )
 
     def _transactions(self, _token, account_id, **kwargs):
@@ -286,6 +297,70 @@ class TestConnectionsWithoutWorkingCards:
         assert len(account_landed) == 2
         assert any(note.startswith("card list:") for note in result.notes)
         assert stamp is not None
+
+
+class TestAProviderThatServesCardsAndNoCurrentAccounts:
+    """A card issuer answers the account list with "not supported", not with an
+    empty list: the real answer was HTTP 501 `endpoint_not_supported`, "Feature
+    not supported by the provider"."""
+
+    @staticmethod
+    def _not_supported() -> TrueLayerError:
+        return TrueLayerError(
+            "Account fetch failed (HTTP 501): endpoint_not_supported - "
+            "Feature not supported by the provider",
+            status=501,
+            code="endpoint_not_supported",
+            description="Feature not supported by the provider",
+        )
+
+    def test_ScheduledPull_WhenTheAccountListIsNotSupported_StillFetchesTheCards(
+        self, tmp_path, monkeypatch
+    ):
+        provider = Provider(
+            monkeypatch,
+            cards=["card-1"],
+            card_txns={"card-1": ('{"results": [' + CARD_RECORD + "]}", "from=x&to=y")},
+            account_list_error=self._not_supported(),
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            result = _pull(tmp_path, store)
+            landed = [r for r in _card_attempts(store) if r["outcome"] == "landed"]
+            stamp = store.provider_fact("truelayer", "halifax", "tier-last-weekly")
+
+        assert result.accounts == 0
+        assert [card for card, _ in provider.card_windows] == ["card-1"]
+        assert len(landed) == 1
+        assert provider.account_asks == []
+        assert any("no current accounts" in note for note in result.notes)
+        assert stamp is not None
+
+    def test_DeepPull_WhenTheAccountListIsNotSupported_StillFetchesTheCards(
+        self, tmp_path, monkeypatch
+    ):
+        provider = Provider(
+            monkeypatch, cards=["card-1"], account_list_error=self._not_supported()
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            _pull(tmp_path, store, deep=True, trigger="post-auth-backfill")
+
+        assert [card for card, _ in provider.card_windows] == ["card-1"]
+
+    def test_ScheduledPull_WhenTheAccountListIsRefusedForAnotherReason_FailsAsBefore(
+        self, tmp_path, monkeypatch
+    ):
+        # A refusal that could change - consent gone, the exemption expired -
+        # is not "this provider has no accounts", and must stay loud.
+        provider = Provider(
+            monkeypatch, cards=["card-1"], account_list_error=_refusal("sca_exceeded")
+        )
+
+        with Store(tmp_path / "s.sqlite3") as store, pytest.raises(TrueLayerError):
+            _pull(tmp_path, store)
+
+        assert provider.card_windows == []
 
 
 class TestOnlyRoutineScheduledCyclesAskForCards:

@@ -59,6 +59,9 @@ from .store import Store
 #: how one provider's quota arithmetic ended up counting another's calls.
 STARLING_CONNECTION = "starling-api"
 
+#: The aggregator's code for an endpoint a provider does not offer at all.
+ACCOUNTS_NOT_SUPPORTED = "endpoint_not_supported"
+
 #: Windows to try, widest first, when the provider refuses a cursorless full
 #: ask for exceeding its maximum queryable range. Empirically a ~70-day
 #: changesSince landed while the ten-year default was refused, so the true
@@ -186,21 +189,40 @@ def pull_truelayer(
         },
         sort_keys=True,
     )
-    accounts, accounts_body = truelayer.fetch_accounts(
-        connection.access_token, psu_ip=psu_ip
-    )
-    result.accounts = len(accounts)
-    # Landed like any payload: the display names and types in here are what a
-    # person needs to tell opaque account ids apart when binding them.
-    store.land_artefact(
-        truelayer.artefact_for(
-            accounts_body,
-            account_id=connection.connection_id,
-            kind="accounts",
-            request_meta=request_meta,
-            account_ref=connection.connection_id,
+    accounts_body: bytes | None
+    try:
+        accounts, accounts_body = truelayer.fetch_accounts(
+            connection.access_token, psu_ip=psu_ip
         )
-    )
+    except truelayer.TrueLayerError as exc:
+        # A card issuer has no current accounts, and the provider says so with
+        # a refusal rather than an empty list.
+        # Measured 2026-10-04 on a newly connected card-only provider:
+        # "Account fetch failed (HTTP 501): endpoint_not_supported - Feature
+        # not supported by the provider", which ended the pull before the card
+        # pass, so the connection held consent and fetched nothing at all.
+        # Only this answer means "no accounts"; any other refusal could change
+        # and stays loud.
+        if not (exc.status == 501 or exc.code == ACCOUNTS_NOT_SUPPORTED):
+            raise
+        accounts, accounts_body = [], None
+        result.notes.append(
+            "this provider serves no current accounts (it answered that the "
+            "account list is not supported), so only its cards are asked for"
+        )
+    result.accounts = len(accounts)
+    if accounts_body is not None:
+        # Landed like any payload: the display names and types in here are what
+        # a person needs to tell opaque account ids apart when binding them.
+        store.land_artefact(
+            truelayer.artefact_for(
+                accounts_body,
+                account_id=connection.connection_id,
+                kind="accounts",
+                request_meta=request_meta,
+                account_ref=connection.connection_id,
+            )
+        )
 
     matched_account = False
     for account in accounts:
