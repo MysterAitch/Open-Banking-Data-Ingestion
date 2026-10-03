@@ -17,6 +17,10 @@ the statement came from.
               of it a row falls on is decided by which statement LISTS the row
               where one does (`statement_membership`), by date otherwise.
   family      the main account's balance derived from a FAMILY anchor, below.
+  opened      nil at the end of the day before the account was created, where
+              `family_anchors.opening_evidence` shows its whole history is
+              held. It outranks every other basis, so it defines the opening
+              and every stated balance is a check.
 
 A balance stated by a source that cannot see an account's Spaces is the balance
 of the whole FAMILY (the main account plus its known Spaces), and is never the
@@ -43,7 +47,8 @@ absorbed.
 THE WEAKNESS, stated where the opening is derived: an opening derived from a
 single anchor absorbs every missing or surplus row before that anchor into the
 opening figure, and nothing can tell it has done so. A second anchor is what
-turns the figure into a test.
+turns the figure into a test. The one exception is the OPENED anchor: an
+account whose complete history is held opened at nil, so nothing is absorbed.
 
 An account with no anchor has NO opening balance. That is a state to report,
 and never a zero to assume.
@@ -81,7 +86,16 @@ from itertools import accumulate, pairwise
 from .accounts import AccountRef, is_balance_only
 from .balance_reconciliation import RUNNING_BALANCE_SOURCE, balance_reconciliation
 from .errors import DataError
-from .family_anchors import Families, FamilyAnchor, FamilyAnchors, family_anchors
+from .family_anchors import (
+    OPENED,
+    Families,
+    FamilyAnchor,
+    FamilyAnchors,
+    OpeningEvidence,
+    UnheldLegs,
+    family_anchors,
+    unheld_space_legs,
+)
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
@@ -99,7 +113,7 @@ FAMILY = "family"
 #: document outranks a feed. The loser is then a check, which is the useful
 #: outcome when the two disagree. A family anchor comes last: it is a
 #: document's or a feed's figure with an assumption about the Spaces applied.
-_PRECEDENCE = {STATED: 0, STATEMENT: 1, BANK: 2, FAMILY: 3}
+_PRECEDENCE = {OPENED: -1, STATED: 0, STATEMENT: 1, BANK: 2, FAMILY: 3}
 
 #: The one currency amounts are held in. Actual's budget is single-currency
 #: and `money.parse_amount` refuses any other, so a figure in another unit
@@ -173,9 +187,11 @@ class FamilyReading:
 class FamilyWalk:
     """The family's counted rows walked against every family balance stated.
 
-    The earliest family balance defines the family's opening and every later one
-    is a check, exactly as for an account. A fault dated before the earliest
-    anchor is absorbed into the opening and cannot be seen here.
+    Where `evidence` holds the opened anchor, the family opened at nil and EVERY
+    stated balance is a check. Otherwise the earliest family balance defines the
+    family's opening and every later one is a check, exactly as for an account,
+    and a fault dated before that earliest balance is absorbed into the opening
+    and cannot be seen here.
     """
 
     main: str
@@ -185,9 +201,42 @@ class FamilyWalk:
     refused_figures: int = 0
     #: Why no walk was made although anchors exist, or "".
     withheld: str = ""
+    evidence: OpeningEvidence | None = None
+    #: Transfer legs whose Space has no rows held: until it is, the family's
+    #: rows cannot reach the whole account's balance.
+    unheld: UnheldLegs = field(default_factory=UnheldLegs)
+    #: Counted rows dated on or before the opened anchor's day. The account
+    #: cannot hold a movement before it was created, so any is a contradiction
+    #: in the evidence, said aloud rather than folded into the opening.
+    before_opening: int = 0
+
+    @property
+    def opened(self) -> FamilyAnchor | None:
+        return self.evidence.opened if self.evidence else None
+
+    @property
+    def opening_note(self) -> str:
+        """What the walk says about its opening. The one place the
+        absorbed-fault sentence is written: it is true only while no nil anchor
+        exists, so it is never said beside one."""
+        if self.opened is not None and self.evidence is not None and self.evidence.created:
+            return (
+                f"The account's history is held from its opening on "
+                f"{self.evidence.created.isoformat()}, so the opening is nil and every "
+                "stated balance is tested."
+            )
+        missing = self.evidence.missing if self.evidence else ""
+        reason = f" ({missing})" if missing else ""
+        earliest = self.readings[0].day.isoformat() if self.readings else ""
+        return (
+            f"The opening is not shown to be nil{reason}, so the earliest stated balance "
+            f"defines it. A fault dated before {earliest} is absorbed into the opening "
+            "and cannot be seen."
+        )
 
     @property
     def anchors(self) -> int:
+        """How many whole-account balances are stated (the opened anchor is not one)."""
         return len(self.readings)
 
     @property
@@ -209,7 +258,10 @@ class FamilyWalk:
         first = self.first_differing
         if first is None:
             return None
-        return self.readings[self.readings.index(first) - 1]
+        at = self.readings.index(first)
+        if at == 0 and self.opened is not None:
+            return FamilyReading(self.opened.day, self.opened.balance_minor, (OPENED,), True)
+        return self.readings[at - 1]
 
     @property
     def constant(self) -> bool | None:
@@ -244,7 +296,7 @@ class EffectiveOpening:
     #: Why an opening was not derived although anchors exist, or "".
     withheld: str = ""
     #: The walk of the family's balances, for a main account with known Spaces
-    #: and at least one family anchor; None otherwise.
+    #: and at least one family anchor (stated or opened); None otherwise.
     family: FamilyWalk | None = None
     #: The account is tracked by its stated balances alone.
     balance_only: bool = False
@@ -259,7 +311,9 @@ class EffectiveOpening:
 
     @property
     def single_anchor(self) -> bool:
-        return len(self.readings) == 1
+        """Only one anchor defines the opening and nothing tests it. The opened
+        anchor is not that: it is the account's creation, which needs no test."""
+        return len(self.readings) == 1 and self.readings[0].anchor.basis != OPENED
 
     @property
     def differing(self) -> list[AnchorReading]:
@@ -494,9 +548,7 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
             key=lambda a: (a.day, a.balance_minor, a.source),
         )
     )
-    return _Gathered(
-        anchors, unusable, FamilyAnchors(merged, stated.refused_figures), placed
-    )
+    return _Gathered(anchors, unusable, replace(stated, anchors=merged), placed)
 
 
 def gather_anchors(
@@ -532,7 +584,11 @@ def family_main_anchors(
     Spaces' own counted rows through that day (a Space's rows start from nil)."""
     through = [_counted_through(rows) for rows in space_rows.values()]
     return [
-        Anchor(a.day, a.balance_minor - sum(t(a.day) for t in through), FAMILY)
+        Anchor(
+            a.day,
+            a.balance_minor - sum(t(a.day) for t in through),
+            OPENED if a.source == OPENED else FAMILY,
+        )
         for a in anchors
     ]
 
@@ -560,11 +616,14 @@ def walk_family(
     for a in anchors.anchors:
         by_figure.setdefault((a.day, a.balance_minor), set()).add(a.source)
     ordered = sorted(by_figure)
+    opened = anchors.opened
     readings: list[FamilyReading] = []
-    opening = 0
+    # With the opened anchor the opening is nil and EVERY stated balance is a
+    # check; without it the earliest stated balance defines the opening.
+    opening = opened.balance_minor - through(opened.day) if opened else 0
     for index, (day, balance) in enumerate(ordered):
         sources = tuple(sorted(by_figure[(day, balance)]))
-        if index == 0:
+        if index == 0 and opened is None:
             opening = balance - through(day)
             readings.append(FamilyReading(day, balance, sources, True))
             continue
@@ -572,7 +631,25 @@ def walk_family(
         readings.append(
             FamilyReading(day, balance, sources, False, expected, balance - expected)
         )
-    return FamilyWalk(main, spaces, tuple(readings), anchors.refused_figures)
+    return FamilyWalk(
+        main,
+        spaces,
+        tuple(readings),
+        anchors.refused_figures,
+        evidence=anchors.evidence,
+        unheld=unheld_space_legs(every, anchors.evidence.known_categories)
+        if anchors.evidence
+        else UnheldLegs(),
+        before_opening=(
+            sum(
+                1
+                for t in every
+                if _counts_toward(FAMILY, t) and t.value_date <= opened.day
+            )
+            if opened
+            else 0
+        ),
+    )
 
 
 def effective_opening(
@@ -593,11 +670,18 @@ def effective_opening(
     held = store.transactions_for_account(ref) if rows is None else rows
     anchors = list(gathered.own)
     walk: FamilyWalk | None = None
-    if gathered.family is not None and gathered.family.anchors and families is not None:
+    if (
+        gathered.family is not None
+        and (gathered.family.anchors or gathered.family.opened)
+        and families is not None
+    ):
         members = {
             space: store.transactions_for_account(space) for space in families.spaces_of(ref)
         }
-        anchors += family_main_anchors(gathered.family.anchors, members)
+        opened = gathered.family.opened
+        anchors += family_main_anchors(
+            [*([opened] if opened else []), *gathered.family.anchors], members
+        )
         walk = walk_family(ref, gathered.family, {ref: held, **members})
     balance_only = is_balance_only(store.declared_kind(ref))
     unitemised = (

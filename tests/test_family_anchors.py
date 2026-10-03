@@ -40,14 +40,16 @@ from __future__ import annotations
 import json
 import pathlib
 from collections.abc import Iterable
+from dataclasses import replace
 from datetime import date
 
 import pytest
 
 from obdi.accounts import AccountBinding, AccountMap
-from obdi.balance_anchors import FAMILY, effective_opening
+from obdi.actual_push import opening_balances
+from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
 from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
-from obdi.family_anchors import Families, families_of, family_anchors
+from obdi.family_anchors import OPENED, Families, families_of, family_anchors
 from obdi.ingest import import_file, reconcile_batch
 from obdi.ledger import (
     ANCHOR_QUERIES,
@@ -56,8 +58,10 @@ from obdi.ledger import (
     QUERIES_PER_PAGE,
     build_ledger,
 )
-from obdi.providers import truelayer
+from obdi.models import TransactionStatus
+from obdi.providers import starling, truelayer
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.replay import ActualAccountBinding
 from obdi.store import Store
 from test_space_attribution import (
     BILLS,
@@ -83,6 +87,7 @@ STATEMENT = [
     "END",
 ]
 
+OTHER = "halifax-current"
 TRUE_MAIN_OPENING = 80000
 BILLS_AT_THE_END = 34000
 
@@ -100,6 +105,70 @@ def feed_rows() -> list:
         pay(BILLS, FEED, "f-in-2", 2000, 16, "From Main", internal=True),
         pay(BILLS, FEED, "f-gym", -3000, 20, "Gym"),
     ]
+
+
+ACCOUNTS_ORIGIN = "https://api.example.com/api/v2/accounts"
+FEED_ORIGIN = "https://api.example.com/api/v2/feed/account/acc-main/category/cat-main"
+
+#: The account was created on the 1st, in the morning, and its feed was first
+#: asked from midnight that day.
+CREATED_AT = "2026-09-01T09:30:00Z"
+FIRST_ASKED = "2026-09-01T00:00:00Z"
+
+
+def land_evidence(
+    store: Store,
+    *,
+    created: str | None = CREATED_AT,
+    asked_from: str | None = FIRST_ASKED,
+    also_created: str | None = None,
+) -> None:
+    """What the provider states about the account's creation, and the feed
+    requests held for its default category (an empty feed is enough: the
+    evidence is the ask, which survives only as the artefact's origin)."""
+    entry: dict[str, str] = {"accountUid": "acc-main", "defaultCategory": "cat-main"}
+    if created is not None:
+        entry["createdAt"] = created
+    listings = [entry]
+    if also_created is not None:
+        listings = [entry, {**entry, "createdAt": also_created}]
+    for position, listing in enumerate(listings):
+        store.land_artefact(
+            starling.artefact_for(
+                json.dumps({"accounts": [listing], "n": position}).encode(),
+                account_id="starling",
+                kind="accounts",
+                origin=ACCOUNTS_ORIGIN,
+            )
+        )
+    if asked_from is not None:
+        store.land_artefact(
+            starling.artefact_for(
+                json.dumps({"feedItems": []}).encode(),
+                account_id="starling:cat-main",
+                kind="feed",
+                origin=f"{FEED_ORIGIN}?changesSince={asked_from}",
+            )
+        )
+
+
+def opened_feed_rows() -> list:
+    """The household's feed with the 800.00 the account was funded with, paid
+    in on the day it was created, so the family really did open at nil."""
+    return [pay(MAIN, FEED, "f-deposit", 80000, 1, "Opening deposit"), *feed_rows()]
+
+
+def leg(account: str, minor: int, day: int, uid: str, ident: str):
+    """A transfer leg whose counterparty is the category `uid`, as the feed reports it."""
+    return replace(
+        pay(account, FEED, ident, minor, day, "To a Space", internal=True),
+        raw={
+            "counterPartyType": "CATEGORY",
+            "counterPartyUid": uid,
+            "counterPartyName": "Rent",
+            "transactionTime": f"2026-09-{day:02}T10:00:00Z",
+        },
+    )
 
 
 def import_statement(store: Store, directory: pathlib.Path, lines: Iterable[str]) -> None:
@@ -316,6 +385,381 @@ class TestTheFamilyWalk:
         assert walked.first_differing is None
         opening = effective_opening(family.store, MAIN, families=families(family))
         assert opening.opening_minor == TRUE_MAIN_OPENING - 2500
+
+
+@pytest.fixture
+def opened(store, tmp_path):
+    """The household that really opened at nil on the 1st: the 800.00 arrived
+    that day, the provider states the creation, and the feed was asked from it."""
+    home = Household(store, MAP)
+    home.arrive(*opened_feed_rows())
+    import_statement(store, tmp_path, STATEMENT)
+    land_evidence(store)
+    return home
+
+
+class TestTheAccountOpenedAtNil:
+    """Where the creation date and the feed's reach are both held, the family
+    opened at nil and the earliest stated balance is a test, not a definition.
+
+    Hand working: the family is 0 at the end of 31 August, takes 800.00 and
+    3000.00 on the 1st (380000), and every figure after that is the household's
+    table in the module docstring, so the statement's seven balances all agree.
+    """
+
+    def walk(self, home: Household):
+        walked = effective_opening(home.store, MAIN, families=families(home)).family
+        assert walked is not None
+        return walked
+
+    def test_Opening_WhenCreationAndFeedReachAreHeld_IsNilAndEveryStatedBalanceIsATest(
+        self, opened
+    ):
+        opening = effective_opening(opened.store, MAIN, families=families(opened))
+        walked = self.walk(opened)
+
+        assert walked.opened is not None
+        assert (walked.opened.day, walked.opened.balance_minor) == (date(2026, 8, 31), 0)
+        assert [r.defines_opening for r in walked.readings] == [False] * 7
+        assert (walked.anchors, walked.agreeing, len(walked.differing)) == (7, 7, 0)
+        assert opening.defining is not None
+        assert (opening.defining.basis, opening.defining.balance_minor) == (OPENED, 0)
+        assert opening.opening_minor == 0
+        assert opening.as_at == date(2026, 8, 31)
+        assert opening.single_anchor is False
+
+    def test_Walk_WhenAFaultPredatesTheFirstStatedBalance_IsCaughtAndDated(self, opened):
+        # The cafe on the 4th is before the statement's first balance (the
+        # 11th): with only stated balances it was absorbed into the opening.
+        drop_row(opened.store, MAIN, -2500, 4)
+
+        walked = self.walk(opened)
+
+        assert walked.first_differing is not None
+        assert walked.first_differing.day == date(2026, 9, 11)
+        assert walked.first_differing.difference_minor == -2500
+        assert walked.last_agreeing is not None
+        assert walked.last_agreeing.day == date(2026, 8, 31)
+        assert walked.constant is True
+
+    def test_Walk_WhenOpenedAnchorHeldAndFaultLaterOn_StillNamesTheDifferingDay(self, opened):
+        drop_row(opened.store, MAIN, -9000, 22)
+
+        walked = self.walk(opened)
+
+        assert walked.first_differing is not None
+        assert walked.first_differing.day == date(2026, 9, 22)
+        assert walked.last_agreeing is not None
+        assert walked.last_agreeing.day == date(2026, 9, 20)
+
+    def test_MovementOnTheCreationDay_IsCountedNotExcluded(self, opened):
+        # The 800.00 deposit and the 3000.00 salary are both dated the 1st, the
+        # creation day. A nil anchor ending the creation day itself would
+        # exclude them and every balance would differ by 3800.00.
+        walked = self.walk(opened)
+
+        assert walked.opened is not None
+        assert walked.opened.day < date(2026, 9, 1)
+        assert walked.before_opening == 0
+        assert walked.differing == []
+
+    def test_Walk_WhenARowIsDatedBeforeTheAccountExisted_SaysSo(self, opened):
+        early = replace(
+            pay(MAIN, FEED, "f-early", 1000, 1, "Impossible"),
+            value_date=date(2026, 8, 31),
+            booking_date=date(2026, 8, 31),
+        )
+        opened.arrive(early)
+
+        walked = self.walk(opened)
+
+        assert walked.before_opening == 1
+
+    def test_Opening_WhenTheFeedWasFirstAskedAfterTheCreation_IsNotNil(self, store, tmp_path):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, asked_from="2026-09-05T00:00:00Z")
+        # A fault before the 11th goes unseen again, as it did before.
+        drop_row(store, MAIN, -2500, 4)
+
+        walked = self.walk(home)
+        opening = effective_opening(store, MAIN, families=families(home))
+
+        assert walked.opened is None
+        assert walked.evidence is not None
+        assert walked.evidence.missing == (
+            "the feed does not reach back to the opening: the earliest request held asked "
+            "from 2026-09-05 and the account opened on 2026-09-01"
+        )
+        assert walked.readings[0].defines_opening is True
+        assert walked.first_differing is None
+        assert opening.opening_minor == -2500
+
+    def test_Opening_WhenTheFeedWasAskedFromTheCreationMomentExactly_IsNil(
+        self, store, tmp_path
+    ):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, asked_from=CREATED_AT)
+
+        assert self.walk(home).opened is not None
+
+    def test_Opening_WhenTheFeedWasAskedFromAMomentAfterTheCreation_IsNotNil(
+        self, store, tmp_path
+    ):
+        # The same day, but one minute too late to have reached the creation.
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, asked_from="2026-09-01T09:31:00Z")
+
+        assert self.walk(home).opened is None
+
+    def test_Opening_WhenNoFeedRequestIsHeldForTheAccount_IsNotNil(self, store, tmp_path):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, asked_from=None)
+
+        walked = self.walk(home)
+
+        assert walked.opened is None
+        assert walked.evidence is not None
+        assert "no feed request is held" in walked.evidence.missing
+
+    def test_Opening_WhenAFeedRequestIsForAnotherCategory_IsNotNil(self, store, tmp_path):
+        # A Space's feed reaching back says nothing about the main account's own.
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, asked_from=None)
+        store.land_artefact(
+            starling.artefact_for(
+                json.dumps({"feedItems": []}).encode(),
+                account_id="starling:cat-bills",
+                kind="feed",
+                origin=(
+                    FEED_ORIGIN.replace("cat-main", "cat-bills")
+                    + "?changesSince=2026-01-01T00:00:00Z"
+                ),
+            )
+        )
+
+        assert self.walk(home).opened is None
+
+    def test_Opening_WhenNoCreationDateIsHeld_IsNotNilAndTheAbsorbedSentenceStays(
+        self, store, tmp_path
+    ):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, created=None)
+
+        walked = self.walk(home)
+
+        assert walked.opened is None
+        assert walked.evidence is not None
+        assert walked.evidence.missing == "no creation date is held for the account"
+        assert (
+            "A fault dated before 2026-09-11 is absorbed into the opening and cannot be seen."
+            in walked.opening_note
+        )
+
+    def test_Opening_WhenNothingAtAllIsLanded_IsNotNil(self, family):
+        walked = TestTheFamilyWalk().walk(family)
+
+        assert walked.opened is None
+        assert "absorbed into the opening" in walked.opening_note
+
+    def test_Opening_WhenTheProviderStatesTwoCreationDates_IsNotNil(self, store, tmp_path):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        land_evidence(store, also_created="2026-08-01T09:30:00Z")
+
+        walked = self.walk(home)
+
+        assert walked.opened is None
+        assert walked.evidence is not None
+        assert "more than one creation date" in walked.evidence.missing
+
+    def test_OpeningNote_WhenNilAnchorHeld_NeverSaysAFaultIsAbsorbed(self, opened):
+        note = self.walk(opened).opening_note
+
+        assert note == (
+            "The account's history is held from its opening on 2026-09-01, so the opening "
+            "is nil and every stated balance is tested."
+        )
+        assert "absorbed" not in note
+
+    def test_Opening_ForAnAccountWithNoSpaces_IsNotDerivedFromTheFamilyEvidence(
+        self, store, tmp_path
+    ):
+        no_spaces = AccountMap([AccountBinding(MAIN, "starling", "acc-main")])
+        Household(store, no_spaces).arrive(*opened_feed_rows())
+        land_evidence(store)
+
+        opening = effective_opening(store, MAIN, families=families_of(store, no_spaces))
+
+        assert opening.family is None
+        assert opening.readings == ()
+
+    def test_Opening_WithTheAnchorAndNoStatedBalance_IsNilAndTestsNothing(self, store):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        land_evidence(store)
+
+        opening = effective_opening(store, MAIN, families=families(home))
+
+        assert opening.opening_minor == 0
+        assert opening.single_anchor is False
+        assert opening.family is not None
+        assert opening.family.anchors == 0
+
+
+class TestSpaceTransfersWhoseOtherLegIsNotHeld:
+    """A transfer to a Space whose rows are not held leaves the main account's
+    leg with no partner, so the family cannot reach the whole account's balance.
+
+    Hand working on the opened household: a 47.00 leg to a closed Space on the
+    8th and an 11.00 leg on the 18th, neither with a held partner (the amounts
+    avoid every statement payment, which a matcher would otherwise merge with
+    them). The stated balance on the 11th is therefore 47.00 above what the
+    rows predict, on the 15th still 47.00, and from the 20th 58.00.
+    """
+
+    GONE = "cat-closed"
+
+    def lose(self, home: Household) -> None:
+        home.arrive(
+            leg(MAIN, -4700, 8, self.GONE, "f-gone-1"),
+            leg(MAIN, -1100, 18, self.GONE, "f-gone-2"),
+        )
+
+    def walk(self, home: Household):
+        walked = effective_opening(home.store, MAIN, families=families(home)).family
+        assert walked is not None
+        return walked
+
+    def test_Walk_WhenLegsGoToAnUnheldSpace_DiffersFromTheFirstAnchorAfterThem(self, opened):
+        self.lose(opened)
+
+        walked = self.walk(opened)
+
+        assert walked.first_differing is not None
+        assert walked.first_differing.day == date(2026, 9, 11)
+        assert [r.difference_minor for r in walked.differing] == [
+            4700, 4700, 4700, 5800, 5800, 5800, 5800,
+        ]
+        assert walked.constant is False
+
+    def test_Walk_WhenLegsGoToAnUnheldSpace_CountsThemAndDatesTheFirst(self, opened):
+        self.lose(opened)
+
+        walked = self.walk(opened)
+
+        assert walked.unheld.legs == 2
+        assert walked.unheld.first == date(2026, 9, 8)
+
+    def test_Walk_WhenTheSpaceIsHeldAsAnAccount_ReportsNoUnheldLegs(self, opened):
+        # The Bills Space is bound to its category: transfers naming it are held.
+        opened.arrive(leg(MAIN, -100, 9, "cat-bills", "f-held"))
+
+        assert self.walk(opened).unheld.legs == 0
+
+    def test_Walk_WhenTheSpaceIsStillListedByTheProvider_ReportsNoUnheldLegs(self, opened):
+        opened.store.land_artefact(
+            starling.artefact_for(
+                json.dumps({"savingsGoals": [{"savingsGoalUid": self.GONE}]}).encode(),
+                account_id="starling:acc-main",
+                kind="spaces",
+                origin="https://api.example.com/api/v2/account/acc-main/spaces",
+            )
+        )
+        self.lose(opened)
+
+        assert self.walk(opened).unheld.legs == 0
+
+    def test_Walk_WhenTheCounterpartyIsTheMainAccountsOwnCategory_ReportsNoUnheldLegs(
+        self, opened
+    ):
+        opened.arrive(leg(MAIN, -100, 9, "cat-main", "f-self"))
+
+        assert self.walk(opened).unheld.legs == 0
+
+    def test_Walk_WhenEveryLegIsHeld_ReportsNoUnheldLegs(self, opened):
+        walked = self.walk(opened)
+
+        assert (walked.unheld.legs, walked.unheld.first) == (0, None)
+
+    def test_Walk_WhenAnUnheldLegIsAVoidedRow_IsNotCounted(self, opened):
+        opened.arrive(
+            replace(
+                leg(MAIN, -4700, 8, self.GONE, "f-gone-void"),
+                status=TransactionStatus.VOID,
+            )
+        )
+
+        assert self.walk(opened).unheld.legs == 0
+
+
+class TestTheOpeningSentToActual:
+    """The opening-balance row for the main account, with and without the anchor."""
+
+    def openings(self, home: Household) -> dict[str, tuple[int, date]]:
+        bindings = [
+            ActualAccountBinding(MAIN, "act-main"),
+            ActualAccountBinding(OTHER, "act-other"),
+        ]
+        return {
+            o.canonical_id: (o.amount_minor, o.as_at)
+            for o in opening_balances(home.store, bindings, families=families(home))
+        }
+
+    @staticmethod
+    def add_other_account(home: Household) -> None:
+        reconcile_batch(
+            home.store,
+            [pay(OTHER, "src-o", "o1", -100, 2, "X")],
+            digest="other-arrival",
+        )
+        record_stated_anchor(home.store, OTHER, "2026-09-10", "250.00")
+
+    def test_MainOpening_WithTheAnchor_IsNilAtTheEndOfTheDayBeforeCreation(self, opened):
+        self.add_other_account(opened)
+
+        sent = self.openings(opened)
+
+        assert sent[MAIN] == (0, date(2026, 8, 31))
+
+    def test_MainOpening_WithTheAnchor_DoesNotAbsorbAFaultBeforeTheFirstStatedBalance(
+        self, opened
+    ):
+        drop_row(opened.store, MAIN, -2500, 4)
+
+        assert self.openings(opened)[MAIN][0] == 0
+
+    def test_MainOpening_WithoutTheAnchor_AbsorbsThatFaultAsItAlwaysDid(self, store, tmp_path):
+        home = Household(store, MAP)
+        home.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        drop_row(store, MAIN, -2500, 4)
+
+        assert self.openings(home)[MAIN][0] == -2500
+
+    def test_AnUnrelatedAccount_IsUnchangedWhetherOrNotTheAnchorIsHeld(self, store, tmp_path):
+        with_anchor = Household(store, MAP)
+        with_anchor.arrive(*opened_feed_rows())
+        import_statement(store, tmp_path, STATEMENT)
+        self.add_other_account(with_anchor)
+        before = self.openings(with_anchor)[OTHER]
+
+        land_evidence(store)
+        after = self.openings(with_anchor)[OTHER]
+
+        assert before == after == (25000 + 100, date(2026, 9, 1))
 
 
 CSV_HEADER = "Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP),Notes"

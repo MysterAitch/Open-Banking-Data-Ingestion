@@ -133,6 +133,9 @@ class AccountPosition:
     family_anchors: Structural[int]
     family_first_differing: Structural[str]
     family_pattern: Structural[str]
+    #: Whether the opening is nil and what that means for a fault before the
+    #: earliest stated balance (`FamilyWalk.opening_note`), or "".
+    family_opening_note: Structural[str]
     #: The newest non-void row's date, ISO, or "" when the account holds none.
     rows_through: Structural[str]
     rows_through_age_days: Structural[int]
@@ -314,6 +317,7 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
                 if opening.family.constant
                 else "changing"
             ),
+            family_opening_note=opening.family.opening_note if opening.family else "",
             rows_through=newest.isoformat() if newest else "",
             rows_through_age_days=(today - newest).days if newest else 0,
             rows=len(live),

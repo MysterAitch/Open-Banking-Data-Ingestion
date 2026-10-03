@@ -566,6 +566,78 @@ def family_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 os.environ[name] = value
 
 
+@pytest.fixture(scope="module")
+def family_nil_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """The family opened at nil, with an early fault and transfers to a Space
+    whose rows are not held: every new sentence of the walk on one page."""
+    from obdi.accounts import AccountRecord, AccountRef
+    from test_family_anchors import (
+        STATEMENT,
+        drop_row,
+        import_statement,
+        land_evidence,
+        leg,
+        opened_feed_rows,
+    )
+    from test_space_attribution import BILLS, MAIN, MAP, Household
+
+    root = tmp_path_factory.mktemp("phone-family-nil")
+    saved = {name: os.environ.get(name) for name in _ENV}
+    os.environ.update(_environment_for(root))
+    os.environ.pop("TRUELAYER_CLIENT_ID", None)
+    os.environ.pop("TRUELAYER_CLIENT_SECRET_FILE", None)
+    (root / "accounts.json").write_text(
+        f'{{"bindings": [{{"canonical_id": "{MAIN}", "source": "starling", '
+        '"provider_account_id": "acc-main"}]}',
+        encoding="utf-8",
+    )
+    db = root / "store.sqlite3"
+    with Store(db) as store:
+        for space in (BILLS, "starling-space-" + LONG_IDENTITY * 2):
+            store.declare_account(
+                AccountRecord(ref=AccountRef(space), kind="starling-space", parent=AccountRef(MAIN))
+            )
+        Household(store, MAP).arrive(
+            *opened_feed_rows(), leg(MAIN, -4700, 8, "cat-closed", "f-gone-1")
+        )
+        import_statement(store, root, STATEMENT)
+        land_evidence(store)
+        drop_row(store, MAIN, -2500, 4)
+    config = build_web_config(db)
+    assert config is not None
+    handler = type(
+        "FamilyNilHandler",
+        (ConnectionHandler,),
+        {"config": config, "session": AuthorisationSession()},
+    )
+    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}"
+    finally:
+        httpd.shutdown()  # type: ignore[attr-defined]
+        httpd.server_close()  # type: ignore[attr-defined]
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_LedgerPage_WithTheOpenedAnchorAndUnheldLegs_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object, family_nil_base: str
+) -> None:
+    page = f"{family_nil_base}/ledger?ref=starling-personal&month=2026-09"
+    _assert_fits(_overflow(browser, page))
+
+
+def test_PositionPage_WithTheOpenedAnchor_AtPhoneWidth_DoesNotScrollSideways(
+    browser: object, family_nil_base: str
+) -> None:
+    _assert_fits(_overflow(browser, f"{family_nil_base}/position"))
+
+
 def test_LedgerPage_WithTheFamilyWalk_AtPhoneWidth_DoesNotScrollSideways(
     browser: object, family_base: str
 ) -> None:

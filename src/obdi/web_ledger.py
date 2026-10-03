@@ -310,6 +310,7 @@ _BASIS_WORDS = {
     "bank": "the bank's own running balance",
     "statement": "a held statement's closing balance",
     "family": "the whole account's stated balance, less its Spaces' own rows",
+    "opened": "the day before the account was created, with its feed held from then",
 }
 
 
@@ -390,6 +391,11 @@ def _anchors_html(anchors: tuple[Any, ...], *, balance_only: bool = False) -> st
     )
 
 
+def _opening_note(family: Any) -> str:
+    css = "muted" if family.nil_day else "warn"
+    return f'<p class="{css}">{_esc(family.opening_note)}</p>'
+
+
 def _family_html(family: Any) -> str:
     """The walk of the whole account's stated balances against the rows of the
     main account and its Spaces together.
@@ -411,25 +417,51 @@ def _family_html(family: Any) -> str:
     )
     if family.withheld:
         return body + f'<p class="warn">Not walked: {_esc(family.withheld)}.</p>'
+    # With the opened anchor every stated balance is tested, so none is "later".
+    which = "Ones" if family.nil_day else "Later ones"
     body += (
         '<div class="scroll"><table>'
         + _count("Spaces", ", ".join(family.spaces))
         + _count("Stated by", ", ".join(family.sources))
         + _count("Whole-account balances stated", family.anchors)
-        + _count("Later ones the rows reproduce", family.agreeing)
-        + _count("Later ones the rows do not reproduce", family.differing)
-        + _count("Earliest, which defines the opening", family.defining_day)
+        + _count(f"{which} the rows reproduce", family.agreeing)
+        + _count(f"{which} the rows do not reproduce", family.differing)
+        + (
+            _count("Opened, with a nil balance at the end of", family.nil_day)
+            if family.nil_day
+            else _count("Earliest, which defines the opening", family.defining_day)
+        )
         + "</table></div>"
     )
+    body += _opening_note(family)
+    if family.before_opening:
+        body += (
+            f'<p class="warn"><strong>{_esc(str(family.before_opening))} row(s) are dated on '
+            "or before the day the account opened.</strong> An account cannot move money "
+            "before it exists, so either the creation date or those rows' dates are wrong, "
+            "and the opening cannot be trusted until that is settled.</p>"
+        )
+    if family.unheld_legs:
+        body += (
+            f'<p class="warn"><strong>{_esc(str(family.unheld_legs))} transfer leg(s) go '
+            "to or from a Space whose own rows are not held, the first on "
+            f'<span class="mono nowrap">{_esc(family.unheld_first)}</span>.</strong> The '
+            "whole account cannot balance until that Space is recovered: run the "
+            '<span class="mono">recover-spaces</span> command or open the '
+            '<a class="tap" href="/spaces">Spaces page</a>.</p>'
+        )
     if family.refused_figures:
         body += (
             f'<p class="warn">{_esc(str(family.refused_figures))} printed end-of-day '
             "balance(s) disagreed with their own statement's rows and were not used.</p>"
         )
+    if not family.anchors:
+        return body
     if not family.differing:
         return body + (
             '<p><span class="pill pill-ok">agrees</span> The rows of the account and its '
-            "Spaces reproduce every later whole-account balance stated.</p>"
+            f"Spaces reproduce every {'' if family.nil_day else 'later '}whole-account "
+            "balance stated.</p>"
         )
     pattern = (
         "The difference is the same at every later balance, so one movement is "
@@ -442,8 +474,7 @@ def _family_html(family: Any) -> str:
         '<p class="warn"><strong>The rows first stop reproducing the stated balance at the '
         f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they last '
         f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
-        f"</span>.</strong> {_esc(pattern)} A fault dated before "
-        f"{_esc(family.defining_day)} is absorbed into the opening and cannot be seen.</p>"
+        f"</span>.</strong> {_esc(pattern)}</p>"
         '<ul class="anchors">'
     )
     for line in family.lines:
@@ -530,8 +561,13 @@ def _opening_html(view: Any, unmasked: bool) -> str:
             body += (
                 f'<p><strong>Opening balance, at the end of {_esc(opening.as_at)}:</strong> '
                 f'<span class="mono">{_esc(figure)}</span>. '
-                "It is the earliest anchor's balance less "
-                "the rows dated on or before that anchor.</p>"
+                + (
+                    "The account opened with nothing, so no row has to be taken on trust."
+                    if opening.anchors and opening.anchors[0].basis == "opened"
+                    else "It is the earliest anchor's balance less "
+                    "the rows dated on or before that anchor."
+                )
+                + "</p>"
             )
             if opening.single_anchor and not opening.balance_only:
                 body += (

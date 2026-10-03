@@ -520,6 +520,16 @@ class AccountMap:
             grouped.setdefault(source, set()).add(canonical)
         return {source: sorted(members) for source, members in grouped.items()}
 
+    def provider_ids(self, source: str) -> dict[AccountRef, frozenset[str]]:
+        """The provider's own identifiers for each canonical account `source`
+        feeds: the inverse of `resolve`, for a caller that must find an
+        account's own entries in a provider's payload."""
+        grouped: dict[AccountRef, set[str]] = {}
+        for (bound_source, provider_id), canonical in self._bindings.items():
+            if bound_source == source:
+                grouped.setdefault(canonical, set()).add(provider_id)
+        return {ref: frozenset(ids) for ref, ids in grouped.items()}
+
     def sources_for(self, ref: AccountRef) -> list[str]:
         return sorted(
             source for (source, _), canonical in self._bindings.items() if canonical == ref

@@ -83,10 +83,15 @@ ANCHOR_QUERIES = 8
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
 #: statements, once per request and shared by every account asked about): for a
 #: main account with known Spaces, the held-statement listing again for the
-#: per-day balances, the listing of held exports, and one read of the rows of
-#: each Space. Each export not yet read adds one more, as each statement does.
-#: An account with no known Spaces adds nothing: ANCHOR_QUERIES holds.
-FAMILY_QUERIES = 2
+#: per-day balances, the listing of held exports, the provider's account and
+#: Space listings (creation date, categories), the feed requests held (how far
+#: back the feed reaches), and one read of the rows of each Space. Each export
+#: not yet read adds one more, as each statement does. An account with no known
+#: Spaces adds nothing: ANCHOR_QUERIES holds. The last two are what the opened
+#: anchor costs (`family_anchors.opening_evidence`), and are read for every
+#: main account with Spaces whether or not the evidence turns out to hold, so
+#: the cost does not depend on the answer.
+FAMILY_QUERIES = 4
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -308,6 +313,18 @@ class FamilyView:
     pattern: Structural[str]
     defining_day: Structural[str]
     lines: Structural[tuple[FamilyLine, ...]]
+    #: The account's creation date when the provider states it, and the day of
+    #: the nil anchor ("" without it, with `opening_missing` saying why).
+    created_on: Structural[str]
+    nil_day: Structural[str]
+    opening_missing: Structural[str]
+    #: A sentence saying whether the opening is nil and what that means for faults.
+    opening_note: Structural[str]
+    #: Counted rows dated before the account was created.
+    before_opening: Structural[int]
+    #: Transfer legs to a Space whose rows are not held, and the first one's date.
+    unheld_legs: Structural[int]
+    unheld_first: Structural[str]
 
 
 @dataclass(frozen=True)
@@ -382,7 +399,22 @@ def family_view(walk: FamilyWalk | None) -> FamilyView | None:
         pattern=(
             "" if walk.constant is None else "constant" if walk.constant else "changing"
         ),
-        defining_day=walk.readings[0].day.isoformat() if walk.readings else "",
+        defining_day=(
+            walk.opened.day.isoformat()
+            if walk.opened
+            else walk.readings[0].day.isoformat()
+            if walk.readings
+            else ""
+        ),
+        created_on=(
+            walk.evidence.created.isoformat() if walk.evidence and walk.evidence.created else ""
+        ),
+        nil_day=walk.opened.day.isoformat() if walk.opened else "",
+        opening_missing=walk.evidence.missing if walk.evidence else "",
+        opening_note=walk.opening_note,
+        before_opening=walk.before_opening,
+        unheld_legs=walk.unheld.legs,
+        unheld_first=walk.unheld.first.isoformat() if walk.unheld.first else "",
         lines=tuple(
             FamilyLine(
                 day=reading.day.isoformat(),

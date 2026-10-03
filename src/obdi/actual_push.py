@@ -541,10 +541,13 @@ def opening_balances(
     """The derived opening balance of each bound account that has one.
 
     An account with no anchor has none, and is simply absent: sending a zero
-    would assert that it opened empty, which nothing has established. With
-    `families`, a main account's opening is derived from the whole account's
-    stated balances less its Spaces' rows rather than from them as its own;
-    every account with no known Spaces derives exactly as it does without.
+    would assert that it opened empty, which nothing has established. The one
+    exception is a Starling family whose creation date and feed reach are held
+    (`family_anchors.opening_evidence`): that nil is established, and is sent.
+    With `families`, a main account's opening is derived from the whole
+    account's stated balances less its Spaces' rows rather than from them as
+    its own; every account with no known Spaces derives exactly as it does
+    without.
     """
     found: list[OpeningBalance] = []
     for binding in bindings:

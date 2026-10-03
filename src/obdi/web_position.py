@@ -127,6 +127,7 @@ def _account_card(view: Any) -> str:
                 f"(main plus its Spaces): {_esc(str(view.family_anchors))} stated "
                 "balances, all reproduced.</span>"
             )
+        checks += f'<br><span class="muted">{_esc(view.family_opening_note)}</span>'
     flag = (
         '<p class="warn">The rows between its stated balances do not add up, so this '
         "balance may be wrong. It is still counted. "
