@@ -72,6 +72,7 @@ from datetime import date, timedelta
 from enum import StrEnum
 from itertools import pairwise
 
+from . import instrumentation
 from .balance_anchors import STATEMENT, _counts_toward
 from .coverage import Agreement, agreements
 from .models import Transaction
@@ -83,6 +84,10 @@ from .store import Store
 
 #: The sources whose rows are a statement's own, as opposed to a feed's.
 STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS)
+
+#: The rebuild phase the same-money pass runs under. Its steps record as
+#: sub-phases named `<this>/<step>`, which is how the Admin page finds them.
+SAME_MONEY_PHASE = "same-money-fold"
 
 STATEMENT_SIDE = "statement"
 FEED_SIDE = "feed"
@@ -701,41 +706,49 @@ def gather_evidence(
     sibling_accounts: Mapping[str, Collection[str]] | None = None,
     account: str | None = None,
 ) -> list[AccountEvidence]:
-    """The evidence for each account with a held statement, in account order."""
-    statements, _unusable = statement_balances(store, account)
-    by_account: dict[str, list[StatementBalance]] = {}
-    for anchor in statements:
-        by_account.setdefault(anchor.account_ref, []).append(anchor)
+    """The evidence for each account with a held statement, in account order.
 
-    openings: dict[str, dict[tuple[date, int], tuple[int, date | None]]] = {}
-    for filed_under, reading in held_statement_readings(store):
-        if (
-            filed_under not in by_account
-            or reading.statement_date is None
-            or reading.closing_balance_minor is None
-            or reading.opening_balance_minor is None
-        ):
-            continue
-        first_row = min((row.value_date for row in reading.transactions), default=None)
-        openings.setdefault(filed_under, {})[
-            (reading.statement_date, reading.closing_balance_minor)
-        ] = (reading.opening_balance_minor, first_row)
+    Each step is a named sub-phase of the same-money pass (`SAME_MONEY_PHASE`)
+    so a slow rebuild says which of them it spent its time in.
+    """
+    with instrumentation.phase(f"{SAME_MONEY_PHASE}/reading-statements"):
+        statements, _unusable = statement_balances(store, account)
+        by_account: dict[str, list[StatementBalance]] = {}
+        for anchor in statements:
+            by_account.setdefault(anchor.account_ref, []).append(anchor)
+
+        openings: dict[str, dict[tuple[date, int], tuple[int, date | None]]] = {}
+        for filed_under, reading in held_statement_readings(store):
+            if (
+                filed_under not in by_account
+                or reading.statement_date is None
+                or reading.closing_balance_minor is None
+                or reading.opening_balance_minor is None
+            ):
+                continue
+            first_row = min((row.value_date for row in reading.transactions), default=None)
+            openings.setdefault(filed_under, {})[
+                (reading.statement_date, reading.closing_balance_minor)
+            ] = (reading.opening_balance_minor, first_row)
 
     if not by_account:
         return []
-    held = store.transactions_by_sighting()
-    found = agreements(
-        held,
-        sibling_accounts=sibling_accounts or {},
-        always_reconcile=True,
-        only_accounts=set(by_account),
-    )
-    folded_ids = store.statement_folded_ids()
+    with instrumentation.phase(f"{SAME_MONEY_PHASE}/reading-sightings"):
+        held = store.transactions_by_sighting()
+        folded_ids = store.statement_folded_ids()
+    with instrumentation.phase(f"{SAME_MONEY_PHASE}/pairing"):
+        found = agreements(
+            held,
+            sibling_accounts=sibling_accounts or {},
+            always_reconcile=True,
+            only_accounts=set(by_account),
+        )
 
     evidence: list[AccountEvidence] = []
     for ref, anchors in sorted(by_account.items()):
-        membership = statement_membership(store, ref, anchors)
-        rows = store.transactions_for_account(ref)
+        with instrumentation.phase(f"{SAME_MONEY_PHASE}/membership"):
+            membership = statement_membership(store, ref, anchors)
+            rows = store.transactions_for_account(ref)
         counted = [t for t in rows if _counts_toward(STATEMENT, t)]
         folded = [t for t in rows if t.entity_id in folded_ids]
         withheld = ""

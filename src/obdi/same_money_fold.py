@@ -81,9 +81,11 @@ would still fold; nothing here tells that apart from the real thing. A band
 holding more than `MAX_BAND_ROWS` unmatched feed rows searches only the nearest
 ones, so it folds less, never more. Cost: the pass reads the whole store's
 sightings and pairs the sources of each account that holds a statement, after
-every import; almost all of the time is the reading and the pairing, and almost
-none the search here. A real store took ten times as long as a synthetic one of
-the same size, and what the synthetic one lacks has not been found.
+every import. Its steps record as sub-phases (`SAME_MONEY_PHASE`), so a slow
+rebuild names which one. What a real store has that a synthetic one lacks was
+the documents themselves: every pass used to extract the text of every held
+statement again, which is slow only for a real PDF. A statement's reading is now
+kept (`statement_terms.keep_statement_readings`) and the pass reads that.
 """
 
 from __future__ import annotations
@@ -93,11 +95,13 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import combinations
 
+from . import instrumentation
 from .accounts import AccountMap
 from .models import Transaction
 from .period_reconciliation import (
     BOUNDARY_DAYS,
     FEED_SIDE,
+    SAME_MONEY_PHASE,
     STATEMENT_SIDE,
     AccountEvidence,
     Leftover,
@@ -106,6 +110,7 @@ from .period_reconciliation import (
     gather_evidence,
     held_in,
 )
+from .statement_terms import keep_statement_readings
 from .store import Store
 
 #: Bounds on the subset searches in `_candidates`, so the work per statement is
@@ -305,10 +310,17 @@ def fold_same_money(store: Store, account_map: AccountMap | None = None) -> Same
     """
     sibling = None if account_map is None else account_map.accounts_by_source()
     before = store.statement_folded_ids()
+    # Before the release below, because it commits: a reading kept is never
+    # part of a pass that can still be rolled back.
+    with instrumentation.phase(f"{SAME_MONEY_PHASE}/reading-statements"):
+        keep_statement_readings(store)
     try:
         store.release_statement_folds()
-        plan = plan_same_money(gather_evidence(store, sibling_accounts=sibling))
-        store.replace_statement_folds(plan.folds)
+        evidence = gather_evidence(store, sibling_accounts=sibling)
+        with instrumentation.phase(f"{SAME_MONEY_PHASE}/search"):
+            plan = plan_same_money(evidence)
+        with instrumentation.phase(f"{SAME_MONEY_PHASE}/writing"):
+            store.replace_statement_folds(plan.folds)
     except BaseException:
         store.connection.rollback()
         raise

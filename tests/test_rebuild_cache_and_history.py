@@ -195,6 +195,56 @@ class TestEveryRebuildLeavesARow:
         assert "failed" in html_out, "failed runs must be visible, not filtered"
         assert "0.4.89+abc1234" in html_out
 
+    def test_TheHistoryRenders_TheSlowestStepOfTheSlowestPhaseBesideIt(self):
+        """A phase that records steps (`phase/step`) names its slowest one, so a
+        slow rebuild says where inside the phase the time went; a step is never
+        mistaken for the slowest phase itself."""
+        from obdi.web import _rebuild_history_html
+
+        runs = [
+            {
+                "ok": 1,
+                "started_at": "2026-08-05T06:25:06Z",
+                "finished_at": "2026-08-05T06:26:15Z",
+                "records_total": 10,
+                "transactions": 10,
+                "timings": {
+                    "same-money-fold": {"seconds": 30.8, "calls": 1},
+                    "parse": {"seconds": 27.5, "calls": 40},
+                    "same-money-fold/reading-statements": {"seconds": 24.25, "calls": 2},
+                    "same-money-fold/pairing": {"seconds": 4.5, "calls": 1},
+                },
+                "build": "0.4.269",
+            }
+        ]
+
+        html_out = _rebuild_history_html(lambda: runs)
+
+        assert "same-money-fold 30.8s" in html_out
+        assert "slowest step reading-statements 24.25s" in html_out
+        assert "parse 27.5s" not in html_out
+
+    def test_TheHistoryRenders_APhaseWithNoStepsWithoutAStepClause(self):
+        from obdi.web import _rebuild_history_html
+
+        runs = [
+            {
+                "ok": 1,
+                "started_at": "2026-08-05T06:25:06Z",
+                "finished_at": "2026-08-05T06:25:15Z",
+                "timings": {
+                    "reconcile": {"seconds": 5.69, "calls": 47},
+                    "same-money-fold/pairing": {"seconds": 0.5, "calls": 1},
+                },
+                "build": "x",
+            }
+        ]
+
+        html_out = _rebuild_history_html(lambda: runs)
+
+        assert "reconcile 5.69s" in html_out
+        assert "slowest step" not in html_out
+
     def test_NoRuns_RendersNothingRatherThanAnEmptyTable(self):
         from obdi.web import _rebuild_history_html
 

@@ -25,7 +25,7 @@ from .parsers.pdf_statements import (
     _lines,
     pdf_parser_for,
 )
-from .parsers.statement_reading import StatementReading
+from .parsers.statement_reading import StatementReading, reading_from_json, reading_to_json
 from .store import SectionAssignment, Store
 
 
@@ -51,11 +51,6 @@ def _parser_for(payload: bytes) -> PdfStatementParser | None:
         # rather than contributing nothing quietly.
         print(f"ambiguous statement, no terms taken: {exc}", file=sys.stderr)
         return None
-
-
-def _read_statement(payload: bytes, digest: str) -> StatementReading | None:
-    found = _read_with_source(payload, digest)
-    return None if found is None else found[1]
 
 
 def _read_with_source(payload: bytes, digest: str) -> tuple[str, StatementReading] | None:
@@ -121,6 +116,58 @@ def _payload_of(store: Store, digest: str, account_ref: str) -> bytes:
     return b"" if row is None else bytes(row["payload"])
 
 
+def _reading_of(
+    store: Store, digest: str, account_ref: str
+) -> tuple[str, StatementReading] | None:
+    """What a held PDF says: the reading the store kept for its digest, else the
+    document read afresh (and not kept - see `keep_statement_readings`).
+
+    A kept reading that cannot be decoded is said aloud and read again: it is
+    derived data, so the document is the authority, and a pass that trusted
+    half a reading would be wrong without saying so.
+    """
+    kept = _kept_reading(store, digest)
+    if kept is not None:
+        return kept
+    return _read_with_source(_payload_of(store, digest, account_ref), digest[:12])
+
+
+def _kept_reading(store: Store, digest: str) -> tuple[str, StatementReading] | None:
+    stored = store.stored_statement_reading(digest)
+    if stored is None:
+        return None
+    try:
+        return stored[0], reading_from_json(stored[1])
+    except (ValueError, KeyError, TypeError) as exc:
+        print(
+            f"artefact {digest[:12]}: stored reading is unusable ({exc}), "
+            "reading the document again",
+            file=sys.stderr,
+        )
+        return None
+
+
+def keep_statement_readings(store: Store) -> int:
+    """Read every held PDF that has no usable kept reading, keep what it says,
+    and commit; returns how many documents were read.
+
+    Called by the pass that already writes (`same_money_fold.fold_same_money`),
+    never by a page view, so a view stays a reader and never waits for the
+    write lock a pull holds. A document that cannot be read keeps nothing and is
+    said aloud each time, as it was before readings were kept.
+    """
+    read = 0
+    for digest, account in _held_pdfs(store, None):
+        if _kept_reading(store, digest) is not None:
+            continue
+        found = _read_with_source(_payload_of(store, digest, account), digest[:12])
+        read += 1
+        if found is not None:
+            store.keep_statement_reading(digest, found[0], reading_to_json(found[1]))
+    store.connection.commit()
+    return read
+
+
 #: Artefact digest -> the sections of that statement, for a multi-account one.
 #: Same reason as `_BALANCE_BY_DIGEST`: the bytes never change, and re-reading a
 #: wide page's geometry on every view of a ledger would make it unusable.
@@ -180,9 +227,9 @@ def held_statement_readings(store: Store) -> Iterator[tuple[str, StatementReadin
     under the account it was assigned to.
     """
     for digest, account in _held_pdfs(store, None):
-        reading = _read_statement(_payload_of(store, digest, account), digest[:12])
-        if reading is not None:
-            yield account, reading
+        found = _reading_of(store, digest, account)
+        if found is not None:
+            yield account, found[1]
     for assignment, section in assigned_sections(store):
         if section is not None and not section.refusal:
             yield assignment.account_ref, section.reading
@@ -263,7 +310,7 @@ _USABLE_BY_DIGEST: dict[str, _Usable | None] = {}
 
 def _usable(store: Store, digest: str, account: str) -> _Usable | None:
     if digest not in _USABLE_BY_DIGEST:
-        found = _read_with_source(_payload_of(store, digest, account), digest[:12])
+        found = _reading_of(store, digest, account)
         held: _Usable | None = None
         if found is not None:
             source, reading = found

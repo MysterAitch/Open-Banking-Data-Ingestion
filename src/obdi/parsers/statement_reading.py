@@ -7,6 +7,7 @@ of it varies completely. A parser per format, one reading for all of them.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -75,3 +76,67 @@ class StatementReading:
             and self.closing_balance_minor is not None
             and self.discrepancy_minor == 0
         )
+
+
+def _day(value: date | None) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+def _maybe_day(value: object) -> date | None:
+    return None if value is None else date.fromisoformat(str(value))
+
+
+def reading_to_json(reading: StatementReading) -> str:
+    """The reading as text, so a store can keep what a document said.
+
+    Every field is written, so a reading read back is equal to the one kept and
+    a field added to the reading without being added here fails the round-trip
+    test rather than being quietly lost.
+    """
+    return json.dumps(
+        {
+            "statement_date": _day(reading.statement_date),
+            "opening_balance_minor": reading.opening_balance_minor,
+            "closing_balance_minor": reading.closing_balance_minor,
+            "credit_limit_minor": reading.credit_limit_minor,
+            "account_name": reading.account_name,
+            "transactions": [
+                [row.value_date.isoformat(), row.description, row.amount_minor]
+                for row in reading.transactions
+            ],
+            "end_of_day_minor": [
+                [day.isoformat(), minor] for day, minor in reading.end_of_day_minor
+            ],
+            "rates": reading.rates,
+            "rate_windows": [
+                [window.percent, window.until.isoformat()] for window in reading.rate_windows
+            ],
+            "notes": reading.notes,
+        }
+    )
+
+
+def reading_from_json(text: str) -> StatementReading:
+    """The reading `reading_to_json` wrote. Refuses text that is not one, with
+    ValueError, KeyError, or TypeError, rather than returning a partial reading."""
+    found = json.loads(text)
+    return StatementReading(
+        statement_date=_maybe_day(found["statement_date"]),
+        opening_balance_minor=found["opening_balance_minor"],
+        closing_balance_minor=found["closing_balance_minor"],
+        credit_limit_minor=found["credit_limit_minor"],
+        account_name=str(found["account_name"]),
+        transactions=[
+            StatementRow(date.fromisoformat(day), str(description), int(minor))
+            for day, description, minor in found["transactions"]
+        ],
+        end_of_day_minor=[
+            (date.fromisoformat(day), int(minor)) for day, minor in found["end_of_day_minor"]
+        ],
+        rates={str(kind): float(percent) for kind, percent in found["rates"].items()},
+        rate_windows=[
+            RateWindow(float(percent), date.fromisoformat(until))
+            for percent, until in found["rate_windows"]
+        ],
+        notes=[str(note) for note in found["notes"]],
+    )

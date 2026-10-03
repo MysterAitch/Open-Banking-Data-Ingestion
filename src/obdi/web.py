@@ -2421,9 +2421,22 @@ def _rebuild_history_html(
         timings = run.get("timings")
         slowest = ""
         if isinstance(timings, dict) and timings:
-            name, figures = next(iter(timings.items()))
+            # A step records as `phase/step`: it is named beside its phase and
+            # is never the slowest phase itself.
+            phases = [(n, f) for n, f in timings.items() if "/" not in str(n)]
+            name, figures = phases[0] if phases else next(iter(timings.items()))
             if isinstance(figures, dict):
                 slowest = f"{html.escape(str(name))} {figures.get('seconds')}s"
+                steps = [
+                    (str(n)[len(str(name)) + 1 :], f)
+                    for n, f in timings.items()
+                    if str(n).startswith(f"{name}/") and isinstance(f, dict)
+                ]
+                if steps:
+                    step, step_figures = steps[0]
+                    slowest += (
+                        f" (slowest step {html.escape(step)} {step_figures.get('seconds')}s)"
+                    )
         rows.append(
             "<tr>"
             f'<td><span class="pill pill-{badge}">{"ok" if ok else "failed"}</span></td>'

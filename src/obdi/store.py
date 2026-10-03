@@ -71,7 +71,9 @@ from .namespaces import (
 #: 10 -> 11: the `statement_sections` table. A new table needs no migration
 #: (SCHEMA creates it), but only an open that does work runs SCHEMA, so a store
 #: stamped 10 would never have grown it and the first assignment would fail.
-SCHEMA_VERSION = 11
+#:
+#: 11 -> 12: the `statement_readings` table, for the same reason as the last.
+SCHEMA_VERSION = 12
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -435,6 +437,18 @@ CREATE TABLE IF NOT EXISTS statement_sections (
     assigned_at TEXT NOT NULL,
     PRIMARY KEY (digest, section_key)
 );
+
+-- DERIVED, like transactions: what a held PDF statement says, kept so that no
+-- pass re-extracts a document whose bytes cannot change. Keyed by the
+-- artefact's digest alone, because the same bytes read the same under every
+-- account. `source` is the parser that read it and `reading` is the JSON of
+-- `StatementReading`. Wiped by a rebuild, which is when a new parser takes
+-- effect, and filled by `fold_same_money` and by nothing a page view runs.
+CREATE TABLE IF NOT EXISTS statement_readings (
+    digest  TEXT PRIMARY KEY,
+    source  TEXT NOT NULL,
+    reading TEXT NOT NULL
+);
 """
 
 
@@ -509,6 +523,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'transactions', 'transfers_paired',
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
+    'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
     ],
@@ -2985,6 +3000,26 @@ class Store:
                 (TransactionStatus.FOLDED.value, len(FOLDED_SIGHTING_PREFIX) + 1, _COPY_PATTERN),
             )
         }
+
+    def stored_statement_reading(self, digest: str) -> tuple[str, str] | None:
+        """(parser source, reading JSON) kept for a held statement, or None."""
+        row = self.connection.execute(
+            "SELECT source, reading FROM statement_readings WHERE digest = ?", (digest,)
+        ).fetchone()
+        return None if row is None else (str(row["source"]), str(row["reading"]))
+
+    def keep_statement_reading(self, digest: str, source: str, reading: str) -> None:
+        """Keep what a statement says, replacing any earlier reading. The caller commits."""
+        self.connection.execute(
+            "INSERT INTO statement_readings (digest, source, reading) VALUES (?, ?, ?) "
+            "ON CONFLICT(digest) DO UPDATE SET source = excluded.source, "
+            "reading = excluded.reading",
+            (digest, source, reading),
+        )
+
+    def clear_statement_readings(self) -> None:
+        """Forget every kept reading, in the open transaction."""
+        self.connection.execute("DELETE FROM statement_readings")
 
     def statement_folded_ids(self) -> set[str]:
         """Rows folded as the same money as a statement's rows: every folded row

@@ -48,6 +48,7 @@ from .namespaces import (
 )
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
+from .period_reconciliation import SAME_MONEY_PHASE
 from .providers import starling, truelayer
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
@@ -444,6 +445,8 @@ def rebuild_from_raw(
     invalidate_fingerprint(store)
     store.connection.execute("DELETE FROM transactions")
     store.connection.execute("DELETE FROM transaction_sources")
+    # A new parser takes effect here, so what the old one read is forgotten.
+    store.clear_statement_readings()
     # UNRESOLVED only. An unjudged flag is a claim the current rules make about
     # the current evidence, so re-deriving it is right: keeping it would
     # preserve doubts the rules have since learned to settle, and the queue
@@ -654,7 +657,7 @@ def rebuild_from_raw(
         report.transfers_paired = pair_transfers_across_store(store)
     # After pairing, because a confirmed transfer leg is never folded and the
     # pairing table is how the pass knows one.
-    with instrumentation.phase("same-money-fold"):
+    with instrumentation.phase(SAME_MONEY_PHASE):
         report.same_money_folded = fold_same_money(store, account_map).folded
     after_counts = {
         str(row[0]): int(row[1])
