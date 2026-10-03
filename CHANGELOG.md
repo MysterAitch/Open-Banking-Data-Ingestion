@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.269] - 2026-10-03
+
+### Fixed
+- **A balance a source states is tested with the rows on that source's own
+  days.** A merged row keeps one date, and an export dates the same payment a
+  day or two either side of the feed, so every payment in flight across a day
+  end read as a difference.
+- **The opened anchor always defines the opening.** A stated balance dated
+  before it made the anchor list and the whole-account walk disagree.
+
+### Added
+- **The ledger names the days on which the difference changes.** Balances that
+  differ by the same amount are one fault, so each change locates one missing
+  or surplus movement, and one explained by an unheld Space says so.
+
 ## [0.4.268] - 2026-10-03
 
 ### Fixed
