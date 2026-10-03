@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.276] - 2026-10-03
+
+### Added
+- **The ledger summarises the shape of the balance differences.** How many
+  stated balances move as the rows do, which changes undo each other (the same
+  money dated differently by the two sides), which sizes recur and at what
+  rhythm, and which permanent changes make up the present difference. A list
+  of several hundred change days could not show any of that.
+- **A timeline and a values chart, each opening in a new tab.** The masked
+  timeline marks where each kind of change falls and draws no size. The values
+  chart draws each source's stated balance, the balance the rows predict, and
+  the difference, wide enough to read at the scale of days, with links that
+  open a single month or year. The existing chart covered too long a period
+  to show a small offset.
+
 ## [0.4.275] - 2026-10-03
 
 ### Fixed
