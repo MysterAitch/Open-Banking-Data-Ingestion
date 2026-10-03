@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -53,6 +53,16 @@ from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
+from .known_accounts import (
+    DeclareOutcome,
+    KnownAccounts,
+    ParentOutcome,
+    ParentPlan,
+    declare_known_accounts,
+    plan_parents,
+    read_known_accounts,
+    set_space_parents,
+)
 from .ledger import Ledger
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
@@ -3280,14 +3290,21 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from the Space's own uid, so a second press recomputes the same names
         and declares nothing new.
         """
+        from .space_attribution import provider_mains_by_space_uid
         from .spaces import account_for, recover
 
         created: list[str] = []
         with Store(db_path) as store:
             found = recover(store)
             already = {str(record.ref) for record in store.declared_accounts()}
+            mains = provider_mains_by_space_uid(store, _account_map(store))
             for space in found:
-                record = account_for(space)
+                # The provider's own structure names the main account, and it
+                # is only a parent once it is itself declared.
+                main = mains.get(space.uid)
+                record = account_for(
+                    space, AccountRef(main) if main and main in already else None
+                )
                 if str(record.ref) in already:
                     continue
                 store.declare_account(record)
@@ -3339,6 +3356,32 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def declared_accounts() -> list[AccountRecord]:
         with Store(db_path) as store:
             return store.declared_accounts()
+
+    def _labels_or_none() -> dict[str, str]:
+        try:
+            return display_labels()
+        except Exception:
+            # A name is a convenience; the accounts page must not depend on
+            # the provider-label scan succeeding.
+            return {}
+
+    def known_accounts_data() -> tuple[KnownAccounts, ParentPlan]:
+        labels = _labels_or_none()
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            return (
+                read_known_accounts(store, account_map, labels),
+                plan_parents(store, account_map),
+            )
+
+    def declare_known(refs: list[str]) -> DeclareOutcome:
+        labels = _labels_or_none()
+        with Store(db_path) as store:
+            return declare_known_accounts(store, _account_map(store), labels, refs)
+
+    def set_parents(spaces: list[str]) -> ParentOutcome:
+        with Store(db_path) as store:
+            return set_space_parents(store, _account_map(store), spaces)
 
     overview_cache = OverviewCache()
 
@@ -3427,6 +3470,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         display_labels=display_labels,
         declared_accounts=declared_accounts,
         declare_account=declare_account,
+        known_accounts=known_accounts_data,
+        declare_known=declare_known,
+        set_parents=set_parents,
         archive_account=archive_account_hook,
         unarchive_account=unarchive_account_hook,
         archive_notes=archive_notes,
@@ -4770,13 +4816,25 @@ def main(argv: list[str] | None = None) -> int:
         # two Spaces that shared a name stay apart. Existing accounts map to
         # no uid, which reserves their ref without claiming it for anybody.
         already = {str(record.ref) for record in declared}
+        from .space_attribution import provider_mains_by_space_uid
+
+        with Store(db_path) as store:
+            mains = provider_mains_by_space_uid(store, _account_map(store))
         for space in found:
             # The record is built by spaces.account_for, not here: the web page
             # declares the same thing, and a label assembled twice is a label
             # that drifts on one path while both keep producing something
             # plausible. Its reasoning - why the span is in the label, why the
             # dates say they are inferred - lives with it.
-            record = account_for(space)
+            main = mains.get(space.uid)
+            record = account_for(space, AccountRef(main) if main and main in already else None)
+            held_parent = next(
+                (r.parent for r in declared if r.ref == record.ref and r.parent), None
+            )
+            if held_parent is not None:
+                # Re-declaring must not clear a parent already set, by a person
+                # or by an earlier run.
+                record = replace(record, parent=held_parent)
             ref = str(record.ref)
             former = former_names_note(space)
             span = f"{space.first_seen.isoformat()} .. {space.last_seen.isoformat()}"

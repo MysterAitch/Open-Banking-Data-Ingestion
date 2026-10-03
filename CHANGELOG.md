@@ -28,6 +28,31 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [0.4.266] - 2026-10-03
 
+### Added
+- **The Accounts button reaches the accounts page**, which now lists every
+  account obdi holds, declared or not. It went to the Overview's cards, and
+  nothing reached the page where an account is declared.
+- **Known accounts can be declared in one press, and Spaces given their
+  parent.** The main Starling account and others held rows with no registry
+  record, and declared Spaces had no parent. Each press acts only on what its
+  form lists; a kind is set only where structure establishes it.
+- **A closed Space's own history is fetched.** A recovered Space was declared
+  and never pulled, so transfers to it had no other half and the whole account
+  could not balance. What the bank answers for a closed Space is not yet known:
+  rows, nothing, or a refusal are each recorded.
+
+### Changed
+- **What a Starling export's balance means is decided from its own
+  arithmetic.** The certified statement's balance moves with Space payments;
+  nothing established the same for the CSV export, and treating both alike left
+  all but one of 1,741 daily balances differing. Each source is now tested
+  against its own rows as the whole account's balance and as the main
+  account's alone, and used under whichever reading its steps support, or not
+  at all.
+- **A Starling account whose whole feed is held opens at nil**, where the
+  bank's record gives its creation date and the feed reaches back to it, so
+  the earliest stated balance is a test like every other.
+
 ### Fixed
 - **A statement's own rows count in that statement's period, whatever date a
   feed gave them.** A card whose statement rows had all merged onto feed rows

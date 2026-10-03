@@ -2,8 +2,10 @@
 
 The destinations are a fixed, small set that says how the site is organised:
 what is up to date, what is held, how it arrives, where it goes, how it is
-checked, and the controls that can hurt. Every one is a page of its own except
-Accounts, which is the second section of the Overview.
+checked, and the controls that can hurt. Every one is a page of its own. The
+Overview keeps a section of account cards (`id="accounts"`) that other links
+may still point at, but the Accounts destination is the page that lists every
+account and is where one is declared and edited.
 
 NAVIGATION LINKS ARE NOT BUTTONS. A button is the action a page exists for, and
 the page's own buttons are full width so that doing and leaving are told apart
@@ -26,7 +28,7 @@ from contextvars import ContextVar
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("overview", "Overview", "/"),
     ("position", "Position", "/position"),
-    ("accounts", "Accounts", "/#accounts"),
+    ("accounts", "Accounts", "/accounts"),
     ("actual", "Actual", "/actual"),
     ("connections", "Connections", "/connections"),
     ("reports", "Reports", "/reports"),

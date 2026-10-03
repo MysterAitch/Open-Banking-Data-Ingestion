@@ -231,8 +231,7 @@ def canonical_ref(name: str, *, uid: str) -> str:
     The name still leads, because a ref nobody can read is a ref nobody checks.
     """
     slug = _UNSAFE.sub("-", name.strip().casefold()).strip("-") or "unnamed"
-    fingerprint = _UNSAFE.sub("", uid.casefold())[:8] or "nouid"
-    return f"{REF_PREFIX}-{slug}-{fingerprint}"
+    return f"{REF_PREFIX}-{slug}-{uid_fingerprint(uid)}"
 
 
 def former_names_note(space: HistoricalSpace) -> str:
@@ -247,8 +246,26 @@ def former_names_note(space: HistoricalSpace) -> str:
     return f" (previously {', '.join(space.also_known_as)})"
 
 
-def account_for(space: HistoricalSpace) -> AccountRecord:
+def uid_fingerprint(uid: str) -> str:
+    return _UNSAFE.sub("", uid.casefold())[:8] or "nouid"
+
+
+def ref_carries_uid(ref: str, uid: str) -> bool:
+    """Whether a recovered Space's canonical name was derived from this uid.
+
+    `canonical_ref` ends the name with a fragment of the uid, so a declared
+    recovered Space can be matched to the provider's structure without the map
+    ever having bound it.
+    """
+    return ref.startswith(f"{REF_PREFIX}-") and ref.endswith(f"-{uid_fingerprint(uid)}")
+
+
+def account_for(space: HistoricalSpace, parent: AccountRef | None = None) -> AccountRecord:
     """The declared account a recovered Space becomes.
+
+    `parent` is the main account the provider's structure puts it under, given
+    only where that account is itself declared: a parent must be, and the
+    caller knows what is.
 
     ONE definition, because there are now two ways to declare one - the command
     and the web page - and a label that drifted on one path would still produce
@@ -268,6 +285,7 @@ def account_for(space: HistoricalSpace) -> AccountRecord:
         ref=AccountRef(canonical_ref(space.name, uid=space.uid)),
         kind="starling-space",
         label=f"{space.name} (starling space, {span}){former}",
+        parent=parent,
         opened=space.first_seen,
         closed=space.last_seen,
         # Said in the record itself, because these dates BOUND the Space's life

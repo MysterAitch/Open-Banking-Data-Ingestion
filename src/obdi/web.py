@@ -50,6 +50,7 @@ from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import DoubtReport, SourceCoverage
 from .doctor import shape_problems
+from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import Ledger
 from .logs import say
 from .masking import MASKED_TOTAL
@@ -689,6 +690,14 @@ class WebConfig:
     #: to declare an account there is nothing to confirm against.
     declared_accounts: Callable[[], list[AccountRecord]] | None = None
     declare_account: Callable[[AccountRecord], AccountRecord] | None = None
+    #: Every account obdi holds, declared or not, with the parent changes the
+    #: provider's structure would make. Reads only; names, kinds, and counts.
+    known_accounts: Callable[[], tuple[KnownAccounts, ParentPlan]] | None = None
+    #: Declare the listed references among the undeclared accounts obdi holds,
+    #: and set the parent of the listed Spaces. Each acts only on what it is
+    #: handed and what is still a candidate, and returns what it did.
+    declare_known: Callable[[list[str]], DeclareOutcome] | None = None
+    set_parents: Callable[[list[str]], ParentOutcome] | None = None
     #: Archive an account (reference, closing date or None, the basis of an
     #: inferred date or "") and undo it. Both write the registry and nothing else.
     archive_account: Callable[[str, date | None, str], ArchiveOutcome] | None = None
@@ -6476,6 +6485,12 @@ class ConnectionHandler(
             return
         if route == "/declare-spaces":
             self._declare_spaces()
+            return
+        if route == "/declare-known":
+            self._declare_known_post(self._read_form())
+            return
+        if route == "/set-parents":
+            self._set_parents_post(self._read_form())
             return
         if route == "/balance-reconciliation":
             self._balance_reconciliation(masked=False)

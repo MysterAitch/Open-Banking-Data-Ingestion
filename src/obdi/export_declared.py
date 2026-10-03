@@ -114,9 +114,10 @@ def _declared_accounts(store: Store) -> list[dict[str, object]]:
             "ref": record.ref,
             "kind": record.kind,
             "label": record.label,
-            "parent": getattr(record, "parent", "") or "",
-            "opened_on": str(getattr(record, "opened_on", "") or ""),
-            "closed_on": str(getattr(record, "closed_on", "") or ""),
+            "parent": str(record.parent) if record.parent else "",
+            "opened_on": record.opened.isoformat() if record.opened else "",
+            "closed_on": record.closed.isoformat() if record.closed else "",
+            "date_basis": record.date_basis,
         }
         for record in store.declared_accounts()
     ]

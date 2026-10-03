@@ -44,6 +44,7 @@ from .accounts import (
 from .callback import render_page
 from .coverage import DoubtReport
 from .errors import DataError
+from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .namespaces import validate_canonical_name
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .web_sections import back_link, referring_page
@@ -303,13 +304,167 @@ def _account_row(record: AccountRecord, today: date) -> str:
     )
 
 
-def accounts_page(records: list[AccountRecord], *, today: date) -> bytes:
+_FEEDLESS_NOTE = (
+    "<p>For an account obdi has no feed for, declare it, then open its ledger "
+    "to state its balance and type its transactions. Choose the kind "
+    f"<strong>{BALANCE_ONLY_KIND}</strong> if you would rather state its balance "
+    "now and then than itemise it: the change between two stated balances is "
+    "then counted as it happened, instead of being reported as a failed check. "
+    "A mortgage or any loan is owed, so its balance is stated as a minus "
+    "figure.</p>"
+)
+
+
+def _known_row(account: KnownAccount) -> str:
+    """One account obdi holds, on a line that wraps rather than scrolls."""
+    ref = quote(account.ref, safe="")
+    detail = [f'<span class="mono">{html.escape(account.ref)}</span>']
+    detail.append(html.escape(account.kind) if account.kind else "no kind")
+    if account.parent:
+        detail.append(f"under {html.escape(account.parent)}")
+    detail.append(f"{account.rows} row(s)")
+    state = (
+        '<span class="pill pill-ok">declared</span>'
+        if account.declared
+        else '<span class="pill pill-bad">not declared</span>'
+    )
+    links = f'<a class="tap" href="/ledger?ref={ref}">Ledger</a>'
+    if account.declared:
+        links += f' <a class="tap" href="/edit-account?ref={ref}">Edit</a>'
+    return (
+        '<div class="row"><strong>'
+        f"{html.escape(account.label)}</strong> {state}<br>"
+        + " - ".join(detail)
+        + f"<br>{links}</div>"
+    )
+
+
+def _declare_known_section(known: KnownAccounts) -> str:
+    waiting = known.undeclared
+    unnamed = (
+        f'<p class="muted">{known.unnamed} more account(s) are held under a '
+        "provider-qualified name that no account can carry. Bind them to a name "
+        "first; they cannot be declared as they stand.</p>"
+        if known.unnamed
+        else ""
+    )
+    if not waiting:
+        return unnamed
+    items = "".join(
+        "<li>"
+        f"<strong>{html.escape(a.label)}</strong> - "
+        f'<span class="mono">{html.escape(a.ref)}</span>, '
+        + (
+            f"kind {html.escape(a.kind)} ({html.escape(a.kind_reason)})"
+            if a.kind
+            else "no kind inferred, so it is left empty"
+        )
+        + "</li>"
+        for a in waiting
+    )
+    hidden = "".join(
+        f'<input type="hidden" name="ref" value="{html.escape(a.ref)}">' for a in waiting
+    )
+    noun = "account" if len(waiting) == 1 else "accounts"
+    return (
+        f"<h2>Held but not declared</h2><p>{len(waiting)} {noun} obdi holds "
+        "rows for, or has bound in the account map, with no record in the registry. "
+        "Declaring them changes no row and no figure: each is declared under its own "
+        "name, with the label obdi already shows for it, and a kind only where the "
+        "structure says so, with the reason beside it.</p>"
+        f'<ul class="plain">{items}</ul>'
+        '<form method="post" action="/declare-known">'
+        + hidden
+        + submit_button(f"Declare these {len(waiting)} {noun}")
+        + "</form>"
+        + unnamed
+    )
+
+
+def _parents_section(plan: ParentPlan) -> str:
+    body = ""
+    if plan.settable:
+        items = "".join(
+            f'<li><span class="mono">{html.escape(c.space)}</span> under '
+            f'<span class="mono">{html.escape(c.main)}</span></li>'
+            for c in plan.settable
+        )
+        hidden = "".join(
+            f'<input type="hidden" name="space" value="{html.escape(c.space)}">'
+            for c in plan.settable
+        )
+        noun = "parent" if len(plan.settable) == 1 else "parents"
+        body += (
+            f"<p>The provider's own structure files these Spaces under a main account "
+            "that is declared, and the registry names none.</p>"
+            f'<ul class="plain">{items}</ul>'
+            '<form method="post" action="/set-parents">'
+            + hidden
+            + submit_button(f"Set these {len(plan.settable)} {noun}")
+            + "</form>"
+        )
+    if plan.waiting:
+        items = "".join(
+            f'<li><span class="mono">{html.escape(c.space)}</span> belongs under '
+            f'<span class="mono">{html.escape(c.main)}</span>, which is not declared</li>'
+            for c in plan.waiting
+        )
+        body += (
+            "<p>These cannot be given a parent yet, because a parent must itself be a "
+            "declared account. Declare the main account first.</p>"
+            f'<ul class="plain">{items}</ul>'
+        )
+    if plan.disagreeing:
+        items = "".join(
+            f'<li><span class="mono">{html.escape(d.space)}</span>: the registry says '
+            f'<span class="mono">{html.escape(d.registry)}</span>, the provider\'s '
+            f'structure says <span class="mono">{html.escape(d.provider)}</span></li>'
+            for d in plan.disagreeing
+        )
+        body += (
+            '<p class="warn">The registry and the provider disagree about these. '
+            "Nothing was changed: one of the two is wrong, and only you can say which. "
+            "Edit the account to change its parent.</p>"
+            f'<ul class="plain">{items}</ul>'
+        )
+    return f"<h2>Space parents</h2>{body}" if body else ""
+
+
+def accounts_page(
+    records: list[AccountRecord],
+    *,
+    today: date,
+    known: KnownAccounts | None = None,
+    plan: ParentPlan | None = None,
+) -> bytes:
     """Which accounts exist, as declared by a person.
 
     Declared state, not derived: a mortgage with no feed and cash in a tin
     have no artefact anything could be replayed from, so this list is the
     only place they exist at all.
+
+    With `known` it leads with every account obdi holds, declared or not, since
+    what a person comes here for is to find an account and open it; declaring
+    comes after.
     """
+    if known is not None:
+        return render_page(
+            "Accounts",
+            "<p>Every account obdi holds, declared or not. An account exists here by "
+            "holding rows or by being bound in the account map; it is declared when "
+            "it has a record in the registry, which is where its kind, parent, and "
+            "dates are kept.</p>"
+            + (
+                "".join(_known_row(a) for a in known.accounts)
+                or "<p>No account is held or declared yet.</p>"
+            )
+            + _declare_known_section(known)
+            + (_parents_section(plan) if plan is not None else "")
+            + "<h2>Declare an account</h2>"
+            + _FEEDLESS_NOTE
+            + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
+            + '<p><a class="button" href="/">Back to overview</a></p>',
+        )
     rows = "".join(_account_row(record, today) for record in records)
     return render_page(
         "Declared accounts",
@@ -330,13 +485,7 @@ def accounts_page(records: list[AccountRecord], *, today: date) -> bytes:
             "accounts a provider has mentioned are already selectable "
             "everywhere a document is filed.</p>"
         )
-        + "<p>For an account obdi has no feed for, declare it, then open its ledger "
-        "to state its balance and type its transactions. Choose the kind "
-        f"<strong>{BALANCE_ONLY_KIND}</strong> if you would rather state its balance "
-        "now and then than itemise it: the change between two stated balances is "
-        "then counted as it happened, instead of being reported as a failed check. "
-        "A mortgage or any loan is owed, so its balance is stated as a minus "
-        "figure.</p>"
+        + _FEEDLESS_NOTE
         + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
         + '<p><a class="button" href="/">Back to overview</a></p>',
     )
@@ -698,9 +847,94 @@ class AccountPages:
         return [] if hook is None else hook()
 
     def _accounts_page(self) -> None:
+        hook = self.bound_config.known_accounts
+        known, plan = (None, None) if hook is None else hook()
         self._respond(
             200,
-            accounts_page(self.declared_accounts(), today=datetime.now(UTC).date()),
+            accounts_page(
+                self.declared_accounts(),
+                today=datetime.now(UTC).date(),
+                known=known,
+                plan=plan,
+            ),
+        )
+
+    def _declare_known_post(self, form: dict[str, list[str]]) -> None:
+        """Declare the accounts the page listed, and say which.
+
+        Only a POST declares anything; the page that offers it is a read. The
+        references are the list that was shown, so what is declared is what the
+        person saw, and any that stopped being candidates in between are
+        reported as skipped rather than declared anyway.
+        """
+        hook = self.bound_config.declare_known
+        if hook is None:
+            self._respond(404, refusal("Not available", "Declaring known accounts is not wired."))
+            return
+        outcome = hook([ref for ref in form.get("ref", []) if ref.strip()])
+        items = "".join(
+            f'<li><strong>{html.escape(a.label)}</strong> - '
+            f'<span class="mono">{html.escape(a.ref)}</span>'
+            + (f", kind {html.escape(a.kind)}" if a.kind else "")
+            + (f", under {html.escape(a.parent)}" if a.parent else "")
+            + "</li>"
+            for a in outcome.declared
+        )
+        skipped = (
+            "<p>Not declared, because each is already declared or is not an account "
+            "obdi holds: "
+            + ", ".join(f'<span class="mono">{html.escape(r)}</span>' for r in outcome.skipped)
+            + ".</p>"
+            if outcome.skipped
+            else ""
+        )
+        count = len(outcome.declared)
+        noun = "account" if count == 1 else "accounts"
+        said = (
+            f'<p class="ok"><strong>Declared {count} {noun}.</strong></p><ul>{items}</ul>'
+            if count
+            else "<p>Nothing was declared: there was nothing left to declare.</p>"
+        )
+        self._respond(
+            200,
+            render_page(
+                "Accounts declared",
+                said + skipped + '<p><a class="button" href="/accounts">Back to accounts</a></p>',
+            ),
+        )
+
+    def _set_parents_post(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.set_parents
+        if hook is None:
+            self._respond(404, refusal("Not available", "Setting parents is not wired."))
+            return
+        outcome = hook([space for space in form.get("space", []) if space.strip()])
+        items = "".join(
+            f'<li><span class="mono">{html.escape(c.space)}</span> now under '
+            f'<span class="mono">{html.escape(c.main)}</span></li>'
+            for c in outcome.set_
+        )
+        skipped = (
+            "<p>Left alone, because each is no longer settable (already set, "
+            "disagreeing, or its main account is not declared): "
+            + ", ".join(f'<span class="mono">{html.escape(r)}</span>' for r in outcome.skipped)
+            + ".</p>"
+            if outcome.skipped
+            else ""
+        )
+        count = len(outcome.set_)
+        said = (
+            f'<p class="ok"><strong>Set {count} parent{"" if count == 1 else "s"}.</strong>'
+            f"</p><ul>{items}</ul>"
+            if count
+            else "<p>No parent was set: there was nothing left to set.</p>"
+        )
+        self._respond(
+            200,
+            render_page(
+                "Parents set",
+                said + skipped + '<p><a class="button" href="/accounts">Back to accounts</a></p>',
+            ),
         )
 
     def _declare_account_form(self) -> None:

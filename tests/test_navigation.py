@@ -89,9 +89,17 @@ class TestEveryPageCarriesTheStrip:
         page = httpx.get(f"{base}/", timeout=20).text
 
         anchors = [href.split("#")[1] for _, _, href in DESTINATIONS if "#" in href]
-        assert anchors == ["accounts"], "every other destination is a page of its own"
+        assert anchors == [], "every destination is a page of its own"
         for anchor in anchors:
             assert f'id="{anchor}"' in page, anchor
+
+    def test_AccountsDestination_IsTheAccountsPageWhileTheOverviewKeepsItsAccountCards(self, base):
+        hrefs = {key: href for key, _, href in DESTINATIONS}
+
+        assert hrefs["accounts"] == "/accounts"
+        assert 'id="accounts"' in httpx.get(f"{base}/", timeout=20).text, (
+            "other links to /#accounts must keep landing on the cards"
+        )
 
     def test_Destinations_AreInOrderOfUse_DailyReadingFirstAndRepairsLast(self):
         keys = [key for key, _, _ in DESTINATIONS]

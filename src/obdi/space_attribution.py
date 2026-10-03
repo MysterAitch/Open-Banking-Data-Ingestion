@@ -290,27 +290,62 @@ def space_parents(store: Store, account_map: AccountMap) -> dict[str, str]:
     The account map's bindings are NOT evidence: two accounts fed by one source
     may be two banks.
     """
-    # Imported here: the rebuild module owns the feed-origin reading and itself
-    # imports this one to run the pass.
-    from .rebuild import _FEED_ORIGIN, _starling_defaults, _starling_feed_ref
-
     claims: dict[str, set[str]] = defaultdict(set)
     for ref in account_map.declared_refs():
         record = account_map.record(ref)
         if record is not None and record.parent:
             claims[str(ref)].add(str(record.parent))
+    for claim in provider_space_claims(store, account_map):
+        if claim.main.startswith("starling:") or claim.space.startswith("starling:"):
+            continue
+        claims[claim.space].add(claim.main)
+
+    return {
+        space: next(iter(mains))
+        for space, mains in claims.items()
+        if len(mains) == 1 and space not in mains
+    }
+
+
+@dataclass(frozen=True)
+class ProviderSpaceClaim:
+    """The provider's own statement that one category is a Space of one account."""
+
+    #: The Space's uid, which is also what a recovered Space's ref carries a
+    #: fragment of, so a Space the account map has never bound can be matched.
+    uid: str
+    #: The canonical name the account map gives it, or "starling:<uid>" unbound.
+    space: str
+    #: The main account's canonical name, or "starling:<uid>" unbound.
+    main: str
+
+
+def provider_space_claims(store: Store, account_map: AccountMap) -> list[ProviderSpaceClaim]:
+    """Every Space a landed Starling feed artefact's origin names, with its main.
+
+    Provider structure ALONE, never the registry: `space_parents` merges the two
+    and drops a Space on which they differ, so the question "does the registry
+    disagree with the provider" can only be asked of this. Unbound ends are
+    returned as the source-qualified fallbacks the map gives them, for the
+    caller to filter, because a recovered Space is unbound by construction and
+    is matched by uid instead.
+    """
+    # Imported here: the rebuild module owns the feed-origin reading and itself
+    # imports this one to run the pass.
+    from .rebuild import _FEED_ORIGIN, _starling_defaults, _starling_feed_ref
 
     defaults = _starling_defaults(
         store.connection.execute(
             "SELECT source, payload FROM raw_artefacts WHERE source = 'starling-accounts'"
         ).fetchall()
     )
-    origins = [
+    origins = sorted(
         str(row[0])
         for row in store.connection.execute(
             "SELECT DISTINCT origin FROM raw_artefacts WHERE source = 'starling-feed'"
         )
-    ]
+    )
+    found_claims: list[ProviderSpaceClaim] = []
     for origin in origins:
         found = _FEED_ORIGIN.search(origin)
         if not found:
@@ -318,17 +353,44 @@ def space_parents(store: Store, account_map: AccountMap) -> dict[str, str]:
         account_uid, category_uid = found.group(1), found.group(2)
         if defaults.get(category_uid) == account_uid:
             continue
-        main = str(account_map.resolve("starling", account_uid))
-        space = str(_starling_feed_ref(origin, "", defaults, account_map))
-        if main.startswith("starling:") or space.startswith("starling:"):
-            continue
-        claims[space].add(main)
+        found_claims.append(
+            ProviderSpaceClaim(
+                uid=category_uid,
+                space=str(_starling_feed_ref(origin, "", defaults, account_map)),
+                main=str(account_map.resolve("starling", account_uid)),
+            )
+        )
+    return found_claims
 
+
+def provider_space_parents(store: Store, account_map: AccountMap) -> dict[str, str]:
+    """Each BOUND Space the provider's structure names, with its one main account.
+
+    A Space the provider's artefacts place under two mains is left out, as in
+    `space_parents`.
+    """
+    mains: dict[str, set[str]] = defaultdict(set)
+    for claim in provider_space_claims(store, account_map):
+        if claim.main.startswith("starling:") or claim.space.startswith("starling:"):
+            continue
+        mains[claim.space].add(claim.main)
     return {
-        space: next(iter(mains))
-        for space, mains in claims.items()
-        if len(mains) == 1 and space not in mains
+        space: next(iter(found))
+        for space, found in mains.items()
+        if len(found) == 1 and space not in found
     }
+
+
+def provider_mains_by_space_uid(store: Store, account_map: AccountMap) -> dict[str, str]:
+    """Each Space uid the provider's structure names, with its one BOUND main account.
+
+    For a Space nothing binds, such as a recovered historical one.
+    """
+    mains: dict[str, set[str]] = defaultdict(set)
+    for claim in provider_space_claims(store, account_map):
+        if not claim.main.startswith("starling:"):
+            mains[claim.uid].add(claim.main)
+    return {uid: next(iter(found)) for uid, found in mains.items() if len(found) == 1}
 
 
 def fold_space_copies(store: Store, account_map: AccountMap) -> FoldReport:
@@ -361,4 +423,14 @@ def fold_space_copies(store: Store, account_map: AccountMap) -> FoldReport:
     )
 
 
-__all__ = ["FoldPlan", "FoldReport", "fold_space_copies", "plan_folds", "space_parents"]
+__all__ = [
+    "FoldPlan",
+    "FoldReport",
+    "ProviderSpaceClaim",
+    "fold_space_copies",
+    "plan_folds",
+    "provider_mains_by_space_uid",
+    "provider_space_claims",
+    "provider_space_parents",
+    "space_parents",
+]
