@@ -486,7 +486,11 @@ def _row_note(note: Any) -> str:
             _lookalike(note.lookalike) if note.lookalike is not None else "",
         )
     )
-    return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
+    feed = f"; feed status {_esc(note.feed_status)}" if note.feed_status else ""
+    return (
+        f"{_esc(note.direction)} row dated {dated}; seen by {seen}; "
+        f"{_esc(note.status)}{feed}{extras}"
+    )
 
 
 def _partner_of(note: Any) -> str:
@@ -636,6 +640,28 @@ def _hold_html(change: Any, hold: str) -> str:
             "a single counted row"
         )
         return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
+    if hold == "feed-status-rows":
+        return "".join(
+            "<p>The change equals "
+            f"{'minus ' if found.equals == 'equals minus' else ''}the sum of the "
+            f"{_plural(found.rows.count, 'row')} whose feed status is {_esc(found.status)} "
+            "in the window:</p>" + _row_list(found.rows)
+            for found in change.feed_status_rows
+            if found.equals
+        )
+    if hold == "feed-status-left-out":
+        return "".join(
+            f"<p>Leave the {_plural(found.rows.count, 'row')} of feed status "
+            f"{_esc(found.status)} out of the count and "
+            + (
+                "nothing is left to explain.</p>"
+                if found.left == "nil"
+                else "the rest of the rows the store counts that "
+                f"{source} does not list sum to what is left.</p>"
+            )
+            for found in change.feed_status_rows
+            if found.left
+        )
     if hold == "timing-pair":
         return (
             f"<p>The change equals {'minus ' if change.sides_negated else ''}the sum of the "
@@ -767,6 +793,44 @@ def _reversed_html(found: Any) -> str:
     return f'<p class="muted">{_esc(sentence)}</p>'
 
 
+def _feed_statuses_html(found: Any, *, exports: bool) -> str:
+    """What the bank's own feed says the counted rows are, and the items it says that yield none.
+
+    Said even when there is nothing to say of them: a status other than SETTLED on
+    counted rows is what says whether such a row is money, and a status the
+    provider's map lacks is a payment that never became a row. Names and counts only.
+    """
+    sentences = []
+    for count in found.by_status:
+        one = count.counted == 1
+        sentence = f"{count.counted} counted {'row carries' if one else 'rows carry'}"
+        sentence += f" the feed status {count.status}"
+        if exports and one:
+            sentence += ", the export lists it" if count.listed else ", the export does not list it"
+        elif exports:
+            sentence += f", the export lists {count.listed} of them"
+        if one:
+            sentence += ", and it has " + ("a" if count.counter_item else "no") + " counter-item."
+        else:
+            sentence += (
+                f", and {count.counter_item} {'has' if count.counter_item == 1 else 'have'} "
+                "a counter-item."
+            )
+        sentences.append(sentence)
+    if found.by_status:
+        sentences.append(
+            "A counter-item is a row of the opposite direction and equal size within three days."
+        )
+    if found.unmapped:
+        names = ", ".join(f"{name} ({count})" for name, count in found.unmapped)
+        sentences.append(f"Feed items with a status the map does not list, so no row: {names}.")
+    elif found.by_status:
+        sentences.append("No feed item carries a status the map does not list.")
+    if not sentences:
+        return ""
+    return "".join(f'<p class="muted">{_esc(sentence)}</p>' for sentence in sentences)
+
+
 def _explanations_html(explanation: Any) -> str:
     """Why each of the first changes happened, and what the held exports are like."""
     if explanation is None:
@@ -783,6 +847,7 @@ def _explanations_html(explanation: Any) -> str:
             f"{'has' if facts.unsighted == 1 else 'have'} no sighting in the store.</p>"
         )
     body += _reversed_html(explanation.reversed)
+    body += _feed_statuses_html(explanation.feed_statuses, exports=facts is not None)
     pairs = sum(1 for change in explanation.changes if change.undone_on)
     if explanation.changes:
         body += (

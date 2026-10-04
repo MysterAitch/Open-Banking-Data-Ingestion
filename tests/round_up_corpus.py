@@ -166,8 +166,12 @@ def land_feed(
     return body
 
 
-def export_of_the_payments(directory: pathlib.Path) -> pathlib.Path:
-    """The Space-blind export: every payment at its own amount, no round-up."""
+def export_of_the_payments(directory: pathlib.Path, extra: tuple[Row, ...] = ()) -> pathlib.Path:
+    """The Space-blind export: every payment at its own amount, no round-up.
+
+    `extra` are further rows the export lists, placed among the others by the
+    day it dates them.
+    """
     rows = [
         Row("Deposit", DEPOSIT, 1, 1),
         Row("Coffee", -350, 3, 3),
@@ -177,6 +181,7 @@ def export_of_the_payments(directory: pathlib.Path) -> pathlib.Path:
         Row("Hotel", -3000, 10, 10),
         Row("Lunch", -800, 12, 12),
     ]
+    rows = sorted([*rows, *extra], key=lambda row: row.export_day)
     path = directory / "export.csv"
     path.write_text("\n".join(export_lines(rows)) + "\n", encoding="utf-8")
     return path
@@ -187,17 +192,23 @@ def household_store(
     main: list[dict[str, Any]] | None = None,
     space: list[dict[str, Any]] | None = None,
     export_last: bool = False,
+    export_extra: tuple[Row, ...] = (),
+    main_refetches: tuple[list[dict[str, Any]], ...] = (),
 ) -> Store:
     """The corpus held as raw artefacts and the export, nothing derived yet.
 
     `main` and `space` replace the two feeds' items where a scenario varies them.
     `export_last` has the export arrive after both feeds, so a rebuild replays
     it as the later sighting of every payment.
+    `export_extra` adds rows to the export, and each of `main_refetches` is a
+    later fetch of the main feed, landed after every other feed, in the order given.
     """
     store = Store(directory / "household.sqlite3")
     land_evidence(store)
     if not export_last:
-        import_file(store, export_of_the_payments(directory), account_id=MAIN, account_map=MAP)
+        import_file(
+            store, export_of_the_payments(directory, export_extra), account_id=MAIN, account_map=MAP
+        )
     land_feed(
         store,
         main if main is not None else main_feed(),
@@ -205,8 +216,12 @@ def household_store(
         asked="2026-09-02T00:00:00Z",
     )
     land_feed(store, space if space is not None else space_feed(), origin=SPACE_FEED_ORIGIN)
+    for later, items in enumerate(main_refetches, start=3):
+        land_feed(store, items, origin=FEED_ORIGIN, asked=f"2026-09-{later:02}T00:00:00Z")
     if export_last:
-        import_file(store, export_of_the_payments(directory), account_id=MAIN, account_map=MAP)
+        import_file(
+            store, export_of_the_payments(directory, export_extra), account_id=MAIN, account_map=MAP
+        )
     return store
 
 

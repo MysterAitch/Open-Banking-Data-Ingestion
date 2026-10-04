@@ -38,7 +38,13 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
   combined              none of those alone, but the three taken together
                         equal the change exactly
   one row              a single counted row, or the negative of one
-  straddling           the rows whose date from the source and stored date fall
+  feed status rows      for each feed status other than SETTLED among the counted
+                        rows in the window (`feed_statuses`): the sum, or minus the
+                        sum, of the rows of that status
+  feed status left out  leave the rows of one such status out of the count and
+                        either nothing is left to explain, or the unlisted rows
+                        still counted sum to what is left
+  straddling          the rows whose date from the source and stored date fall
                         on different sides of this balance, which would mean the
                         source's dating is not being applied to them
   timing pair          for a change that a later change of exactly the opposite
@@ -92,6 +98,7 @@ from .export_parting import (
     first_parting,
 )
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
+from .feed_statuses import FeedStatuses
 from .identity import normalise_description
 from .masking import Structural
 from .models import Transaction, TransactionStatus
@@ -128,6 +135,8 @@ COUNTED_NOT_LISTED = "counted-not-listed"
 DIFFERENT_FIGURE = "different-figure"
 COMBINED = "combined"
 ONE_ROW = "one-row"
+FEED_STATUS_ROWS = "feed-status-rows"
+FEED_STATUS_LEFT_OUT = "feed-status-left-out"
 STRADDLING = "straddling"
 TIMING_PAIR = "timing-pair"
 UNHELD_SPACE = "unheld-space"
@@ -137,6 +146,9 @@ NONE = "none"
 
 #: How near in days a row must lie to be another's counter-item.
 COUNTER_ITEM_DAYS = 3
+
+#: The feed status that is an ordinary payment: the baseline the status tests compare against.
+ORDINARY_FEED_STATUS = "SETTLED"
 
 #: How far apart in days two rows of one size and direction may lie and still be
 #: offered as each other's counterpart across an export comparison (`Lookalike`).
@@ -191,6 +203,9 @@ class RowNote:
     #: For a row the export does not list, or an export row the store does not count:
     #: what the other side holds that is like it (`Lookalike`); None for any other row.
     lookalike: Structural[Lookalike | None] = None
+    #: The bank's own feed status of the row's item, newest landed (`feed_statuses`);
+    #: "" for a row no feed item is its own.
+    feed_status: Structural[str] = ""
 
 
 @dataclass(frozen=True)
@@ -224,6 +239,24 @@ class Lookalike:
 
 
 @dataclass(frozen=True)
+class StatusRows:
+    """The counted rows of one feed status in a change's window, and what the status tests say.
+
+    Present for every status other than `ORDINARY_FEED_STATUS` that a counted row in
+    the window carries, so the page can say a test did not hold as well as that it did.
+    """
+
+    status: Structural[str]
+    rows: Structural[RowSet]
+    #: The change equals the sum of those rows ("equals"), minus it ("equals minus"),
+    #: or neither ("").
+    equals: Structural[str] = ""
+    #: What leaving them out of the count leaves: "nil", "sum" (the unlisted rows still
+    #: counted), or "".
+    left: Structural[str] = ""
+
+
+@dataclass(frozen=True)
 class RowSet:
     """Some rows, the first few named and the rest counted."""
 
@@ -250,6 +283,8 @@ class ChangeExplanation:
     #: The one counted row that equals the change, or minus it.
     one_row: Structural[RowNote | None] = None
     one_row_negated: Structural[bool] = False
+    #: Each feed status other than SETTLED among the counted rows in the window.
+    feed_status_rows: Structural[tuple[StatusRows, ...]] = ()
     straddling: Structural[RowSet] = field(default_factory=RowSet)
     #: Rows the export lists in the window, and sightings of it the store holds there.
     export_rows: Structural[int | None] = None
@@ -329,10 +364,37 @@ class ReversedFacts:
 
 
 @dataclass(frozen=True)
+class StatusCount:
+    """The counted rows carrying one feed status, in counts over the whole account."""
+
+    status: Structural[str]
+    counted: Structural[int]
+    #: Of those, the rows an export lists.
+    listed: Structural[int]
+    #: Of those, the rows with a counter-item (`RowNote.counter_item`).
+    counter_item: Structural[int]
+
+
+@dataclass(frozen=True)
+class FeedStatusFacts:
+    """What the bank's own feed says its counted rows are, and what it says that yields no row.
+
+    The counts are what say whether a status other than SETTLED is money: a status
+    whose rows the export omits and which have no counter-item would be a payment
+    the bank took back by changing the item alone.
+    """
+
+    by_status: Structural[tuple[StatusCount, ...]] = ()
+    #: Status name -> feed items carrying a status the provider's map does not list.
+    unmapped: Structural[tuple[tuple[str, int], ...]] = ()
+
+
+@dataclass(frozen=True)
 class WalkExplanation:
     changes: Structural[tuple[ChangeExplanation, ...]] = ()
     facts: Structural[ExportFacts | None] = None
     reversed: Structural[ReversedFacts] = field(default_factory=ReversedFacts)
+    feed_statuses: Structural[FeedStatusFacts] = field(default_factory=FeedStatusFacts)
     #: Changes that were due an explanation and have none because `EXPLAINED_CHANGES`
     #: was reached; nil means the bound was not met.
     omitted: Structural[int] = 0
@@ -422,6 +484,10 @@ class _View:
     by_stored: _Dated
     #: The rows the source is shown to list (an export's matched rows), where it is one.
     represented: frozenset[str] = frozenset()
+    #: Counted rows by feed status other than `ORDINARY_FEED_STATUS`, and the unlisted
+    #: ones among them.
+    by_feed_status: Mapping[str, _Dated] = field(default_factory=dict)
+    unlisted_by_feed_status: Mapping[str, _Dated] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -469,6 +535,14 @@ class _RowFacts:
         self._uids: dict[str, frozenset[str]] = {}
         self._legs: dict[str, Transaction] = {}
         self._counters: dict[tuple[int, int], list[tuple[date, str]]] | None = None
+        self._statuses: FeedStatuses | None = None
+
+    @property
+    def feed(self) -> FeedStatuses:
+        """The feed statuses of every account's items, read on first use."""
+        if self._statuses is None:
+            self._statuses = FeedStatuses(self.store, self.members)
+        return self._statuses
 
     @property
     def pairs(self) -> dict[str, str]:
@@ -667,6 +741,7 @@ class _Evidence:
                 about.partner_day,
                 about.partner_is_leg,
                 lookalike() if lookalike is not None else None,
+                self.facts.feed.of(row.entity_id),
             )
 
         return build
@@ -1179,6 +1254,8 @@ def _view(
     by_source: list[_Entry] = []
     by_stored: list[_Entry] = []
     extra: list[_Entry] = []
+    by_feed_status: dict[str, list[_Entry]] = defaultdict(list)
+    unlisted_by_feed_status: dict[str, list[_Entry]] = defaultdict(list)
     for account, rows in evidence.members.items():
         for row in rows:
             if account not in family:
@@ -1191,19 +1268,27 @@ def _view(
                 is_listed = (
                     row.entity_id in listed if listed is not None else row.entity_id in sighted
                 )
-                if not is_listed and not (begins is not None and day < begins):
-                    unlisted.append(
+                feed_status = evidence.facts.feed.of(row.entity_id)
+                if feed_status and feed_status != ORDINARY_FEED_STATUS:
+                    by_feed_status[feed_status].append(
                         _Entry(
-                            day,
-                            row.amount_minor,
-                            row.value_date,
-                            evidence.note(
-                                row,
-                                lookalike=twin_of(row, day) if twin_of is not None else None,
-                            ),
-                            row.entity_id,
+                            day, row.amount_minor, row.value_date, evidence.note(row), row.entity_id
                         )
                     )
+                if not is_listed and not (begins is not None and day < begins):
+                    entry = _Entry(
+                        day,
+                        row.amount_minor,
+                        row.value_date,
+                        evidence.note(
+                            row,
+                            lookalike=twin_of(row, day) if twin_of is not None else None,
+                        ),
+                        row.entity_id,
+                    )
+                    unlisted.append(entry)
+                    if feed_status and feed_status != ORDINARY_FEED_STATUS:
+                        unlisted_by_feed_status[feed_status].append(entry)
                 if day != row.value_date:
                     by_source.append(
                         _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
@@ -1241,6 +1326,8 @@ def _view(
         _Dated(by_source),
         _Dated(by_stored),
         frozenset(listed or ()),
+        {status: _Dated(entries) for status, entries in by_feed_status.items()},
+        {status: _Dated(entries) for status, entries in unlisted_by_feed_status.items()},
     )
 
 
@@ -1278,6 +1365,7 @@ def _explain_one(
     one_row: RowNote | None = None
     negated = False
     straddling: list[_Entry] = []
+    feed_status_rows: list[StatusRows] = []
     sides: list[_Entry] = []
     sides_negated = False
     export_rows: int | None = None
@@ -1307,6 +1395,30 @@ def _explain_one(
             chosen = single if single is not None else flipped
             negated = single is None
             one_row = chosen.note() if chosen is not None else None
+        for status in sorted(view.by_feed_status):
+            ofstatus = view.by_feed_status[status].within(after, day)
+            if not ofstatus:
+                continue
+            status_sum = sum(entry.minor for entry in ofstatus)
+            equals = ""
+            if status_sum and delta in (status_sum, -status_sum):
+                equals = "equals" if delta == status_sum else "equals minus"
+            # Leaving the rows out of the count moves the difference by their sum.
+            left_over = delta + status_sum
+            still = view.unlisted_by_feed_status.get(status)
+            still_unlisted = still.within(after, day) if still is not None else []
+            rest = len(unlisted) - len(still_unlisted)
+            rest_sum = unlisted_sum - sum(entry.minor for entry in still_unlisted)
+            left = ""
+            if left_over == 0:
+                left = "nil"
+            elif rest and -rest_sum == left_over:
+                left = "sum"
+            feed_status_rows.append(StatusRows(status, _rowset(ofstatus), equals, left))
+        if any(found.equals for found in feed_status_rows):
+            holds.append(FEED_STATUS_ROWS)
+        if any(found.left for found in feed_status_rows):
+            holds.append(FEED_STATUS_LEFT_OUT)
         straddling = [
             e for e in view.by_source.within(after, day) if not _inside(e.other, after, day)
         ] + [e for e in view.by_stored.within(after, day) if not _inside(e.other, after, day)]
@@ -1367,6 +1479,7 @@ def _explain_one(
         different_figure=_rowset(figures),
         one_row=one_row,
         one_row_negated=negated,
+        feed_status_rows=tuple(feed_status_rows),
         straddling=_rowset(straddling),
         index=index,
         undone_on=None if undone is None else undone[1],
@@ -1555,6 +1668,7 @@ def explain_walk(
         tuple(explained),
         facts,
         _reversed_facts(evidence, matched.values()),
+        _feed_status_facts(evidence, matched.values()),
         selection.omitted,
         selection.bound,
     )
@@ -1573,6 +1687,29 @@ def _reversed_facts(evidence: _Evidence, matches: Iterable[_Matches]) -> Reverse
         held=len(rows),
         listed=sum(1 for row in rows if row.entity_id in listed),
         counter_item=sum(1 for row in rows if evidence.facts.counter_item(row)),
+    )
+
+
+def _feed_status_facts(evidence: _Evidence, matches: Iterable[_Matches]) -> FeedStatusFacts:
+    """What the feed says the whole account's counted rows are, and the items it says yield none."""
+    listed = {str(sighting["entity_id"]) for match in matches for _, sighting in match.pairs}
+    by_status: dict[str, list[Transaction]] = defaultdict(list)
+    for rows in evidence.members.values():
+        for row in rows:
+            status = evidence.facts.feed.of(row.entity_id)
+            if status and evidence.counted(row):
+                by_status[status].append(row)
+    return FeedStatusFacts(
+        tuple(
+            StatusCount(
+                status,
+                len(rows),
+                sum(1 for row in rows if row.entity_id in listed),
+                sum(1 for row in rows if evidence.facts.counter_item(row)),
+            )
+            for status, rows in sorted(by_status.items())
+        ),
+        tuple(evidence.facts.feed.unmapped().items()),
     )
 
 
@@ -1596,6 +1733,8 @@ __all__ = [
     "DISAGREEMENT",
     "EXPLAINED_CHANGES",
     "EXPORT_OPENING",
+    "FEED_STATUS_LEFT_OUT",
+    "FEED_STATUS_ROWS",
     "LISTED_NOT_COUNTED",
     "LOOKALIKE_DAYS",
     "NAMED_ROWS",
@@ -1607,11 +1746,14 @@ __all__ = [
     "UNHELD_SPACE",
     "ChangeExplanation",
     "ExportFacts",
+    "FeedStatusFacts",
     "Lookalike",
     "ReversedFacts",
     "RowNote",
     "RowSet",
     "Selection",
+    "StatusCount",
+    "StatusRows",
     "WalkExplanation",
     "explain_walk",
 ]
