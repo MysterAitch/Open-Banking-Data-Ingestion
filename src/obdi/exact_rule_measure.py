@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
+from .feed_statuses import RowWithNoRowStatus, rows_with_no_row_status
 from .matching import (
     REFUSALS,
     CandidateIndex,
@@ -42,7 +43,7 @@ from .matching import (
     second_row_verdicts,
     settlement_candidates,
 )
-from .models import MatchTier, Transaction
+from .models import MatchTier, Transaction, TransactionStatus
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
 from .plural import agree, plural
 from .rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
@@ -250,9 +251,52 @@ class SettlementFigures:
         ]
 
 
+#: How many dates a status's line names before it counts the rest.
+NAMED_DATES = 5
+
+
+@dataclass
+class NoRowStatusFigures:
+    """Stored rows whose own feed item newest says a status that makes no row, for one account.
+
+    Read with `feed_statuses.rows_with_no_row_status`, which a rule acting on these rows
+    reads too. A status name and a date are said; a size and a payee never are.
+    """
+
+    account: str
+    rows: list[RowWithNoRowStatus] = field(default_factory=list)
+
+    def sentences(self) -> list[str]:
+        if not self.rows:
+            return [
+                "No stored transaction that is not history has, as the newest landed status of "
+                "its own feed item, a status that makes no row."
+            ]
+        pending = sum(1 for r in self.rows if r.row.status is TransactionStatus.PENDING)
+        lines = [
+            f"{_transactions(len(self.rows))} that {'is' if len(self.rows) == 1 else 'are'} "
+            "not history "
+            f"{'has' if len(self.rows) == 1 else 'have'}, as the newest landed status of "
+            "its own feed item, a status that makes no row.",
+            f"Of those, still pending: {pending}. Still booked: {len(self.rows) - pending}.",
+            "Also sighted by a source other than the bank's feed: "
+            f"{sum(1 for r in self.rows if r.corroborated)}.",
+        ]
+        for status in sorted({r.status for r in self.rows}):
+            named = [r for r in self.rows if r.status == status]
+            dates = [r.row.value_date.isoformat() for r in named[:NAMED_DATES]]
+            line = f"{status}: {len(named)}, dated {', '.join(dates)}"
+            if len(named) > NAMED_DATES:
+                line += f" and {len(named) - NAMED_DATES} more"
+            lines.append(f"{line}.")
+        return lines
+
+
 @dataclass
 class ExactRuleReport:
     accounts: list[AccountFigures] = field(default_factory=list)
+    #: Per account that holds a row the bank's feed sighted, the rows whose item makes no row.
+    no_row_status: list[NoRowStatusFigures] = field(default_factory=list)
     #: Per account, where the stored transactions hold the export's rows (`settlement_figures`).
     settlement: list[SettlementFigures] = field(default_factory=list)
     #: Artefacts that could not be read, which no figure includes.
@@ -286,6 +330,20 @@ class ExactRuleReport:
         for placed in self.settlement:
             lines.append(f"{placed.account}:")
             lines.extend(f"  {sentence}" for sentence in placed.sentences())
+        lines.append("")
+        lines.append(
+            "Stored transactions whose own feed item the bank's newest landed feed gives a "
+            "status that makes no row, read from the landed feeds and the stored transactions "
+            "without changing them:"
+        )
+        if not self.no_row_status:
+            lines.append(
+                "  No account holds a transaction the bank's feed sighted, so there is no feed "
+                "status to read."
+            )
+        for declined in self.no_row_status:
+            lines.append(f"{declined.account}:")
+            lines.extend(f"  {sentence}" for sentence in declined.sentences())
         lines.append("")
         lines.append(
             "Stored rows one record's exact rules name twice, read from the stored rows and "
@@ -536,7 +594,23 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
         _count_export(figures, account, landed, pool, held)
     report.pairs = pair_figures(store, account_map)
     report.settlement = settlement_figures(store, account_map, landed)
+    report.no_row_status = no_row_status_figures(store)
     return report
+
+
+def no_row_status_figures(store: Store) -> list[NoRowStatusFigures]:
+    """For each account the bank's feed sighted, the stored rows whose item makes no row."""
+    marks = ",".join("?" for _ in FIRST_PARTY_FEEDS)
+    accounts = [
+        str(row[0])
+        for row in store.connection.execute(
+            "SELECT DISTINCT t.account_id FROM transactions t "  # noqa: S608
+            "JOIN transaction_sources s ON s.entity_id = t.entity_id "
+            f"WHERE s.source IN ({marks}) ORDER BY t.account_id",
+            tuple(sorted(FIRST_PARTY_FEEDS)),
+        )
+    ]
+    return [NoRowStatusFigures(a, rows_with_no_row_status(store, a)) for a in accounts]
 
 
 def settlement_figures(

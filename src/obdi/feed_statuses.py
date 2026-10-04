@@ -40,6 +40,8 @@ from datetime import UTC, datetime
 
 from .family_anchors import feed_payload
 from .identity import normalise_description
+from .models import Transaction
+from .payment_links import FIRST_PARTY_FEEDS
 from .providers.starling import STATUS_MAP
 from .round_up_accounts import feed_uids_by_entity
 from .store import Store
@@ -267,4 +269,48 @@ class FeedStatuses:
         return dict(sorted(names.items()))
 
 
-__all__ = ["NO_STATUS", "FeedItem", "FeedStatuses", "makes_no_row"]
+@dataclass(frozen=True)
+class RowWithNoRowStatus:
+    """A stored row, not history, whose feed item the newest landed feed gives no-row status."""
+
+    row: Transaction
+    #: The status the newest landed feed states for the row's own item, upper-cased.
+    status: str
+    #: Whether a source other than the bank's own feed has sighted the row, which says money moved.
+    corroborated: bool
+
+
+def rows_with_no_row_status(
+    store: Store, account: str, statuses: FeedStatuses | None = None
+) -> list[RowWithNoRowStatus]:
+    """The account's stored rows, not history, whose item the newest landed feed says makes no row.
+
+    DETECTION ONLY, shared by the measurement on Identity health and by any pass that acts
+    on such rows, so the two cannot name different rows.
+    A row's own item is what the feed uid on its sighting names (`FeedStatuses.item_of`), so a
+    round-up leg, whose uid is derived and is no item's, is never one of them: the booked leg of
+    a payment that never settled is deliberate (`providers.starling._round_up_leg`).
+    A row of a status that is already history is left to its own reason.
+    Earliest first, the entity id breaking a tie.
+    """
+    read = statuses if statuses is not None else FeedStatuses(store, [account])
+    found: list[RowWithNoRowStatus] = []
+    for row in store.transactions_for_account(account):
+        if row.status.is_history:
+            continue
+        item = read.item_of(row.entity_id)
+        if item is None or not makes_no_row(item.status):
+            continue
+        others = [s for s in store.sources_for(row.entity_id) if s not in FIRST_PARTY_FEEDS]
+        found.append(RowWithNoRowStatus(row, item.status or NO_STATUS, bool(others)))
+    return sorted(found, key=lambda r: (r.row.value_date, r.row.entity_id))
+
+
+__all__ = [
+    "NO_STATUS",
+    "FeedItem",
+    "FeedStatuses",
+    "RowWithNoRowStatus",
+    "makes_no_row",
+    "rows_with_no_row_status",
+]
