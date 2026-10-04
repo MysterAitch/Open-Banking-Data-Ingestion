@@ -456,6 +456,23 @@ class TestOneRowPerCanonicalAccount:
 
         assert account(assemble(path), "acct-v").rows == 1
 
+    def test_ReversedRows_AreNotCountedAsHeld_AsTheLedgerDoesNotCountThem(self, tmp_path):
+        from obdi.models import TransactionStatus
+
+        path = tmp_path / "r.sqlite3"
+        with Store(path) as store:
+            land(
+                store,
+                "d",
+                txn("acct-r", "starling", "r1", date(2026, 9, 30), -100, "REAL"),
+                txn(
+                    "acct-r", "starling", "r2", date(2026, 9, 30), -101, "UNDONE",
+                    status=TransactionStatus.REVERSED,
+                ),
+            )
+
+        assert account(assemble(path), "acct-r").rows == 1
+
 
 class TestArchivedAccounts:
     def test_AccountClosedInThePast_IsArchivedWithItsDateAndSortedAfterEveryOther(self, household):

@@ -32,6 +32,7 @@ from urllib.parse import quote
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
+from .models import TransactionStatus
 from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -576,22 +577,26 @@ def _order_items(items: Sequence[AttentionItem]) -> tuple[AttentionItem, ...]:
 def held_by_account(
     store: Store,
 ) -> tuple[dict[str, tuple[int, date]], dict[str, set[str]]]:
-    """Rows (history excluded, as the ledger excludes it: void and folded),
+    """Rows (history excluded, as the ledger excludes it: `TransactionStatus.is_history`),
     the newest row's date, and every source that has sighted any of them."""
+    history = tuple(s.value for s in TransactionStatus if s.is_history)
+    marks = ",".join("?" for _ in history)
     held = {
         str(row["account_id"]): (int(row["rows"]), date.fromisoformat(str(row["newest"])))
         for row in store.connection.execute(
-            "SELECT account_id, COUNT(*) AS rows, MAX(value_date) AS newest "
-            "FROM transactions WHERE status NOT IN ('void', 'folded') GROUP BY account_id"
+            "SELECT account_id, COUNT(*) AS rows, MAX(value_date) AS newest "  # noqa: S608
+            f"FROM transactions WHERE status NOT IN ({marks}) GROUP BY account_id",
+            history,
         )
     }
     sources: dict[str, set[str]] = {}
     for row in store.connection.execute(
-        "SELECT account_id, source FROM transactions "
-        "WHERE status NOT IN ('void', 'folded') "
+        "SELECT account_id, source FROM transactions "  # noqa: S608
+        f"WHERE status NOT IN ({marks}) "
         "UNION SELECT t.account_id, s.source FROM transaction_sources s "
         "JOIN transactions t ON t.entity_id = s.entity_id "
-        "WHERE t.status NOT IN ('void', 'folded')"
+        f"WHERE t.status NOT IN ({marks})",
+        (*history, *history),
     ):
         sources.setdefault(str(row["account_id"]), set()).add(str(row["source"]))
     return held, sources

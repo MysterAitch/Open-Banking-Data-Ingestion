@@ -26,6 +26,27 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.284] - 2026-10-04
+
+### Fixed
+- **A payment the bank reversed is held as history and not counted as money.**
+  On a real account 92 rows were reversed; the bank's own export listed none of
+  them, none had an opposite entry, and the one with an amount was exactly a
+  remaining difference. A reversed row is in no sum, no balance, and no push;
+  one already in Actual is taken out by the removal pass. A round-up it carried
+  keeps its own leg.
+- **A row from a source that cannot see Spaces is never merged into a transfer
+  to a Space or a round-up leg.** Money moved into a Space and spent from it a
+  day later let the export's row for the payment attach to the transfer of the
+  same amount, and the answer changed with which source arrived first. No such
+  source ever lists a transfer between an account and its own Space.
+- **The Overview's row counts leave out reversed rows**, as the ledger does.
+
+### Changed
+- **Every permanent change in a balance difference is explained, and a pair
+  that undoes itself is explained once.** Only the first twenty were, which
+  left later ones bare.
+
 ## [0.4.283] - 2026-10-04
 
 ### Added
