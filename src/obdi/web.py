@@ -114,7 +114,7 @@ from .web_sections import (
     system_strip_html,
     way_back,
 )
-from .web_transfer_skips import skipped_pairs_block
+from .web_transfer_skips import relinked_pairs_block, skipped_pairs_block
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
 #: join onto a directory. The point is not the sanitising - that already
@@ -2734,9 +2734,10 @@ def _push_result_row(result: dict[str, object]) -> str:
     )
     stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
     skipped = skipped_pairs_block(result.get("transfers")) if ok else ""
+    relinked = relinked_pairs_block(result.get("transfers")) if ok else ""
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}'
-        f'<br><span class="muted">{detail}</span>{skipped}</div>'
+        f'<br><span class="muted">{detail}</span>{relinked}{skipped}</div>'
     )
 
 
@@ -2756,8 +2757,12 @@ def _push_transfer_note(transfers: object) -> str:
     skipped_total = (
         sum(_count_of(n) for n in skipped.values()) if isinstance(skipped, dict) else 0
     )
+    relinked = (
+        f"{_count_of(transfers.get('relinked'))} re-linked, " if "relinked" in transfers else ""
+    )
     return (
         f", transfers: {_count_of(transfers.get('linked'))} linked, "
+        f"{relinked}"
         f"{_count_of(transfers.get('already_linked'))} already linked, "
         f"{skipped_total} skipped, {_count_of(transfers.get('failed'))} failed"
     )

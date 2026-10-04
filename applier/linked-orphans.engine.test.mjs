@@ -225,9 +225,10 @@ test('LinkedOrphans_WhenThePartnerIsExpected_OrphanGoesPartnerStaysUnlinkedAndUn
   });
 });
 
-test('LinkedOrphans_WhenRemovedThenTheExpectedPairsAreLinked_EveryAccountAuditsClean', async () => {
-  // Before the removal the push reported both expected pairs skipped as
-  // linked_elsewhere; afterwards they link and nothing is left to report.
+test('LinkedOrphans_WhenThePushRelinksAndThenTheRemovalRuns_EveryAccountAuditsClean', async () => {
+  // The push releases N1 and N2 from the orphans and links them to the
+  // payments obdi now pairs them with; the orphans are then plain rows, and
+  // the removal deletes them with nothing left to unlink.
   await withBudget(async (ctx) => {
     await stocked(ctx);
     const expected = EXPECTED(ctx);
@@ -236,14 +237,17 @@ test('LinkedOrphans_WhenRemovedThenTheExpectedPairsAreLinked_EveryAccountAuditsC
       { debit: leg(ctx.space, S2), credit: leg(ctx.nat, N2) },
     ];
     const before = await linkTransfers(api, pairs);
-    assert.equal(before.counts.skipped.linked_elsewhere, 2);
+    assert.equal(before.counts.relinked, 2);
     assert.equal(before.counts.linked, 0);
+    assert.deepEqual(before.counts.skipped, {});
 
-    await run(api, expected, { confirmed: { [ctx.main]: 2 } });
+    const report = await run(api, expected, { confirmed: { [ctx.main]: 2 } });
+    assert.equal(entryFor(report, ctx.main).removed, 2);
+    assert.equal(entryFor(report, ctx.main).unlinked, undefined);
     await settledCount(ctx.main, 1);
     const after = await linkTransfers(api, pairs);
 
-    assert.equal(after.counts.linked, 2);
+    assert.equal(after.counts.already_linked, 2);
     assert.equal(after.counts.failed, 0);
     assert.deepEqual(after.counts.skipped, {});
     const audited = await auditAccounts(api, expected);

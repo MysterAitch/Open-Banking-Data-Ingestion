@@ -39,7 +39,68 @@ def _pair(reason, debit="main-current", credit="bills-space", date="2026-09-02")
     return {"debit_account": debit, "credit_account": credit, "date": date, "reason": reason}
 
 
+class TestAPushCountsAndNamesWhatItRelinked:
+    def test_Row_WhenPairsWereRelinked_TheResultLineCountsThemBesideLinked(self):
+        row = _result_row(_result([], {}, linked=3, relinked=2))
+
+        assert "transfers: 3 linked, 2 re-linked, 1427 already linked, 0 skipped, 0 failed" in row
+
+    def test_Row_WhenTheApplierPredatesRelinking_NoReLinkedCountIsClaimed(self):
+        row = _result_row(_result([], {}, linked=3))
+
+        assert "transfers: 3 linked, 1427 already linked" in row
+        assert "re-linked" not in row
+
+    def test_Row_WhenPairsWereRelinked_NamesAccountsAndDate(self):
+        named = [
+            {
+                "debit_account": "starling-personal",
+                "credit_account": "starling-space-money",
+                "date": "2026-09-02",
+            }
+        ]
+        row = _result_row(_result([], {}, relinked=1, relinked_pairs=named))
+
+        assert "1 transfer pair re-linked" in row
+        assert "starling-personal to starling-space-money, 2026-09-02" in row
+
+    def test_Row_WhenMoreWereRelinkedThanTheResultNames_SaysHowManyAreNotListed(self):
+        named = [{"debit_account": "a", "credit_account": "b", "date": "2026-09-02"}] * 50
+        row = _result_row(_result([], {}, relinked=60, relinked_pairs=named))
+
+        assert "60 transfer pairs re-linked" in row
+        assert "and 10 more, not listed" in row
+
+    def test_Row_WhenNothingWasRelinked_ShowsNoReLinkBlock(self):
+        row = _result_row(_result([], {}, relinked=0, relinked_pairs=[]))
+
+        assert "pairs re-linked" not in row
+        assert "pair re-linked" not in row
+
+    def test_Row_WhenARelinkedRecordCarriesMarkupOrAnAmount_ItIsEscapedAndNoFigureIsShown(self):
+        named = [
+            {
+                "debit_account": "<script>x</script>",
+                "credit_account": "b",
+                "date": "2026-09-02",
+                "amount": 87123,
+            }
+        ]
+        row = _result_row(_result([], {}, relinked=1, relinked_pairs=named))
+
+        assert "<script>" not in row
+        for form in AMOUNT_FORMS:
+            assert form not in row
+
+
 class TestAPushNamesWhatItSkipped:
+    def test_Row_WhenALegIsLinkedToARowNotReleased_DoesNotSayToUnlinkWhatThePushNowHandles(self):
+        row = _result_row(_result([_pair("linked_elsewhere")], {"linked_elsewhere": 1}))
+
+        assert "unlink it in Actual, then push" not in row
+        assert "not an obdi import" in row
+        assert "a later push will not link these" in row
+
     def test_Row_WhenPairsWereSkippedForAStuckReason_NamesAccountsDateAndReason(self):
         row = _result_row(_result([_pair("reconciled")] * 4))
 

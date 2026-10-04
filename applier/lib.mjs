@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 
-import { isOpeningImportedId, readAccountRows } from './audit.mjs';
+import { isOpeningImportedId, readAccountRows, unlinkLeg } from './audit.mjs';
 import { isMarkerName } from './marker.mjs';
 import { indexPairRows, judgePair } from './transfers.mjs';
 import { makeYielder } from './turn.mjs';
@@ -161,7 +161,7 @@ export async function provisionAccounts(client, provision) {
   return { bindings, lines };
 }
 
-//: Skipped pairs named in a result; the counts beside them stay complete.
+//: Skipped and re-linked pairs named in a result; the counts beside them stay complete.
 const SKIPPED_PAIRS_KEPT = 50;
 
 //: Re-reads of an unlinked pair before it is counted failed, and the pause
@@ -189,6 +189,8 @@ export async function linkTransfers(client, transfers, options = {}) {
   const counts = {
     pairs: transfers.length,
     linked: 0,
+    relinked: 0,
+    relinked_pairs: [],
     already_linked: 0,
     skipped: {},
     skipped_pairs: [],
@@ -205,39 +207,110 @@ export async function linkTransfers(client, transfers, options = {}) {
     // unexplained across two pushes. The names are obdi's canonical ids, which
     // the envelope carries; the Actual ids stand in for an envelope that lacks them.
     if (counts.skipped_pairs.length < SKIPPED_PAIRS_KEPT) {
-      counts.skipped_pairs.push({
-        debit_account: pair.debit.account_name ?? pair.debit.account,
-        credit_account: pair.credit.account_name ?? pair.credit.account,
-        date: typeof pair.debit.date === 'string' ? pair.debit.date : null,
-        reason,
-      });
+      counts.skipped_pairs.push({ ...describePair(pair), reason });
     }
   };
+  const describePair = (pair) => ({
+    debit_account: pair.debit.account_name ?? pair.debit.account,
+    credit_account: pair.credit.account_name ?? pair.credit.account,
+    date: typeof pair.debit.date === 'string' ? pair.debit.date : null,
+  });
   const named = (pair) => `${pair.debit.imported_id} -> ${pair.credit.imported_id}`;
 
   const transferPayeeOf = new Map();
   for (const payee of await client.getPayees()) {
     if (payee.transfer_acct) transferPayeeOf.set(payee.transfer_acct, payee.id);
   }
-  const rowsByAccount = await indexPairRows(client, transfers);
+  let rowsByAccount = await indexPairRows(client, transfers);
 
   const attempted = [];
+  const relinking = new Set();
   const maybeYield = makeYielder();
+
+  // Re-linking is decided from the budget as it stood when the push began and
+  // done before any pair is linked: every pair is judged, the legs to release
+  // are the union over all of them, and the budget is read again. The result
+  // therefore cannot depend on the order the pairs arrive in, which a pair
+  // linked and the next judged on stale rows would. The rule itself is
+  // judgePair's.
+  const judged = transfers.map((pair) => ({ pair, ...judgePair(pair, rowsByAccount) }));
+  const establishedRows = new Set();
+  for (const { verdict, a, b } of judged) {
+    if (verdict === 'linked') {
+      establishedRows.add(a.id);
+      establishedRows.add(b.id);
+    }
+  }
+  const toRelink = [];
+  for (const entry of judged) {
+    if (entry.verdict !== 'relinkable') continue;
+    const involved = [entry.a, entry.b, ...entry.unlink.map(({ partner }) => partner)];
+    if (involved.some((row) => establishedRows.has(row.id))) {
+      // Releasing a row of a pair the same request keeps would undo that pair.
+      entry.verdict = 'linked_elsewhere';
+      continue;
+    }
+    toRelink.push(entry);
+  }
+  const released = new Set();
+  let stopped = false;
+  for (const entry of toRelink) {
+    if (stopped) {
+      entry.verdict = 'relink_stopped';
+      continue;
+    }
+    try {
+      for (const { leg, partner } of entry.unlink) {
+        const key = [leg.id, partner.id].sort().join('|');
+        if (released.has(key)) continue;
+        await unlinkLeg(
+          client,
+          { account: leg.account, row: leg },
+          { account: partner.account, row: partner },
+        );
+        released.add(key);
+      }
+      relinking.add(entry.pair);
+    } catch (error) {
+      stopped = true;
+      counts.failed += 1;
+      entry.verdict = 'unlink_failed';
+      lines.push(
+        `${named(entry.pair)}: FAILED while releasing the old partner - ${error?.message ?? error}; ` +
+          'no further pair was re-linked',
+      );
+    }
+  }
+  if (released.size) rowsByAccount = await indexPairRows(client, transfers);
+
   let done = 0;
-  for (const pair of transfers) {
+  for (const entry of judged) {
     done += 1;
-    await linkOne(pair);
+    await linkOne(entry);
     options.onProgress?.({ done, total: transfers.length });
     await maybeYield();
   }
 
-  async function linkOne(pair) {
+  async function linkOne(entry) {
+    const { pair } = entry;
+    if (entry.verdict === 'unlink_failed') return;
+    if (!['linked', 'linkable', 'relinkable'].includes(entry.verdict)) {
+      skip(entry.verdict, `${named(pair)}: skipped, ${PAIR_REFUSALS[entry.verdict] ?? entry.verdict}`, pair);
+      return;
+    }
     const { verdict, a, b } = judgePair(pair, rowsByAccount);
     if (verdict === 'linked') {
       counts.already_linked += 1;
       return;
     }
     if (verdict !== 'linkable') {
+      if (relinking.has(pair)) {
+        // Released and then not linkable: the rows are not as the release left
+        // them, which is loud rather than skipped.
+        counts.failed += 1;
+        lines.push(`${named(pair)}: FAILED after releasing the old partner - the rows read as ${verdict}`);
+        return;
+      }
       skip(verdict, `${named(pair)}: skipped, ${PAIR_REFUSALS[verdict] ?? verdict}`, pair);
       return;
     }
@@ -273,8 +346,17 @@ export async function linkTransfers(client, transfers, options = {}) {
     const after = await indexPairRows(client, waiting);
     const stillUnlinked = [];
     for (const pair of waiting) {
-      if (judgePair(pair, after).verdict === 'linked') counts.linked += 1;
-      else stillUnlinked.push(pair);
+      if (judgePair(pair, after).verdict !== 'linked') {
+        stillUnlinked.push(pair);
+      } else if (relinking.has(pair)) {
+        counts.relinked += 1;
+        if (counts.relinked_pairs.length < SKIPPED_PAIRS_KEPT) {
+          counts.relinked_pairs.push(describePair(pair));
+        }
+        lines.push(`${named(pair)}: re-linked, it had been linked to a different obdi row`);
+      } else {
+        counts.linked += 1;
+      }
     }
     waiting = stillUnlinked;
     if (!waiting.length || reread >= settle.attempts) break;
@@ -408,7 +490,10 @@ const PAIR_REFUSALS = {
   same_account: 'both legs are in one Actual account',
   amounts_not_opposite: 'the amounts are not exact opposites; rows untouched',
   reconciled: 'a leg is reconciled, which the library will not change',
-  linked_elsewhere: 'a leg is already linked to a different row; not overwritten',
+  linked_elsewhere:
+    'a leg is linked to a row obdi will not release (not an obdi import, split, linked onward, or not found), or to a row another pair of this push keeps; not overwritten',
+  relink_stopped: 'an earlier re-link failed, so no further pair was re-linked',
+  relinkable: 'another pair in this push claims one of the same rows',
 };
 
 export async function applyAccounts(client, accounts) {

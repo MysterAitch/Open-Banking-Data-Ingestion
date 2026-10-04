@@ -39,8 +39,18 @@ REASONS: dict[str, tuple[str, bool]] = {
         False,
     ),
     "linked_elsewhere": (
-        "a leg is already linked to a different row and is not overwritten; "
-        "unlink it in Actual, then push",
+        "a leg is linked to a row that is not an obdi import, or is split or linked onward, "
+        "which a push never releases; change that row's link in Actual, then push",
+        False,
+    ),
+    "relink_stopped": (
+        "an earlier re-link in the same push failed, so this pair was not attempted; "
+        "a later push will try it again",
+        True,
+    ),
+    "relinkable": (
+        "another pair in the same push claims one of the same rows; "
+        "the request contradicts itself",
         False,
     ),
     "no_transfer_payee": (
@@ -66,6 +76,34 @@ def _pair_line(pair: dict[str, object]) -> tuple[str, bool | None]:
     names = f"{pair.get('debit_account')} to {pair.get('credit_account')}"
     line = f"{html.escape(names)}{when}: {html.escape(meaning)}"
     return line, clears if code in REASONS else None
+
+
+def relinked_pairs_block(transfers: object) -> str:
+    """The pairs a push re-linked, named by accounts and date, or nothing where none were.
+
+    A pair is re-linked when a leg was linked to a different obdi row and the push moved it to
+    the partner obdi now holds (`judgePair` states the rule). The count is the applier's own;
+    the names are capped there, and the rest are said to be unlisted.
+    """
+    if not isinstance(transfers, dict):
+        return ""
+    total = _count(transfers.get("relinked"))
+    raw = transfers.get("relinked_pairs")
+    pairs = [p for p in raw if isinstance(p, dict)] if isinstance(raw, list) else []
+    if not total or not pairs:
+        return ""
+    items = []
+    for pair in pairs:
+        stamp = str(pair.get("date") or "")
+        when = f", {stamp}" if _DATE.fullmatch(stamp) else ""
+        names = f"{pair.get('debit_account')} to {pair.get('credit_account')}"
+        items.append(f"- {html.escape(names)}{when}")
+    more = f"<br>and {total - len(pairs)} more, not listed" if total > len(pairs) else ""
+    return (
+        f"<details><summary>{total} transfer {'pair' if total == 1 else 'pairs'} re-linked - "
+        "each had been linked to a different obdi row, which is now an ordinary row"
+        f"</summary>{'<br>'.join(items)}{more}</details>"
+    )
 
 
 def skipped_pairs_block(transfers: object) -> str:

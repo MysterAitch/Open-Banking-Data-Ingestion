@@ -384,6 +384,37 @@ async function waitFor(settle, read, done) {
 // links the row to its new partner.
 const UNLINK = { transfer_id: null, payee: null };
 
+/**
+ * Unlink one leg of a transfer from its partner, and read both back as
+ * unlinked; throws, naming which still reads as linked, when either does not.
+ * Shared by the removal and by a push that re-links a leg, so both unlink by
+ * the one sequence the engine was measured to survive.
+ *
+ * The partner is unlinked first, so that a failure between the two unlinks
+ * leaves the leg still pointing at it: a state the next run recognises and
+ * finishes. The other order would leave the partner pointing at a row nothing
+ * identifies as linked.
+ */
+export async function unlinkLeg(client, leg, partner, settle = SETTLE) {
+  const fullSettle = { ...SETTLE, ...settle };
+  if (partner.row.transfer_id) {
+    await client.updateTransaction(partner.row.id, UNLINK);
+    const read = await waitFor(
+      fullSettle,
+      () => readRowNow(client, partner.account, partner.row),
+      (row) => !row || !row.transfer_id
+    );
+    if (read === undefined) throw new Error('the partner still reads as linked');
+  }
+  await client.updateTransaction(leg.row.id, UNLINK);
+  const read = await waitFor(
+    fullSettle,
+    () => readRowNow(client, leg.account, leg.row),
+    (row) => !row || !row.transfer_id
+  );
+  if (read === undefined) throw new Error('the leg still reads as linked');
+}
+
 const bankFacts = (row) =>
   JSON.stringify([row.account, row.amount, row.date, row.imported_id, row.cleared]);
 
@@ -409,27 +440,13 @@ async function removeOrphan(client, accountId, target, settle) {
 
   const named = `${target.imported_id} -> ${partnerNow.imported_id}`;
   const expected = bankFacts(partnerNow);
-  // The partner is unlinked first, so that a failure between the two unlinks
-  // leaves the orphan still pointing at it: a state the next removal
-  // recognises and finishes. The other order would leave the partner pointing
-  // at a row nothing identifies as linked.
   try {
-    if (partnerNow.transfer_id) {
-      await client.updateTransaction(partnerNow.id, UNLINK);
-      const read = await waitFor(
-        settle,
-        () => readRowNow(client, partnerAccount, partnerNow),
-        (row) => !row || !row.transfer_id
-      );
-      if (read === undefined) throw new Error('the partner still reads as linked');
-    }
-    await client.updateTransaction(orphan.id, UNLINK);
-    const read = await waitFor(
-      settle,
-      () => readRowNow(client, accountId, orphan),
-      (row) => !row || !row.transfer_id
+    await unlinkLeg(
+      client,
+      { account: accountId, row: orphan },
+      { account: partnerAccount, row: partnerNow },
+      settle
     );
-    if (read === undefined) throw new Error('the orphan still reads as linked');
   } catch (error) {
     throw new RemovalStopped(
       `${named}: unlinking failed (${error?.message ?? error}); the account was stopped before anything was deleted`
