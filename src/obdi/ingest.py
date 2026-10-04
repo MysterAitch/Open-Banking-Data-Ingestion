@@ -451,9 +451,7 @@ def preview_reconcile(
                 transaction.source_id,
             )
             continue
-        superseded = supersede(
-            held, transaction, settled_on=existing.settlement_days(held.entity_id)
-        )
+        superseded = supersede(held, transaction)
         existing.replace(
             replace(
                 superseded,
@@ -667,11 +665,7 @@ def _reconcile(
         return result.existing, result.existing.entity_id
 
     if result.existing is not None:
-        merged = supersede(
-            result.existing,
-            transaction,
-            settled_on=existing.settlement_days(result.existing.entity_id),
-        )
+        merged = supersede(result.existing, transaction)
         merged = replace(
             merged,
             artefact_digest=digest,

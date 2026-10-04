@@ -26,7 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.297] - 2026-10-04
+
+### Fixed
+- **A second export of an overlapping span no longer stores card payments
+  twice.** 0.4.296 kept the day a payment was made as the row's date when an
+  export listed it on its settlement day. A file's own row finds its stored
+  row by a key that includes the date, the deployed store holds two exports
+  of one year that overlap, and its first rebuild on 0.4.296 held 245 rows
+  more than its sources list. The row's date is again its latest sighting's,
+  as before 0.4.296; the settlement rule that joins a late-settled payment to
+  its export row is kept. The same key is the identity a push uses, so every
+  such row would also have gone to Actual as a new one.
+
+The cost: one more arrival order is left open, the aggregator arriving after
+the export has joined the feed's row. It is not the deployed store's order,
+it is pinned as an expected failure, and joining the feed and the aggregator
+by the bank's own id, which is being built, closes it.
+
+Nothing in the settlement build's tests had the same source listing the same
+row again from another file. The regression is now a test, live and rebuilt.
+
 ## [0.4.296] - 2026-10-04
+
+**Do not deploy**: it duplicates rows where two exports overlap. 0.4.297
+replaces it.
 
 ### Fixed
 - **A payment the export lists on its settlement day is no longer counted

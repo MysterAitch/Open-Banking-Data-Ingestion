@@ -35,7 +35,6 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TypeVar
 
-from .identity import content_key
 from .models import MatchTier, SourceTier, Transaction, TransactionStatus
 from .stated_times import settlement_days_of
 
@@ -1029,12 +1028,7 @@ def _solve_exactly(
     return result
 
 
-def supersede(
-    previous: Transaction,
-    observation: Transaction,
-    *,
-    settled_on: frozenset[date] = frozenset(),
-) -> Transaction:
+def supersede(previous: Transaction, observation: Transaction) -> Transaction:
     """Apply a later sighting of a transaction already held.
 
     A pending transaction that settles often arrives with a NEW provider id and
@@ -1043,29 +1037,17 @@ def supersede(
     payloads remain in the raw layer. Modelling it this way is what makes a
     rebuild from raw reproducible.
 
-    `settled_on` is the days the held row's sightings state it settled under.
-    A sighting dated on one of them is the bank's export listing the payment by
-    its settlement (`settles_together`), and it does not move the row off the day
-    the payment was made: that day is the row's date for the ledger, the push to
-    Actual, and its identity, and the export's own day is kept as the sighting's
-    (`sighting_placement`).
+    THE ROW'S DATE IS THE LATEST SIGHTING'S, including where that is an export
+    listing a payment on its settlement day (`settles_together`).
+    Keeping the day the payment was made was tried for such a sighting and withdrawn
+    within the hour: a row's date is part of the key by which a file's own row finds it
+    again, so a second export of an overlapping span no longer found the row the first
+    had joined and stored every card payment settled on a later day a second time
+    (245 surplus rows on the deployed store's first rebuild), and the same key is the
+    identity a push uses, so every such row would have gone to Actual as a new one.
+    Each source's own day is kept on its sighting, which is what a balance is tested
+    against (`sighting_placement`).
     """
-    merged = _supersede(previous, observation)
-    if observation.value_date in settled_on and not settlement_days_of(observation):
-        merged = replace(
-            merged,
-            value_date=previous.value_date,
-            booking_date=previous.booking_date,
-            content_key=content_key(
-                amount_minor=merged.amount_minor,
-                value_date=previous.value_date,
-                description=merged.description,
-            ),
-        )
-    return merged
-
-
-def _supersede(previous: Transaction, observation: Transaction) -> Transaction:
     return replace(
         observation,
         entity_id=previous.entity_id,
