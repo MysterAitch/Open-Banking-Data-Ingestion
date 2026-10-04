@@ -31,6 +31,9 @@ SECTION_STYLES = r"""
  /* The way out sits under the heading, so a page deep in a flow can leave without scrolling. */
  .wayout { margin: 0 0 var(--s3); }
  .wayout a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ /* The fetch timeline's choices: stacked on a phone, one row where there is width. */
+ .timeline-choices { display: grid; gap: var(--s2) var(--s4); margin: var(--s3) 0; }
+ .timeline-choices button:not(.button) { margin: 0; }
  .diag-accounts { margin: var(--s3) 0; }
  .diag-danger { margin: var(--s6) 0 var(--s4); padding: 0 var(--s4) var(--s3); border: var(--edge-weight) solid var(--bad);
                 border-radius: var(--radius); }
@@ -43,6 +46,8 @@ SECTION_STYLES = r"""
   .sitenav ul { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .sitenav li:nth-child(n+5) a { border-top: 0; }
   .hub-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s6); }
+  .timeline-choices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
+  .timeline-choices button:not(.button) { width: auto; padding: 0 var(--s5); }
   .diag-accounts .hub-list { columns: 3; column-gap: var(--s5); }
   .diag-danger { max-width: 40rem; }
  }

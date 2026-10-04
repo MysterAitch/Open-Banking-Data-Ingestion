@@ -2970,16 +2970,17 @@ class TestFetchTimelineControls:
         assert "window extends left of chart" in clamped.text
         assert "window extends left of chart" not in fitted.text
 
-    def test_SpanChoice_SurvivesTheRangeAndPanLinks(self, tmp_path):
+    def test_SpanChoice_SurvivesTheRangeFormAndPanLinks(self, tmp_path):
         # Picking a span then changing the row filter must not silently
-        # snap the axis back to the default.
+        # snap the axis back to the default: the form's span select stays on it,
+        # so submitting a new range sends it again, and the pan links carry it.
         httpd, base = self._server(tmp_path)
         try:
             page = httpx.get(f"{base}/fetch-timeline?days=7&span=fit")
         finally:
             httpd.shutdown()
 
-        assert 'href="/fetch-timeline?days=30&span=fit"' in page.text
+        assert '<option value="fit" selected>' in page.text
         assert "days=7&span=fit&until=" in page.text
 
     def test_AnUnparseableSpan_FallsBackAndIsNotReflected(self, tmp_path):

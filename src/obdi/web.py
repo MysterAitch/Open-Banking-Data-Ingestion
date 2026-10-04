@@ -4185,38 +4185,60 @@ class ConnectionHandler(
 
         # Links are rebuilt from the PARSED values, never the raw params:
         # a raw string that failed parsing must not be reflected into hrefs.
-        until_query = f"&until={raw_until}" if until else ""
         span_value = "fit" if span is None else str(span)
         span_query = f"&span={span_value}" if span != 120 else ""
-        days_query = f"days={'all' if days is None else days}"
-        ranges = " | ".join(
-            [
-                link(f"days={n}{span_query}{until_query}", label, current=days == n)
-                for n, label in (
-                    (1, "24 hours"),
-                    (7, "7 days"),
-                    (30, "30 days"),
-                    (56, "56 days"),
-                    (72, "72 days"),
-                    (365, "1 year"),
-                    (730, "2 years"),
-                )
-            ]
-            + [link(f"days=all{span_query}{until_query}", "everything", current=days is None)]
+        until_field = (
+            '<input type="hidden" name="until" '
+            f'value="{until.isoformat().replace("+00:00", "Z")}">'
+            if until is not None
+            else ""
         )
-        spans = " | ".join(
-            [link(f"{days_query}&span=fit{until_query}", "fit", current=span is None)]
-            + [
-                link(f"{days_query}&span={n}{until_query}", label, current=span == n)
-                for n, label in (
-                    (30, "30 days"),
-                    (56, "56 days"),
-                    (90, "90 days"),
-                    (120, "120 days"),
-                    (365, "1 year"),
-                    (730, "2 years"),
-                )
-            ]
+
+        def choice(name: str, label: str, current: str, options: list[tuple[str, str]]) -> str:
+            """One select, the current choice marked; a value the list lacks is added, marked."""
+            if current not in {value for value, _ in options}:
+                options = [*options, (current, f"{current} days")]
+            rendered = "".join(
+                f'<option value="{value}"{" selected" if value == current else ""}>{text}</option>'
+                for value, text in options
+            )
+            return f'<label>{label}<select name="{name}">{rendered}</select></label>'
+
+        chosen_days = "all" if days is None else str(days)
+        chosen_span = "fit" if span is None else str(span)
+        choices = (
+            '<form class="timeline-choices" method="get" action="/fetch-timeline">'
+            + choice(
+                "days",
+                "Asks made in the last",
+                chosen_days,
+                [
+                    ("1", "24 hours"),
+                    ("7", "7 days"),
+                    ("30", "30 days"),
+                    ("56", "56 days"),
+                    ("72", "72 days"),
+                    ("365", "1 year"),
+                    ("730", "2 years"),
+                    ("all", "everything"),
+                ],
+            )
+            + choice(
+                "span",
+                "Chart reaches back",
+                chosen_span,
+                [
+                    ("fit", "to the oldest ask"),
+                    ("30", "30 days"),
+                    ("56", "56 days"),
+                    ("90", "90 days"),
+                    ("120", "120 days"),
+                    ("365", "1 year"),
+                    ("730", "2 years"),
+                ],
+            )
+            + until_field
+            + '<button type="submit">Show</button></form>'
         )
 
         pan = ""
@@ -4236,10 +4258,7 @@ class ConnectionHandler(
             "newest at the top; the bar spans the history it asked about. "
             "The fetch strategy reads straight off the shapes: tier steps, "
             "cursor slivers hugging now, ladder bursts, probe cuts.</p>"
-            f"<p>Asks made in the last: {ranges}</p>"
-            f"<p>Chart reaches back: {spans} "
-            '<span class="muted">(fit = stretch to the oldest drawn ask, '
-            "nothing clipped)</span></p>"
+            f"{choices}"
             f"{pan}"
             + timeline_svg(hook(), days=days, clamp_days=span, now=until)
             + '<p><a class="button" href="/attempts">Fetch attempts ledger</a></p>'
