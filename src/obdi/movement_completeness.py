@@ -298,8 +298,7 @@ _ListKey = tuple[str, date, str, int]
 
 #: (artefact source, digest) -> the rows that artefact lists, or None when it
 #: could not be read. The bytes never change, so a listing is good for the life
-#: of the process; an unreadable statement is not kept, because a reading may be
-#: kept for it later.
+#: of the process. Statements are not held here (see `_listing_of`).
 _LISTED_BY_DIGEST: dict[tuple[str, str], Counter[_ListKey] | None] = {}
 
 
@@ -334,37 +333,33 @@ def _listing_of(
     from .rebuild import parse_artefact_transactions
 
     source, digest = str(artefact["source"]), str(artefact["digest"])
+    if str(artefact["media_type"]) == _PDF:
+        # Never memoised here: the store's kept reading is the memo, and it is
+        # wiped and rewritten by a rebuild, which a process-long copy would outlive.
+        return _counted(_statement_rows(store, digest, account))
     memo_key = (source, digest)
-    if memo_key in _LISTED_BY_DIGEST:
-        return _LISTED_BY_DIGEST[memo_key]
-    media = str(artefact["media_type"])
-    rows: list[Transaction] | None
-    if media == _PDF:
-        rows = _statement_rows(store, digest, account)
-    else:
+    if memo_key not in _LISTED_BY_DIGEST:
         found = store.connection.execute(
             "SELECT payload FROM raw_artefacts WHERE digest = ? AND account_ref = ? "
             "AND source = ? LIMIT 1",
             (digest, str(artefact["account_ref"]), source),
         ).fetchone()
+        rows: list[Transaction] | None = None
         try:
-            rows = (
-                None
-                if found is None
-                else parse_artefact_transactions(source, bytes(found["payload"]), account, digest)
-            )
+            if found is not None:
+                rows = parse_artefact_transactions(source, bytes(found["payload"]), account, digest)
         except Exception as exc:
             print(f"artefact {digest[:12]}: {source} could not be listed - {exc}", file=sys.stderr)
-            rows = None
+        _LISTED_BY_DIGEST[memo_key] = _counted(rows)
+    return _LISTED_BY_DIGEST[memo_key]
+
+
+def _counted(rows: list[Transaction] | None) -> Counter[_ListKey] | None:
     if rows is None:
-        if media != _PDF:
-            _LISTED_BY_DIGEST[memo_key] = None
         return None
-    listing: Counter[_ListKey] = Counter(
+    return Counter(
         (r.source, r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) for r in rows
     )
-    _LISTED_BY_DIGEST[memo_key] = listing
-    return listing
 
 
 def _held_by_key(
