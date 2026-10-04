@@ -26,6 +26,26 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.289] - 2026-10-04
+
+### Added
+- **The bank's own present balance is a check for a Starling account.** The
+  balance the provider states on every pull was stored and never read. It is
+  now judged against the rows at the moment it was fetched, for the main
+  account and for the whole account, and the ledger says what it means for the
+  open differences: whether they are the export's, or the rows'. Every balance
+  tested until now came from an export or a statement, so nothing could say
+  which side was right when the feed and the export disagreed.
+- **What each figure in that balance means is decided by arithmetic**, against
+  what the Spaces' rows sum to, and the page says which reading it took. No
+  published description of the figures could be reached.
+- **An account without Spaces gets the same explanation of each change** in its
+  balance difference, naming the source that lists the rows.
+
+### Changed
+- **A source that lists rows says nothing about days before its first listed
+  row.** A statement beginning mid-month made every earlier row look omitted.
+
 ## [0.4.288] - 2026-10-04
 
 ### Fixed
