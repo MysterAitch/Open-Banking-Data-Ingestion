@@ -26,6 +26,47 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.295] - 2026-10-04
+
+Five defects that 0.4.293 showed only on the real store, and one in 0.4.294's
+wording. Three of the five existed because a test built its rows by hand in a
+shape the real pipeline never makes; each is now reproduced through the real
+provider and importers.
+
+### Fixed
+- **The bank's own feed clears the rows it lists.** The clearing rule named the
+  source a raw artefact carries, where a row carries another, so no row that
+  only the feed lists was cleared: the main account showed 1,174 rows not
+  cleared. A guard test derives the names a row can carry from the parsers and
+  providers themselves.
+- **The chain check no longer reports a round-up as leaving and never
+  arriving.** It raised 231 account-pair days as data at risk while the check
+  beside it said every leg had its partner, and held the account's agreement
+  at its second day. A leg that names no account, and is the paired partner of
+  a leg that names its account, is the other side of that movement. That the
+  real arrivals name no account is inferred from the page, not read.
+- **The first page after a start no longer waits on work every concurrent
+  request repeats.** The Overview did not answer within 110 seconds after a
+  deploy. One computation is shared, the server warms it at start, and
+  Identity health says how long it took.
+- **An account waiting for its next statement is not reported as out of
+  agreement.** Seven items of one sentence covered three situations. A real
+  hold-back keeps its own item, accounts with rows after their last known
+  balance share one asking for statements, and a quiet account raises nothing.
+- **A settlement gap is said only when it is rare**, in calendar days, with how
+  rare a gap that long is. The two payments that settled 136 days late read as
+  doing what 39% of items do.
+
+### Added
+- **A row-count fault says where its sightings are**: on one stored row, on a
+  row of another day or account, or on none; and for a surplus row, its status
+  and which other artefacts sighted it. Three such faults are on the real
+  store and none has been read at this depth yet.
+
+Known and not fixed: the matcher merges two export rows onto one stored row
+where the feed holds one payment and the aggregator and export hold two of
+that size on one day. The settlement-date matching is still being built.
+
 ## [0.4.294] - 2026-10-04
 
 ### Added
