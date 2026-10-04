@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.308] - 2026-10-04
+
+### Changed
+- **The Actual page opens with one verdict.** It opened with five status
+  lines, each a pill and a sentence, and left "does Actual agree?" to be
+  assembled from them. It now says one of: Actual agrees with obdi; it has not
+  been checked since the last push; it differs in N accounts; the last push or
+  audit failed; a request is waiting for the applier; nothing has been pushed;
+  Actual is not configured. Each names the one press that moves things on,
+  and that button is the filled one. A later audit outranks an earlier
+  failure, because it read Actual as it is.
+- **The five steps are a sequence**: push applied, audit, marker written,
+  server has the marker, snapshot refreshed, each with its state and time.
+- **Only the accounts that differ are listed open**, and the two controls that
+  delete from Actual stand together in one bordered block at the foot.
+  "Bring Actual into line" is the remedy and sits in the verdict that calls
+  for it.
+- **The home page says the same verdict**, from the one function, with the
+  same hooks. Read separately, it said "push failed" of a push a later audit
+  had read past, and "nothing pushed" of an instance the Actual page called
+  not configured.
+
+### Fixed
+- **The page reads the newest forty results, not five.** A handful of audits
+  in a row put the last push out of view, and the verdict would have said
+  nothing had been pushed.
+- **Two pages styling one class no longer distort each other.** Every page
+  carries one stylesheet; the home page and the Actual page each styled
+  `.verdict`. Each page's rules now lead with a class of its own, and a test
+  refuses two pages leading with the same one.
+
+The page is not shorter: 2.9 screens against 2.3 with seventeen agreeing
+accounts, the difference being the sequence and the danger block. After more
+than forty results with no push among them the verdict would again say that
+nothing has been pushed.
+
 ## [0.4.307] - 2026-10-04
 
 ### Changed
