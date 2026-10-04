@@ -374,6 +374,23 @@ def test_LedgerPage_WithValuesShown_At320PixelsWithTextEnlarged_DoesNotScrollSid
         page.close()
 
 
+def test_HomePage_OverTheThreeAccountCorpus_HasAVerdictFourLinesAndARowPerAccountAndIsShort(
+    browser: object, corpus_base: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": 390, "height": 800}
+    )
+    try:
+        page.goto(f"{corpus_base}/", wait_until="load")
+        assert page.locator("#verdict").count() == 1
+        assert page.locator("a.status-row").count() == 4
+        assert 3 <= page.locator("a.acct-row").count() <= 6, "the corpus holds a handful"
+        assert page.evaluate("document.documentElement.scrollHeight") < 3 * 800
+        _assert_fits(_measure(page))
+    finally:
+        page.close()
+
+
 def test_ActualPage_AtPhoneWidth_DoesNotScrollSideways(
     browser: object, corpus_base: str
 ) -> None:
