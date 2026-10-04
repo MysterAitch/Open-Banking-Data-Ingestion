@@ -63,6 +63,7 @@ from datetime import date, timedelta
 from itertools import accumulate
 
 from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
+from .date_window import Resolution
 from .family_anchors import Families
 from .ledger import Money, direction_of, running_balance
 from .masking import Structural, Total
@@ -222,11 +223,18 @@ class ChartItem:
     #: Which way the item sits now, or "" for an account whose balance is not known.
     direction: Structural[str]
     figures: Total[tuple[int | None, ...]]
+    #: The item's figure on any day, for a chart over a window of days. A value, so a
+    #: masked view never hands it over; the chart reads it from the record itself.
+    lookup: Total[ItemLookup]
 
 
 @dataclass(frozen=True)
 class ChartSeries:
-    """The lines a chart draws, for everything held or for the items chosen."""
+    """The lines a chart draws, for everything held or for the items chosen.
+
+    A point's `month` is its label: the month for a chart of month-ends, and the
+    day (ISO) for a chart of days or weeks. See `series_at`.
+    """
 
     history: tuple[MonthPoint, ...]
     complete_from: str
@@ -306,6 +314,66 @@ class _Cumulative:
         if day is None:
             return self._sums[-1]
         return self._sums[bisect_right(self._dates, day)]
+
+
+class ItemLookup:
+    """One account or asset's figure on any day, from a single pass over its data.
+
+    Built once (sorted and prefix-summed), then asked as often as there are days to
+    draw: a lookup is a bisect, so the cost of a chart is its days and never its days
+    times its rows. A `cut` of None is "everything held now", which is how the newest
+    point is read. The month-end history, the month chart, and a chart over any
+    window of days all read an item through `at`, so they cannot differ.
+    """
+
+    def __init__(
+        self,
+        *,
+        cumulative: _Cumulative | None = None,
+        known_from: date | None = None,
+        series: Sequence[tuple[date, int]] = (),
+    ) -> None:
+        self._cumulative = cumulative
+        self._known_from = known_from
+        self._series = sorted(series, key=lambda observed: observed[0])
+        self._series_days = [when for when, _ in self._series]
+        #: The first day the item has a figure, or None when it never does.
+        self.first: date | None = (
+            self._series_days[0] if cumulative is None and self._series_days else known_from
+        )
+
+    @classmethod
+    def account(
+        cls, opening_minor: int, as_at: date | None, rows: Iterable[Transaction]
+    ) -> ItemLookup:
+        """A counted account: nothing before its opening applies, its running balance after."""
+        return cls(cumulative=_Cumulative(opening_minor, rows), known_from=as_at)
+
+    @classmethod
+    def uncounted(cls, rows: Iterable[Transaction]) -> ItemLookup:
+        """An account with no known opening: how far it has moved, from its first row."""
+        live = [t for t in rows if not t.status.is_history]
+        first = min((t.value_date for t in live), default=None)
+        return cls(cumulative=_Cumulative(0, live), known_from=first)
+
+    @classmethod
+    def asset(cls, series: Sequence[tuple[date, int]]) -> ItemLookup:
+        """An asset: its latest observation on or before the day, carried forward."""
+        return cls(series=series)
+
+    def at(self, cut: date | None) -> int | None:
+        """The figure as at `cut`, or None where the item has none yet."""
+        if self._cumulative is None:
+            if cut is None:
+                return self._series[-1][1] if self._series else None
+            index = bisect_right(self._series_days, cut)
+            return self._series[index - 1][1] if index else None
+        if self._known_from is None or (cut is not None and self._known_from > cut):
+            return None
+        return self._cumulative.through(cut)
+
+    def __repr__(self) -> str:
+        return "ItemLookup"
 
 
 def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition, int | None]:
@@ -417,15 +485,13 @@ def _asset_series(item: AssetInput) -> list[tuple[date, int]]:
 
 
 def _history(
-    accounts: Sequence[tuple[AccountInput, _Cumulative]],
-    assets: Sequence[list[tuple[date, int]]],
+    lookups: Sequence[ItemLookup],
     today: date,
 ) -> tuple[tuple[MonthPoint, ...], str]:
-    items = len(accounts) + len(assets)
+    items = len(lookups)
     if not items:
         return (), ""
-    starts = [a.opening.as_at for a, _ in accounts if a.opening.as_at is not None]
-    starts += [series[0][0] for series in assets]
+    starts = [lookup.first for lookup in lookups if lookup.first is not None]
     first = min(min(starts), today)
     points: list[MonthPoint] = []
     last_month = _month_label(today)
@@ -434,17 +500,11 @@ def _history(
         cut = None if label == last_month else _month_end(year, month)
         included = 0
         total = 0
-        for item, cumulative in accounts:
-            as_at = item.opening.as_at
-            if as_at is None or (cut is not None and as_at > cut):
-                continue
-            included += 1
-            total += cumulative.through(cut)
-        for series in assets:
-            seen = [value for when, value in series if cut is None or when <= cut]
-            if seen:
+        for lookup in lookups:
+            figure = lookup.at(cut)
+            if figure is not None:
                 included += 1
-                total += seen[-1]
+                total += figure
         points.append(
             MonthPoint(
                 month=label,
@@ -461,7 +521,7 @@ def _history(
 
 def _provisional_history(
     known: Sequence[MonthPoint],
-    movers: Sequence[AccountInput],
+    cumulatives: Sequence[ItemLookup],
     today: date,
 ) -> tuple[ProvisionalPoint, ...]:
     """Known net worth plus each uncounted account's movement, at every month-end.
@@ -469,13 +529,7 @@ def _provisional_history(
     An uncounted account adds nothing before its first row, and every unknown
     opening is taken as nil, so this is a shape and never a level.
     """
-    cumulatives = [_Cumulative(0, item.rows) for item in movers]
-    starts = [
-        t.value_date
-        for item in movers
-        for t in item.rows
-        if not t.status.is_history
-    ]
+    starts = [lookup.first for lookup in cumulatives if lookup.first is not None]
     if known:
         year, month = (int(part) for part in known[0].month.split("-"))
         starts.append(date(year, month, 1))
@@ -487,7 +541,7 @@ def _provisional_history(
     for year, month in _months(min(min(starts), today), today):
         label = f"{year:04d}-{month:02d}"
         cut = None if label == last_month else _month_end(year, month)
-        total = known_by_month.get(label, 0) + sum(c.through(cut) for c in cumulatives)
+        total = known_by_month.get(label, 0) + sum(c.at(cut) or 0 for c in cumulatives)
         points.append(
             ProvisionalPoint(
                 month=label, direction=direction_of(total), total=Money(total, CURRENCY)
@@ -507,16 +561,14 @@ def _cut(label: str, today: date) -> date | None:
 def _chart_items(
     months: Sequence[str],
     today: date,
-    counted: Sequence[tuple[AccountInput, AccountPosition]],
-    held: Sequence[tuple[AssetPosition, list[tuple[date, int]]]],
-    movers: Sequence[AccountInput],
+    counted: Sequence[tuple[AccountInput, AccountPosition, ItemLookup]],
+    held: Sequence[tuple[AssetPosition, ItemLookup]],
+    movers: Sequence[tuple[AccountInput, ItemLookup]],
 ) -> tuple[ChartItem, ...]:
     """Each item's figure at each month-end, by the lookups `_history` sums."""
     cuts = [_cut(label, today) for label in months]
     out: list[ChartItem] = []
-    for item, view in counted:
-        cumulative = _Cumulative(item.opening.opening_minor or 0, item.rows)
-        as_at = item.opening.as_at
+    for item, view, lookup in counted:
         out.append(
             ChartItem(
                 key=f"account:{item.ref}",
@@ -525,14 +577,11 @@ def _chart_items(
                 kind=item.kind,
                 role="account",
                 direction=view.direction,
-                figures=tuple(
-                    None if as_at is None or (cut is not None and as_at > cut)
-                    else cumulative.through(cut)
-                    for cut in cuts
-                ),
+                figures=tuple(lookup.at(cut) for cut in cuts),
+                lookup=lookup,
             )
         )
-    for asset, series in held:
+    for asset, lookup in held:
         out.append(
             ChartItem(
                 key=f"asset:{asset.asset_id}",
@@ -541,17 +590,11 @@ def _chart_items(
                 kind=asset.kind,
                 role="asset",
                 direction=asset.direction,
-                figures=tuple(
-                    next(
-                        (v for when, v in reversed(series) if cut is None or when <= cut), None
-                    )
-                    for cut in cuts
-                ),
+                figures=tuple(lookup.at(cut) for cut in cuts),
+                lookup=lookup,
             )
         )
-    for item in movers:
-        cumulative = _Cumulative(0, item.rows)
-        first = min((t.value_date for t in item.rows if not t.status.is_history), default=None)
+    for item, lookup in movers:
         out.append(
             ChartItem(
                 key=f"account:{item.ref}",
@@ -560,11 +603,8 @@ def _chart_items(
                 kind=item.kind,
                 role="uncounted",
                 direction="",
-                figures=tuple(
-                    None if first is None or (cut is not None and first > cut)
-                    else cumulative.through(cut)
-                    for cut in cuts
-                ),
+                figures=tuple(lookup.at(cut) for cut in cuts),
+                lookup=lookup,
             )
         )
     return tuple(out)
@@ -581,32 +621,75 @@ def chart_series(position: Position, drawn: AbstractSet[str] | None = None) -> C
     """
     if drawn is None:
         return ChartSeries(position.history, position.complete_from, position.provisional_history)
-    items = [i for i in position.chart_items if i.key in drawn]
+    today = date.fromisoformat(position.as_of)
+    points = [(label, _cut(label, today)) for label in position.chart_months]
+    return series_at(position, points, drawn)
+
+
+def window_points(
+    days: Sequence[date], resolution: Resolution, today: date
+) -> list[tuple[str, date | None]]:
+    """(label, cut) for each day a window is drawn at, as `series_at` takes them.
+
+    A day or week is labelled by its day. A month-end is labelled by its month, and
+    the last point by the month it falls in, read at that day, which is how the
+    month chart has always read its newest month. A day that is today is read as
+    everything held now (`cut` None), where an earlier day is read at its own end.
+    """
+    monthly = resolution is Resolution.MONTH
+    return [
+        (_month_label(day) if monthly else day.isoformat(), None if day == today else day)
+        for day in days
+    ]
+
+
+def held_from(position: Position) -> date | None:
+    """The first day any item the page can chart has a figure, or None if none does."""
+    firsts = [i.lookup.first for i in position.chart_items if i.lookup.first is not None]
+    return min(firsts) if firsts else None
+
+
+def series_at(
+    position: Position,
+    points: Sequence[tuple[str, date | None]],
+    drawn: AbstractSet[str] | None = None,
+) -> ChartSeries:
+    """The chart's lines at any list of days, from the chosen items; None chooses all.
+
+    `points` is (label, cut) in order, oldest first: a `cut` is the day a figure is
+    read at, or None for everything held now. Each point's figure is the sum of the
+    chosen items' own figures there (`ItemLookup.at`), added the way `_history` and
+    `_provisional_history` add them, so the month-end points of everything reproduce
+    `Position.history` to the pence. A point before any chosen item has a figure is
+    not drawn, because a nil there would be a balance nobody had. Names that match no
+    item are ignored. Each item is looked up once per point and never re-read.
+    """
+    items = [i for i in position.chart_items if drawn is None or i.key in drawn]
     known = [i for i in items if i.role != "uncounted"]
     movers = [i for i in items if i.role == "uncounted"]
-    months = position.chart_months
+    grid = {i.key: [i.lookup.at(cut) for _, cut in points] for i in items}
 
     def first_figure(chosen: Sequence[ChartItem]) -> int:
         return min(
             (
                 index
-                for index in range(len(months))
-                if any(i.figures[index] is not None for i in chosen)
+                for index in range(len(points))
+                if any(grid[i.key][index] is not None for i in chosen)
             ),
-            default=len(months),
+            default=len(points),
         )
 
     def figure(item: ChartItem, index: int) -> int:
-        value = item.figures[index]
+        value = grid[item.key][index]
         return 0 if value is None else value
 
     history = []
-    for index in range(first_figure(known), len(months)):
-        included = sum(1 for i in known if i.figures[index] is not None)
+    for index in range(first_figure(known), len(points)):
+        included = sum(1 for i in known if grid[i.key][index] is not None)
         total = sum(figure(i, index) for i in known)
         history.append(
             MonthPoint(
-                month=months[index],
+                month=points[index][0],
                 included=included,
                 of=len(known),
                 partial=included < len(known),
@@ -617,11 +700,13 @@ def chart_series(position: Position, drawn: AbstractSet[str] | None = None) -> C
     complete = next((p.month for p in history if not p.partial), "")
     provisional = []
     if movers and position.provisional_history:
-        for index in range(first_figure(items), len(months)):
+        for index in range(first_figure(items), len(points)):
             total = sum(figure(i, index) for i in items)
             provisional.append(
                 ProvisionalPoint(
-                    month=months[index], direction=direction_of(total), total=Money(total, CURRENCY)
+                    month=points[index][0],
+                    direction=direction_of(total),
+                    total=Money(total, CURRENCY),
                 )
             )
     return ChartSeries(tuple(history), complete, tuple(provisional))
@@ -671,22 +756,27 @@ def build_position(
     assets_total = sum(a.value.minor for a in held)
     nothing = not counted and not held
     net = sum(m for _, _, m in counted) + assets_total
-    history, complete = _history(
-        [(item, _Cumulative(item.opening.opening_minor or 0, item.rows)) for item, _, _ in counted],
-        series_by_asset,
-        today,
-    )
+    account_lookups = [
+        ItemLookup.account(item.opening.opening_minor or 0, item.opening.as_at, item.rows)
+        for item, _, _ in counted
+    ]
+    asset_lookups = [ItemLookup.asset(series) for series in series_by_asset]
+    mover_lookups = [ItemLookup.uncounted(item.rows) for item in movers]
+    history, complete = _history([*account_lookups, *asset_lookups], today)
     moved_total = sum(view.moved.minor for view in uncounted if view.moved is not None)
     provisional = net + moved_total
-    provisional_history = _provisional_history(history, movers, today) if movers else ()
+    provisional_history = _provisional_history(history, mover_lookups, today) if movers else ()
     chart_months = tuple(p.month for p in (provisional_history or history))
     # `held` and `series_by_asset` were appended together, so they pair by position.
     chart_items = _chart_items(
         chart_months,
         today,
-        [(item, view) for item, view, _ in counted],
-        list(zip(held, series_by_asset, strict=True)),
-        movers,
+        [
+            (item, view, lookup)
+            for (item, view, _), lookup in zip(counted, account_lookups, strict=True)
+        ],
+        list(zip(held, asset_lookups, strict=True)),
+        list(zip(movers, mover_lookups, strict=True)),
     )
     return Position(
         as_of=today.isoformat(),
