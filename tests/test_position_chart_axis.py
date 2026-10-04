@@ -178,6 +178,94 @@ class TestTheAxisOfAChartUnderAYear:
         assert ">2026-10</text>" in svg
 
 
+def card_purchase(store: Store) -> None:
+    """A purchase on a card that takes the household below nil, and most of it paid off.
+
+    Worked out by hand BEFORE the first run (pence, month-ends):
+
+        everyday   stated 2026-03-31: 450.00, no rows after      45,000 throughout
+        card       stated 2026-03-31: 0.00
+            rows   04-10 -1,000.00   06-10 +800.00
+            month-ends  03: 0   04: -100,000   05: -100,000   06 onwards: -20,000
+        net worth  03: 45,000   04: -55,000   05: -55,000   06 to 10: 25,000
+
+    so the chart runs from -55,000 to 45,000, eight months, two of them below nil. Its plot
+    is 168 units tall from y=30, so nil is drawn at 30 + 45,000/100,000 x 168 = 105.6 and
+    the plot's floor is at 198.
+    """
+    land(store, "d-everyday", txn("everyday", "s", "e1", D(2026, 3, 5), 20000, "PAY"))
+    land(
+        store,
+        "d-card",
+        txn("card", "s", "c1", D(2026, 4, 10), -100000, "SOFA"),
+        txn("card", "s", "c2", D(2026, 6, 10), 80000, "PAYMENT"),
+    )
+    record_stated_anchor(store, "everyday", "2026-03-31", "450.00")
+    record_stated_anchor(store, "card", "2026-03-31", "0.00")
+
+
+def below_nil(svg: str) -> tuple[float, float] | None:
+    """(top, height) of the region the chart marks as below nil, or None if it marks none."""
+    found = re.search(r'<rect data-below-nil[^>]*\by="([0-9.]+)"[^>]*\bheight="([0-9.]+)"', svg)
+    return (float(found.group(1)), float(found.group(2))) if found else None
+
+
+def line_ys(svg: str, series: str) -> list[float]:
+    """The y of each month's point on `series`, in month order."""
+    by_x: dict[float, float] = {}
+    for points in re.findall(rf'<polyline points="([^"]*)" data-series="{series}"', svg):
+        for pair in points.split():
+            x, y = pair.split(",")
+            by_x[float(x)] = float(y)
+    return [by_x[x] for x in sorted(by_x)]
+
+
+class TestAChartThatGoesBelowNil:
+    def test_Chart_CrossingNil_MarksTheRegionFromNilToTheFloorOfThePlot(self, tmp_path):
+        svg = chart_of(tmp_path, card_purchase)
+
+        assert below_nil(svg) == pytest.approx((105.6, 92.4), abs=0.06)
+
+    def test_Chart_CrossingNil_DrawsTheMonthsOwedInsideThatRegionAndTheRestAboveIt(self, tmp_path):
+        svg = chart_of(tmp_path, card_purchase)
+
+        ys = line_ys(svg, "known")
+        assert len(ys) == 8
+        assert [y > 105.6 for y in ys] == [False, True, True, False, False, False, False, False]
+
+    def test_Chart_CrossingNil_SaysInItsKeyWhatTheRegionMeans(self, tmp_path):
+        page = page_of(tmp_path, card_purchase, unmasked=True)
+
+        assert 'data-key="below-nil"' in page
+        assert "Below nil: more is owed than held" in page
+
+    def test_Chart_BelowNilInEveryMonth_MarksTheWholePlotAndSaysThroughout(self, tmp_path):
+        page = page_of(tmp_path, household, unmasked=True)
+        chart = CHART.search(page)
+        assert chart
+
+        assert below_nil(chart.group(0)) == pytest.approx((30.0, 168.0), abs=0.06)
+        assert "Below nil throughout: more is owed than held in every month drawn" in page
+
+    def test_Chart_NeverBelowNil_MarksNoRegionAndItsKeyDoesNotMentionOne(self, tmp_path):
+        page = page_of(tmp_path, three_years, unmasked=True)
+        chart = CHART.search(page)
+        assert chart
+
+        assert below_nil(chart.group(0)) is None
+        assert 'data-key="below-nil"' not in page
+        assert "Below nil" not in page
+
+    def test_Chart_AtNilAndNeverBelowIt_MarksNoRegion(self, tmp_path):
+        def at_nil(store: Store) -> None:
+            land(store, "d-everyday", txn("everyday", "s", "e1", D(2026, 3, 5), 20000, "PAY"))
+            record_stated_anchor(store, "everyday", "2026-03-04", "0.00")
+
+        svg = chart_of(tmp_path, at_nil)
+
+        assert below_nil(svg) is None
+
+
 def key_entries(page: str) -> dict[str, tuple[str, str, str]]:
     """Each key entry by its series: (stroke, dash pattern, the words beside the swatch)."""
     found = re.search(r'<ul class="legend chart-key"[^>]*>(.*?)</ul>', page, re.S)
@@ -187,6 +275,8 @@ def key_entries(page: str) -> dict[str, tuple[str, str, str]]:
     for name, swatch, words in re.findall(
         r'<li data-key="([a-z-]+)">(<svg.*?</svg>)\s*([^<]*)</li>', found.group(1), re.S
     ):
+        if "<line" not in swatch:
+            continue  # the region below nil is not a line; its own tests read it
         stroke = re.search(r'stroke="([^"]+)"', swatch)
         dash = re.search(r'stroke-dasharray="([^"]+)"', swatch)
         assert stroke, f"the key's swatch for {name} draws no line"

@@ -378,9 +378,30 @@ def _lines_drawn(
     return tuple(drawn)
 
 
-def _key(lines: tuple[str, ...], *, narrowed: bool) -> str:
-    """The chart's key: each line it draws, as a swatch drawn the way the line is, and its name."""
-    if not lines:
+#: How the part of the plot below nil is marked, in the chart and in its key. A wash of the
+#: text's own colour and not the fault colour: owing money is a position, not an error.
+_BELOW_NIL_FILL = 'fill="currentColor" fill-opacity=".09"'
+
+SOME_BELOW_NIL = "some"
+ALL_BELOW_NIL = "all"
+
+
+def _below_nil(
+    points: tuple[MonthPoint, ...], provisional: tuple[ProvisionalPoint, ...]
+) -> str:
+    """Whether the figures drawn go below nil: in some months, in all of them, or "" for none."""
+    values = [p.net_worth.minor for p in points] + [p.total.minor for p in provisional]
+    if not values or min(values) >= 0:
+        return ""
+    return ALL_BELOW_NIL if max(values) < 0 else SOME_BELOW_NIL
+
+
+def _key(lines: tuple[str, ...], *, narrowed: bool, below_nil: str = "") -> str:
+    """The chart's key: each line it draws, as a swatch drawn the way the line is, and its name.
+
+    Where the chart goes below nil the key also says what the marked region means.
+    """
+    if not lines and not below_nil:
         return ""
     total = "Total of the chosen accounts" if narrowed else "Net worth"
     words = {
@@ -388,12 +409,22 @@ def _key(lines: tuple[str, ...], *, narrowed: bool) -> str:
         "partial": f"{total} in a partial month, which leaves something out",
         "provisional": "Provisional total, which counts each unknown opening balance as nil",
     }
+    swatch = '<svg width="46" height="10" aria-hidden="true" style="vertical-align:middle">'
     items = "".join(
-        f'<li data-key="{name}"><svg width="46" height="10" aria-hidden="true" '
-        f'style="vertical-align:middle"><line x1="2" y1="5" x2="44" y2="5" {_line_attrs(name)}/>'
-        f"</svg> {_esc(words[name])}</li>"
+        f'<li data-key="{name}">{swatch}<line x1="2" y1="5" x2="44" y2="5" '
+        f"{_line_attrs(name)}/></svg> {_esc(words[name])}</li>"
         for name in lines
     )
+    if below_nil:
+        meaning = (
+            "Below nil throughout: more is owed than held in every month drawn"
+            if below_nil == ALL_BELOW_NIL
+            else "Below nil: more is owed than held"
+        )
+        items += (
+            f'<li data-key="below-nil">{swatch}<rect x="2" y="0" width="42" height="10" '
+            f"{_BELOW_NIL_FILL}/></svg> {meaning}</li>"
+        )
     return f'<ul class="legend chart-key" style="list-style:none;padding-left:0">{items}</ul>'
 
 
@@ -508,6 +539,13 @@ def _chart(
     drawn = _lines_drawn(points, complete_from, provisional)
     floor = float(height - bottom)
     parts = [_axis(months, x, top=top, floor=floor, edges=(left, width - right))]
+    if _below_nil(points, provisional):
+        # From nil down to the floor of the plot, or the whole plot where nil is above it.
+        nil_y = y(0) if high > 0 else float(top)
+        parts.append(
+            f'<rect data-below-nil x="{left}" y="{nil_y:.1f}" width="{width - left - right}" '
+            f'height="{floor - nil_y:.1f}" {_BELOW_NIL_FILL}/>'
+        )
     if low < 0 < high:
         zero = y(0)
         parts.append(
@@ -768,6 +806,7 @@ def _history(
                 _key(
                     _lines_drawn(series.history, series.complete_from, series.provisional),
                     narrowed=narrowed,
+                    below_nil=_below_nil(series.history, series.provisional),
                 )
                 + '<div class="chart">'
                 + _chart(
