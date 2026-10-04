@@ -148,6 +148,9 @@ class FamilyAnchor:
     #: Stated for the end of the day itself rather than after its last row.
     #: Not part of equality: it says how the figure was stated, not what it is.
     day_end: bool = field(default=False, compare=False)
+    #: The instant a balance stated for a moment was fetched (`bank_balances`).
+    #: Not part of equality, like `day_end`.
+    at: datetime | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

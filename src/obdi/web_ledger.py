@@ -1051,6 +1051,23 @@ def _meaning_html(meanings: tuple[Any, ...]) -> str:
     return body
 
 
+def _bank_html(opening: Any) -> str:
+    """What the bank's own landed balances were, how they were read, and what the
+    newest says about the differences open elsewhere. The sentences are written by
+    `bank_balances`, once; this only lays them out."""
+    if not opening.bank_lines:
+        return ""
+    body = (
+        "<h3>The bank's own balance</h3>"
+        '<p class="muted">Starling states the account\'s balance with every pull. It is the '
+        "bank's own figure and independent of the export and the statements, so it can say "
+        "which side is wrong where they and the feed part company.</p>"
+    )
+    body += "".join(f'<p class="muted">{_esc(line)}</p>' for line in opening.bank_lines)
+    body += "".join(f"<p><strong>{_esc(line)}</strong></p>" for line in opening.bank_sayings)
+    return body
+
+
 def _opening_html(view: Any, unmasked: bool) -> str:
     """The "Opening balance and anchors" section, and the forms that edit it."""
     opening = view.opening
@@ -1116,6 +1133,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
         )
     return (
         body
+        + _bank_html(opening)
         + _meaning_html(opening.meanings)
         + _family_html(opening.family, view.ref)
         + _anchor_forms(view, view.ref, view.month)

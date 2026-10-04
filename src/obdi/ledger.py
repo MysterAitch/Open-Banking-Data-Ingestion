@@ -53,6 +53,7 @@ from .balance_anchors import (
     FamilyWalk,
     effective_opening,
 )
+from .bank_balances import describe as describe_bank
 from .family_anchors import Families
 from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
@@ -101,8 +102,15 @@ ANCHOR_QUERIES = 8
 #: (`family_anchors.feed_round_ups`). Each such artefact not yet read adds one
 #: more, once per process. The last is the confirmed transfer pairs, which say
 #: whether each round-up leg and each Space leg has a partner
-#: (`round_up_accounts`). None depends on what the evidence turns out to say.
-FAMILY_QUERIES = 8
+#: (`round_up_accounts`), and the very last is the listing of the balances the
+#: bank landed (`bank_balances.landed_balances`), which any main account bound
+#: to the bank's own feed pays, Spaces or not, and which is the one extra
+#: statement a Starling account without Spaces adds to ANCHOR_QUERIES. None
+#: depends on what the evidence turns out to say. Where a balance is judged,
+#: the feed's own times for the recent rows (`bank_balances.FeedMoments`) add
+#: one read of their sightings and one per feed artefact not yet read, once
+#: per process.
+FAMILY_QUERIES = 9
 FAMILY_DISCOVERY_QUERIES = 2
 
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
@@ -409,6 +417,12 @@ class OpeningView:
     #: account whose chart is not the whole-account walk (`balance_chart`);
     #: None where the family walk is the one shown, or nothing differs.
     own_structure: Structural[StructureReport | None]
+    #: What the bank's own landed balances were and how they were read
+    #: (`bank_balances.describe`), then what the newest says about the open
+    #: differences (`BankReport.sayings`). Sentences of counts, days, and source
+    #: names; empty where none was landed.
+    bank_lines: Structural[tuple[str, ...]]
+    bank_sayings: Structural[tuple[str, ...]]
 
     opening: Total[Money]
 
@@ -557,6 +571,8 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
             if not (opening.family and opening.family.readings) and opening.differing
             else None
         ),
+        bank_lines=describe_bank(opening.bank) if opening.bank is not None else (),
+        bank_sayings=opening.bank.sayings if opening.bank is not None else (),
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )
 

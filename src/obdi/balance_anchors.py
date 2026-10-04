@@ -11,8 +11,10 @@ the statement came from.
               (as an account-balance observation in `valuations`, see
               `store.ACCOUNT_BALANCE_KIND`).
   bank        the bank's own running balance on its records, derived on demand
-              by `balance_reconciliation` and never stored.
-  statement   the closing balance of a held statement, derived on demand by
+              by `balance_reconciliation` and never stored. A Starling
+              account's own landed balance is of this basis too, stated for a
+              moment and judged at it (`bank_balances`).
+  statement  the closing balance of a held statement, derived on demand by
               `statement_terms.statement_balances` and never stored. Which side
               of it a row falls on is decided by which statement LISTS the row
               where one does (`statement_membership`), by date otherwise.
@@ -83,13 +85,25 @@ import re
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import accumulate, pairwise
 
 from .accounts import AccountRef, is_balance_only
 from .balance_meaning import MAIN as READ_AS_MAIN
 from .balance_meaning import WHOLE, SourceMeaning, read_meanings
 from .balance_reconciliation import RUNNING_BALANCE_SOURCE, balance_reconciliation
+from .bank_balances import (
+    BANK_SOURCE,
+    REACH_DAYS,
+    BankBalances,
+    BankReport,
+    FeedMoments,
+    by_source,
+    landed_balances,
+    read_meaning,
+    rows_through,
+    say,
+)
 from .errors import DataError
 from .family_anchors import (
     CSV_SOURCE,
@@ -132,6 +146,9 @@ EXPORT = "export"
 #: document's or a feed's figure with an assumption about the Spaces applied.
 _PRECEDENCE = {OPENED: -1, STATED: 0, STATEMENT: 1, BANK: 2, EXPORT: 2, FAMILY: 3}
 
+#: An anchor with no instant sorts before one stated for a moment of the same day.
+_NO_INSTANT = datetime.min.replace(tzinfo=UTC)
+
 #: The one currency amounts are held in. Actual's budget is single-currency
 #: and `money.parse_amount` refuses any other, so a figure in another unit
 #: has nowhere correct to land.
@@ -162,6 +179,10 @@ class Anchor:
     #: The source that states it, where one does. Not part of equality: it says
     #: whose dating judges the anchor (`sighting_placement`), not what is stated.
     source: str = field(default="", compare=False)
+    #: The instant a balance stated for a moment was fetched. Not part of equality, like
+    #: `source`: it says how the figure is judged (`bank_balances`), and an anchor with
+    #: one is judged against the rows as they stood then, not at the end of its day.
+    at: datetime | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -255,6 +276,11 @@ class FamilyWalk:
     round_ups: RoundUpTally = field(default_factory=RoundUpTally)
     #: What became of the round-ups that are not a paired leg (`round_up_accounts`).
     round_up_gaps: RoundUpGaps = field(default_factory=RoundUpGaps)
+    #: The bank's own whole-account balances (`bank_balances`), each judged against the
+    #: same opening as `readings` and at its own moment. A series of their own, never
+    #: among `readings`: they would interleave with an export's balances and make a
+    #: bank balance that agrees between two that differ read as a pair of timing faults.
+    bank_readings: tuple[FamilyReading, ...] = ()
 
     @property
     def opened(self) -> FamilyAnchor | None:
@@ -381,6 +407,9 @@ class EffectiveOpening:
     unitemised: tuple[Transaction, ...] = ()
     #: How each Space-blind source's balances were read, whichever way.
     meanings: tuple[SourceMeaning, ...] = ()
+    #: What the bank's own landed balances were and how they were read; None where
+    #: none was landed for the account (`bank_balances`).
+    bank: BankReport | None = None
 
     @property
     def defining(self) -> Anchor | None:
@@ -419,6 +448,7 @@ def derive_opening(
     unusable_statements: int = 0,
     placed: Mapping[str, date] | None = None,
     sightings: SightingPlacement | None = None,
+    moments: FeedMoments | None = None,
 ) -> EffectiveOpening:
     """The opening balance, and each later anchor judged against it.
 
@@ -431,11 +461,14 @@ def derive_opening(
     closing the row falls. An anchor naming a source `sightings` dates rows for
     is judged with the rows on that source's days (`sighting_placement`). Anchors
     of every other basis go by stored date.
+
+    An anchor with an instant (`Anchor.at`) is judged against the rows as they stood at
+    that moment, by `bank_balances.counts_at` with `moments` the feed's own times.
     """
     held = list(rows)
     # One anchor per statement of it, so two sources stating one figure are two
     # tests, each by its own dating.
-    distinct = {(a.day, a.balance_minor, a.basis, a.source): a for a in anchors}
+    distinct = {(a.day, a.balance_minor, a.basis, a.source, a.at): a for a in anchors}
     # The opened anchor defines the opening whatever day it falls on: a stated
     # balance dated before it is then a check that fails, as `walk_family` judges
     # it, and never the definition of an opening that the nil one outranks.
@@ -444,6 +477,7 @@ def derive_opening(
         key=lambda a: (
             a.basis != OPENED,
             a.day,
+            a.at or _NO_INSTANT,
             _PRECEDENCE.get(a.basis, len(_PRECEDENCE)),
             a.balance_minor,
             a.source,
@@ -459,6 +493,17 @@ def derive_opening(
     totals: dict[tuple[bool, bool, str], tuple[list[date], list[int]]] = {}
 
     def through(anchor: Anchor) -> int:
+        if anchor.at is not None:
+            by_feed = sightings is not None and sightings.places(anchor.source)
+
+            def feed_day(t: Transaction) -> date:
+                return (
+                    sightings.day(anchor.source, t)
+                    if by_feed and sightings is not None
+                    else t.value_date
+                )
+
+            return rows_through(held, anchor.at, feed_day, moments)
         by_statement = anchor.basis == STATEMENT and bool(placed)
         by_source = (
             anchor.source
@@ -628,6 +673,16 @@ class _Gathered:
     placed: Mapping[str, date] = field(default_factory=dict)
     #: How each blind source's balances were read (`balance_meaning`).
     meanings: tuple[SourceMeaning, ...] = ()
+    #: The balances the bank itself stated, landed with each pull. Whether they become
+    #: anchors waits for the rows, which say what their figures mean (`bank_balances`).
+    bank: BankBalances = field(default_factory=BankBalances)
+
+
+def _bank_balances(store: Store, ref: str, families: Families | None) -> BankBalances:
+    """The balances landed for a main account of the bank's own feed, none for any other."""
+    if families is None or ref in families.parents:
+        return BankBalances()
+    return landed_balances(store, families.provider_ids.get(ref, frozenset()))
 
 
 def _own_basis(source: str) -> str:
@@ -666,8 +721,9 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
         anchors.append(Anchor(s.day, s.balance_minor, STATEMENT))
         anchoring.append(s)
     placed = statement_membership(store, ref, anchoring).placed if anchoring else {}
+    bank = _bank_balances(store, ref, families)
     if families is None or not spaces:
-        return _Gathered(anchors, unusable, None, placed)
+        return _Gathered(anchors, unusable, None, placed, bank=bank)
     stated = family_anchors(store, ref, families)
     merged = sorted(
         {*stated.anchors, *bank_family},
@@ -690,7 +746,7 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
             basis = _own_basis(candidate.source)
             anchors.append(Anchor(candidate.day, candidate.balance_minor, basis, candidate.source))
     return _Gathered(
-        anchors, unusable, replace(stated, anchors=tuple(whole)), placed, meanings
+        anchors, unusable, replace(stated, anchors=tuple(whole)), placed, meanings, bank
     )
 
 
@@ -765,6 +821,8 @@ def walk_family(
     members: Mapping[str, Sequence[Transaction]],
     held_categories: frozenset[str] = frozenset(),
     sightings: SightingPlacement | None = None,
+    bank: Sequence[FamilyAnchor] = (),
+    moments: FeedMoments | None = None,
 ) -> FamilyWalk:
     """Each family balance against the counted rows of the main account and
     every Space in `members` (keyed by account, main included). Pure.
@@ -773,6 +831,11 @@ def walk_family(
     sum, so the family's rows are comparable with the family's balance where
     neither account's own are. Each balance is judged with the rows placed as
     its own source places them (`sighting_placement`).
+
+    `bank` is the bank's own whole-account balances, each with the instant it was
+    fetched: judged at that moment by `bank_balances.counts_at`, against the opening
+    the other balances define, or where there is none against the earliest of them.
+    They are returned as `FamilyWalk.bank_readings` and are never among `readings`.
     """
     spaces = tuple(sorted(ref for ref in members if ref != main))
     every = [t for rows in members.values() for t in rows]
@@ -805,12 +868,50 @@ def walk_family(
         readings.append(
             FamilyReading(day, balance, (source,), False, expected, balance - expected)
         )
+
+    def bank_through(anchor: FamilyAnchor) -> int:
+        by_feed = sightings is not None and sightings.places(anchor.source)
+
+        def feed_day(t: Transaction) -> date:
+            return (
+                sightings.day(anchor.source, t)
+                if by_feed and sightings is not None
+                else t.value_date
+            )
+
+        # `at` is always set on a bank anchor; the end of the day is the fallback that
+        # judges it as a day-end figure, which is the most that can be said without it.
+        moment = anchor.at or datetime.combine(anchor.day + timedelta(days=1), time.min, UTC)
+        return rows_through(every, moment, feed_day, moments)
+
+    bank_readings: list[FamilyReading] = []
+    for index, found in enumerate(
+        sorted(bank, key=lambda a: (a.day, a.at or _NO_INSTANT, a.balance_minor))
+    ):
+        if index == 0 and opened is None and not ordered:
+            opening = found.balance_minor - bank_through(found)
+            bank_readings.append(
+                FamilyReading(found.day, found.balance_minor, (found.source,), True)
+            )
+            continue
+        expected = opening + bank_through(found)
+        bank_readings.append(
+            FamilyReading(
+                found.day,
+                found.balance_minor,
+                (found.source,),
+                False,
+                expected,
+                found.balance_minor - expected,
+            )
+        )
     return FamilyWalk(
         main,
         spaces,
         tuple(readings),
         anchors.refused_figures,
         evidence=anchors.evidence,
+        bank_readings=tuple(bank_readings),
         unheld=unheld_space_legs(every, anchors.evidence.known_categories | held_categories)
         if anchors.evidence
         else UnheldLegs(),
@@ -851,19 +952,52 @@ def effective_opening(
     stating = {a.source for a in anchors if a.source}
     if gathered.family is not None:
         stating |= {a.source for a in gathered.family.anchors}
-    sightings = sighting_placement(
-        store,
-        [ref, *(families.spaces_of(ref) if families is not None else ())],
-        stating - {OPENED},
+    judged = gathered.bank.judged
+    if judged:
+        stating.add(BANK_SOURCE)
+    spaces = families.spaces_of(ref) if families is not None else ()
+    sightings = sighting_placement(store, [ref, *spaces], stating - {OPENED})
+    moments = (
+        FeedMoments(
+            store, [ref, *spaces], min(b.day for b in judged) - timedelta(days=REACH_DAYS)
+        )
+        if judged
+        else None
     )
-    if (
+    walks = (
         gathered.family is not None
-        and (gathered.family.anchors or gathered.family.opened)
+        and bool(gathered.family.anchors or gathered.family.opened)
         and families is not None
-    ):
-        members = {
-            space: store.transactions_for_account(space) for space in families.spaces_of(ref)
-        }
+    )
+    members: dict[str, list[Transaction]] = {}
+    if families is not None and spaces and (walks or judged):
+        members = {space: store.transactions_for_account(space) for space in spaces}
+    report: BankReport | None = None
+    whole_bank: list[FamilyAnchor] = []
+    if gathered.bank.usable or gathered.bank.refused:
+        report = read_meaning(
+            judged,
+            members,
+            lambda t: sightings.day(BANK_SOURCE, t),
+            moments,
+            refused=gathered.bank.refused,
+            landed=len(gathered.bank.usable),
+        )
+        for balance in judged:
+            if report.gives_main:
+                anchors.append(
+                    Anchor(balance.day, balance.figures.cleared, BANK, BANK_SOURCE, balance.at)
+                )
+            if report.gives_whole:
+                whole_bank.append(
+                    FamilyAnchor(
+                        balance.day,
+                        balance.figures.total_cleared,
+                        BANK_SOURCE,
+                        at=balance.at,
+                    )
+                )
+    if (walks or whole_bank) and families is not None and gathered.family is not None:
         opened = gathered.family.opened
         anchors += family_main_anchors(
             [*([opened] if opened else []), *gathered.family.anchors], members, sightings
@@ -885,6 +1019,8 @@ def effective_opening(
             {ref: [*held, *unitemised], **members},
             held_categories=held_ids,
             sightings=sightings,
+            bank=whole_bank,
+            moments=moments,
         )
         paired = frozenset(
             entity for pair in store.confirmed_transfer_pairs() for entity in pair
@@ -928,14 +1064,55 @@ def effective_opening(
         unusable_statements=gathered.unusable,
         placed=gathered.placed,
         sightings=sightings,
+        moments=moments,
     )
+    if report is not None:
+        report = replace(report, sayings=_bank_sayings(opening, walk))
     return replace(
         opening,
         family=walk,
         balance_only=balance_only,
         unitemised=unitemised,
         meanings=gathered.meanings,
+        bank=report,
     )
+
+
+def _bank_sayings(opening: EffectiveOpening, walk: FamilyWalk | None) -> tuple[str, ...]:
+    """What the newest bank balance says about the differences the other sources show.
+
+    One sentence for the whole-account walk where there is one (the account's own
+    anchors are then the same differences with the Spaces' rows taken off, and
+    saying both would say each twice), otherwise one for the account's own anchors.
+    Nothing where the bank balance defines the opening, since nothing tests it.
+    """
+    if walk is not None and (walk.readings or walk.bank_readings):
+        bank = [r for r in walk.bank_readings if r.difference_minor is not None]
+        if not bank:
+            return ()
+        others = by_source(
+            (r.sources[0], r.difference_minor or 0)
+            for r in walk.readings
+            if r.difference_minor is not None
+        )
+        newest = bank[-1]
+        said = say(newest.day, newest.difference_minor or 0, others, len(walk.changes))
+        return (said,) if said else ()
+    bank_own = [
+        r
+        for r in opening.readings
+        if r.anchor.source == BANK_SOURCE and r.difference_minor is not None
+    ]
+    if not bank_own:
+        return ()
+    others = by_source(
+        (r.anchor.source or r.anchor.basis, r.difference_minor or 0)
+        for r in opening.readings
+        if r.anchor.source != BANK_SOURCE and r.difference_minor is not None
+    )
+    newest_own = bank_own[-1]
+    said = say(newest_own.anchor.day, newest_own.difference_minor or 0, others)
+    return (said,) if said else ()
 
 
 def _fold_refusals(
