@@ -67,12 +67,15 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from time import perf_counter
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from .accounts import AccountMap, AccountRef
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS
 from .models import Transaction
 from .store import FOLDED_SIGHTING_PREFIX, Store
+
+if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
+    from .balance_anchors import EffectiveOpening
 
 #: How many faults a check names before it only counts the rest.
 NAMED = 20
@@ -136,6 +139,9 @@ class RowCountFault:
     held_as_history: int = 0
     #: Where the sightings are, from `transaction_sources` (`_explain`).
     explanation: str = ""
+    #: What the artefacts and the known balances say about which count is right
+    #: (`_measure_listing`, `_measure_balances`), each a clause with no figure in it.
+    measured: tuple[str, ...] = ()
 
     def says(self) -> str:
         where = f"{self.day.isoformat()} {self.account} via {self.source} ({self.direction})"
@@ -149,7 +155,8 @@ class RowCountFault:
             f"{where}: {_plural(self.listed, 'row')} of one size and direction "
             f"listed, {self.held} held"
         )
-        return f"{line}: {self.explanation}" if self.explanation else line
+        clauses = [clause for clause in (self.explanation, *self.measured) if clause]
+        return f"{line}: {'; '.join(clauses)}" if clauses else line
 
 
 @dataclass(frozen=True)
@@ -389,31 +396,38 @@ def _statement_rows(store: Store, digest: str, account: str) -> list[Transaction
     return list(parser.rows_of(reading, account))
 
 
-def _listing_of(
-    store: Store, artefact: sqlite3.Row, account: str
-) -> Counter[_ListKey] | None:
-    """What one artefact lists, by (source, day, direction, size); None when unreadable."""
+def _rows_listed(store: Store, artefact: sqlite3.Row, account: str) -> list[Transaction] | None:
+    """The rows one artefact lists, as the rebuild reads them; None when unreadable."""
     from .rebuild import parse_artefact_transactions
 
     source, digest = str(artefact["source"]), str(artefact["digest"])
     if str(artefact["media_type"]) == _PDF:
+        return _statement_rows(store, digest, account)
+    found = store.connection.execute(
+        "SELECT payload FROM raw_artefacts WHERE digest = ? AND account_ref = ? "
+        "AND source = ? LIMIT 1",
+        (digest, str(artefact["account_ref"]), source),
+    ).fetchone()
+    try:
+        if found is not None:
+            return parse_artefact_transactions(source, bytes(found["payload"]), account, digest)
+    except Exception as exc:
+        print(f"artefact {digest[:12]}: {source} could not be listed - {exc}", file=sys.stderr)
+    return None
+
+
+def _listing_of(
+    store: Store, artefact: sqlite3.Row, account: str
+) -> Counter[_ListKey] | None:
+    """What one artefact lists, by (source, day, direction, size); None when unreadable."""
+    source, digest = str(artefact["source"]), str(artefact["digest"])
+    if str(artefact["media_type"]) == _PDF:
         # Never memoised here: the store's kept reading is the memo, and it is
         # wiped and rewritten by a rebuild, which a process-long copy would outlive.
-        return _counted(_statement_rows(store, digest, account))
+        return _counted(_rows_listed(store, artefact, account))
     memo_key = (source, digest)
     if memo_key not in _LISTED_BY_DIGEST:
-        found = store.connection.execute(
-            "SELECT payload FROM raw_artefacts WHERE digest = ? AND account_ref = ? "
-            "AND source = ? LIMIT 1",
-            (digest, str(artefact["account_ref"]), source),
-        ).fetchone()
-        rows: list[Transaction] | None = None
-        try:
-            if found is not None:
-                rows = parse_artefact_transactions(source, bytes(found["payload"]), account, digest)
-        except Exception as exc:
-            print(f"artefact {digest[:12]}: {source} could not be listed - {exc}", file=sys.stderr)
-        _LISTED_BY_DIGEST[memo_key] = _counted(rows)
+        _LISTED_BY_DIGEST[memo_key] = _counted(_rows_listed(store, artefact, account))
     return _LISTED_BY_DIGEST[memo_key]
 
 
@@ -617,6 +631,112 @@ def _explain(
     )
 
 
+_Cell5 = tuple[str, str, str, int, date]
+
+
+def _measure_listing(
+    store: Store,
+    cell: _Cell5,
+    digests: Iterable[str],
+    artefact_of: dict[tuple[str, str], sqlite3.Row],
+) -> str:
+    """Whether the rows a cell lists come from one artefact or several, and what ids they state.
+
+    Measured because a line of "N listed, fewer held" cannot say whether the source listed N
+    payments or one payment N times: two items of one artefact with ids of their own are two
+    payments, and one id stated by two artefacts is one. Counts only, never an id.
+    """
+    account, source, direction, size, day = cell
+    wanted = (source, day, direction, size)
+    stated: list[str | None] = []
+    artefacts = 0
+    for digest in sorted(digests):
+        artefact = artefact_of.get((digest, account))
+        rows = _rows_listed(store, artefact, account) if artefact is not None else None
+        mine = [
+            r.source_id
+            for r in rows or []
+            if (r.source, r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) == wanted
+        ]
+        if mine:
+            artefacts += 1
+            stated.extend(mine)
+    if not stated:
+        return ""
+    named = [i for i in stated if i]
+    if not named:
+        ids = "stating no id"
+    else:
+        ids = f"stating {_plural(len(set(named)), 'distinct id')}"
+        if len(named) < len(stated):
+            ids += f" and {len(stated) - len(named)} stating none"
+    return f"listed by {_plural(artefacts, 'artefact')}, {ids}"
+
+
+def _family_accounts(store: Store, account_map: AccountMap) -> frozenset[str]:
+    """Accounts that are a Space or have one, whose balances are read through the family."""
+    from .space_attribution import space_parents
+
+    parents = space_parents(store, account_map)
+    return frozenset(parents) | frozenset(parents.values())
+
+
+def _measure_balances(
+    openings: dict[str, EffectiveOpening],
+    store: Store,
+    cell: _Cell5,
+    *,
+    kind: str,
+    count: int,
+    row_days: Iterable[date],
+) -> str:
+    """Whether the known balances either side of a fault's day are met with the rows as held.
+
+    THE ARITHMETIC. The known balances before and after the day state a change in the account;
+    the rows as held predict one; the two differ by the amount of what is missing (a row the
+    store lacks) or surplus (a row it holds twice). With a missing row added the rows as held
+    would differ from the balances by exactly that row, so balances met as held say the source
+    listed one payment more than there was, and balances short by exactly the row say the store
+    lost it. Where neither holds, something else lies between the two balances and this
+    does not say which count is right.
+    An account read through its family is not measured here (`_family_accounts`).
+    """
+    from .balance_anchors import ASSUMED_NIL, effective_opening
+    from .family_anchors import OPENED
+
+    account, _source, direction, size, day = cell
+    if account not in openings:
+        openings[account] = effective_opening(store, account)
+    opening = openings[account]
+    known = sorted(
+        (r for r in opening.readings if r.anchor.basis not in (OPENED, ASSUMED_NIL)),
+        key=lambda r: (r.anchor.day, r.anchor.source),
+    )
+    days = [day, *row_days]
+    before = [r for r in known if r.anchor.day < min(days)]
+    after = [r for r in known if r.anchor.day >= max(days)]
+    if not before or not after:
+        return "the known balances do not stand on both sides of the day, so they cannot say"
+    first, last = before[-1], after[0]
+    change = (last.difference_minor or 0) - (first.difference_minor or 0)
+    which = "surplus" if kind == SURPLUS else "missing"
+    rows = "row" if count == 1 else "rows"
+    between = (
+        f"the known balances of {first.anchor.day.isoformat()} and {last.anchor.day.isoformat()}"
+    )
+    signed = (-size if direction == OUT else size) * count
+    if change == 0:
+        word = "fewer" if kind == SURPLUS else "more"
+        it = "it" if count == 1 else "them"
+        return (
+            f"{between} are met by the rows as held, and with {count} {word} {rows} of that "
+            f"size and direction they would differ by exactly {it}"
+        )
+    if change == (-signed if kind == SURPLUS else signed):
+        return f"{between} differ from the rows as held by exactly the {which} {rows}"
+    return f"{between} differ from the rows as held by an amount that is not the {which} {rows}"
+
+
 def check_rows(
     store: Store, canonical_for_ref: Callable[[str], str] | None
 ) -> MovementCompleteness:
@@ -637,6 +757,7 @@ def check_rows(
     listed: dict[tuple[str, str], Counter[tuple[date, str, int]]] = defaultdict(Counter)
     digest_accounts: dict[str, set[str]] = defaultdict(set)
     read: set[tuple[str, str]] = set()
+    artefact_of: dict[tuple[str, str], sqlite3.Row] = {}
     listing_digests: dict[tuple[str, str, str, int, date], set[str]] = defaultdict(set)
     for artefact in artefacts:
         source = str(artefact["source"])
@@ -649,6 +770,7 @@ def check_rows(
         if (digest, account) in read:
             continue
         read.add((digest, account))
+        artefact_of[(digest, account)] = artefact
         listing = _listing_of(store, artefact, account)
         if listing is None:
             report.artefacts_unread += 1
@@ -674,6 +796,30 @@ def check_rows(
             by_shape=by_shape,
             listing_digests=listing_digests.get(cell, set()),
         )
+
+    openings: dict[str, EffectiveOpening] = {}
+    in_families: frozenset[str] | None = None
+
+    def measured(cell: _Cell5, kind: str, count: int) -> tuple[str, ...]:
+        nonlocal in_families
+        if in_families is None:
+            in_families = _family_accounts(store, account_map)
+        clauses: list[str] = []
+        if kind != SURPLUS:
+            digests = listing_digests.get(cell, ())
+            clauses.append(_measure_listing(store, cell, digests, artefact_of))
+        if cell[0] not in in_families:
+            row_days = [
+                s.value_date
+                for s in by_shape.get((cell[1], cell[2], cell[3]), [])
+                if s.account == cell[0] and s.observed == cell[4]
+            ]
+            clauses.append(
+                _measure_balances(
+                    openings, store, cell, kind=kind, count=count, row_days=row_days
+                )
+            )
+        return tuple(clause for clause in clauses if clause)
 
     wanted: Counter[tuple[str, str, str, int, date]] = Counter()
     for (account, source), union in listed.items():
@@ -721,6 +867,7 @@ def check_rows(
                         held_count,
                         history.get(cell, 0),
                         explained(cell, wanted[cell], held_count),
+                        measured(cell, COLLAPSED if held_count else MISSING, missing),
                     )
                 )
     for group, days in extra.items():
@@ -739,6 +886,7 @@ def check_rows(
                         held[cell],
                         history.get(cell, 0),
                         explained(cell, wanted.get(cell, 0), held[cell]),
+                        measured(cell, SURPLUS, over),
                     )
                 )
     report.row_faults = sorted(faults, key=lambda f: (f.day, f.account, f.source, f.direction))

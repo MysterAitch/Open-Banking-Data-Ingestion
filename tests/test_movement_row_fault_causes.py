@@ -60,6 +60,9 @@ from test_space_blind_rows_and_internal_legs import (
 
 CASES = [pytest.param(order, id=order_id(order)) for order in ORDERS]
 
+#: What the measurement of a listed-more-than-held fault adds for an id-less export file.
+BY_ONE_ARTEFACT = "; listed by 1 artefact, stating no id"
+
 
 @pytest.fixture
 def stores(tmp_path):
@@ -122,6 +125,7 @@ class TestTwoListedRowsSightedOnOneStoredRow:
             [
                 f"2026-09-06 {MAIN} via {EXPORT} (out): 2 rows of one size and direction "
                 "listed, 1 held: both listed rows are sighted on one stored row, dated 2026-09-06"
+                f"{BY_ONE_ARTEFACT}"
             ]
             if export_is_replayed_last(store)
             else []
@@ -190,7 +194,7 @@ class TestAListedRowWhoseSightingIsElsewhere:
 
         assert said(store) == [
             f"2026-09-08 {MAIN} via {EXPORT} (out): 1 row of one size and direction listed, "
-            "0 held: the listed row is sighted on no stored row"
+            f"0 held: the listed row is sighted on no stored row{BY_ONE_ARTEFACT}"
         ]
 
     @pytest.mark.parametrize("order", CASES)
@@ -202,7 +206,7 @@ class TestAListedRowWhoseSightingIsElsewhere:
         assert said(store)[0] == (
             f"2026-09-08 {MAIN} via {EXPORT} (out): 1 row of one size and direction listed, "
             "0 held: the listed row is sighted on a stored row of another day, "
-            "observed 2026-09-13"
+            f"observed 2026-09-13{BY_ONE_ARTEFACT}"
         )
 
     @pytest.mark.parametrize("order", CASES)
@@ -214,7 +218,7 @@ class TestAListedRowWhoseSightingIsElsewhere:
         assert said(store)[0] == (
             f"2026-09-08 {MAIN} via {EXPORT} (out): 1 row of one size and direction listed, "
             f"0 held: the listed row is sighted on a stored row of another account, {BILLS}, "
-            "observed 2026-09-13"
+            f"observed 2026-09-13{BY_ONE_ARTEFACT}"
         )
 
     def test_Fault_WhenAnotherListedRowSharesTheSizeOnAnotherDay_ItIsNotMistakenForTheMissingOne(
@@ -229,5 +233,5 @@ class TestAListedRowWhoseSightingIsElsewhere:
 
         assert said(store) == [
             f"2026-09-08 {MAIN} via {EXPORT} (out): 1 row of one size and direction listed, "
-            "0 held: the listed row is sighted on no stored row"
+            f"0 held: the listed row is sighted on no stored row{BY_ONE_ARTEFACT}"
         ]
