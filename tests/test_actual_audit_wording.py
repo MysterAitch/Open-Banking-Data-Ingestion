@@ -148,7 +148,10 @@ class TestAuditSaysWhatEachDifferenceMeansAndWhatToDo:
         )
         page = web._audit_result_row(result)
 
-        assert "1 transfer pair not linked - the next push links what it can" in page
+        assert (
+            "1 transfer pair not linked - a push links what it can and names each pair it skips"
+            in page
+        )
         assert "transfers linked 2 of 3 pair(s)" in page
 
     def test_OrphansTheRemovalWillTake_AreSaidInWords_NotAsAnUnknownCategory(self):

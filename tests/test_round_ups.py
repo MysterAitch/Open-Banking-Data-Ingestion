@@ -456,3 +456,6 @@ def test_Leg_WhenReplayedByTheShippedPushBuilder_TravelsAsALinkedTransfer(rebuil
     assert sorted(leg["amount"] for leg in debits) == [-10000, -90, -50, -25, -20]
     assert {leg["account"] for leg in debits} == {"act-main"}
     assert {leg["account"] for leg in credits} == {"act-bills"}
+    # The names let a skipped pair be said by account on the Actual page.
+    assert {leg["account_name"] for leg in debits} == {MAIN}
+    assert {leg["account_name"] for leg in credits} == {BILLS}

@@ -131,12 +131,14 @@ class TestHouseholdBalances:
             {
                 "debit": {
                     "account": "act-main",
+                    "account_name": MAIN,
                     "imported_id": debit_id,
                     "date": "2026-09-02",
                     "amount": -150000,
                 },
                 "credit": {
                     "account": "act-pot",
+                    "account_name": POT,
                     "imported_id": credit_id,
                     "date": "2026-09-02",
                     "amount": 150000,

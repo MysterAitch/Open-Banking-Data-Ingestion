@@ -161,6 +161,9 @@ export async function provisionAccounts(client, provision) {
   return { bindings, lines };
 }
 
+//: Skipped pairs named in a result; the counts beside them stay complete.
+const SKIPPED_PAIRS_KEPT = 50;
+
 //: Re-reads of an unlinked pair before it is counted failed, and the pause
 //: between them: five seconds of pausing in all.
 const LINK_SETTLE = { attempts: 20, intervalMs: 250 };
@@ -188,14 +191,27 @@ export async function linkTransfers(client, transfers, options = {}) {
     linked: 0,
     already_linked: 0,
     skipped: {},
+    skipped_pairs: [],
     failed: 0,
   };
   const lines = [];
   if (!transfers.length) return { counts, lines };
 
-  const skip = (reason, line) => {
+  const skip = (reason, line, pair) => {
     counts.skipped[reason] = (counts.skipped[reason] ?? 0) + 1;
     lines.push(line);
+    // Which pair and why, without a figure: the page names the two accounts, the
+    // date, and the reason, because a bare count left four skipped pairs
+    // unexplained across two pushes. The names are obdi's canonical ids, which
+    // the envelope carries; the Actual ids stand in for an envelope that lacks them.
+    if (counts.skipped_pairs.length < SKIPPED_PAIRS_KEPT) {
+      counts.skipped_pairs.push({
+        debit_account: pair.debit.account_name ?? pair.debit.account,
+        credit_account: pair.credit.account_name ?? pair.credit.account,
+        date: typeof pair.debit.date === 'string' ? pair.debit.date : null,
+        reason,
+      });
+    }
   };
   const named = (pair) => `${pair.debit.imported_id} -> ${pair.credit.imported_id}`;
 
@@ -222,13 +238,17 @@ export async function linkTransfers(client, transfers, options = {}) {
       return;
     }
     if (verdict !== 'linkable') {
-      skip(verdict, `${named(pair)}: skipped, ${PAIR_REFUSALS[verdict] ?? verdict}`);
+      skip(verdict, `${named(pair)}: skipped, ${PAIR_REFUSALS[verdict] ?? verdict}`, pair);
       return;
     }
     const payeeForA = transferPayeeOf.get(pair.credit.account);
     const payeeForB = transferPayeeOf.get(pair.debit.account);
     if (!payeeForA || !payeeForB) {
-      skip('no_transfer_payee', `${named(pair)}: skipped, an account has no transfer payee`);
+      skip(
+        'no_transfer_payee',
+        `${named(pair)}: skipped, an account has no transfer payee`,
+        pair,
+      );
       return;
     }
     try {

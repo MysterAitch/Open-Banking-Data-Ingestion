@@ -304,6 +304,8 @@ def _leg(transaction: Transaction, actual_account: str) -> dict[str, object]:
     row = to_actual_transaction(transaction)
     return {
         "account": actual_account,
+        # obdi's own name for the account, so a skipped pair can be named on a page.
+        "account_name": transaction.account_id,
         "imported_id": row["imported_id"],
         "date": row["date"],
         "amount": row["amount"],

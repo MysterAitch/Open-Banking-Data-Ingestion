@@ -123,6 +123,79 @@ test('a reconciled leg is skipped and reported, not updated', async () => {
   assert.deepEqual(client.updates, []);
 });
 
+const NAMED_PAIR = [
+  {
+    debit: {
+      account: 'act-1',
+      account_name: 'main-current',
+      imported_id: 'k-a:0',
+      date: '2026-09-02',
+      amount: -500,
+    },
+    credit: {
+      account: 'act-2',
+      account_name: 'bills-space',
+      imported_id: 'k-b:0',
+      date: '2026-09-02',
+      amount: 500,
+    },
+  },
+];
+
+test('a skipped pair is named by its two accounts, its date, and its reason, with no figure', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const client = transferClient(freshRows({ reconciled: true }));
+  const result = await linkTransfers(client, NAMED_PAIR);
+  assert.deepEqual(result.counts.skipped_pairs, [
+    {
+      debit_account: 'main-current',
+      credit_account: 'bills-space',
+      date: '2026-09-02',
+      reason: 'reconciled',
+    },
+  ]);
+  assert.ok(!JSON.stringify(result.counts.skipped_pairs).includes('500'));
+});
+
+test('a pair whose rows disagree on the amount is named with that reason', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const rows = freshRows();
+  rows['act-2'][0].amount = 499;
+  const result = await linkTransfers(transferClient(rows), NAMED_PAIR);
+  assert.equal(result.counts.skipped_pairs[0].reason, 'amounts_not_opposite');
+});
+
+test('a pair that links is not listed among the skipped', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const result = await linkTransfers(transferClient(freshRows()), NAMED_PAIR);
+  assert.equal(result.counts.linked, 1);
+  assert.deepEqual(result.counts.skipped_pairs, []);
+});
+
+test('an envelope without account names falls back to the Actual account ids', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const result = await linkTransfers(transferClient(freshRows({ reconciled: true })), PAIR);
+  assert.equal(result.counts.skipped_pairs[0].debit_account, 'act-1');
+  assert.equal(result.counts.skipped_pairs[0].credit_account, 'act-2');
+});
+
+test('the named list is capped while the counts stay complete', async () => {
+  const { linkTransfers } = await import('./lib.mjs');
+  const rows = { 'act-1': [], 'act-2': [] };
+  const pairs = [];
+  for (let n = 0; n < 60; n += 1) {
+    rows['act-1'].push({ id: `a${n}`, imported_id: `k-a${n}:0`, amount: -5, reconciled: true });
+    rows['act-2'].push({ id: `b${n}`, imported_id: `k-b${n}:0`, amount: 5 });
+    pairs.push({
+      debit: { account: 'act-1', imported_id: `k-a${n}:0`, date: '2026-09-02', amount: -5 },
+      credit: { account: 'act-2', imported_id: `k-b${n}:0`, date: '2026-09-02', amount: 5 },
+    });
+  }
+  const result = await linkTransfers(transferClient(rows), pairs);
+  assert.equal(result.counts.skipped.reconciled, 60);
+  assert.equal(result.counts.skipped_pairs.length, 50);
+});
+
 test('an update the engine refuses is counted as failed and named, and the next pair still runs', async () => {
   const { linkTransfers } = await import('./lib.mjs');
   const rows = freshRows();

@@ -114,6 +114,7 @@ from .web_sections import (
     system_strip_html,
     way_back,
 )
+from .web_transfer_skips import skipped_pairs_block
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
 #: join onto a directory. The point is not the sanitising - that already
@@ -2732,9 +2733,10 @@ def _push_result_row(result: dict[str, object]) -> str:
         else html.escape(str(result.get("error", "")))
     )
     stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    skipped = skipped_pairs_block(result.get("transfers")) if ok else ""
     return (
         f'<div class="row"><strong>{stamp}Z</strong> {badge}'
-        f'<br><span class="muted">{detail}</span></div>'
+        f'<br><span class="muted">{detail}</span>{skipped}</div>'
     )
 
 
@@ -3105,9 +3107,9 @@ def _audit_difference_sentences(
     if "unlinked_transfers" in differences:
         n = _count_of(differences["unlinked_transfers"])
         sentences.append(
-            f"{n} transfer {'pair' if n == 1 else 'pairs'} not linked - the "
-            "next push links what it can; a pair with a leg missing from "
-            "Actual is refused and says why in the push result"
+            f"{n} transfer {'pair' if n == 1 else 'pairs'} not linked - a push "
+            "links what it can and names each pair it skips and why; most "
+            "reasons stay until the rows are changed in Actual"
         )
     sentences = [html.escape(s, quote=False) for s in sentences]
     for key in sorted(differences):
