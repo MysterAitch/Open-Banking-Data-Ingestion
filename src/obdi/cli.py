@@ -1113,6 +1113,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 transactions,
                 digest=str(row["digest"]),
                 summary=ImportSummary(artefact_new=False),
+                space_blind=families_of(store, _account_map(store)).blind_in,
             )
             fold_space_copies(store, _account_map(store))
             fold_same_money(store, _account_map(store))
@@ -3173,7 +3174,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             store.refile_artefact(artefact_id, destination)
             summary = ImportSummary(artefact_new=False)
             reconcile_batch(
-                store, incoming, digest=str(row["digest"]), summary=summary
+                store,
+                incoming,
+                digest=str(row["digest"]),
+                summary=summary,
+                space_blind=families_of(store, _account_map(store)).blind_in,
             )
             summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
             summary.same_money_folded += fold_same_money(

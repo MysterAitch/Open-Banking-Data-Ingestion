@@ -288,8 +288,14 @@ def record_typed_transaction(
             origin="typed",
         )
     )
+    blind = None
+    if account_map is not None:
+        # Imported here: `family_anchors` reaches the store's readers, which reach `ingest`.
+        from .family_anchors import families_of
+
+        blind = families_of(store, account_map).blind_in
     reconcile_batch(
-        store, [transaction_from_entry(payload, ref, digest)], digest=digest
+        store, [transaction_from_entry(payload, ref, digest)], digest=digest, space_blind=blind
     )
     settle_review_flags(store)
     pair_transfers_across_store(store, account_map)

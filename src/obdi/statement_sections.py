@@ -165,10 +165,16 @@ def check_assignment(
     ]
     found = agreements(held + incoming, sibling_accounts=account_map.accounts_by_source())
     previews: list[MatcherPreview] = []
+    # Imported here: `family_anchors` reaches the store's readers, which reach `ingest`.
+    from .family_anchors import families_of
 
     def preview() -> MatcherPreview:
         if not previews:
-            previews.append(preview_reconcile(store, incoming))
+            previews.append(
+                preview_reconcile(
+                    store, incoming, space_blind=families_of(store, account_map).blind_in
+                )
+            )
         return previews[0]
 
     def matcher_agrees() -> bool:
@@ -344,7 +350,16 @@ def assign_section(
         prepared.digest, prepared.key, prepared.destination, prepared.label
     )
     summary = ImportSummary(artefact_new=False)
-    reconcile_batch(store, prepared.incoming, digest=prepared.digest, summary=summary)
+    # Imported here: `family_anchors` reaches the store's readers, which reach `ingest`.
+    from .family_anchors import families_of
+
+    reconcile_batch(
+        store,
+        prepared.incoming,
+        digest=prepared.digest,
+        summary=summary,
+        space_blind=families_of(store, account_map).blind_in,
+    )
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)

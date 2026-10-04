@@ -37,7 +37,7 @@ from .asked_coverage import (
 )
 from .connections import Connection, ConnectionStore, apply_refresh
 from .family_anchors import families_of
-from .ingest import ImportSummary, reconcile_batch
+from .ingest import ImportSummary, SpaceBlind, reconcile_batch
 from .jsontypes import JsonObject, text
 from .jsontypes import rows as json_rows
 from .models import Transaction
@@ -848,6 +848,7 @@ def _pull_closed_space_history(
     request_meta: str,
     result: PullResult,
     summary: ImportSummary,
+    space_blind: SpaceBlind,
 ) -> None:
     """Fetch a closed Space's history in bounded windows, resuming where it stopped.
 
@@ -937,7 +938,7 @@ def _pull_closed_space_history(
         if items:
             reconcile_batch(
                 store, _transactions_of(items, target, landed.digest), digest=landed.digest,
-                summary=summary,
+                summary=summary, space_blind=space_blind,
             )
         gaps = uncovered(span, window_attempts(store, refs))
 
@@ -1052,6 +1053,7 @@ def pull_starling(
                     request_meta,
                     result,
                     summary,
+                    families_of(store, account_map).blind_in,
                 )
                 continue
             if category.is_space:
