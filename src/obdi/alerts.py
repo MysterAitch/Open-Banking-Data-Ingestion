@@ -385,7 +385,7 @@ def stale_apply_finding(
         return None
     when = (
         f"nothing has been applied to Actual for {_span_text(now - newest)} "
-        f"(last applied {newest.strftime('%Y-%m-%dT%H:%M')}Z)"
+        f"(last applied {newest.strftime('%Y-%m-%d %H:%M')} UTC)"
         if newest is not None
         else "nothing has been applied to Actual: no applied push on record"
     )

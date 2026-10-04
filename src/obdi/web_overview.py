@@ -101,7 +101,7 @@ def _stamp(raw: object, now: datetime) -> str:
 def _age(moment: datetime, now: datetime) -> str:
     seconds = max(0, int((now - moment).total_seconds()))
     if seconds < 90:
-        return f"{seconds} seconds ago"
+        return "just now"
     if seconds < 5400:
         return f"{round(seconds / 60)} minutes ago"
     return f"{round(seconds / 3600)} hours ago"

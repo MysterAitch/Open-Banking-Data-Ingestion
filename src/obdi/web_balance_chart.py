@@ -76,6 +76,7 @@ from .fault_structure import (
 )
 from .logs import say
 from .masking import Disclosed
+from .page_times import percent_text
 from .plural import agree
 from .plural import plural as _plural
 from .web_accounts import submit_button
@@ -170,8 +171,7 @@ def _day_list(days: Sequence[date]) -> str:
 
 
 def _per_cent(share: float) -> str:
-    text = f"{share * 100:.1f}".removesuffix(".0")
-    return f"{text} per cent"
+    return percent_text(share)
 
 
 def _oxford(items: Sequence[str]) -> str:

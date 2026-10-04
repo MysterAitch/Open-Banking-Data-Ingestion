@@ -368,7 +368,7 @@ class MovementCompleteness:
         lines.append(f"  {_plural(self.chain_days, 'account-pair day')} compared")
         lines += _named([f.says() for f in self.chain_faults], "both sides agree every day")
         if self.check_seconds is not None and self.worked_out_at is not None:
-            moment = self.worked_out_at.astimezone(UTC).strftime("%H:%MZ")
+            moment = self.worked_out_at.astimezone(UTC).strftime("%H:%M UTC")
             lines += ["", f"Worked out in {sum(self.check_seconds):.1f} s at {moment}."]
         return "\n".join(lines)
 

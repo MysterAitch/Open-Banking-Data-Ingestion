@@ -310,7 +310,7 @@ class TestStatesWithNothingToDraw:
     def test_Page_WhenNothingIsWrong_SaysOneLevelAndOneHundredPerCent(self):
         page = Parsed(masked(chart_of_walk(MAIN, corpus.walk())))
 
-        assert "one level" in page.text and "100 per cent" in page.text
+        assert "one level" in page.text and "100%" in page.text
         assert page.find("rect", class_="mark") == []
 
 

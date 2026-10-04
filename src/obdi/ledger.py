@@ -789,7 +789,7 @@ def _removed_balances(store: Store, ref: str, built: Ledger) -> tuple[RemovedBal
         RemovedBalance(
             day=removed.day.isoformat(),
             source=removed.source,
-            removed_at=removed.removed_at[:19].replace("T", " "),
+            removed_at=removed.removed_at[:16].replace("T", " "),
             balance_direction=direction_of(removed.balance_minor),
             balance=Money(removed.balance_minor, CURRENCY),
             restate_as=f"{'-' if removed.balance_minor < 0 else ''}"

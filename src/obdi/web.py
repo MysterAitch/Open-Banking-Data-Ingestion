@@ -79,6 +79,7 @@ from .namespaces import (
 )
 from .navigation import answering, current_route, page_name
 from .overview import Overview
+from .page_times import UTC_NOTE, instant_of
 from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
@@ -4511,7 +4512,7 @@ class ConnectionHandler(
             rows.append(
                 f'<div class="row"><strong>{html.escape(str(item.get("source", "")))}</strong> '
                 f'- {html.escape(str(item.get("account_ref", "")))}<br>'
-                f'{html.escape(str(item.get("fetched_at", "")))} - '
+                f'{html.escape(instant_of(item.get("fetched_at", "")))} - '
                 # Size shown only when it is KNOWN. Rendering an absent
                 # payload as "0 bytes" would state something false about
                 # the evidence layer, which is the one place a wrong
@@ -4529,7 +4530,9 @@ class ConnectionHandler(
             )
         body = (
             "<p>Every payload landed, newest first: the evidence everything else "
-            "derives from.</p>" + ("".join(rows) or "<p>Nothing landed yet.</p>") + HOME_LINK
+            f"derives from. {UTC_NOTE}</p>"
+            + ("".join(rows) or "<p>Nothing landed yet.</p>")
+            + HOME_LINK
         )
         self._respond(200, render_page("Raw artefacts", body))
 
@@ -4589,7 +4592,7 @@ class ConnectionHandler(
             moved
             + f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
-            f'fetched {html.escape(str(detail.get("fetched_at", "")))}<br>'
+            f'fetched {html.escape(instant_of(detail.get("fetched_at", "")))} UTC<br>'
             f'<span class="muted" style="word-break:break-all">'
             f'{html.escape(str(detail.get("origin", "")))}</span></p>'
             + (
@@ -6498,7 +6501,7 @@ class ConnectionHandler(
             "transaction. Consecutive balances must differ by exactly the "
             "amounts in between - a break means money moved that no held "
             "transaction explains. This is the store checked against the "
-            "bank's own arithmetic.</p>"
+            f"bank's own arithmetic. {UTC_NOTE}</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{self._named(text)}</pre>" + HOME_LINK
         )

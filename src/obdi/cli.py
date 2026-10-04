@@ -78,6 +78,7 @@ from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .outbound import install_if_requested as install_outbound_refusal_if_requested
 from .overview import Overview, OverviewCache, build_overview
+from .page_times import instant_of
 from .plural import agree, plural
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
@@ -2805,7 +2806,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 artefacts.append(
                     {
                         "ref": str(row["account_ref"]),
-                        "label": f"{row['source']} {str(row['fetched_at'])[:16]}Z",
+                        "label": f"{row['source']} {instant_of(row['fetched_at'])}",
                         "rows": results,
                     }
                 )

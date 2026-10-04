@@ -17,7 +17,7 @@ KNOWN ANSWERS:
         one line on stderr: which memo, the seconds, and for the movement report the seconds of
         each of its three checks; a call that is answered from the memo says nothing
     the movement report is rendered on Identity health
-        "Worked out in 3.0 s at 14:02Z." where the clock steps one second per reading
+        "Worked out in 3.0 s at 14:02 UTC." where the clock steps one second per reading
 """
 
 from __future__ import annotations
@@ -319,7 +319,7 @@ class TestTheMovementReportsOwnTiming:
     def test_Describe_WhenWorkedOut_SaysHowLongItTookAndWhen(self, store):
         text = self.report(store).describe()
 
-        assert text.splitlines()[-1] == "Worked out in 3.0 s at 14:02Z."
+        assert text.splitlines()[-1] == "Worked out in 3.0 s at 14:02 UTC."
 
     def test_Describe_WhenBuiltByHand_SaysNothingOfTiming(self):
         from obdi.movement_completeness import MovementCompleteness
