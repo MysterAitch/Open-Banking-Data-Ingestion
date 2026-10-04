@@ -599,7 +599,7 @@ class TestTheAccountOpenedAtNil:
 
         assert note == (
             "The account's history is held from its opening on 2026-09-01, so the opening "
-            "is nil and every stated balance is tested."
+            "is nil and every known balance is tested."
         )
         assert "absorbed" not in note
 
