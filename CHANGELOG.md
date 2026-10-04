@@ -26,6 +26,30 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.283] - 2026-10-04
+
+### Added
+- **The scheduler says what it is doing, on the Overview and in the alert.**
+  Completed and when the next is due; waiting until a stated time and why;
+  running a step and for how long; or which step failed and with what error.
+  The Connections page lists the last cycle step by step. The owner's dead-man
+  alarm fired after nine hours, the page said only "look at the obdi-pull
+  container", and the container's log held the whole answer: it was waiting
+  for its slot.
+- **"Needs attention" covers the scheduler**: a failed step, a step running far
+  longer than usual, an overdue cycle with no announced wait, and, as
+  housekeeping, a wait that makes a cycle more than one interval late.
+- **A push names each transfer pair it skipped and why**, and says whether a
+  later push could link it. It reported "4 skipped" twice running with no
+  reason.
+
+### Fixed
+- **A pull run by hand no longer moves the scheduler's slot.** The slot is
+  measured from the newest fetch labelled scheduled, and every pull run inside
+  the scheduler's container took that label, so hand-run pulls deferred it for
+  most of a day. Only the loop's own all-connections pull carries the label
+  now. Pulls already recorded that way still count until the slot passes.
+
 ## [0.4.282] - 2026-10-04
 
 ### Added
