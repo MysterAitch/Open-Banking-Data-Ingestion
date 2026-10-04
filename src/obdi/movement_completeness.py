@@ -921,6 +921,34 @@ def _partners(
     return found
 
 
+def _paired_across(
+    out_legs: Sequence[Transaction],
+    in_legs: Sequence[Transaction],
+    partners: dict[str, list[Transaction]],
+) -> set[str]:
+    """The legs of one flow that are each other's ONE confirmed partner.
+
+    Such a pair is one movement whatever the two sides' stamps say, and is not put to the
+    size-and-time comparison (`_unmatched`), which is for legs the pairing pass left alone.
+    Measured on the deployed store: a round-up's leaving leg is stamped when the payment was
+    made and its arrival in the Space when the round-up was swept, more than `SAME_MOVEMENT`
+    later, and three such pairs read "the same number, but not of the same sizes" though each
+    was paired with the other, which held the account's agreement at the first of them.
+    That every leg has exactly one partner, of its own size, is the leg check's (`check_legs`).
+    """
+    leaving = {r.entity_id for r in out_legs}
+    arriving = {r.entity_id for r in in_legs}
+    joined: set[str] = set()
+    for row in out_legs:
+        found = partners.get(row.entity_id, [])
+        if len(found) != 1 or found[0].entity_id not in arriving:
+            continue
+        back = partners.get(found[0].entity_id, [])
+        if len(back) == 1 and back[0].entity_id in leaving:
+            joined.update((row.entity_id, found[0].entity_id))
+    return joined
+
+
 def _chain_account(
     row: Transaction,
     resolver: Callable[[str], str | None] | None,
@@ -982,7 +1010,11 @@ def check_chains(
     for flow in sorted(set(leaving) | set(arriving)):
         out_legs, in_legs = leaving.get(flow, []), arriving.get(flow, [])
         compared += len({r.value_date for r in (*out_legs, *in_legs)})
-        out_over, in_over = _unmatched(out_legs, in_legs)
+        joined = _paired_across(out_legs, in_legs, partners)
+        out_over, in_over = _unmatched(
+            [r for r in out_legs if r.entity_id not in joined],
+            [r for r in in_legs if r.entity_id not in joined],
+        )
         for day in sorted({r.value_date for r in (*out_over, *in_over)}):
             left = [r for r in out_over if r.value_date == day]
             right = [r for r in in_over if r.value_date == day]

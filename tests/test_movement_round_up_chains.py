@@ -185,21 +185,44 @@ class TestAPairedLegThatNamesNoAccount:
         assert check_chains(rows, NAMES, [("a", "b")]) == (0, [])
 
 
-class TestAFaultExplainsItself:
-    def test_Says_WhenBothSidesAreNamedPairedAndStampedFarApart_NamesWhereThePartnersSit(self):
-        rows = [
-            leg("out", MAIN, -100, "cat-bills", "2026-09-06T09:00:00Z"),
-            leg("in", BILLS, 100, "cat-main", "2026-09-06T09:30:00Z"),
-        ]
+class TestLegsPairedWithEachOtherAndStampedFarApart:
+    """A confirmed pair is one movement whatever its two stamps say.
 
-        _, faults = check_chains(rows, NAMES, [("out", "in")])
+    The deployed page read, for three days, "1 leave, 1 arrive - the same number, but not of
+    the same sizes: 1 round-up leg and 1 transfer leg, both paired, their partners in
+    starling-personal and starling-space-savings": each was the other's partner, of one size,
+    stamped further apart than the check's five minutes.
+    An earlier form of this test pinned that sentence as the answer.
+    """
+
+    FAR_APART = (
+        leg("out", MAIN, -100, "cat-bills", "2026-09-06T09:00:00Z"),
+        leg("in", BILLS, 100, "cat-main", "2026-09-06T09:30:00Z"),
+    )
+
+    def test_Chain_WhenTheTwoArePairedWithEachOther_IsNoFault(self):
+        _, faults = check_chains(list(self.FAR_APART), NAMES, [("out", "in")])
+
+        assert faults == []
+
+    def test_Chain_WhenTheTwoAreNotPaired_IsStillAFault(self):
+        _, faults = check_chains(list(self.FAR_APART), NAMES, [])
 
         assert [f.says() for f in faults] == [
             f"2026-09-06 {MAIN} to {BILLS}: 1 leave, 1 arrive "
-            "- the same number, but not of the same sizes: "
-            f"2 transfer legs, both paired, their partners in {MAIN} and {BILLS}"
+            "- the same number, but not of the same sizes: 2 transfer legs, neither paired"
         ]
 
+    def test_Chain_WhenOneIsPairedWithALegElsewhere_IsStillAFault(self):
+        rows = [*self.FAR_APART, leg("other", HOLIDAY, 100, "cat-main", "2026-09-06T09:00:30Z")]
+
+        _, faults = check_chains(rows, NAMES, [("out", "other")])
+
+        assert len(faults) >= 1
+        assert any(f.from_account == MAIN and f.to_account == BILLS for f in faults)
+
+
+class TestAFaultExplainsItself:
     def test_Says_WhenRoundUpAndTransferLegsAreMixed_CountsEachKind(self):
         rows = [
             round_up_out(),
