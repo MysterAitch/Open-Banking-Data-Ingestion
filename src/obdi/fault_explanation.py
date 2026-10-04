@@ -52,6 +52,11 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
                         from the number of sightings the store holds of it
   none of these         with the counts of rows each side of the window
 
+WITHIN AN EXPORT'S WINDOW the first row after which the export's own balance and the
+store's running sum part is named as well (`ChangeExplanation.parting`, by
+`export_parting`), which narrows a differing day to a row. It is not one of the
+tests above and changes no verdict or count.
+
 THE IDENTITY. A source's step is the sum of the rows it lists, so the change is
 always (listed, not counted) - (counted, not listed) + (figure differences); a
 residual after that is the finding in itself, and is said.
@@ -66,11 +71,22 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from itertools import accumulate
 from typing import TYPE_CHECKING, TypeVar
 
+from .bank_balances import FeedMoments
+from .export_parting import (
+    ELSEWHERE,
+    HELD,
+    NOT_COUNTED,
+    NOTHING,
+    Counterpart,
+    RowParting,
+    Surplus,
+    first_parting,
+)
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
 from .masking import Structural
 from .models import Transaction, TransactionStatus
@@ -245,6 +261,9 @@ class ChangeExplanation:
     sides: Structural[RowSet] = field(default_factory=RowSet)
     #: Whether the change equals minus the sum of `sides` rather than their sum.
     sides_negated: Structural[bool] = False
+    #: For a change an export states: the first of its rows after which the export's
+    #: balance and the store's running sum part (`export_parting`); None otherwise.
+    parting: Structural[RowParting | None] = None
 
 
 @dataclass(frozen=True)
@@ -369,6 +388,8 @@ class _View:
     #: Counted rows whose two dates differ, once under each.
     by_source: _Dated
     by_stored: _Dated
+    #: The rows the source is shown to list (an export's matched rows), where it is one.
+    represented: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -642,6 +663,8 @@ class _Matches:
     unheld: list[ExportRow]
     #: Every sighting of the export, by its own day.
     sightings: _Dated
+    #: The sighting each row is paired with, by the row's place in the export's own sequence.
+    at: dict[int, dict[str, object]] = field(default_factory=dict)
 
 
 def _match(reading: ExportReading, sighted: Sequence[dict[str, object]]) -> _Matches:
@@ -649,25 +672,29 @@ def _match(reading: ExportReading, sighted: Sequence[dict[str, object]]) -> _Mat
     for entry in sighted:
         exact[(str(entry["observed_date"] or ""), int(str(entry["amount_minor"])))].append(entry)
     pairs: list[tuple[ExportRow, dict[str, object]]] = []
-    unmatched: list[ExportRow] = []
+    unmatched: list[tuple[int, ExportRow]] = []
+    at: dict[int, dict[str, object]] = {}
     taken: set[str] = set()
-    for row in reading.rows:
+    for index, row in enumerate(reading.rows):
         candidates = exact.get((row.day.isoformat(), row.amount_minor))
         if candidates:
             found = candidates.pop(0)
             taken.add(str(found["entity_id"]))
             pairs.append((row, found))
+            at[index + 1] = found
         else:
-            unmatched.append(row)
+            unmatched.append((index + 1, row))
     left: dict[str, list[dict[str, object]]] = defaultdict(list)
     for entry in sighted:
         if str(entry["entity_id"]) not in taken:
             left[str(entry["observed_date"] or "")].append(entry)
     unheld: list[ExportRow] = []
-    for row in unmatched:
+    for position, row in unmatched:
         candidates = left.get(row.day.isoformat())
         if candidates:
-            pairs.append((row, candidates.pop(0)))
+            found = candidates.pop(0)
+            pairs.append((row, found))
+            at[position] = found
         else:
             unheld.append(row)
     dated = [
@@ -675,7 +702,7 @@ def _match(reading: ExportReading, sighted: Sequence[dict[str, object]]) -> _Mat
         for entry in sighted
         if (day := _day(str(entry["observed_date"] or ""))) is not None
     ]
-    return _Matches(pairs, unheld, _Dated(dated))
+    return _Matches(pairs, unheld, _Dated(dated), at)
 
 
 def _day(text: str) -> date | None:
@@ -778,11 +805,7 @@ def _csv_view(
                     )
                 )
                 continue
-            stand_in = row
-            if not evidence.counted(row):
-                target = evidence.by_entity.get(evidence.folds.get(entity, ""))
-                if target is not None and evidence.counted(target):
-                    stand_in = target
+            stand_in = _stand_in(evidence, row)
             if not evidence.counted(stand_in):
                 held_back.append(
                     _Entry(
@@ -825,6 +848,88 @@ def _csv_view(
         held_back=held_back,
         figures=figures,
         twin_of=export_twin,
+    )
+
+
+def _stand_in(evidence: _Evidence, row: Transaction) -> Transaction:
+    """The row that counts for a sighted row: itself, or the Space row it was folded onto.
+
+    Said once, here: a row the fold left as history is represented by the counted
+    row its sightings were copied onto, and by itself where there is none.
+    """
+    if not evidence.counted(row):
+        target = evidence.by_entity.get(evidence.folds.get(row.entity_id, ""))
+        if target is not None and evidence.counted(target):
+            return target
+    return row
+
+
+def _parting(
+    store: Store,
+    evidence: _Evidence,
+    view: _View,
+    reading: ExportReading,
+    match: _Matches,
+    after: date | None,
+    through: date,
+) -> RowParting | None:
+    """Where the export's own balance and the store's running sum first part in a window.
+
+    The rule is `export_parting`'s. The family's rows are the store's side, as the
+    walk's are, so a Space payment the export lists is compared with the Space's row.
+    """
+    family = frozenset(evidence.members)
+    window = [
+        (index + 1, row)
+        for index, row in enumerate(reading.rows)
+        if _inside(row.day, after, through)
+    ]
+    if not window:
+        return None
+    unlisted = [
+        row
+        for rows in evidence.members.values()
+        for row in rows
+        if evidence.counted(row)
+        and row.entity_id not in view.represented
+        and _inside(evidence.day(CSV_SOURCE, row), after, through)
+    ]
+    moments = (
+        FeedMoments(store, family, min(row.day for _, row in window) - timedelta(days=3))
+        if unlisted
+        else None
+    )
+
+    def when(entity: str) -> datetime | None:
+        return moments.cleared(entity) if moments is not None else None
+
+    held: dict[int, Counterpart] = {}
+    for position, _row in window:
+        sighting = match.at.get(position)
+        if sighting is None:
+            held[position] = Counterpart(NOTHING)
+            continue
+        stored = evidence.by_entity.get(str(sighting["entity_id"]))
+        if stored is None or str(sighting["account_id"]) not in family:
+            held[position] = Counterpart(ELSEWHERE)
+            continue
+        stand = _stand_in(evidence, stored)
+        if evidence.counted(stand):
+            held[position] = Counterpart(HELD, stand.amount_minor, at=when(stand.entity_id))
+        else:
+            held[position] = Counterpart(
+                NOT_COUNTED,
+                why=evidence.why_not_counted(stored) or str(sighting["status"]),
+                at=when(stored.entity_id),
+            )
+    return first_parting(
+        window,
+        held,
+        [
+            Surplus(evidence.day(CSV_SOURCE, row), row.amount_minor, when(row.entity_id))
+            for row in unlisted
+        ],
+        len(reading.rows),
     )
 
 
@@ -1020,6 +1125,7 @@ def _view(
         _Dated(figures),
         _Dated(by_source),
         _Dated(by_stored),
+        frozenset(listed or ()),
     )
 
 
@@ -1252,21 +1358,27 @@ def explain_walk(
         if source == CSV_SOURCE and digest and not has_previous:
             reading_of = dict(exports)[digest]
             opening_balance = reading_of.rows[0].before_minor if reading_of.rows else None
-        explained.append(
-            _explain_one(
-                view=views[source],
-                day=change.day,
-                after=after,
-                delta=delta,
-                source=source,
-                previous_source=follows if follows and follows != source else "",
-                unheld=change.unheld,
-                matches=own,
-                opening_balance=opening_balance,
-                index=change.index,
-                undone=undone,
-            )
+        found = _explain_one(
+            view=views[source],
+            day=change.day,
+            after=after,
+            delta=delta,
+            source=source,
+            previous_source=follows if follows and follows != source else "",
+            unheld=change.unheld,
+            matches=own,
+            opening_balance=opening_balance,
+            index=change.index,
+            undone=undone,
         )
+        if own and delta != 0:
+            found = replace(
+                found,
+                parting=_parting(
+                    store, evidence, views[source], dict(exports)[digest], own[0], after, change.day
+                ),
+            )
+        explained.append(found)
     return WalkExplanation(
         tuple(explained),
         facts,

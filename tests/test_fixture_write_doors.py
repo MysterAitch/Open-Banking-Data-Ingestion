@@ -103,6 +103,14 @@ JUSTIFIED = {
     "as a bad merge would have",
     ("test_family_anchors.py", "transaction_sources"): "the sightings of that same "
     "removed row, so the store holds no trace of the payment at all",
+    ("test_row_parting.py", "transactions"): "a store that disagrees with the export it "
+    "came from: a listed row the store does not hold, and a held row under another "
+    "figure. The importer derives the rows and the artefact from the same bytes, so "
+    "neither can be produced by it, and they are the faults whose first parting the "
+    "page must name. The surplus row, which a door CAN produce, is landed through the "
+    "feed in the same file",
+    ("test_row_parting.py", "transaction_sources"): "the sightings of the removed row, "
+    "so the store holds no trace of the payment at all",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",

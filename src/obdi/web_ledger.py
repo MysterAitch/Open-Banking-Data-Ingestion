@@ -657,6 +657,48 @@ def _hold_html(change: Any, hold: str) -> str:
     )
 
 
+def _parting_html(found: Any) -> str:
+    """Where inside the window the export's balance and the store's running sum first part.
+
+    Said once, here. A position, a date, a direction, and what the store holds in
+    that row's place: never a figure, a description, or a payee.
+    """
+    if found is None:
+        return ""
+    row = (
+        f"row {found.position:,} of {found.total:,} in the export's own sequence, dated "
+        f"{_mono(found.day)}, a payment {_esc(found.direction)}"
+    )
+    surplus = (
+        f"{_plural(found.surplus_before, 'surplus row')} the export does not list"
+        if found.surplus_before
+        else ""
+    )
+    if found.after_last:
+        return (
+            "<p>Walked row by row, the export's balance and the store's running sum do not "
+            f"part within the window's rows. The store holds {surplus}, which "
+            f"{'falls' if found.surplus_before == 1 else 'fall'} after the last of them "
+            f"({row}).</p>"
+        )
+    place = {
+        "nothing": "holds no row in its place",
+        "another size": "holds a row of another size in its place",
+        "not counted": f"holds the row but does not count it ({_esc(found.why)})",
+        "another account": "holds the row under an account outside this family",
+        "held": "holds that row, as the export lists it",
+    }[found.holds]
+    extra = (
+        f", and {surplus} between the row before it and this one"
+        if surplus
+        else ""
+    )
+    return (
+        "<p>Walked row by row, the export's balance and the store's running sum first part "
+        f"after {row}. There the store {place}{extra}.</p>"
+    )
+
+
 def _reversed_html(found: Any) -> str:
     """How many reversed rows are held as history, and what the export and the rows say of them.
 
@@ -720,6 +762,7 @@ def _explanations_html(explanation: Any) -> str:
             f"<div><p><strong>The change at the end of {_mono(change.day)}"
             f"</strong> (after {start}, stated by {_esc(change.source)}{undone}):</p>"
             + "".join(_hold_html(change, hold) for hold in change.holds)
+            + _parting_html(change.parting)
             + "</div>"
         )
     return body
