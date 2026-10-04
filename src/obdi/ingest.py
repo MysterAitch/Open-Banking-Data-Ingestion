@@ -18,7 +18,7 @@ from pathlib import Path
 from . import instrumentation
 from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
-from .matching import CandidateIndex, pair_transfer_entities, resolve, supersede
+from .matching import CandidateIndex, pair_transfer_entities, plan_partners, resolve, supersede
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
 from .review_settlement import settle_review_flags
@@ -406,17 +406,21 @@ def preview_reconcile(
     by_account: dict[str, CandidateIndex] = {}
     merged = 0
     new = 0
-    for position, transaction in enumerate(_numbered(transactions)):
-        existing = by_account.get(transaction.account_id)
-        if existing is None:
-            existing = CandidateIndex(
+    numbered = _numbered(transactions)
+    for transaction in numbered:
+        if transaction.account_id not in by_account:
+            loaded = CandidateIndex(
                 store.transactions_for_account(transaction.account_id),
                 sightings=store.sighted_ids_for_account(transaction.account_id),
                 space_blind=_blind_in(space_blind, transaction.account_id),
             )
-            existing.begin_batch()
-            by_account[transaction.account_id] = existing
-        result = resolve(transaction, existing)
+            loaded.begin_batch()
+            by_account[transaction.account_id] = loaded
+    plans = _partner_plans(numbered, by_account)
+    for position, transaction in enumerate(numbered):
+        existing = by_account[transaction.account_id]
+        partner, reserved = plans[position]
+        result = resolve(transaction, existing, partner=partner, reserved=reserved)
         if result.existing is None:
             occurrence = existing.free_occurrence(
                 transaction.account_id,
@@ -542,18 +546,23 @@ def _reconcile_all(
     pending_snapshot = store.is_pending_snapshot(digest)
     for index in by_account.values():
         index.begin_batch(pending_snapshot=pending_snapshot)
-    for position, transaction in enumerate(numbered, start=1):
-        existing = by_account.get(transaction.account_id)
-        if existing is None:
+    for transaction in numbered:
+        if transaction.account_id not in by_account:
             with instrumentation.phase("load-candidates"):
-                existing = CandidateIndex(
+                loaded = CandidateIndex(
                     store.transactions_for_account(transaction.account_id),
                     sightings=store.sighted_ids_for_account(transaction.account_id),
                     space_blind=_blind_in(space_blind, transaction.account_id),
                 )
-            existing.begin_batch(pending_snapshot=pending_snapshot)
-            by_account[transaction.account_id] = existing
-        merged, matched_entity_id = _reconcile(store, transaction, existing, digest, result)
+            loaded.begin_batch(pending_snapshot=pending_snapshot)
+            by_account[transaction.account_id] = loaded
+    with instrumentation.phase("plan-partners"):
+        plans = _partner_plans(numbered, by_account)
+    for position, transaction in enumerate(numbered, start=1):
+        existing = by_account[transaction.account_id]
+        merged, matched_entity_id = _reconcile(
+            store, transaction, existing, digest, result, plans[position - 1]
+        )
         # Whichever row took this record has now answered to its id.
         existing.claim(
             matched_entity_id or merged.entity_id, transaction.source, transaction.source_id
@@ -575,12 +584,33 @@ def _reconcile_all(
         existing.replace(merged)
 
 
+def _partner_plans(
+    numbered: list[Transaction], by_account: dict[str, CandidateIndex]
+) -> list[tuple[str | None, frozenset[str]]]:
+    """Each record's planned partner and the rows reserved, in the batch's order.
+
+    Planned per account against the rows held before the batch starts, so the
+    outcome is the same whichever order the batch lists its records in
+    (`matching.plan_partners` states the rule).
+    """
+    positions_by_account: dict[str, list[int]] = {}
+    for position, transaction in enumerate(numbered):
+        positions_by_account.setdefault(transaction.account_id, []).append(position)
+    plans: list[tuple[str | None, frozenset[str]]] = [(None, frozenset())] * len(numbered)
+    for account, positions in positions_by_account.items():
+        plan = plan_partners([numbered[p] for p in positions], by_account[account])
+        for local, position in enumerate(positions):
+            plans[position] = plan.for_position(local)
+    return plans
+
+
 def _reconcile(
     store: Store,
     transaction: Transaction,
     existing: CandidateIndex,
     digest: str,
     summary: ImportSummary,
+    plan: tuple[str | None, frozenset[str]] = (None, frozenset()),
 ) -> tuple[Transaction, str | None]:
     """Resolve one transaction, returning it and the entity it merged into.
 
@@ -589,7 +619,7 @@ def _reconcile(
     again by the next record.
     """
     with instrumentation.phase("resolve"):
-        result = resolve(transaction, existing)
+        result = resolve(transaction, existing, partner=plan[0], reserved=plan[1])
 
     if (
         result.existing is not None

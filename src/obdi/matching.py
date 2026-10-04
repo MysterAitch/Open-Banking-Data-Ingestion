@@ -31,7 +31,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import TypeVar
 
 from .models import MatchTier, SourceTier, Transaction, TransactionStatus
@@ -46,6 +46,10 @@ FUZZY_WINDOW_DAYS = 7
 MANUAL_WINDOW_DAYS = 10
 
 INTERNAL_TRANSFER_WINDOW_DAYS = 1
+
+#: The most records or rows in one group that `assign_as_a_set` solves exactly.
+#: `plan_partners` states the rule and what happens past this.
+ASSIGNMENT_SET_LIMIT = 12
 
 #: Sources that name a payment by ONE id for its whole life, pending and
 #: settled alike.
@@ -566,34 +570,31 @@ class CandidateIndex:
         return free
 
 
-def resolve(
-    incoming: Transaction, existing: Sequence[Transaction] | CandidateIndex
-) -> MatchResult:
-    """Decide whether `incoming` is already represented in `existing`."""
-    index = (
-        existing if isinstance(existing, CandidateIndex) else CandidateIndex(existing)
-    )
-    account = incoming.account_id
+class _Judgement:
+    """What the stored rows are to one incoming record, by each tier's own question."""
+
+    def __init__(self, incoming: Transaction, index: CandidateIndex) -> None:
+        self.incoming = incoming
+        self.index = index
+        self.account = incoming.account_id
 
     # Provider ids are only unique within a provider's own namespace, so tier 1
     # matches on (source, source_id) rather than the id alone. Two sources
     # reporting the same payment are SUPPOSED to disagree here.
-    def taken(candidate: Transaction) -> bool:
+    def taken(self, candidate: Transaction) -> bool:
         # Already answered, in this batch, to another of this source's ids.
-        return index.claimed_under_another_id(
-            candidate.entity_id, incoming.source, incoming.source_id
+        return self.index.claimed_under_another_id(
+            candidate.entity_id, self.incoming.source, self.incoming.source_id
         )
 
-    if incoming.source_id:
-        for candidate in index.by_source_id(account, incoming.source, incoming.source_id):
-            if not taken(candidate):
-                return MatchResult(MatchTier.SOURCE_ID, candidate)
+    def apart_by_kind(self, candidate: Transaction) -> bool:
+        return is_internal_leg_meeting_space_blind_source(
+            self.incoming, candidate, self.index.space_blind
+        )
 
-    def apart_by_kind(candidate: Transaction) -> bool:
-        return is_internal_leg_meeting_space_blind_source(incoming, candidate, index.space_blind)
-
-    def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
-        if taken(candidate) or apart_by_kind(candidate):
+    def one_payment(self, candidate: Transaction, *, same_content: bool) -> bool:
+        incoming, index = self.incoming, self.index
+        if self.taken(candidate) or self.apart_by_kind(candidate):
             return False
         # Where a source keeps a payment's id through settlement, a row it
         # has already called by a different id is a different payment, and
@@ -613,35 +614,85 @@ def resolve(
             return could_be_reissue(incoming, candidate)
         return could_be_one_payment(incoming, candidate, same_content=same_content)
 
-    if incoming.content_key:
-        for candidate in index.by_content_key(account, incoming.content_key):
-            if one_payment(candidate, same_content=True):
-                return MatchResult(MatchTier.CONTENT_KEY, candidate)
+    def exact(self) -> MatchResult | None:
+        """Tiers 1 and 2: the row this record names by id or by content."""
+        incoming, index = self.incoming, self.index
+        if incoming.source_id:
+            for candidate in index.by_source_id(
+                self.account, incoming.source, incoming.source_id
+            ):
+                if not self.taken(candidate):
+                    return MatchResult(MatchTier.SOURCE_ID, candidate)
+        if incoming.content_key:
+            for candidate in index.by_content_key(self.account, incoming.content_key):
+                if self.one_payment(candidate, same_content=True):
+                    return MatchResult(MatchTier.CONTENT_KEY, candidate)
+        return None
 
     # A hand-entered date is remembered rather than observed, so the window
     # widens when one side was typed by a person. YNAB allows ten days for the
     # same reason; between two machine-read sources seven is ample.
-    def window_for(candidate: Transaction) -> timedelta:
-        if SourceTier.MANUAL in (incoming.tier, candidate.tier):
+    def window_for(self, candidate: Transaction) -> timedelta:
+        if SourceTier.MANUAL in (self.incoming.tier, candidate.tier):
             return timedelta(days=MANUAL_WINDOW_DAYS)
         return timedelta(days=FUZZY_WINDOW_DAYS)
 
-    same_amount = index.by_amount(account, incoming.amount_minor)
-    # A pair kept apart by kind is certain, not a near-miss, so it is never put
-    # to the reviewer as a puzzle.
-    similar = [
-        t
-        for t in same_amount
-        if abs(t.value_date - incoming.value_date) <= window_for(t) and not apart_by_kind(t)
-    ]
+    def same_amount(self) -> list[Transaction]:
+        return self.index.by_amount(self.account, self.incoming.amount_minor)
 
-    # Applies whether or not the source numbers its rows: two rows of one file
-    # are two payments either way, and an id-less format needs the brake most.
-    near = [
-        t
-        for t in similar
-        if one_payment(t, same_content=t.content_key == incoming.content_key)
-    ]
+    def similar(self) -> list[Transaction]:
+        # A pair kept apart by kind is certain, not a near-miss, so it is never
+        # put to the reviewer as a puzzle.
+        incoming = self.incoming
+        return [
+            t
+            for t in self.same_amount()
+            if abs(t.value_date - incoming.value_date) <= self.window_for(t)
+            and not self.apart_by_kind(t)
+        ]
+
+    def near(self, similar: Sequence[Transaction]) -> list[Transaction]:
+        # Applies whether or not the source numbers its rows: two rows of one
+        # file are two payments either way, and an id-less format needs the
+        # brake most.
+        return [
+            t
+            for t in similar
+            if self.one_payment(t, same_content=t.content_key == self.incoming.content_key)
+        ]
+
+
+def _distance_days(incoming: Transaction, candidate: Transaction) -> int:
+    return abs((candidate.value_date - incoming.value_date).days)
+
+
+def resolve(
+    incoming: Transaction,
+    existing: Sequence[Transaction] | CandidateIndex,
+    *,
+    partner: str | None = None,
+    reserved: frozenset[str] = frozenset(),
+) -> MatchResult:
+    """Decide whether `incoming` is already represented in `existing`.
+
+    `partner` and `reserved` come from `plan_partners`, which decides a batch's
+    fuzzy matches as a set.
+    The planned `partner` is taken when it is still a candidate, and a row
+    reserved for another record of the batch is never taken by this one.
+    With neither given, the nearest candidate wins, the earlier arrival on a tie.
+    """
+    index = (
+        existing if isinstance(existing, CandidateIndex) else CandidateIndex(existing)
+    )
+    judge = _Judgement(incoming, index)
+
+    found = judge.exact()
+    if found is not None:
+        return found
+
+    same_amount = judge.same_amount()
+    similar = judge.similar()
+    near = judge.near(similar)
     # Two typed rows kept apart are not a puzzle to put to the reviewer: the
     # person typed both on purpose, and `could_be_one_payment` refuses to merge
     # them for exactly that reason.
@@ -651,6 +702,8 @@ def resolve(
         if t not in near
         and not (incoming.tier is SourceTier.MANUAL and t.tier is SourceTier.MANUAL)
     )
+    # Reserved for another record, which is not the same as kept apart from this one.
+    near = [t for t in near if t.entity_id == partner or t.entity_id not in reserved]
 
     if not near:
         # The series check filters on exact amount itself, so the amount
@@ -662,8 +715,219 @@ def resolve(
             recurring=belongs_to_established_series(incoming, same_amount),
         )
 
-    near.sort(key=lambda t: abs(t.value_date - incoming.value_date))
+    for candidate in near:
+        if candidate.entity_id == partner:
+            return MatchResult(MatchTier.FUZZY, candidate)
+    near.sort(key=lambda t: _distance_days(incoming, t))
     return MatchResult(MatchTier.FUZZY, near[0])
+
+
+@dataclass(frozen=True)
+class PartnerPlan:
+    """What `plan_partners` decided for one batch.
+
+    The stored row each record is to take, by the record's position in the
+    batch, and every row so taken.
+    """
+
+    partner: dict[int, str]
+    reserved: frozenset[str]
+
+    def for_position(self, position: int) -> tuple[str | None, frozenset[str]]:
+        return self.partner.get(position), self.reserved
+
+
+def plan_partners(batch: Sequence[Transaction], index: CandidateIndex) -> PartnerPlan:
+    """Decide which stored row each record of a batch takes, as a SET.
+
+    THE RULE. When several records of one batch have no exact match and several
+    stored rows of the same size, direction, and account lie within the window
+    of them, they are assigned together and not in the order they arrive:
+    a pair of the same date is taken first, and the rest so that no record is
+    left without a partner while one within the window exists, at the least
+    total distance in days.
+    Ties go to the earlier date, then to the earlier arrival among rows of one
+    date, so the outcome does not depend on the order the batch lists its rows.
+    A record that shares no candidate with another record of the batch is not
+    planned at all, and takes its nearest candidate, the earlier arrival on a
+    tie, as it always did.
+
+    Measured on the deployed page: "out row dated starling 2021-03-22,
+    truelayer 2021-03-22; seen by starling, truelayer; booked" with no export
+    sighting, beside a payment dated three days on that carried the export's
+    row of a day before it.
+    The feed and the aggregator held payments of one size on the 22nd and the
+    25th and the export rows on the 24th and the 25th: arriving first, the 24th
+    took the 25th's payment (one day away) and the 25th's row was left with the
+    22nd's (three days away).
+
+    BOUND. A group is solved exactly only while it has at most
+    `ASSIGNMENT_SET_LIMIT` records and as many rows of the same size, after
+    same-date pairs are set aside.
+    A larger group keeps its same-date pairs and every other record is left to
+    be matched one at a time, as it was before this rule.
+    Exact solving is exponential in the rows, which is why it is bounded and not
+    measured: a month of one standing amount stays well inside it.
+    """
+    pool: dict[int, list[Transaction]] = {}
+    consumed: set[str] = set()
+    for position, incoming in enumerate(batch):
+        judge = _Judgement(incoming, index)
+        found = judge.exact()
+        if found is not None and found.existing is not None:
+            consumed.add(found.existing.entity_id)
+            continue
+        near = judge.near(judge.similar())
+        if near:
+            pool[position] = near
+
+    options: dict[int, list[Transaction]] = {
+        position: [t for t in near if t.entity_id not in consumed]
+        for position, near in pool.items()
+    }
+    options = {position: near for position, near in options.items() if near}
+
+    partner: dict[int, str] = {}
+    for group in _groups_sharing_candidates(options):
+        if len(group) < 2:
+            continue
+        partner.update(_assign_group(batch, options, group))
+    return PartnerPlan(partner, frozenset(partner.values()))
+
+
+def _assign_group(
+    batch: Sequence[Transaction], options: dict[int, list[Transaction]], group: list[int]
+) -> dict[int, str]:
+    reach = {position: {t.entity_id for t in options[position]} for position in group}
+    rows = {t.entity_id: t for position in group for t in options[position]}
+    return assign_as_a_set(
+        [(position, batch[position].value_date) for position in group],
+        [(entity_id, row.value_date) for entity_id, row in rows.items()],
+        lambda position, entity_id: entity_id in reach[position],
+    )
+
+
+def _groups_sharing_candidates(options: dict[int, list[Transaction]]) -> list[list[int]]:
+    """Records joined by a stored row both could take, each group in batch order."""
+    parent: dict[int, int] = {position: position for position in options}
+
+    def find(position: int) -> int:
+        while parent[position] != position:
+            parent[position] = parent[parent[position]]
+            position = parent[position]
+        return position
+
+    first_for: dict[str, int] = {}
+    for position, near in options.items():
+        for candidate in near:
+            owner = first_for.setdefault(candidate.entity_id, position)
+            parent[find(position)] = find(owner)
+    groups: dict[int, list[int]] = {}
+    for position in sorted(options):
+        groups.setdefault(find(position), []).append(position)
+    return list(groups.values())
+
+
+def assign_as_a_set(
+    wanting: Sequence[tuple[int, date]],
+    offered: Sequence[tuple[str, date]],
+    allowed: Callable[[int, str], bool],
+) -> dict[int, str]:
+    """Pair records with rows by the rule `plan_partners` states.
+
+    `wanting` is each record's key and date; `offered` each row's key and date;
+    `allowed` says whether a record could take a row at all.
+    Same-date pairs come first, taken in date order and then in the order given.
+    The rest are solved exactly for the fewest records left unpaired, then the
+    least total distance, when no more than `ASSIGNMENT_SET_LIMIT` records and
+    rows remain in a connected group; a larger group is left unpaired here.
+    """
+    records = sorted(enumerate(wanting), key=lambda item: (item[1][1], item[0]))
+    rows = sorted(enumerate(offered), key=lambda item: (item[1][1], item[0]))
+    result: dict[int, str] = {}
+    used: set[int] = set()
+
+    for _, (key, day) in records:
+        for row_index, (entity_id, row_day) in rows:
+            if row_index in used or row_day != day or not allowed(key, entity_id):
+                continue
+            used.add(row_index)
+            result[key] = entity_id
+            break
+
+    left_records = [(key, day) for _, (key, day) in records if key not in result]
+    left_rows = [(entity_id, day) for row_index, (entity_id, day) in rows if row_index not in used]
+    for component_records, component_rows in _components(left_records, left_rows, allowed):
+        if max(len(component_records), len(component_rows)) > ASSIGNMENT_SET_LIMIT:
+            continue
+        result.update(_solve_exactly(component_records, component_rows, allowed))
+    return result
+
+
+def _components(
+    records: list[tuple[int, date]],
+    rows: list[tuple[str, date]],
+    allowed: Callable[[int, str], bool],
+) -> list[tuple[list[tuple[int, date]], list[tuple[str, date]]]]:
+    parent = list(range(len(records) + len(rows)))
+
+    def find(item: int) -> int:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    for i, (key, _) in enumerate(records):
+        for j, (entity_id, _) in enumerate(rows):
+            if allowed(key, entity_id):
+                parent[find(i)] = find(len(records) + j)
+    grouped: dict[int, tuple[list[tuple[int, date]], list[tuple[str, date]]]] = {}
+    for i, record in enumerate(records):
+        grouped.setdefault(find(i), ([], []))[0].append(record)
+    for j, row in enumerate(rows):
+        grouped.setdefault(find(len(records) + j), ([], []))[1].append(row)
+    return [group for group in grouped.values() if group[0] and group[1]]
+
+
+def _solve_exactly(
+    records: list[tuple[int, date]],
+    rows: list[tuple[str, date]],
+    allowed: Callable[[int, str], bool],
+) -> dict[int, str]:
+    count = len(rows)
+    best: dict[tuple[int, int], tuple[int, int]] = {}
+    choice: dict[tuple[int, int], int | None] = {}
+
+    def solve(i: int, taken: int) -> tuple[int, int]:
+        if i == len(records):
+            return (0, 0)
+        state = (i, taken)
+        if state in best:
+            return best[state]
+        key, day = records[i]
+        leave = solve(i + 1, taken)
+        winner = (leave[0] + 1, leave[1])
+        picked: int | None = None
+        for j in range(count):
+            if taken & (1 << j) or not allowed(key, rows[j][0]):
+                continue
+            rest = solve(i + 1, taken | (1 << j))
+            score = (rest[0], rest[1] + abs((rows[j][1] - day).days))
+            if score < winner:
+                winner, picked = score, j
+        best[state] = winner
+        choice[state] = picked
+        return winner
+
+    solve(0, 0)
+    result: dict[int, str] = {}
+    taken = 0
+    for i, (key, _) in enumerate(records):
+        picked = choice[(i, taken)]
+        if picked is not None:
+            result[key] = rows[picked][0]
+            taken |= 1 << picked
+    return result
 
 
 def supersede(previous: Transaction, observation: Transaction) -> Transaction:
