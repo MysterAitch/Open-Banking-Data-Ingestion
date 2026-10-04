@@ -32,6 +32,7 @@ passed on.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -62,7 +63,20 @@ class FeedItem:
     minor: int | None
     #: The counterparty as the matcher compares text (`identity.normalise_description`).
     recipient: str
+    #: The item's STRUCTURE, for `feed_item_shape`: the top-level fields that carry a value,
+    #: the (field, value) of each that is a short upper-case token (a candidate for a closed
+    #: set; `feed_item_shape` decides which fields are and which may be said), the currencies
+    #: of `amount` and `sourceAmount`, and the two times as stated.
+    fields: frozenset[str] = frozenset()
+    tokens: tuple[tuple[str, str], ...] = ()
+    currency: str = ""
+    source_currency: str = ""
+    transacted: datetime | None = None
+    settled: datetime | None = None
 
+
+_TOKEN = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
+_CURRENCY = re.compile(r"^[A-Z]{3}$")
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -84,17 +98,36 @@ def _instant(text: object) -> datetime | None:
     return (moment if moment.tzinfo else moment.replace(tzinfo=UTC)).astimezone(UTC)
 
 
+def _currency(amount: object) -> str:
+    named = amount.get("currency") if isinstance(amount, dict) else None
+    return named if isinstance(named, str) and _CURRENCY.match(named) else ""
+
+
 def _item(entry: Mapping[str, object], uid: str) -> FeedItem:
     amount = entry.get("amount")
     minor = amount.get("minorUnits") if isinstance(amount, dict) else None
     direction = str(entry.get("direction") or "").strip().lower()
+    transacted = _instant(entry.get("transactionTime"))
+    settled = _instant(entry.get("settlementTime"))
     return FeedItem(
         uid,
         str(entry.get("status") or "").strip().upper(),
-        _instant(entry.get("transactionTime")) or _instant(entry.get("settlementTime")),
+        transacted or settled,
         direction if direction in ("in", "out") else "",
         minor if isinstance(minor, int) and not isinstance(minor, bool) else None,
         normalise_description(str(entry.get("counterPartyName") or "")),
+        frozenset(name for name, value in entry.items() if value is not None),
+        tuple(
+            sorted(
+                (name, value)
+                for name, value in entry.items()
+                if isinstance(value, str) and _TOKEN.match(value)
+            )
+        ),
+        _currency(amount),
+        _currency(entry.get("sourceAmount")),
+        transacted,
+        settled,
     )
 
 
@@ -165,12 +198,23 @@ class FeedStatuses:
         order = _landing_order(store)
         #: Feed uid -> (the landing rank of the artefact that last named it, what it said).
         self._newest: dict[str, tuple[int, FeedItem]] = {}
+        #: Feed uid -> what the artefact that first named it said.
+        self._oldest: dict[str, FeedItem] = {}
         for rank, digest in enumerate(sorted(digests, key=lambda d: order.get(d, ("", 0)))):
             if digest not in _ITEMS_BY_DIGEST:
                 _ITEMS_BY_DIGEST[digest] = _items_in(feed_payload(store, digest))
             for uid, item in _ITEMS_BY_DIGEST[digest].items():
                 self._newest[uid] = (rank, item)
+                self._oldest.setdefault(uid, item)
         self._row_uids = frozenset(uid for uids in self._uids.values() for uid in uids)
+
+    def items(self) -> list[FeedItem]:
+        """Every item of the accounts' feeds as the newest landing stated it, by uid."""
+        return [item for _, item in self._newest.values()]
+
+    def oldest_of(self, uid: str) -> FeedItem | None:
+        """What the first artefact to name a feed uid said of it."""
+        return self._oldest.get(uid)
 
     def item_of(self, entity: str) -> FeedItem | None:
         """What the newest landed feed says of a stored row's own item, or None where none is.

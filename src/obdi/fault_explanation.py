@@ -113,6 +113,7 @@ from .export_parting import (
     first_parting,
 )
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
+from .feed_item_shape import FeedShapes, ItemShape
 from .feed_statuses import FeedItem, FeedStatuses, makes_no_row
 from .identity import normalise_description
 from .masking import Structural
@@ -225,6 +226,9 @@ class RowNote:
     #: The instant the newest landed feed states for the row's item, in UTC (`feed_statuses`);
     #: None for a row no feed item is its own, or whose item states none.
     feed_at: Structural[datetime | None] = None
+    #: How the row's feed item differs from the usual item like it (`feed_item_shape`);
+    #: None for a row no feed item is its own.
+    feed_shape: Structural[ItemShape | None] = None
 
 
 @dataclass(frozen=True)
@@ -602,6 +606,7 @@ class _RowFacts:
         self._legs: dict[str, Transaction] = {}
         self._counters: dict[tuple[int, int], list[tuple[date, str]]] | None = None
         self._statuses: FeedStatuses | None = None
+        self._shapes: FeedShapes | None = None
 
     @property
     def feed(self) -> FeedStatuses:
@@ -609,6 +614,13 @@ class _RowFacts:
         if self._statuses is None:
             self._statuses = FeedStatuses(self.store, self.members)
         return self._statuses
+
+    @property
+    def shapes(self) -> FeedShapes:
+        """How each row's feed item differs from the usual one, compared on first use."""
+        if self._shapes is None:
+            self._shapes = FeedShapes(self.feed)
+        return self._shapes
 
     @property
     def pairs(self) -> dict[str, str]:
@@ -809,6 +821,7 @@ class _Evidence:
                 lookalike() if lookalike is not None else None,
                 self.facts.feed.of(row.entity_id),
                 self.facts.feed.time_of(row.entity_id),
+                self.facts.shapes.of(row.entity_id),
             )
 
         return build

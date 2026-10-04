@@ -26,6 +26,7 @@ from .balance_meaning import READING_THRESHOLD
 from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .errors import DataError
+from .feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,
@@ -613,10 +614,65 @@ _CARRIES = {
 }
 
 
+def _percent_words(percent: int) -> str:
+    return "under 1%" if percent == 0 else f"{percent}%"
+
+
+def _shape_sentence(found: Any) -> str:
+    """How a row's feed item differs from the usual one. Said once, here.
+
+    Field names, closed-set values, currency codes, and percentages only: the
+    measurement (`feed_item_shape`) never carries an amount, a name, or free text.
+    """
+    if found is None:
+        return ""
+    kind = " ".join(part for part in (found.status, found.direction, found.source) if part)
+    kind = f"{kind} item" if kind else "item"
+    if found.comparable < MIN_COMPARABLE:
+        parts = []
+        if found.changed:
+            parts.append("between its first and latest landing, " + ", ".join(found.changed))
+        said = f"; {'; '.join(parts)}" if parts else ""
+        return (
+            f" Its feed item has {_plural(found.comparable, 'other comparable item')}, too few "
+            f"to say what the usual {_esc(kind)} is{_esc(said)}."
+        )
+    if not differs(found):
+        return " Its feed item is like the usual one."
+    parts = []
+    if found.lacks:
+        parts.append("lacks " + ", ".join(found.lacks))
+    if found.extra:
+        parts.append(
+            "has " + ", ".join(found.extra) + ", which fewer than one in ten comparable items carry"
+        )
+    parts += [
+        f"{name} {value}, carried by {_percent_words(percent)} of comparable items"
+        for name, value, percent in found.rare_values
+    ]
+    if found.currencies != ("", ""):
+        parts.append(
+            f"amount and sourceAmount name different currencies ({found.currencies[0]} and "
+            f"{found.currencies[1]})"
+        )
+    if found.days_apart is not None:
+        parts.append(
+            f"states both times, {_plural(found.days_apart, 'day')} apart, as "
+            f"{_percent_words(found.days_apart_percent)} of comparable items do"
+        )
+    if found.changed:
+        parts.append("between its first and latest landing, " + ", ".join(found.changed))
+    return f" Its feed item differs from the usual {_esc(kind)}: {_esc('; '.join(parts))}."
+
+
+def _row_li(note: Any) -> str:
+    return f"<li>{_row_note(note)}.{_shape_sentence(note.feed_shape)}</li>"
+
+
 def _row_list(rows: Any) -> str:
     if not rows.count:
         return ""
-    items = "".join(f"<li>{_row_note(note)}</li>" for note in rows.named)
+    items = "".join(_row_li(note) for note in rows.named)
     more = f"<li>and {rows.more} more</li>" if rows.more > 0 else ""
     return f"<ul>{items}{more}</ul>"
 
@@ -686,7 +742,7 @@ def _hold_html(change: Any, hold: str) -> str:
         shape = "the negative of a single counted row" if change.one_row_negated else (
             "a single counted row"
         )
-        return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
+        return f"<p>The change equals {shape}:</p><ul>{_row_li(change.one_row)}</ul>"
     if hold == "feed-status-rows":
         return "".join(
             "<p>The change equals "
@@ -967,6 +1023,7 @@ def _explanations_html(explanation: Any) -> str:
     body += _feed_statuses_html(explanation.feed_statuses, exports=facts is not None)
     pairs = sum(1 for change in explanation.changes if change.undone_on)
     if explanation.changes:
+        body += f'<p class="muted">{_esc(THRESHOLDS)}</p>'
         body += (
             f"<p>{_plural(len(explanation.changes), 'explanation')} "
             f"{'follows' if len(explanation.changes) == 1 else 'follow'}: "
