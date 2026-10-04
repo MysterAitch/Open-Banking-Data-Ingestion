@@ -26,6 +26,41 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.314] - 2026-10-04
+
+### Added
+- **A review flag is settled when the known balances need both rows.** The
+  owner asked whether the remaining flags could be resolved. Nine of the real
+  store's eleven are same-day pairs on one card, both rows listed by one
+  statement, and seven of those sit between two statement balances that the
+  rows reproduce with both counted: were a pair one payment seen twice, the
+  later balance would be out by its amount. That is arithmetic, and it was
+  not being used. A flag is now closed where a source lists both rows as
+  separate lines AND a known balance strictly before the pair and a tested
+  one on or after it are reproduced, with every known balance between them.
+  One file listing both lines is not enough alone, because a statement reader
+  can read one line twice at a page boundary, which has happened here; the
+  balance rules that out.
+- **A flag the balances could not settle says which statement would.** "No
+  known balance before 2025-09-30: a statement covering it would settle
+  this", "No known balance after 2026-09-01 yet: the next statement will
+  settle this", or "Only one known balance". The line shows only where a
+  statement would in fact settle it.
+
+### Not covered
+- Predicted for the real store, to be checked against the page after a
+  deploy: seven flags close, four stay open, two or three of them with a
+  line.
+- An account that may have Spaces is never proven this way, nor is one
+  tracked by its stated balances alone, whose balances are followed and so
+  prove nothing.
+- A duplicate offset by a missing row of the same size between the same two
+  balances would also reproduce the later one. The rows are then right in
+  money and the flag is closed; this is accepted for closing a flag, since no
+  row changes.
+- A conflict between two sources' balances inside the span blocks the proof;
+  that is tested on the function and not through a whole household.
+
 ## [0.4.313] - 2026-10-04
 
 ### Fixed
