@@ -388,20 +388,20 @@ class TestTheExistingSectionsRemain:
 
         assert "Import a file" in page_at("/import")
         assert "Preview import" in page_at("/import")
-        assert "Danger zone" in page_at("/admin")
-        assert "Rebuild from raw" in page_at("/admin")
+        assert "Repairs" in page_at("/diagnostics")
+        assert "Rebuild from raw" in page_at("/diagnostics")
         assert "Add a bank" in page_at("/connections")
         assert "Push to Actual now" in page_at("/actual")
 
-    def test_Home_ReportAndEvidenceAreReachedFromTheStripAndNotListedOnTheHomePage(
+    def test_Home_ChecksAndDiagnosticsAreReachedFromTheStripAndNotListedOnTheHomePage(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
         strip = re.search(r'<nav class="sitenav".*?</nav>', page, re.S).group(0)
         body = page.replace(strip, "")
 
-        assert 'href="/reports"' in strip and 'href="/evidence"' in strip
-        for route in ("/reports", "/evidence"):
+        assert 'href="/checks"' in strip and 'href="/diagnostics"' in strip
+        for route in ("/checks", "/diagnostics"):
             assert f'href="{route}"' not in body
         for route in ("/agreements", "/date-lag", "/balance-walk", "/artefacts", "/attempts"):
             assert f'href="{route}"' not in body
@@ -413,8 +413,10 @@ class TestTheExistingSectionsRemain:
         assert 'id="attention"' in page and 'id="system"' in page
 
 
-@pytest.mark.parametrize("path", ["/reports", "/evidence"])
-def test_IndexPage_WhenOpened_LinksBackToTheOverview(tmp_path, path):
+@pytest.mark.parametrize("path", ["/checks", "/diagnostics", "/bring-in"])
+def test_HubPage_WhenOpened_LinksHomeThroughTheStripAlone(tmp_path, path):
     page = home(tmp_path, None, path=path)
 
-    assert "Back to overview" in page
+    strip = re.search(r'<nav class="sitenav".*?</nav>', page, re.S).group(0)
+    assert 'href="/"' in strip
+    assert "Back to overview" not in page

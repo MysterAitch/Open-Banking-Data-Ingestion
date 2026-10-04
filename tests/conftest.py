@@ -110,6 +110,42 @@ def land_transaction():
     return land
 
 
+@pytest.fixture
+def serve_hub(tmp_path):
+    """Start the real handler over a `WebConfig` of the hooks a test names; returns its address.
+
+    No store is behind it: a hub page is drawn from hooks, and a hook a test leaves out is a
+    hook that is not wired, which is the state the pages must also answer in.
+    """
+    import threading
+    from http.server import HTTPServer
+
+    from obdi.connections import ConnectionStore
+    from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+
+    servers: list[HTTPServer] = []
+
+    def start(store: ConnectionStore | None = None, **hooks) -> str:
+        config = WebConfig(
+            client_id="c",
+            client_secret="tlcs_live_abcdefghij1234567890",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=store or ConnectionStore(tmp_path / f"c{len(servers)}.json"),
+            **hooks,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers.append(httpd)
+        return f"http://127.0.0.1:{httpd.server_port}"
+
+    yield start
+    for httpd in servers:
+        httpd.shutdown()
+
+
 @pytest.fixture(scope="session")
 def configuration_prefixes() -> tuple[str, ...]:
     """The prefixes, as a fixture rather than an import.

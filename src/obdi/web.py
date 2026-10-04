@@ -76,7 +76,7 @@ from .namespaces import (
     validate_canonical_name,
     validate_connection_name,
 )
-from .navigation import current_route
+from .navigation import current_route, page_name
 from .overview import Overview
 from .plural import plural, word
 from .position import Position
@@ -100,6 +100,7 @@ from .web_accounts import (
     submit_button,
 )
 from .web_balance_chart import BalanceChartPages
+from .web_destinations import DestinationPages
 from .web_empty import (
     EmptyPlan,
     check_empty_post,
@@ -107,7 +108,6 @@ from .web_empty import (
     plan_from_audit,
 )
 from .web_flags import FlagPages
-from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
 from .web_overview import overview_html
@@ -812,6 +812,9 @@ class WebConfig:
     #: The references of the accounts that hold rows, declared or not, so a picker can offer an
     #: account that was imported into but never declared.
     held_accounts: Callable[[], list[str]] | None = None
+    #: The newest landed ask of each connection, by its name, as the ledger stamps it: what the
+    #: Bring in page says of when each bank last answered.
+    connection_last_answered: Callable[[], dict[str, str]] | None = None
     declare_account: Callable[[AccountRecord], AccountRecord] | None = None
     #: Every account obdi holds, declared or not, with the parent changes the
     #: provider's structure would make. Reads only; names, kinds, and counts.
@@ -892,7 +895,7 @@ def _connection_rows(store: ConnectionStore, rename_available: bool = False) -> 
 #: The way back from a result page to the page its action came from, then the Overview.
 BACK_TO_CONNECTIONS = way_back("/connections")
 BACK_TO_ACTUAL = way_back("/actual")
-BACK_TO_ADMIN = way_back("/admin")
+BACK_TO_ADMIN = way_back("/diagnostics")
 BACK_TO_IMPORT = way_back("/import")
 
 #: What the provider's own OAuth codes mean, in words. Deliberately
@@ -3856,7 +3859,7 @@ class ConnectionHandler(
     FlagPages,
     BalanceChartPages,
     PositionPages,
-    IndexPages,
+    DestinationPages,
     SectionPages,
     BaseHTTPRequestHandler,
 ):
@@ -3998,14 +4001,24 @@ class ConnectionHandler(
         if route == "/import":
             self._import_page()
             return
+        if route == "/bring-in":
+            self._bring_in_page()
+            return
+        if route == "/checks":
+            self._checks_page(params.get("fresh", [""])[0] == "1")
+            return
+        if route == "/diagnostics":
+            self._diagnostics_page()
+            return
+        # Addresses that were pages of their own before these three were destinations.
         if route == "/admin":
-            self._admin_page()
+            self._diagnostics_page()
             return
         if route == "/reports":
-            self._reports_index()
+            self._checks_page(params.get("fresh", [""])[0] == "1")
             return
         if route == "/evidence":
-            self._evidence_index()
+            self._diagnostics_page()
             return
         if route == "/accounts":
             self._accounts_page()
@@ -4305,7 +4318,7 @@ class ConnectionHandler(
         parts.append(HOME_LINK)
         self._respond(
             200,
-            render_page("Cross-source agreement", "".join(parts)),
+            render_page(page_name("/agreements"), "".join(parts)),
             no_store=not masked,
         )
 
@@ -4789,7 +4802,7 @@ class ConnectionHandler(
             )
             + HOME_LINK
         )
-        self._respond(200, render_page("Account", body))
+        self._respond(200, render_page(page_name("/account"), body))
 
     def _connect(self, params: dict[str, list[str]]) -> None:
         # Reachable by a bookmark or an old link long after the form stopped being
@@ -6211,7 +6224,6 @@ class ConnectionHandler(
             "Back to the masked rendering</a></p>"
         )
         body = (
-            "<h2>Review queue report</h2>"
             "<p>A flag marks a transaction stored as new that looks like a "
             "duplicate report: another transaction in the same account "
             "matches it on value and date, and only the same-source rule "
@@ -6230,7 +6242,7 @@ class ConnectionHandler(
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
         self._respond(
-            200, render_page("Review queue report", body), no_store=not masked
+            200, render_page(page_name("/review-report"), body), no_store=not masked
         )
 
     def _date_lag(self) -> None:
@@ -6246,7 +6258,6 @@ class ConnectionHandler(
             )
             return
         body = (
-            "<h2>Settlement lag</h2>"
             "<p>Starling reports both when a payment happened and when it "
             "settled - the truth set for how often dates drift, and how "
             "often the drift would file a payment into the wrong week or "
@@ -6255,7 +6266,7 @@ class ConnectionHandler(
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
-        self._respond(200, render_page("Settlement lag", body))
+        self._respond(200, render_page(page_name("/date-lag"), body))
 
     def _identity_health(self) -> None:
         hook = self.bound_config.identity_health_text
@@ -6299,7 +6310,6 @@ class ConnectionHandler(
             )
         )
         body = (
-            "<h2>Identity health</h2>"
             "<p>Two faults the merged layer cannot show from inside: rows "
             "that share one identity, and payments folded into another "
             "payment's row. Each source's own count of an account's "
@@ -6310,7 +6320,7 @@ class ConnectionHandler(
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{html.escape(text)}</pre>" + movement_section + exact_section + HOME_LINK
         )
-        self._respond(200, render_page("Identity health", body))
+        self._respond(200, render_page(page_name("/identity-health"), body))
 
     def _balance_reconciliation(self, *, masked: bool) -> None:
         """The report, masked when fetched and unmasked only when posted for.
@@ -6344,7 +6354,6 @@ class ConnectionHandler(
             "Back to the masked rendering</a></p>"
         )
         body = (
-            "<h2>Balance reconciliation</h2>"
             "<p>For each account and day, the bank's closing balance is "
             "derived from the running balances on its records without "
             "assuming any order. The sum of the rows the store holds for "
@@ -6355,7 +6364,7 @@ class ConnectionHandler(
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
         self._respond(
-            200, render_page("Balance reconciliation", body), no_store=not masked
+            200, render_page(page_name("/balance-reconciliation"), body), no_store=not masked
         )
 
     def _period_reconciliation(self, *, masked: bool, ref: str) -> None:
@@ -6400,7 +6409,6 @@ class ConnectionHandler(
             "Back to the masked rendering</a></p>"
         )
         body = (
-            "<h2>Statement periods</h2>"
             "<p>Between each pair of consecutive statement balances, the rows "
             "the store counts are set against the statement's own movement. "
             "Where they differ, the rows each source holds that the "
@@ -6412,7 +6420,7 @@ class ConnectionHandler(
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
         self._respond(
-            200, render_page("Statement periods", body), no_store=not masked
+            200, render_page(page_name("/period-reconciliation"), body), no_store=not masked
         )
 
     def _balance_walk(self, *, masked: bool = True) -> None:
@@ -6443,8 +6451,7 @@ class ConnectionHandler(
             '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
         )
         body = (
-            "<h2>Balance walk</h2>"
-            + showing
+            showing
             + "<p>TrueLayer reports the account's running balance on each "
             "transaction. Consecutive balances must differ by exactly the "
             "amounts in between - a break means money moved that no held "
@@ -6453,7 +6460,7 @@ class ConnectionHandler(
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
-        self._respond(200, render_page("Balance walk", body), no_store=not masked)
+        self._respond(200, render_page(page_name("/balance-walk"), body), no_store=not masked)
 
     def _statement_held(self) -> None:
         """Which of these digests is already held - asked before sending.
@@ -6555,11 +6562,14 @@ class ConnectionHandler(
     def do_POST(self) -> None:
         began = time.perf_counter()
         route = urlparse(self.path).path.rstrip("/") or "/"
+        # An answer page is marked with the section its action belongs to, as a GET is.
+        marked = current_route.set(route)
         try:
             self._dispatch_post()
         except Exception as exc:
             self._report_fault("POST", route, exc)
         finally:
+            current_route.reset(marked)
             _report_slow_route("POST", route, time.perf_counter() - began)
 
     def _dispatch_post(self) -> None:

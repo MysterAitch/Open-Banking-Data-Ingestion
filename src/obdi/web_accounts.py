@@ -53,6 +53,7 @@ from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .standing_data import AccountStanding, standing_lines
 from .web_answers import UNREAD, AnswerPages, ledger_href, ledger_link
+from .web_destinations import accounts_links_html
 from .web_sections import back_link, referring_page
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -625,6 +626,7 @@ def accounts_page(
             + "<h2>Declare an account</h2>"
             + _FEEDLESS_NOTE
             + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
+            + accounts_links_html()
             + '<p><a class="button" href="/">Back to overview</a></p>',
         )
     rows = "".join(_account_row(record, today) for record in records)
@@ -649,6 +651,7 @@ def accounts_page(
         )
         + _FEEDLESS_NOTE
         + '<p><a class="button" href="/declare-account">Declare an account</a></p>'
+        + accounts_links_html()
         + '<p><a class="button" href="/">Back to overview</a></p>',
     )
 

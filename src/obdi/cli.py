@@ -1120,6 +1120,11 @@ def _recent_attempts(db_path: Path) -> list[dict[str, object]]:
         return store.attempts(6000)
 
 
+def _last_landed_by_connection(db_path: Path) -> dict[str, str]:
+    with Store(db_path) as store:
+        return store.last_landed_by_connection()
+
+
 def _recent_rebuilds(db_path: Path) -> list[dict[str, object]]:
     with Store(db_path) as store:
         return store.recent_rebuild_runs(8)
@@ -4175,6 +4180,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         rebuild_busy_note=lambda: rebuild_in_progress_note(db_path),
         recent_rebuilds=lambda: _recent_rebuilds(db_path),
         recent_attempts=lambda: _recent_attempts(db_path),
+        connection_last_answered=lambda: _last_landed_by_connection(db_path),
         source_connections=lambda: _source_connections(db_path),
         starling_probe=(
             _starling_probe_runner(db_path) if _starling_token_present() else None

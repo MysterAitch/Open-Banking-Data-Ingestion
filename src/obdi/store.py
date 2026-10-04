@@ -2026,6 +2026,19 @@ class Store:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def last_landed_by_connection(self) -> dict[str, str]:
+        """When each connection last had an ask land, by the connection's name.
+
+        A connection that has never had one is absent, which is how the Bring in page says it
+        has never answered.
+        """
+        rows = self.connection.execute(
+            "SELECT connection_id, MAX(attempted_at) AS attempted_at "
+            "FROM fetch_attempts WHERE outcome = 'landed' AND connection_id != '' "
+            "GROUP BY connection_id"
+        ).fetchall()
+        return {str(row["connection_id"]): str(row["attempted_at"]) for row in rows}
+
     def last_landed_asks(self) -> list[dict[str, object]]:
         """The newest landed ask per ledger account ref, whatever the ledger's size.
 

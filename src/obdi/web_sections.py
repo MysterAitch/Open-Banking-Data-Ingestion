@@ -52,7 +52,7 @@ WAY_BACK_PAGES: dict[str, str] = {
     "/connections": "Back to bank connections",
     "/actual": "Back to Actual sync",
     "/coverage": "Back to coverage by source",
-    "/admin": "Back to admin",
+    "/diagnostics": "Back to Diagnostics",
     "/import": "Back to import",
 }
 
@@ -419,42 +419,6 @@ masked, so a parser can be taught the shape before any rows are read.</p>
     return render_page("Import", body)
 
 
-def render_admin(
-    *,
-    rebuild_available: bool = False,
-    forget_available: bool = False,
-    rebuild_status: Callable[[], dict[str, object]] | None = None,
-    rebuild_busy_note: Callable[[], str | None] | None = None,
-    recent_rebuilds: Callable[[], list[dict[str, object]]] | None = None,
-    starling_probe_available: bool = False,
-    probe_suggestions: Callable[[], list[object]] | None = None,
-) -> bytes:
-    from . import web
-
-    # The history is passed separately so it reads after the controls it is
-    # the record of, rather than inside them.
-    danger = web._danger_zone(rebuild_available, forget_available, rebuild_status, None)
-    history = web._rebuild_history_html(recent_rebuilds) if rebuild_available else ""
-    probe = web._probe_section_html(starling_probe_available, probe_suggestions)
-    body = (
-        web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
-        + _lede(
-            "Repairs and one-off experiments. Nothing here is needed day to day, and each "
-            "repair asks you to confirm before it does anything."
-        )
-        + (danger or _nothing_wired("Rebuild and forget"))
-        + history
-        + (
-            '<details class="oneoff">'
-            "<summary>One-off experiment: Starling changesSince probe</summary>"
-            f"{probe}</details>"
-            if probe
-            else ""
-        )
-    )
-    return render_page("Admin", body)
-
-
 class SectionPages:
     """The section routes, composed into the request handler."""
 
@@ -525,18 +489,4 @@ class SectionPages:
             held_accounts=timer.wrap("held_accounts", config.held_accounts),
         )
         timer.report("/import")
-        self._respond(200, page)
-
-    def _admin_page(self) -> None:
-        config, timer = self.bound_config, HookTimer()
-        page = render_admin(
-            rebuild_available=config.rebuild_derived is not None,
-            forget_available=config.forget_actual is not None,
-            rebuild_status=timer.wrap("rebuild_status", config.rebuild_status),
-            rebuild_busy_note=timer.wrap("rebuild_busy_note", config.rebuild_busy_note),
-            recent_rebuilds=timer.wrap("recent_rebuilds", config.recent_rebuilds),
-            starling_probe_available=config.starling_probe is not None,
-            probe_suggestions=timer.wrap("probe_suggestions", config.probe_suggestions),
-        )
-        timer.report("/admin")
         self._respond(200, page)

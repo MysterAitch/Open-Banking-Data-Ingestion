@@ -30,7 +30,7 @@ from typing import Protocol
 from urllib.parse import parse_qs, urlparse
 
 from .buildinfo import describe
-from .navigation import navigation_html
+from .navigation import navigation_html, with_way_out
 from .page_structure import structure_tables
 from .stylesheet import STYLESHEET
 
@@ -109,6 +109,7 @@ def render_page(
     and a page about one thing leads with that thing's own name. `body_class` is a page's own
     class on `<body>`, for rules that lay out only that page.
     """
+    body = with_way_out(body)
     banner, prefix = instance_identity()
     if prefix:
         title = f"[{prefix}] {title}"

@@ -104,7 +104,7 @@ def inside_details(page: str, needle: str) -> bool:
 
 
 def current_section(page: str) -> list[str]:
-    return re.findall(r'aria-current="page">([A-Za-z]+)<', page)
+    return re.findall(r'aria-current="page">([A-Za-z ]+)<', page)
 
 
 def coverage_rows() -> list[SourceCoverage]:
@@ -176,11 +176,12 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
     @pytest.mark.parametrize(
         ("path", "section", "fragment"),
         [
-            ("/connections", "Connections", "Add a bank"),
+            ("/connections", "Bring in", "Add a bank"),
             ("/actual", "Actual", "Push to Actual now"),
             ("/coverage", "Accounts", "Held so far"),
-            ("/import", "Accounts", "Preview import"),
-            ("/admin", "Admin", "Danger zone"),
+            ("/import", "Bring in", "Preview import"),
+            ("/diagnostics", "Diagnostics", "Repairs"),
+            ("/admin", "Diagnostics", "Repairs"),
         ],
     )
     def test_Page_WhenFullyWired_RendersItsSectionsAndMarksItsNavigationEntry(
@@ -218,7 +219,7 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
         assert "PDF statement is kept as evidence" in page
         assert 'href="/statement-shape"' in page
 
-    def test_AdminPage_OrdersTheDangerZoneThenTheRecordThenTheProbe(self, serve):
+    def test_DiagnosticsPage_OrdersTheRepairsThenTheRecordThenTheProbe(self, serve):
         base = serve(
             rebuild_derived=lambda: "started",
             forget_actual=lambda: 0,
@@ -232,10 +233,10 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
             starling_probe=lambda cutoff: None,
         )
 
-        page = fetch(base, "/admin")
+        page = fetch(base, "/diagnostics")
 
         assert (
-            page.index("Danger zone")
+            page.index("Repairs")
             < page.index("Recent rebuilds")
             < page.index("Starling changesSince probe")
         )
@@ -552,16 +553,19 @@ class TestPagesTolerateHooksAsTheHomePageDid:
 
         assert "Banks and their consent" in page
 
-    def test_Admin_WhenTheRebuildHistoryHookRaises_ThePageStillRenders(self, serve):
+    def test_Diagnostics_WhenTheRebuildHistoryHookRaises_ThePageStillRenders(self, serve):
         def boom():
             raise RuntimeError("locked")
 
-        page = fetch(serve(rebuild_derived=lambda: "x", recent_rebuilds=boom), "/admin")
+        page = fetch(serve(rebuild_derived=lambda: "x", recent_rebuilds=boom), "/diagnostics")
 
-        assert "Danger zone" in page and "Recent rebuilds" not in page
+        assert "Repairs" in page and "Recent rebuilds" not in page
 
-    def test_Admin_WhenNothingIsWired_SaysSo(self, serve):
-        assert "Rebuild and forget is not wired" in fetch(serve(), "/admin")
+    def test_Diagnostics_WhenNoRepairIsWired_OffersNoRepairAndStillListsThePages(self, serve):
+        page = fetch(serve(), "/diagnostics")
+
+        assert "Repairs" not in page and "<form" not in page
+        assert 'href="/artefacts"' in page
 
     def test_Coverage_WhenNothingIsHeld_SaysSo(self, serve):
         assert "Coverage is not wired on this instance, or has nothing to show" in fetch(
@@ -647,10 +651,10 @@ class TestEveryResultPageOffersTheWayBackToWhereItCameFrom:
                 "/connections",
                 "Back to bank connections",
             ),
-            ("/rebuild-derived", {"confirm": "yes"}, "/admin", "Back to admin"),
-            ("/rebuild-derived", {}, "/admin", "Back to admin"),
-            ("/forget-actual-bindings", {"confirm": "yes"}, "/admin", "Back to admin"),
-            ("/forget-actual-bindings", {}, "/admin", "Back to admin"),
+            ("/rebuild-derived", {"confirm": "yes"}, "/diagnostics", "Back to Diagnostics"),
+            ("/rebuild-derived", {}, "/diagnostics", "Back to Diagnostics"),
+            ("/forget-actual-bindings", {"confirm": "yes"}, "/diagnostics", "Back to Diagnostics"),
+            ("/forget-actual-bindings", {}, "/diagnostics", "Back to Diagnostics"),
             ("/upload", {}, "/import", "Back to import"),
         ],
     )

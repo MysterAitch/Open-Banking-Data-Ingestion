@@ -1220,7 +1220,7 @@ class TestDangerZone:
         finally:
             httpd.shutdown()
 
-        assert "Danger zone" in page
+        assert "Repairs" in page
         assert 'action="/rebuild-derived"' in page
         assert 'action="/forget-actual-bindings"' in page
         assert page.count('name="confirm"') == 2
@@ -1230,7 +1230,7 @@ class TestDangerZone:
             bare = httpx.get(f"{base}/admin").text
         finally:
             httpd.shutdown()
-        assert "Danger zone" not in bare
+        assert "Repairs" not in bare
 
     def test_Rebuild_WithoutConfirmation_IsRefused(self, tmp_path):
         calls = []

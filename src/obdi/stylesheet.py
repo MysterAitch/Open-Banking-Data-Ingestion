@@ -48,6 +48,7 @@ from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
 from .stylesheet_flags import FLAGS_STYLES
 from .stylesheet_home import HOME_STYLES
+from .stylesheet_sections import SECTION_STYLES
 
 SHARED_STYLES = """
  :root {
@@ -308,4 +309,6 @@ SHARED_STYLES = """
 """
 
 #: The one stylesheet a page carries: the shared rules, then each page's own.
-STYLESHEET = SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES
+STYLESHEET = (
+    SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
+)

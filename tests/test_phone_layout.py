@@ -339,6 +339,9 @@ REFLOW_ROUTES = [
     "/balance-chart?ref=synthetic-current",
     "/accounts",
     "/admin",
+    "/checks",
+    "/bring-in",
+    "/diagnostics",
 ]
 
 
