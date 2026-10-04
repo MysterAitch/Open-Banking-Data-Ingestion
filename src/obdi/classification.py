@@ -45,6 +45,10 @@ CATEGORICAL = "categorical"
 #: UI in bind boxes and feeder lines, so withholding them HERE would be
 #: incoherent as well as useless for debugging.
 OPAQUE_ID = "opaque-id"
+#: The identifier of a PAYMENT, which a provider mints and a bank statement or a receipt may
+#: carry. Rotatable like an OPAQUE_ID, but it names one payment, so a GET never prints it: the
+#: owner's rule is that stored values are read only by a deliberate POST.
+PAYMENT_ID = "payment-id"
 #: Ranges and formats only. Monetary values: the span and the precision are
 #: what a person is reading the shape page FOR, but the individual amounts
 #: are their spending.
@@ -361,9 +365,10 @@ _RULES: list[tuple[str, str]] = [
     # --- elsewhere on every page ---
     (r"^running_balance\.currency$", SHOW),
     (r"^(account_id|accountUid|categoryUid|defaultCategory)$", OPAQUE_ID),
-    (r"^(transaction_id|provider_transaction_id)$", OPAQUE_ID),
-    (r"^normalised_provider_transaction_id$", OPAQUE_ID),
-    (r"^(feedItemUid|counterPartyUid|counterPartySubEntityUid)$", OPAQUE_ID),
+    (r"^(transaction_id|provider_transaction_id)$", PAYMENT_ID),
+    (r"^normalised_provider_transaction_id$", PAYMENT_ID),
+    (r"^feedItemUid$", PAYMENT_ID),
+    (r"^(counterPartyUid|counterPartySubEntityUid)$", OPAQUE_ID),
     (r"^(entity_id|content_key|imported_id|digest)$", OPAQUE_ID),
     # --- people ---
     (r"^(display_name|name|name_on_card)$", PERSONAL),
@@ -741,6 +746,7 @@ def classify(path: str) -> str:
 OURS = "obdi withheld this"
 
 NOTES = {
+    PAYMENT_ID: f"{OURS}: the identifier of a payment, shown only in the payload view",
     SHAPE_ONLY: f"{OURS}: identifying or personal",
     PERMANENT_ID: (
         f"{OURS}: a permanent identifier - it cannot be rotated, only "
@@ -819,6 +825,7 @@ def redact_summary(summary: dict[str, object]) -> dict[str, object]:
                 fields.append(field)
                 continue
         if level in (
+            PAYMENT_ID,
             SHAPE_ONLY,
             PERMANENT_ID,
             PERSONAL,

@@ -32,7 +32,7 @@ from obdi.cli import build_web_config
 from obdi.identity import artefact_digest
 from obdi.ingest import import_file
 from obdi.models import RawArtefact
-from obdi.providers import truelayer
+from obdi.providers import starling, truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
@@ -45,6 +45,8 @@ CSV_CREDIT = ("Marmalade Foundry", "MF-PAY-55102", "1846.53")
 JSON_ITEM = ("Wyvern Chandlery", "TL-ID-77194-ZQ", "2468.19")
 TYPED = ("Nacelle Upholstery", "3571.82")
 STATED_BALANCE = "9182.64"
+#: An id the aggregator states under `meta`, where a payload nests values one level down.
+META_ID = "META-PROV-90817-QX"
 #: Two running balances a bank states one row apart that differ by far more than the 5.00 between
 #: them, so the balance walk reports a break and names the balance the rows would have explained.
 WALK_BALANCES = ("8472.36", "8391.11")
@@ -52,20 +54,26 @@ PDF_PAYEE = "QUARTZMOOSE HOLDINGS"
 PDF_FIGURE = "4,813.57"
 
 #: Every distinctive text a page must not carry, compared without regard to case.
-#: The aggregator's own transaction id (`JSON_ITEM[1]`) is absent on purpose: the shape pages show a
-#: provider-minted opaque id by design (`classification.OPAQUE_ID`), because it can be rotated and
-#: is meaningless outside the provider. It is still asserted to be in the payload a POST returns.
+#: Provider ids are included: the shape pages once showed an opaque id as a value, and a page that
+#: echoes any field's value as a category is the failure this walk exists to catch.
+FEED_ITEM = ("Gryphon Taxidermy", "GRY-REF-30417", "feed-uid-gry-5521", "6120.45")
 TEXTS = (
     CSV_DEBIT[0],
     CSV_DEBIT[1],
     CSV_CREDIT[0],
     CSV_CREDIT[1],
     JSON_ITEM[0],
+    JSON_ITEM[1],
+    META_ID,
     TYPED[0],
     PDF_PAYEE,
+    FEED_ITEM[0],
+    FEED_ITEM[1],
+    FEED_ITEM[2],
 )
 AMOUNTS = (
     *(c[2] for c in (CSV_DEBIT, CSV_CREDIT, JSON_ITEM)),
+    FEED_ITEM[3],
     TYPED[1],
     STATED_BALANCE,
     *WALK_BALANCES,
@@ -124,11 +132,36 @@ def invented(tmp_path_factory) -> tuple[Path, Path]:
                         "currency": "GBP",
                         "description": JSON_ITEM[0],
                         "transaction_type": "DEBIT",
+                        "meta": {"provider_id": META_ID},
                     }
                 ]
             }
         ).encode()
         store.land_artefact(truelayer.artefact_for(body, account_id="tl-tok", kind="booked"))
+        feed = json.dumps(
+            {
+                "feedItems": [
+                    {
+                        "feedItemUid": FEED_ITEM[2],
+                        "amount": {"currency": "GBP", "minorUnits": 612045},
+                        "direction": "OUT",
+                        "transactionTime": "2026-09-08T10:00:00.000Z",
+                        "source": "MASTER_CARD",
+                        "status": "SETTLED",
+                        "counterPartyName": FEED_ITEM[0],
+                        "reference": FEED_ITEM[1],
+                    }
+                ]
+            }
+        ).encode()
+        store.land_artefact(
+            starling.artefact_for(
+                feed,
+                account_id="starling:cat-tok",
+                kind="feed",
+                origin="https://api.example/feed/cat-tok?changesSince=2026-09-01T00:00:00Z",
+            )
+        )
         walk = json.dumps(
             {
                 "results": [
@@ -222,8 +255,7 @@ class TestTheStoreHoldsWhatItIsSaidNotToShow:
             response = httpx.post(f"{served}/artefact", data={"id": str(artefact)})
             assert response.status_code == 200
             assert response.headers["Cache-Control"] == "no-store"
-            lowered = response.text.casefold()
-            shown |= {form for form in (*FORMS, JSON_ITEM[1].casefold()) if form in lowered}
+            shown |= set(leaked(response.text))
 
         for planted in (
             CSV_DEBIT[0],
@@ -231,6 +263,9 @@ class TestTheStoreHoldsWhatItIsSaidNotToShow:
             CSV_CREDIT[0],
             JSON_ITEM[0],
             JSON_ITEM[1],
+            META_ID,
+            FEED_ITEM[0],
+            FEED_ITEM[2],
             CSV_DEBIT[2],
             JSON_ITEM[2],
             PDF_PAYEE,

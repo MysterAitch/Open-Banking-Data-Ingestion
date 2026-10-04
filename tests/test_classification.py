@@ -105,7 +105,7 @@ class TestSensitivityFollowsTheCostOfRotation:
 
     @pytest.mark.parametrize(
         "path",
-        ["account_id", "accountUid", "transaction_id", "feedItemUid", "entity_id"],
+        ["account_id", "accountUid", "entity_id"],
     )
     def test_ARotatableIdentifierIsShown(self, path):
         """Opaque outside the provider, regenerable inside obdi, and
@@ -113,6 +113,14 @@ class TestSensitivityFollowsTheCostOfRotation:
         withholding it here would conceal nothing and cost the debugging
         the explorer exists for."""
         assert leaked(shown(path)) is True
+
+    @pytest.mark.parametrize(
+        "path",
+        ["transaction_id", "provider_transaction_id", "feedItemUid"],
+    )
+    def test_TheIdentifierOfAPayment_IsWithheldFromAGet(self, path):
+        """It names one payment, so it is a reference to a payment: read only by the POST."""
+        assert leaked(shown(path)) is False
 
     def test_ThePermanentAndTheRotatableAreTreatedDifferently(self):
         """The axis itself, stated once: this is the design decision, so
