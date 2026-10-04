@@ -1086,9 +1086,9 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
     source_count = len(sources) if isinstance(sources, list) else 0
 
     lines = [
-        "<h2>Where these rows came from</h2>",
+        "<h2>Where these transactions came from</h2>",
         f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'sighting')}, "
-        f"{plural(source_count, 'source')}. A transaction seen by two pipes is one "
+        f"{plural(source_count, 'source')}. A transaction that two sources report is one "
         "transaction and two sightings.</p>",
         '<div class="row">',
     ]
@@ -1118,13 +1118,13 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
         lines.append(
             f'<p><span class="ok">{plural(corroborated, "transaction")} corroborated '
             f"by two or more sources</span>; {single:,} seen by one source only. "
-            "A row only one pipe has seen is either a gap in the others or a "
-            "disagreement worth reading.</p>"
+            "A transaction only one source has reported is either a gap in the others "
+            "or a mismatch worth reading.</p>"
         )
     else:
         lines.append(
             '<p class="muted">One source, so nothing is corroborated yet - '
-            "every row here rests on a single pipe's word.</p>"
+            "every transaction here rests on a single source's word.</p>"
         )
     return "".join(lines)
 
@@ -2760,7 +2760,7 @@ def _danger_zone(
     parts = [
         "<h2>Danger zone</h2>",
         '<p class="muted">Administrative repairs. Each asks for '
-        "confirmation; none touches the raw artefacts in layer 0.</p>",
+        "confirmation; none touches the stored raw artefacts.</p>",
     ]
     def checkbox(confirms: str) -> str:
         """A confirmation that says what it confirms, never a bare "I understand"."""
@@ -4261,7 +4261,7 @@ class ConnectionHandler(
             "<h2>Fetch timeline</h2>"
             '<p class="muted">Each row is one ask from the attempt ledger, '
             "newest at the top; the bar spans the history it asked about. "
-            "The fetch strategy reads straight off the shapes: tier steps, "
+            "The fetch strategy reads straight off the shapes: steps in how far back it asks, "
             "cursor slivers hugging now, ladder bursts, probe cuts.</p>"
             f"{choices}"
             f"{pan}"
@@ -6347,7 +6347,7 @@ class ConnectionHandler(
             else (
                 "<h3>Exact rules</h3>"
                 "<p>Two facts could replace guesswork in matching: an aggregator item's own "
-                "id is a feed item's uid, and the export lists a card payment on the day the "
+                "id is a feed item's own id, and the export lists a card payment on the day the "
                 "feed says it settled. These count how often each holds, read from the "
                 "landed artefacts and not from the stored rows.</p>"
                 f'<pre class="scroll" style="white-space:pre-wrap">'

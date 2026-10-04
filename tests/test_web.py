@@ -1730,8 +1730,8 @@ class TestActualRoster:
         )
 
         assert "in progress (audit)" in rendered
-        assert "13:31:56" in rendered
-        assert "waiting for the applier" not in rendered
+        assert "picked this up at 13:31 and is working on it" in rendered
+        assert "waiting for the process that applies requests to Actual" not in rendered
 
     def test_HistoryPage_ListsBeyondTheHomepageHandful(self, tmp_path):
         results = [

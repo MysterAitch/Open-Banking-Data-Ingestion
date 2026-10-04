@@ -187,14 +187,15 @@ def _queue_rows(queue: list[dict[str, object]], beating: bool) -> str:
         if since:
             what = f"in progress{kind_note}"
             note = (
-                f"the applier picked this up at {html.escape(since[11:19])}Z and is working on it"
+                "the process that applies requests to Actual picked this up at "
+                f"{html.escape(since[11:16])} and is working on it"
             )
             sentence = web._progress_sentence(entry.get("progress")) if beating else ""
             if sentence:
                 note += f" - {html.escape(sentence)}"
         else:
             what = f"queued{kind_note}"
-            note = "waiting for the applier"
+            note = "waiting for the process that applies requests to Actual"
         parts.append(
             f'<div class="row"><strong>{stamp}Z</strong> '
             f'<span class="pill pill-quiet">{what}</span>'
@@ -562,9 +563,9 @@ def _results_column(results: list[dict[str, object]]) -> str:
 def _how_it_works() -> str:
     return (
         "<details><summary>How the sync works</summary>"
-        "<p>Pushes run through the applier container: bound accounts import, "
-        "named accounts are created in Actual automatically (empty ones "
-        "included) and their transactions ride the next push. The applier "
+        "<p>Pushes run through the process that applies requests to Actual: bound "
+        "accounts import, named accounts are created in Actual automatically (empty "
+        "ones included) and their transactions ride the next push. That process "
         "checks the queue about every 20 seconds; the scheduler also "
         "queues a push after each pull cycle, every six hours.</p>"
         "<p>The audit reads each bound account back from Actual and "

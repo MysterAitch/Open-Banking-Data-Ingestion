@@ -115,7 +115,7 @@ class TestHowTheAccountsRowsJoined:
     def test_Account_ListsTheDatesOfTheRowsThatRestOnTheGuess(self, made):
         page = page_of(made(REAL_ORDER, late_settlement_payments()))
 
-        assert "6 joined by the matcher's guess: the dates" in page
+        assert "6 joined on a guess from amount, date, and description: the dates" in page
         listed = page.split("the dates")[1]
         days = re.findall(r'<span class="mono nowrap">(2026-09-\d\d)</span>', listed)
         assert days[:6] == [
@@ -131,7 +131,7 @@ class TestHowTheAccountsRowsJoined:
             page = page_of(store)
 
         assert "1 row joined by id" in page
-        assert "No row rests on the matcher's guess." in page
+        assert "No row was joined on a guess." in page
 
     def test_Account_WhenRebuiltFromRaw_CountsTheSameJoins(self, made):
         store = made(REAL_ORDER, late_settlement_payments())

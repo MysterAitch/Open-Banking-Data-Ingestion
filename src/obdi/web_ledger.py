@@ -269,10 +269,11 @@ def _joins_html(joins: Any, clock: str = "") -> str:
         return _disclosure("About the times shown", clock) if clock else ""
     guessed = joins.heuristic_days
     listing = (
-        f"<details><summary>{len(guessed)} joined by the matcher's guess: the dates</summary>"
+        f"<details><summary>{len(guessed)} joined on a guess from amount, date, and "
+        "description: the dates</summary>"
         "<p>" + ", ".join(_mono(day) for day in guessed) + "</p></details>"
         if guessed
-        else '<p class="muted">No row rests on the matcher\'s guess.</p>'
+        else '<p class="muted">No row was joined on a guess.</p>'
     )
     return _disclosure(
         f"How the rows were joined ({_esc(_joined_gist(counts))})",
