@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
 from actual_states import MARKER, align, audit, push, queued
 from obdi.actual_verdict import (
@@ -232,6 +233,35 @@ class TestQueue:
         assert verdict.headline == "A request is waiting for the applier"
         assert "audit" in verdict.detail
         assert verdict.press is None
+
+    @pytest.mark.parametrize(
+        ("kind", "opening"),
+        [
+            ("push", "A push is queued;"),
+            ("audit", "An audit is queued;"),
+            ("marker", "A sync marker is queued;"),
+            ("align", "A request to bring Actual into line is queued;"),
+            ("prune", "A removal of orphaned imports is queued;"),
+            ("empty", "An emptying of Actual is queued;"),
+            ("something-new", "A request of an unknown kind is queued;"),
+        ],
+    )
+    def test_Verdict_WhenOneRequestWaits_NamesItWithTheArticleItsNameTakes(self, kind, opening):
+        verdict = _verdict(push(10), audit(20), queue=[queued(kind)], **ALIVE)
+
+        assert verdict.detail.startswith(opening)
+
+    def test_Verdict_WhenOneRequestIsRunning_NamesItWithTheArticleItsNameTakes(self):
+        verdict = _verdict(push(10), queue=[queued("audit", running=True)], **ALIVE)
+
+        assert verdict.detail.startswith("An audit is running;")
+
+    def test_Verdict_WhenSeveralRequestsWait_CountsThemAndNamesEachKindWithoutAnArticle(self):
+        verdict = _verdict(
+            push(10), audit(20), queue=[queued("push"), queued("audit")], **ALIVE
+        )
+
+        assert verdict.detail.startswith("2 requests (push, audit) are queued;")
 
     def test_Verdict_WhenARequestIsRunningAndTheApplierIsChecking_SaysTheApplierIsWorking(self):
         verdict = _verdict(push(10), queue=[queued("push", running=True)], **ALIVE)

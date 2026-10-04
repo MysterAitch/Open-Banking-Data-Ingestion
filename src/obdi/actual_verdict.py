@@ -104,6 +104,9 @@ _KIND_NAMES = {
     "empty": "emptying of Actual",
 }
 
+#: A kind whose name in a list does not stand as a noun after "a" when it is the only request.
+_KIND_ALONE = {"align": "request to bring Actual into line"}
+
 #: The differences "bring into line" can clear: it pushes (adding what is missing,
 #: creating a missing account, linking transfers) and then removes orphaned imports.
 _ALIGN_HANDLES = frozenset(
@@ -242,12 +245,10 @@ def _queue_verdict(
 
 def _names_of_kinds(queue: Sequence[Mapping[str, object]]) -> str:
     named = [_KIND_NAMES.get(str(e.get("kind", "")), "request of an unknown kind") for e in queue]
-    text = ", ".join(dict.fromkeys(named))
-    return (
-        f"A {text}"
-        if len(set(named)) == 1 and len(queue) == 1
-        else f"{counted(len(queue), 'request')} ({text})"
-    )
+    if len(queue) == 1:
+        alone = _KIND_ALONE.get(str(queue[0].get("kind", "")), named[0])
+        return f"{'An' if alone[0] in 'aeiou' else 'A'} {alone}"
+    return f"{counted(len(queue), 'request')} ({', '.join(dict.fromkeys(named))})"
 
 
 def actual_verdict(
