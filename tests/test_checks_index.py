@@ -87,7 +87,7 @@ class TestAHealthyOverview:
         found = results(overview())
 
         for route in ("/agreements", "/identity-health", "/balance-reconciliation",
-                      "/period-reconciliation", "/review-report"):
+                      "/review-report"):
             assert found[route].state == "in order", route
 
     def test_ChecksTheHomePageDoesNotRun_SayCannotSayRatherThanInOrder(self):
@@ -95,7 +95,22 @@ class TestAHealthyOverview:
 
         assert found["/balance-walk"].state == "cannot say"
         assert found["/date-lag"].state == "cannot say"
+        assert found["/period-reconciliation"].state == "cannot say"
         assert "open" in found["/date-lag"].sentence.lower()
+
+    def test_StatementPeriods_WhenAnotherCheckFindsSomething_StillSayCannotSay(self):
+        lapsed = item("agreement-lapsed", "A: in agreement through 2026-03-10.")
+        found = results(overview(lapsed))
+
+        assert found["/period-reconciliation"].state == "cannot say"
+
+    def test_WhenAnAccountsAgreementHasLapsed_TheRowForDaysAddingUpLooks(self):
+        message = "A: in agreement through 2026-03-10, more than 45 days ago."
+        found = results(overview(item("agreement-lapsed", message)))
+
+        assert found["/balance-reconciliation"].state == "look"
+        assert found["/balance-reconciliation"].sentence == message
+        assert [r for r, c in found.items() if c.state == "look"] == ["/balance-reconciliation"]
 
 
 class TestAFault:
@@ -208,8 +223,8 @@ class TestThePage:
 
         assert page.count("pill-bad") == 1
         assert "A: 1 break." in page
-        assert page.count(">in order<") == 4
-        assert page.count(">cannot say<") == 2
+        assert page.count(">in order<") == 3
+        assert page.count(">cannot say<") == 3
 
     def test_ChecksPage_CallsTheOverviewHookOnceForAllSevenRows(self, serve):
         calls: list[bool] = []
@@ -266,7 +281,8 @@ class TestThePage:
 
         assert page.count("Formerly called Reports.") == 1
 
-    def test_ReviewFlagsAction_WhenThatRouteIsNotServed_IsNotLinked(self, serve):
+    def test_ReviewFlagsAction_WhenThatRouteIsNotServed_IsNotLinked(self, serve, monkeypatch):
+        monkeypatch.setattr(web_destinations, "dispatcher_serves", lambda route: False)
         page = httpx.get(f"{serve(overview=lambda fresh: overview())}/checks", timeout=20).text
 
         assert "/review-flags" not in page

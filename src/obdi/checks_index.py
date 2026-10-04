@@ -60,18 +60,23 @@ CHECKS: tuple[CheckSpec, ...] = (
         ("identity health", "movement completeness", "shared-identity"),
         "No payment is held twice or folded into another, and no movement is missing.",
     ),
+    # An account whose rows have reproduced no known balance for a long time is filed here,
+    # with the days that do not add up: both say the rows and the stated figures have parted.
     CheckSpec(
         "/balance-reconciliation",
-        frozenset({"balance"}),
-        ("balance reconciliation",),
-        "Every day's rows add up to the bank's own figures.",
+        frozenset({"balance", "agreement-lapsed"}),
+        ("balance reconciliation", "known balances and agreement"),
+        "Every day's rows add up to the bank's own figures, and no account has gone more "
+        f"than {STALE_AGREEMENT_DAYS} days reproducing no known balance.",
     ),
+    # No check on Today adds up a statement's own period, so this row borrows no other
+    # check's finding: a chip must not speak for a sum nobody ran.
     CheckSpec(
         "/period-reconciliation",
-        frozenset({"agreement-lapsed"}),
-        ("known balances and agreement",),
-        f"No account has gone more than {STALE_AGREEMENT_DAYS} days with its rows "
-        "reproducing no balance the bank states.",
+        frozenset(),
+        (),
+        "",
+        unwatched="The home page does not run this one. Open it to read each statement's period.",
     ),
     CheckSpec(
         "/balance-walk",
