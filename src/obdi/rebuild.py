@@ -461,6 +461,7 @@ def rebuild_from_raw(
     invalidate_fingerprint(store)
     store.connection.execute("DELETE FROM transactions")
     store.connection.execute("DELETE FROM transaction_sources")
+    store.connection.execute("DELETE FROM sighting_times")
     # A new parser takes effect here, so what the old one read is forgotten.
     store.clear_statement_readings()
     # The same-money pass rewrites these at the end of the rebuild.

@@ -41,6 +41,7 @@ from .accounts import (
 )
 from .errors import DataError
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus, Valuation
+from .stated_times import recorded_for
 from .namespaces import (
     API_SOURCES,
     MANUAL_SOURCE,
@@ -77,7 +78,9 @@ from .namespaces import (
 #: 12 -> 13: the `same_money_outcomes` table, likewise.
 #:
 #: 13 -> 14: the `protections` and `protection_history` tables, likewise.
-SCHEMA_VERSION = 14
+#:
+#: 14 -> 15: the `sighting_times` table, likewise.
+SCHEMA_VERSION = 15
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -497,6 +500,23 @@ CREATE TABLE IF NOT EXISTS protection_history (
     fingerprint TEXT NOT NULL,
     detail      TEXT NOT NULL DEFAULT ''
 );
+
+-- Every date and instant a source stated for a payment, one record per field of each
+-- sighting (`stated_times` says what is read and from which sources).
+-- DERIVED: a rebuild empties it and replays it from the raw artefacts.
+-- Keyed on the sighting (source, artefact, the source's own id), not on a stored row, so
+-- that a merge or a re-merge of rows cannot lose it; a stored row's times are found
+-- through its sightings in transaction_sources (`Store.stated_times_for`).
+CREATE TABLE IF NOT EXISTS sighting_times (
+    source          TEXT NOT NULL,
+    artefact_digest TEXT NOT NULL,
+    source_id       TEXT NOT NULL,
+    field           TEXT NOT NULL,
+    stated          TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    zone            TEXT NOT NULL,
+    PRIMARY KEY (source, artefact_digest, source_id, field)
+);
 """
 
 
@@ -578,6 +598,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
     'same_money_outcomes': ['account', 'outcome'],
+    'sighting_times': ['artefact_digest', 'field', 'kind', 'source', 'source_id', 'stated', 'zone'],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
@@ -729,6 +750,7 @@ class _WriteBatch:
     now: str
     upserts: list[tuple[object, ...]] = field(default_factory=list)
     sightings: list[tuple[object, ...]] = field(default_factory=list)
+    times: list[tuple[object, ...]] = field(default_factory=list)
     reviews: list[tuple[object, ...]] = field(default_factory=list)
 
 
@@ -802,6 +824,13 @@ _RECORD_SOURCE_SQL = """
         (entity_id, source, source_id, artefact_digest, observed_date, first_seen_at)
     VALUES (?,?,?,?,?,?)
     ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
+"""
+
+_RECORD_TIME_SQL = """
+    INSERT INTO sighting_times
+        (source, artefact_digest, source_id, field, stated, kind, zone)
+    VALUES (?,?,?,?,?,?,?)
+    ON CONFLICT(source, artefact_digest, source_id, field) DO NOTHING
 """
 
 _QUEUE_REVIEW_SQL = (
@@ -1521,6 +1550,8 @@ class Store:
             self.connection.executemany(_UPSERT_TRANSACTION_SQL, batch.upserts)
         if batch.sightings:
             self.connection.executemany(_RECORD_SOURCE_SQL, batch.sightings)
+        if batch.times:
+            self.connection.executemany(_RECORD_TIME_SQL, batch.times)
         if batch.reviews:
             self.connection.executemany(_QUEUE_REVIEW_SQL, batch.reviews)
 
@@ -2805,10 +2836,73 @@ class Store:
             transaction.value_date.isoformat(),
             now,
         )
+        times = [
+            (
+                transaction.source,
+                transaction.artefact_digest,
+                transaction.source_id,
+                stated.field,
+                stated.stated,
+                stated.kind,
+                stated.zone,
+            )
+            for stated in recorded_for(transaction)
+        ]
         if self._batch is not None:
             self._batch.sightings.append(params)
+            self._batch.times.extend(times)
             return
         self.connection.execute(_RECORD_SOURCE_SQL, params)
+        self.connection.executemany(_RECORD_TIME_SQL, times)
+
+    def stated_times_for(self, entity_id: str) -> list[dict[str, str]]:
+        """Every moment each source stated for this stored row, in a stable order.
+
+        One dict per field of each sighting, ordered by source, the source's own id,
+        the artefact, and the field's name, none of which a rebuild changes.
+        Empty for a row whose sources are not yet recorded (`stated_times`).
+        """
+        rows = self.connection.execute(
+            "SELECT t.source, t.artefact_digest, t.source_id, t.field, t.stated, t.kind, t.zone "
+            "FROM sighting_times t JOIN transaction_sources s "
+            "ON s.source = t.source AND s.artefact_digest = t.artefact_digest "
+            "AND s.source_id = t.source_id "
+            "WHERE s.entity_id = ? "
+            "ORDER BY t.source, t.source_id, t.artefact_digest, t.field",
+            (entity_id,),
+        ).fetchall()
+        return [
+            {
+                "source": str(row[0]),
+                "artefact_digest": str(row[1]),
+                "source_id": str(row[2]),
+                "field": str(row[3]),
+                "stated": str(row[4]),
+                "kind": str(row[5]),
+                "zone": str(row[6]),
+            }
+            for row in rows
+        ]
+
+    def settlement_days_for_account(self, account_id: str) -> dict[str, set[date]]:
+        """Entity id -> the days each of its sightings' settlement could be listed under."""
+        from .stated_times import SETTLEMENT_FIELD, StatedTime, days_of
+
+        rows = self.connection.execute(
+            "SELECT DISTINCT s.entity_id, t.stated, t.kind, t.zone "
+            "FROM sighting_times t JOIN transaction_sources s "
+            "ON s.source = t.source AND s.artefact_digest = t.artefact_digest "
+            "AND s.source_id = t.source_id "
+            "JOIN transactions x ON x.entity_id = s.entity_id "
+            "WHERE x.account_id = ? AND t.field = ?",
+            (account_id, SETTLEMENT_FIELD),
+        ).fetchall()
+        found: dict[str, set[date]] = {}
+        for entity_id, stated, kind, zone in rows:
+            found.setdefault(str(entity_id), set()).update(
+                days_of(StatedTime(SETTLEMENT_FIELD, str(stated), str(kind), str(zone)))
+            )
+        return found
 
     def accounts_for_connection(self, connection_id: str) -> list[dict[str, str]]:
         """The provider's own account list, from the landed accounts artefact.
