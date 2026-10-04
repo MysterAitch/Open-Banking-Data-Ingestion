@@ -335,13 +335,13 @@ class TestTheOverviewsOwnChecks:
 
         assert item.severity == INFORMATION, "nothing for a person to do, so not counted"
         assert not item.needs_attention
-        assert item.href == "/review-report"
+        assert item.href == "/review-flags"
         assert item.message.startswith("1 transaction is flagged")
         assert item.accounts == ("current-account",)
 
-    def test_ReviewFlags_Remedy_DoesNotPromiseADecisionNoPageCanTake(self, tmp_path):
-        """Nothing resolves a review flag yet, so the item says where to read
-        them and that they cannot be cleared, where it used to say "decide"."""
+    def test_ReviewFlags_Remedy_SendsThePersonToThePageThatAnswersThem(self, tmp_path):
+        """A page answers the flags, so the item names it and does not say they
+        cannot be cleared, nor use the older "decide" wording."""
         path = tmp_path / "h.sqlite3"
         with Store(path) as store:
             build_household(store)
@@ -349,7 +349,8 @@ class TestTheOverviewsOwnChecks:
         (item,) = [i for i in assemble(path).items if i.kind == "review"]
 
         assert "decide" not in item.remedy
-        assert "nothing resolves them yet" in item.remedy
+        assert "Answer each flag on the review flags page" in item.remedy
+        assert "nothing resolves them yet" not in item.remedy
 
     def test_ReviewFlags_WhenNoneIsOpen_RaisesNothing(self, household):
         assert [i for i in assemble(household).items if i.kind == "review"] == []

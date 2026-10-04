@@ -64,6 +64,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/balance-walk": "reports",
     "/date-lag": "reports",
     "/review-report": "reports",
+    "/review-flags": "reports",
     "/evidence": "evidence",
     "/artefacts": "evidence",
     "/artefact": "evidence",

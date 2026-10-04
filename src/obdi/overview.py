@@ -200,7 +200,8 @@ _KINDS: dict[str, tuple[int, str]] = {
     "disk": (SOON, "Free space on the data volume or enlarge it."),
     "review": (
         INFORMATION,
-        "The review queue report shows what the flags are made of; nothing resolves them yet.",
+        "Answer each flag on the review flags page; the review queue report shows what "
+        "they are made of.",
     ),
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
     "known-balances-disagree": (
@@ -768,7 +769,7 @@ def _review_items(store: Store) -> list[AttentionItem]:
                 "that could not be made automatically."
             ),
             remedy=_KINDS["review"][1],
-            href="/review-report",
+            href="/review-flags",
             accounts=tuple(sorted(concerned)),
         )
     ]
