@@ -281,6 +281,29 @@ class TestAccountRows:
         assert (reading.word, reading.css, reading.group) == ("protection broken", "pill-bad", 0)
         assert reading.clause == "protected span has changed"
 
+    def test_Row_WhenItsDatesContradictEachOther_SaysSoAndThePageStillRenders(
+        self, clear, monkeypatch
+    ):
+        from obdi import web_overview
+
+        drawn = web_overview.build_rail
+
+        def refusing_one(**dates):
+            # The one protected account of the household stands in for a contradiction.
+            if dates["protected_through"] is not None:
+                raise ValueError("known_to is before known_from")
+            return drawn(**dates)
+
+        monkeypatch.setattr(web_overview, "build_rail", refusing_one)
+
+        page = page_of(clear)
+
+        assert page.count("No rail is drawn: this account's dates contradict each other.") == 1
+        assert page.count("<svg") >= 10, "every other row keeps its rail"
+
+    def test_Row_WhenItsDatesAreConsistent_SaysNothingOfTheRail(self, clear):
+        assert "No rail is drawn" not in page_of(clear)
+
     def test_Rows_AreOrderedHeldBackThenUnprovenThenInAgreementThenQuietThenArchived(
         self, troubled
     ):

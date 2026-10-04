@@ -586,16 +586,25 @@ def _rail_html(account: AccountOverview, today: date, uid: str) -> str:
         return ""
     standing = account.standing
     own = standing.standing.own if standing is not None else None
-    rail = build_rail(
-        first=account.first,
-        known_from=own.known_from if own is not None else None,
-        known_to=own.known_to if own is not None else None,
-        through=own.through if own is not None else None,
-        held_day=own.held.day if own is not None and own.held is not None else None,
-        protected_through=standing.protected_through if standing is not None else None,
-        protection_broken=standing.protection_broken if standing is not None else False,
-        today=today,
-    )
+    try:
+        rail = build_rail(
+            first=account.first,
+            known_from=own.known_from if own is not None else None,
+            known_to=own.known_to if own is not None else None,
+            through=own.through if own is not None else None,
+            held_day=own.held.day if own is not None and own.held is not None else None,
+            protected_through=standing.protected_through if standing is not None else None,
+            protection_broken=standing.protection_broken if standing is not None else False,
+            today=today,
+        )
+    except ValueError:
+        # The rail refuses dates that contradict each other, and one account's contradiction
+        # must not take the whole home page down with it: the row says so in place of the
+        # rail, where it will be seen, and the account's own page still states the dates.
+        return (
+            '<span class="acct-rail muted">No rail is drawn: this account\'s dates '
+            "contradict each other.</span>"
+        )
     return f'<span class="acct-rail">{rail_svg(rail, uid=uid)}</span>'
 
 
