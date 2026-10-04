@@ -162,6 +162,24 @@ JUSTIFIED = {
     "attribution does not re-run on every open",
     ("test_transfer_split.py", "transactions"): "vanishes one side of a pair, which is "
     "the case name",
+    ("test_movement_rows_listed.py", "transactions"): "holds a listed row twice, and one "
+    "row as history: the importer numbers every repeat within a batch and merges a "
+    "listed row onto at most one stored row, so it cannot hold a listed row twice, and "
+    "a check for a state the door prevents still has to be shown working on one. The "
+    "faults the importer can produce (twins in every source, overlapping files, a file "
+    "landed twice) are all landed through it in the same file",
+    ("test_movement_leg_partners.py", "transactions"): "plants a row in a Space the leg "
+    "does not name, and an ordinary payment of the leg's size: the pairing pass pairs a "
+    "leg that names a Space only with a leg in that Space and never with a payment "
+    "(test_internal_leg_pairing.py), so no door pairs the leg wrongly, and a check on "
+    "that pairing still has to be shown working on a pairing that is wrong",
+    ("test_movement_leg_partners.py", "transfer_pairs"): "re-points a confirmed pair at the "
+    "wrong row, which the pairing pass is built never to do, so the state exists for the "
+    "check to find and no door produces it",
+    ("test_movement_rows_listed.py", "transaction_sources"):"removes a sighting, moves "
+    "one to another day, and adds a second row's: the store disagreeing with the "
+    "artefact it came from, which the importer derives both from the same bytes and so "
+    "cannot produce. This is the state a collapsed or dropped movement would leave",
 }
 
 # Convenience bypasses: the row could have been landed through the writer, and was
