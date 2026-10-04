@@ -26,6 +26,23 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.301] - 2026-10-04
+
+### Added
+- **The Position chart can be drawn without chosen accounts.** The owner:
+  "The mortgage overwhelms the other balances (+ and -). Let's optionally
+  include/exclude it in the charts." There is a tick per account and per
+  asset, all on by default, and the chart is drawn from the ticked ones. The
+  page's groups could not be the unit: the mortgage shares "overdrawn or
+  owed" with every card. The headline and every total stay whole, and the
+  page says what the chart leaves out and that a narrowed line is not the
+  household's net worth. Nothing is stored; the choice travels with the
+  press that shows values.
+
+Seen on an invented household only: with a large liability in, nothing else
+on the chart is readable; with it out, the smaller accounts' month-to-month
+movement is.
+
 ## [0.4.300] - 2026-10-04
 
 The owner asked whether what the sources state could replace guesswork in
