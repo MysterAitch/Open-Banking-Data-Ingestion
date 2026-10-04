@@ -293,7 +293,7 @@ class TestThePageWhenTheMortgageIsLeftOut:
 
     def test_Chart_IsDrawnFromTheNarrowedFigures(self, position):
         page = page_of(position, every_key(position) - {MORTGAGE})
-        chart = re.search(r"<svg.*?</svg>", chart_block(page), re.S)
+        chart = re.search(r'<svg role="img".*?</svg>', chart_block(page), re.S)
 
         assert chart is not None
         assert "latest £1,590.00" in chart.group(0)

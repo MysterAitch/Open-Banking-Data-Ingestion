@@ -220,7 +220,8 @@ class TestShowingValues:
     def test_Post_DrawsTheChartAsInlineSvgThatScalesAndWorksInBothThemes(self, lab):
         page = lab.show_values().text
 
-        assert page.count("<svg") == 1
+        assert page.count('<svg role="img"') == 1, "one chart, beside the swatches of its key"
+        assert page.count("<svg") == 1 + page.count("<li data-key=")
         assert 'role="img"' in page
         assert "<title" in page and "<desc" in page
         assert "viewBox=" in page

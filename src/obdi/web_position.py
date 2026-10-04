@@ -330,6 +330,138 @@ def _signed(minor: int) -> str:
     return f"{'-' if minor < 0 else ''}£{whole:,}.{pence:02d}"
 
 
+#: How each line is drawn: (stroke, dash pattern, further attributes). The chart and its key
+#: both read this, so a swatch in the key cannot differ from the line it names.
+_LINE_STYLES: dict[str, tuple[str, str, str]] = {
+    "known": ("var(--act)", "", ""),
+    "partial": ("var(--act)", "5 5", ' stroke-opacity=".6"'),
+    # Dotted with round caps, where the partial months are dashed: the two must
+    # not be mistaken for one another.
+    "provisional": ("var(--warn)", "1 5", ""),
+}
+
+_MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+#: A chart of at most this many months names each month; a longer one names its years only.
+_NAME_MONTHS_UP_TO = 18
+#: Tick labels nearer than this, in the chart's own units, would run into each other.
+_LABEL_GAP = 30
+#: A tick nearer than this to its neighbour is a smear, not a mark.
+_TICK_GAP = 5
+
+
+def _line_attrs(name: str) -> str:
+    stroke, dash, more = _LINE_STYLES[name]
+    dashes = f' stroke-dasharray="{dash}"' if dash else ""
+    return (
+        f'fill="none" stroke="{stroke}" stroke-width="2.5" stroke-linejoin="round" '
+        f'stroke-linecap="round"{dashes}{more}'
+    )
+
+
+def _lines_drawn(
+    points: tuple[MonthPoint, ...], complete_from: str, provisional: tuple[ProvisionalPoint, ...]
+) -> tuple[str, ...]:
+    """Which of `_LINE_STYLES` the chart draws for these series, in the key's order.
+
+    A series of one month is a single mark and no line.
+    """
+    complete_index = next(
+        (i for i, p in enumerate(points) if p.month == complete_from), len(points)
+    )
+    drawn = []
+    if len(points) > 1 and complete_index < len(points) - 1:
+        drawn.append("known")
+    if len(points) > 1 and complete_index > 0:
+        drawn.append("partial")
+    if len(provisional) > 1:
+        drawn.append("provisional")
+    return tuple(drawn)
+
+
+def _key(lines: tuple[str, ...], *, narrowed: bool) -> str:
+    """The chart's key: each line it draws, as a swatch drawn the way the line is, and its name."""
+    if not lines:
+        return ""
+    total = "Total of the chosen accounts" if narrowed else "Net worth"
+    words = {
+        "known": f"{total} that is known",
+        "partial": f"{total} in a partial month, which leaves something out",
+        "provisional": "Provisional total, which counts each unknown opening balance as nil",
+    }
+    items = "".join(
+        f'<li data-key="{name}"><svg width="46" height="10" aria-hidden="true" '
+        f'style="vertical-align:middle"><line x1="2" y1="5" x2="44" y2="5" {_line_attrs(name)}/>'
+        f"</svg> {_esc(words[name])}</li>"
+        for name in lines
+    )
+    return f'<ul class="legend chart-key" style="list-style:none;padding-left:0">{items}</ul>'
+
+
+def _span_words(months: int) -> str:
+    """How long `months` month-ends cover, in years and months."""
+    years, rest = divmod(months, 12)
+    return " ".join(
+        _plural(count, unit) for count, unit in ((years, "year"), (rest, "month")) if count
+    )
+
+
+def _axis(
+    months: list[str],
+    x: Callable[[int], float],
+    *,
+    top: float,
+    floor: float,
+    edges: tuple[float, float],
+) -> str:
+    """The ticks under the plot: each January named by its year, and the months between.
+
+    A chart of more than `_NAME_MONTHS_UP_TO` months names its years only and ticks each
+    month, or each quarter, where there is room for the ticks; a shorter one names every
+    month. Years are placed first, and a label is left out where it would run into one
+    already placed, so a year is never lost to the month before it.
+    """
+    n = len(months)
+    step = x(1) - x(0) if n > 1 else float(_LABEL_GAP)
+    name_months = n <= _NAME_MONTHS_UP_TO
+    every = 1 if name_months or step >= _TICK_GAP else 3 if step * 3 >= _TICK_GAP else 0
+    ticks: list[tuple[str, float, str]] = []
+    for index, month in enumerate(months):
+        number = int(month[5:7])
+        if number == 1:
+            ticks.append(("year", x(index), month[:4]))
+        elif every and (number - 1) % every == 0:
+            ticks.append(("month", x(index), _MONTH_NAMES[number - 1] if name_months else ""))
+    parts = []
+    placed: list[float] = []
+    for kind in ("year", "month"):
+        for tick_kind, at, text in ticks:
+            if tick_kind != kind:
+                continue
+            length = 8 if kind == "year" else 4
+            if kind == "year":
+                parts.append(
+                    f'<line x1="{at:.1f}" y1="{top:.1f}" x2="{at:.1f}" y2="{floor:.1f}" '
+                    'stroke="currentColor" stroke-opacity=".12"/>'
+                )
+            parts.append(
+                f'<line data-tick="{kind}" x1="{at:.1f}" y1="{floor:.1f}" x2="{at:.1f}" '
+                f'y2="{floor + length:.1f}" stroke="currentColor" stroke-opacity=".55"/>'
+            )
+            if not text or any(abs(at - other) < _LABEL_GAP for other in placed):
+                continue
+            placed.append(at)
+            anchor = (
+                "start" if at - edges[0] < 14 else "end" if edges[1] - at < 14 else "middle"
+            )
+            weight = ' font-weight="700"' if kind == "year" else ""
+            parts.append(
+                f'<text data-tick-label="{kind}" x="{at:.1f}" y="{floor + 20:.1f}" '
+                f'text-anchor="{anchor}" font-size="11" fill="var(--ink-2)"{weight}>'
+                f"{_esc(text)}</text>"
+            )
+    return "".join(parts)
+
+
 def _chart(
     points: tuple[MonthPoint, ...],
     complete_from: str,
@@ -345,8 +477,10 @@ def _chart(
     month places both. A `narrowed` chart is drawn from some accounts only, and
     says so in its own text, since a figure copied out of it is not the net worth.
     """
-    width, height = 400, 240
-    left, right, top, bottom = 12, 12, 30, 42
+    width, height = 400, 260
+    # Under the plot: the axis's ticks and their names, the lowest and latest figures, and
+    # the first and last month with how long the chart covers between them.
+    left, right, top, bottom = 12, 12, 30, 62
     months = [p.month for p in (provisional or points)]
     column = {month: index for index, month in enumerate(months)}
     n = len(months)
@@ -366,17 +500,14 @@ def _chart(
             return top + plot / 2
         return top + (high - value) / (high - low) * plot
 
-    def line(
-        series: list[tuple[int, int]], first: int, last: int, extra: str, name: str, colour: str
-    ) -> str:
+    def line(series: list[tuple[int, int]], first: int, last: int, name: str, style: str) -> str:
         coords = " ".join(f"{x(c):.1f},{y(v):.1f}" for c, v in series[first : last + 1])
-        return (
-            f'<polyline points="{coords}" data-series="{name}" fill="none" stroke="{colour}" '
-            f'stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"{extra}/>'
-        )
+        return f'<polyline points="{coords}" data-series="{name}" {_line_attrs(style)}/>'
 
     complete_index = next((i for i, p in enumerate(points) if p.month == complete_from), len(known))
-    parts = []
+    drawn = _lines_drawn(points, complete_from, provisional)
+    floor = float(height - bottom)
+    parts = [_axis(months, x, top=top, floor=floor, edges=(left, width - right))]
     if low < 0 < high:
         zero = y(0)
         parts.append(
@@ -385,24 +516,12 @@ def _chart(
             f'<text x="{width - right}" y="{zero - 4:.1f}" text-anchor="end" font-size="11" '
             'fill="var(--ink-2)">nil</text>'
         )
-    # Dotted with round caps, where the partial months are dashed: the two must
-    # not be mistaken for one another.
-    if len(dotted) > 1:
-        parts.append(
-            line(
-                dotted, 0, len(dotted) - 1, ' stroke-dasharray="1 5"', "provisional", "var(--warn)"
-            )
-        )
-    if len(known) > 1:
-        if complete_index > 0:
-            parts.append(
-                line(
-                    known, 0, min(complete_index, len(known) - 1),
-                    ' stroke-dasharray="5 5" stroke-opacity=".6"', "known", "var(--act)",
-                )
-            )
-        if complete_index < len(known) - 1:
-            parts.append(line(known, complete_index, len(known) - 1, "", "known", "var(--act)"))
+    if "provisional" in drawn:
+        parts.append(line(dotted, 0, len(dotted) - 1, "provisional", "provisional"))
+    if "partial" in drawn:
+        parts.append(line(known, 0, min(complete_index, len(known) - 1), "known", "partial"))
+    if "known" in drawn:
+        parts.append(line(known, complete_index, len(known) - 1, "known", "known"))
     if dotted:
         parts.append(
             f'<circle cx="{x(n - 1):.1f}" cy="{y(dotted[-1][1]):.1f}" r="4" fill="none" '
@@ -422,11 +541,11 @@ def _chart(
             f'<text x="{left}" y="16" {label}>highest {_esc(_signed(high))}</text>'
         )
         bottom_label = (
-            f'<text x="{left}" y="{height - bottom + 16}" {label}>'
+            f'<text x="{left}" y="{height - bottom + 38}" {label}>'
             f"lowest {_esc(_signed(low))}</text>"
         )
     latest = (
-        f'<text x="{width - right}" y="{height - bottom + 16}" text-anchor="end" {label}>'
+        f'<text x="{width - right}" y="{height - bottom + 38}" text-anchor="end" {label}>'
         f"{'chosen only, ' if narrowed else ''}latest {_esc(_signed(known[-1][1]))}</text>"
         if known
         else ""
@@ -445,6 +564,8 @@ def _chart(
             if n > 1
             else ""
         )
+        + f'<text data-span x="{width / 2:.0f}" y="{height - 6}" text-anchor="middle" '
+        f'font-size="12" fill="var(--ink-2)">{_esc(_span_words(n))}</text>'
     )
     desc = f"From {months[0]} to {months[-1]}, at each month-end. "
     if narrowed:
@@ -644,7 +765,11 @@ def _history(
         else:
             legend = _legend(bool(series.history), bool(series.provisional), narrowed=narrowed)
             body += (
-                '<div class="chart">'
+                _key(
+                    _lines_drawn(series.history, series.complete_from, series.provisional),
+                    narrowed=narrowed,
+                )
+                + '<div class="chart">'
                 + _chart(
                     series.history, series.complete_from, series.provisional, narrowed=narrowed
                 )
