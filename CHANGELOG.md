@@ -26,6 +26,20 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.290] - 2026-10-04
+
+### Added
+- **Movements are checked as well as money, on every day.** A balance cannot
+  see a fault that nets to nil: the owner's example was in, out, in, out
+  collapsing to one pair, or to nothing, with every total unchanged. Three
+  checks now run whether or not any balance changed: every row a source lists
+  is held exactly once, including sources with no ids; every transfer leg has
+  one partner, in the account it names; and the two sides of a chain agree
+  movement for movement, day by day.
+- **The Identity health page shows them, and the Overview raises a fault from
+  any of them**, at its strongest setting until real data shows how often they
+  fire.
+
 ## [0.4.289] - 2026-10-04
 
 ### Added
