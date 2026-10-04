@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.304] - 2026-10-04
+
+The first step of a redesign, from three critical reviews of the interface the
+owner asked for: its tasks and navigation, its visual design, and its words
+and accessibility. It changes how every page looks and no page's wording or
+order.
+
+### Changed
+- **One stylesheet built from named tokens**, each colour with a light and a
+  dark value, replacing a single blue, a near-black, and opacity for anything
+  secondary. Serif for prose and headings, sans for labels, monospace for
+  dates and ids. Colour means one thing each: verified, rows disagree or an
+  action failed, held back, housekeeping. A change of palette or face is now
+  a change of tokens.
+- **Navigation is a strip of text tabs**, not eight boxed buttons, and the
+  current section is marked by weight and an underline.
+- **Buttons are ranked**: one filled primary, outlined secondary, and
+  red-outlined for the destructive ones, which had no look of their own.
+- **Status pills carry a glyph**, so a status survives greyscale.
+
+### Fixed
+- **Contrast.** Twenty-six of 168 measured text pairs failed the AA standard,
+  mostly because muted text was made with opacity, which compounds when
+  nested and fell to about 3 to 1; dark mode's red was the worst. A test now
+  computes the contrast of every token pairing in both schemes: the lowest
+  is 5.4 to 1.
+- **Structure for assistive technology and the keyboard**: a main landmark
+  and a skip link, a visible focus ring on every stop, a name on every
+  control (about 28 had none), captions and scoped headers on tables, and
+  tap targets of 44 pixels or more where several were about 20.
+- **Reflow**: no page widens at 320 pixels with text at 200%.
+
+Not in this step, because each needs more than a stylesheet: the verdict line,
+the proof rail on each account, sealed figures, and any change to page order
+or wording. Chart series colours are unchanged. Only Chromium was checked.
+
 ## [0.4.303] - 2026-10-04
 
 Three measurements and no change to what is matched or counted. Each makes a
