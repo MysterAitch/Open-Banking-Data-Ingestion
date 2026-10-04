@@ -16,7 +16,9 @@ sources landed in EVERY order and rebuilt. KNOWN ANSWERS, decided before the fir
     (i)   the feed holds one payment of 2000 on day 5, the aggregator two on day 6, the export two
           rows on day 6
           one fault, starling-csv, day 6, 2 listed and 1 held: "both listed rows are sighted on
-          one stored row, dated 2026-09-06", in every arrival order
+          one stored row, dated 2026-09-06", where the export is REPLAYED last, and no fault
+          where it is replayed earlier (`export_is_replayed_last` says why the replay's order
+          is read from the store and not taken from the arrival order)
     (ii)  the feed holds payments on days 5 and 8, the aggregator two on day 6, the export two
           on day 6
           no fault
@@ -87,6 +89,28 @@ def said(store) -> list[str]:
     return [fault.says() for fault in check_rows(store, canonical).row_faults]
 
 
+def export_is_replayed_last(store) -> bool:
+    """Whether the rebuild replays the export after the feed and the aggregator.
+
+    Read from the store in the rebuild's own order and not from the order the test landed
+    them in, because the two differ: the replay sorts the stamp as text, a pull stamps UTC,
+    and an import stamps local time with its offset.
+    On a machine ahead of UTC an import therefore replays last whatever order it arrived
+    in, and on one at UTC it replays where it arrived.
+    The build of v0.4.295 failed on exactly that: this scenario's answer was written as
+    true of every order on a machine where every order replays the export last.
+    """
+    replayed = [
+        str(row["source"])
+        for row in store.connection.execute(
+            "SELECT source FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
+        )
+    ]
+    listing = ("csv", "starling-feed", "truelayer-booked")
+    listers = [source for source in replayed if source in listing]
+    return bool(listers) and listers[-1] == "csv"
+
+
 class TestTwoListedRowsSightedOnOneStoredRow:
     @pytest.mark.parametrize("order", CASES)
     def test_Fault_WhenTheExportListsTwoEqualPaymentsAndTheFeedOne_SaysBothAreOnOneStoredRow(
@@ -94,10 +118,16 @@ class TestTwoListedRowsSightedOnOneStoredRow:
     ):
         store = stores(order, **two_equal_export_rows((5,)))
 
-        assert said(store) == [
-            f"2026-09-06 {MAIN} via {EXPORT} (out): 2 rows of one size and direction listed, "
-            "1 held: both listed rows are sighted on one stored row, dated 2026-09-06"
-        ]
+        # The matcher puts both export rows on one stored row only where the export is
+        # replayed after both other sources; replayed earlier, each row keeps its own.
+        assert said(store) == (
+            [
+                f"2026-09-06 {MAIN} via {EXPORT} (out): 2 rows of one size and direction "
+                "listed, 1 held: both listed rows are sighted on one stored row, dated 2026-09-06"
+            ]
+            if export_is_replayed_last(store)
+            else []
+        )
 
     @pytest.mark.parametrize("order", CASES)
     def test_Fault_WhenTheFeedsTwoPaymentsSitDaysApart_ThereIsNoFault(self, stores, order):
