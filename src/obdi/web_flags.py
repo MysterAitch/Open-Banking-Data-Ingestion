@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 from .callback import render_page
 from .logs import say
 from .masking import Disclosed
+from .plural import plural
 from .review_flags import FlagQueue, FlagRefused, Outcome
-from .same_money_outcome import plural
 from .web_accounts import submit_button
 from .web_answers import AnswerPages
 from .web_ledger import _disclosure, _seal
