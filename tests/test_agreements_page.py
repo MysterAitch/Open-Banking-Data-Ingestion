@@ -135,9 +135,9 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
         assert "transactions" in page
         assert "the sources do not match" in page
         assert "2026-01-01" in page
-        assert "in starling ONLY" in page
+        assert "in starling only" in page
         assert "confirmed internal-transfer leg" in page
-        assert "MASKED rendering" in page
+        assert "masked rendering" in page
 
     def test_Page_Fetched_ContainsNoAmountPayeeOrMoneyFigureAnywhere(self):
         page = _request(_report(_held(unexplained_bulk=12)), "GET", "/agreements").text
@@ -187,7 +187,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
         page = _request(_report(_held()), "GET", f"/agreements?{query}").text
 
         assert NETFLIX not in page
-        assert "MASKED rendering" in page
+        assert "masked rendering" in page
 
     def test_Page_Fetched_IsNotMarkedNoStore(self):
         response = _request(_report(_held()), "GET", "/agreements")
@@ -200,7 +200,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
         page = response.text
-        assert "UNMASKED rendering" in page
+        assert "unmasked rendering" in page
         assert NETFLIX in page and "-£487.31" in page
         assert f"-£1234.57 &quot;{ACME}&quot; dated 2026-03-02 by starling" in page
         assert "; net " in page

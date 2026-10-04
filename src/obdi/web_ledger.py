@@ -1424,7 +1424,7 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         '<form method="post" action="/ledger-anchor">'
         + hidden
         + '<input type="hidden" name="currency" value="GBP">'
-        '<p><label>Date the balance applies to, the END of that day<br>'
+        '<p><label>Date the balance applies to, the end of that day<br>'
         '<input type="date" name="day" required></label></p>'
         '<p><label>Balance at the end of that day, in pounds and pence<br>'
         f'<span class="muted">{way_round}</span><br>'
@@ -2080,7 +2080,7 @@ def _position_html(position: Any, *, bound: bool) -> str:
 
 _LIMITS = (
     '<ul class="muted">'
-    "<li>A BOOKED row that a source reported once and stopped reporting in later "
+    "<li>A booked row that a source reported once and stopped reporting in later "
     "fetches covering the same dates is not detected yet. Void rows are listed, "
     "because the store records a vanished pending payment; a vanished booked row "
     "leaves no record in the merged layer, so a page with no warning is not a "
@@ -2260,7 +2260,7 @@ def _head(view: Any) -> str:
     binding = (
         "bound to an Actual account"
         if view.actual_bound
-        else "NOT bound to an Actual account, so nothing in it is sent"
+        else "not bound to an Actual account, so nothing in it is sent"
     )
     held = (
         f"Rows held from {_esc(view.oldest_month)} to {_esc(view.newest_month)}."

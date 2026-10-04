@@ -742,7 +742,7 @@ class TestThePageIsMaskedUnlessPostedFor:
     def test_Page_Fetched_StatesDatesCountsAndWhichExplanationHolds(self, lab):
         page = html.unescape(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
 
-        assert "MASKED rendering" in page
+        assert "masked rendering" in page
         assert "Period 2026-02-12 to 2026-03-11" in page
         assert "1 row only in the statements, 3 rows only in the feed" in page
         assert "holds the statement's leftovers on top of the feed's" in page
@@ -769,7 +769,7 @@ class TestThePageIsMaskedUnlessPostedFor:
     def test_Page_FetchedWithAnyQuery_StaysMasked(self, lab, query):
         page = httpx.get(f"{lab}/period-reconciliation?{query}", timeout=60).text
 
-        assert "MASKED rendering" in page
+        assert "masked rendering" in page
         assert "£" not in page
 
     def test_Page_Fetched_IsNotMarkedNoStoreAndOffersAFormNotALinkToShowValues(self, lab):
@@ -788,7 +788,7 @@ class TestThePageIsMaskedUnlessPostedFor:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
         page = response.text
-        assert "UNMASKED rendering" in page
+        assert "unmasked rendering" in page
         assert "surplus -£7.77" in page
         assert "&#x27;Fee One&#x27;" in page
         assert f'href="/period-reconciliation?ref={ACCOUNT}"' in page
@@ -823,7 +823,7 @@ class TestTheCommandLine:
         assert main(["--db", str(db), "period-reconciliation"]) == 0
 
         out = capsys.readouterr().out
-        assert "MASKED" in out and "--show-values" in out
+        assert "Masked" in out and "--show-values" in out
         assert f"Period {P2}" in out
         assert "£" not in out
 
@@ -833,7 +833,7 @@ class TestTheCommandLine:
         assert main(["--db", str(db), "period-reconciliation", "--show-values"]) == 0
 
         out = capsys.readouterr().out
-        assert "MASKED" not in out
+        assert "Masked" not in out
         assert "Statement movement -£21.04" in out
 
     def test_Command_ScopedToAnotherAccount_ReportsNone(self, db, capsys):

@@ -132,7 +132,7 @@ class TestThePageShowsTheEvidence:
 
         page = httpx.get(f"{base}/review", timeout=20)
 
-        assert "HUMAN rank" in page.text
+        assert "human rank" in page.text
 
 
 class TestAnsweringAGroup:

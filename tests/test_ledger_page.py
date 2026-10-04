@@ -274,13 +274,13 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
     def test_Page_ForAnUnboundAccount_NamesTheMissingBinding(self, served):
         page = get(served, ref="savings-account", month="2026-03").text
 
-        assert "NOT bound to an Actual account" in page
+        assert "not bound to an Actual account" in page
         assert "<th>Would be sent to Actual</th><td>0</td>" in page
 
     def test_Page_SaysWhatItDoesNotDetect(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert "BOOKED row that a source reported once and stopped reporting" in page
+        assert "booked row that a source reported once and stopped reporting" in page
         assert "not a pass" in page
 
     def test_Page_StatesTheDateFieldAndTheStatementCost(self, served):

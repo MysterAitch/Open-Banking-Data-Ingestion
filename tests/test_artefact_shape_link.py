@@ -118,7 +118,7 @@ class TestReachingAKeptStatementsLayout:
         )
 
         assert page.status_code == 200
-        assert "MASKED" in page.text, "the report must say what it is showing"
+        assert "masked" in page.text, "the report must say what it is showing"
         assert "WATERSTONES" not in page.text, "a payee reached a masked surface"
         assert "9,999.99" in page.text or "999.99" in page.text, (
             "no masked amount appeared, so the layout is not being shown at all"

@@ -403,7 +403,7 @@ def render_import(
     )
     body = f"""{lede}
 <h2>Import a file</h2>
-<p>Bank CSV or QIF exports. Choose the destination FIRST - the preview can
+<p>Bank CSV or QIF exports. Choose the destination first - the preview can
 then verify the file against what that account already holds, before
 anything is stored.</p>
 <form action="/upload" method="post" enctype="multipart/form-data">

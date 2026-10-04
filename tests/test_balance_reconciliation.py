@@ -411,7 +411,7 @@ class TestAccountsThatCannotBeChecked:
 
         starling_account = next(a for a in report.accounts if a.account_id == "starling:cat-1")
         assert starling_account.not_checkable
-        assert "starling:cat-1: NOT CHECKABLE" in text
+        assert "starling:cat-1: cannot be checked" in text
         assert ACCOUNT in text and "clean where it could be checked" in text
 
     def test_Report_ForACardWhoseBalanceSignIsUnverified_SaysNotCheckable(self, tmp_path):
@@ -496,10 +496,10 @@ class TestTheFiguresArePrivate:
             "73913", "739.13", "31415", "314.15", "1618", "16.18", "2718", "27.18",
         ):
             assert private not in masked, private
-        for shown in ("86482.01", "-£42.17", "UNMASKED"):
+        for shown in ("86482.01", "-£42.17", "Unmasked"):
             assert shown in unmasked, shown
         assert PRIVATE_PAYEE not in unmasked
-        assert "MASKED: account names" in masked
+        assert "Masked: account names" in masked
 
     def test_Describe_WhenMasked_OffersNoWayToUnmaskThatTheCallerDidNotSupply(
         self, tmp_path
@@ -513,7 +513,7 @@ class TestTheFiguresArePrivate:
             masked = balance_reconciliation(store).describe()
 
         header = masked.splitlines()[1]
-        assert header.startswith("MASKED: account names")
+        assert header.startswith("Masked: account names")
         assert "values=1" not in masked and "--show-values" not in masked
         assert "(" not in header, "no hint was given, so no parenthesis offers one"
 
@@ -592,7 +592,7 @@ class TestBalanceReconciliationPage:
 
         assert response.status_code == 200
         assert "example masked=True" in response.text
-        assert "MASKED rendering" in response.text
+        assert "masked rendering" in response.text
 
     def test_Page_WhenTheFiguresArePostedFor_ShowsTheUnmaskedRenderingAndSaysSo(
         self, tmp_path
@@ -605,7 +605,7 @@ class TestBalanceReconciliationPage:
 
         assert response.status_code == 200
         assert "example masked=False" in response.text
-        assert "UNMASKED rendering" in response.text
+        assert "unmasked rendering" in response.text
 
     def test_Page_WhenTheFiguresAreShown_TellsTheBrowserNotToKeepThem(self, tmp_path):
         config = _config(

@@ -252,7 +252,7 @@ class PeriodReport:
         lines = [f"{_plural(held, 'account')} with a held statement"]
         if masked:
             lines.append(
-                "  MASKED: dates, counts, and which explanation holds only"
+                "  Masked: dates, counts, and which explanation holds only"
                 + (f" - {unmask_hint}" if unmask_hint else "")
             )
         if not self.accounts:

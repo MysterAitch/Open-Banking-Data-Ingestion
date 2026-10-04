@@ -325,7 +325,7 @@ class Agreement:
                     buckets.append(
                         {
                             "label": (
-                                f"{count} in {name} ONLY - no counterpart in "
+                                f"{count} in {name} only - no counterpart in "
                                 f"{other}, its sibling accounts, or the "
                                 "pairing table"
                             ),

@@ -2140,7 +2140,7 @@ class TestAccountLevelShape:
         finally:
             httpd.shutdown()
 
-        assert "MERGED layer" in page
+        assert "merged layer" in page
         assert "halifax-csv, truelayer" in page
         assert "2 distinct: halifax-csv x1, truelayer x1" in page
         assert "Items per month" in page
@@ -2615,7 +2615,7 @@ class TestBrowsingTheAttemptLedger:
         finally:
             httpd.shutdown()
 
-        assert "No attempts recorded yet" in page
+        assert "No attempts are recorded yet" in page
 
 
 class TestBrowsingRawArtefactsFromThePage:
@@ -3108,7 +3108,7 @@ class TestAccountPickerOptions:
         # standing as an innocent-looking twin.
         assert (
             "Personal (starling) [starling:0abc4567deadbeef]"
-            " (unbound - imports here land in a SEPARATE account)"
+            " (unbound - imports here land in a separate account)"
         ) in html_out
         # A unique label stays clean - the ref is noise when nothing collides.
         assert "Current Account (halifax) [" not in html_out

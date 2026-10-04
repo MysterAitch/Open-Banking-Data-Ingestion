@@ -343,10 +343,10 @@ class BalanceReconciliation:
         """
         hint = f" ({unmask_hint})" if unmask_hint else ""
         shown = (
-            "MASKED: account names, dates and counts only - no balance, amount, "
+            "Masked: account names, dates and counts only - no balance, amount, "
             f"or difference appears{hint}"
             if masked
-            else "UNMASKED: balances and differences are shown - this is private"
+            else "Unmasked: balances and differences are shown - this is private"
         )
         lines = [
             "Store rows against the bank's end-of-day balances.",
@@ -378,11 +378,11 @@ def _money(minor: int) -> str:
 
 def _describe_account(account: AccountReconciliation, masked: bool) -> list[str]:
     if account.not_checkable:
-        return [f"  {account.account_id}: NOT CHECKABLE - {account.not_checkable}"]
+        return [f"  {account.account_id}: cannot be checked - {account.not_checkable}"]
     if not account.days_summed and not account.known_days:
-        verdict = "NOTHING CHECKED"
+        verdict = "nothing checked"
     elif account.faults:
-        verdict = f"{account.faults} FAULT(S)"
+        verdict = plural(account.faults, "fault")
     else:
         verdict = "clean where it could be checked"
     lines = [

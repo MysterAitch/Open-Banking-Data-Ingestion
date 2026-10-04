@@ -2814,8 +2814,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with_balance = int(str(report["rows_with_balance"]))
         if not with_balance:
             return (
-                "no running balances held yet - the walk needs truelayer "
-                "artefacts that carry running_balance"
+                "No running balances are held yet. That is expected until a bank connection "
+                "that states them has been pulled; nothing needs pressing."
             )
         lines = [
             f"{plural(int(str(report['rows'])), 'artefact row')} held, {with_balance} carry "
@@ -2895,7 +2895,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         report = settlement_lag_report(rows)
         measured = int(str(report["measured"]))
         if not measured:
-            return "no starling rows with both timestamps held yet"
+            return (
+                "No Starling rows hold both timestamps yet. That is expected until the "
+                "Starling feed has been pulled; nothing needs pressing."
+            )
         lines = [
             f"{plural(measured, 'payment')} "
             f"{'carries' if measured == 1 else 'carry'} both an economic and a "

@@ -233,7 +233,7 @@ class ShapeReport:
                 "be read, so only the spacing view is available)"
             )
             + (
-                " - values MASKED (digits as 9, other words as X, layout kept)"
+                " - values masked (digits as 9, other words as X, layout kept)"
                 if self.masked
                 else " - REAL VALUES, not masked"
             )

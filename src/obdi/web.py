@@ -3764,7 +3764,7 @@ def account_options(labels: dict[str, str], *, selected: str = "") -> str:
             # separate, uncorroborated account. Legitimate for genuinely
             # new accounts - but never as an innocent-looking twin of a
             # bound canonical, so the option states the consequence.
-            shown += " (unbound - imports here land in a SEPARATE account)"
+            shown += " (unbound - imports here land in a separate account)"
         mark = " selected" if selected and ref == selected else ""
         options.append(
             f'<option value="{html.escape(ref)}"{mark}>{html.escape(shown)}</option>'
@@ -4288,13 +4288,13 @@ class ConnectionHandler(
             return
         report = hook()
         showing = (
-            '<p class="muted">Showing the MASKED rendering: counts, source '
+            '<p class="muted">Showing the masked rendering: counts, source '
             "names, account names, dates, and verdicts only.</p>"
             '<form method="post" action="/agreements">'
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the UNMASKED rendering: net totals, '
+            else '<p class="warn">Showing the unmasked rendering: net totals, '
             "amounts, and payee descriptions are visible.</p>"
             '<p><a class="button" href="/agreements">'
             "Back to the masked rendering</a></p>"
@@ -4489,8 +4489,8 @@ class ConnectionHandler(
             + (
                 rows
                 if rows
-                else "<p>No attempts recorded yet - the ledger began at 0.4.5, "
-                "so only fetches after that deployment appear.</p>"
+                else "<p>No attempts are recorded yet. That is expected until the next pull "
+                "runs: each pull records one.</p>"
             )
             + HOME_LINK
         )
@@ -4809,7 +4809,7 @@ class ConnectionHandler(
             f"<p><strong>{heading}</strong>{id_line}{details_html}<br>"
             f"{plural(int(str(shape.get('count', 0) or 0)), 'merged transaction')} "
             f"from {source_list or 'unknown sources'}</p>"
-            "<p>This is the MERGED layer - what the store believes after "
+            "<p>This is the merged layer - what the store believes after "
             "matching - not one payload. The raw artefacts remain the "
             "evidence underneath.</p>"
             + _breakdown_html(breakdown)
@@ -6139,13 +6139,13 @@ class ConnectionHandler(
             f"category{share}. {plural(legs, 'confirmed transfer leg')} "
             f"{'is' if legs == 1 else 'are'} excluded - "
             "money that stayed in the household is not spending.</p>"
-            "<p>Answering a group here writes at HUMAN rank: it outranks "
+            "<p>Answering a group here writes at human rank: it outranks "
             "every later rule sweep and survives every rebuild. Groups with "
             "no obvious answer are better left alone than guessed - the "
             "shape of a payment identifies it when the string does not.</p>"
             + (
                 (
-                    '<p class="muted">Showing the MASKED rendering: the groups are counted, '
+                    '<p class="muted">Showing the masked rendering: the groups are counted, '
                     "and neither their payees nor their references appear.</p>"
                     '<form method="post" action="/review">'
                     '<button class="button" type="submit" style="width:100%">'
@@ -6241,13 +6241,13 @@ class ConnectionHandler(
             )
             return
         showing = (
-            '<p class="muted">Showing the MASKED rendering: counts, account '
+            '<p class="muted">Showing the masked rendering: counts, account '
             "names, source names, and age bands only.</p>"
             '<form method="post" action="/review-report">'
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the UNMASKED rendering: the '
+            else '<p class="warn">Showing the unmasked rendering: the '
             "descriptions of the largest flagged clusters are visible.</p>"
             '<p><a class="button" href="/review-report">'
             "Back to the masked rendering</a></p>"
@@ -6387,13 +6387,13 @@ class ConnectionHandler(
             )
             return
         showing = (
-            '<p class="muted">Showing the MASKED rendering: account names, '
+            '<p class="muted">Showing the masked rendering: account names, '
             "dates, and counts only.</p>"
             '<form method="post" action="/balance-reconciliation">'
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the UNMASKED rendering: balances and '
+            else '<p class="warn">Showing the unmasked rendering: balances and '
             "differences are visible.</p>"
             '<p><a class="button" href="/balance-reconciliation">'
             "Back to the masked rendering</a></p>"
@@ -6441,14 +6441,14 @@ class ConnectionHandler(
             else "/period-reconciliation"
         )
         showing = (
-            '<p class="muted">Showing the MASKED rendering: account names, '
+            '<p class="muted">Showing the masked rendering: account names, '
             "dates, counts, and which explanation holds only.</p>"
             '<form method="post" action="/period-reconciliation">'
             + scope
             + '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the UNMASKED rendering: figures and the '
+            else '<p class="warn">Showing the unmasked rendering: figures and the '
             "unmatched rows are visible.</p>"
             f'<p><a class="button" href="{html.escape(back, quote=True)}">'
             "Back to the masked rendering</a></p>"
@@ -6487,12 +6487,12 @@ class ConnectionHandler(
             )
             return
         showing = (
-            '<p class="muted">Showing the MASKED rendering: counts and artefact names only.</p>'
+            '<p class="muted">Showing the masked rendering: counts and artefact names only.</p>'
             '<form method="post" action="/balance-walk">'
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the UNMASKED rendering: balances are visible.</p>'
+            else '<p class="warn">Showing the unmasked rendering: balances are visible.</p>'
             '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
         )
         body = (

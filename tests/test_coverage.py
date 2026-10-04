@@ -798,10 +798,10 @@ class TestAgreementOutline:
         starling_labels = [bucket["label"] for bucket in sides[0]["buckets"]]
         assert starling_labels[0] == "2 matched with starling-csv"
         assert any("1 confirmed internal-transfer leg" in label for label in starling_labels)
-        assert any("in starling ONLY" in label for label in starling_labels)
+        assert any("in starling only" in label for label in starling_labels)
         # The direction is explicit: the unexplained row names its rows.
         unexplained = next(
-            bucket for bucket in sides[0]["buckets"] if "ONLY" in bucket["label"]
+            bucket for bucket in sides[0]["buckets"] if " only" in bucket["label"]
         )
         assert unexplained["items"] == [
             {"date": "2026-01-04", "amount": "-£4.50", "description": "NETFLIX"}
@@ -957,8 +957,8 @@ class TestExportDrift:
             for side in outline["sides"]
             for bucket in side["buckets"]
         ]
-        assert any("in starling-csv (this file) ONLY" in label for label in labels)
-        assert any("in starling-csv (imported earlier) ONLY" in label for label in labels)
+        assert any("in starling-csv (this file) only" in label for label in labels)
+        assert any("in starling-csv (imported earlier) only" in label for label in labels)
 
     def test_ExportDrift_WithNoEarlierImports_ReportsNothing(self):
         incoming = [txn("starling-csv", 1, -500, account="starling-personal")]

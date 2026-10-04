@@ -337,7 +337,7 @@ class ReviewReport:
         ]
         if masked:
             lines.append(
-                "  MASKED: counts, accounts, sources, and age bands only"
+                "  Masked: counts, accounts, sources, and age bands only"
                 + (f" - {unmask_hint}" if unmask_hint else "")
             )
         classes = self.breakdown.by_class

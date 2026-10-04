@@ -51,6 +51,7 @@ class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
         assert "repeated payment" in page and "duplicate report" in page
         assert 'href="/review-flags"' in page
         assert "There is no page that resolves these yet" not in page
+        assert "nothing to press" not in page
 
     def test_ReportWithFlags_PointsAtCategoriseOnlyAsADifferentQueue(self, tmp_path):
         page = _get(
@@ -98,7 +99,7 @@ class TestTheReviewQueueReportIsMaskedUnlessPostedFor:
         response = self._request(self._config(tmp_path), "GET", "/review-report")
 
         assert "example masked=True" in response.text
-        assert "MASKED rendering" in response.text
+        assert "masked rendering" in response.text
         assert '<form method="post" action="/review-report">' in response.text
 
     @pytest.mark.parametrize("query", ["values=1", "unmask=1", "show=1", "masked=0"])
@@ -112,7 +113,7 @@ class TestTheReviewQueueReportIsMaskedUnlessPostedFor:
         response = self._request(self._config(tmp_path), "POST", "/review-report")
 
         assert "example masked=False" in response.text
-        assert "UNMASKED rendering" in response.text
+        assert "unmasked rendering" in response.text
         assert response.headers["Cache-Control"] == "no-store"
 
     def test_Page_Fetched_IsNotMarkedNoStore(self, tmp_path):
