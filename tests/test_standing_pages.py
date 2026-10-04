@@ -132,7 +132,7 @@ class TestKnownBalancesThatDisagree:
         found = standing_items_from(self.conflicting(store), label, open_account, D(2026, 9, 1))
 
         assert [i.kind for i in found] == ["known-balances-disagree"]
-        assert "disagree with each other on 1 day, the first 2026-03-10" in found[0].message
+        assert "do not match each other on 1 day, the first 2026-03-10" in found[0].message
         assert "halifax-statement-pdf" in found[0].message
         assert "not a fault in the rows" in found[0].message
         assert found[0].severity == 2, "to look at soon: only a person can say which is right"
@@ -160,7 +160,7 @@ class TestTheCards:
 
         assert (
             "Known balances from 2026-03-05 to 2026-03-20; in agreement through 2026-03-20; "
-            "protected through nowhere." in page
+            "not protected." in page
         )
 
     def test_Card_WhenProtected_SaysProtectedThroughTheDate(self, store):
@@ -187,7 +187,7 @@ class TestTheCards:
 
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
-        assert "The protection is broken: its span has changed." in page
+        assert "The protection is broken: its protected period has changed." in page
 
     def test_Card_WhenNoKnownBalanceExists_SaysTheRowsCannotBeVerified(self, tmp_path):
         with Store(tmp_path / "card-bare.sqlite3") as bare:

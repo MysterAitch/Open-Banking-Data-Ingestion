@@ -153,7 +153,7 @@ def _row_flags(row: Any) -> str:
     elif row.origin == "unitemised":
         flags += _flag(
             "unitemised change",
-            "Derived from the account's stated balances: the difference between two "
+            "Derived from the account's known balances: the difference between two "
             "of them that no row explains. It is never stored, so restating a "
             "balance changes it.",
         )
@@ -448,10 +448,10 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
 _BALANCE_WORDS = {"in": "in credit", "out": "overdrawn or owed", "nil": "nil"}
 
 _BASIS_WORDS = {
-    "stated": "stated by a person",
+    "stated": "stated by you",
     "bank": "the bank's own running balance",
     "statement": "a held statement's closing balance",
-    "family": "the whole account's stated balance, less its Spaces' own rows",
+    "family": "the whole account's known balance, less its Spaces' own rows",
     "opened": "the day before the account was created, with its feed held from then",
     "export": "the export's own balance, read as the main account's",
     "assumed-nil": "assumed, not shown: a Space's rows are taken to start from nil",
@@ -463,7 +463,7 @@ def _balance_word(direction: str) -> str:
 
 
 def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True) -> str:
-    """One anchor as a list item: its verdict first, then when, what, and whence.
+    """One known balance as a list item: its verdict first, then when, what, and whence.
 
     A list and not a table.
     Four columns did not fit a phone: the verdict, which is the reason for
@@ -476,17 +476,17 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
         role = '<span class="pill pill-quiet">assumed</span>'
         detail = ": the nil the listings' balances are tested against"
     elif line.defines_opening:
-        role = '<span class="pill pill-quiet">defines the opening balance</span>'
+        role = '<span class="pill pill-quiet">the opening balance is worked out from this</span>'
         detail = ""
     elif balance_only and line.basis == "stated":
         role = '<span class="pill pill-quiet">followed</span>'
         detail = (
-            ": this account is tracked by its stated balances, so the balance "
-            "follows this figure"
+            ": this account is tracked by its known balances, so the balance "
+            "follows this one"
         )
     elif line.verdict == "agrees":
-        role = '<span class="pill pill-ok">agrees</span>'
-        detail = " with what the rows predict"
+        role = '<span class="pill pill-ok">in agreement</span>'
+        detail = ": the rows reproduce it"
     else:
         role = '<span class="pill pill-bad">differs</span>'
         difference = _signed(
@@ -535,11 +535,11 @@ def _anchors_html(
         + "".join(row(line) for line in anchors if id(line) not in folded)
         + "</ul>"
         '<details class="agreeing"><summary>'
-        f"{_plural(len(agreeing), 'later anchor')} "
+        f"{_plural(len(agreeing), 'later known balance')} "
         + (
             f"{agree(len(agreeing), 'is')} followed"
             if balance_only
-            else f"{agree(len(agreeing), 'agrees')} with what the rows predict"
+            else f"{agree(len(agreeing), 'is')} in agreement with what the rows predict"
         )
         + "</summary>"
         '<ul class="anchors">' + "".join(row(line) for line in agreeing) + "</ul>"
@@ -565,7 +565,7 @@ def _day_list(days: tuple[str, ...]) -> str:
 
 
 def _changes_html(family: Any) -> str:
-    """Where the faults are, by day: the stated balances at which the difference
+    """Where the faults are, by day: the known balances at which the difference
     from the rows changes, which are the places a movement is missing or surplus.
 
     Dates and counts only, never a figure, so it reads the same masked or not.
@@ -1290,30 +1290,31 @@ def _family_html(family: Any, ref: str = "") -> str:
     if family is None:
         return ""
     body = (
-        "<h3>The whole account's stated balances</h3>"
-        '<p class="muted">A family balance is one stated by a source that cannot see '
-        "this account's Spaces (the certified statement, the export, the aggregator), so "
-        "it is the balance of the main account and every Space together and is checked "
-        "against the rows of all of them, where a transfer between them cancels.</p>"
-        '<p class="muted">This account\'s own balance is taken as that figure less what '
+        "<h3>The whole account's known balances</h3>"
+        '<p class="muted">A whole-account known balance is one stated by a source that '
+        "cannot see this account's Spaces (the certified statement, the export, the "
+        "aggregator), so it is the balance of the main account and every Space together "
+        "and is checked against the rows of all of them, where a transfer between them "
+        "cancels.</p>"
+        '<p class="muted">This account\'s own balance is taken as that known balance less what '
         "each Space's rows sum to, which assumes every Space's rows start from nil: its "
         "history is held from its first row.</p>"
     )
     if family.withheld:
         return body + f'<p class="warn">Not walked: {_esc(family.withheld)}.</p>'
-    # With the opened anchor every stated balance is tested, so none is "later".
+    # With the opened anchor every known balance is tested, so none is "later".
     which = "Ones" if family.nil_day else "Later ones"
     body += (
         '<div class="scroll"><table>'
         + _count("Spaces", ", ".join(family.spaces))
         + _count("Stated by", ", ".join(family.sources))
-        + _count("Whole-account balances stated", family.anchors)
+        + _count("Whole-account known balances", family.anchors)
         + _count(f"{which} the rows reproduce", family.agreeing)
         + _count(f"{which} the rows do not reproduce", family.differing)
         + (
             _count("Opened, with a nil balance at the end of", family.nil_day)
             if family.nil_day
-            else _count("Earliest, which defines the opening", family.defining_day)
+            else _count("Earliest, from which the opening is worked out", family.defining_day)
         )
         + "</table></div>"
     )
@@ -1367,21 +1368,21 @@ def _family_html(family: Any, ref: str = "") -> str:
         return body
     if not family.differing:
         return body + (
-            '<p><span class="pill pill-ok">agrees</span> The rows of the account and its '
-            f"Spaces reproduce every {'' if family.nil_day else 'later '}whole-account "
-            "balance stated.</p>"
+            '<p><span class="pill pill-ok">in agreement</span> The rows of the account and '
+            f"its Spaces reproduce every {'' if family.nil_day else 'later '}whole-account "
+            "known balance.</p>"
         )
     pattern = (
-        "The difference is the same at every later balance, so one movement is "
+        "The difference is the same at every later known balance, so one movement is "
         "missing or surplus between those two days."
         if family.pattern == "constant"
-        else "The difference changes between later balances, so more than one "
+        else "The difference changes between later known balances, so more than one "
         "movement is missing or surplus."
     )
     body += (
-        '<p class="warn"><strong>The rows first stop reproducing the stated balance at the '
-        f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they last '
-        f'agreed at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
+        '<p class="warn"><strong>The rows first stop reproducing the known balance at the '
+        f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they were '
+        f'last in agreement at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
         f"</span>.</strong> {_esc(pattern)}</p>"
         + _changes_html(family)
         + (structure_summary_html(family.structure, ref) if family.structure and ref else "")
@@ -1392,7 +1393,7 @@ def _family_html(family: Any, ref: str = "") -> str:
         side = "lower" if line.difference_direction == "out" else "higher"
         body += (
             f'<li><p><span class="pill pill-bad">differs</span> at the end of '
-            f'<span class="mono nowrap">{_esc(line.day)}</span>: the stated balance is '
+            f'<span class="mono nowrap">{_esc(line.day)}</span>: the known balance is '
             f'{side} than the rows predict by '
             f'<span class="mono nowrap">{_esc(line.difference)}</span></p>'
             f'<p class="muted">{_esc(", ".join(line.sources))}</p></li>'
@@ -1428,7 +1429,7 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         '<p><label>Balance at the end of that day, in pounds and pence<br>'
         f'<span class="muted">{way_round}</span><br>'
         '<input name="amount" inputmode="decimal" autocomplete="off" required>'
-        "</label></p>" + submit_button("Save stated balance") + "</form>"
+        "</label></p>" + submit_button("Save known balance") + "</form>"
     )
     return _disclosure(
         "State a balance",
@@ -1452,14 +1453,14 @@ def _remove_forms(view: Any, ref: str, month: str) -> str:
         '<form method="post" action="/ledger-anchor-remove">'
         + hidden
         + f'<input type="hidden" name="day" value="{_esc(day)}">'
-        + submit_button(f"Remove the stated balance for the end of {day}", secondary=True)
+        + submit_button(f"Remove the known balance for the end of {day}", secondary=True)
         + "</form>"
         for day in view.opening.stated_days
     )
 
 
 def _removed_balances_html(view: Any, ref: str, month: str, unmasked: bool) -> str:
-    """The stated balances removed from the account, so one removed by mistake can be stated again.
+    """The known balances removed from the account, so one removed by mistake can be stated again.
 
     The dates and the times of removal are always shown. The figure, and the form that states it
     again, appear only on the values view: the masked page is reachable by address.
@@ -1485,7 +1486,7 @@ def _removed_balances_html(view: Any, ref: str, month: str, unmasked: bool) -> s
                 + "</form>"
             )
         items += (
-            f'<li>The stated balance for the end of <span class="mono nowrap">'
+            f'<li>The known balance for the end of <span class="mono nowrap">'
             f"{_esc(item.day)}</span> was removed at {_esc(item.removed_at)}{figure}.{again}</li>"
         )
     reveal = (
@@ -1493,7 +1494,7 @@ def _removed_balances_html(view: Any, ref: str, month: str, unmasked: bool) -> s
         if unmasked
         else '<p class="muted">Show values to read a removed balance back and state it again.</p>'
     )
-    return _disclosure(f"Removed stated balances ({len(removed)})", f"{reveal}<ul>{items}</ul>")
+    return _disclosure(f"Removed known balances ({len(removed)})", f"{reveal}<ul>{items}</ul>")
 
 
 def _own_first_difference(anchors: tuple[Any, ...]) -> str:
@@ -1507,31 +1508,33 @@ def _own_first_difference(anchors: tuple[Any, ...]) -> str:
                 else f"It is a {_esc(line.basis)} balance"
             )
             walk = {
-                "agrees": "the whole-account walk agrees at that balance from the same source, "
+                "agrees": "the whole-account walk is in agreement at that balance from the same "
+                "source, "
                 "so the difference arises in the step from the whole account to this one's "
                 "own (the Spaces' rows taken off)",
                 "differs": "the whole-account walk differs at that same balance from the same "
                 "source, so the cause is the one explained there",
-                "": "the whole-account walk does not hold that balance, so it is tested "
-                "against this account's rows alone",
+                "": "the whole-account walk does not include that known balance, so it is "
+                "tested against this account's rows alone",
             }[line.walk]
             return (
-                '<p class="warn">The account\'s own anchors first stop matching its rows at the '
-                f'end of <span class="mono nowrap">{_esc(line.day)}</span>; they last agreed at '
-                f'the end of <span class="mono nowrap">{_esc(anchors[at - 1].day)}</span>.</p>'
+                '<p class="warn">The rows first stop being in agreement with the account\'s own '
+                f'known balances at the end of <span class="mono nowrap">{_esc(line.day)}</span>; '
+                'they were last in agreement at the end of '
+                f'<span class="mono nowrap">{_esc(anchors[at - 1].day)}</span>.</p>'
                 f"<p>{stated}, and {walk}.</p>"
             )
     return ""
 
 
 def _meaning_html(meanings: tuple[Any, ...]) -> str:
-    """For each source blind to the Spaces, what its own rows say its stated
+    """For each source blind to the Spaces, what its own rows say its known
     balance means, in counts a person can check."""
     if not meanings:
         return ""
     percent = round(READING_THRESHOLD * 100)
     body = (
-        "<h3>What each source's stated balance means</h3>"
+        "<h3>What each source's known balance means</h3>"
         '<p class="muted">A source that cannot see this account\'s Spaces states a balance '
         "that is either the whole account's (it moves with every payment it lists, "
         "including those from a Space) or the main account's own (it skips those and "
@@ -1631,9 +1634,8 @@ def _held_html(agreement: Any, *, boxed: bool) -> str:
 def _verdict_text(own: Any, protection: Any) -> str:
     """The standing sentence, ending in the protection in the page's own words.
 
-    `agreement.standing_line` says "protected through nowhere" of an account nothing protects,
-    which reads as a place; here the account is "not protected", and a broken protection says so
-    instead of claiming a date it no longer holds.
+    `agreement.standing_line` says "not protected" of an account nothing protects; here a
+    broken protection says so instead of claiming a date it no longer holds.
     """
     if own.state == NONE:
         return standing_line(own, None)
@@ -1731,10 +1733,10 @@ def _protect_html(view: Any) -> str:
     state = protection.state
     if state == "intact":
         detail = (
-            f"<p>The span runs from {_esc(protection.span_start.isoformat())} to "
+            f"<p>The protected period runs from {_esc(protection.span_start.isoformat())} to "
             f"{_esc(protection.through.isoformat())}. It is an alarm on change and never a "
             "freeze: a rebuild or an import still does what the rules say, and says here if "
-            "that changed anything inside the span.</p>"
+            "that changed anything inside the protected period.</p>"
         )
         if protection.healed_on:
             detail += (
@@ -1755,18 +1757,19 @@ def _protect_html(view: Any) -> str:
     elif state == "broken":
         said = "".join(f"<li>{_esc(line)}</li>" for line in protection.changes)
         body += (
-            '<p class="bad"><strong>The protection is broken: the protected span, through '
+            '<p class="bad"><strong>The protection is broken: the protected period, through '
             f"{_esc(protection.through.isoformat())}, has changed since "
             f"{_esc(protection.pressed_on.isoformat())}.</strong></p>"
             f'<ul class="plain">{said}</ul>'
             '<p class="muted">Nothing was changed back or updated: the protection stays broken '
-            "until a later rebuild restores the span, or you accept the new state.</p>"
+            "until a later rebuild restores the protected period, or you accept the new "
+            "state.</p>"
             + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
             + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
         )
     if protection.earlier_said:
         body += (
-            '<p class="warn"><strong>A fault in the data before the protected span, not a '
+            '<p class="warn"><strong>A fault in the data before the protected period, not a '
             f"change to it:</strong> {_esc(protection.earlier_said)}</p>"
         )
     offer = protection.offer
@@ -1802,11 +1805,11 @@ def _opening_gist(opening: Any) -> str:
     family = opening.family
     if not agree and not differ and family is not None and family.anchors:
         agree, differ = family.agreeing, family.differing
-    return f"{agree:,} agree, {'none' if not differ else f'{differ:,}'} differ"
+    return f"{agree:,} in agreement, {'none' if not differ else f'{differ:,}'} differ"
 
 
 def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
-    """The "Opening balance and anchors" section, and the forms that edit it.
+    """The "Known balances and the opening" section, and the forms that edit it.
 
     Folded away, since an account in agreement has no use for it, and open where the account is
     held back, since the explanation of the difference is in it and the box above links here.
@@ -1819,7 +1822,7 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
         body += (
             '<p class="warn"><strong>No opening balance: the figures on this page '
             "start from zero.</strong> That is how they are counted, and it is not "
-            "a claim that the account opened empty. No balance has been stated for "
+            "a claim that the account opened empty. No known balance has been stated for "
             "it, and neither the bank's records nor a held statement supplies one.</p>"
         )
     else:
@@ -1838,24 +1841,25 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
                 + (
                     "The account opened with nothing, so no row has to be taken on trust."
                     if opening.anchors and opening.anchors[0].basis == "opened"
-                    else "It is the earliest anchor's balance less "
-                    "the rows dated on or before that anchor."
+                    else "It is the earliest known balance less "
+                    "the rows dated on or before that day."
                 )
                 + "</p>"
             )
             if opening.single_anchor and not opening.balance_only:
                 body += (
-                    '<p class="warn">An opening derived from a single anchor absorbs every '
-                    "missing or surplus row before that anchor into the opening figure, and "
-                    "nothing here can tell. A second anchor turns it into a test.</p>"
+                    '<p class="warn">An opening worked out from a single known balance absorbs '
+                    "every missing or surplus row before that day into the opening figure, "
+                    "and nothing here can tell. A second known balance turns it into a "
+                    "test.</p>"
                 )
             differing = sum(1 for line in opening.anchors if line.verdict == "differs")
             if differing:
                 body += (
-                    f'<p class="warn"><strong>{_plural(differing, "later anchor")} '
+                    f'<p class="warn"><strong>{_plural(differing, "later known balance")} '
                     f"{agree(differing, 'differs')}</strong> "
                     "from what the rows predict: rows are missing, duplicated, or "
-                    "mis-dated between the anchors.</p>"
+                    "mis-dated between the known balances.</p>"
                 )
                 body += _own_first_difference(opening.anchors)
                 if opening.own_structure:
@@ -1872,7 +1876,7 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
                 differing = sum(1 for line in opening.anchors if line.verdict == "differs")
                 if differing:
                     body += (
-                        f'<p class="warn"><strong>{_plural(differing, "balance")} '
+                        f'<p class="warn"><strong>{_plural(differing, "known balance")} '
                         f"{agree(differing, 'differs')}</strong> "
                         "from what the rows predict: rows are missing, duplicated, or "
                         "mis-dated.</p>"
@@ -1916,11 +1920,11 @@ def _unitemised_html(view: Any) -> str:
     if opening is None or not opening.balance_only:
         return ""
     body = (
-        '<p class="muted">This account is tracked by its stated balances. Between two '
+        '<p class="muted">This account is tracked by its known balances. Between two '
         "consecutive ones the balance moved by the difference, less any rows dated "
         "between them, typed or otherwise; what is left is shown here as one change "
         "dated at the later balance. Where the rows explain the whole difference "
-        "there is no change. They are worked out from the stated balances each time "
+        "there is no change. They are worked out from the known balances each time "
         "and never stored, so removing or restating a balance changes them.</p>"
     )
     if not view.unitemised:
@@ -1930,9 +1934,9 @@ def _unitemised_html(view: Any) -> str:
             body
             + "<p>None: "
             + (
-                "the rows between the stated balances explain every difference."
+                "the rows between the known balances explain every difference."
                 if stated >= 2
-                else "it takes two stated balances for there to be a difference."
+                else "it takes two known balances for there to be a difference."
             )
             + "</p>",
         )
@@ -1942,7 +1946,7 @@ def _unitemised_html(view: Any) -> str:
         f'<span class="mono nowrap">'
         f"{_esc(_signed(line.direction, line.direction, line.amount))}</span></div>"
         + (
-            f'<p class="muted">since the balance stated for the end of {_esc(line.since)}</p>'
+            f'<p class="muted">since the known balance for the end of {_esc(line.since)}</p>'
             if line.since
             else ""
         )
@@ -2226,7 +2230,7 @@ def _name(view: Any) -> str:
 def _danger_zone(view: Any, *, archive_wired: bool) -> str:
     """The controls that remove or retire something, in one bordered place at the foot.
 
-    A review of the page found two full-width "Remove the stated balance" buttons in the middle
+    A review of the page found two full-width "Remove the known balance" buttons in the middle
     of it, a thumb's scroll from the transactions. Each control here still asks for
     confirmation before it acts.
     """
@@ -2243,7 +2247,7 @@ def _danger_zone(view: Any, *, archive_wired: bool) -> str:
     if not (removals or archive):
         return ""
     return _disclosure(
-        "Danger zone: remove a stated balance, or archive this account",
+        "Danger zone: remove a known balance, or archive this account",
         removals + archive,
         css="ledger-danger",
     )
@@ -2285,7 +2289,7 @@ def _statement_cost() -> str:
     return (
         f'<p class="muted">This page costs {QUERIES_PER_PAGE} statements however '
         f"many rows the account holds, plus {ANCHOR_QUERIES} to look for opening "
-        "balance anchors and a few more for each held statement or bank record "
+        "known balances and a few more for each held statement or bank record "
         "that has not been read yet. A main account with Spaces adds "
         f"{FAMILY_QUERIES} and one per Space to check the whole account's balances. "
         f"An account the bank's own feed fills adds {FEED_TIME_QUERIES} more to read the "
@@ -2522,7 +2526,7 @@ class LedgerPages(AnswerPages):
             month,
             unmasked=False,
             notice=self.answer_notice(
-                f"Saved: a stated balance for the end of {day}. Nothing else changed.",
+                f"Saved: a known balance for the end of {day}. Nothing else changed.",
                 ref,
                 before,
             ),
@@ -2551,10 +2555,10 @@ class LedgerPages(AnswerPages):
                 "/ledger-anchor-remove",
                 ref,
                 month,
-                f"Remove the stated balance for the end of {asked}, stated by you? It stops "
+                f"Remove the known balance for the end of {asked}, stated by you? It stops "
                 "counting at once. The figure is kept in the record of removed balances, "
                 "readable on the values view, so it can be stated again.",
-                "Remove the stated balance",
+                "Remove the known balance",
                 f'<input type="hidden" name="day" value="{_esc(asked)}">',
             )
             return
@@ -2578,7 +2582,7 @@ class LedgerPages(AnswerPages):
         if not removed:
             self._anchor_refusal(
                 404,
-                "No such stated balance",
+                "No such known balance",
                 f"No balance was stated for the end of {day}, so nothing was removed.",
                 ref=ref,
             )
@@ -2588,7 +2592,7 @@ class LedgerPages(AnswerPages):
             month,
             unmasked=False,
             notice=self.answer_notice(
-                f"Removed: the stated balance for the end of {day}.", ref, before
+                f"Removed: the known balance for the end of {day}.", ref, before
             ),
             no_store=True,
         )
@@ -2722,10 +2726,10 @@ class LedgerPages(AnswerPages):
             hook_name="protect_accept",
             refused_title="Change not accepted",
             refused_lead="Nothing was accepted.",
-            done="Accepted: the protected span is now as it stands, and the acceptance is "
+            done="Accepted: the protected period is now as it stands, and the acceptance is "
             "recorded beside the original.",
             question=(
-                "Accept the change and protect again? The protection will describe the span as "
+                "Accept the change and protect again? The protection will describe the period as "
                 "it is now. The original and this acceptance both stay in its history."
             ),
             label="Accept the change and protect again",

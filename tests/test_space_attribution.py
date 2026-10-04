@@ -1013,7 +1013,7 @@ class TestWhatTheOperatorIsTold:
 
         assert isinstance(summary, ImportSummary)
         assert summary.folded == 1
-        assert "folded 1 main-account row(s) into their Space rows" in summary.describe()
+        assert "folded 1 main-account row into their Space rows" in summary.describe()
         assert home.counted(BILLS) == 1
 
     def test_AnImportWithNothingToFold_SaysNothingAboutIt(self, store, tmp_path):

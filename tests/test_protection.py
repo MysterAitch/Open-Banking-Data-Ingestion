@@ -207,7 +207,7 @@ class TestWhatABreakSays:
     def test_Span_WhenARowIsAddedInsideIt_SaysOneRowAddedAndItsDate(self, store):
         found = self.broken(store, lambda: add_r6(store))
 
-        assert found == ("1 row added to the span (dated 2026-03-07)",)
+        assert found == ("1 row added to the protected period (dated 2026-03-07)",)
 
     def test_Span_WhenARowIsWithdrawnFromIt_SaysOneRowGone(self, store):
         everyday(store)
@@ -358,7 +358,7 @@ class TestEarlierHistoryIsNotABreak:
         assert found.state == "intact", "the protected rows themselves are unchanged"
         assert found.earlier_fits is False
         assert found.earlier_said == (
-            "1 row dated before the protected span arrives at a different balance from the one "
+            "1 row dated before the protected period arrives at a different balance from the one "
             "it was verified from."
         )
         assert broken_protections(store) == []
@@ -448,7 +448,7 @@ class TestABrokenProtectionIsLoud:
 
         found = [f for f in findings if f.key.startswith("protection-broken:")]
         assert [f.key for f in found] == [f"protection-broken:{ACCOUNT}"]
-        assert "1 row added to the span (dated 2026-03-07)" in found[0].message
+        assert "1 row added to the protected period (dated 2026-03-07)" in found[0].message
 
     def test_Alert_WhenNothingInAProtectedSpanChanged_HasNoSuchFinding(
         self, tmp_path, monkeypatch

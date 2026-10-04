@@ -4020,7 +4020,7 @@ class Store:
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),
             "declared accounts": int(declared),
-            "stated balance anchors": int(stated),
+            "known balances stated by you": int(stated),
             "statement section assignments": int(sections),
             "typed transactions and withdrawals": int(typed),
         }

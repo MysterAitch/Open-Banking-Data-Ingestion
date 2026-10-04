@@ -163,10 +163,10 @@ class TestOneStatedAnchor:
         page = lab.get().text
 
         assert "end of 2026-03-10" in page
-        assert "stated by a person" in page
-        assert "defines the opening balance" in page
-        assert "absorbs every missing or surplus row before that anchor" in page
-        assert "A second anchor turns it into a test." in page
+        assert "stated by you" in page
+        assert "the opening balance is worked out from this" in page
+        assert "absorbs every missing or surplus row before that day" in page
+        assert "A second known balance turns it into a test." in page
         assert_no_secret(page)
 
     def test_Masked_ShowsTheDateTheOpeningAppliesButNotItsAmount(self, lab):
@@ -197,10 +197,10 @@ class TestTwoAnchors:
 
         page = lab.get().text
 
-        assert '<span class="pill pill-ok">agrees</span>' in page
-        assert "later anchor differs" not in page
-        assert "later anchors differ" not in page
-        assert "A second anchor turns it into a test." not in page
+        assert '<span class="pill pill-ok">in agreement</span>' in page
+        assert "later known balance differs" not in page
+        assert "later known balances differ" not in page
+        assert "A second known balance turns it into a test." not in page
         assert_no_secret(page)
 
     def test_Differing_SaysDiffersMaskedAndTheSizeOnlyWhenValuesAreShown(self, lab):
@@ -211,7 +211,7 @@ class TestTwoAnchors:
         shown = lab.show_values().text
 
         assert '<span class="pill pill-bad">differs</span>' in masked
-        assert "1 later anchor differs" in masked
+        assert "1 later known balance differs" in masked
         assert_no_secret(masked)
         assert "£489.89" in shown
         assert "£4,000.00" in shown
@@ -235,11 +235,11 @@ class TestALongRunOfAgreeingAnchorsFolds:
 
         page = lab.get().text
 
-        assert "5 later anchors agree with what the rows predict" in page
+        assert "5 later known balances are in agreement with what the rows predict" in page
         assert page.count('<details class="agreeing">') == 1
-        assert _outside_details(page).count('<span class="pill pill-ok">agrees</span>') == 0
-        assert page.count('<span class="pill pill-ok">agrees</span>') == 5
-        assert "defines the opening balance" in _outside_details(page)
+        assert _outside_details(page).count('<span class="pill pill-ok">in agreement</span>') == 0
+        assert page.count('<span class="pill pill-ok">in agreement</span>') == 5
+        assert "the opening balance is worked out from this" in _outside_details(page)
         assert_no_secret(page)
 
     def test_ThreeAgreeingLaterAnchors_AreListedPlainlyWithNoFold(self, lab):
@@ -250,7 +250,7 @@ class TestALongRunOfAgreeingAnchorsFolds:
         page = lab.get().text
 
         assert '<details class="agreeing">' not in page
-        assert page.count('<span class="pill pill-ok">agrees</span>') == 3
+        assert page.count('<span class="pill pill-ok">in agreement</span>') == 3
 
     def test_FourAgreeingLaterAnchors_FoldBecauseThreeIsTheMostShownPlainly(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
@@ -259,7 +259,7 @@ class TestALongRunOfAgreeingAnchorsFolds:
 
         page = lab.get().text
 
-        assert "4 later anchors agree with what the rows predict" in page
+        assert "4 later known balances are in agreement with what the rows predict" in page
 
     def test_ADifferingAnchorAmongManyAgreeing_StaysVisibleOutsideTheFold(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
@@ -270,9 +270,9 @@ class TestALongRunOfAgreeingAnchorsFolds:
         page = lab.get().text
         shown = lab.show_values().text
 
-        assert "5 later anchors agree with what the rows predict" in page
+        assert "5 later known balances are in agreement with what the rows predict" in page
         assert _outside_details(page).count('<span class="pill pill-bad">differs</span>') == 1
-        assert '<details class="agreeing">' in page and "1 later anchor differs" in page
+        assert '<details class="agreeing">' in page and "1 later known balance differs" in page
         assert "overdrawn or owed £489.89" in _outside_details(shown)
         assert_no_secret(page)
 
@@ -305,7 +305,7 @@ class TestOnlyShowValuesIsAPrimaryButton:
 
         # Archiving is consequential and done once in an account's life, so it
         # is outlined (`secondary`) and never competes with the page's action.
-        assert sorted(primary) == ["Save stated balance", "Show values"]
+        assert sorted(primary) == ["Save known balance", "Show values"]
         assert 'class="button secondary" type="submit"' in page
         assert "Archive this account</button>" in page
 
@@ -353,7 +353,7 @@ class TestStatingABalanceThroughThePage:
         assert response.status_code == 200
         assert lab.stated() == [Anchor(date(2026, 3, 10), 451789, STATED)]
         page = response.text
-        assert "Saved: a stated balance for the end of 2026-03-10." in page
+        assert "Saved: a known balance for the end of 2026-03-10." in page
         assert "VALUES ARE SHOWN" not in page
         assert "Opening balance, at the end of 2026-03-01" in page
         assert_no_secret(page, where="the save response")
@@ -427,7 +427,7 @@ class TestRemovingAStatedBalance:
 
         assert response.status_code == 200
         assert lab.stated() == []
-        assert "Removed: the stated balance for the end of 2026-03-10." in response.text
+        assert "Removed: the known balance for the end of 2026-03-10." in response.text
         assert "No opening balance: the figures on this page start from zero." in response.text
         assert_no_secret(response.text)
 
@@ -438,8 +438,8 @@ class TestRemovingAStatedBalance:
         page = lab.get().text
 
         assert page.count('action="/ledger-anchor-remove"') == 2
-        assert "Remove the stated balance for the end of 2026-03-10" in page
-        assert "Remove the stated balance for the end of 2026-03-20" in page
+        assert "Remove the known balance for the end of 2026-03-10" in page
+        assert "Remove the known balance for the end of 2026-03-20" in page
 
     def test_Remove_WhenNothingWasStatedForThatDate_SaysSoAndChangesNothing(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)

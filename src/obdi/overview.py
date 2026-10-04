@@ -136,7 +136,7 @@ _KINDS: dict[str, tuple[int, str]] = {
     ),
     "protection-broken": (
         NOW,
-        "Open the account's ledger to see what changed in the protected span, then fix the "
+        "Open the account's ledger to see what changed in the protected period, then fix the "
         "cause or accept the change.",
     ),
     "silent-feed": (
@@ -207,7 +207,7 @@ _KINDS: dict[str, tuple[int, str]] = {
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
     "known-balances-disagree": (
         SOON,
-        "Open the account's ledger and decide which source is right; remove a stated balance "
+        "Open the account's ledger and decide which source is right; remove a known balance "
         "that is wrong, or look at the statement.",
     ),
     "agreement-lapsed": (
@@ -229,7 +229,7 @@ ALERT_CONDITIONS = (
     "push build",
     "push applied",
     "shared identities",
-    "protected spans",
+    "protected periods",
     "consent expiry",
     "disk space",
     "emptied rebuild",
@@ -244,14 +244,14 @@ DERIVED_ALERT_CONDITIONS = (
     "stale feeds",
     "push build",
     "shared identities",
-    "protected spans",
+    "protected periods",
 )
 _ALERT_GUARDS = {
     "silent-feeds": "silent feeds",
     "push-build": "push build",
     "push-stale": "push applied",
     "shared-identity": "shared identities",
-    "protections": "protected spans",
+    "protections": "protected periods",
     "scheduler": "scheduler cycle",
 }
 
@@ -646,7 +646,7 @@ def standing_items_from(
                     kind="known-balances-disagree",
                     severity=_KINDS["known-balances-disagree"][0],
                     message=(
-                        f"{label_of(ref)}: known balances disagree with each other on "
+                        f"{label_of(ref)}: known balances do not match each other on "
                         f"{_plural(len(conflicts), 'day')}, the first {first.isoformat()} "
                         f"({' and '.join(conflicts[first])}). That is a conflict between "
                         "sources, not a fault in the rows."

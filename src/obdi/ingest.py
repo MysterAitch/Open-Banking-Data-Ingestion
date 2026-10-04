@@ -38,6 +38,7 @@ from .models import (
 )
 from .parsers.uk_banks import detect
 from .payment_links import stated_link_of
+from .plural import plural
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import category_resolver, fold_space_copies
@@ -82,21 +83,23 @@ class ImportSummary:
         if self.rows_offered is not None and self.rows_offered != self.parsed:
             skipped = self.rows_offered - self.parsed
             offered = (
-                f" of {self.rows_offered} row(s) in the file - {skipped} "
+                f" of {plural(self.rows_offered, 'row')} in the file - {skipped} "
                 "skipped, which is a fault unless you know why"
             )
         folded = (
-            f", folded {self.folded} main-account row(s) into their Space rows"
+            f", folded {plural(self.folded, 'main-account row')} into their Space rows"
             if self.folded
             else ""
         )
         same_money = (
-            f", folded {self.same_money_folded} feed row(s) as the same money a "
+            f", folded {plural(self.same_money_folded, 'feed row')} as the same money a "
             "statement itemises (withheld from the push)"
             if self.same_money_folded
             else ""
         )
-        absorbed = f", joined {self.absorbed} stored row(s) held twice" if self.absorbed else ""
+        absorbed = (
+            f", joined {plural(self.absorbed, 'stored row')} held twice" if self.absorbed else ""
+        )
         return (
             f"parsed {self.parsed}{offered}, new {self.inserted}, "
             f"matched {self.matched}, superseded {self.superseded}, "

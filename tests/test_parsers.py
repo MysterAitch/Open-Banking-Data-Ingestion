@@ -168,7 +168,7 @@ class TestSkippedRowsAreCounted:
             summary = import_file(store, path, account_id="monzo-personal")
 
             described = summary.describe()
-            assert "of 3 row(s)" in described
+            assert "of 3 rows" in described
             assert "1 skipped" in described
 
     def test_AnImportThatSkipsNothing_StaysQuietAboutIt(self, tmp_path):

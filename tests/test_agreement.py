@@ -150,7 +150,7 @@ class TestAnAccountWithKnownBalances:
 
         assert found.state == UNTESTED
         assert found.through is None
-        assert "defines the opening" in held_sentence(found)
+        assert "sets the opening balance" in held_sentence(found)
 
     def test_Agreement_WhenMovementWasNotRead_SaysSo(self, store):
         everyday(store)
@@ -169,7 +169,7 @@ class TestAnAccountWithKnownBalances:
 
         assert standing_line(found, None) == (
             "Known balances from 2026-03-05 to 2026-03-10; in agreement through 2026-03-10; "
-            "protected through nowhere."
+            "not protected."
         )
         assert standing_line(found, D(2026, 3, 10)).endswith("protected through 2026-03-10.")
 
@@ -198,7 +198,7 @@ class TestKnownBalancesThatDisagreeWithEachOther:
         assert found.through is None
         assert [c.day for c in found.conflicts] == [D(2026, 3, 5)]
         sentence = held_sentence(found)
-        assert "disagree on 2026-03-05" in sentence
+        assert "do not match on 2026-03-05" in sentence
         assert "not a fault in the rows" in sentence
         assert "halifax-statement-pdf" in sentence
 

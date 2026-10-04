@@ -241,7 +241,9 @@ class SpanChange:
         """One sentence per kind of change, in counts, dates, and account names."""
         lines = []
         if self.added:
-            lines.append(f"{_rows(len(self.added))} added to the span ({_dated(self.added)})")
+            lines.append(
+                f"{_rows(len(self.added))} added to the protected period ({_dated(self.added)})"
+            )
         if self.gone:
             lines.append(f"{_rows(len(self.gone))} gone from it ({_dated(self.gone)})")
         if self.resized:
@@ -396,7 +398,7 @@ def broken_protections(store: Store) -> list[Check]:
 def broken_sentence(check: Check) -> str:
     """The one sentence an alert or an Overview item says of a broken protection."""
     said = "; ".join(check.change.says()) or "its rows differ from those protected"
-    return f"{check.account}: a protected span has changed - {said}."
+    return f"{check.account}: a protected period has changed - {said}."
 
 
 def recheck(
@@ -491,7 +493,7 @@ def press(
         raise ProtectionRefused(str(refused)) from None
     if opening.balance_only:
         raise ProtectionRefused(
-            "an account tracked by its stated balances alone has no rows of its own to protect"
+            "an account tracked by its known balances alone has no rows of its own to protect"
         )
     if through not in tested_days(opening, standing):
         raise ProtectionRefused(
@@ -565,7 +567,7 @@ def accept(store: Store, ref: str, *, now: datetime | None = None) -> None:
     check = check_span(store, record)
     if check.intact:
         raise ProtectionRefused(
-            "nothing in the protected span has changed, so there is nothing to accept"
+            "nothing in the protected period has changed, so there is nothing to accept"
         )
     span = span_rows(
         store,
@@ -591,7 +593,7 @@ def accept(store: Store, ref: str, *, now: datetime | None = None) -> None:
         through=str(record["through"]),
         fingerprint=fingerprint,
         detail="; ".join(check.change.says())
-        + f" (the protected span was {str(record['fingerprint'])[:12]})",
+        + f" (the protected period was {str(record['fingerprint'])[:12]})",
     )
     store.connection.commit()
 
@@ -674,7 +676,7 @@ def protection_view(
     not_offered = ""
     allowed = () if standing is None else tested_days(opening, standing)
     if opening.balance_only:
-        not_offered = "an account tracked by its stated balances alone has no rows to protect"
+        not_offered = "an account tracked by its known balances alone has no rows to protect"
     elif standing is not None and standing.own.known_count == 0:
         not_offered = "there is no known balance to verify the account against"
     elif standing is None or not allowed:
@@ -695,13 +697,16 @@ def protection_view(
     else:
         offer = tuple(d for d in offer if d > through)
         if not offer and not not_offered:
-            not_offered = "the account is protected through its latest agreed known balance"
+            not_offered = "the account is protected through its latest known balance in agreement"
     start = date.fromisoformat(str(record["span_start"]))
     before = [t for t in rows if not t.status.is_history and t.value_date < start]
     fits, said = True, ""
     if opening.opening_minor is None:
         fits = False
-        said = "no opening can be derived now, so the rows before the span cannot be checked"
+        said = (
+            "no opening can be derived now, so the rows before the protected period "
+            "cannot be checked"
+        )
     else:
         arrives = running_balance(
             opening.opening_minor, rows, date.fromisoformat(str(record["opening_day"]))
@@ -709,11 +714,11 @@ def protection_view(
         if arrives != int(record["opening_minor"]):
             fits = False
             said = (
-                f"{_rows(len(before))} dated before the protected span "
+                f"{_rows(len(before))} dated before the protected period "
                 f"{'arrives' if len(before) == 1 else 'arrive'} at a different balance from "
                 "the one it was verified from."
                 if before
-                else "The balance the protected span starts from is no longer the one it was "
+                else "The balance the protected period starts from is no longer the one it was "
                 "verified from."
             )
     return ProtectionView(

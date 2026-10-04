@@ -787,7 +787,7 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "does not agree: 1 unexplained row needs a look"
+        assert outline["verdict"] == "the sources do not match: 1 unexplained row needs a look"
         assert outline["warn"] is True
         sides = outline["sides"]
         assert [side["heading"] for side in sides] == [
@@ -862,7 +862,7 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "does not agree: 2 unexplained rows need a look"
+        assert outline["verdict"] == "the sources do not match: 2 unexplained rows need a look"
         assert outline["warn"] is True
 
     def test_Outline_WithoutSiblingScope_KeepsTheVerdictAndSaysWhatToCompare(self):
@@ -877,7 +877,7 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "disagree - nothing here says why"
+        assert outline["verdict"] == "the sources do not match - nothing here says why"
         assert outline["warn"] is True
         note = str(outline["note"])
         assert "cannot tell expected differences from real ones" in note
@@ -887,7 +887,7 @@ class TestAgreementOutline:
     def test_Outline_WhenAgreeing_CarriesNoNote(self):
         outline = self._found([]).outline()
 
-        assert outline["verdict"] == "agree"
+        assert outline["verdict"] == "the sources match"
         assert outline.get("note", "") == ""
 
     def test_Outline_PlainAgreement_CarriesNoSides(self):
@@ -895,7 +895,7 @@ class TestAgreementOutline:
 
         outline = agreement.outline()
 
-        assert outline["verdict"] == "agree"
+        assert outline["verdict"] == "the sources match"
         assert outline["warn"] is False
         assert outline["sides"] == []
 

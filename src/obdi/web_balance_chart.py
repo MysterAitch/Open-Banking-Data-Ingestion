@@ -194,7 +194,7 @@ def _href(ref: str, start: date | None = None, end: date | None = None) -> str:
 def _levels_html(structure: Any) -> str:
     longest = ", ".join(
         f"{_mono(level.first_day)} until {_mono(level.until)} "
-        f"({_plural(level.balances, 'stated balance')})"
+        f"({_plural(level.balances, 'known balance')})"
         for level in structure.longest_levels
     )
     return (
@@ -224,22 +224,22 @@ def _structure_html(structure: Any) -> str:
     """One series' structure as sentences: counts, dates, class letters, no figure."""
     balances = structure.balances
     if not balances:
-        return "<p>No stated balance is held to judge.</p>"
+        return "<p>No known balance is held to judge.</p>"
     if not structure.steps:
         return (
             "<p>The difference is nil at "
             + (
-                "the only stated balance"
+                "the only known balance"
                 if balances == 1
-                else f"all {_plural(balances, 'stated balance')}"
+                else f"all {_plural(balances, 'known balance')}"
             )
-            + f": one level, and {_per_cent(1.0)} of the stated "
+            + f": one level, and {_per_cent(1.0)} of the known "
             f"{'balance moves' if balances == 1 else 'balances move'} from the one before as "
             "the rows do.</p>"
         )
     steps = len(structure.steps)
     body = (
-        f"<p>{structure.agreeing} of the {_plural(balances, 'stated balance')} "
+        f"<p>{structure.agreeing} of the {_plural(balances, 'known balance')} "
         f"({_per_cent(structure.agreeing / balances)}) "
         f"{agree(structure.agreeing, 'moves')} from the one before by exactly "
         f"what the rows move by; the other {steps} {'is' if steps == 1 else 'are'} the "
@@ -490,7 +490,7 @@ def _levels_band(structure: FaultStructure, plot: _Plot, y: float) -> str:
                 'stroke-opacity=".75" stroke-width=".7"/>'
             )
         parts.append(
-            f"<g><title>Level {index + 1}: stated balances from {level.first_day} to "
+            f"<g><title>Level {index + 1}: known balances from {level.first_day} to "
             f"{level.last_day} ({level.balances}); the difference does not change across "
             "them.</title>"
             f'<rect class="level" x="{left:.1f}" y="{y:.1f}" '
@@ -583,7 +583,7 @@ def _range_summary(changes: Sequence[Change], start: date, end: date) -> str:
     if not changes:
         return (
             f"<p><strong>No change falls in this range</strong>, {_mono(start)} to "
-            f"{_mono(end)}: the stated balances agree with the rows throughout it.</p>"
+            f"{_mono(end)}: the rows are in agreement with the known balances throughout it.</p>"
         )
     counts = count_by_kind(changes)
     held = [_kind_phrase(kind, counts[kind]) for kind in KINDS if counts[kind]]
@@ -930,7 +930,7 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
     desc = (
         f"From {scale.start} to {scale.end}. "
         + " ".join(
-            f"{line.source}: stated balances from {_pounds(min(line.stated))} to "
+            f"{line.source}: known balances from {_pounds(min(line.stated))} to "
             f"{_pounds(max(line.stated))}."
             for line in chart.lines
             if line.stated
@@ -1048,7 +1048,7 @@ def _heading(chart: Any) -> str:
     """The scope as a title, short enough to leave the chart on the first screen."""
     if chart.scope == WHOLE:
         return "<h2>The whole account: the main account and its Spaces together</h2>"
-    return "<h2>This account's own stated balances</h2>"
+    return "<h2>This account's own known balances</h2>"
 
 
 def _scope_note(chart: Any) -> str:

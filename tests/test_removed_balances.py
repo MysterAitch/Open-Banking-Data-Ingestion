@@ -86,7 +86,7 @@ class TestThePressAsksFirst:
     def test_Remove_Question_NamesTheDateAndTheSourceButNeverTheFigure(self, served):
         asked = press_remove(served, confirmed=False)
 
-        assert f"the stated balance for the end of {DAY}, stated by you" in asked.text
+        assert f"the known balance for the end of {DAY}, stated by you" in asked.text
         for leak in (FIGURE, FORMATTED, str(MINOR)):
             assert leak not in asked.text
 
@@ -101,7 +101,7 @@ class TestThePressAsksFirst:
 
         assert done.status_code == 200
         assert stated_days(db) == []
-        assert f"Removed: the stated balance for the end of {DAY}." in done.text
+        assert f"Removed: the known balance for the end of {DAY}." in done.text
 
     def test_Remove_WhenTheDateIsMalformed_RefusesWithoutAsking(self, served, db):
         refused = press_remove(served, confirmed=False, day="not-a-day")
@@ -140,8 +140,8 @@ class TestTheRemovalIsKept:
             f"{served}/ledger", params={"ref": ACCOUNT, "month": "2026-03"}, timeout=60
         ).text
 
-        assert "Removed stated balances" in page
-        assert "The stated balance for the end of <span" in page
+        assert "Removed known balances" in page
+        assert "The known balance for the end of <span" in page
         assert "Show values to read a removed balance back" in page
         for leak in (FIGURE, FORMATTED, str(MINOR)):
             assert leak not in page
@@ -161,18 +161,18 @@ class TestTheRemovalIsKept:
         page = post(served, "/ledger", ref=ACCOUNT, month="2026-03").text
 
         assert stated_days(db) == [DAY]
-        assert "Removed stated balances" not in page
+        assert "Removed known balances" not in page
 
     def test_Ledger_WhenNothingWasEverRemoved_HasNoRemovedSection(self, served):
         page = httpx.get(
             f"{served}/ledger", params={"ref": ACCOUNT, "month": "2026-03"}, timeout=60
         ).text
 
-        assert "Removed stated balances" not in page
+        assert "Removed known balances" not in page
 
     def test_Ledger_OfAnotherAccount_DoesNotListThisAccountsRemoval(self, served):
         press_remove(served, confirmed=True)
 
         page = post(served, "/ledger", ref="other-acct", month="2026-03").text
 
-        assert "Removed stated balances" not in page
+        assert "Removed known balances" not in page

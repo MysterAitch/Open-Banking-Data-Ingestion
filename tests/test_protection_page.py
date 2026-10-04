@@ -195,7 +195,7 @@ class TestABreakOnThePage:
         page = self.broken(lab)
 
         assert "The protection is broken" in page
-        assert "1 row added to the span (dated 2026-03-07)" in page
+        assert "1 row added to the protected period (dated 2026-03-07)" in page
         assert "Accept the change and protect again" in page
         assert "the protection through 2026-03-20 is broken" in page, "the verdict says so too"
         assert "; protected through 2026-03-20" not in page, "a broken span is not claimed"

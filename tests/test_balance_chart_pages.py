@@ -290,7 +290,7 @@ class TestTheOwnAccountView:
 
         page = masked(own)
 
-        assert "This account's own stated balances" in page
+        assert "This account's own known balances" in page
         assert "main account and its Spaces together" not in page
 
 

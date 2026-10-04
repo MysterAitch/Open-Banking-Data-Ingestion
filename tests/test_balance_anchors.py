@@ -452,11 +452,11 @@ class TestStatingAndRemoving:
 
     def test_StatedAnchors_AreCountedAsIrreplaceableWork(self, store):
         everyday(store)
-        assert store.irreplaceable()["stated balance anchors"] == 0
+        assert store.irreplaceable()["known balances stated by you"] == 0
 
         record_stated_anchor(store, ACCOUNT, "2026-03-10", "1000.00")
 
-        assert store.irreplaceable()["stated balance anchors"] == 1
+        assert store.irreplaceable()["known balances stated by you"] == 1
 
 
 class TestStatedAnchorsOutliveTheirAccountsDerivedLayer:

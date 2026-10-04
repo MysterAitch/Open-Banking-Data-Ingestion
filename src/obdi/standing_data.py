@@ -210,7 +210,7 @@ def standing_lines(item: AccountStanding) -> tuple[str, ...]:
     own = item.standing.own
     lines = [standing_line(own, item.protected_through)]
     if item.protection_broken:
-        lines.append("The protection is broken: its span has changed.")
+        lines.append("The protection is broken: its protected period has changed.")
     held = held_sentence(own)
     if held:
         lines.append(held)

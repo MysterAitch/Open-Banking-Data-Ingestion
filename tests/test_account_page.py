@@ -136,7 +136,7 @@ class TestTheVerdictAndTheBox:
         assert "in agreement through 2026-09-30; not protected." in page
         assert "protected through nowhere" not in page
         assert '<details id="opening">' in page
-        assert "(35 agree, none differ)" in page, "36 month ends, the first defines the opening"
+        assert "(35 in agreement, none differ)" in page, "36 month ends, the first sets the opening"
 
     def test_AccountWithNoKnownBalance_SaysSoAndOffersNoProtection(self, base):
         page = get(base, UNKNOWN)
@@ -304,8 +304,8 @@ class TestTheDangerZone:
         page = get(base)
 
         zone = at(page, '<details class="ledger-danger">')
-        removals = [m.start() for m in re.finditer("Remove the stated balance for", page)]
-        assert len(removals) == 36, "one for each balance stated, a month end for 36 months"
+        removals = [m.start() for m in re.finditer("Remove the known balance for", page)]
+        assert len(removals) == 36, "one for each known balance, a month end for 36 months"
         assert all(position > zone for position in removals)
         assert page.count('class="ledger-danger"') == 1
         assert at(page, "Archive this account") > zone
@@ -326,10 +326,10 @@ class TestTheDangerZone:
 
         assert response.status_code == 200
         assert "Are you sure?" in response.text
-        assert "Remove the stated balance for the end of 2025-04-30" in response.text
+        assert "Remove the known balance for the end of 2025-04-30" in response.text
 
     def test_AccountWithNoStatedBalance_HasNoRemovalButton(self, base):
-        assert "Remove the stated balance for" not in get(base, UNKNOWN)
+        assert "Remove the known balance for" not in get(base, UNKNOWN)
 
 
 class TestTheRailOnARow:

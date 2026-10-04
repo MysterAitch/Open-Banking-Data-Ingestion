@@ -3,7 +3,7 @@
 A reviewer drove every flow on invented data and each ended in a dead end: after an import, a
 statement read in, an edit, a stated or removed balance, or a protection, the page offered only
 "Back to overview" and the rows the flow had just changed were not reachable from the answer.
-Removing a balance twice said "No such stated balance" with the Overview as the only way on, and
+Removing a balance twice said "No such known balance" with the Overview as the only way on, and
 reloading the answer to an import said "Upload expired" with a bare token in quotes, which does
 not tell a person who has just imported whether the first press landed.
 """
@@ -212,7 +212,7 @@ class TestStatedBalancesEndOnTheLedger:
 
         assert first.status_code == 200
         assert second.status_code == 404
-        assert "No such stated balance" in second.text
+        assert "No such known balance" in second.text
         assert LEDGER_OF_EVERYDAY in second.text
 
     def test_RemoveABalance_SaysTheAgreementNow(self, served):

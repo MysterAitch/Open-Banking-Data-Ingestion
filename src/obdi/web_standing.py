@@ -71,10 +71,10 @@ def protection_html(protection: Any, ref: str, month: str) -> str:
     state = protection.state
     if state == "intact":
         detail = (
-            f"<p>The span runs from {_esc(protection.span_start.isoformat())} to "
+            f"<p>The protected period runs from {_esc(protection.span_start.isoformat())} to "
             f"{_esc(protection.through.isoformat())}. It is an alarm on change and never a "
             "freeze: a rebuild or an import still does what the rules say, and says here if "
-            "that changed anything inside the span.</p>"
+            "that changed anything inside the protected period.</p>"
         )
         if protection.healed_on:
             detail += (
@@ -99,18 +99,19 @@ def protection_html(protection: Any, ref: str, month: str) -> str:
     elif state == "broken":
         said = "".join(f"<li>{_esc(line)}</li>" for line in protection.changes)
         body += (
-            '<p class="bad"><strong>The protection is broken: the protected span, through '
+            '<p class="bad"><strong>The protection is broken: the protected period, through '
             f"{_esc(protection.through.isoformat())}, has changed since "
             f"{_esc(protection.pressed_on.isoformat())}.</strong></p>"
             f'<ul class="plain">{said}</ul>'
             '<p class="muted">Nothing was changed back or updated: the protection stays broken '
-            "until a later rebuild restores the span, or you accept the new state.</p>"
+            "until a later rebuild restores the protected period, or you accept the new "
+            "state.</p>"
             + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
             + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
         )
     if protection.earlier_said:
         body += (
-            '<p class="warn"><strong>A fault in the data before the protected span, not a '
+            '<p class="warn"><strong>A fault in the data before the protected period, not a '
             f"change to it:</strong> {_esc(protection.earlier_said)}</p>"
         )
     offer = protection.offer

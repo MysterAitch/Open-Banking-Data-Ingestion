@@ -296,7 +296,7 @@ class TestTheImportSummarySaysSo:
 
         assert sum(s.same_money_folded for s in summaries) == 2
         described = " ".join(s.describe() for s in summaries)
-        assert "feed row(s) as the same money a statement itemises" in described
+        assert "feed row as the same money a statement itemises" in described
         assert "(withheld from the push)" in described
         assert folded_descriptions(store) == ["Combined Fees 1", "Combined Fees 2"]
 

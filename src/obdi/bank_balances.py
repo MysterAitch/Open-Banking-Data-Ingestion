@@ -529,7 +529,7 @@ def describe(report: BankReport) -> tuple[str, ...]:
         held = f"{_plural(report.landed, 'balance')} the bank stated "
         held += "is held" if report.landed == 1 else "are held"
         if not report.judged:
-            held += ", and none is used as an anchor"
+            held += ", and none is used as a known balance"
         elif report.landed > report.judged:
             held += (
                 f". The newest {report.judged} are tested against the rows as they stood at "
@@ -619,8 +619,8 @@ def say(
         if bank_difference == 0:
             return ""
         return (
-            f"{stated}, differs from the rows although every other balance stated agrees "
-            "with them."
+            f"{stated}, differs from the rows although the rows are in agreement with "
+            "every other known balance."
         )
     named = ", ".join(sorted(differing))
     count = (
@@ -630,7 +630,8 @@ def say(
     )
     if bank_difference == 0:
         return (
-            f"{stated}, agrees with the rows, so the {_plural(count, 'difference')} against "
+            f"{stated}, is in agreement with the rows, so the "
+            f"{_plural(count, 'difference')} against "
             f"{named} {'is' if count == 1 else 'are'} {named}'s and not the rows'."
         )
     if all(value == bank_difference for value in differing.values()):

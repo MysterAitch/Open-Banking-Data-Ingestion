@@ -133,7 +133,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
 
         assert "starling vs starling-csv" in page
         assert "transactions" in page
-        assert "does not agree" in page
+        assert "the sources do not match" in page
         assert "2026-01-01" in page
         assert "in starling ONLY" in page
         assert "confirmed internal-transfer leg" in page
@@ -162,7 +162,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
     def test_Page_FetchedWithTransposition_KeepsDatesAndSourcesAndNothingElse(self):
         page = _request(_report(_held()), "GET", "/agreements").text
 
-        assert "Dates disagree" in page
+        assert "Dates do not match" in page
         assert "dated 2026-03-02 by starling" in page
         assert "2026-02-03 by starling-csv" in page
         assert ACME not in page

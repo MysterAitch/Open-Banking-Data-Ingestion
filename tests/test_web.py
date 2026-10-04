@@ -3180,7 +3180,7 @@ class TestTheStandingAgreementReport:
         finally:
             httpd.shutdown()
 
-        assert "Cross-source agreement" in page
+        assert "Source comparison" in page
         assert "<h2>starling-personal</h2>" in page
         assert "<li>661 matched with starling-csv</li>" in page
         assert "Missing - another source has data" in page

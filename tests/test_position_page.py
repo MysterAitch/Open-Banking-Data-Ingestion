@@ -648,7 +648,7 @@ class TestTheLimitsAndTheAnswerAboutOlderStatements:
         assert (
             "Stating a balance for a date fixes the balance at that date, so importing older "
             "statements later does not make it wrong: the opening balance moves back in time "
-            "and is re-derived from the same stated figure." in page
+            "and is worked out again from the same known balance." in page
         )
 
 

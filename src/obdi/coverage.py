@@ -260,14 +260,14 @@ class Agreement:
         # reader to ignore the word.
         note = ""
         if self.agrees:
-            verdict, warn = "agree", False
+            verdict, warn = "the sources match", False
         elif not self.reconciled:
-            verdict, warn = "disagree - nothing here says why", True
+            verdict, warn = "the sources do not match - nothing here says why", True
             note = _UNRECONCILED_NOTE
         elif self.unexplained:
             count = len(self.unexplained)
             verdict = (
-                f"does not agree: {count} unexplained "
+                f"the sources do not match: {count} unexplained "
                 f"{'row needs' if count == 1 else 'rows need'} a look"
             )
             warn = True

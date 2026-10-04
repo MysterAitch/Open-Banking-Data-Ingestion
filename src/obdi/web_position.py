@@ -115,29 +115,30 @@ def _account_card(view: Any) -> str:
         )
     elif view.checks_agree:
         checks = (
-            f"{_plural(view.checks_agree, 'later check')} {agree(view.checks_agree, 'agrees')}"
+            f"{_plural(view.checks_agree, 'later check')} "
+            f"{'is' if view.checks_agree == 1 else 'are'} in agreement"
         )
     else:
-        checks = '<span class="muted">none: one balance stated, so nothing tests it</span>'
+        checks = '<span class="muted">none: one known balance, so nothing tests it</span>'
     if view.family_anchors:
-        # The stated balances are the whole account's (main plus its Spaces), so
+        # The known balances are the whole account's (main plus its Spaces), so
         # a difference is located against the family's rows, not main's alone.
         if view.family_first_differing:
             checks += (
-                '<br><span class="warn">The whole account\'s stated balances '
-                f"({_esc(str(view.family_anchors))}) first stop matching the rows on "
+                '<br><span class="warn">The rows first stop being in agreement with the whole '
+                f"account's known balances ({_esc(str(view.family_anchors))}) on "
                 f"{_esc(view.family_first_differing)}; the difference is "
                 f"{_esc(view.family_pattern)} after that.</span>"
             )
         else:
             checks += (
                 '<br><span class="muted">Checked against the whole account '
-                f"(main plus its Spaces): {_esc(str(view.family_anchors))} stated "
+                f"(main plus its Spaces): {_esc(str(view.family_anchors))} known "
                 "balances, all reproduced.</span>"
             )
         checks += f'<br><span class="muted">{_esc(view.family_opening_note)}</span>'
     flag = (
-        '<p class="warn">The rows between its stated balances do not add up, so this '
+        '<p class="warn">The rows between its known balances do not add up, so this '
         "balance may be wrong. It is still counted. "
         f'<a class="tap" href="{_ledger_href(view.ref)}">See its ledger</a> or '
         f'<a class="tap" href="{_periods_href(view.ref)}">where, period by period</a></p>'
@@ -214,7 +215,7 @@ def _uncounted_card(view: Any) -> str:
         reason = f"No opening balance could be derived: {_esc(view.withheld)}."
     else:
         reason = (
-            "No balance has been stated for it, and neither the bank's records nor a "
+            "No known balance has been stated for it, and neither the bank's records nor a "
             "held statement supplies one."
         )
         if not int(view.rows):
@@ -223,7 +224,7 @@ def _uncounted_card(view: Any) -> str:
                 " It holds no rows, so it may be an account obdi has no feed for: "
                 "state a balance on its ledger, or declare its kind as "
                 f"{BALANCE_ONLY_KIND} on its account page to have it counted from "
-                "its first stated balance."
+                "its first known balance."
             )
     through = (
         f"{_esc(_plural(int(view.rows), 'row'))} held, through {_esc(view.rows_through)}"
@@ -843,9 +844,10 @@ _LIMIT_PROVISIONAL = (
 
 _LIMITS = (
     "<li>An account's balance rests on its opening balance, which is derived from the "
-    "earliest balance stated for it. An opening derived from a single anchor absorbs "
-    "every missing or surplus row before that anchor and nothing here can tell; a "
-    "second anchor turns it into a test, and a later one that differs is flagged.</li>"
+    "earliest known balance. With only one known balance, the opening balance is simply "
+    "whatever makes that balance true, so rows missing before it cannot be detected. A "
+    "second known balance makes the first a test, and a later known balance that differs "
+    "is flagged.</li>"
     "<li>Pending rows are included, as the ledger's running position includes them; "
     "void rows and folded copies of Space payments never are.</li>"
     "<li>An asset is worth what it was last observed to be worth, as of the date shown, "
@@ -881,7 +883,7 @@ def render_position(
             "moved since its history began.</p>"
             "<p>Stating a balance for a date fixes the balance at that date, so importing "
             "older statements later does not make it wrong: the opening balance moves back "
-            "in time and is re-derived from the same stated figure.</p>"
+            "in time and is worked out again from the same known balance.</p>"
             '<ul class="accounts">' + "".join(_uncounted_card(a) for a in view.uncounted) + "</ul>"
         )
     if view.entitlements:

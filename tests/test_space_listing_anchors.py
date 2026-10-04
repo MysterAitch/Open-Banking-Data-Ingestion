@@ -312,7 +312,7 @@ class TestThePageForASpace:
         without_topup = [i for i in bills_items() if i["feedItemUid"] != "b-topup"]
         page = self.page(make(complete()[1], bills=without_topup))
 
-        assert "1 balance differs" in page
+        assert "1 known balance differs" in page
         assert "No opening balance could be derived:</strong> the Space's rows are taken" in page
         assert "400.00" not in page
         assert "40000" not in page

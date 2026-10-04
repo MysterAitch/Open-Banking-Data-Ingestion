@@ -4301,16 +4301,17 @@ class ConnectionHandler(
             "ledger whose buckets sum to that side's own total. Alarms lead: "
             "a transposed date passes every count, and a missing month that "
             "another source contradicts is a file worth fetching.</p>"
-            '<p class="muted">A pair reads <strong>differs as expected</strong> '
-            "when every row only one source holds is explained here: money "
-            "reported under a sibling account (a Starling Space, say), or an "
-            "internal transfer whose other leg is held in another account. "
-            "Anything else reads <strong>does not agree</strong>, with the "
-            "count of unexplained rows to look at.</p>"
+            '<p class="muted">Two sources <strong>differ as expected</strong> '
+            "when each row held by only one of them has an explanation on this "
+            "page: the money was reported under a sibling account (a Starling "
+            "Space, say), or it is an internal transfer whose other leg is held "
+            "in another account. Anything else is reported as the sources "
+            "<strong>not matching</strong>, with the number of unexplained rows "
+            "to look at.</p>"
         ]
         raw_transposed = report.get("transposed")
         if isinstance(raw_transposed, list) and raw_transposed:
-            parts.append("<h2>Dates disagree - possible day/month transposition</h2>")
+            parts.append("<h2>Dates do not match - possible day/month transposition</h2>")
             parts += [
                 f'<p class="warn">{html.escape(_transposition_text(item, masked=masked))}</p>'
                 for item in raw_transposed
@@ -6428,10 +6429,10 @@ class ConnectionHandler(
             "Back to the masked rendering</a></p>"
         )
         body = (
-            "<p>Between each pair of consecutive statement balances, the rows "
-            "the store counts are set against the statement's own movement. "
+            "<p>Between each pair of known balances from consecutive statements, the "
+            "rows the store counts are set against the statement's own movement. "
             "Where they differ, the rows each source holds that the "
-            "cross-source page could not match are used to say whether the "
+            "source comparison page could not match are used to say whether the "
             "same money is held twice, and whether the difference is undone "
             "by the next period.</p>"
             f"{showing}"

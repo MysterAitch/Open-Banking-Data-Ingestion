@@ -197,7 +197,8 @@ class TestTheAgreementsPageSaysWhetherADifferenceNeedsALook:
     def test_Page_ExplainsWhatEachVerdictMeans(self, tmp_path):
         page = self._page(tmp_path, _entry("agree", warn=False))
 
-        assert "differs as expected" in page
+        assert "differ as expected" in page
+        assert "not matching" in page
         assert "unexplained" in page
         assert "sibling account" in page
 

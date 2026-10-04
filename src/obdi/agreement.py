@@ -276,14 +276,14 @@ def held_sentence(agreement: Agreement) -> str:
     if held is None:
         if agreement.state == UNTESTED and agreement.known_count:
             return (
-                f"Only the known balance for {_day(agreement.known_from)} defines the opening, "
-                "so nothing tests the rows yet."
+                f"Only the known balance for {_day(agreement.known_from)} sets the opening "
+                "balance, so nothing tests the rows yet."
             )
         return ""
     day = _day(held.day)
     if held.kind == HELD_CONFLICT:
         return (
-            f"Known balances disagree on {day}: {' and '.join(held.sources)} state different "
+            f"Known balances do not match on {day}: {' and '.join(held.sources)} state different "
             "balances for the same day. That is a conflict between sources, not a fault in "
             "the rows."
         )
@@ -305,7 +305,7 @@ def standing_line(
     """The one-line summary shown on the ledger, the Accounts page, and the Overview cards.
 
     `with_protection` is False for a reading of a whole family, which nothing protects: a person
-    protects an account, and the clause would say "nowhere" of a thing that cannot be protected.
+    protects an account, and the clause would say "not protected" of a thing that cannot be.
     """
     if agreement.state == NONE:
         return "No known balance: these rows cannot be verified."
@@ -316,5 +316,6 @@ def standing_line(
     )
     if not with_protection:
         return line + "."
-    protected = _day(protected_through) if protected_through else "nowhere"
-    return f"{line}; protected through {protected}."
+    if not protected_through:
+        return f"{line}; not protected."
+    return f"{line}; protected through {_day(protected_through)}."

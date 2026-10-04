@@ -509,7 +509,7 @@ def row_reading(account: AccountOverview) -> RowReading:
         return RowReading("unproven", "pill-warn", f"verification not read{feed}", 1)
     own = standing.standing.own
     if standing.protection_broken:
-        return RowReading("protection broken", "pill-bad", f"protected span has changed{feed}", 0)
+        return RowReading("protection broken", "pill-bad", f"protected period has changed{feed}", 0)
     if own.held is not None:
         since = own.held.day.isoformat()
         return RowReading("held back", "pill-warn", f"held back since {since}{feed}", 0)

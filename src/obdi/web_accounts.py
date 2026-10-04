@@ -99,7 +99,7 @@ ACCOUNT_KINDS: tuple[tuple[str, str], ...] = (
     (
         BALANCE_ONLY_KIND,
         "Tracked by the balances you state alone, such as a mortgage at another bank: the change "
-        "between two stated balances is counted as it happened instead of being reported as a "
+        "between two known balances is counted as it happened instead of being reported as a "
         "failed check.",
     ),
     (
@@ -376,7 +376,7 @@ _FEEDLESS_NOTE = (
     "<p>For an account obdi has no feed for, declare it, then open its ledger "
     "to state its balance and type its transactions. Choose the kind "
     f"<strong>{BALANCE_ONLY_KIND}</strong> if you would rather state its balance "
-    "now and then than itemise it: the change between two stated balances is "
+    "now and then than itemise it: the change between two known balances is "
     "then counted as it happened, instead of being reported as a failed check. "
     "A mortgage or any loan is owed, so its balance is stated as a minus "
     "figure.</p>"

@@ -297,8 +297,8 @@ class TestWhatThePageSays:
         page = render(make(full_day(), export=export))
 
         assert (
-            "The bank's own balance, stated at the end of 2026-09-25, agrees with the rows, "
-            "so the 1 difference against starling-csv is starling-csv's" in page
+            "The bank's own balance, stated at the end of 2026-09-25, is in agreement with "
+            "the rows, so the 1 difference against starling-csv is starling-csv's" in page
         )
 
     def test_Page_WhenBankAndExportDifferByTheSame_SaysTheRowsHoldWhatNeitherCounts(self, make):

@@ -279,7 +279,7 @@ class TestAccountRows:
         reading = row_reading(account(overview_of(db), "p"))
 
         assert (reading.word, reading.css, reading.group) == ("protection broken", "pill-bad", 0)
-        assert reading.clause == "protected span has changed"
+        assert reading.clause == "protected period has changed"
 
     def test_Row_WhenItsDatesContradictEachOther_SaysSoAndThePageStillRenders(
         self, clear, monkeypatch

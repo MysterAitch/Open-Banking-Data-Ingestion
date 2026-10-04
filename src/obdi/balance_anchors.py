@@ -321,15 +321,15 @@ class FamilyWalk:
             return (
                 f"The account's history is held from its opening on "
                 f"{self.evidence.created.isoformat()}, so the opening is nil and every "
-                "stated balance is tested."
+                "known balance is tested."
             )
         missing = self.evidence.missing if self.evidence else ""
         reason = f" ({missing})" if missing else ""
         earliest = self.readings[0].day.isoformat() if self.readings else ""
         return (
-            f"The opening is not shown to be nil{reason}, so the earliest stated balance "
-            f"defines it. A fault dated before {earliest} is absorbed into the opening "
-            "and cannot be seen."
+            f"The opening is not shown to be nil{reason}, so the earliest known balance "
+            f"is where it is worked out from. A fault dated before {earliest} is absorbed "
+            "into the opening and cannot be seen."
         )
 
     @property

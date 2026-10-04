@@ -144,7 +144,7 @@ class TestTheLedgerPageSummarisesTheStructure:
 
         page = Parsed(render(store))
 
-        assert "of the 29 stated balances" in page.text
+        assert "of the 29 known balances" in page.text
         assert "move from the one before by exactly what the rows move by" in page.text
         links = [a for a in page.find("a") if a.get("href", "").startswith("/balance-chart")]
         assert [(a["href"], a["target"], a["rel"]) for a in links] == [
@@ -179,7 +179,7 @@ class TestTheLedgerPageSummarisesTheStructure:
             store.close()
 
         assert "The structure of the whole account" in page.text
-        assert not re.search(r"\b25 of the \d+ stated balances", page.text)
+        assert not re.search(r"\b25 of the \d+ known balances", page.text)
         assert "the other 25 are the 25 changes in the difference" in page.text
 
 
