@@ -54,6 +54,7 @@ from .balance_anchors import (
     EffectiveOpening,
     FamilyWalk,
     effective_opening,
+    removed_stated_anchors,
 )
 from .bank_balances import BANK_SOURCE
 from .bank_balances import describe as describe_bank
@@ -88,11 +89,12 @@ QUERIES_PER_PAGE = 10
 #: has no TrueLayer records and no held statements: the stated balances, the
 #: bank-record reconciliation (cards, rows, pending, sightings), the held
 #: statement listing, the sections of "all accounts" statements assigned to
-#: accounts, and the declared kind that says whether the stated balances are
-#: followed or checked. Each TrueLayer artefact a row's balance has to be found
-#: in, and each held statement not yet read, adds statements beyond this, so a
-#: page for such an account costs more and the fixed figure is a floor.
-ANCHOR_QUERIES = 8
+#: accounts, the declared kind that says whether the stated balances are
+#: followed or checked, and the record of stated balances removed. Each TrueLayer
+#: artefact a row's balance has to be found in, and each held statement not yet
+#: read, adds statements beyond this, so a page for such an account costs more and
+#: the fixed figure is a floor.
+ANCHOR_QUERIES = 9
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -342,6 +344,19 @@ class AnchorLine:
 
 
 @dataclass(frozen=True)
+class RemovedBalance:
+    """A stated balance a person removed: when it applied, when it went, and what it was."""
+
+    day: Structural[str]
+    source: Structural[str]
+    removed_at: Structural[str]
+    balance_direction: Structural[str]
+    balance: Total[Money]
+    #: The figure as the stating form takes it, so the values view can offer to state it again.
+    restate_as: Total[str]
+
+
+@dataclass(frozen=True)
 class FamilyLine:
     """One family balance that the family's rows do not reproduce."""
 
@@ -493,6 +508,8 @@ class Ledger:
     opening: Structural[OpeningView | None] = None
     #: What a person has typed into the account; empty for one that is unknown.
     typed: Structural[TypedLines | None] = None
+    #: Stated balances removed and not stated again, newest removal first.
+    removed_balances: Structural[tuple[RemovedBalance, ...]] = ()
     #: The changes derived from a balance-only account's stated balances.
     unitemised: Structural[tuple[UnitemisedLine, ...]] = ()
     #: Cleared and uncleared rows, per month and in all (`clearing`).
@@ -748,7 +765,25 @@ def build_ledger(
         with_protection=with_protection,
         check=check,
     )
-    return replace(built, archive=archive)
+    return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
+
+
+def _removed_balances(store: Store, ref: str, built: Ledger) -> tuple[RemovedBalance, ...]:
+    """The balances removed from the account, for the values view to offer back."""
+    if built.state == "unknown":
+        return ()
+    return tuple(
+        RemovedBalance(
+            day=removed.day.isoformat(),
+            source=removed.source,
+            removed_at=removed.removed_at[:19].replace("T", " "),
+            balance_direction=direction_of(removed.balance_minor),
+            balance=Money(removed.balance_minor, CURRENCY),
+            restate_as=f"{'-' if removed.balance_minor < 0 else ''}"
+            f"{abs(removed.balance_minor) // 100}.{abs(removed.balance_minor) % 100:02d}",
+        )
+        for removed in removed_stated_anchors(store, ref)
+    )
 
 
 def _ledger_for(

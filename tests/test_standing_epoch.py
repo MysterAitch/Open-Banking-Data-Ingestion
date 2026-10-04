@@ -329,7 +329,8 @@ class TestTheOverviewIsNotOlderThanTheViewersOwnPress:
         assert known_through(get(served, "/")) == "2026-03-25"
 
         response = post(
-            served, "/ledger-anchor-remove", ref=ACCOUNT, month="2026-03", day="2026-03-25"
+            served, "/ledger-anchor-remove", ref=ACCOUNT, month="2026-03", day="2026-03-25",
+            confirmed="yes",
         )
         assert response.status_code == 200, response.text
 

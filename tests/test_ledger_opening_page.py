@@ -83,10 +83,14 @@ class Lab:
             {"ref": ref, "month": "2026-03", "day": day, "amount": amount, "currency": "GBP"},
         )
 
-    def remove(self, day: str, *, ref: str = ACCOUNT, **kwargs) -> httpx.Response:
-        return self.post(
-            "/ledger-anchor-remove", {"ref": ref, "month": "2026-03", "day": day}, **kwargs
-        )
+    def remove(
+        self, day: str, *, ref: str = ACCOUNT, confirmed: bool = True, **kwargs
+    ) -> httpx.Response:
+        """The second press, which carries the confirmation the first press was answered with."""
+        form = {"ref": ref, "month": "2026-03", "day": day}
+        if confirmed:
+            form["confirmed"] = "yes"
+        return self.post("/ledger-anchor-remove", form, **kwargs)
 
     def stated(self, ref: str = ACCOUNT) -> list[Anchor]:
         with Store(self.db) as store:

@@ -1364,6 +1364,44 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
     )
 
 
+def _removed_balances_html(view: Any, ref: str, month: str, unmasked: bool) -> str:
+    """The stated balances removed from the account, so one removed by mistake can be stated again.
+
+    The dates and the times of removal are always shown. The figure, and the form that states it
+    again, appear only on the values view: the masked page is reachable by address.
+    """
+    removed = view.removed_balances
+    if not removed:
+        return ""
+    items = ""
+    for item in removed:
+        figure = ""
+        again = ""
+        if unmasked:
+            minus = "minus " if item.balance_direction == "out" else ""
+            figure = f' - it was <span class="mono nowrap">{_esc(minus + item.balance)}</span>'
+            again = (
+                '<form method="post" action="/ledger-anchor">'
+                f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+                f'<input type="hidden" name="month" value="{_esc(month)}">'
+                '<input type="hidden" name="currency" value="GBP">'
+                f'<input type="hidden" name="day" value="{_esc(item.day)}">'
+                f'<input type="hidden" name="amount" value="{_esc(item.restate_as)}">'
+                + submit_button(f"State the balance for the end of {item.day} again")
+                + "</form>"
+            )
+        items += (
+            f'<li>The stated balance for the end of <span class="mono nowrap">'
+            f"{_esc(item.day)}</span> was removed at {_esc(item.removed_at)}{figure}.{again}</li>"
+        )
+    reveal = (
+        ""
+        if unmasked
+        else '<p class="muted">Show values to read a removed balance back and state it again.</p>'
+    )
+    return f"<h3>Removed stated balances</h3>{reveal}<ul>{items}</ul>"
+
+
 def _own_first_difference(anchors: tuple[Any, ...]) -> str:
     """Where the account's own anchors first stop agreeing with its own rows,
     reported apart from the whole-account walk (`_family_html`)."""
@@ -1566,6 +1604,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
         + _meaning_html(opening.meanings)
         + _family_html(opening.family, view.ref)
         + _anchor_forms(view, view.ref, view.month)
+        + _removed_balances_html(view, view.ref, view.month, unmasked)
     )
 
 
@@ -2014,6 +2053,27 @@ class LedgerPages(AnswerPages):
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
         day = (form.get("day", [""])[0] or "").strip()
+        if (form.get("confirmed", [""])[0] or "") != "yes":
+            # Asked like a protection is: a tap on the ledger's button changes nothing, and the
+            # figure is never on the question, because the page is reachable by address.
+            try:
+                asked = parse_calendar_day(day).isoformat()
+            except DataError as exc:
+                self._anchor_refusal(
+                    400, "Balance not removed", f"Nothing was removed. {exc}.", ref=ref
+                )
+                return
+            self._confirm_page(
+                "/ledger-anchor-remove",
+                ref,
+                month,
+                f"Remove the stated balance for the end of {asked}, stated by you? It stops "
+                "counting at once. The figure is kept in the record of removed balances, "
+                "readable on the values view, so it can be stated again.",
+                "Remove the stated balance",
+                f'<input type="hidden" name="day" value="{_esc(asked)}">',
+            )
+            return
         before = self.answer_standing(ref)
         try:
             removed = hook(ref, day)

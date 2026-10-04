@@ -544,6 +544,20 @@ CREATE TABLE IF NOT EXISTS sighting_times (
     PRIMARY KEY (entity_id, source, artefact_digest, field)
 );
 
+-- A stated balance a person removed: when, and the figure it held. Kept so one removed by
+-- mistake can be read back on the values view and stated again; the figure is as private as
+-- the valuation it came from. Never read by a standing: the removal itself is a write to
+-- valuations, which moves the epoch.
+CREATE TABLE IF NOT EXISTS removed_stated_balances (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id    TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    value_minor INTEGER NOT NULL,
+    currency    TEXT NOT NULL,
+    removed_at  TEXT NOT NULL
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -601,6 +615,10 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "rebuild_runs": (
         "the history of rebuilds and their timings; the rows a rebuild rewrites are "
         "classified in their own tables"
+    ),
+    "removed_stated_balances": (
+        "the record of balances a person removed, read only by the values view; the removal "
+        "itself deletes from valuations, which moves the epoch"
     ),
     "standing_epoch": "is the epoch: a trigger on it would move itself",
 }
@@ -697,6 +715,9 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'artefacts_replayed', 'artefacts_skipped', 'build', 'finished_at', 'id',
         'kind', 'ok', 'records_total', 'started_at', 'summary', 'timings',
         'transactions', 'transfers_paired',
+    ],
+    'removed_stated_balances': [
+        'asset_id', 'currency', 'id', 'observed_at', 'removed_at', 'source', 'value_minor',
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
     'same_money_outcomes': ['account', 'outcome'],
@@ -2123,6 +2144,55 @@ class Store:
         )
         self.connection.commit()
         return bool(cursor.rowcount)
+
+    def remove_stated_balance(
+        self, *, asset_id: str, observed_at: date, source: str, now: datetime | None = None
+    ) -> bool:
+        """Remove one stated balance and keep a record of it, in one transaction.
+
+        The figure goes into `removed_stated_balances` before the row goes, so a removal made
+        by mistake can be read back and stated again. Returns whether there was one to remove.
+        """
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        found = self.connection.execute(
+            "SELECT value_minor, currency FROM valuations "
+            "WHERE asset_id = ? AND observed_at = ? AND source = ?",
+            (asset_id, observed_at.isoformat(), source),
+        ).fetchone()
+        if found is None:
+            self.connection.commit()
+            return False
+        self.connection.execute(
+            "INSERT INTO removed_stated_balances "
+            "(asset_id, observed_at, source, value_minor, currency, removed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                asset_id,
+                observed_at.isoformat(),
+                source,
+                found["value_minor"],
+                found["currency"],
+                (now or datetime.now(UTC)).isoformat(),
+            ),
+        )
+        self.connection.execute(
+            "DELETE FROM valuations WHERE asset_id = ? AND observed_at = ? AND source = ?",
+            (asset_id, observed_at.isoformat(), source),
+        )
+        self.connection.commit()
+        return True
+
+    def removed_stated_balances(self, asset_id: str, *, limit: int = 20) -> list[sqlite3.Row]:
+        """The balances removed from one account, newest first, that are not stated again now."""
+        return self.connection.execute(
+            "SELECT r.observed_at, r.source, r.value_minor, r.currency, r.removed_at "
+            "FROM removed_stated_balances AS r WHERE r.asset_id = ? AND NOT EXISTS ("
+            "SELECT 1 FROM valuations AS v WHERE v.asset_id = r.asset_id "
+            "AND v.observed_at = r.observed_at AND v.source = r.source) "
+            "ORDER BY r.id DESC LIMIT ?",
+            (asset_id, limit),
+        ).fetchall()
 
     def _entity_moves(
         self,

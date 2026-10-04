@@ -27,7 +27,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
+from obdi.balance_anchors import record_stated_anchor, remove_stated_anchor
 from obdi.cli import build_web_config
 from obdi.identity import artefact_digest
 from obdi.ingest import import_file
@@ -45,6 +45,7 @@ CSV_CREDIT = ("Marmalade Foundry", "MF-PAY-55102", "1846.53")
 JSON_ITEM = ("Wyvern Chandlery", "TL-ID-77194-ZQ", "2468.19")
 TYPED = ("Nacelle Upholstery", "3571.82")
 STATED_BALANCE = "9182.64"
+REMOVED_BALANCE = "5316.92"
 #: An id the aggregator states under `meta`, where a payload nests values one level down.
 META_ID = "META-PROV-90817-QX"
 #: Two running balances a bank states one row apart that differ by far more than the 5.00 between
@@ -76,6 +77,7 @@ AMOUNTS = (
     FEED_ITEM[3],
     TYPED[1],
     STATED_BALANCE,
+    REMOVED_BALANCE,
     *WALK_BALANCES,
 )
 
@@ -195,6 +197,10 @@ def invented(tmp_path_factory) -> tuple[Path, Path]:
         )
         rebuild_from_raw(store)
         record_stated_anchor(store, CURRENT, "2026-09-05", STATED_BALANCE)
+        # Stated and removed, so the record of removed balances holds a figure the masked
+        # ledger must not show.
+        record_stated_anchor(store, CURRENT, "2026-09-06", REMOVED_BALANCE)
+        remove_stated_anchor(store, CURRENT, "2026-09-06")
         record_typed_transaction(
             store,
             CURRENT,

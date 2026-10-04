@@ -1404,9 +1404,36 @@ def record_stated_anchor(
 
 
 def remove_stated_anchor(store: Store, ref: str, day_text: str) -> bool:
-    """Remove the stated anchor for one date. False when there was none."""
-    return store.delete_valuation_row(
+    """Remove the stated anchor for one date, keeping a record of it. False when there was none.
+
+    The figure is kept in the private record of removed balances (`removed_stated_anchors`), so
+    a removal made by mistake can be read back on the values view and stated again.
+    """
+    return store.remove_stated_balance(
         asset_id=_asset_id(ref.strip()),
         observed_at=_parse_day(day_text),
         source=STATED,
     )
+
+
+@dataclass(frozen=True)
+class RemovedAnchor:
+    """A stated balance a person removed, and the figure it held."""
+
+    day: date
+    source: str
+    balance_minor: int
+    removed_at: str
+
+
+def removed_stated_anchors(store: Store, ref: str) -> list[RemovedAnchor]:
+    """The balances removed from an account and not stated again since, newest removal first."""
+    return [
+        RemovedAnchor(
+            day=date.fromisoformat(str(row["observed_at"])),
+            source=str(row["source"]),
+            balance_minor=int(row["value_minor"]),
+            removed_at=str(row["removed_at"]),
+        )
+        for row in store.removed_stated_balances(_asset_id(ref.strip()))
+    ]
