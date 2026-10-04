@@ -164,15 +164,27 @@ def feed_body(items: list[dict[str, Any]]) -> bytes:
 
 
 def land_feed(
-    store: Store, items: list[dict[str, Any]], *, origin: str, asked: str = "2026-09-01T00:00:00Z"
+    store: Store,
+    items: list[dict[str, Any]],
+    *,
+    origin: str,
+    asked: str = "2026-09-01T00:00:00Z",
+    window: bool = False,
 ) -> bytes:
+    """Land a feed fetch asked `changesSince` `asked`, or (with `window`) as a window of
+    transaction time from `asked` to the end of September, which lists what exists."""
     body = feed_body(items)
+    ask = (
+        f"minTransactionTimestamp={asked}&maxTransactionTimestamp=2026-09-30T23:59:59.000Z"
+        if window
+        else f"changesSince={asked}"
+    )
     store.land_artefact(
         starling.artefact_for(
             body,
             account_id="starling:cat-main" if origin == FEED_ORIGIN else "starling:cat-bills",
             kind="feed",
-            origin=f"{origin}?changesSince={asked}",
+            origin=f"{origin}?{ask}",
         )
     )
     return body
@@ -206,6 +218,7 @@ def household_store(
     export_last: bool = False,
     export_extra: tuple[Row, ...] = (),
     main_refetches: tuple[list[dict[str, Any]], ...] = (),
+    refetch_windows: bool = False,
 ) -> Store:
     """The corpus held as raw artefacts and the export, nothing derived yet.
 
@@ -213,7 +226,8 @@ def household_store(
     `export_last` has the export arrive after both feeds, so a rebuild replays
     it as the later sighting of every payment.
     `export_extra` adds rows to the export, and each of `main_refetches` is a
-    later fetch of the main feed, landed after every other feed, in the order given.
+    later fetch of the main feed, landed after every other feed, in the order given, each asked
+    `changesSince` its day or, with `refetch_windows`, as a window of transaction time.
     """
     store = Store(directory / "household.sqlite3")
     land_evidence(store)
@@ -229,7 +243,13 @@ def household_store(
     )
     land_feed(store, space if space is not None else space_feed(), origin=SPACE_FEED_ORIGIN)
     for later, items in enumerate(main_refetches, start=3):
-        land_feed(store, items, origin=FEED_ORIGIN, asked=f"2026-09-{later:02}T00:00:00Z")
+        land_feed(
+            store,
+            items,
+            origin=FEED_ORIGIN,
+            asked=f"2026-09-{later:02}T00:00:00" + (".000Z" if refetch_windows else "Z"),
+            window=refetch_windows,
+        )
     if export_last:
         import_file(
             store, export_of_the_payments(directory, export_extra), account_id=MAIN, account_map=MAP

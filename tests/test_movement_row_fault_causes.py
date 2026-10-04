@@ -22,11 +22,13 @@ sources landed in EVERY order and rebuilt. KNOWN ANSWERS, decided before the fir
     (ii)  the feed holds payments on days 5 and 8, the aggregator two on day 6, the export two
           on day 6
           no fault
-    (iii) a Coffee reissued by a later feed fetch under a new id (the same day and size), settled
-          one fault, starling, day 3, 1 listed and 2 held: the surplus row is booked, sighted by 1
-          other artefact of starling (observed 2026-09-03)
-    (iv)  the same, the reissue pending: the surplus row is pending
-    (v)   the same, the reissue reversed: the surplus row is history
+    (iii) a Coffee reissued by a later feed fetch under a new id (the same day and size), settled,
+          the later fetch a WINDOW of transaction time
+          one fault, starling, day 3: "a row whose id the feed stopped listing when another id of
+          the same size and recipient appeared: possibly one payment held twice"
+    (iv)  the same, the reissue pending, or reversed: the same fault
+    (v)   the same, the later fetch a changesSince: no fault, because a changesSince fetch lists
+          what changed and its silence about an unchanged item is not absence
 
     PLANTED, because the importer derives rows and sightings from the same bytes and cannot
     disagree with itself
@@ -143,11 +145,16 @@ class TestARowHeldTwiceWhereOneIsListed:
     def reissued(self, tmp_path):
         opened: list[Store] = []
 
-        def build(status: str, export_last: bool) -> Store:
+        def build(status: str, export_last: bool, windows: bool = True) -> Store:
             directory = tmp_path / f"{len(opened)}"
             directory.mkdir()
             again = card_payment("f-coffee-again", "Coffee", 350, 3, status=status)
-            store = household_store(directory, export_last=export_last, main_refetches=([again],))
+            store = household_store(
+                directory,
+                export_last=export_last,
+                main_refetches=([again],),
+                refetch_windows=windows,
+            )
             opened.append(store)
             assert rebuild_from_raw(store, account_map=MAP).problems == []
             return store
@@ -157,23 +164,29 @@ class TestARowHeldTwiceWhereOneIsListed:
             store.close()
 
     @pytest.mark.parametrize("export_last", [False, True], ids=["export-first", "export-last"])
-    @pytest.mark.parametrize(
-        ("status", "word"),
-        [("SETTLED", "booked"), ("PENDING", "pending"), ("REVERSED", "history")],
-    )
-    def test_Fault_WhenALaterFetchReissuesTheRow_SaysWhatTheSurplusRowIsAndWhoSightedIt(
-        self, reissued, status, word, export_last
+    @pytest.mark.parametrize("status", ["SETTLED", "PENDING", "REVERSED"])
+    def test_Fault_WhenALaterWindowFetchReissuesTheRow_SaysPossiblyOnePaymentHeldTwice(
+        self, reissued, status, export_last
     ):
         store = reissued(status, export_last)
 
         assert said(store) == [
-            f"2026-09-03 {MAIN} via starling (out): 1 row of one size and direction listed, "
-            f"2 held: the surplus row is {word}, sighted by 1 other artefact of starling "
-            "(observed 2026-09-03); an earlier-listed row's id is absent from the 1 later fetch "
-            "that asks for its day (1 asking by changesSince), the newest included, and an item "
-            "of the same size, direction, and recipient under another id first appears in the "
-            "first of them"
+            f"2026-09-03 {MAIN} via starling (out): a row whose id the feed stopped listing when "
+            "another id of the same size and recipient appeared: possibly one payment held twice "
+            "(its id is absent from the 1 later fetch that asks for its day, asking by "
+            "transaction-time window)"
         ]
+
+    @pytest.mark.parametrize("export_last", [False, True], ids=["export-first", "export-last"])
+    @pytest.mark.parametrize("status", ["SETTLED", "PENDING", "REVERSED"])
+    def test_Fault_WhenALaterChangesSinceFetchListsOnlyTheNewId_ThereIsNoFault(
+        self, reissued, status, export_last
+    ):
+        """A changesSince fetch lists what changed: silence about an unchanged item is not absence,
+        so two ids listed one size, direction, and day are two listed rows and two held."""
+        store = reissued(status, export_last, windows=False)
+
+        assert said(store) == []
 
 
 def move_sighting(store: Store, entity_id: str, observed: str, account: str | None = None) -> None:

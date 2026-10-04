@@ -36,6 +36,11 @@ list the union of what they say: for each key the larger of the counts, so two
 overlapping exports that each list one payment list one payment, and two
 identical payments listed by both are two. A pending snapshot is set aside, as
 `identity_health` does, because its ids and amounts are not the ones kept.
+Where a row states an id as durable, the id decides (`_Listing`): within one artefact one
+id is one row, however often it is listed, and for a source whose ids are stable for an item's
+life (`matching.SETTLEMENT_KEEPS_ID`) every distinct id any artefact listed is a row, so two
+payments never listed by one fetch are two. The one thing that stops showing is an item the
+bank dropped and made again under another id, which `_reissue_evidence` reports.
 
 CHECK 2 reads the pairs the pairing pass confirmed (`ingest.pair_transfers_across_store`)
 and asks of every internal leg the questions that pass is meant to answer
@@ -72,9 +77,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .accounts import AccountMap, AccountRef
 from .arrival_order import in_arrival_order
-from .matching import INTERNAL_TRANSFER_WINDOW_DAYS
-from .models import Transaction
-from .payment_links import FIRST_PARTY_FEEDS
+from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
+from .models import SourceTier, Transaction
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -92,6 +96,8 @@ COLLAPSED = "collapsed"
 SURPLUS = "surplus"
 DATED_LATER = "dated-later"
 DATED_EARLIER = "dated-earlier"
+#: A first-party feed's item dropped and made again under another uid (`_reissue_evidence`).
+REISSUED = "reissued"
 
 #: Check 2: what is wrong with a leg's pairing.
 NO_PARTNER = "no-partner"
@@ -150,6 +156,11 @@ class RowCountFault:
 
     def says(self) -> str:
         where = f"{self.day.isoformat()} {self.account} via {self.source} ({self.direction})"
+        if self.kind == REISSUED:
+            return (
+                f"{where}: a row whose id the feed stopped listing when another id of the same "
+                f"size and recipient appeared: possibly one payment held twice ({self.explanation})"
+            )
         if self.kind in (DATED_LATER, DATED_EARLIER):
             when = "the next day" if self.kind == DATED_LATER else "the day before"
             return (
@@ -162,6 +173,26 @@ class RowCountFault:
         )
         clauses = [clause for clause in (self.explanation, *self.measured) if clause]
         return f"{line}: {'; '.join(clauses)}" if clauses else line
+
+
+@dataclass(frozen=True)
+class RepeatedItems:
+    """Items listed more than once in one artefact under one id: information, not a fault."""
+
+    account: str
+    source: str
+    day: date
+    items: int
+    #: Whether every one was listed exactly twice.
+    twice: bool
+
+    def says(self) -> str:
+        times = "twice" if self.twice else "more than once"
+        one = "it is one row" if self.items == 1 else "each is one row"
+        return (
+            f"{self.source} listed {_plural(self.items, 'item')} {times} in one artefact on "
+            f"{self.day.isoformat()}; {one}"
+        )
 
 
 @dataclass(frozen=True)
@@ -266,6 +297,8 @@ class MovementCompleteness:
     rows_held: int = 0
     held_as_history: int = 0
     row_faults: list[RowCountFault] = field(default_factory=list)
+    #: Items a source repeated inside one artefact, which are one row each and no fault.
+    repeated: list[RepeatedItems] = field(default_factory=list)
     # Check 2.
     legs: int = 0
     legs_verified: int = 0
@@ -315,6 +348,9 @@ class MovementCompleteness:
                 f"  {_plural(self.held_as_history, 'listed row')} held as history "
                 "(void, folded, or reversed): held, and not a fault"
             )
+        lines += [f"  {item.says()}" for item in self.repeated[:NAMED]]
+        if len(self.repeated) > NAMED:
+            lines.append(f"  ... and {len(self.repeated) - NAMED} more repeats")
         lines += _named([f.says() for f in self.row_faults], "every listed row is held once")
 
         lines += ["", "Every transfer leg has exactly one partner, in the account it names:"]
@@ -374,7 +410,7 @@ _ListKey = tuple[str, date, str, int]
 #: (artefact source, digest) -> the rows that artefact lists, or None when it
 #: could not be read. The bytes never change, so a listing is good for the life
 #: of the process. Statements are not held here (see `_listing_of`).
-_LISTED_BY_DIGEST: dict[tuple[str, str], Counter[_ListKey] | None] = {}
+_LISTED_BY_DIGEST: dict[tuple[str, str], _Listing | None] = {}
 
 
 def _statement_rows(store: Store, digest: str, account: str) -> list[Transaction] | None:
@@ -421,9 +457,7 @@ def _rows_listed(store: Store, artefact: sqlite3.Row, account: str) -> list[Tran
     return None
 
 
-def _listing_of(
-    store: Store, artefact: sqlite3.Row, account: str
-) -> Counter[_ListKey] | None:
+def _listing_of(store: Store, artefact: sqlite3.Row, account: str) -> _Listing | None:
     """What one artefact lists, by (source, day, direction, size); None when unreadable."""
     source, digest = str(artefact["source"]), str(artefact["digest"])
     if str(artefact["media_type"]) == _PDF:
@@ -436,11 +470,52 @@ def _listing_of(
     return _LISTED_BY_DIGEST[memo_key]
 
 
-def _counted(rows: list[Transaction] | None) -> Counter[_ListKey] | None:
+@dataclass(frozen=True)
+class _Listing:
+    """What one artefact lists, per (source, day, direction, size).
+
+    THE RULE OF ONE ARTEFACT. Rows that state the same own id are one listed row: a source that
+    names an item by an id it states as durable (`SourceTier.AUTHORITATIVE`) and lists it twice
+    in one response has repeated itself, and `matching.could_be_one_payment` already reads two
+    records with one id as one payment. Measured on the deployed store: "2 rows of one size and
+    direction listed, 1 held ... listed by 1 artefact, stating 1 distinct id ... met by the rows
+    as held" - one card item listed twice, the store right.
+    Rows that state no id are each a row, and two different ids are two rows.
+    """
+
+    #: Rows that state no id (or one not stated as durable), each a row.
+    anonymous: Counter[_ListKey]
+    #: The distinct ids of the rows that do.
+    ids: dict[_ListKey, frozenset[str]]
+    #: Ids listed more than once in this artefact, with how many times.
+    repeated: dict[_ListKey, dict[str, int]]
+
+    def cells(self) -> set[_ListKey]:
+        return set(self.anonymous) | set(self.ids)
+
+    def count(self, key: _ListKey) -> int:
+        return self.anonymous[key] + len(self.ids.get(key, ()))
+
+
+def _counted(rows: list[Transaction] | None) -> _Listing | None:
     if rows is None:
         return None
-    return Counter(
-        (r.source, r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) for r in rows
+    anonymous: Counter[_ListKey] = Counter()
+    seen: dict[_ListKey, Counter[str]] = defaultdict(Counter)
+    for r in rows:
+        key = (r.source, r.value_date, _direction(r.amount_minor), abs(r.amount_minor))
+        if r.source_id and r.tier is SourceTier.AUTHORITATIVE:
+            seen[key][r.source_id] += 1
+        else:
+            anonymous[key] += 1
+    return _Listing(
+        anonymous,
+        {key: frozenset(ids) for key, ids in seen.items()},
+        {
+            key: {sid: n for sid, n in ids.items() if n > 1}
+            for key, ids in seen.items()
+            if any(n > 1 for n in ids.values())
+        },
     )
 
 
@@ -715,98 +790,67 @@ def _asked_days(origin: str) -> tuple[date, date | None, str] | None:
     return None
 
 
-def _measure_feed(
-    store: Store,
+def _reissue_evidence(
     cell: _Cell5,
-    entities: Iterable[str],
+    uids: Iterable[str],
     fetches: Sequence[sqlite3.Row],
     rows_of: Callable[[sqlite3.Row], list[Transaction] | None],
-) -> str:
-    """Whether the bank's own feed stopped listing a stored row after listing it.
+) -> str | None:
+    """Whether the bank's own feed dropped an item and made it again under another uid.
 
-    THE QUESTION, put of every row held at the cell because which of two is the surplus is
-    only a ranking (`_explain`). A row of a first-party feed (`starling`) has a uid, and the
-    fetches that listed it are known. A later fetch that asks for the row's day and does not
-    list the uid is evidence the bank dropped the item, and the first such fetch listing an item
-    of the same size, direction, and recipient under another uid is evidence it re-issued it.
-    Measured as counts only, because a `changesSince` ask lists what CHANGED, so its silence is
-    not a withdrawal (`pending_lifecycle` says the same of absence there), while a window asked
-    by transaction time lists what exists: the clause says how many of each kind were silent.
+    THE SIGNATURE of a re-issue, the one thing counting a first-party feed's rows by uid stops
+    seeing: an item's uid is absent from the fetches after the one that last listed it, and the
+    first of those fetches lists an item of the same size, direction, day, and recipient under a
+    uid no earlier fetch listed.
+    WHAT COUNTS AS ABSENCE. Only a fetch whose way of asking lists what EXISTS in a window of
+    transaction time (`_asked_days`, kind "window"). A `changesSince` fetch lists what CHANGED
+    since its stamp, so it is silent about an item that has not changed, and is treated as saying
+    nothing about it either way (`pending_lifecycle` holds the same of absence there). A re-issue
+    seen only by `changesSince` fetches is therefore not seen: the new uid appears, the old one is
+    not asked about, and the store holds two rows, correctly as far as anything shows.
+    None where the signature is not found, else the evidence as a clause of counts.
     """
     from .matching import same_payee
 
     _account, source, direction, size, day = cell
     wanted = (day, direction, size)
-    listing = [rows_of(f) or [] for f in fetches]
-
-    clauses: list[str] = []
-    for entity in entities:
-        uids = {
-            str(r["source_id"])
-            for r in store.connection.execute(
-                "SELECT source_id FROM transaction_sources "
-                "WHERE entity_id = ? AND source = ? AND source_id IS NOT NULL",
-                (entity, source),
-            )
-        }
+    listing = [
+        [
+            r
+            for r in rows_of(f) or []
+            if r.source == source
+            and (r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) == wanted
+        ]
+        for f in fetches
+    ]
+    for uid in sorted(uids):
         first = next(
-            (i for i, rows in enumerate(listing) if any(r.source_id in uids for r in rows)), None
+            (i for i, rows in enumerate(listing) if any(r.source_id == uid for r in rows)), None
         )
         if first is None:
             continue
-        old = next(r for r in listing[first] if r.source_id in uids)
-        covering: list[tuple[int, str]] = []
-        for index in range(first + 1, len(fetches)):
-            asked = _asked_days(str(fetches[index]["origin"]))
-            if asked is None or day < asked[0] or (asked[1] is not None and day > asked[1]):
-                continue
-            covering.append((index, asked[2]))
-        silent = [
-            (index, kind)
-            for index, kind in covering
-            if not any(r.source_id in uids for r in listing[index])
+        old = next(r for r in listing[first] if r.source_id == uid)
+        asking = [
+            index
+            for index in range(first + 1, len(fetches))
+            if (asked := _asked_days(str(fetches[index]["origin"]))) is not None
+            and asked[2] == "window"
+            and asked[0] <= day
+            and (asked[1] is None or day <= asked[1])
         ]
+        silent = [i for i in asking if not any(r.source_id == uid for r in listing[i])]
         if not silent:
             continue
-        changes = sum(1 for _, kind in silent if kind == "changes")
-        windows = len(silent) - changes
-        asked_by = " and ".join(
-            part
-            for part in (
-                f"{changes} asking by changesSince" if changes else "",
-                f"{windows} asking by transaction-time window" if windows else "",
+        seen_before = {r.source_id for earlier in listing[: silent[0]] for r in earlier}
+        if any(
+            r.source_id != uid and r.source_id not in seen_before and same_payee(old, r)
+            for r in listing[silent[0]]
+        ):
+            return (
+                f"its id is absent from {_the_fetches(len(silent), len(asking))}, "
+                "asking by transaction-time window"
             )
-            if part
-        )
-        newest = ", the newest included" if silent[-1][0] == covering[-1][0] else ""
-        seen_before = {
-            r.source_id for earlier in listing[: silent[0][0]] for r in earlier if r.source_id
-        }
-        reissued = any(
-            r.source_id not in uids
-            and r.source_id not in seen_before
-            and r.source == source
-            and (r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) == wanted
-            and same_payee(old, r)
-            for r in listing[silent[0][0]]
-        )
-        successor = (
-            "an item of the same size, direction, and recipient under another id first appears "
-            "in the first of them"
-            if reissued
-            else "no item of the same size, direction, and recipient under another id first "
-            "appears in the first of them"
-        )
-        clauses.append(
-            f"an earlier-listed row's id is absent from {_the_fetches(len(silent), len(covering))} "
-            f"({asked_by}){newest}, and {successor}"
-        )
-    if not clauses:
-        return (
-            "no fetch landed after a row's first listing asks for its day without listing "
-            "that row, so nothing says the bank withdrew one"
-        )
-    return "; ".join(clauses)
+    return None
 
 
 def _the_fetches(silent: int, asked: int) -> str:
@@ -906,6 +950,8 @@ def check_rows(
     artefact_of: dict[tuple[str, str], sqlite3.Row] = {}
     fetches_of: dict[str, list[sqlite3.Row]] = defaultdict(list)
     listing_digests: dict[tuple[str, str, str, int, date], set[str]] = defaultdict(set)
+    stable_ids: dict[tuple[str, str, str, int, date], set[str]] = defaultdict(set)
+    repeated: dict[tuple[str, str, date], dict[str, int]] = defaultdict(dict)
     for artefact in artefacts:
         source = str(artefact["source"])
         if source in _READS_NO_ROWS or source in _PENDING_SOURCES:
@@ -926,10 +972,26 @@ def check_rows(
             continue
         report.artefacts_listed += 1
         digest_accounts[digest].add(account)
-        for (row_source, day, direction, size), count in listing.items():
+        for key in listing.cells():
+            row_source, day, direction, size = key
+            cell_key = (account, row_source, direction, size, day)
             union = listed[(account, row_source)]
-            union[(day, direction, size)] = max(union[(day, direction, size)], count)
-            listing_digests[(account, row_source, direction, size, day)].add(digest)
+            if row_source in SETTLEMENT_KEEPS_ID:
+                # Ids stable for an item's life identify it across artefacts: what is listed is
+                # every distinct id any fetch listed, never the most one fetch listed together.
+                union[(day, direction, size)] = max(
+                    union[(day, direction, size)], listing.anonymous[key]
+                )
+                stable_ids[cell_key] |= listing.ids.get(key, frozenset())
+            else:
+                union[(day, direction, size)] = max(
+                    union[(day, direction, size)], listing.count(key)
+                )
+            listing_digests[cell_key].add(digest)
+        for key, again in listing.repeated.items():
+            seen = repeated[(account, key[0], key[1])]
+            for item_id, times in again.items():
+                seen[item_id] = max(seen.get(item_id, 0), times)
 
     sighted = _held_by_key(store, digest_accounts)
     held, history = sighted.held, sighted.history
@@ -958,18 +1020,11 @@ def check_rows(
             parsed[digest] = _rows_listed(store, fetch, account)
         return parsed[digest]
 
-    def measured(cell: _Cell5, kind: str, count: int, listed: int) -> tuple[str, ...]:
+    def measured(cell: _Cell5, kind: str, count: int) -> tuple[str, ...]:
         nonlocal in_families
         if in_families is None:
             in_families = _family_accounts(store, account_map)
         clauses: list[str] = []
-        if kind == SURPLUS and cell[1] in FIRST_PARTY_FEEDS:
-            fault = _Cell(*cell, listed=listed, held=listed + count)
-            _, ranked = _ranked_rows(
-                fault, sighted, by_shape.get((cell[1], cell[2], cell[3]), [])
-            )
-            fetches = in_arrival_order(fetches_of[cell[0]])
-            clauses.append(_measure_feed(store, cell, ranked, fetches, rows_of))
         if kind != SURPLUS:
             digests = listing_digests.get(cell, ())
             clauses.append(_measure_listing(store, cell, digests, artefact_of))
@@ -989,7 +1044,12 @@ def check_rows(
     wanted: Counter[tuple[str, str, str, int, date]] = Counter()
     for (account, source), union in listed.items():
         for (day, direction, size), count in union.items():
-            wanted[(account, source, direction, size, day)] = count
+            cell_key = (account, source, direction, size, day)
+            wanted[cell_key] = count + len(stable_ids.get(cell_key, ()))
+    report.repeated = [
+        RepeatedItems(account, source, day, len(items), all(n == 2 for n in items.values()))
+        for (account, source, day), items in sorted(repeated.items(), key=lambda kv: kv[0][2])
+    ]
     report.rows_listed = sum(wanted.values())
     report.rows_held = sum(held.values())
 
@@ -1032,12 +1092,7 @@ def check_rows(
                         held_count,
                         history.get(cell, 0),
                         explained(cell, wanted[cell], held_count),
-                        measured(
-                            cell,
-                            COLLAPSED if held_count else MISSING,
-                            missing,
-                            wanted[cell],
-                        ),
+                        measured(cell, COLLAPSED if held_count else MISSING, missing),
                     )
                 )
     for group, days in extra.items():
@@ -1056,9 +1111,28 @@ def check_rows(
                         held[cell],
                         history.get(cell, 0),
                         explained(cell, wanted.get(cell, 0), held[cell]),
-                        measured(cell, SURPLUS, over, wanted.get(cell, 0)),
+                        measured(cell, SURPLUS, over),
                     )
                 )
+    for cell, uids in stable_ids.items():
+        if len(uids) < 2:
+            continue
+        evidence = _reissue_evidence(cell, uids, in_arrival_order(fetches_of[cell[0]]), rows_of)
+        if evidence is not None:
+            account, source, direction, _size, day = cell
+            faults.append(
+                RowCountFault(
+                    account,
+                    source,
+                    day,
+                    direction,
+                    REISSUED,
+                    wanted[cell],
+                    held.get(cell, 0),
+                    history.get(cell, 0),
+                    evidence,
+                )
+            )
     report.row_faults = sorted(faults, key=lambda f: (f.day, f.account, f.source, f.direction))
     return report
 
