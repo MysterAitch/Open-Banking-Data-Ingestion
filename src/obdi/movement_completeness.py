@@ -68,10 +68,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from time import perf_counter
 from typing import TYPE_CHECKING, NamedTuple
+from urllib.parse import parse_qs, urlparse
 
 from .accounts import AccountMap, AccountRef
+from .arrival_order import in_arrival_order
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS
 from .models import Transaction
+from .payment_links import FIRST_PARTY_FEEDS
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -105,6 +108,8 @@ OUTSIDE_WINDOW = "outside-window"
 SAME_MOVEMENT = timedelta(minutes=5)
 
 _PENDING_SOURCES = ("truelayer-pending",)
+#: The artefact source of a first-party feed fetch, whose rows' source is `starling`.
+FEED_ARTEFACT = "starling-feed"
 _PDF = "application/pdf"
 
 
@@ -540,6 +545,30 @@ class _Cell:
     held: int
 
 
+def _ranked_rows(
+    fault: _Cell, held: _Held, shape: list[_Sighting]
+) -> tuple[dict[str, list[_Sighting]], list[str]]:
+    """The stored rows a cell holds, with their sightings, best supported first.
+
+    The first `fault.listed` are taken as the listed ones and the rest are the surplus
+    (`_explain` says what that choice rests on).
+    """
+    here_rows: dict[str, list[_Sighting]] = defaultdict(list)
+    for sighting in shape:
+        if sighting.account == fault.account and sighting.observed == fault.day:
+            here_rows[sighting.entity_id].append(sighting)
+    ranked = sorted(
+        here_rows,
+        key=lambda e: (
+            _status_word(here_rows[e][0].status) != "booked",
+            _status_word(here_rows[e][0].status) != "pending",
+            -len(held.support[e]),
+            e,
+        ),
+    )
+    return here_rows, ranked
+
+
 def _explain(
     fault: _Cell,
     *,
@@ -599,19 +628,7 @@ def _explain(
             return f"{subject} sighted on {' and '.join(places)}"
         return f"{subject} sighted on no stored row"
 
-    here_rows: dict[str, list[_Sighting]] = defaultdict(list)
-    for sighting in shape:
-        if sighting.account == fault.account and sighting.observed == fault.day:
-            here_rows[sighting.entity_id].append(sighting)
-    ranked = sorted(
-        here_rows,
-        key=lambda e: (
-            _status_word(here_rows[e][0].status) != "booked",
-            _status_word(here_rows[e][0].status) != "pending",
-            -len(held.support[e]),
-            e,
-        ),
-    )
+    here_rows, ranked = _ranked_rows(fault, held, shape)
     surplus = ranked[fault.listed :]
     kept_digests = {s.digest for e in ranked[: fault.listed] for s in here_rows[e]}
     others = [s for e in surplus for s in here_rows[e] if s.digest not in kept_digests]
@@ -671,6 +688,134 @@ def _measure_listing(
         if len(named) < len(stated):
             ids += f" and {len(stated) - len(named)} stating none"
     return f"listed by {_plural(artefacts, 'artefact')}, {ids}"
+
+
+def _asked_days(origin: str) -> tuple[date, date | None, str] | None:
+    """The days a feed fetch asked for, as (first, last or None, kind), from its recorded origin.
+
+    A `changesSince` ask runs from its stamp to now, and a bounded window names both ends
+    (`providers.starling.parse_window_spec`); any other origin says nothing about its reach.
+    """
+    from .providers.starling import WINDOW_MAX_PARAM, WINDOW_MIN_PARAM
+
+    query = parse_qs(urlparse(origin).query)
+
+    def day_of(values: list[str]) -> date | None:
+        try:
+            return datetime.fromisoformat(values[0].replace("Z", "+00:00")).date()
+        except (IndexError, ValueError):
+            return None
+
+    since = day_of(query.get("changesSince", []))
+    if since is not None:
+        return since, None, "changes"
+    first, last = day_of(query.get(WINDOW_MIN_PARAM, [])), day_of(query.get(WINDOW_MAX_PARAM, []))
+    if first is not None and last is not None:
+        return first, last, "window"
+    return None
+
+
+def _measure_feed(
+    store: Store,
+    cell: _Cell5,
+    entities: Iterable[str],
+    fetches: Sequence[sqlite3.Row],
+    rows_of: Callable[[sqlite3.Row], list[Transaction] | None],
+) -> str:
+    """Whether the bank's own feed stopped listing a stored row after listing it.
+
+    THE QUESTION, put of every row held at the cell because which of two is the surplus is
+    only a ranking (`_explain`). A row of a first-party feed (`starling`) has a uid, and the
+    fetches that listed it are known. A later fetch that asks for the row's day and does not
+    list the uid is evidence the bank dropped the item, and the first such fetch listing an item
+    of the same size, direction, and recipient under another uid is evidence it re-issued it.
+    Measured as counts only, because a `changesSince` ask lists what CHANGED, so its silence is
+    not a withdrawal (`pending_lifecycle` says the same of absence there), while a window asked
+    by transaction time lists what exists: the clause says how many of each kind were silent.
+    """
+    from .matching import same_payee
+
+    _account, source, direction, size, day = cell
+    wanted = (day, direction, size)
+    listing = [rows_of(f) or [] for f in fetches]
+
+    clauses: list[str] = []
+    for entity in entities:
+        uids = {
+            str(r["source_id"])
+            for r in store.connection.execute(
+                "SELECT source_id FROM transaction_sources "
+                "WHERE entity_id = ? AND source = ? AND source_id IS NOT NULL",
+                (entity, source),
+            )
+        }
+        first = next(
+            (i for i, rows in enumerate(listing) if any(r.source_id in uids for r in rows)), None
+        )
+        if first is None:
+            continue
+        old = next(r for r in listing[first] if r.source_id in uids)
+        covering: list[tuple[int, str]] = []
+        for index in range(first + 1, len(fetches)):
+            asked = _asked_days(str(fetches[index]["origin"]))
+            if asked is None or day < asked[0] or (asked[1] is not None and day > asked[1]):
+                continue
+            covering.append((index, asked[2]))
+        silent = [
+            (index, kind)
+            for index, kind in covering
+            if not any(r.source_id in uids for r in listing[index])
+        ]
+        if not silent:
+            continue
+        changes = sum(1 for _, kind in silent if kind == "changes")
+        windows = len(silent) - changes
+        asked_by = " and ".join(
+            part
+            for part in (
+                f"{changes} asking by changesSince" if changes else "",
+                f"{windows} asking by transaction-time window" if windows else "",
+            )
+            if part
+        )
+        newest = ", the newest included" if silent[-1][0] == covering[-1][0] else ""
+        seen_before = {
+            r.source_id for earlier in listing[: silent[0][0]] for r in earlier if r.source_id
+        }
+        reissued = any(
+            r.source_id not in uids
+            and r.source_id not in seen_before
+            and r.source == source
+            and (r.value_date, _direction(r.amount_minor), abs(r.amount_minor)) == wanted
+            and same_payee(old, r)
+            for r in listing[silent[0][0]]
+        )
+        successor = (
+            "an item of the same size, direction, and recipient under another id first appears "
+            "in the first of them"
+            if reissued
+            else "no item of the same size, direction, and recipient under another id first "
+            "appears in the first of them"
+        )
+        clauses.append(
+            f"an earlier-listed row's id is absent from {_the_fetches(len(silent), len(covering))} "
+            f"({asked_by}){newest}, and {successor}"
+        )
+    if not clauses:
+        return (
+            "no fetch landed after a row's first listing asks for its day without listing "
+            "that row, so nothing says the bank withdrew one"
+        )
+    return "; ".join(clauses)
+
+
+def _the_fetches(silent: int, asked: int) -> str:
+    """"all 3 later fetches that ask for its day", with the number and verb agreeing."""
+    one = asked == 1
+    subject = "the 1 later fetch" if one else f"all {asked} later fetches"
+    if silent != asked:
+        subject = f"{silent} of the {asked} later fetches"
+    return f"{subject} that ask{'s' if one else ''} for its day"
 
 
 def _family_accounts(store: Store, account_map: AccountMap) -> frozenset[str]:
@@ -746,7 +891,8 @@ def check_rows(
     report = MovementCompleteness()
     account_map = _CanonicalMap(canonical_for_ref or (lambda ref: ref))
     artefacts = store.connection.execute(
-        "SELECT source, account_ref, digest, origin, media_type FROM raw_artefacts"
+        "SELECT rowid, fetched_at, source, account_ref, digest, origin, media_type "
+        "FROM raw_artefacts"
     ).fetchall()
     defaults = _starling_defaults(
         store.connection.execute(
@@ -758,6 +904,7 @@ def check_rows(
     digest_accounts: dict[str, set[str]] = defaultdict(set)
     read: set[tuple[str, str]] = set()
     artefact_of: dict[tuple[str, str], sqlite3.Row] = {}
+    fetches_of: dict[str, list[sqlite3.Row]] = defaultdict(list)
     listing_digests: dict[tuple[str, str, str, int, date], set[str]] = defaultdict(set)
     for artefact in artefacts:
         source = str(artefact["source"])
@@ -771,6 +918,8 @@ def check_rows(
             continue
         read.add((digest, account))
         artefact_of[(digest, account)] = artefact
+        if source == FEED_ARTEFACT:
+            fetches_of[account].append(artefact)
         listing = _listing_of(store, artefact, account)
         if listing is None:
             report.artefacts_unread += 1
@@ -800,11 +949,27 @@ def check_rows(
     openings: dict[str, EffectiveOpening] = {}
     in_families: frozenset[str] | None = None
 
-    def measured(cell: _Cell5, kind: str, count: int) -> tuple[str, ...]:
+    parsed: dict[str, list[Transaction] | None] = {}
+
+    def rows_of(fetch: sqlite3.Row) -> list[Transaction] | None:
+        digest = str(fetch["digest"])
+        if digest not in parsed:
+            account = resolve_artefact_ref(fetch, account_map, defaults)
+            parsed[digest] = _rows_listed(store, fetch, account)
+        return parsed[digest]
+
+    def measured(cell: _Cell5, kind: str, count: int, listed: int) -> tuple[str, ...]:
         nonlocal in_families
         if in_families is None:
             in_families = _family_accounts(store, account_map)
         clauses: list[str] = []
+        if kind == SURPLUS and cell[1] in FIRST_PARTY_FEEDS:
+            fault = _Cell(*cell, listed=listed, held=listed + count)
+            _, ranked = _ranked_rows(
+                fault, sighted, by_shape.get((cell[1], cell[2], cell[3]), [])
+            )
+            fetches = in_arrival_order(fetches_of[cell[0]])
+            clauses.append(_measure_feed(store, cell, ranked, fetches, rows_of))
         if kind != SURPLUS:
             digests = listing_digests.get(cell, ())
             clauses.append(_measure_listing(store, cell, digests, artefact_of))
@@ -867,7 +1032,12 @@ def check_rows(
                         held_count,
                         history.get(cell, 0),
                         explained(cell, wanted[cell], held_count),
-                        measured(cell, COLLAPSED if held_count else MISSING, missing),
+                        measured(
+                            cell,
+                            COLLAPSED if held_count else MISSING,
+                            missing,
+                            wanted[cell],
+                        ),
                     )
                 )
     for group, days in extra.items():
@@ -886,7 +1056,7 @@ def check_rows(
                         held[cell],
                         history.get(cell, 0),
                         explained(cell, wanted.get(cell, 0), held[cell]),
-                        measured(cell, SURPLUS, over),
+                        measured(cell, SURPLUS, over, wanted.get(cell, 0)),
                     )
                 )
     report.row_faults = sorted(faults, key=lambda f: (f.day, f.account, f.source, f.direction))

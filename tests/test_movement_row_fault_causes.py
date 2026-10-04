@@ -169,7 +169,10 @@ class TestARowHeldTwiceWhereOneIsListed:
         assert said(store) == [
             f"2026-09-03 {MAIN} via starling (out): 1 row of one size and direction listed, "
             f"2 held: the surplus row is {word}, sighted by 1 other artefact of starling "
-            "(observed 2026-09-03)"
+            "(observed 2026-09-03); an earlier-listed row's id is absent from the 1 later fetch "
+            "that asks for its day (1 asking by changesSince), the newest included, and an item "
+            "of the same size, direction, and recipient under another id first appears in the "
+            "first of them"
         ]
 
 
