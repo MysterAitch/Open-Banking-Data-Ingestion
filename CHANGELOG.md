@@ -26,6 +26,34 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.294] - 2026-10-04
+
+### Added
+- **Rows say the time the bank's feed states**, on the ledger and in the
+  explanations of a difference, and a day's rows are ordered by it. The owner
+  compared a page with the bank's app and wrote: "starling has the times
+  (therefore sequence) not only the date". Times are shown in London time,
+  as the app shows them, and the zone is said once per page.
+- **Feed items that make no row are listed beside the change they sit in**:
+  a declined attempt minutes before the payment that went through was
+  invisible on every page. Each says its status, direction, time, and whether
+  it shares a recipient or a size with a named row. Nothing is shown of
+  either.
+- **Each named row says how its feed item differs from the usual item like
+  it**, in field names and coded values only. The status of the two rows
+  behind the last permanent difference was the ordinary one, so the status
+  could not tell them apart; what did was a settlement time months after the
+  purchase, and a days-apart clause now says that of any row.
+
+### Fixed
+- **A later fetch that reports an item as declined was never read** by the
+  status reading, because only artefacts that had sighted a row were read and
+  a declined item sights none.
+
+Found and not fixed here: through a rebuild, a payment settled in one fetch
+and declined in a later one keeps its row booked. The page now tests each
+change for it by name. Whether the real store holds one is not known.
+
 ## [0.4.293] - 2026-10-04
 
 The owner's framing, in his words: "this is what the balance is known to be on
