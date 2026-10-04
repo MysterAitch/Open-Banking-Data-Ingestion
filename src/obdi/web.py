@@ -631,6 +631,9 @@ class WebConfig:
     #: Rows sharing an identity, and payments with no row of their own.
     #: Counts and account names only, by design of the report itself.
     identity_health_text: Callable[[], str] | None = None
+    #: Whether every listed row is held once, every transfer leg has its partner,
+    #: and the two sides of a chain agree. Shown on the identity health page.
+    movement_completeness_text: Callable[[], str] | None = None
     #: The store's rows against the bank's end-of-day balances. The argument
     #: is whether to MASK the figures, and the page only passes False when
     #: the viewer asked for them.
@@ -6445,13 +6448,27 @@ class ConnectionHandler(
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
+        movement_hook = self.bound_config.movement_completeness_text
         try:
             text = hook()
+            movement = "" if movement_hook is None else movement_hook()
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
             )
             return
+        movement_section = (
+            ""
+            if movement_hook is None
+            else (
+                "<h3>Movements</h3>"
+                "<p>Balances cannot see a fault that nets to nil: two movements held as "
+                "one, a pair missing altogether, or a leg paired with the wrong partner. "
+                "These checks count the movements themselves on every day.</p>"
+                f'<pre class="scroll" style="white-space:pre-wrap">'
+                f"{html.escape(movement)}</pre>"
+            )
+        )
         body = (
             "<h2>Identity health</h2>"
             "<p>Two faults the merged layer cannot show from inside: rows "
@@ -6462,7 +6479,7 @@ class ConnectionHandler(
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + HOME_LINK
+            f"{html.escape(text)}</pre>" + movement_section + HOME_LINK
         )
         self._respond(200, render_page("Identity health", body))
 

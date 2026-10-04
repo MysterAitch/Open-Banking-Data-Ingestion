@@ -12,9 +12,9 @@ only the COUNTS of its breaks and mismatches are read from it, and no item or
 account row carries an amount, a description, or a payee.
 
 NOTHING IS RE-DERIVED. The alert's findings, the identity health totals, the
-reconciliation counts, the review queue, the recovered Spaces and the last
-rebuild are each read from the module that owns that condition. This module
-orders them, links them, and attributes them to accounts.
+movement completeness counts, the reconciliation counts, the review queue, the
+recovered Spaces and the last rebuild are each read from the module that owns
+that condition. This module orders them, links them, and attributes them to accounts.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .identity_health import IdentityHealth
+    from .movement_completeness import MovementCompleteness
 
 #: Where a person goes to act on each kind of attention item. Declared once,
 #: here, because the navigation strip and the items below must agree about them.
@@ -81,6 +82,7 @@ _KIND_ORDER = (
     "uncovered-span",
     "shared-identity",
     "identity-health",
+    "movement-completeness",
     "balance",
     "rebuild-problems",
     "push-refused",
@@ -127,6 +129,11 @@ _KINDS: dict[str, tuple[int, str]] = {
     "identity-health": (
         NOW,
         "Open identity health to see which accounts hold payments counted twice or folded away.",
+    ),
+    "movement-completeness": (
+        NOW,
+        "Open identity health to see which days and accounts hold a movement collapsed, "
+        "missing, or paired with the wrong partner.",
     ),
     "balance": (
         NOW,
@@ -197,6 +204,7 @@ _ALERT_GUARDS = {
 OVERVIEW_CHECKS = (
     "uncovered spans",
     "identity health",
+    "movement completeness",
     "balance reconciliation",
     "review flags",
     "recovered Spaces",
@@ -433,6 +441,52 @@ def identity_items_from(health: IdentityHealth) -> list[AttentionItem]:
             remedy=_KINDS["identity-health"][1],
             href="/identity-health",
             accounts=concerned,
+        )
+    ]
+
+
+def _movement_items(
+    store: Store, canonical_for_ref: Callable[[str], str]
+) -> list[AttentionItem]:
+    from .movement_completeness import movement_completeness
+
+    return movement_items_from(movement_completeness(store, canonical_for_ref))
+
+
+def movement_items_from(report: MovementCompleteness) -> list[AttentionItem]:
+    """The movement checks as at most one item.
+
+    Every fault is data at risk, whatever the balances say: a movement held once
+    where it was listed twice, a pair missing altogether, or a leg paired with
+    the wrong partner leaves the money agreeing and the record wrong, which is
+    the case these checks exist for.
+    """
+    if not report.faults:
+        return []
+    parts = []
+    if report.row_faults:
+        parts.append(
+            f"{_plural(len(report.row_faults), 'day')} where a source lists more or fewer "
+            "rows than the store holds from it"
+        )
+    if report.leg_faults:
+        parts.append(
+            f"{_plural(len(report.leg_faults), 'transfer leg')} without exactly one "
+            "partner in the account it names"
+        )
+    if report.chain_faults:
+        parts.append(
+            f"{_plural(len(report.chain_faults), 'account-pair day')} where the two sides "
+            "of a chain of transfers disagree"
+        )
+    return [
+        AttentionItem(
+            kind="movement-completeness",
+            severity=NOW,
+            message="Movement completeness: " + ", and ".join(parts) + ".",
+            remedy=_KINDS["movement-completeness"][1],
+            href="/identity-health",
+            accounts=report.accounts,
         )
     ]
 
@@ -675,6 +729,7 @@ def build_overview(
             ),
         ),
         ("identity health", lambda: _identity_items(store)),
+        ("movement completeness", lambda: _movement_items(store, canonical_for_ref)),
         ("balance reconciliation", lambda: _balance_items(store, label_of)),
         ("review flags", lambda: _review_items(store)),
         ("recovered Spaces", lambda: _space_items(store)),

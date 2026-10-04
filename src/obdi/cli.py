@@ -2824,6 +2824,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return identity_health(store).describe()
 
+    def movement_completeness_text() -> str:
+        from .movement_completeness import movement_completeness
+
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            return movement_completeness(
+                store, lambda ref: _canonical_for_ref(account_map, ref)
+            ).describe()
+
     def balance_reconciliation_text(masked: bool) -> str:
         from .balance_reconciliation import balance_reconciliation
 
@@ -3778,6 +3787,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
         identity_health_text=identity_health_text,
+        movement_completeness_text=movement_completeness_text,
         balance_reconciliation_text=balance_reconciliation_text,
         period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,
