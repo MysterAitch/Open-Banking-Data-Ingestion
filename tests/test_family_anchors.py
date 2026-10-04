@@ -1003,13 +1003,18 @@ class TestTheAggregatorsBalancesAreTheFamilysToo:
         opening = effective_opening(store, MAIN, families=families(home))
 
         assert opening.family is not None
+        # The opening before the first day, then the closing of each day the bank's chain
+        # has one end for (`AccountReconciliation.balances`): the 2nd and the 4th. The 3rd
+        # states nothing, because its only record is the water bill the fold holds as
+        # a Space copy, so no booked row of the day is left to chain.
         assert [(r.day.day, r.balance_minor) for r in opening.family.readings] == [
             (1, 100000),
+            (2, 150000),
             (4, 143000),
         ]
         assert opening.family.sources == ("truelayer",)
         assert opening.opening_minor == 100000
-        assert opening.readings[1].agrees is True
+        assert [r.agrees for r in opening.readings[1:]] == [True, True]
 
     def test_BankBalances_WhenTreatedAsMainsOwn_GaveTheWrongOpening(self, store):
         # Without the account map every anchor is main's own: the measured old behaviour.
@@ -1018,7 +1023,8 @@ class TestTheAggregatorsBalancesAreTheFamilysToo:
         opening = effective_opening(store, MAIN)
 
         assert opening.opening_minor == 100000 + 20000
-        assert opening.readings[1].difference_minor == -5000
+        # The 2nd's closing agrees; the 4th's differs by the Space's 50.00 bill.
+        assert [r.difference_minor for r in opening.readings[1:]] == [0, -5000]
 
 
 class TestWhatTheFamilyReadingCosts:

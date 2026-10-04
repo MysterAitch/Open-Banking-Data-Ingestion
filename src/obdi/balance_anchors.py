@@ -11,7 +11,9 @@ the statement came from.
               (as an account-balance observation in `valuations`, see
               `store.ACCOUNT_BALANCE_KIND`).
   bank        the bank's own running balance on its records, derived on demand
-              by `balance_reconciliation` and never stored. A Starling
+              by `balance_reconciliation` and never stored: its earliest opening
+              and the closing of each day, judged by the aggregator's own
+              dating. A Starling
               account's own landed balance is of this basis too, stated for a
               moment and judged at it (`bank_balances`).
   statement  the closing balance of a held statement, derived on demand by
@@ -716,15 +718,23 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
         and families.blind(RUNNING_BALANCE_SOURCE, ref)
     )
     bank_family: list[FamilyAnchor] = []
-    for report in balance_reconciliation(store, ref).accounts:
+    for report in balance_reconciliation(store, ref, aggregator_dating=True).accounts:
         if report.account_id != ref:
             continue
         for b in report.balances():
             if blind_bank:
                 bank_family.append(FamilyAnchor(b.day, b.balance_minor, RUNNING_BALANCE_SOURCE))
             else:
+                # The opening anchor keeps the stored dating it always had, so adding a
+                # closing for every day never moves an opening an account already has.
                 anchors.append(
-                    Anchor(b.day, b.balance_minor, BANK, stated_by=RUNNING_BALANCE_SOURCE)
+                    Anchor(
+                        b.day,
+                        b.balance_minor,
+                        BANK,
+                        "" if b.opening else RUNNING_BALANCE_SOURCE,
+                        stated_by=RUNNING_BALANCE_SOURCE,
+                    )
                 )
     statements, unusable = statement_balances(store, ref)
     anchoring: list[StatementBalance] = []

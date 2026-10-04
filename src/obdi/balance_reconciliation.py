@@ -87,6 +87,9 @@ class BankBalance:
 
     day: date
     balance_minor: int
+    #: The balance before the account's first known day, which no row of the store
+    #: states: it is the one figure that defines an opening (`balance_anchors`).
+    opening: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,9 @@ class AccountReconciliation:
     #: Days the store holds booked rows for and the bank gave no figures for.
     unwitnessed_days: list[date] = field(default_factory=list)
     pending_excluded: int = 0
+    #: The same days grouped by the aggregator's own dating, where that was asked for
+    #: (`balance_reconciliation`); `days` stays on the stored dates the check compares.
+    aggregator_days: list[BankDay] | None = None
 
     @property
     def known_days(self) -> list[BankDay]:
@@ -160,18 +166,36 @@ class AccountReconciliation:
     def balances(self) -> list[BankBalance]:
         """The bank's own statements of the balance, as end-of-day figures.
 
-        The earliest known OPENING is the balance at the end of the day before
-        it, and the latest known CLOSING is the balance at the end of its own
-        day. Nothing here is stored: both come from evidence the store already
-        holds, so they cannot drift from it.
+        THE RULE, stated here and only here: the earliest known OPENING is the
+        balance at the end of the day before it, and the CLOSING of every known
+        day is the balance at the end of its own day, the days being the
+        aggregator's own where `aggregator_days` was asked for (the opening
+        always goes by the stored dates it was always found by, so adding a
+        closing for every day never moves an opening an account already has).
+        A day is known only where
+        its figures form ONE chain (`_chain_ends`), so a day with a row missing
+        from the middle states nothing, and the next day's closing shows it.
+        Nothing here is stored: every figure comes from evidence the store
+        already holds, so they cannot drift from it.
+
+        REJECTED. Taking each later day's OPENING as the end of the day before:
+        a row the store lacks from the start of a day is already in that
+        opening, so it would state a figure for the previous day that no
+        clean cut of the rows can reach, which is the fault `cut_anchors`
+        refuses to state for an export's day.
         """
         found: list[BankBalance] = []
         first = self.opening
         if first is not None and first.opening_minor is not None:
-            found.append(BankBalance(first.day - timedelta(days=1), first.opening_minor))
-        last = self.latest
-        if last is not None and last.closing_minor is not None:
-            found.append(BankBalance(last.day, last.closing_minor))
+            found.append(BankBalance(first.day - timedelta(days=1), first.opening_minor, True))
+        closing = self.known_days if self.aggregator_days is None else [
+            day for day in self.aggregator_days if day.known
+        ]
+        found.extend(
+            BankBalance(day.day, day.closing_minor)
+            for day in closing
+            if day.closing_minor is not None
+        )
         return found
 
 
@@ -441,18 +465,30 @@ class _TruelayerSightings:
         self._store = store
         self._by_entity: dict[str, list[tuple[str, str]]] = {}
         only = "" if account_id is None else " AND t.account_id = ?"
+        self._days: dict[str, date] = {}
         for row in store.connection.execute(
             "SELECT s.entity_id AS entity_id, s.source_id AS source_id, "  # noqa: S608
-            "s.artefact_digest AS digest FROM transaction_sources s "
+            "s.artefact_digest AS digest, s.observed_date AS observed FROM transaction_sources s "
             "JOIN transactions t ON t.entity_id = s.entity_id "
             "WHERE s.source = 'truelayer' AND s.source_id IS NOT NULL "
             f"AND s.source_id != ''{only}",
             () if account_id is None else (account_id,),
         ):
-            self._by_entity.setdefault(str(row["entity_id"]), []).append(
+            entity = str(row["entity_id"])
+            self._by_entity.setdefault(entity, []).append(
                 (str(row["digest"]), str(row["source_id"]))
             )
+            try:
+                seen = date.fromisoformat(str(row["observed"] or "")[:10])
+            except ValueError:
+                continue
+            if entity not in self._days or seen < self._days[entity]:
+                self._days[entity] = seen
         self._payloads: dict[str, dict[str, object]] = {}
+
+    def day(self, entity_id: str) -> date | None:
+        """The earliest day the aggregator dated the row, where it dated it."""
+        return self._days.get(entity_id)
 
     def _records(self, digest: str) -> dict[str, object]:
         if digest not in self._payloads:
@@ -485,12 +521,17 @@ class _TruelayerSightings:
 
 
 def balance_reconciliation(
-    store: Store, account_id: str | None = None
+    store: Store, account_id: str | None = None, *, aggregator_dating: bool = False
 ) -> BalanceReconciliation:
     """Every account's reconciliation, or just `account_id`'s.
 
     Narrowing exists for a page about one account: the whole-store read costs
     in proportion to every row held, and the page needs one account's figures.
+
+    Days are the rows' stored dates, which is what the day-by-day check compares.
+    With `aggregator_dating` a row the aggregator dated goes on the day it gave,
+    which is the day a balance it states is judged by (`sighting_placement`), so
+    the figures that become anchors are grouped as they are tested.
     """
     only = "" if account_id is None else " AND t.account_id = ?"
     own: tuple[str, ...] = () if account_id is None else (account_id,)
@@ -523,6 +564,7 @@ def balance_reconciliation(
 
     sightings = _TruelayerSightings(store, account_id)
     per_account: dict[str, list[tuple[date, int, tuple[int, int] | None]]] = {}
+    per_aggregator: dict[str, list[tuple[date, int, tuple[int, int] | None]]] = {}
     card_accounts: set[str] = set()
     for row in rows:
         account_id = str(row["account_id"])
@@ -542,9 +584,12 @@ def balance_reconciliation(
                 pair = _bank_pair(
                     sightings.record(str(row["entity_id"])), str(row["currency"])
                 )
-        per_account.setdefault(account_id, []).append(
-            (date.fromisoformat(str(row["value_date"])), int(row["amount_minor"]), pair)
-        )
+        stored = date.fromisoformat(str(row["value_date"]))
+        amount = int(row["amount_minor"])
+        per_account.setdefault(account_id, []).append((stored, amount, pair))
+        if aggregator_dating:
+            dated = sightings.day(str(row["entity_id"])) or stored
+            per_aggregator.setdefault(account_id, []).append((dated, amount, pair))
 
     accounts: list[AccountReconciliation] = []
     for account_id in sorted(per_account):
@@ -566,9 +611,12 @@ def balance_reconciliation(
                 )
             )
         else:
-            accounts.append(
-                _reconcile_account(account_id, entries, pending.get(account_id, 0))
-            )
+            reconciled = _reconcile_account(account_id, entries, pending.get(account_id, 0))
+            if aggregator_dating:
+                reconciled.aggregator_days = _reconcile_account(
+                    account_id, per_aggregator[account_id], 0
+                ).days
+            accounts.append(reconciled)
     for account_id in sorted(set(pending) - set(per_account)):
         accounts.append(
             AccountReconciliation(

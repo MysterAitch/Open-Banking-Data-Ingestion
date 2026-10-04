@@ -32,10 +32,11 @@ WHICH BALANCES, all derived on demand from the held artefacts and never stored:
                         statement's own rows, and its closing balance
   CSV export            the balance after the last row of each day that its own
                         sequence cuts cleanly (`cut_anchors`)
-  aggregator            the bank's earliest opening and latest closing, which
-                        `balance_reconciliation` already derives. Only those
-                        two: a day holding a folded row has a broken chain and
-                        is ambiguous there, so no per-day figure is offered.
+  aggregator            the bank's earliest opening and the closing of every day
+                        its chain has one end for
+                        (`AccountReconciliation.balances` states which days). A
+                        day holding a folded row or a row lost from its middle
+                        has a broken chain, and states nothing.
 
 THE OPENED ANCHOR. Starling's own feed holds every movement of the main account
 and of every Space since the account was created, so a family whose complete

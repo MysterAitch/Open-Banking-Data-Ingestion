@@ -530,10 +530,11 @@ class TestStatedAnchorsOutliveTheirAccountsDerivedLayer:
 
 
 class TestTheBanksOwnRunningBalanceIsAnAnchor:
-    def test_BankAnchors_ComeFromTheReconciliationsOwnOpeningAndLatestClosing(self, store):
-        """The reconciliation's opening is 100,000 on 03-02 and its latest
-        closing 119,889 on 03-06 (see test_balance_reconciliation). As anchors
-        they are the end of 03-01 and the end of 03-06."""
+    def test_BankAnchors_ComeFromTheReconciliationsOwnOpeningAndEveryDaysClosing(self, store):
+        """The reconciliation's opening is 100,000 on 03-02 and its days close at
+        98,266 (03-02), 123,266 (03-03), 120,489 (03-05) and 119,889 (03-06) (see
+        test_balance_reconciliation). As anchors they are the end of 03-01 and the end
+        of each of those days, and the rows reproduce every one."""
         build_bank_account(store)
         reconciliation = next(
             a for a in balance_reconciliation(store).accounts
@@ -546,24 +547,29 @@ class TestTheBanksOwnRunningBalanceIsAnAnchor:
         found = [(r.anchor.day, r.anchor.balance_minor, r.anchor.basis) for r in opening.readings]
         assert found == [
             (D(2026, 3, 1), reconciliation.opening.opening_minor, BANK),
+            (D(2026, 3, 2), 98266, BANK),
+            (D(2026, 3, 3), 123266, BANK),
+            (D(2026, 3, 5), 120489, BANK),
             (D(2026, 3, 6), 119889, BANK),
         ]
         assert opening.opening_minor == 100000
         assert opening.as_at == D(2026, 3, 1)
-        assert opening.readings[1].agrees is True
+        assert [r.agrees for r in opening.readings[1:]] == [True, True, True, True]
 
-    def test_BankClosing_WhenARowIsMissingFromTheStore_DiffersByThatRow(self, tmp_path):
-        """Row d (-2,000) is omitted from what is landed while the bank's
-        balances still reflect it. Held rows total +21,889, predicting 121,889
-        at 03-06; the bank says 119,889: a difference of -2,000."""
+    def test_BankClosing_WhenARowIsMissingFromTheStore_DiffersFromItsDayByThatRow(self, tmp_path):
+        """Row d (-2,000, 03-05) is omitted from what is landed while the bank's
+        balances still reflect it. 03-05's single remaining row still chains, closing
+        at 120,489 which includes d; held rows predict 122,489 there, so the bank
+        differs by -2,000 from 03-05 on, and the days before it agree."""
         with Store(tmp_path / "omitted.sqlite3") as held:
             build_bank_account(held, omit=("d",))
 
             opening = opening_of(held, TRUELAYER_ACCOUNT)
 
         assert opening.opening_minor == 100000
-        assert opening.readings[1].expected_minor == 121889
-        assert opening.readings[1].difference_minor == -2000
+        assert [r.difference_minor for r in opening.readings[1:]] == [0, 0, -2000, -2000]
+        assert opening.readings[3].anchor.day == D(2026, 3, 5)
+        assert opening.readings[3].expected_minor == 122489
 
     def test_AccountWithNoRunningBalance_HasNoBankAnchor(self, store):
         everyday(store)

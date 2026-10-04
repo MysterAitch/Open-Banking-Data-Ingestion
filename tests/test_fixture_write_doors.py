@@ -111,6 +111,11 @@ JUSTIFIED = {
     "feed in the same file",
     ("test_row_parting.py", "transaction_sources"): "the sightings of the removed row, "
     "so the store holds no trace of the payment at all",
+    ("test_aggregator_day_anchors.py", "transactions"): "a stored date a day later than the "
+    "one the aggregator's own sighting gave the row. A merged row takes the date of the "
+    "sighting that wrote it last, so the state is reachable only with a second source "
+    "that dates the payment differently and writes after the aggregator; the aggregator's "
+    "own sighting date, which is what the check judges by, is left untouched",
     ("test_export_declared.py", "transactions"): "removes a transaction from under "
     "an annotation, to prove the export carries work that has lost its row - which "
     "is the work most at risk and invisible from every other angle",
