@@ -21,6 +21,8 @@ ACRONYMS = frozenset(
     {
         *("GBP", "UTC", "BST", "CSV", "PDF", "JSON", "API", "URL", "URI", "HTTP", "HTTPS"),
         *("ISO", "OCR", "QIF", "DEBIT", "CREDIT", "FASTER", "CARD", "OUT", "SETTLED", "PENDING"),
+        # A status the bank states, named as data where a count of items is given by status.
+        "DECLINED",
     }
 )
 SHOUTING = re.compile(r"\b[A-Z]{3,}\b")

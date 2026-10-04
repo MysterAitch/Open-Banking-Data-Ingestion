@@ -267,7 +267,7 @@ class TestThePage:
 
         assert f"{MAIN}:" in page
         assert "The aggregator listed 6 items in all." in page
-        assert "4 carry a provider id that is the uid of a landed feed item." in page
+        assert "4 carry a provider id that is the own id of a landed feed item." in page
         assert "Of those, 1 agree on the instant to the second." in page
         assert "Of the 4 joined pairs, the store already holds 4 as one stored row." in page
         assert "The export listed 12 rows in all." in page

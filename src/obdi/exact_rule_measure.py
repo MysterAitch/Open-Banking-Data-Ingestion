@@ -88,7 +88,7 @@ class AccountFigures:
         joined = self.linked
         lines = [
             f"The aggregator listed {_items(self.aggregator_items)} in all.",
-            f"{self.linked} carry a provider id that is the uid of a landed feed item.",
+            f"{self.linked} carry a provider id that is the own id of a landed feed item.",
             f"Of those, {self.agree_on_size} agree with that feed item on size and direction.",
             f"Of those, {self.same_second} agree on the instant to the second.",
             f"Of those, {self.within_a_minute} differ on the instant by under a minute.",
@@ -103,10 +103,10 @@ class AccountFigures:
             f"Of the {_pairs(joined)}, the store already holds {self.held_as_one_row} "
             "as one stored row.",
             f"Of the {_pairs(joined)}, the store holds {self.held_as_two_rows} as two different "
-            "rows, so the matcher missed a pair the id proves.",
+            "rows, so a pair the id proves was not joined.",
             f"Of the pairs held as two rows, {self.on_another_feed_uid} have the aggregator's "
-            "sighting on a stored row whose feed sighting has a different uid, so the matcher "
-            "joined the wrong pair.",
+            "sighting on a stored row whose feed sighting has a different id, so the wrong "
+            "pair was joined.",
         ]
         if self.held_nowhere:
             lines.append(
@@ -135,6 +135,10 @@ def _pairs(count: int) -> str:
 
 def _rows(count: int) -> str:
     return f"{count} row" if count == 1 else f"{count} rows"
+
+
+def _days(count: int) -> str:
+    return f"{count} day" if count == 1 else f"{count} days"
 
 
 def _transactions(count: int) -> str:
@@ -209,8 +213,17 @@ class SettlementFigures:
     sets_fewer_rows_than_candidates: int = 0
     sets_more_rows_than_candidates: int = 0
     sets_of_another_payee: int = 0
+    none_named: int = 0
+    none_on_no_time: int = 0
+    none_on_no_feed: int = 0
+    none_on_other: int = 0
+    none_on_none: int = 0
     moved: int = 0
     dates_changed: int = 0
+    days_changed: int = 0
+    in_protected: int = 0
+    #: Stored transactions whose date this reading of their sightings does not reproduce.
+    unreproduced: int = 0
 
     def sentences(self) -> list[str]:
         sets_refused = (
@@ -236,6 +249,14 @@ class SettlementFigures:
             f"day: {self.candidates_two} name two, {self.candidates_three} name three, and "
             f"{self.candidates_four_or_more} name four or more.",
             f"Of those, {self.in_a_run} are of a payee paid the same size on consecutive days.",
+            f"{self.none_named} name no stored transaction by their settlement day, which with the "
+            f"{self.one_candidate} and the {self.several_candidates} above makes "
+            f"{self.one_candidate + self.several_candidates + self.none_named} of "
+            f"{self.export_rows}.",
+            f"Of those, {self.none_on_no_time} sit on a transaction whose feed sighting states no "
+            f"settlement time, {self.none_on_no_feed} sit on one with no feed sighting, "
+            f"{self.none_on_other} sit on one of another kind, and {self.none_on_none} sit on "
+            "no transaction.",
             f"Taking the export rows of one size and date as a set, {self.sets_assignable} sets "
             "could be assigned in order, each row to a transaction of its own, and "
             f"{sets_refused} could not "
@@ -245,9 +266,15 @@ class SettlementFigures:
             "set names).",
             f"The settlement rule would move {_rows(self.moved)} from one stored transaction "
             "to another.",
-            f"{_transactions(self.dates_changed)} would carry another date as a result, "
-            "assuming the export is the last source to sight each; a later feed or aggregator "
-            "sighting of one carries its own date instead, so this is at most.",
+            f"{_transactions(self.dates_changed)} would carry another date as a result, counted "
+            "by moving those rows over the stored sightings and giving each transaction the "
+            "date of its latest sighting.",
+            f"{_days(self.days_changed)} would then hold a different total of counted "
+            "transactions.",
+            f"{self.in_protected} of the re-dated transactions carry a date, before or after, "
+            "inside a protected period.",
+            f"{_transactions(self.unreproduced)} carry a date that this reading of their "
+            "sightings does not reproduce, and the counts above are exact only where it does.",
         ]
 
 
@@ -667,6 +694,8 @@ def settlement_figures(
                     figures.sharing_one_candidate += 1
             elif len(named) > 1:
                 _count_several(figures, index, batch[position], named, made_on)
+            else:
+                _place_none(figures, index, sits_on(position))
         for positions in sizes.values():
             named = candidates[positions[0]]
             if len(named) < 2:
@@ -679,7 +708,7 @@ def settlement_figures(
                 figures.sets_assignable += 1
             else:
                 figures.sets_of_another_payee += 1
-        _count_moves(figures, index, batch, planned, sits_on, made_on)
+        _count_moves(figures, store, index, batch, planned, sits_on)
         found.append(figures)
     return found
 
@@ -744,40 +773,147 @@ def _count_several(
         figures.in_a_run += 1
 
 
+def _place_none(
+    figures: SettlementFigures, index: CandidateIndex, sits: set[str]
+) -> None:
+    """Say where a row that no stored transaction's settlement day names is held."""
+    figures.none_named += 1
+    if not sits:
+        figures.none_on_none += 1
+        return
+    kinds = set()
+    for entity in sits:
+        if not index.feed_uids_of(entity):
+            kinds.add("no feed")
+        elif not index.settlement_days(entity):
+            kinds.add("no time")
+        else:
+            kinds.add("other")
+    if "no time" in kinds:
+        figures.none_on_no_time += 1
+    elif "no feed" in kinds:
+        figures.none_on_no_feed += 1
+    else:
+        figures.none_on_other += 1
+
+
+@dataclass(frozen=True)
+class _Sighting:
+    """One source's sighting of a stored transaction, as it orders and dates the row."""
+
+    arrived: tuple[datetime, int]
+    source: str
+    digest: str
+    day: date
+
+
+def _sightings_by_entity(store: Store, account: str) -> dict[str, list[_Sighting]]:
+    """Each stored transaction's sightings that can give it a date, from the stored evidence.
+
+    A sighting copied onto a Space row by a fold, and any sighting by a pending snapshot
+    (which never re-dates a settled row, `ingest._reconcile`), is left out.
+    """
+    from .arrival_order import arrival_instant
+
+    order = {
+        str(row["digest"]): (arrival_instant(row["fetched_at"]), int(row["rowid"]))
+        for row in store.connection.execute(
+            "SELECT digest, MIN(fetched_at) AS fetched_at, MIN(rowid) AS rowid "
+            "FROM raw_artefacts GROUP BY digest"
+        )
+    }
+    found: dict[str, list[_Sighting]] = defaultdict(list)
+    pending: dict[str, bool] = {}
+    for entity, source, digest, observed in store.connection.execute(
+        "SELECT s.entity_id, s.source, s.artefact_digest, s.observed_date "
+        "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+        "WHERE t.account_id = ? AND s.observed_date != '' "
+        "AND (s.source_id IS NULL OR s.source_id NOT LIKE ?)",
+        (account, FOLDED_SIGHTING_PREFIX + "%"),
+    ):
+        if str(digest) not in pending:
+            pending[str(digest)] = store.is_pending_snapshot(str(digest))
+        if str(digest) in order and not pending[str(digest)]:
+            found[str(entity)].append(
+                _Sighting(
+                    order[str(digest)], str(source), str(digest), date.fromisoformat(observed)
+                )
+            )
+    return found
+
+
+def _carried(sightings: list[_Sighting]) -> date | None:
+    """The date a row carries over these sightings: its latest sighting's (`matching.supersede`)."""
+    return max(sightings, key=lambda s: (s.arrived, s.day)).day if sightings else None
+
+
 def _count_moves(
     figures: SettlementFigures,
+    store: Store,
     index: CandidateIndex,
     batch: list[Transaction],
     planned: Mapping[int, str],
     sits_on: Callable[[int], set[str]],
-    made_on: Mapping[str, str],
 ) -> None:
-    """Rows the plan would put on another transaction, and the transactions whose date changes."""
-    changed: set[str] = set()
-    losing: list[tuple[str, date]] = []
+    """What the plan would do, done over the stored sightings without writing anything.
+
+    Each row the plan puts on another transaction is taken off the transactions its sightings
+    sit on and given to the one the plan names. A transaction then carries its latest
+    sighting's date, and only a transaction that lost or gained a sighting can carry another,
+    so the dates, the days whose counted total differs, and the protected periods touched
+    are counted over exactly those.
+    """
+    account = batch[0].account_id if batch else ""
+    sightings = _sightings_by_entity(store, account)
+    figures.unreproduced = sum(
+        1
+        for entity, held in sightings.items()
+        if (row := index.row(entity)) is not None and _carried(held) != row.value_date
+    )
+    after = {entity: list(held) for entity, held in sightings.items()}
+    touched: set[str] = set()
     for position, target in planned.items():
         sits = sits_on(position)
-        listed = batch[position].value_date
-        if sits and target not in sits:
-            figures.moved += 1
-            losing.extend((entity, listed) for entity in sits)
-        gaining = index.row(target)
-        if gaining is not None and gaining.value_date != listed:
-            changed.add(target)
-    receiving = set(planned.values())
-    for entity, listed in losing:
-        if entity in receiving or entity in changed:
+        if not sits or target in sits:
             continue
-        stored = index.row(entity)
-        made = made_on.get(entity)
-        if (
-            stored is not None
-            and stored.value_date == listed
-            and made is not None
-            and date.fromisoformat(made[:10]) != listed
-        ):
-            changed.add(entity)
+        figures.moved += 1
+        listed = batch[position]
+        for entity in sits:
+            before = after.get(entity, [])
+            kept = [
+                s
+                for s in before
+                if not (s.source == listed.source and s.day == listed.value_date)
+            ]
+            taken = [s for s in before if s not in kept]
+            after[entity] = kept
+            after.setdefault(target, []).extend(taken)
+            touched.update((entity, target))
+    changed: dict[str, tuple[date, date]] = {}
+    for entity in touched:
+        row = index.row(entity)
+        now = _carried(after.get(entity, []))
+        if row is not None and now is not None and now != row.value_date:
+            changed[entity] = (row.value_date, now)
     figures.dates_changed = len(changed)
+
+    totals: dict[date, int] = defaultdict(int)
+    for entity, (was, now) in changed.items():
+        row = index.row(entity)
+        if row is not None and not row.status.is_history:
+            totals[was] -= row.amount_minor
+            totals[now] += row.amount_minor
+    figures.days_changed = sum(1 for amount in totals.values() if amount != 0)
+    spans = [
+        (date.fromisoformat(str(p["span_start"])), date.fromisoformat(str(p["through"])))
+        for p in store.protection_records()
+        if str(p["account"]) == account
+    ]
+    figures.in_protected = sum(
+        1
+        for was, now in changed.values()
+        if any(start <= day <= end for start, end in spans for day in (was, now))
+    )
 
 
 def _count_aggregator(

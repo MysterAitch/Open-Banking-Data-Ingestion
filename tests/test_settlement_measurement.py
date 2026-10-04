@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -95,6 +96,85 @@ class TestAWeekOfEqualPaymentsOnConsecutiveDays:
         assert figures.sharing_one_candidate == 0
         assert figures.moved == 7
         assert figures.dates_changed == 7
+
+    def test_Measurement_WhenTheRowsSwapDatesAndAreOfOneSize_NoDayHoldsAnotherTotal(
+        self, stores, rebuild, again
+    ):
+        figures = figures_of(stores(consecutive_payments(7), rebuild=rebuild, again=again))
+
+        assert figures.days_changed == 0
+        assert figures.in_protected == 0
+        assert figures.unreproduced == 0
+
+
+def week_without_its_last_export_row() -> list[Payment]:
+    week = consecutive_payments(7)
+    return [*week[:-1], replace(week[-1], listed=None)]
+
+
+@pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
+class TestAChainThatIsBrokenAtItsEnd:
+    """The week, but the export never lists the last payment's settlement day.
+
+    KNOWN ANSWER, worked by hand before the first run: six export rows on the transactions
+    made on their own dates, so six moved, to the six payments before them; the first
+    payment's date goes from the 15th to the 16th and so on to the sixth's from the 20th to
+    the 21st, six re-dated; the last payment keeps the 21st, so the 15th loses its payment
+    and the 21st gains one: two days with a different total. Measured: 6, 6, and 2.
+    """
+
+    def test_Measurement_WhenTheChainIsBroken_CountsTheDaysThatEndUpDifferent(
+        self, stores, rebuild, again
+    ):
+        figures = figures_of(
+            stores(week_without_its_last_export_row(), rebuild=rebuild, again=again)
+        )
+
+        assert figures.moved == 6
+        assert figures.dates_changed == 6
+        assert figures.days_changed == 2
+        assert figures.unreproduced == 0
+
+
+class TestEveryExportRowIsAccountedFor:
+    @pytest.mark.parametrize(
+        "payments",
+        [
+            consecutive_payments(7),
+            late_settlement_payments(),
+            equal_payments(),
+            equal_payments(both_listed_on_the_later_day=True),
+            week_without_its_last_export_row(),
+        ],
+        ids=["week", "late", "equal", "equal-together", "broken-week"],
+    )
+    def test_Sentences_WhenEveryRowIsClassified_TheThreeKindsAddUpToTheRowsListed(
+        self, stores, payments
+    ):
+        figures = figures_of(stores(payments))
+
+        assert (
+            figures.one_candidate + figures.several_candidates + figures.none_named
+            == figures.export_rows
+        )
+        assert (
+            figures.none_on_no_time
+            + figures.none_on_no_feed
+            + figures.none_on_other
+            + figures.none_on_none
+            == figures.none_named
+        )
+
+    def test_Measurement_WhenTheHouseholdRowsHaveNoSettlementDay_SaysWhereTheySit(self, stores):
+        """PREDICTED: all seven household rows on a transaction whose feed sighting states no
+        settlement time. MEASURED: six, and one on a transaction with no feed sighting, which
+        was not examined further. The prediction was wrong, and this is what was found."""
+        figures = figures_of(stores(consecutive_payments(7)))
+
+        assert figures.none_named == 7
+        assert figures.none_on_no_time == 6
+        assert figures.none_on_no_feed == 1
+        assert figures.none_on_none == 0
 
 
 @pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
@@ -230,6 +310,9 @@ class TestTheSentences:
         assert "7 sit on one whose own feed sighting states a different settlement day" in text
         assert "would move 7 rows from one stored transaction to another." in text
         assert "7 stored transactions would carry another date as a result" in text
+        assert "0 days would then hold a different total of counted transactions." in text
+        assert "0 of the re-dated transactions carry a date, before or after" in text
+        assert "7 name no stored transaction by their settlement day, which with the 7" in text
         for hidden in ("Coffee Co", "450", "4.50"):
             assert hidden not in text
 
