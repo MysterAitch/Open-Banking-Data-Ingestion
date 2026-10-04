@@ -20,7 +20,11 @@ The accounts, and what each is built to be (decided here, before any page reads 
 from __future__ import annotations
 
 import json
+import os
 import random
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -139,6 +143,62 @@ def _state_balances(
         record_stated_anchor(
             store, ref, end.isoformat(), f"{sign}{whole}.{pence:02d}", today=LAST_DAY
         )
+
+
+_ENV = (
+    "OBDI_CONNECTION_STORE",
+    "OBDI_ACCOUNT_MAP",
+    "OBDI_INSTANCE_LABEL",
+    "OBDI_INSTANCE_ROLE",
+    "TRUELAYER_CLIENT_ID",
+    "TRUELAYER_CLIENT_SECRET_FILE",
+)
+
+
+def corpus_environment(root: Path) -> dict[str, str]:
+    """What the served application reads from the environment on every request.
+
+    The suite's own fixture clears every `OBDI_` variable before each test, which would unbind the
+    accounts from Actual in the middle of a module-scoped server; a test module restores these
+    after it, with its own `autouse` fixture.
+    """
+    return {
+        "OBDI_CONNECTION_STORE": str(root / "connections.json"),
+        "OBDI_ACCOUNT_MAP": str(root / "accounts.json"),
+        "OBDI_INSTANCE_LABEL": "obdi",
+        "OBDI_INSTANCE_ROLE": "production",
+    }
+
+
+@contextmanager
+def served_corpus(root: Path) -> Iterator[str]:
+    """The real application over the corpus, in this process, on a free port; yields its address."""
+    from obdi.cli import build_web_config
+    from obdi.web import AuthorisationSession, ConnectionHandler
+
+    saved = {name: os.environ.get(name) for name in _ENV}
+    os.environ.update(corpus_environment(root))
+    os.environ.pop("TRUELAYER_CLIENT_ID", None)
+    os.environ.pop("TRUELAYER_CLIENT_SECRET_FILE", None)
+    write_account_map(root / "accounts.json")
+    db = root / "store.sqlite3"
+    with Store(db) as store:
+        build_corpus(store)
+    config = build_web_config(db)
+    assert config is not None
+    handler = type("H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()})
+    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}"
+    finally:
+        httpd.shutdown()  # type: ignore[attr-defined]
+        httpd.server_close()  # type: ignore[attr-defined]
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def write_account_map(path: Path) -> None:

@@ -35,32 +35,34 @@ ACCOUNT_STYLES = """
  /* Where the account page begins: its four places stack on a phone. */
  .acct-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
  .acct-grid > * { min-width: 0; }
- .ledger-page h1 { margin: var(--s4) 0 var(--s1); }
- .ledger-page h2 { font-size: var(--text-lg); margin: var(--s4) 0 var(--s2); }
+ .ledger-page h1 { margin: var(--s3) 0 var(--s1); }
+ .ledger-page h2 { font-size: var(--text-lg); margin: var(--s3) 0 var(--s1); }
  .ledger-page .sub { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
  .ledger-page .ref { margin: 0; font-size: var(--text-sm); color: var(--ink-2); }
 
  /* The rail, and the two dates it runs between. */
- .proof { margin: var(--s3) 0 var(--s2); }
+ .proof { margin: var(--s2) 0 var(--s1); }
  .rail-ends { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--ink-2); }
 
  /* The verdict is the page's one display sentence. It is teal only where it is a claim of
     agreement with nothing held back, and carries a glyph beside the colour. */
- .verdict { font: 600 var(--text-xl)/130% var(--serif); margin: var(--s3) 0; }
+ .verdict { font: 600 var(--text-xl)/130% var(--serif); margin: var(--s2) 0; }
  .verdict.clear { color: var(--ok); }
  .verdict.clear::before { content: "\\2713\\00a0"; content: "\\2713\\00a0" / ""; }
  .verdict.warn::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; }
 
  /* The one tinted box: what holds the account back, and the way to the explanation. */
- .held { margin: var(--s3) 0; padding: var(--s3) var(--s4); background: var(--bad-bg); border-radius: var(--radius); }
+ .held { margin: var(--s2) 0; padding: var(--s3) var(--s4); background: var(--bad-bg); border-radius: var(--radius); }
  .held p { margin: var(--s1) 0; }
  .held strong { font: 600 var(--text-lg)/130% var(--serif); color: var(--bad); }
  .held strong::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
 
  /* Protection: a quiet line, and the control for the state it describes. */
  .protect { margin: var(--s3) 0; }
- .protect-line { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
- .protect .button { margin: var(--s2) 0; }
+ .protect-line { font: var(--text-xs)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
+ .protect-line strong { font-weight: 500; }
+ .protect .button { margin: var(--s1) 0; }
+ .acct-state p:has(> .button) { margin: 0; }
  .shown { border: var(--edge-weight) solid currentColor; padding: var(--s3); border-radius: var(--radius); }
 
  /* Months. */
@@ -82,22 +84,30 @@ ACCOUNT_STYLES = """
  .absent { color: var(--ink-2); border: var(--rule-weight) dashed var(--rule); font-weight: 400; }
  .count { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); }
 
- /* A transaction: description and figure, then the date, then what is known of it. */
- .txns li.txn { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s3);
-                padding: var(--s2) 0;
-                grid-template-areas: "desc fig" "when more" "chips chips" "note note" "open open"; }
+ /* A transaction is one line to read and, where sources sighted it, one line to tap: the line is
+    the summary of the row's own disclosure, so its hit area is the whole row and no control takes
+    a line of its own. On a phone the description and figure are the first line and the date and
+    chips the second; from 60rem the same four parts are columns. */
+ .txns li.txn { padding: 0; }
+ .t-row, .txns li.txn summary.t-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-areas: "desc fig" "meta meta"; gap: 2px var(--s2);
+                align-items: start; padding: calc(var(--s2) - 2px) 0; min-height: var(--hit);
+                color: inherit; font: inherit; }
+ .txns li.txn summary.t-row::before { display: none; }
  .t-desc { grid-area: desc; overflow-wrap: anywhere; line-height: 130%; }
- .t-fig { grid-area: fig; align-self: start; font-weight: 600; text-align: right; }
- .t-when { grid-area: when; color: var(--ink-2); line-height: 130%; }
- .t-chips { grid-area: chips; }
- .txns li.txn > .t-note { grid-area: note; margin: 0; }
- /* The row's own disclosure shares the date's line while closed, so a month of rows is not a
-    month of extra lines; its hit area is the full tap height, reached by negative margins that
-    leave its layout height at one line. Open, it takes a line of its own. */
- .txns li.txn > .t-more:not([open]) { grid-area: more; }
- .txns li.txn > .t-more[open] { grid-area: open; }
- .txns li.txn > .t-more summary { min-height: var(--hit); font-size: var(--text-xs); justify-content: flex-end; }
- .txns li.txn > .t-more:not([open]) > summary { margin: -.75rem 0; }
+ .t-fig { grid-area: fig; font-weight: 600; text-align: right; line-height: 130%; }
+ /* The date keeps its width and the chips take the rest of the line and wrap inside it, so no
+    size of text pushes the line wider than the page. */
+ .t-meta { grid-area: meta; display: flex; align-items: baseline; gap: 2px var(--s2); min-width: 0; }
+ .t-when.mono { flex: none; color: var(--ink-2); line-height: 150%; font-size: var(--text-xs); }
+ .t-chips { flex: 1 1 0; min-width: 0; }
+ /* The chevron belongs to the date, so a row that opens is told from one that does not. */
+ summary.t-row .t-when::before { content: ""; display: inline-block; width: .45rem; height: .45rem;
+                margin-right: .4rem; border-right: var(--edge-weight) solid var(--act);
+                border-bottom: var(--edge-weight) solid var(--act); transform: rotate(-45deg); }
+ details[open] > summary.t-row .t-when::before { transform: rotate(45deg); }
+ .txns li.txn > .t-note { margin: 0 0 var(--s2); }
+ .txns li.txn > .t-more > p { margin: var(--s1) 0 var(--s1) var(--s4); }
  .txn.flagged { border-left: var(--rail) solid var(--bad); padding-left: var(--s3); }
  .txn.doubtful { border-left: var(--rail) solid var(--warn); padding-left: var(--s3); }
 
@@ -110,8 +120,10 @@ ACCOUNT_STYLES = """
                font-weight: 500; border-bottom: var(--rule-weight) dashed var(--edge); }
 
  /* The folded sections, and the one bordered place for what removes something. */
- .acct-more { margin-top: var(--s4); }
+ .acct-more { margin-top: var(--s2); }
  .acct-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
+ .foot-links { display: flex; flex-wrap: wrap; gap: 0 var(--s5); border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); }
+ .acct-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
  details.danger-zone { margin: var(--s5) 0 0; padding: 0 var(--s4); border: var(--rule-weight) solid var(--bad); border-radius: var(--radius); }
  details.danger-zone button.button.secondary { color: var(--bad); border-color: var(--bad); }
  details.danger-zone > summary { color: var(--bad); font-weight: 600; }
@@ -119,7 +131,7 @@ ACCOUNT_STYLES = """
 
  @media (min-width: 60rem) {
   body.ledger-page { max-width: 80rem; }
-  .acct-grid { grid-template-columns: 32rem minmax(0, 1fr); column-gap: var(--s6); align-items: start;
+  .acct-grid { grid-template-columns: 28rem minmax(0, 1fr); column-gap: var(--s5); align-items: start;
                grid-template-areas: "head head" "state txns" "month txns" "more txns"; }
   .acct-head { grid-area: head; }
   .acct-state { grid-area: state; }
@@ -127,11 +139,14 @@ ACCOUNT_STYLES = """
   .acct-txns { grid-area: txns; }
   .acct-more { grid-area: more; }
   .acct-txns h2 { margin-top: var(--s4); }
-  .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; }
   .year { grid-template-columns: 3rem minmax(0, 1fr); }
-  .txns li.txn { grid-template-columns: 10rem minmax(0, 1fr) auto minmax(9rem, 16rem) auto;
-                 grid-template-areas: "when desc fig chips more" ". note note note note" ". open open open open";
-                 align-items: baseline; }
-  .t-chips { justify-content: flex-end; }
+  .monthgrid li > a.tap, .monthgrid li > button.tap, .absent { padding: 0; font-size: var(--text-xs); }
+  .t-row, .txns li.txn summary.t-row { grid-template-columns: 8.5rem minmax(0, 1fr) auto 13rem;
+                 grid-template-areas: "when desc fig chips"; column-gap: var(--s4); align-items: baseline; }
+  .t-meta { display: contents; }
+  .t-when.mono { grid-area: when; }
+  .t-chips { grid-area: chips; justify-content: flex-end; }
+  .t-fig { align-self: baseline; }
  }
 """

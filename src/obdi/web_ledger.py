@@ -210,9 +210,17 @@ def _row_flags(row: Any) -> str:
     return flags
 
 
-def _status_pill(status: str) -> str:
+def _status_pill(row: Any) -> str:
+    """The row's status as a chip.
+
+    A booked row that a listing clears is told by its "cleared by" chip alone, since a pending
+    row is never cleared (`clearing`); its own chip stays in the page for a screen reader and is
+    left off the screen, which is what lets a row's date and chips share one line on a phone.
+    """
+    status = row.status
     css = {"booked": "pill-ok", "void": "pill-bad"}.get(status, "pill-quiet")
-    return f'<span class="pill {css}">{_esc(status)}</span>'
+    implied = " visually-hidden" if status == "booked" and row.cleared_by else ""
+    return f'<span class="pill {css}{implied}">{_esc(status)}</span>'
 
 
 def _sighting_line(sighting: Any) -> str:
@@ -225,29 +233,37 @@ def _sighting_line(sighting: Any) -> str:
     return f'<p class="muted"><strong>{_esc(sighting.source)}</strong> - {_esc(how)}{tail}</p>'
 
 
-def _sightings_html(row: Any) -> str:
-    """What each source stated of the row and how its sighting joined, one click away.
+def _line_html(row: Any, line: str) -> str:
+    """The row's line, and what each source stated of it one tap away.
 
     Times are London time, the clock the rest of the page uses (`_CLOCK_NOTE`); a date is as stated.
+
+    The whole line is the disclosure's own summary, so the row is its own tap target and takes no
+    line for a control (a month of fifty rows was a third taller with the disclosure on a line of
+    its own). The summary's name is the line followed by "Dates and joins", and the line carries
+    the row's date, so no two rows' summaries read alike. A row nothing sighted has nothing to
+    open and carries the line plain.
     """
     if not row.sightings:
-        return ""
+        return f'<div class="t-row">{line}</div>'
     lines = "".join(_sighting_line(sighting) for sighting in row.sightings)
     return (
-        '<details class="muted t-more"><summary>Dates and joins'
-        f'<span class="visually-hidden">, {_esc(row.dated.isoformat())}</span>'
+        f'<details class="t-more"><summary class="t-row">{line}'
+        '<span class="visually-hidden">Dates and joins</span>'
         f"</summary>{lines}</details>"
     )
 
 
-def _joins_html(joins: Any) -> str:
-    """The account's rows by how they joined, and the guessed ones' dates a click away."""
-    if joins is None:
-        return ""
-    counts = dict(joins.by_basis)
+def _joins_html(joins: Any, clock: str = "") -> str:
+    """The account's rows by how they joined, and the guessed ones' dates a click away.
+
+    `clock` is the sentence about the times a row states, which is about the same detail a row's
+    "Dates and joins" opens, and so is said here rather than in a disclosure of its own.
+    """
+    counts = dict(joins.by_basis) if joins is not None else {}
     sentence = count_sentence(counts)
     if not sentence:
-        return ""
+        return _disclosure("About the times shown", clock) if clock else ""
     guessed = joins.heuristic_days
     listing = (
         f"<details><summary>{len(guessed)} joined by the matcher's guess: the dates</summary>"
@@ -257,7 +273,7 @@ def _joins_html(joins: Any) -> str:
     )
     return _disclosure(
         f"How the rows were joined ({_esc(_joined_gist(counts))})",
-        f"<p>{_esc(sentence[0].upper() + sentence[1:])}.</p>{listing}",
+        f"<p>{_esc(sentence[0].upper() + sentence[1:])}.</p>{listing}{clock}",
     )
 
 
@@ -329,17 +345,17 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
     )
     at = f" {_esc(_clock(row.feed_at))}" if row.feed_at is not None else ""
     ident = f' id="row-{_esc(row.anchor)}"' if row.anchor else ""
-    return (
-        f'<li class="txn{_row_rail(row)}"{ident}>'
+    line = (
         f'<span class="t-desc"><strong class="txt{seal}">{_esc(row.description)}</strong>'
         f"{counterparty}</span>"
         f'<span class="t-fig mono nowrap fig{seal}">{figure}</span>'
+        '<span class="t-meta">'
         f'<span class="t-when mono nowrap">{_esc(row.dated.isoformat())}{at}</span>'
-        f'<span class="t-chips pills">{_status_pill(row.status)} {sources}{_row_flags(row)}</span>'
-        f"{dates}"
-        f"{annotation}"
-        f"{_sightings_html(row)}"
-        "</li>"
+        f'<span class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</span>'
+        "</span>"
+    )
+    return (
+        f'<li class="txn{_row_rail(row)}"{ident}>{_line_html(row, line)}{dates}{annotation}</li>'
     )
 
 
@@ -473,7 +489,10 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
         difference = _signed(
             _balance_word(line.difference_direction), line.difference_direction, line.difference
         )
-        detail = f" from what the rows predict by {_esc(difference)}"
+        detail = (
+            f' from what the rows predict by <span class="fig{_seal(unmasked)}">'
+            f"{_esc(difference)}</span>"
+        )
     basis = _BASIS_WORDS.get(line.basis, line.basis)
     if line.balance_direction == "nil":
         balance = "nil"
@@ -1598,7 +1617,7 @@ def _held_html(agreement: Any, *, boxed: bool) -> str:
     )
     if not boxed:
         return f'<p class="warn">{_esc(sentence)} {link}</p>'
-    return f'<div class="held"><p><strong>{_esc(sentence)}</strong></p><p>{link}</p></div>'
+    return f'<div class="held"><p><strong>{_esc(sentence)}</strong> {link}</p></div>'
 
 
 def _verdict_text(own: Any, protection: Any) -> str:
@@ -2152,7 +2171,8 @@ def _navigation(view: Any, unmasked: bool) -> str:
     Months are stepped from beside the month's own heading, where the rows they change are.
     """
     shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
-    return shape + "Shape of this account's data</a></p>" + _HOME
+    shape += "Shape of this account's data</a></p>"
+    return f'<div class="foot-links">{shape}{_HOME}</div>'
 
 
 def _mode(view: Any, unmasked: bool) -> str:
@@ -2165,17 +2185,22 @@ def _mode(view: Any, unmasked: bool) -> str:
             f'href="{_url("/ledger", ref=view.ref, month=view.month)}">'
             "Hide values (masked view)</a></p>"
         )
+    # The button is the call to action and the sealed slots are the state; what masked means is
+    # one tap away, so a reader who knows it does not scroll past a paragraph every time.
     return (
-        '<p class="sub">Values are masked: every digit shows as 9 and every letter '
-        "as X, with length, case, and punctuation kept. A balance or a sum shows "
-        f"as {MASKED_TOTAL} whatever its size, since its number of digits would "
-        "say how much there is. Counts, dates, sources, directions, and flags "
-        "are real.</p>"
         '<form method="post" action="/ledger">'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
         f'<input type="hidden" name="month" value="{_esc(view.month)}">'
         + submit_button("Show values")
         + "</form>"
+        + _disclosure(
+            "What masked means",
+            '<p class="sub">Values are masked: every digit shows as 9 and every letter '
+            "as X, with length, case, and punctuation kept. A balance or a sum shows "
+            f"as {MASKED_TOTAL} whatever its size, since its number of digits would "
+            "say how much there is. Counts, dates, sources, directions, and flags "
+            "are real.</p>",
+        )
     )
 
 
@@ -2351,6 +2376,7 @@ def render_ledger(
         + _month_picker(view, unmasked)
     )
     counts = ""
+    position = _position_html(view.position, bound=view.actual_bound)
     if view.state == "empty-month":
         month += (
             '<p class="warn"><strong>No rows are dated in this month.</strong> '
@@ -2362,19 +2388,19 @@ def render_ledger(
         month += _month_line(view)
         counts = _disclosure(
             f"This month's counts and sums ({_esc(str(view.summary.rows))} rows)",
-            _summary_html(view.summary, bound=view.actual_bound),
+            _summary_html(view.summary, bound=view.actual_bound) + position,
         )
+        position = ""
+    clock = (
+        f'<p class="sub">{_esc(_CLOCK_NOTE)}</p>'
+        if BANK_SOURCE in view.sources and view.state == "ok"
+        else ""
+    )
     txns = ""
     if view.state == "ok":
-        clock = (
-            _disclosure("About the times shown", f'<p class="sub">{_esc(_CLOCK_NOTE)}</p>')
-            if BANK_SOURCE in view.sources
-            else ""
-        )
         txns = (
             "<h2>Transactions, newest first</h2>"
-            + clock
-            + '<ul class="txns">'
+            '<ul class="txns">'
             + "".join(_row_html(row, unmasked) for row in view.rows)
             + "</ul>"
         )
@@ -2383,11 +2409,11 @@ def render_ledger(
         _LIMITS + _statement_cost(),
     )
     more = (
-        _joins_html(view.joins)
+        _joins_html(view.joins, clock)
         + _opening_html(view, unmasked, held=held)
         + _clearing_html(view.clearing)
         + counts
-        + _position_html(view.position, bound=view.actual_bound)
+        + position
         + _anchor_forms(view, view.ref, view.month)
         + _typed_html(view, ref=view.ref, month=view.month)
         + _unitemised_html(view)
