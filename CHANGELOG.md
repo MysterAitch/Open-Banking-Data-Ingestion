@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.307] - 2026-10-04
+
+### Changed
+- **The home page opens with a verdict.** It was sixteen screens on a phone,
+  nearly all of it a six-row card per account, with no statement that things
+  were in order and the answer to "has the push worked?" at the very bottom.
+  It now says first, in one sentence, whether everything checked is in order
+  or how many things there are to look at, and then four lines, each a tap
+  from its page: how fresh the data is, how many accounts are in agreement,
+  whether Actual agrees, and the position, masked.
+- **What needs attention is banded by what to do**: look at now, look at soon,
+  when convenient. A balance the rows do not reproduce was filed with the
+  reminders and is now a fault; two sources that disagree about a balance is
+  "soon", because only a person can say which is right. An item with nothing
+  for a person to do is said once as information and no longer counted. Every
+  link says where it goes.
+- **Accounts are one row each**, ordered by how much looking at they need,
+  with Spaces under their parent: a name, a state, a clause, and a proof
+  rail. The rail is solid where the rows are in agreement with known
+  balances, broken where they are held back, and hatched where nothing is
+  known, with a mark for a protected span. The card's other facts are behind
+  each row.
+
+Measured on an invented household of twenty accounts at phone width: 14.6
+screens before, 4.5 with faults and 3.5 with none. Not yet seen on the real
+instance, where the rails will be mostly solid and the names longer.
+
 ## [0.4.306] - 2026-10-04
 
 ### Fixed
