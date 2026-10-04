@@ -82,13 +82,15 @@ class TestTheMonthEndChartIsUnchanged:
         assert drawn.provisional == position.provisional_history
 
     def test_MonthEnds_OfTheWindowHousehold_AreTheHandWorkedFigures(self, held):
-        days = sample_days(D(2026, 6, 1), TODAY, Resolution.MONTH)
+        days = sample_days(D(2024, 3, 1), TODAY, Resolution.MONTH)
 
         drawn = series_at(held, window_points(days, Resolution.MONTH, TODAY), None)
 
-        assert by_day(drawn) == {
-            "2026-06": 280000, "2026-07": 280000, "2026-08": 520000,
-            "2026-09": 710000, "2026-10": 705000,
+        figures = by_day(drawn)
+        assert len(figures) == 32
+        assert [v for k, v in figures.items() if k < "2026-08"] == [280000] * 29
+        assert {k: figures[k] for k in ("2026-08", "2026-09", "2026-10")} == {
+            "2026-08": 520000, "2026-09": 710000, "2026-10": 705000,
         }
         assert drawn.history == held.history
         assert drawn.complete_from == "2026-09"
@@ -195,12 +197,12 @@ class TestEachKindOfItemOnAnArbitraryDay:
         assert series.history[-1].net_worth.minor == -90000
 
     def test_WindowBeforeAnythingIsHeld_HasNoPointsAndNoLine(self, held):
-        series = daily(held, D(2026, 1, 1), D(2026, 1, 31))
+        series = daily(held, D(2024, 1, 1), D(2024, 1, 31))
 
         assert series.history == () and series.provisional == ()
 
     def test_WindowFromTheFirstDayHeld_StartsOnItsFirstFigure(self, held):
-        assert held_from(held) == D(2026, 6, 15)
+        assert held_from(held) == D(2024, 3, 15)
 
     def test_ItemsNotChosen_AreLeftOutOfEveryDay(self, held):
         series = daily(held, D(2026, 9, 28), D(2026, 9, 29), {EVERYDAY, SAVER})

@@ -17,14 +17,15 @@ written BEFORE it ran:
     pension    a balance-only account, stated 2026-08-01: 2,000.00 and again
                2026-09-15: 2,300.00 (one unitemised change of +300.00 on 09-15)
         08-01 to 09-14: 200,000   09-15 on: 230,000
-    bond       an asset, valued 2026-06-15 at 2,800.00 and 2026-09-01 at 3,200.00
-        06-15 to 08-31: 280,000   09-01 on: 320,000
+    bond       an asset, valued 2024-03-15 at 2,800.00 and 2026-09-01 at 3,200.00
+               (so what is held reaches back 934 days, enough for a monthly chart)
+        2024-03-15 to 2026-08-31: 280,000   09-01 on: 320,000
     mystery    NOT COUNTED (no stated balance): rows 08-20 +70.00, 09-18 -20.00
         moved: 08-20 to 09-17: 7,000   09-18 on: 5,000
 
 The five counted items give, on the days that matter (included of 5 in brackets):
 
-    06-15 to 07-31   280,000 (1)        08-01        480,000 (2)
+    2024-03-15 to 07-31 280,000 (1)     08-01        480,000 (2)
     08-09            490,000 (3)        08-10 to 08-31   520,000 (3)
     09-01 to 09-09   560,000 (3)        09-10, 09-11     550,000 (4: card from 09-11)
     09-12, 09-13    -250,000 (4)        09-14       -150,000 (5)
@@ -32,9 +33,10 @@ The five counted items give, on the days that matter (included of 5 in brackets)
     09-26 to 10-01   710,000 (5)        10-02 to 10-04   705,000 (5)
 
 The household is below nil from 09-12 to 09-25, fourteen days. At month-ends it
-never is: 06: 280,000   07: 280,000   08: 520,000   09: 710,000   10 (today): 705,000.
-At Sundays from 2026-06-21 (the first with a figure), sixteen of them:
-    06-21 to 07-26   280,000    08-02  480,000   08-09  490,000
+never is: 2024-03 to 2026-07 (29 month-ends): 280,000   08: 520,000   09: 710,000
+10 (today): 705,000, so thirty-two months in all.
+At Sundays from 2025-10-05 (365 days to today, 53 Sundays):
+    2025-10-05 to 2026-07-26   280,000 (43 of them)   08-02  480,000   08-09  490,000
     08-16 to 08-30   520,000    09-06  560,000   09-13 -250,000
     09-20            -90,000    09-27  710,000   10-04  705,000
 
@@ -64,7 +66,7 @@ MYSTERY = "account:mystery"
 
 #: The household's total on each day it changes (see the docstring), counted items only.
 KNOWN = {
-    D(2026, 6, 15): 280000,
+    D(2024, 3, 15): 280000,
     D(2026, 7, 31): 280000,
     D(2026, 8, 1): 480000,
     D(2026, 8, 9): 490000,
@@ -118,7 +120,7 @@ def window_household(store: Store) -> None:
     record_stated_anchor(store, "pension", "2026-09-15", "2300.00", today=TODAY)
     bond = Asset("bond", AssetKind.INVESTMENT)
     record_observation(
-        store, bond, observed_at=D(2026, 6, 15), source="statement", value_minor=280000
+        store, bond, observed_at=D(2024, 3, 15), source="statement", value_minor=280000
     )
     record_observation(
         store, bond, observed_at=D(2026, 9, 1), source="statement", value_minor=320000

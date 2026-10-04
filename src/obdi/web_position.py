@@ -29,16 +29,36 @@ from __future__ import annotations
 
 import html
 from collections.abc import Callable, Collection
+from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
+from .date_window import (
+    Resolution,
+    Window,
+    WindowRefused,
+    WindowSpec,
+    resolution_for,
+    resolve,
+    sample_days,
+)
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .plural import agree
 from .plural import plural as _plural
-from .position import MonthPoint, Position, ProvisionalPoint, chart_series
+from .position import (
+    ChartSeries,
+    MonthPoint,
+    Position,
+    ProvisionalPoint,
+    chart_series,
+    held_from,
+    series_at,
+    window_points,
+)
 from .web_accounts import submit_button
 from .web_ledger import _balance_word
 
@@ -397,12 +417,19 @@ def _below_nil(
     return ALL_BELOW_NIL if max(values) < 0 else SOME_BELOW_NIL
 
 
-def _key(lines: tuple[str, ...], *, narrowed: bool, below_nil: str = "") -> str:
+def _key(
+    lines: tuple[str, ...],
+    *,
+    narrowed: bool,
+    below_nil: str = "",
+    resolution: Resolution | None = None,
+) -> str:
     """The chart's key: each line it draws, as a swatch drawn the way the line is, and its name.
 
-    Where the chart goes below nil the key also says what the marked region means.
+    Where the chart goes below nil the key also says what the marked region means. A chart
+    over a window (a `resolution`) also says how often it has a figure.
     """
-    if not lines and not below_nil:
+    if not lines and not below_nil and resolution is None:
         return ""
     total = "Total of the chosen accounts" if narrowed else "Net worth"
     words = {
@@ -416,6 +443,8 @@ def _key(lines: tuple[str, ...], *, narrowed: bool, below_nil: str = "") -> str:
         f"{_line_attrs(name)}/></svg> {_esc(words[name])}</li>"
         for name in lines
     )
+    if resolution is not None:
+        items += f'<li data-key="resolution">{_esc(_resolution_words(resolution))}</li>'
     if below_nil:
         meaning = (
             "Below nil throughout: more is owed than held in every month drawn"
@@ -434,6 +463,36 @@ def _span_words(months: int) -> str:
     years, rest = divmod(months, 12)
     return " ".join(
         _plural(count, unit) for count, unit in ((years, "year"), (rest, "month")) if count
+    )
+
+
+#: Where a chart's figures are read, in the words its title and description use.
+_WHEN = {
+    Resolution.MONTH: "at each month-end",
+    Resolution.DAY: "on each day",
+    Resolution.WEEK: "on the first day, each Sunday, and the last day",
+}
+
+
+def _resolution_words(resolution: Resolution) -> str:
+    """The chart's resolution in one short sentence, for its key."""
+    return {
+        Resolution.MONTH: "One figure per month-end.",
+        Resolution.WEEK: "One figure per week.",
+        Resolution.DAY: "One figure per day.",
+    }[resolution]
+
+
+def _span_phrase(labels: list[str], resolution: Resolution) -> str:
+    """How long a chart covers: its days or weeks, or its months and years."""
+    if resolution is Resolution.MONTH:
+        return _span_words(len(labels))
+    days = (date.fromisoformat(labels[-1]) - date.fromisoformat(labels[0])).days + 1
+    if resolution is Resolution.DAY:
+        return _plural(days, "day")
+    weeks, rest = divmod(days, 7)
+    return " ".join(
+        _plural(count, unit) for count, unit in ((weeks, "week"), (rest, "day")) if count
     )
 
 
@@ -463,21 +522,43 @@ def _axis(
             ticks.append(("year", x(index), month[:4]))
         elif every and (number - 1) % every == 0:
             ticks.append(("month", x(index), _MONTH_NAMES[number - 1] if name_months else ""))
+    return _tick_marks(ticks, top=top, floor=floor, edges=edges)
+
+
+#: How long each kind of tick is, longest first, which is also the order labels are placed in.
+_TICK_LENGTHS = {"year": 8, "month": 4, "week": 6, "day": 3}
+_TICK_OPACITY = {"day": ".35"}
+
+
+def _tick_marks(
+    ticks: list[tuple[str, float, str]],
+    *,
+    top: float,
+    floor: float,
+    edges: tuple[float, float],
+    order: tuple[str, ...] = ("year", "month"),
+) -> str:
+    """Each tick as a mark under the plot, and its name where it fits.
+
+    Kinds are placed in `order`, so a label is left out where it would run into one
+    already placed: years are never lost to the month before them.
+    """
     parts = []
     placed: list[float] = []
-    for kind in ("year", "month"):
+    for kind in order:
         for tick_kind, at, text in ticks:
             if tick_kind != kind:
                 continue
-            length = 8 if kind == "year" else 4
             if kind == "year":
                 parts.append(
                     f'<line x1="{at:.1f}" y1="{top:.1f}" x2="{at:.1f}" y2="{floor:.1f}" '
                     'stroke="currentColor" stroke-opacity=".12"/>'
                 )
+            opacity = _TICK_OPACITY.get(kind, ".55")
             parts.append(
                 f'<line data-tick="{kind}" x1="{at:.1f}" y1="{floor:.1f}" x2="{at:.1f}" '
-                f'y2="{floor + length:.1f}" stroke="currentColor" stroke-opacity=".55"/>'
+                f'y2="{floor + _TICK_LENGTHS[kind]:.1f}" stroke="currentColor" '
+                f'stroke-opacity="{opacity}"/>'
             )
             if not text or any(abs(at - other) < _LABEL_GAP for other in placed):
                 continue
@@ -494,12 +575,50 @@ def _axis(
     return "".join(parts)
 
 
+def _axis_days(
+    first: date,
+    last: date,
+    x: Callable[[date], float],
+    *,
+    resolution: Resolution,
+    top: float,
+    floor: float,
+    edges: tuple[float, float],
+) -> str:
+    """The ticks of a chart of days or weeks, placed by date and not by point.
+
+    A daily chart ticks every day, marks each Monday (a week's start) longer and names it
+    by its day of the month where there is room, and names each month's first day and each
+    January's year. A weekly chart ticks and names months and years only, since its points
+    are Sundays and the month's first is not one. Years are placed first, then months, then
+    Mondays; a label that would run into one placed is left out.
+    """
+    daily = resolution is Resolution.DAY
+    ticks: list[tuple[str, float, str]] = []
+    for offset in range((last - first).days + 1):
+        day = first + timedelta(days=offset)
+        at = x(day)
+        if day.day == 1 and day.month == 1:
+            ticks.append(("year", at, str(day.year)))
+        elif day.day == 1:
+            ticks.append(("month", at, _MONTH_NAMES[day.month - 1]))
+        elif daily and day.weekday() == 0:
+            ticks.append(("week", at, str(day.day)))
+        elif daily:
+            ticks.append(("day", at, ""))
+    return _tick_marks(
+        ticks, top=top, floor=floor, edges=edges, order=("year", "month", "week", "day")
+    )
+
+
 def _chart(
     points: tuple[MonthPoint, ...],
     complete_from: str,
     provisional: tuple[ProvisionalPoint, ...] = (),
     *,
     narrowed: bool = False,
+    resolution: Resolution = Resolution.MONTH,
+    windowed: bool = False,
 ) -> str:
     """The net-worth line, and the provisional line when there is one, as inline SVG.
 
@@ -508,8 +627,17 @@ def _chart(
     provisional ones, which end in the same month, so one column per provisional
     month places both. A `narrowed` chart is drawn from some accounts only, and
     says so in its own text, since a figure copied out of it is not the net worth.
+
+    A chart of days or weeks (`resolution`) labels its points by day and places them in
+    proportion to the days between them, so a short first or last week is not drawn as
+    a whole one. A `windowed` chart is of part of what is held, and its lowest, highest,
+    and latest say they are the window's.
     """
-    width, height = 400, 260
+    width, base_height = 400, 260
+    # A windowed chart of chosen accounts needs a line of its own to say so, where the
+    # latest figure's label has no room for the words.
+    extra = 16 if windowed and narrowed else 0
+    height = base_height + extra
     # Under the plot: the axis's ticks and their names, the lowest and latest figures, and
     # the first and last month with how long the chart covers between them.
     left, right, top, bottom = 12, 12, 30, 62
@@ -520,9 +648,18 @@ def _chart(
     dotted = [(index, p.total.minor) for index, p in enumerate(provisional)]
     values = [value for _, value in known + dotted]
     low, high = min(values), max(values)
-    plot = height - top - bottom
+    plot = base_height - top - bottom
+    by_date = resolution is not Resolution.MONTH
+    days = [date.fromisoformat(label) for label in months] if by_date else []
+
+    def x_date(day: date) -> float:
+        if n == 1:
+            return (left + width - right) / 2
+        return left + (day - days[0]).days * (width - left - right) / (days[-1] - days[0]).days
 
     def x(index: int) -> float:
+        if by_date:
+            return x_date(days[index])
         if n == 1:
             return (left + width - right) / 2
         return left + index * (width - left - right) / (n - 1)
@@ -538,8 +675,15 @@ def _chart(
 
     complete_index = next((i for i, p in enumerate(points) if p.month == complete_from), len(known))
     drawn = _lines_drawn(points, complete_from, provisional)
-    floor = float(height - bottom)
-    parts = [_axis(months, x, top=top, floor=floor, edges=(left, width - right))]
+    floor = float(base_height - bottom)
+    edges = (float(left), float(width - right))
+    parts = [
+        _axis_days(
+            days[0], days[-1], x_date, resolution=resolution, top=top, floor=floor, edges=edges
+        )
+        if by_date and n > 1
+        else _axis(months, x, top=top, floor=floor, edges=edges)
+    ]
     if _below_nil(points, provisional):
         # From nil down to the floor of the plot, or the whole plot where nil is above it.
         nil_y = y(0) if high > 0 else float(top)
@@ -572,21 +716,34 @@ def _chart(
             'fill="var(--act)"/>'
         )
     label = 'font-size="12" fill="currentColor"'
+    scope = "window " if windowed else ""
+    every = {Resolution.MONTH: "months", Resolution.WEEK: "weeks", Resolution.DAY: "days"}
     if high == low:
-        top_labels = f'<text x="{left}" y="16" {label}>all months {_esc(_signed(low))}</text>'
+        top_labels = (
+            f'<text x="{left}" y="16" {label}>{scope}all {every[resolution]} '
+            f"{_esc(_signed(low))}</text>"
+        )
         bottom_label = ""
     else:
         top_labels = (
-            f'<text x="{left}" y="16" {label}>highest {_esc(_signed(high))}</text>'
+            f'<text x="{left}" y="16" {label}>{scope}highest {_esc(_signed(high))}</text>'
         )
         bottom_label = (
-            f'<text x="{left}" y="{height - bottom + 38}" {label}>'
-            f"lowest {_esc(_signed(low))}</text>"
+            f'<text x="{left}" y="{base_height - bottom + 38}" {label}>'
+            f"{scope}lowest {_esc(_signed(low))}</text>"
         )
+    # Where the chart is windowed and narrowed too, the second fact has a line of its own.
+    chosen_only = "chosen only, " if narrowed and not extra else ""
     latest = (
-        f'<text x="{width - right}" y="{height - bottom + 38}" text-anchor="end" {label}>'
-        f"{'chosen only, ' if narrowed else ''}latest {_esc(_signed(known[-1][1]))}</text>"
+        f'<text x="{width - right}" y="{base_height - bottom + 38}" text-anchor="end" {label}>'
+        f"{chosen_only}{scope}latest {_esc(_signed(known[-1][1]))}</text>"
         if known
+        else ""
+    )
+    chosen_line = (
+        f'<text x="{left}" y="{base_height - 6}" {label}>chosen accounts only, not the '
+        "net worth</text>"
+        if extra
         else ""
     )
     latest_provisional = (
@@ -604,9 +761,12 @@ def _chart(
             else ""
         )
         + f'<text data-span x="{width / 2:.0f}" y="{height - 6}" text-anchor="middle" '
-        f'font-size="12" fill="var(--ink-2)">{_esc(_span_words(n))}</text>'
+        f'font-size="12" fill="var(--ink-2)">{_esc(_span_phrase(months, resolution))}</text>'
     )
-    desc = f"From {months[0]} to {months[-1]}, at each month-end. "
+    when = _WHEN[resolution]
+    desc = f"From {months[0]} to {months[-1]}, {when}. "
+    if windowed:
+        desc += "A window of what is held: lowest, highest, and latest are of the window. "
     if narrowed:
         desc += "Drawn from the chosen accounts only, so not the net worth. "
     if known:
@@ -631,12 +791,13 @@ def _chart(
         '<svg role="img" aria-labelledby="chart-title chart-desc" '
         f'viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
         'style="width:100%;height:auto;display:block">'
-        f'<title id="chart-title">{what} at each month-end</title>'
+        f'<title id="chart-title">{what} {when}</title>'
         f'<desc id="chart-desc">{_esc(desc.strip())}</desc>'
         + "".join(parts)
         + top_labels
         + bottom_label
         + latest
+        + chosen_line
         + latest_provisional
         + month_labels
         + "</svg>"
@@ -677,20 +838,49 @@ def _month_rows(view: Any) -> str:
     return f'<div class="scroll"><table><tr>{head}</tr>' + "".join(rows) + "</table></div>"
 
 
-def _legend(has_known: bool, has_provisional: bool, *, narrowed: bool = False) -> str:
-    """The sentence under the chart saying which line is which."""
-    text = "One figure per month-end. "
+def _legend(
+    has_known: bool,
+    has_provisional: bool,
+    *,
+    narrowed: bool = False,
+    resolution: Resolution | None = None,
+    last_day: str = "",
+    ends_today: bool = True,
+) -> str:
+    """The sentence under the chart saying which line is which.
+
+    A `resolution` says the chart is over a window: how often it has a figure, and where
+    its last point is read (`ends_today` says whether that is everything held now).
+    """
+    if resolution is Resolution.WEEK:
+        text = (
+            "One figure per week, read on each Sunday and on the window's first and last "
+            "day. "
+        )
+    elif resolution is Resolution.DAY:
+        text = "One figure per day. "
+    else:
+        text = "One figure per month-end. "
     if has_known:
         what = "the total of the chosen accounts that is known" if narrowed else (
             "the net worth that is known"
         )
-        text += f"The solid blue line is {what}, dashed for the partial months. "
+        units = {Resolution.DAY: "days", Resolution.WEEK: "weeks"}
+        unit = units.get(resolution, "months") if resolution is not None else "months"
+        text += f"The solid blue line is {what}, dashed for the partial {unit}. "
     if has_provisional:
         text += (
             "The dotted line is the provisional total, which counts each unknown opening "
             "balance as nil. The provisional line's shape shows real movement; its height "
             "is offset by the unknown opening balances. "
         )
+    if resolution is not None:
+        newest = (
+            f"everything {'chosen' if narrowed else 'held'} now"
+            if ends_today
+            else f"the end of {last_day}"
+        )
+        return text + f"The last point is drawn at {newest}."
     return text + (
         "The newest month is drawn at everything chosen now."
         if narrowed
@@ -756,8 +946,95 @@ def _ticks(view: Any, drawn: frozenset[str] | None, *, unmasked: bool) -> str:
     )
 
 
+@dataclass(frozen=True)
+class _Windowed:
+    """A chart's window as the page reads it: the days, the resolution, and the words."""
+
+    spec: WindowSpec
+    window: Window
+    resolution: Resolution | None
+    today: date
+    words: str
+
+    @property
+    def last_day(self) -> str:
+        return self.window.last.isoformat() if self.window.last else ""
+
+    @property
+    def ends_today(self) -> bool:
+        return self.window.last == self.today
+
+    def series(self, position: Position, drawn: frozenset[str] | None) -> ChartSeries:
+        if (
+            self.window.empty
+            or self.window.first is None
+            or self.window.last is None
+            or self.resolution is None
+        ):
+            return ChartSeries((), "", ())
+        days =sample_days(self.window.first, self.window.last, self.resolution)
+        return series_at(position, window_points(days, self.resolution, self.today), drawn)
+
+
+_PER = {Resolution.DAY: "day", Resolution.WEEK: "week", Resolution.MONTH: "month-end"}
+
+
+def _windowed(position: Position, spec: WindowSpec) -> _Windowed | None:
+    """The window `spec` makes of what `position` holds, with its words; None for everything.
+
+    Everything held is the chart's default, drawn as it always was, so it is not a window.
+    The conventions of a window are `date_window`'s; this only reports them.
+    """
+    if spec.kind == "everything":
+        return None
+    today = date.fromisoformat(position.as_of)
+    start = held_from(position)
+    try:
+        window = resolve(spec, today=today, held_from=start)
+    except WindowRefused as refused:
+        # The form refuses such a choice before it gets here; this keeps a caller that
+        # did not from drawing a chart from a guess.
+        window = Window(None, None, today, today, False, False, True, str(refused))
+    named_as = spec.describe(today=today)
+    if window.empty or window.first is None or window.last is None:
+        words = (
+            f'<p data-window-words><strong>{_esc(named_as)}.</strong> '
+            f"{_esc(window.empty_reason)}</p>"
+        )
+        return _Windowed(spec, window, None, today, words)
+    resolution = resolution_for(window.first, window.last)
+    sentence = (
+        f"{named_as}: {window.first.isoformat()} to {window.last.isoformat()}, "
+        f"one figure per {_PER[resolution]}."
+    )
+    if window.ended_in_future:
+        sentence += (
+            f" The period runs to {window.asked_last.isoformat()}, which has not come, so "
+            "it is shown to today."
+        )
+    if window.began_before_held:
+        sentence += (
+            f" Nothing is held before {window.first.isoformat()}, so the window starts there."
+        )
+    narrower = start is not None and (window.first > start or window.last < today)
+    note = (
+        " This window is narrower than everything held, so the chart's lowest, highest, and "
+        "latest are of the window and not of everything held. The month table below stays "
+        "monthly and whole: it is the record, and the chart is a view of it."
+        if narrower
+        else ""
+    )
+    words = f'<p data-window-words><strong>{_esc(sentence)}</strong>{_esc(note)}</p>'
+    return _Windowed(spec, window, resolution, today, words)
+
+
 def _history(
-    position: Position, view: Any, *, unmasked: bool, chart_in: Collection[str] | None = None
+    position: Position,
+    view: Any,
+    *,
+    unmasked: bool,
+    chart_in: Collection[str] | None = None,
+    window: WindowSpec | None = None,
 ) -> str:
     body = "<h2>History, month by month</h2>"
     if not view.history and not view.provisional_history:
@@ -794,24 +1071,47 @@ def _history(
                 "The headline and every total on this page still count everything held; only "
                 "the chart is narrower, so its lines are not the household's net worth.</p>"
             )
+        windowed = _windowed(position, window) if window is not None else None
+        resolution = windowed.resolution if windowed is not None else None
+        if windowed is not None:
+            body += windowed.words
+            series = windowed.series(position, drawn)
         if drawn is not None and not drawn:
             body += "<p>Nothing is ticked, so no chart is drawn. Tick at least one to draw it.</p>"
+        elif windowed is not None and windowed.window.empty:
+            body += "<p>No chart is drawn.</p>"
         elif not series.history and not series.provisional:
             body += (
-                "<p>Nothing that is ticked has a figure in any month yet, so no chart is "
+                "<p>Nothing that is ticked has a figure in this window, so no chart is "
+                "drawn.</p>"
+                if windowed is not None
+                else "<p>Nothing that is ticked has a figure in any month yet, so no chart is "
                 "drawn.</p>"
             )
         else:
-            legend = _legend(bool(series.history), bool(series.provisional), narrowed=narrowed)
+            legend = _legend(
+                bool(series.history),
+                bool(series.provisional),
+                narrowed=narrowed,
+                resolution=resolution,
+                last_day=windowed.last_day if windowed is not None else "",
+                ends_today=windowed.ends_today if windowed is not None else True,
+            )
             body += (
                 _key(
                     _lines_drawn(series.history, series.complete_from, series.provisional),
                     narrowed=narrowed,
                     below_nil=_below_nil(series.history, series.provisional),
+                    resolution=resolution,
                 )
                 + '<div class="chart">'
                 + _chart(
-                    series.history, series.complete_from, series.provisional, narrowed=narrowed
+                    series.history,
+                    series.complete_from,
+                    series.provisional,
+                    narrowed=narrowed,
+                    resolution=resolution or Resolution.MONTH,
+                    windowed=windowed is not None,
                 )
                 + f'</div><p class="muted">{legend}</p>'
             )
@@ -857,11 +1157,16 @@ _LIMITS = (
 
 
 def render_position(
-    position: Position, *, unmasked: bool, chart_in: Collection[str] | None = None
+    position: Position,
+    *,
+    unmasked: bool,
+    chart_in: Collection[str] | None = None,
+    window: WindowSpec | None = None,
 ) -> bytes:
     """The page; `chart_in` names the items the chart is drawn from, None for all.
 
-    Names that match no item are ignored. The masked rendering never reads it.
+    `window` is the days the chart covers, None for everything held. Names that match
+    no item are ignored. The masked rendering never reads either.
     """
     view = Disclosed(position, unmasked=unmasked)
     body = _mode(unmasked) + _headline(view)
@@ -895,7 +1200,7 @@ def render_position(
             + "".join(_entitlement_card(e) for e in view.entitlements)
             + "</ul>"
         )
-    body += _history(position, view, unmasked=unmasked, chart_in=chart_in)
+    body += _history(position, view, unmasked=unmasked, chart_in=chart_in, window=window)
     limits = _LIMITS + (_LIMIT_PROVISIONAL if view.uncounted else "")
     body += _LIMITS_HEAD + limits + "</ul>" + _HOME
     return render_page("Position", body, wide=True)

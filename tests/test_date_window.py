@@ -63,6 +63,7 @@ The point of each resolution is a day, a Sunday, or a month-end. A window of
 from __future__ import annotations
 
 from datetime import date
+from itertools import pairwise
 
 import pytest
 
@@ -369,6 +370,24 @@ class TestSampleDays:
         days = sample_days(D(2026, 10, 4), D(2026, 10, 18), Resolution.WEEK)
 
         assert days == [D(2026, 10, 4), D(2026, 10, 11), D(2026, 10, 18)]
+
+    def test_Weekly_WhereASundayIsTwoDaysFromTheLastDayOfAWideWindow_LeavesThatSundayOut(self):
+        # 731 days across 376 units is 0.51 a day, so a Sunday two days short of the last
+        # day would sit 1 unit from it; it needs six days (3 / 0.51, rounded up).
+        days = sample_days(D(2023, 1, 1), D(2024, 12, 31), Resolution.WEEK)
+
+        assert D(2024, 12, 29) not in days
+        assert days[-2:] == [D(2024, 12, 22), D(2024, 12, 31)]
+
+    def test_Weekly_NoTwoPointsOfAnyLengthAreNearerThanThreeUnits(self):
+        for span in (DAILY_UP_TO_DAYS + 1, 200, 365, WEEKLY_UP_TO_DAYS):
+            for start in range(7):
+                first = D(2024, 1, 1 + start)
+                last = D.fromordinal(first.toordinal() + span - 1)
+                days = sample_days(first, last, Resolution.WEEK)
+                per_day = 376 / (span - 1)
+                gaps = [(b - a).days * per_day for a, b in pairwise(days)]
+                assert min(gaps) >= 3 - 1e-9, (first, last, min(gaps))
 
     def test_Weekly_OfOneDay_IsThatDay(self):
         assert sample_days(D(2026, 10, 6), D(2026, 10, 6), Resolution.WEEK) == [D(2026, 10, 6)]

@@ -58,6 +58,10 @@ from .plural import plural
 #: The month and day the tax year starts: the UK's, 6 April to 5 April.
 TAX_YEAR_STARTS = (4, 6)
 
+#: The width of the plot a chart is drawn in, and the nearest two marks may sit.
+CHART_WIDTH_UNITS = 376
+MIN_MARK_GAP_UNITS = 3
+
 #: Up to this many days a chart has a point per day: 376 units across 119 gaps is 3.2 each.
 DAILY_UP_TO_DAYS = 120
 #: Up to this many days (two years and a leap day) a chart has a point per week.
@@ -318,8 +322,10 @@ def sample_days(first: date, last: date, resolution: Resolution) -> Sequence[dat
     """The days a chart is drawn at, oldest first, the last always `last`.
 
     Daily is every day. Weekly is the first day, each Sunday after it, and the last
-    day, so the chart covers the whole window and not only its whole weeks. Monthly
-    is each month-end in the window and the last day.
+    day, so the chart covers the whole window and not only its whole weeks; a Sunday
+    so near either end that its mark would sit within `MIN_MARK_GAP_UNITS` of that
+    end's is left out, since the ends are the points that name the window. Monthly is
+    each month-end in the window and the last day.
     """
     if resolution is Resolution.DAY:
         return [first + timedelta(days=n) for n in range((last - first).days + 1)]
@@ -328,8 +334,11 @@ def sample_days(first: date, last: date, resolution: Resolution) -> Sequence[dat
         days.append(first)
         ahead = (_SUNDAY - first.weekday()) % 7
         day = first + timedelta(days=ahead)
+        near = -(-MIN_MARK_GAP_UNITS * (last - first).days // CHART_WIDTH_UNITS)
         while day <= last:
-            days.append(day)
+            clear_of_ends = (day - first).days >= near and (last - day).days >= near
+            if day in (first, last) or clear_of_ends:
+                days.append(day)
             day += timedelta(days=7)
     else:
         year, month = first.year, first.month
