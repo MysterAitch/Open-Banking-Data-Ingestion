@@ -324,7 +324,7 @@ class TestNoGetCarriesAStoredValue:
             response = httpx.get(f"{served}/artefact", params={"id": artefact})
 
             assert leaked(response.text) == [], f"artefact {artefact}"
-            assert "Show the payload (unmasked)" in response.text
+            assert "Show raw payload (unmasked)" in response.text
             assert "no longer shown at an address" not in response.text
 
     def test_EveryGetRouteTheDispatcherKnows_CarriesNoPlantedToken(self, served, invented):

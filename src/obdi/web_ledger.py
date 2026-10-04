@@ -2201,7 +2201,7 @@ def _mode(view: Any, unmasked: bool) -> str:
             "them, has no address of its own, and is not kept by the browser.</p>"
             f'<p><a class="button secondary" '
             f'href="{_url("/ledger", ref=view.ref, month=view.month)}">'
-            "Hide values (masked view)</a></p>"
+            "Hide values</a></p>"
         )
     # The button is the call to action and the sealed slots are the state; what masked means is
     # one tap away, so a reader who knows it does not scroll past a paragraph every time.

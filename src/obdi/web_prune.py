@@ -382,7 +382,9 @@ def _clear_form(count: OrphanCount) -> str:
         f'<input type="hidden" name="clear_count" value="{count.orphaned}">'
         '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
-        "I understand</label>" + _BUTTON.format(label=label) + "</form>"
+        f"I understand this will delete {_imported(count.orphaned)} from Actual</label>"
+        + _BUTTON.format(label=label)
+        + "</form>"
     )
 
 

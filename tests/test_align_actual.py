@@ -187,7 +187,7 @@ class TestThePageOffersOnePress:
             assert form.index(earlier) < form.index(later), (earlier, later)
         assert "re-links transfers whose partner changed" in form
         assert "stops at the first step that fails" in form
-        assert "I understand" in form
+        assert "I understand rows carrying obdi's imported ids" in form
 
     def test_Page_NamesHowManyRowsItWillRemoveAndHowManyItKeepsBack(self, serve):  # noqa: F811
         audited = audit(

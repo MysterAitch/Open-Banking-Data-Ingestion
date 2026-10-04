@@ -22,4 +22,12 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     "protected span",
     "family balance",
     "cross-source agreement",
+    # One label reveals values (`Show values` / `Hide values`; `Show raw payload (unmasked)` for
+    # an artefact's bytes), so these older labels for the same press may not come back.
+    "show the figures",
+    "disclose the real contents",
+    "show the payload",
+    "show the payees",
+    "(masked view)",
+    "(masked timeline)",
 )

@@ -826,7 +826,7 @@ def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(
         archive = background("Archive this account")
         page.get_by_role("button", name="Show values").first.click()
         page.wait_for_load_state("load")
-        hide = background("Hide values (masked view)")
+        hide = background("Hide values")
     finally:
         page.close()
     transparent = "rgba(0, 0, 0, 0)"

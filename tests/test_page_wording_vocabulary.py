@@ -43,6 +43,19 @@ class TestNoPageUsesARetiredWord:
 
         assert not found, "\n" + "\n".join(f"{url}: {hits}" for url, hits in found.items())
 
+    def test_Pages_WhenWalked_NoConfirmationBoxIsABareIUnderstand(self, pages):
+        bare = re.compile(r"I understand\s*</label>")
+
+        found = [url for url, page in pages.items() if bare.search(page)]
+
+        assert not found, found
+
+    def test_BareConfirmation_IsCaught(self):
+        assert re.search(r"I understand\s*</label>", "<label>I understand</label>")
+        assert not re.search(
+            r"I understand\s*</label>", "<label>I understand this will rebuild it</label>"
+        )
+
     def test_TextOf_ForMarkupThatOnlyNamesAnAnchor_IsNotCaught(self):
         page = '<ul class="anchors"><text text-anchor="end">x</text></ul><a href="/ledger-anchor">'
 

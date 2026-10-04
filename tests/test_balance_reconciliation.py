@@ -45,7 +45,7 @@ from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 ACCOUNT = "truelayer:tl-1"
 
 #: What the real web hook tells a reader of the page, which has a button for it.
-PAGE_HINT = "press the Show the figures button on this page"
+PAGE_HINT = "press the Show values button on this page"
 
 LEDGER: list[tuple[str, date, int, str]] = [
     ("a", date(2026, 3, 2), -1234, "Alpha Bakery"),
@@ -750,5 +750,5 @@ class TestBalanceReconciliationCommand:
         page = _get(config, "/balance-reconciliation").text
 
         assert PAGE_HINT in page
-        assert "Show the figures</button>" in page
+        assert "Show values</button>" in page
         assert "values=1" not in page

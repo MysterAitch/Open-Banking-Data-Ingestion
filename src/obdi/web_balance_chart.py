@@ -1071,7 +1071,7 @@ def _mode(view: Any, unmasked: bool, start: date | None, end: date | None) -> st
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
             f'<p><a class="button secondary" href="{_href(ref, start, end)}">'
-            "Hide values (masked timeline)</a></p>"
+            "Hide values</a></p>"
         )
     fields = f'<input type="hidden" name="ref" value="{_esc(ref)}">' + (
         f'<input type="hidden" name="from" value="{start.isoformat()}">'

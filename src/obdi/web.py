@@ -2761,11 +2761,14 @@ def _danger_zone(
         '<p class="muted">Administrative repairs. Each asks for '
         "confirmation; none touches the raw artefacts in layer 0.</p>",
     ]
-    checkbox = (
-        '<label class="tick">'
-        '<input type="checkbox" name="confirm" value="yes" required> '
-        "I understand</label>"
-    )
+    def checkbox(confirms: str) -> str:
+        """A confirmation that says what it confirms, never a bare "I understand"."""
+        return (
+            '<label class="tick">'
+            '<input type="checkbox" name="confirm" value="yes" required> '
+            f"I understand this will {confirms}</label>"
+        )
+
     button_style = 'style="width:100%;font-size:inherit;cursor:pointer"'
     if rebuild_available:
         parts.append(_rebuild_status_line(rebuild_status))
@@ -2789,7 +2792,7 @@ def _danger_zone(
             "Unresolved review flags are raised again by the current rules "
             "rather than carried over, so a flag the rules have since learned "
             "to settle does not come back.</p>"
-            + checkbox
+            + checkbox("rebuild every derived transaction from the stored originals")
             + f'<p><button class="button danger" type="submit" {button_style}>'
             "Rebuild from raw</button></p></form>"
         )
@@ -2800,7 +2803,7 @@ def _danger_zone(
             "(names are kept). Use after deleting accounts on the Actual "
             "side: the next push re-provisions by name, reusing any "
             "same-named accounts that still exist.</p>"
-            + checkbox
+            + checkbox("forget which Actual account each of obdi's accounts is linked to")
             + f'<p><button class="button danger" type="submit" {button_style}>'
             "Forget Actual account links</button></p></form>"
         )
@@ -4521,7 +4524,8 @@ class ConnectionHandler(
                 + ' - '
                 f'trigger: {html.escape(str(item.get("trigger", "unrecorded")))}<br>'
                 f'<span class="muted" style="word-break:break-all">{origin}</span><br>'
-                f'<a class="button" href="/artefact?id={item.get("id")}">Inspect</a></div>'
+                f'<a class="button" href="/artefact?id={item.get("id")}">'
+                f'Open artefact {item.get("id")}</a></div>'
             )
         body = (
             "<p>Every payload landed, newest first: the evidence everything else "
@@ -4626,7 +4630,8 @@ class ConnectionHandler(
                 )
                 + '<label class="tick">'
                 '<input type="checkbox" name="confirm" value="yes" required> '
-                "I understand the filing changes and a rebuild re-derives</label>"
+                "I understand this will change which account the artefact is filed under, "
+                "and a rebuild will derive its transactions again</label>"
                 '<p><button class="button" type="submit" '
                 'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
                 "Refile</button></p></form>"
@@ -4639,7 +4644,7 @@ class ConnectionHandler(
             f'<input type="hidden" name="id" value="{artefact_id}">'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            "Show the payload (unmasked)</button></p></form>" + HOME_LINK
+            "Show raw payload (unmasked)</button></p></form>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
 
@@ -5285,7 +5290,7 @@ class ConnectionHandler(
                 f'<input type="hidden" name="disclose_token" value="{token}">'
                 '<p><input type="text" name="confirm" size="24" '
                 'autocomplete="off" required></p>'
-                '<p><button type="submit">Disclose the real contents</button>'
+                '<p><button type="submit">Show values</button>'
                 "</p></form>"
             )
         body += (
@@ -6141,7 +6146,7 @@ class ConnectionHandler(
                     "and neither their payees nor their references appear.</p>"
                     '<form method="post" action="/review">'
                     '<button class="button" type="submit" style="width:100%">'
-                    "Show the payees and answer them</button></form>"
+                    "Show values and answer them</button></form>"
                     "<table><tr><th>Group</th><th>Rows</th></tr>"
                     if masked
                     else "<table><tr><th>Group</th><th>Rows</th><th>Answer</th></tr>"
@@ -6383,7 +6388,7 @@ class ConnectionHandler(
             "dates, and counts only.</p>"
             '<form method="post" action="/balance-reconciliation">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show the figures</button></form>"
+            "Show values</button></form>"
             if masked
             else '<p class="warn">Showing the UNMASKED rendering: balances and '
             "differences are visible.</p>"
@@ -6482,7 +6487,7 @@ class ConnectionHandler(
             '<p class="muted">Showing the MASKED rendering: counts and artefact names only.</p>'
             '<form method="post" action="/balance-walk">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show the figures</button></form>"
+            "Show values</button></form>"
             if masked
             else '<p class="warn">Showing the UNMASKED rendering: balances are visible.</p>'
             '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'

@@ -3041,7 +3041,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return paused
         with Store(db_path) as store:
             return balance_reconciliation(store).describe(
-                masked=masked, unmask_hint="press the Show the figures button on this page"
+                masked=masked, unmask_hint="press the Show values button on this page"
             )
 
     def period_reconciliation_text(masked: bool, ref: str) -> str:

@@ -315,7 +315,7 @@ def _mode(unmasked: bool) -> str:
             '<p class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
-            '<p><a class="button" href="/position">Hide values (masked view)</a></p>'
+            '<p><a class="button" href="/position">Hide values</a></p>'
         )
     return (
         '<p class="muted">Values are masked. Every figure here is a balance or a '
