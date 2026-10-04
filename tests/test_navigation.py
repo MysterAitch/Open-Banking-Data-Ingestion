@@ -325,6 +325,60 @@ class TestTheWayOutUnderTheHeading:
         assert heading < way < page.index("</main>")
         assert page[heading : way].count("<p") <= 1
 
+    @pytest.mark.parametrize(
+        ("route", "words"),
+        [
+            ("/spaces", "Back to Accounts"),
+            ("/coverage", "Back to Accounts"),
+            ("/review", "Back to Accounts"),
+            ("/connections", "Back to Bring in"),
+            ("/import", "Back to Bring in"),
+            ("/statements", "Back to Bring in"),
+            ("/statement-shape", "Back to Bring in"),
+            ("/actual-history", "Back to Actual"),
+            ("/balance-walk", "Back to Checks"),
+            ("/review-report", "Back to Checks"),
+            ("/artefacts", "Back to Diagnostics"),
+            ("/fetch-timeline", "Back to Diagnostics"),
+            ("/account", "Back to Diagnostics"),
+        ],
+    )
+    def test_PageDeepInAFlow_LeavesByItsDestinationWithoutScrolling(self, base, route, words):
+        page = httpx.get(f"{base}{route}", timeout=20).text
+
+        top = page.split("</h1>", 1)[1][:400]
+        assert words in top, (route, top)
+
+    @pytest.mark.parametrize(
+        ("route", "words"),
+        [
+            ("/rebuild-derived", "Back to Diagnostics"),
+            ("/save-account", "Back to Accounts"),
+            ("/push-actual", "Back to Actual"),
+            ("/rename-connection", "Back to Bring in"),
+        ],
+    )
+    def test_AnswerPageOfAPost_LeavesByItsDestinationToo(self, base, route, words):
+        page = httpx.post(f"{base}{route}", data={}, timeout=20).text
+
+        assert words in page.split("</h1>", 1)[1][:400], route
+
+    def test_AnswerPageThatLeadsWithTheLedgerLink_KeepsItFirst_AndTheWayOutFollowsIt(self):
+        from obdi.navigation import current_route
+        from obdi.web_answers import ledger_link
+
+        marked = current_route.set("/ledger-anchor")
+        try:
+            page = render_page("Balance stated", ledger_link("a", "A") + "<p>done</p>").decode()
+        finally:
+            current_route.reset(marked)
+
+        assert (
+            page.index("Open the ledger for A")
+            < page.index("Back to Accounts")
+            < page.index("<p>done</p>")
+        )
+
     def test_PageInAnotherSection_OffersItsOwnDestination_NotChecks(self, base):
         page = httpx.get(f"{base}/attempts", timeout=20).text
 
