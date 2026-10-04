@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.298] - 2026-10-04
+
+### Fixed
+- **A confirmed pair is one movement in the chain check.** With every known
+  balance of the main account reproduced, its agreement stopped in April 2019
+  on three faults that were false: a round-up and its arrival, each the
+  other's partner, stamped more than five minutes apart. A test had pinned
+  the false sentence as the answer.
+- **A rebuild replays artefacts in the order they arrived.** It sorted the
+  landing stamp as text; a pull stamps UTC and an import stamps local time
+  with its offset, so an import replayed after pulls it had preceded, and a
+  rebuilt store could differ from the live one. It is also why 0.4.295 passed
+  on a machine ahead of UTC and failed its build on one at UTC: there, every
+  "arrival order" a test named replayed the import last. A guard now fails a
+  test whose named orders do not replay differently.
+
+### Changed
+- **The suite runs in about a third of the time.** Two costs were the tests'
+  own and not the application's: the HTTP client built a TLS context for
+  every request to a plain local server, and every test server took half a
+  second to stop. Measured here: 374 seconds before, 97 to 118 after, the
+  same 5,627 tests collected.
+
+Not proven: what the replay order changes on the real store. It moves an
+import relative to pulls that landed within the hour of it, and the first
+rebuild is where that is read.
+
 ## [0.4.297] - 2026-10-04
 
 ### Fixed
