@@ -26,6 +26,24 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.291] - 2026-10-04
+
+### Added
+- **A differing window names the first row where the balances part.** The
+  export states a balance after every row, and only day ends were used, so a
+  fault was narrowed to a day and then searched for. Inside a window that
+  differs, the export's rows are now walked in its own order and the page
+  names the row and what the store holds in its place.
+- **The aggregator's running balance is a checkpoint** at the end of every day
+  its chain has one end for, on every account it covers. What it measures for
+  an account with Spaces is decided by arithmetic and stated.
+- **Each Space has a checkpoint of its own**, from the balance the provider's
+  Space listing states on every pull. A Space had none.
+- **The search for a missing row's twin uses the recipient** as well as size
+  and direction, and says which it found. The recipient is never shown.
+- **A change that equals a row, or a sum of rows, says which sources list
+  those rows** in the same window and which do not.
+
 ## [0.4.290] - 2026-10-04
 
 ### Added
