@@ -61,7 +61,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from itertools import accumulate
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
 from .masking import Structural
@@ -78,6 +78,8 @@ from .store import Store
 
 if TYPE_CHECKING:
     from .balance_anchors import FamilyWalk, FaultChange
+
+_T = TypeVar("_T")
 
 #: The most explanations worked out for one walk: a safety bound on the page's size
 #: and the work, not the usual count.
@@ -106,6 +108,12 @@ NONE = "none"
 
 #: How near in days a row must lie to be another's counter-item.
 COUNTER_ITEM_DAYS = 3
+
+#: How far apart in days two rows of one size and direction may lie and still be
+#: offered as each other's counterpart across an export comparison (`Lookalike`).
+#: Wide on purpose: the matcher's own window is seven days, so a row only
+#: further away than that is the case this exists to show.
+LOOKALIKE_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -146,6 +154,38 @@ class RowNote:
     #: For a main-account row the Space fold left counted: why it could not be
     #: paired one to one with a Space row (`space_attribution.FoldRefusal`); "" for any other row.
     fold_refusal: Structural[str] = ""
+    #: For a confirmed transfer leg: its partner's direction and day, and whether the
+    #: partner is itself an internal leg (False: an ordinary payment); "" and None otherwise.
+    partner_direction: Structural[str] = ""
+    partner_day: Structural[str] = ""
+    partner_is_leg: Structural[bool | None] = None
+    #: For a row the export does not list, or an export row the store does not count:
+    #: what the other side holds that is like it (`Lookalike`); None for any other row.
+    lookalike: Structural[Lookalike | None] = None
+
+
+@dataclass(frozen=True)
+class Lookalike:
+    """A row on the other side of an export comparison that has the same size and direction.
+
+    The question it answers is the one a missing row raises: is it really absent,
+    or is it there under another day or another row? Every field is structural
+    (`masking`): the size is the thing both rows are said to share, and is never stated.
+    """
+
+    #: "export": the export lists a row like a counted row it does not list.
+    #: "store": the store counts a row like an export row it does not count.
+    side: Structural[str]
+    #: Whether any row of that size and direction lies within `LOOKALIKE_DAYS`.
+    found: Structural[bool]
+    #: How many days between the two rows' dates, the nearest being chosen.
+    days_away: Structural[int] = 0
+    #: For side "export": what the export row is sighted on - "nothing" (no stored row
+    #: carries it), "this row", "another row", or "a row of another account".
+    #: For side "store": whether the export lists the counted row - "listed" or "unlisted".
+    sighted_on: Structural[str] = ""
+    #: The other row, named, where it is held in the family.
+    other: Structural[RowNote | None] = None
 
 
 @dataclass(frozen=True)
@@ -332,6 +372,9 @@ class RowAbout:
     counter_item: bool | None
     arrival_near: bool | None
     fold_refusal: str = ""
+    partner_direction: str = ""
+    partner_day: str = ""
+    partner_is_leg: bool | None = None
 
 
 class _RowFacts:
@@ -381,6 +424,31 @@ class _RowFacts:
             "SELECT account_id FROM transactions WHERE entity_id = ?", (entity,)
         ).fetchone()
         return str(row["account_id"]) if row is not None else ""
+
+    def _partner_of(self, entity: str) -> tuple[str, str, bool | None]:
+        """A pair's other row: its direction, its stored day, and whether it is an internal leg.
+
+        Read from the family where it is held, and from the store for a row of
+        another account. Whether it is a leg is the question that tells a leg
+        paired with a leg from a leg paired with an ordinary payment.
+        """
+        found = self.by_entity.get(entity)
+        if found is not None:
+            return _direction(found.amount_minor), found.value_date.isoformat(), (
+                found.is_internal_transfer
+            )
+        row = self.store.connection.execute(
+            "SELECT amount_minor, value_date, is_internal_transfer FROM transactions "
+            "WHERE entity_id = ?",
+            (entity,),
+        ).fetchone()
+        if row is None:
+            return "", "", None
+        return (
+            _direction(int(row["amount_minor"])),
+            str(row["value_date"])[:10],
+            bool(row["is_internal_transfer"]),
+        )
 
     def _label(self, account: str) -> str:
         if not account:
@@ -456,6 +524,9 @@ class _RowFacts:
         if row.is_internal_transfer:
             pairing = "paired" if partner is not None else "unpaired"
         unpaired_leg = "roundUpOf" in row.raw and partner is None
+        partner_direction, partner_day, partner_is_leg = (
+            self._partner_of(partner) if partner is not None else ("", "", None)
+        )
         return RowAbout(
             account=self._label(row.account_id),
             round_up_leg="roundUpOf" in row.raw,
@@ -467,6 +538,9 @@ class _RowFacts:
             ),
             arrival_near=self.arrival_near(row) if unpaired_leg else None,
             fold_refusal=self.fold_refusal(row),
+            partner_direction=partner_direction,
+            partner_day=partner_day,
+            partner_is_leg=partner_is_leg,
         )
 
 
@@ -491,7 +565,12 @@ class _Evidence:
         return self.placement.day(source, row)
 
     def note(
-        self, row: Transaction, *, why: str = "", figure_differs: bool = False
+        self,
+        row: Transaction,
+        *,
+        why: str = "",
+        figure_differs: bool = False,
+        lookalike: Callable[[], Lookalike] | None = None,
     ) -> Callable[[], RowNote]:
         def build() -> RowNote:
             seen = {
@@ -520,6 +599,10 @@ class _Evidence:
                 about.counter_item,
                 about.arrival_near,
                 about.fold_refusal,
+                about.partner_direction,
+                about.partner_day,
+                about.partner_is_leg,
+                lookalike() if lookalike is not None else None,
             )
 
         return build
@@ -609,6 +692,63 @@ def _csv_view(
     held_back: list[_Entry] = []
     figures: list[_Entry] = []
     represented: set[str] = set()
+    export_rows_by_figure: dict[int, list[tuple[date, str | None]]] = defaultdict(list)
+    for match in matches:
+        for export_row, sighting in match.pairs:
+            export_rows_by_figure[export_row.amount_minor].append(
+                (export_row.day, str(sighting["entity_id"]))
+            )
+        for export_row in match.unheld:
+            export_rows_by_figure[export_row.amount_minor].append((export_row.day, None))
+    counted_by_figure: dict[int, list[tuple[date, str]]] = defaultdict(list)
+    for account, rows in evidence.members.items():
+        if account not in family:
+            continue
+        for held_row in rows:
+            if evidence.counted(held_row):
+                counted_by_figure[held_row.amount_minor].append(
+                    (evidence.day(source, held_row), held_row.entity_id)
+                )
+
+    def export_twin(row: Transaction, day: date) -> Callable[[], Lookalike]:
+        """What the export lists that is like a counted row it does not list."""
+
+        def build() -> Lookalike:
+            found = _nearest(export_rows_by_figure.get(row.amount_minor, ()), day)
+            if found is None:
+                return Lookalike("export", False)
+            there, entity = found
+            away = abs((there - day).days)
+            if entity is None:
+                return Lookalike("export", True, away, "nothing")
+            if entity == row.entity_id:
+                return Lookalike("export", True, away, "this row")
+            other = evidence.by_entity.get(entity)
+            if other is None:
+                return Lookalike("export", True, away, "a row of another account")
+            return Lookalike("export", True, away, "another row", evidence.note(other)())
+
+        return build
+
+    def store_twin(day: date, minor: int) -> Callable[[], Lookalike]:
+        """What the store counts that is like an export row it does not count."""
+
+        def build() -> Lookalike:
+            found = _nearest(counted_by_figure.get(minor, ()), day)
+            if found is None:
+                return Lookalike("store", False)
+            there, entity = found
+            other = evidence.by_entity[entity]
+            return Lookalike(
+                "store",
+                True,
+                abs((there - day).days),
+                "listed" if entity in represented else "unlisted",
+                evidence.note(other)(),
+            )
+
+        return build
+
     for match in matches:
         for export_row, sighting in match.pairs:
             entity = str(sighting["entity_id"])
@@ -642,6 +782,7 @@ def _csv_view(
                             row,
                             why=evidence.why_not_counted(row) or status.value,
                             figure_differs=amount != export_row.amount_minor,
+                            lookalike=store_twin(export_row.day, export_row.amount_minor),
                         ),
                     )
                 )
@@ -661,11 +802,29 @@ def _csv_view(
                 row.day,
                 row.amount_minor,
                 row.day,
-                _absent_note(source, row),
+                _absent_note(source, row, store_twin(row.day, row.amount_minor)),
             )
             for row in match.unheld
         )
-    return _view(evidence, source, family, listed=represented, held_back=held_back, figures=figures)
+    return _view(
+        evidence,
+        source,
+        family,
+        listed=represented,
+        held_back=held_back,
+        figures=figures,
+        twin_of=export_twin,
+    )
+
+
+def _nearest(candidates: Iterable[tuple[date, _T]], day: date) -> tuple[date, _T] | None:
+    """The candidate dated nearest `day` within `LOOKALIKE_DAYS`, the earlier on a tie."""
+
+    def distance(candidate: tuple[date, _T]) -> tuple[int, date]:
+        return abs((candidate[0] - day).days), candidate[0]
+
+    within = [candidate for candidate in candidates if distance(candidate)[0] <= LOOKALIKE_DAYS]
+    return min(within, key=distance, default=None)
 
 
 def _foreign_note(
@@ -686,7 +845,9 @@ def _foreign_note(
     return build
 
 
-def _absent_note(source: str, row: ExportRow) -> Callable[[], RowNote]:
+def _absent_note(
+    source: str, row: ExportRow, lookalike: Callable[[], Lookalike]
+) -> Callable[[], RowNote]:
     def build() -> RowNote:
         return RowNote(
             ((source, row.day.isoformat()),),
@@ -694,6 +855,7 @@ def _absent_note(source: str, row: ExportRow) -> Callable[[], RowNote]:
             (source,),
             "not held",
             "not held at all",
+            lookalike=lookalike(),
         )
 
     return build
@@ -707,9 +869,13 @@ def _view(
     listed: set[str] | None,
     held_back: list[_Entry],
     figures: list[_Entry],
+    twin_of: Callable[[Transaction, date], Callable[[], Lookalike]] | None = None,
 ) -> _View:
     """Build one source's view. `listed` is the rows the source is shown to list
-    (an export's matched rows); None means the rows it has a dated sighting of."""
+    (an export's matched rows); None means the rows it has a dated sighting of.
+
+    `twin_of` names, for a counted row the source does not list, what the source
+    lists that is like it."""
     sighted = evidence.placement.days.get(source, {}) if evidence.placement.places(source) else {}
     counted: list[_Entry] = []
     unlisted: list[_Entry] = []
@@ -728,7 +894,15 @@ def _view(
                 )
                 if not is_listed:
                     unlisted.append(
-                        _Entry(day, row.amount_minor, row.value_date, evidence.note(row))
+                        _Entry(
+                            day,
+                            row.amount_minor,
+                            row.value_date,
+                            evidence.note(
+                                row,
+                                lookalike=twin_of(row, day) if twin_of is not None else None,
+                            ),
+                        )
                     )
                 if day != row.value_date:
                     by_source.append(
@@ -1042,6 +1216,7 @@ __all__ = [
     "EXPLAINED_CHANGES",
     "EXPORT_OPENING",
     "LISTED_NOT_COUNTED",
+    "LOOKALIKE_DAYS",
     "NAMED_ROWS",
     "NONE",
     "ONE_ROW",
@@ -1051,6 +1226,7 @@ __all__ = [
     "UNHELD_SPACE",
     "ChangeExplanation",
     "ExportFacts",
+    "Lookalike",
     "ReversedFacts",
     "RowNote",
     "RowSet",

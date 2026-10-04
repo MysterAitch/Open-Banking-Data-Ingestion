@@ -17,7 +17,8 @@ sighting for each of the export's rows and no stated balance disagrees. Nothing
 here was made wider, because nothing here needed it. What differs in the deployed
 store is not known from the page's facts, and the ledger now says the facts that
 decide it: whether the export lists a row of the same size within thirty days,
-and what that row is sighted on (`test_ledger_twins`).
+and what that row is sighted on
+(`test_export_cuts.TestWhatTheOtherSideHoldsThatIsLikeAMissingRow`).
 
 What these scenarios pin is the rule that a Space-blind export row with no partner
 inside the window stays its own row, so the window is not stretched by a row

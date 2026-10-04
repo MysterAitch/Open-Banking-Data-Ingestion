@@ -23,8 +23,8 @@ import pytest
 
 from obdi.balance_anchors import FAMILY, OPENED, effective_opening
 from obdi.family_anchors import families_of
-from obdi.fault_explanation import explain_walk
-from obdi.ingest import import_file
+from obdi.fault_explanation import Lookalike, _nearest, explain_walk
+from obdi.ingest import import_file, pair_transfers_across_store
 from obdi.models import Transaction, TransactionStatus
 from obdi.sighting_placement import SightingPlacement
 from obdi.store import Store
@@ -861,3 +861,217 @@ class TestExplanationsThatNeedAnotherSourceOrADefect:
         (change,) = explanation.changes
         assert change.holds == ("none",)
         assert (change.rows_before, change.rows_inside, change.rows_after) == (1, 2, 1)
+
+
+def lookalike_of(note) -> Lookalike:
+    assert note.lookalike is not None
+    return note.lookalike
+
+
+def twin_ghosts() -> list[Transaction]:
+    """Two counted rows of the Garage's figure on the 9th that the export does not list.
+
+    Two, so the change on the 9th is twice the figure and does not undo the 6th's,
+    and is explained in its own right instead of as half of a timing pair.
+    """
+    return [pay(MAIN, FEED, f"f-ghost-{n}", GARAGE.minor, 9, f"Ghost{n}") for n in (1, 2)]
+
+
+class TestWhatTheOtherSideHoldsThatIsLikeAMissingRow:
+    """A row one side lacks is either absent or present under another day or row.
+
+    The deployed page said three payments the feed and the aggregator both hold were
+    "not listed" by the export, and could not say whether the export listed a row of
+    that size elsewhere, so every reading stayed open. Each scenario adds ONE row to
+    the healthy household, in pence, with the answer decided before the first run
+    and no figure on any sentence.
+
+    KNOWN ANSWERS (the ghost is a counted row the export does not list):
+        a ghost of 1234 on the 6th, and a payment of 1234 both sources hold on the 16th
+            the export lists a row of that size 10 days away, sighted on that other
+            stored row, which is seen by the feed and the export on the 16th
+        a ghost of 1234 on the 6th and nothing else of that size
+            the export lists no row of that size within thirty days
+        the export's Garage of 9000 on the 6th held nowhere, and two ghosts of 9000 on the 9th
+            on the 6th the store counts a row of that size 3 days away that the export
+            does not list; on the 9th the export lists a row 3 days away that no
+            stored row carries
+        the Garage voided on the 6th and another payment of 9000 both sources hold on the 9th
+            the store counts a row of that size 3 days away, which the export lists
+            as another row
+    """
+
+    def test_Change_WhenTheExportListsARowOfThatSizeBeyondTheMatchersReach_NamesTheRowItIsSightedOn(
+        self, make
+    ):
+        store = make(
+            [*HEALTHY, Row("Twin", -1234, 16, 16)],
+            feed_only=[pay(MAIN, FEED, "f-ghost", -1234, 6, "Ghost")],
+        )
+
+        (note,) = only_change(store).counted_not_listed.named
+
+        found = lookalike_of(note)
+        assert (found.side, found.found, found.days_away, found.sighted_on) == (
+            "export",
+            True,
+            10,
+            "another row",
+        )
+        assert found.other is not None
+        assert found.other.sources == ("starling", "starling-csv")
+        assert found.other.account == "the main account"
+        assert ("starling", "2026-09-16") in found.other.dates
+
+    def test_Change_WhenNoRowOfThatSizeIsListedNearby_SaysTheExportListsNone(self, make):
+        store = make(HEALTHY, feed_only=[pay(MAIN, FEED, "f-ghost", -1234, 6, "Ghost")])
+
+        (note,) = only_change(store).counted_not_listed.named
+
+        assert lookalike_of(note) == Lookalike("export", False)
+
+    def test_Change_WhenAnExportRowAndAStoreRowLieThreeDaysApart_EachNamesTheOther(self, make):
+        store = make(HEALTHY)
+        store.connection.execute(
+            "DELETE FROM transaction_sources WHERE entity_id IN "
+            "(SELECT entity_id FROM transactions WHERE amount_minor = ?)",
+            (GARAGE.minor,),
+        )
+        store.connection.execute("DELETE FROM transactions WHERE amount_minor = ?", (GARAGE.minor,))
+        store.connection.commit()
+        Household(store, MAP).arrive(*twin_ghosts())
+
+        first, second = explained(store).changes
+
+        (missing,) = first.listed_not_counted.named
+        assert missing.why == "not held at all"
+        mirror = lookalike_of(missing)
+        assert (mirror.side, mirror.found, mirror.days_away, mirror.sighted_on) == (
+            "store",
+            True,
+            3,
+            "unlisted",
+        )
+        assert mirror.other is not None
+        assert mirror.other.sources == ("starling",)
+        assert second.counted_not_listed.count == 2
+        for ghost in second.counted_not_listed.named:
+            assert lookalike_of(ghost) == Lookalike("export", True, 3, "nothing")
+
+    def test_Change_WhenTheCountedRowOfThatSizeIsListedAsAnotherRow_SaysSo(self, make):
+        store = make([*HEALTHY, Row("Garage Again", GARAGE.minor, 9, 9)])
+        arrive_again(store, GARAGE, status=TransactionStatus.VOID)
+
+        change = only_change(store)
+
+        (voided,) = change.listed_not_counted.named
+        mirror = lookalike_of(voided)
+        assert (mirror.side, mirror.found, mirror.days_away, mirror.sighted_on) == (
+            "store",
+            True,
+            3,
+            "listed",
+        )
+
+    def test_Page_WhenARowIsMissing_SaysWhatTheOtherSideHoldsWithoutAFigure(self, make):
+        store = make(
+            [*HEALTHY, Row("Twin", -1234, 16, 16)],
+            feed_only=[pay(MAIN, FEED, "f-ghost", -1234, 6, "Ghost")],
+        )
+
+        page = render(store)
+
+        assert (
+            "the export lists a row of the same size and direction, 10 days away, sighted "
+            "on another stored row (out row dated"
+        ) in page
+        assert "1234" not in page
+        assert "12.34" not in page
+
+    def test_Page_WhenNoRowOfThatSizeLiesNearby_SaysNoneIsListedWithinThirtyDays(self, make):
+        store = make(HEALTHY, feed_only=[pay(MAIN, FEED, "f-ghost", -1234, 6, "Ghost")])
+
+        page = render(store)
+
+        assert "the export lists no row of the same size and direction within thirty days" in page
+
+    def test_Page_WhenTheExportRowIsNotHeld_SaysNoStoredRowCarriesIt(self, make):
+        store = make(HEALTHY)
+        store.connection.execute(
+            "DELETE FROM transaction_sources WHERE entity_id IN "
+            "(SELECT entity_id FROM transactions WHERE amount_minor = ?)",
+            (GARAGE.minor,),
+        )
+        store.connection.execute("DELETE FROM transactions WHERE amount_minor = ?", (GARAGE.minor,))
+        store.connection.commit()
+        Household(store, MAP).arrive(*twin_ghosts())
+
+        page = render(store)
+
+        assert "3 days away, that no stored row carries" in page
+        assert (
+            "the store counts a row of the same size and direction, 3 days away, which the "
+            "export does not list (out row dated"
+        ) in page
+
+    def test_Lookalike_WhenTheNearestRowIsThirtyOneDaysAway_IsNotOffered(self):
+        day = date(2026, 9, 1)
+        within = (date(2026, 10, 1), "thirty")
+        beyond = (date(2026, 10, 2), "thirty-one")
+
+        assert _nearest([beyond], day) is None
+        assert _nearest([beyond, within], day) == within
+        assert _nearest([(date(2026, 8, 30), "before"), (date(2026, 9, 3), "after")], day) == (
+            date(2026, 8, 30),
+            "before",
+        )
+
+
+class TestWhatATransferLegsPartnerIs:
+    """A leg is "confirmed paired with the Space" and the page now says with what.
+
+    The deployed page showed the main account's IN leg paired with the Space beside
+    the Space's own leg "with no pair" and an ordinary payment of the same size, and
+    nothing on the leg said its partner was the payment. KNOWN ANSWERS, with a
+    ghost of 1234 on the 6th so the change names the rows:
+
+        an IN leg of 4700 in the main account naming a Space no account holds, and the
+        Space's payment of 4700 the same day
+            the leg's partner is an out row, dated the 6th, an ordinary payment
+        the same with the Space's own OUT leg, naming the main account, instead
+            the leg's partner is an out row, dated the 6th, an internal leg
+    """
+
+    @staticmethod
+    def household(make, space_row: Transaction, main_names: str) -> Store:
+        store = make(
+            HEALTHY,
+            feed_only=[
+                pay(MAIN, FEED, "f-ghost", -1234, 6, "Ghost"),
+                leg(MAIN, 4700, 6, main_names, "f-in"),
+                space_row,
+            ],
+        )
+        pair_transfers_across_store(store, MAP)
+        return store
+
+    def test_Page_WhenALegIsPairedWithAnOrdinaryPayment_SaysItsPartnerIsAPayment(self, make):
+        store = self.household(make, pay(BILLS, FEED, "s-pay", -4700, 6, "Pay"), "cat-unknown")
+
+        page = render(store)
+
+        assert (
+            "confirmed paired with the Space starling-space-bills (out row dated "
+            '<span class="mono nowrap">2026-09-06</span>, an ordinary payment)'
+        ) in page
+
+    def test_Page_WhenALegIsPairedWithTheSpacesOwnLeg_SaysItsPartnerIsALeg(self, make):
+        space_leg = leg(BILLS, -4700, 6, "cat-main", "s-out")
+        store = self.household(make, space_leg, "cat-bills")
+
+        page = render(store)
+
+        assert (
+            "confirmed paired with the Space starling-space-bills (out row dated "
+            '<span class="mono nowrap">2026-09-06</span>, an internal leg)'
+        ) in page

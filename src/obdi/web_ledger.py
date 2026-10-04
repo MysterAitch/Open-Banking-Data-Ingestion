@@ -447,7 +447,7 @@ def _row_note(note: Any) -> str:
     seen = ", ".join(_esc(source) for source in note.sources) or "no source"
     kind = "a round-up leg" if note.round_up_leg else "a transfer leg" if note.transfer else ""
     pairing = (
-        f", confirmed paired with {_esc(note.partner_account)}"
+        f", confirmed paired with {_esc(note.partner_account)}{_partner_of(note)}"
         if note.pairing == "paired"
         else " with no pair"
         if note.pairing == "unpaired"
@@ -479,9 +479,60 @@ def _row_note(note: Any) -> str:
                 if note.fold_refusal
                 else ""
             ),
+            _lookalike(note.lookalike) if note.lookalike is not None else "",
         )
     )
     return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
+
+
+def _partner_of(note: Any) -> str:
+    """What a transfer leg's partner is: its direction, its day, and its kind.
+
+    The kind is what tells a leg paired with a leg from a leg paired with an
+    ordinary payment of the same size, which is the pairing that went wrong
+    when "confirmed paired with the Space" sat beside "a transfer leg with no pair".
+    """
+    if not note.partner_day:
+        return ""
+    kind = "an internal leg" if note.partner_is_leg else "an ordinary payment"
+    return f" ({_esc(note.partner_direction)} row dated {_mono(note.partner_day)}, {kind})"
+
+
+def _days_away(days: int) -> str:
+    return "on the same day" if days == 0 else f"{_plural(days, 'day')} away"
+
+
+def _lookalike(found: Any) -> str:
+    """The row on the other side of an export comparison that is like this one, or none.
+
+    Said once, here. "No figure, no description": a row is the same size and
+    direction as another and the sentence never says what size.
+    """
+    if found.side == "export":
+        if not found.found:
+            return "; the export lists no row of the same size and direction within thirty days"
+        away = _days_away(found.days_away)
+        lead = f"; the export lists a row of the same size and direction, {away}"
+        if found.sighted_on == "nothing":
+            return f"{lead}, that no stored row carries"
+        if found.sighted_on == "this row":
+            return f"{lead}, sighted on this row"
+        if found.sighted_on == "a row of another account":
+            return f"{lead}, sighted on a row of another account"
+        other = _row_note(found.other) if found.other is not None else ""
+        return f"{lead}, sighted on another stored row ({other})"
+    if not found.found:
+        return "; the store counts no row of the same size and direction within thirty days"
+    listing = (
+        "which the export lists as another row"
+        if found.sighted_on == "listed"
+        else "which the export does not list"
+    )
+    other = _row_note(found.other) if found.other is not None else ""
+    return (
+        f"; the store counts a row of the same size and direction, "
+        f"{_days_away(found.days_away)}, {listing} ({other})"
+    )
 
 
 #: What `round_up_accounts.carrier_state` says, in the words of a row's note.
