@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
+from datetime import date
 
 from .accounts import AccountMap, AccountRecord, AccountRef
 from .namespaces import UK_CARD_STATEMENT_SOURCE, validate_canonical_name
@@ -100,6 +101,10 @@ class KnownAccount:
     parent: str
     declared: bool
     rows: int
+    #: The registry's closing date, which is what makes an account archived once it has passed.
+    closed: date | None = None
+    #: The registry's note on how its dates are known; an inferred closing date says so here.
+    date_basis: str = ""
 
 
 @dataclass(frozen=True)
@@ -204,6 +209,8 @@ def read_known_accounts(
                 parent=str(record.parent) if record and record.parent else "",
                 declared=record is not None,
                 rows=held[ref][0] if ref in held else 0,
+                closed=record.closed if record else None,
+                date_basis=record.date_basis if record else "",
             )
         )
     return KnownAccounts(tuple(accounts), unnamed)

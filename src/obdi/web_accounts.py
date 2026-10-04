@@ -46,6 +46,7 @@ from .coverage import DoubtReport
 from .errors import DataError
 from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .namespaces import validate_canonical_name
+from .overview import ARCHIVED
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .web_sections import back_link, referring_page
 
@@ -315,28 +316,101 @@ _FEEDLESS_NOTE = (
 )
 
 
-def _known_row(account: KnownAccount) -> str:
+def _is_archived(account: KnownAccount, today: date) -> bool:
+    """The Overview's own test for ARCHIVED: a closing date that has passed."""
+    return account.closed is not None and account.closed <= today
+
+
+def _archived_pill(account: KnownAccount) -> str:
+    """The word the Overview uses, the date, and how the date is known where it was inferred."""
+    assert account.closed is not None  # narrowed for the type checker by `_is_archived`
+    inferred = " (inferred)" if account.date_basis.lower().startswith("inferred") else ""
+    return f'<span class="pill pill-quiet">{ARCHIVED} {account.closed.isoformat()}{inferred}</span>'
+
+
+def _spaces_phrase(spaces: list[KnownAccount], today: date) -> str:
+    archived = sum(_is_archived(space, today) for space in spaces)
+    noun = "Space" if len(spaces) == 1 else "Spaces"
+    return f"{len(spaces)} {noun} ({len(spaces) - archived} live, {archived} archived)"
+
+
+def _known_row(
+    account: KnownAccount,
+    today: date,
+    *,
+    spaces: list[KnownAccount] | None = None,
+    depth: int = 0,
+    show_parent: bool = True,
+) -> str:
     """One account obdi holds, on a line that wraps rather than scrolls."""
     ref = quote(account.ref, safe="")
     detail = [f'<span class="mono">{html.escape(account.ref)}</span>']
     detail.append(html.escape(account.kind) if account.kind else "no kind")
-    if account.parent:
+    if account.parent and show_parent:
         detail.append(f"under {html.escape(account.parent)}")
     detail.append(f"{account.rows} row(s)")
+    if spaces:
+        detail.append(_spaces_phrase(spaces, today))
     state = (
         '<span class="pill pill-ok">declared</span>'
         if account.declared
         else '<span class="pill pill-bad">not declared</span>'
     )
+    archived = f" {_archived_pill(account)}" if _is_archived(account, today) else ""
     links = f'<a class="tap" href="/ledger?ref={ref}">Ledger</a>'
     if account.declared:
         links += f' <a class="tap" href="/edit-account?ref={ref}">Edit</a>'
+    # Indented inline, because the shared stylesheet is searched by other pages' tests
+    # for words and figures, and a rule added there is read by all of them.
+    indent = f' style="margin-left:{1.25 * depth:g}rem"' if depth else ""
     return (
-        '<div class="row"><strong>'
-        f"{html.escape(account.label)}</strong> {state}<br>"
+        f'<div class="row"{indent}><strong>'
+        f"{html.escape(account.label)}</strong> {state}{archived}<br>"
         + " - ".join(detail)
         + f"<br>{links}</div>"
     )
+
+
+def _listing(accounts: Iterable[KnownAccount], today: date) -> str:
+    """Live accounts first, archived last, each Space beneath its parent in the same order.
+
+    A Space whose parent is not among the accounts listed stays at the top level and names its
+    parent, as it did before the list was nested.
+    """
+    held = {account.ref: account for account in accounts}
+    children: dict[str, list[KnownAccount]] = {}
+    top: list[KnownAccount] = []
+    for account in held.values():
+        if account.parent and account.parent in held and account.parent != account.ref:
+            children.setdefault(account.parent, []).append(account)
+        else:
+            top.append(account)
+
+    def order(account: KnownAccount) -> tuple[bool, str]:
+        return (_is_archived(account, today), account.ref)
+
+    out: list[str] = []
+    shown: set[str] = set()
+
+    def emit(account: KnownAccount, depth: int) -> None:
+        if account.ref in shown:
+            return
+        shown.add(account.ref)
+        spaces = sorted(children.get(account.ref, []), key=order)
+        out.append(
+            _known_row(
+                account, today, spaces=spaces, depth=depth, show_parent=account.parent not in held
+            )
+        )
+        for space in spaces:
+            emit(space, depth + 1)
+
+    for account in sorted(top, key=order):
+        emit(account, 0)
+    # Only a ring of accounts naming each other as parents reaches here; none is lost.
+    for account in sorted(held.values(), key=order):
+        emit(account, 0)
+    return "".join(out)
 
 
 def _declare_known_section(known: KnownAccounts) -> str:
@@ -455,7 +529,7 @@ def accounts_page(
             "it has a record in the registry, which is where its kind, parent, and "
             "dates are kept.</p>"
             + (
-                "".join(_known_row(a) for a in known.accounts)
+                _listing(known.accounts, today)
                 or "<p>No account is held or declared yet.</p>"
             )
             + _declare_known_section(known)
