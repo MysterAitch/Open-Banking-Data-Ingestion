@@ -493,6 +493,24 @@ def queue_actual_push(db_path: Path) -> str:
     return "; ".join(lines)
 
 
+def pull_trigger_label(explicit: str | None, psu_ip: str | None) -> str:
+    """How an aggregator pull is labelled in the fetch ledger.
+
+    A caller's own label wins, then a declared attendance, then the standing
+    label of the process, then the bare command line.
+    Attendance outranks the standing label because the scheduler's container
+    carries `OBDI_TRIGGER=scheduled` for everything run inside it:
+    four pulls a person ran there by hand with `--attended-from` were ledgered
+    as scheduled, which is the one distinction the label exists to keep.
+    """
+    return (
+        explicit
+        or ("cli-attended" if psu_ip else "")
+        or os.getenv("OBDI_TRIGGER", "").strip()
+        or "cli"
+    )
+
+
 def rebuild_in_progress_note(db_path: Path) -> str | None:
     """The polite refusal for actions that read or move store rows while a
     rebuild is replaying them. A bind mid-rebuild leaves a SPLIT state
@@ -4133,9 +4151,7 @@ def _pull(
                 psu_ip=psu_ip,
                 # Named pathways, so artefacts can be sliced by how they
                 # were requested when behaviour ever differs between them.
-                trigger=trigger
-                or os.getenv("OBDI_TRIGGER")
-                or ("cli-attended" if psu_ip else "cli"),
+                trigger=pull_trigger_label(trigger, psu_ip),
                 # Forwarded, not defaulted. Dropping this is what disconnected
                 # the backfill ladder from the only moment it exists for: the
                 # page said deep history was being fetched while a single

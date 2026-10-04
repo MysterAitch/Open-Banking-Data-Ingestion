@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.282] - 2026-10-04
+
+### Added
+- **"Fetch now" on the Connections page**, per connection, and "Fetch these
+  now" beside each span never asked for. It runs that connection's routine
+  pull, cards and unasked spans included, declared as attended from the device
+  that pressed it, and the page then says what was asked, what landed, and any
+  refusal in the provider's own words. The page's other buttons only walk
+  backward from the earliest date held, so they could not fill a recent gap.
+  With no address it can honestly declare, the press refuses and asks nothing.
+
+### Fixed
+- **A pull run by hand with a declared attendance is recorded as attended.**
+  Inside the scheduler's container the standing label won, so four attended
+  pulls were recorded as scheduled.
+
 ## [0.4.281] - 2026-10-04
 
 ### Fixed

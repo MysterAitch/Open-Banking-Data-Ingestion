@@ -43,7 +43,7 @@ from obdi.attended_fetch import (
     write_status,
 )
 from obdi.cli import _pull as cli_pull
-from obdi.cli import rebuild_in_progress_note
+from obdi.cli import pull_trigger_label, rebuild_in_progress_note
 from obdi.connections import ConnectionStore
 from obdi.pull import PullResult, pull_truelayer
 from obdi.store import Store
@@ -535,6 +535,32 @@ class TestAPressOnStarling:
             cli_pull("nowhere", tmp_path / "s.sqlite3", None, raise_errors=True)
 
         assert capsys.readouterr().err == ""
+
+
+class TestHowACommandLinePullIsLabelled:
+    def test_Label_WhenAttendanceIsDeclaredInsideTheSchedulersContainer_IsAttendedNotScheduled(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("OBDI_TRIGGER", "scheduled")
+
+        assert pull_trigger_label(None, ADDRESS) == "cli-attended"
+
+    def test_Label_WhenNoAttendanceIsDeclaredInsideTheSchedulersContainer_IsScheduled(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("OBDI_TRIGGER", "scheduled")
+
+        assert pull_trigger_label(None, None) == "scheduled"
+
+    def test_Label_WhenTheCallerNamesItsOwnPathway_KeepsThatName(self, monkeypatch):
+        monkeypatch.setenv("OBDI_TRIGGER", "scheduled")
+
+        assert pull_trigger_label("web-fetch-now", ADDRESS) == "web-fetch-now"
+
+    def test_Label_WhenNothingIsSet_IsThePlainCommandLine(self, monkeypatch):
+        monkeypatch.delenv("OBDI_TRIGGER", raising=False)
+
+        assert pull_trigger_label(None, None) == "cli"
 
 
 class TestWhatDoesNotStartAPress:
