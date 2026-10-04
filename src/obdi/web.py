@@ -43,7 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord, ArchiveOutcome
-from .actual_push import valid_progress
+from .actual_push import NothingQueued, valid_progress
 from .alerts import consent_rung
 from .asked_coverage import Hole, describe_spans
 from .attended_fetch import PRESS_KIND, PressRefused
@@ -610,6 +610,9 @@ class WebConfig:
     audit_actual: Callable[[], str] | None = None
     #: Queue a write of the sync marker alone: no store rows are read or moved.
     marker_actual: Callable[[], str] | None = None
+    #: Whether this instance has been told which Actual budget to sync with. Unwired reads as
+    #: configured, so a deployment that never wired it keeps its buttons.
+    actual_configured: Callable[[], bool] | None = None
     #: The sync history behind the homepage's newest handful. Either the
     #: bare list of results, or a mapping of {"results", "total",
     #: "unreadable"} - the reading side caps and skips, and a page can
@@ -3479,12 +3482,18 @@ def _actual_rows(
     empty_available: bool = False,
     marker_available: bool = False,
     align_available: bool = False,
+    configured: bool = True,
 ) -> str:
     """The budget sync, visible and pressable: the state lines first (the
     last push, the newest audit, the sync marker), then what is in flight,
     then the buttons (the push the heaviest), then the latest results, then
     the roster and the destructive prune and empty folded away as reference
-    and rarely-used controls, the empty last."""
+    and rarely-used controls, the empty last.
+
+    Where Actual is not configured the page says so first, the three presses that could only
+    answer "nothing queued" are shown off with the reason beside them, and the destructive
+    controls are not offered at all: a reviewer pressed three live buttons on a page that never
+    said there was no budget behind them."""
     if actual_status is None and not push_available:
         return ""
     roster_html = ""
@@ -3553,45 +3562,48 @@ def _actual_rows(
                 "audit cannot be summarised.</p>"
             )
     rows = [_result_row(result) for result in results]
+    off = "" if configured else " disabled"
+    why = "" if configured else ' <span class="muted">Off: Actual is not configured.</span>'
     button = (
         '<form method="post" action="/push-actual">'
-        '<p><button class="button" type="submit" '
+        f'<p><button class="button" type="submit"{off} '
         'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-        "Push to Actual now</button></p></form>"
+        f"Push to Actual now</button>{why}</p></form>"
         if push_available
         else ""
     )
     audit_button = (
         '<form method="post" action="/audit-actual">'
-        '<p><button class="button secondary" type="submit" '
+        f'<p><button class="button secondary" type="submit"{off} '
         'style="width:100%;font-size:inherit;cursor:pointer">'
-        "Audit Actual now</button></p></form>"
+        f"Audit Actual now</button>{why}</p></form>"
         if audit_available
         else ""
     )
     marker_button = (
         '<form method="post" action="/marker-actual">'
-        '<p><button class="button secondary" type="submit" '
+        f'<p><button class="button secondary" type="submit"{off} '
         'style="width:100%;font-size:inherit;cursor:pointer">'
-        "Write a sync marker now</button></p></form>"
+        f"Write a sync marker now</button>{why}</p></form>"
         if marker_available
         else ""
     )
     prune_button = (
         prune_section(counts_from_audit(_newest_of_kind(results, "audit")))
-        if prune_available
+        if prune_available and configured
         else ""
     )
     align_audit = _newest_of_kind(results, "audit")
     align_block = (
         align_section(counts_from_audit(align_audit) or [])
         if align_available
+        and configured
         and align_audit is not None
         and _audit_has_differences(align_audit)
         else ""
     )
     empty_block = (
-        empty_section(*_empty_plan(results)) if empty_available else ""
+        empty_section(*_empty_plan(results)) if empty_available and configured else ""
     )
     explanation = (
         "<details><summary>How the sync works</summary>"
@@ -7608,15 +7620,34 @@ class ConnectionHandler(
             )
             return
         print(f"actual push queued via page: {summary}", file=sys.stderr)
+        self._queue_answer(
+            summary,
+            "Push queued",
+            "<p>The applier container picks requests up within its poll "
+            "interval; results appear on the Actual sync page.</p>",
+        )
+
+    def _queue_answer(self, summary: str, title: str, applier_note: str) -> None:
+        """The answer to a press that asks for a request to be queued.
+
+        What happened leads, in the title and in the first sentence. The note about the applier
+        picking requests up is only true of a request that was written, so a press that queued
+        nothing never carries it (it said "Push queued" over "nothing queued", with the applier
+        sentence beneath).
+        """
+        if isinstance(summary, NothingQueued):
+            self._respond(
+                200,
+                render_page(
+                    "Nothing queued",
+                    "".join(f"<p>{html.escape(line)}</p>" for line in summary.splitlines())
+                    + BACK_TO_ACTUAL,
+                ),
+            )
+            return
         self._respond(
             200,
-            render_page(
-                "Push queued",
-                f"<p>{html.escape(summary)}</p>"
-                "<p>The applier container picks requests up within its poll "
-                "interval; results appear on the Actual sync page.</p>"
-                + BACK_TO_ACTUAL,
-            ),
+            render_page(title, f"<p>{html.escape(summary)}</p>" + applier_note + BACK_TO_ACTUAL),
         )
 
     def _audit_actual(self) -> None:
@@ -7638,15 +7669,12 @@ class ConnectionHandler(
             )
             return
         print(f"actual audit queued via page: {summary}", file=sys.stderr)
-        self._respond(
-            200,
-            render_page(
-                "Audit queued",
-                f"<p>{html.escape(summary)}</p>"
-                "<p>Read-only: the applier reads each bound account back "
-                "from Actual and reports differences on the Actual sync "
-                "page - nothing is changed on either side.</p>" + BACK_TO_ACTUAL,
-            ),
+        self._queue_answer(
+            summary,
+            "Audit queued",
+            "<p>Read-only: the applier reads each bound account back "
+            "from Actual and reports differences on the Actual sync "
+            "page - nothing is changed on either side.</p>",
         )
 
     def _marker_actual(self) -> None:
@@ -7668,16 +7696,13 @@ class ConnectionHandler(
             )
             return
         print(f"actual marker queued via page: {summary}", file=sys.stderr)
-        self._respond(
-            200,
-            render_page(
-                "Marker queued",
-                f"<p>{html.escape(summary)}</p>"
-                "<p>The applier renames the sync marker account in Actual to "
-                "the time it writes it; nothing else in the budget changes "
-                "and it reads nothing from the store. The result appears on "
-                "the Actual sync page.</p>" + BACK_TO_ACTUAL,
-            ),
+        self._queue_answer(
+            summary,
+            "Marker queued",
+            "<p>The applier renames the sync marker account in Actual to "
+            "the time it writes it; nothing else in the budget changes "
+            "and it reads nothing from the store. The result appears on "
+            "the Actual sync page.</p>",
         )
 
     def _rename_connection(self, form: dict[str, list[str]]) -> None:

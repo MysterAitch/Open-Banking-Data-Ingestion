@@ -34,7 +34,7 @@ from .accounts import (
     lifecycle_breach,
     read_registry_file,
 )
-from .actual_push import ENVELOPE_VERSION
+from .actual_push import ACTUAL_NOT_CONFIGURED, ENVELOPE_VERSION, NothingQueued
 from .alerts import Finding
 from .asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
 from .attended_fetch import (
@@ -470,16 +470,40 @@ def build_push_envelope(store: Store, map_path: Path) -> dict[str, object]:
     )
 
 
+def actual_configured() -> bool:
+    """Whether this instance has been told which Actual budget to sync with.
+
+    The one place the setting that says so (ACTUAL_SYNC_ID) is named for the code that asks, so
+    the Actual page and every queueing function agree about it and no page has to quote the
+    variable as a remedy.
+    """
+    return bool(os.getenv("ACTUAL_SYNC_ID", "").strip())
+
+
+def _held_up(db_path: Path) -> NothingQueued | None:
+    """The sentence for a request that cannot be queued now (a rebuild holds the layer), if any."""
+    busy = rebuild_in_progress_note(db_path)
+    return NothingQueued(busy) if busy else None
+
+
 def queue_actual_push(db_path: Path) -> str:
     """The push, as one call returning its summary - shared by the CLI
-    command and the web button so the two routes cannot drift."""
-    from .actual_push import empty_pending_note, merge_pending_bindings, queue_push
+    command and the web button so the two routes cannot drift.
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
-    busy = rebuild_in_progress_note(db_path)
-    if busy:
-        return busy
+    Returns a `NothingQueued` where no request was written, so a page can say so first.
+    """
+    from .actual_push import (
+        empty_pending_note,
+        merge_pending_bindings,
+        queue_push,
+        waiting_of_kind,
+    )
+
+    if not actual_configured():
+        return NothingQueued(ACTUAL_NOT_CONFIGURED)
+    held_up = _held_up(db_path)
+    if held_up is not None:
+        return held_up
     map_path_env = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
     if not map_path_env:
         raise RuntimeError("Set OBDI_ACCOUNT_MAP to the account map path.")
@@ -500,7 +524,7 @@ def queue_actual_push(db_path: Path) -> str:
     # and must carry on; the push simply waits for the next cycle.
     pending = empty_pending_note(actual_dir)
     if pending:
-        return "\n".join([*lines, pending])
+        return NothingQueued("\n".join([*lines, pending]))
     merge_note = merge_pending_bindings(Path(map_path_env), actual_dir).describe()
     if merge_note:
         lines.append(merge_note)
@@ -515,6 +539,19 @@ def queue_actual_push(db_path: Path) -> str:
 
     with Store(db_path) as store:
         envelope = build_push_envelope(store, Path(map_path_env))
+    waiting = waiting_of_kind(envelope, actual_dir, "push")
+    if waiting.identical is not None:
+        return NothingQueued(
+            "\n".join(
+                [*lines, f"Nothing queued: an identical push ({waiting.identical}) is already "
+                 "waiting for the applier."]
+            )
+        )
+    if waiting.names:
+        lines.append(
+            f"{len(waiting.names)} earlier push(es) were already waiting; this one differs "
+            "from them (it is built from the store as it is now), so it is queued behind them"
+        )
     queued = queue_push(envelope, actual_dir)
     raw_accounts = envelope.get("accounts")
     raw_provision = envelope.get("provision")
@@ -1195,11 +1232,11 @@ def queue_actual_prune(
     """
     from .actual_push import build_prune_envelope, queue_push
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
-    busy = rebuild_in_progress_note(db_path)
-    if busy:
-        return busy
+    if not actual_configured():
+        return NothingQueued(ACTUAL_NOT_CONFIGURED)
+    held_up = _held_up(db_path)
+    if held_up is not None:
+        return held_up
     settle_emptied_budgets_for(db_path)
     bindings = _actual_bindings()
     if clear_empty:
@@ -1247,8 +1284,8 @@ def queue_actual_align(
         queued_requests,
     )
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        raise ValueError("Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued.")
+    if not actual_configured():
+        raise ValueError(ACTUAL_NOT_CONFIGURED)
     busy = rebuild_in_progress_note(db_path)
     if busy:
         raise ValueError(busy)
@@ -1324,8 +1361,8 @@ def queue_actual_empty(db_path: Path, shown: Mapping[str, int]) -> str:
     """
     from .actual_push import build_empty_envelope, queue_push, queued_requests
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        raise ValueError("Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued.")
+    if not actual_configured():
+        raise ValueError(ACTUAL_NOT_CONFIGURED)
     busy = rebuild_in_progress_note(db_path)
     if busy:
         raise ValueError(busy)
@@ -1366,11 +1403,20 @@ def queue_actual_marker(db_path: Path) -> str:
     populated, whereas this request carries none and the marker it writes names
     only the time of the write.
     """
-    from .actual_push import build_marker_envelope, queue_push
+    from .actual_push import build_marker_envelope, queue_push, waiting_of_kind
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
-    queued = queue_push(build_marker_envelope(), _actual_dir(db_path), prefix="marker")
+    if not actual_configured():
+        return NothingQueued(ACTUAL_NOT_CONFIGURED)
+    envelope = build_marker_envelope()
+    waiting = waiting_of_kind(envelope, _actual_dir(db_path), "marker")
+    if waiting.identical is not None:
+        # Every marker request is the same envelope, so a second would only rename the marker
+        # again, a moment later, to the time the first would already have written.
+        return NothingQueued(
+            f"Nothing queued: a sync marker request ({waiting.identical}) is already waiting "
+            "for the applier."
+        )
+    queued = queue_push(envelope, _actual_dir(db_path), prefix="marker")
     return f"queued {queued.name}: the sync marker will be renamed to the time it is written"
 
 
@@ -1382,17 +1428,17 @@ def queue_actual_audit(db_path: Path) -> str:
     (present / missing / orphaned / yours / diverged) and answers with a
     result file the page renders. Nothing is changed anywhere.
     """
-    from .actual_push import build_audit_envelope, queue_push
+    from .actual_push import build_audit_envelope, queue_push, waiting_of_kind
 
-    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
-        return "Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued."
-    busy = rebuild_in_progress_note(db_path)
-    if busy:
-        return busy
+    if not actual_configured():
+        return NothingQueued(ACTUAL_NOT_CONFIGURED)
+    held_up = _held_up(db_path)
+    if held_up is not None:
+        return held_up
     settle_emptied_budgets_for(db_path)
     bindings = _actual_bindings()
     if not bindings:
-        return "no Actual-bound accounts to audit - push first."
+        return NothingQueued("Nothing queued: no Actual-bound accounts to audit - push first.")
     named: set[str] = set()
     map_path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
     if map_path and Path(map_path).is_file():
@@ -1413,6 +1459,12 @@ def queue_actual_audit(db_path: Path) -> str:
                 "SELECT DISTINCT account_id FROM transactions"
             )
         }
+    waiting = waiting_of_kind(envelope, _actual_dir(db_path), "audit")
+    if waiting.identical is not None:
+        return NothingQueued(
+            f"Nothing queued: an identical audit ({waiting.identical}) is already waiting "
+            "for the applier."
+        )
     queued = queue_push(envelope, _actual_dir(db_path), prefix="audit")
     raw_accounts = envelope.get("accounts")
     count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
@@ -4013,6 +4065,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_queue=actual_queue,
         audit_actual=audit_actual_hook,
         marker_actual=marker_actual_hook,
+        actual_configured=actual_configured,
         prune_actual=prune_actual_hook,
         align_actual=align_actual_hook,
         empty_actual=empty_actual_hook,

@@ -680,6 +680,50 @@ def build_marker_envelope() -> dict[str, object]:
     return {"version": ENVELOPE_VERSION, "kind": "marker"}
 
 
+class NothingQueued(str):
+    """The answer of a queueing function that wrote no request.
+
+    A plain sentence for every caller that only prints it, and a type for the page, which says
+    "Nothing queued" in its title and drops the sentence about the applier picking requests up:
+    a page titled "Push queued" over "nothing queued" said both things at once.
+    """
+
+
+ACTUAL_NOT_CONFIGURED = (
+    "Nothing queued: Actual is not configured on this instance, so there is no budget to send to."
+)
+
+
+@dataclass(frozen=True)
+class WaitingOfKind:
+    """The requests of one kind still in the queue, and which of them is the same as a new one."""
+
+    names: tuple[str, ...]
+    identical: str | None
+
+
+def waiting_of_kind(envelope: dict[str, object], actual_dir: Path, prefix: str) -> WaitingOfKind:
+    """Requests of `prefix` already waiting for the applier, and whether one equals `envelope`.
+
+    A request is built from the store as it is when it is pressed, so two of a kind can
+    legitimately differ (rows landed between the presses) and the later is then not redundant.
+    Only a request whose content is exactly the new one's is called identical.
+    """
+    wanted = json.loads(json.dumps(envelope))
+    names: list[str] = []
+    identical: str | None = None
+    for entry in queued_requests(actual_dir):
+        if entry.get("kind") != prefix:
+            continue
+        name = str(entry["name"])
+        names.append(name)
+        with contextlib.suppress(OSError, ValueError):
+            held = json.loads((actual_dir / "requests" / name).read_text(encoding="utf-8"))
+            if held == wanted and identical is None:
+                identical = name
+    return WaitingOfKind(tuple(names), identical)
+
+
 def queue_push(
     envelope: dict[str, object], actual_dir: Path, prefix: str = "push"
 ) -> Path:

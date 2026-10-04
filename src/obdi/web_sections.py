@@ -305,9 +305,17 @@ def render_actual(
     empty_actual: Callable[..., str] | None = None,
     marker_actual: Callable[[], str] | None = None,
     align_actual: Callable[..., str] | None = None,
+    actual_configured: Callable[[], bool] | None = None,
 ) -> bytes:
     from . import web
 
+    configured = True
+    if actual_configured is not None:
+        try:
+            configured = actual_configured()
+        except Exception:
+            # An unreadable setting must not hide the page: the buttons then answer for themselves.
+            configured = True
     section = web._actual_rows(
         actual_status,
         push_actual is not None,
@@ -319,9 +327,18 @@ def render_actual(
         empty_available=empty_actual is not None,
         marker_available=marker_actual is not None,
         align_available=align_actual is not None,
+        configured=configured,
+    )
+    not_configured = (
+        ""
+        if configured
+        else '<p class="warn"><strong>Actual is not configured on this instance.</strong> '
+        "It has not been told which budget to sync with, so nothing can be sent to it, read "
+        "back from it, or marked in it. The presses below are off until it is.</p>"
     )
     body = (
-        web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
+        not_configured
+        + web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
         + _lede(
             "Where the budget in Actual is brought up to date with what is held here. Push to "
             "send new rows; audit to read Actual back and see whether it agrees. "
@@ -478,6 +495,7 @@ class SectionPages:
             empty_actual=config.empty_actual,
             marker_actual=config.marker_actual,
             align_actual=config.align_actual,
+            actual_configured=config.actual_configured,
             actual_heartbeat=timer.wrap("actual_heartbeat", config.actual_heartbeat),
             rebuild_status=timer.wrap("rebuild_status", config.rebuild_status),
             rebuild_busy_note=timer.wrap("rebuild_busy_note", config.rebuild_busy_note),
