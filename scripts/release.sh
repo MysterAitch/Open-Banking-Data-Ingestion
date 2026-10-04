@@ -71,13 +71,35 @@ PY=./.venv/Scripts/python.exe
 [ -x "$PY" ] || PY=python
 run_gate "$PY" -m ruff check .
 run_gate "$PY" -m mypy
-# In parallel: 2,708 tests took 8.5 minutes in one process and 2 minutes 7
-# seconds across six (2026-10-02). OBDI_TEST_WORKERS=0 runs them in one
-# process again, for a failure that only appears in parallel.
-run_gate "$PY" -m pytest -q -n "${OBDI_TEST_WORKERS:-6}"
-# The applier's tests gate the image in CI; run here they fail in seconds
-# and before anything is pushed.
-run_gate bash -c 'cd applier && node --test'
+# The whole suite is the BUILD's gate, not this script's. Here only what
+# changed since the last tag is run, because the suite ran twice in a row and
+# the second run was the one that counted: measured on 2026-10-04, 5,450 tests
+# took 6 to 9 minutes on this machine and 2 minutes 47 on the build's, a
+# release took twelve minutes, and v0.4.295 passed all of them here and failed
+# the build on a test whose answer depended on the machine's time zone. No
+# image is published from a build that fails, so what a failure after the push
+# costs is the version number, and what this gate still buys is a failure in
+# the changed tests within a minute and before anything is pushed.
+# OBDI_RELEASE_SUITE=full runs everything here first, as it used to.
+# OBDI_TEST_WORKERS=0 runs in one process, for a failure that only appears in
+# parallel.
+LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)
+if [ "${OBDI_RELEASE_SUITE:-changed}" = "full" ] || [ -z "$LAST_TAG" ]; then
+  run_gate "$PY" -m pytest -q -n "${OBDI_TEST_WORKERS:-6}"
+  run_gate bash -c 'cd applier && node --test'
+else
+  mapfile -t CHANGED_TESTS < <(git diff --name-only --diff-filter=d "$LAST_TAG" HEAD -- 'tests/test_*.py')
+  if [ "${#CHANGED_TESTS[@]}" -gt 0 ]; then
+    say "${#CHANGED_TESTS[@]} test file(s) changed since $LAST_TAG"
+    run_gate "$PY" -m pytest -q -n "${OBDI_TEST_WORKERS:-6}" "${CHANGED_TESTS[@]}"
+  else
+    say "no test file changed since $LAST_TAG - the build runs the suite"
+  fi
+  # The applier's tests take seconds; they are run when its files changed.
+  if [ -n "$(git diff --name-only "$LAST_TAG" HEAD -- applier)" ]; then
+    run_gate bash -c 'cd applier && node --test'
+  fi
+fi
 
 # --- push main and the tag together ----------------------------------------
 git push origin main

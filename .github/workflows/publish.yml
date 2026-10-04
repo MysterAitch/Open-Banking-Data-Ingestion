@@ -18,9 +18,15 @@ env:
   IMAGE: ${{ github.repository }}
 
 jobs:
-  check:
-    # Publishing an image that fails its own tests would defeat the point, so
-    # this gates the build rather than running alongside it.
+  # Publishing an image that fails its own checks would defeat the point, so
+  # every job below gates the build rather than running alongside it.
+  #
+  # Three jobs and not one, because a release waits on all of them and they do
+  # not wait on each other. As one job they ran in turn: measured on the
+  # v0.4.294 build, the applier's install and tests were 50 seconds spent after
+  # a suite of 2 minutes 47 that they could have run beside. Nothing is checked
+  # less: `publish` needs all three.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -30,12 +36,26 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: mypy
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
       # In parallel: the suite was 4m54s of a 6m22s run in one process, and
       # every release waits on it.
       - run: pytest -q -n auto
-      # The applier's pure logic (envelope parsing, audit partitioning)
-      # is node:test covered; a failure here must gate the image build
-      # the same way pytest does.
+
+  applier:
+    # The applier's pure logic (envelope parsing, audit partitioning)
+    # is node:test covered; a failure here must gate the image build
+    # the same way pytest does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -45,7 +65,7 @@ jobs:
         working-directory: applier
 
   publish:
-    needs: check
+    needs: [lint, test, applier]
     # Nothing to publish from a pull request, and a fork must not be able to
     # push an image into the registry real deployments pull from.
     if: github.event_name == 'push'
