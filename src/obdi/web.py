@@ -43,7 +43,26 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from .accounts import AccountRecord, ArchiveOutcome
+from .actual_audit import (
+    NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
+)
+from .actual_audit import (
+    WORDED_DIFFERENCES as _AUDIT_WORDED_DIFFERENCES,
+)
+from .actual_audit import (
+    account_pairs as _account_pairs,
+)
+from .actual_audit import (
+    audit_differences as _audit_differences,
+)
+from .actual_audit import (
+    audit_has_differences as _audit_has_differences,
+)
+from .actual_audit import (
+    count_of as _count_of,
+)
 from .actual_push import NothingQueued, valid_progress
+from .actual_verdict import APPLIER_STALE_SECONDS
 from .alerts import consent_rung
 from .asked_coverage import Hole, describe_spans
 from .attended_fetch import PRESS_KIND, PressRefused
@@ -2090,7 +2109,7 @@ def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
 
 #: Seconds without a heartbeat after which queued work is called stuck. The
 #: applier renews it every 60 seconds while a request runs.
-_HEARTBEAT_STALE_SECONDS = 120
+_HEARTBEAT_STALE_SECONDS = APPLIER_STALE_SECONDS
 
 
 def _heartbeat_reading(heartbeat: str, now: datetime) -> tuple[str, float | None]:
@@ -2820,10 +2839,6 @@ def _push_result_row(result: dict[str, object]) -> str:
     )
 
 
-def _count_of(value: object) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
 def _push_transfer_note(transfers: object) -> str:
     """What the push's linking step did, as counts and nothing else.
 
@@ -2958,73 +2973,6 @@ def _prune_result_row(result: dict[str, object]) -> str:
         + "<br>".join(lines)
         + "</div>"
     )
-
-
-#: Audit keys that describe the comparison rather than report a
-#: difference: the two totals being compared, the person's own rows
-#: (counted precisely so they are never read as a fault), the row count
-#: on a stray account, and the account's own identity.
-#: `orphaned_will_go` is not a difference of its own: it says what a removal
-#: would do with the orphans already counted under `orphaned`, and is worded
-#: in that sentence. Read as a category, it showed as one the page did not
-#: know, beside the count it was explaining.
-_AUDIT_NON_DIFFERENCE_KEYS = frozenset(
-    {"expected", "present", "human", "rows", "account_id", "name", "orphaned_will_go"}
-)
-
-#: The difference categories with a fixed place in the detail line, in
-#: reading order. Anything else the applier reports is appended after
-#: them - see _audit_differences.
-_AUDIT_NAMED_DIFFERENCES = ("missing", "orphaned", "diverged", "duplicated")
-
-
-#: Differences the row words itself, so the generic "key value" tail
-#: must not repeat them.
-_AUDIT_WORDED_DIFFERENCES = frozenset({"balance", "unlinked_transfers"})
-
-
-def _audit_differences(
-    account: dict[str, object], pairs: tuple[int, int] | None = None
-) -> dict[str, object]:
-    """Every key in an account's audit line that reports a difference.
-
-    Read from the result rather than from a list of the categories known
-    when this page was written: the applier chooses those names on its
-    own side of a file boundary, so a category this page has never heard
-    of must read as a difference to look at, never as a clean audit. A
-    difference is a flag that is true or a count that is not zero;
-    samples are the evidence for a count, not a category of their own.
-
-    The balance is a nested verdict and the transfer pairs are counted
-    beside the account rather than in it, so each is lifted here: a
-    balance that disagrees, or a pair not yet linked, must not leave the
-    verdict clean.
-    """
-    differences: dict[str, object] = {}
-    for key, value in account.items():
-        if key in _AUDIT_NON_DIFFERENCE_KEYS or key.endswith("_sample"):
-            continue
-        if isinstance(value, bool):
-            if value:
-                differences[key] = value
-        elif isinstance(value, int | float) and value:
-            differences[key] = value
-    balance = account.get("balance")
-    if isinstance(balance, dict) and balance.get("agrees") is False:
-        differences["balance"] = "differs"
-    if pairs is not None and pairs[1] > pairs[0]:
-        differences["unlinked_transfers"] = pairs[1] - pairs[0]
-    return differences
-
-
-def _account_pairs(result: dict[str, object], account_id: object) -> tuple[int, int] | None:
-    """(linked, total) transfer pairs touching one account, if the applier said."""
-    transfers = result.get("transfers")
-    by_account = transfers.get("by_account") if isinstance(transfers, dict) else None
-    entry = by_account.get(str(account_id)) if isinstance(by_account, dict) else None
-    if not isinstance(entry, dict):
-        return None
-    return _count_of(entry.get("linked")), _count_of(entry.get("pairs"))
 
 
 def _audit_sample_entry(item: object) -> str:
@@ -3207,18 +3155,6 @@ def _audit_difference_sentences(
             "category this page knows, so read it as a difference to look at"
         )
     return sentences
-
-
-def _audit_has_differences(result: dict[str, object]) -> bool:
-    """Did this audit find anything to look at? A failed audit found nothing and says so
-    elsewhere; it is not a clean one, but it is not a difference either."""
-    if not result.get("ok"):
-        return False
-    raw = result.get("accounts")
-    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
-    return any(
-        _audit_differences(a, _account_pairs(result, a.get("account_id"))) for a in accounts
-    )
 
 
 #: How each step of an align is named for a reader, and where "stopped at" puts it.
