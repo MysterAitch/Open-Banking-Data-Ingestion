@@ -121,27 +121,30 @@ export function expectedBalance(expectedRows) {
  * - unknown: neither, so obdi holds no row with that identity (re-identified by
  *   a matching change, or never obdi's; another importer's ids land here too).
  *
- * Only the Python side's `explained_orphans` says what "explained" is worth to
- * the removal's size guard. An absent `history` list classifies nothing as
- * history, which only ever makes the guard stricter.
+ * What "explained" is worth to the removal's size guard is decided on the Python
+ * side (web_prune.py), which owns it. An absent `history` list classifies
+ * nothing as history, which only ever makes the guard stricter.
  */
-export function explainOrphans(orphans, accountId, accounts, history) {
+export function orphanClassifier(accounts, history) {
   const owners = new Map();
   for (const [owner, rows] of Object.entries(accounts)) {
     for (const row of rows) if (!owners.has(row.imported_id)) owners.set(row.imported_id, owner);
   }
-  const counts = { history: 0, elsewhere: 0, unknown: 0 };
-  for (const { imported_id: id } of orphans) {
+  return (id, accountId) => {
     const owner = owners.get(id);
-    if (owner !== undefined && owner !== accountId) counts.elsewhere += 1;
-    else if (history.has(id)) counts.history += 1;
-    else counts.unknown += 1;
-  }
+    if (owner !== undefined && owner !== accountId) return 'elsewhere';
+    return history.has(id) ? 'history' : 'unknown';
+  };
+}
+
+export function explainOrphans(orphans, accountId, classify) {
+  const counts = { history: 0, elsewhere: 0, unknown: 0 };
+  for (const { imported_id: id } of orphans) counts[classify(id, accountId)] += 1;
   return counts;
 }
 
 export async function auditAccounts(client, accounts, options = {}) {
-  const history = new Set(options.history ?? []);
+  const classify = orphanClassifier(accounts, new Set(options.history ?? []));
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
   const report = [];
@@ -194,7 +197,7 @@ export async function auditAccounts(client, accounts, options = {}) {
       missing_account: false,
       ...summariseAudit(partition),
       // The three classes add up to `orphaned`.
-      orphaned_explained: explainOrphans(partition.orphaned, accountId, accounts, history),
+      orphaned_explained: explainOrphans(partition.orphaned, accountId, classify),
       // Every top-level row the account holds, whoever owns it: the partition
       // above counts a duplicated imported id once, so its numbers cannot add
       // up to this, and an empty of the whole budget is confirmed against it.
@@ -527,12 +530,19 @@ export async function pruneAccounts(client, accounts, options = {}) {
   // nothing else: pruning every other account in the same stroke would
   // delete rows the person never saw a count for.
   const clearing = Object.keys(clearEmpty).length > 0;
+  // `scope` is the align job's: account id -> 'all', or 'explained' to take only
+  // the orphans obdi's own store accounts for (see orphanClassifier). An account
+  // it does not name is not pruned. The decision which accounts may lose
+  // unexplained rows is the Python side's (web_prune.py); this only obeys it.
+  const scope = options.scope ?? null;
+  const classify = scope ? orphanClassifier(accounts, new Set(options.history ?? [])) : null;
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
   const report = [];
   for (const [accountId, expectedRows] of Object.entries(accounts)) {
     if (!nameOf.has(accountId)) continue;
     if (clearing && !hasOwn(clearEmpty, accountId)) continue;
+    if (scope && !hasOwn(scope, accountId)) continue;
     const expectedIds = new Set(expectedRows.map((row) => row.imported_id));
     const { named, shown } = shownCeiling(accountId, clearEmpty, confirmed);
     if (expectedIds.size === 0 && !named) {
@@ -561,7 +571,17 @@ export async function pruneAccounts(client, accounts, options = {}) {
     const rows = await readAccountRows(client, accountId);
     const ctx = createLinkContext(client);
     ctx.prime(accountId, rows);
-    const { prunable, left } = await choosePrunable(ctx, accountId, expectedIds, rows);
+    const chosen = await choosePrunable(ctx, accountId, expectedIds, rows);
+    const { left } = chosen;
+    let { prunable } = chosen;
+    let unexplainedLeft = 0;
+    if (scope && scope[accountId] === 'explained') {
+      const explained = prunable.filter(
+        (target) => classify(target.imported_id, accountId) !== 'unknown'
+      );
+      unexplainedLeft = prunable.length - explained.length;
+      prunable = explained;
+    }
     // `foreign` is the audit's word for rows this removal never considers;
     // the result reports them under `foreign_ids`, below.
     delete left.foreign;
@@ -633,6 +653,10 @@ export async function pruneAccounts(client, accounts, options = {}) {
         ([reason, n]) =>
           `${n} linked orphan${n === 1 ? '' : 's'} left: ${LEFT_REASONS[reason] ?? reason}`
       );
+    }
+    if (unexplainedLeft > 0) {
+      // Left on purpose and said so: the request allowed only explained rows.
+      entry.unexplained_left = unexplainedLeft;
     }
     if (stopped) entry.stopped = stopped;
     report.push(entry);

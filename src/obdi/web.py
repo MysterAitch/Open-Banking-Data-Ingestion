@@ -98,8 +98,11 @@ from .web_marker import marker_lines, marker_result_row
 from .web_overview import overview_html
 from .web_position import PositionPages
 from .web_prune import (
+    RUN_AN_AUDIT_FIRST,
     STAY_REASONS,
     PruneRefused,
+    align_plan,
+    align_section,
     check_prune_post,
     counts_from_audit,
     prune_section,
@@ -598,6 +601,10 @@ class WebConfig:
     #: bare for a prune with no counts to confirm, and with `clear_empty` or
     #: `confirmed` (Actual account id -> rows the person was shown) otherwise.
     prune_actual: Callable[..., str] | None = None
+    #: Queue the one job that brings Actual into line (push, audit, removal, push, audit),
+    #: called with `scope` and `confirmed` as `web_prune.align_plan` judged them from the
+    #: newest audit. Raises ValueError, with a sentence the page shows, when it refuses to queue.
+    align_actual: Callable[..., str] | None = None
     #: Empty the whole Actual budget, called with the Actual account id -> rows
     #: the person was shown. Raises ValueError, with a sentence the page shows,
     #: when it refuses to queue (a rebuild in flight, another job in the queue).
@@ -3130,6 +3137,89 @@ def _audit_difference_sentences(
     return sentences
 
 
+def _audit_has_differences(result: dict[str, object]) -> bool:
+    """Did this audit find anything to look at? A failed audit found nothing and says so
+    elsewhere; it is not a clean one, but it is not a difference either."""
+    if not result.get("ok"):
+        return False
+    raw = result.get("accounts")
+    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+    return any(
+        _audit_differences(a, _account_pairs(result, a.get("account_id"))) for a in accounts
+    )
+
+
+#: How each step of an align is named for a reader, and where "stopped at" puts it.
+_ALIGN_STEP_WORDS = {
+    "push": "push",
+    "audit": "audit",
+    "prune": "remove",
+    "push_again": "push again",
+    "audit_final": "audit again",
+}
+_ALIGN_STOPPED_AT = {
+    "push": "the push step",
+    "audit": "the audit step",
+    "prune": "the removal step",
+    "push_again": "the second push step",
+    "audit_final": "the final audit step",
+}
+
+
+def _align_result_row(result: dict[str, object]) -> str:
+    """One alignment: a verdict, the steps that ran, and where and why it stopped.
+
+    Each step's own result is listed beside this one in the history, as it is for a push,
+    an audit, or a removal on its own (`actual_push.expand_align`), so only the verdict and
+    the order are said here. A result with no `complete` flag is a result this build cannot
+    read, and is never reported as a success.
+    """
+    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    if not result.get("ok"):
+        return (
+            f'<div class="row"><strong>{stamp}Z</strong> '
+            '<span class="pill pill-bad">align failed</span>'
+            f'<br><span class="muted">{html.escape(str(result.get("error", "")))}'
+            "</span></div>"
+        )
+    complete = result.get("complete")
+    if not isinstance(complete, bool):
+        return (
+            f'<div class="row"><strong>{stamp}Z</strong> '
+            '<span class="pill pill-bad">align result not understood</span>'
+            '<br><span class="muted">this build cannot read it - the applier is newer '
+            "than the page.</span></div>"
+        )
+    raw = result.get("steps")
+    steps = [s for s in raw if isinstance(s, dict)] if isinstance(raw, list) else []
+    ran = [
+        _ALIGN_STEP_WORDS.get(str(s.get("step")), html.escape(str(s.get("step"))))
+        for s in steps
+        if "skipped" not in s
+    ]
+    skipped = [
+        f"{_ALIGN_STEP_WORDS.get(str(s.get('step')), html.escape(str(s.get('step'))))}: "
+        f"skipped - {html.escape(str(s.get('skipped')))}"
+        for s in steps
+        if "skipped" in s
+    ]
+    detail = f"steps that ran: {', '.join(ran) or 'none'}"
+    if skipped:
+        detail += "<br>" + "<br>".join(skipped)
+    if complete:
+        badge = '<span class="pill pill-ok">aligned</span>'
+    else:
+        where = _ALIGN_STOPPED_AT.get(
+            str(result.get("stopped_at")), html.escape(str(result.get("stopped_at")))
+        )
+        badge = f'<span class="pill pill-bad">stopped at {where}</span>'
+        detail += f"<br>{html.escape(str(result.get('stopped', '')))}"
+    return (
+        f'<div class="row"><strong>{stamp}Z</strong> {badge}'
+        f'<br><span class="muted">{detail}</span></div>'
+    )
+
+
 def _audit_result_row(result: dict[str, object]) -> str:
     """One audit outcome: a verdict pill, then a line per account, then
     the sampled rows behind each account's counts.
@@ -3150,10 +3240,7 @@ def _audit_result_row(result: dict[str, object]) -> str:
 
     badge = (
         '<span class="pill pill-bad">audit: differences</span>'
-        if any(
-            _audit_differences(a, _account_pairs(result, a.get("account_id")))
-            for a in accounts
-        )
+        if _audit_has_differences(result)
         else '<span class="pill pill-ok">audit clean</span>'
     )
     shared = _shared_labels(
@@ -3243,6 +3330,7 @@ _RESULT_ROWS: dict[str, Callable[[dict[str, object]], str]] = {
     "prune": _prune_result_row,
     "empty": empty_result_row,
     "marker": marker_result_row,
+    "align": _align_result_row,
 }
 
 
@@ -3356,6 +3444,7 @@ def _actual_rows(
     prune_available: bool = False,
     empty_available: bool = False,
     marker_available: bool = False,
+    align_available: bool = False,
 ) -> str:
     """The budget sync, visible and pressable: the state lines first (the
     last push, the newest audit, the sync marker), then what is in flight,
@@ -3461,6 +3550,14 @@ def _actual_rows(
         if prune_available
         else ""
     )
+    align_audit = _newest_of_kind(results, "audit")
+    align_block = (
+        align_section(counts_from_audit(align_audit) or [])
+        if align_available
+        and align_audit is not None
+        and _audit_has_differences(align_audit)
+        else ""
+    )
     empty_block = (
         empty_section(*_empty_plan(results)) if empty_available else ""
     )
@@ -3491,6 +3588,7 @@ def _actual_rows(
         + queued_html
         + button
         + audit_button
+        + align_block
         + marker_button
         + ("<h3>Latest results</h3>" + "".join(rows) if rows else "")
         + (
@@ -6732,6 +6830,9 @@ class ConnectionHandler(
         if route == "/prune-actual":
             self._prune_actual(self._read_form())
             return
+        if route == "/align-actual":
+            self._align_actual(self._read_form())
+            return
         if route == "/empty-actual":
             self._empty_actual(self._read_form())
             return
@@ -7438,6 +7539,91 @@ class ConnectionHandler(
                 "its own form. A removal larger than the count you were shown "
                 "is refused. Results appear on the Actual sync page.</p>"
                 + BACK_TO_ACTUAL,
+            ),
+        )
+
+    def _align_actual(self, form: dict[str, list[str]]) -> None:
+        hook = self.bound_config.align_actual
+        if hook is None:
+            self._respond(
+                404, error_page("Not available", "<p>Not wired.</p>", BACK_TO_ACTUAL)
+            )
+            return
+        if form.get("confirm") != ["yes"]:
+            self._respond(
+                400,
+                error_page(
+                    "Not confirmed",
+                    "<p>Bringing Actual into line can delete rows from it (only ones "
+                    "carrying obdi's imported ids that obdi can explain). Tick the "
+                    "confirmation box.</p>",
+                    BACK_TO_ACTUAL,
+                ),
+            )
+            return
+        # What it may remove is judged here from the newest audit as it is now,
+        # whatever the browser says the page showed: no field of the form is read
+        # beyond the tick.
+        audit = None
+        status_hook = self.bound_config.actual_status
+        if status_hook is not None:
+            with contextlib.suppress(Exception):
+                audit = _newest_of_kind(status_hook(), "audit")
+        if audit is None or not audit.get("ok"):
+            self._respond(
+                400,
+                error_page(
+                    "Run an audit first",
+                    f"<p>{RUN_AN_AUDIT_FIRST} Nothing was queued.</p>",
+                    BACK_TO_ACTUAL,
+                ),
+            )
+            return
+        if not _audit_has_differences(audit):
+            self._respond(
+                400,
+                error_page(
+                    "Nothing to bring into line",
+                    "<p>The newest audit found no differences, so nothing was queued.</p>",
+                    BACK_TO_ACTUAL,
+                ),
+            )
+            return
+        plan = align_plan(counts_from_audit(audit) or [])
+        try:
+            summary = hook(scope=plan.scope, confirmed=plan.confirmed)
+        except ValueError as refusal:
+            # The hook's own refusals are sentences meant for the page; nothing was
+            # queued. A duplicate-id refusal carries a form without the content key.
+            self._respond(
+                409,
+                error_page(
+                    "Not queued",
+                    f"<p>{html.escape(str(getattr(refusal, 'public', refusal)))}"
+                    " Nothing was queued.</p>",
+                    BACK_TO_ACTUAL,
+                ),
+            )
+            return
+        except Exception as exc:
+            self._respond(
+                500,
+                error_page(
+                    "Could not queue", f"<p>{html.escape(str(exc))}</p>", BACK_TO_ACTUAL
+                ),
+            )
+            return
+        print(f"actual align queued via page: {summary}", file=sys.stderr)
+        self._respond(
+            200,
+            render_page(
+                "Align queued",
+                f"<p>{html.escape(summary)}</p>"
+                "<p>The applier runs the whole sequence as one job and stops at the first "
+                "step that fails. Its result appears on the Actual sync page, with each "
+                "step beside it, and says at which step it stopped if it did. A job "
+                "that is interrupted writes no result, which the page shows as a "
+                "failed request and not as a finished one.</p>" + BACK_TO_ACTUAL,
             ),
         )
 

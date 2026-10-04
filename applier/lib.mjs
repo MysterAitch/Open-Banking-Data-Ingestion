@@ -161,6 +161,26 @@ export async function provisionAccounts(client, provision) {
   return { bindings, lines };
 }
 
+/**
+ * The body of a push, in the order a push and an align both run it: create the
+ * accounts named for provisioning, import every account's rows, keep the
+ * opening rows exact, then link the transfer pairs. It writes no marker and
+ * refreshes no snapshot; those belong to the whole job, which decides when it
+ * has finished. An account with no rows is not imported into, so a bound
+ * account that holds nothing costs no call.
+ */
+export async function runPushStage(client, request, options = {}) {
+  const { provision, accounts, openings, transfers } = request;
+  const provisioned = await provisionAccounts(client, provision);
+  const withRows = Object.fromEntries(
+    Object.entries(accounts).filter(([, rows]) => rows.length > 0),
+  );
+  const applied = await applyAccounts(client, withRows);
+  const opening = await applyOpeningBalances(client, openings);
+  const linked = await linkTransfers(client, transfers, { onProgress: options.onLinkProgress });
+  return { provisioned, applied, opening, linked };
+}
+
 //: Skipped and re-linked pairs named in a result; the counts beside them stay complete.
 const SKIPPED_PAIRS_KEPT = 50;
 

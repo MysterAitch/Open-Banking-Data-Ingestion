@@ -247,6 +247,35 @@ test('an empty envelope that was not told what the person saw is refused, never 
   }
 });
 
+test('an align carries a push and an audit and the ceilings and scope of its removal', () => {
+  const parsed = parseEnvelope({
+    version: 3,
+    kind: 'align',
+    provision: [{ canonical_id: 'a', label: 'A' }],
+    accounts: { 'act-1': [{ imported_id: 'k:0' }] },
+    transfers: [],
+    opening_balances: [],
+    history: ['h:0'],
+    confirmed: { 'act-1': 3 },
+    scope: { 'act-1': 'explained', 'act-2': 'all' },
+  });
+
+  assert.equal(parsed.kind, 'align');
+  assert.deepEqual(parsed.history, ['h:0']);
+  assert.deepEqual(parsed.confirmed, { 'act-1': 3 });
+  assert.deepEqual(parsed.scope, { 'act-1': 'explained', 'act-2': 'all' });
+  assert.equal(parsed.provision.length, 1);
+});
+
+test('an align with a missing or malformed scope or ceiling is refused, never read as everywhere', () => {
+  const base = { version: 3, kind: 'align', accounts: {}, confirmed: {}, scope: {} };
+  assert.doesNotThrow(() => parseEnvelope(base));
+  for (const bad of [undefined, null, [], 'all', { 'act-1': true }, { 'act-1': 'some' }]) {
+    assert.throws(() => parseEnvelope({ ...base, scope: bad }), /"scope" must be an object/, JSON.stringify(bad));
+  }
+  assert.throws(() => parseEnvelope({ ...base, confirmed: { 'act-1': 'many' } }), /"confirmed"/);
+});
+
 test('the history list is read on an audit, drops what is not an id, and is absent on a push', () => {
   const audit = parseEnvelope({
     version: 3,

@@ -340,11 +340,12 @@ def empty_pending_note(actual_dir: Path) -> str | None:
             continue
         if not isinstance(decoded, dict):
             continue
-        finished = str(decoded.get("finished_at", ""))
-        if decoded.get("kind") == "audit" and decoded.get("ok") is True:
-            last_audit = max(last_audit, finished)
-        elif decoded.get("kind") == "empty" and (newest is None or finished > newest[0]):
-            newest = (finished, decoded)
+        for each in expand_align(decoded):
+            finished = str(each.get("finished_at", ""))
+            if each.get("kind") == "audit" and each.get("ok") is True:
+                last_audit = max(last_audit, finished)
+            elif each.get("kind") == "empty" and (newest is None or finished > newest[0]):
+                newest = (finished, each)
     if newest is None:
         return None
     finished, result = newest
@@ -624,6 +625,39 @@ def build_prune_envelope(
     return envelope
 
 
+def build_align_envelope(
+    store: Store,
+    bindings: list[ActualAccountBinding],
+    labels: dict[str, str],
+    *,
+    scope: Mapping[str, str],
+    confirmed: Mapping[str, int],
+    named_canonicals: set[str] | None = None,
+    families: Families | None = None,
+) -> dict[str, object]:
+    """One request for the whole alignment: a push's, an audit's, and the bounds of its removal.
+
+    The push half is a push envelope as it always is. Its `accounts` is replaced by the
+    audit's, which also names every bound account that holds nothing, because the audit and
+    the removal must see an account that holds only orphans; the applier imports only into
+    accounts that have rows. `scope` and `confirmed` (Actual account id to what the removal
+    may take there, and the ceiling it re-counts against) come from the newest audit as
+    `web_prune.align_plan` judges it, never from the browser.
+    """
+    push = build_envelope(
+        store, bindings, labels, named_canonicals=named_canonicals, families=families
+    )
+    audit = build_audit_envelope(store, bindings, families=families)
+    return {
+        **push,
+        "kind": "align",
+        "accounts": audit["accounts"],
+        "history": audit["history"],
+        "confirmed": dict(confirmed),
+        "scope": dict(scope),
+    }
+
+
 def build_empty_envelope(shown: Mapping[str, int]) -> dict[str, object]:
     """The request to empty the whole Actual budget.
 
@@ -687,6 +721,37 @@ def queued_requests(actual_dir: Path) -> list[dict[str, object]]:
     return out
 
 
+def expand_align(result: dict[str, object]) -> list[dict[str, object]]:
+    """A result as the list of results it stands for.
+
+    An align is one job and one file (applier/align.mjs says why), but each of its steps
+    is a push, an audit, or a removal, and everything that reads results (the summary lines,
+    the newest audit the removal form is checked against, the marker and snapshot lines, the
+    alert that nothing has been applied) asks for the newest of a kind. So the steps come
+    out beside the align's own summary as ordinary results of their own kinds, each tagged
+    with the request they ran under. A step with no result (skipped) or a malformed one is
+    dropped: the summary still says it was skipped, and nothing is invented for it.
+    Any other result is returned as it is.
+    """
+    if result.get("kind") != "align":
+        return [result]
+    expanded: list[dict[str, object]] = [result]
+    raw = result.get("steps")
+    for step in raw if isinstance(raw, list) else []:
+        if not isinstance(step, dict):
+            continue
+        inner = step.get("result")
+        if not isinstance(inner, dict):
+            continue
+        kind, finished = inner.get("kind"), inner.get("finished_at")
+        if kind not in ("push", "audit", "prune") or not isinstance(finished, str):
+            continue
+        expanded.append(
+            {**inner, "request": result.get("request", ""), "align_step": step.get("step", "")}
+        )
+    return expanded
+
+
 def latest_results(actual_dir: Path, limit: int = 5) -> list[dict[str, object]]:
     """Newest first BY FINISH TIME, never by filename: audit- sorts before
     push- alphabetically, and ranking on names buried the first real audit
@@ -718,7 +783,7 @@ def latest_results_with_totals(
             unreadable.append(path.name)
             continue
         if isinstance(decoded, dict):
-            decoded_all.append(decoded)
+            decoded_all.extend(expand_align(decoded))
         else:
             unreadable.append(path.name)
     decoded_all.sort(key=lambda r: str(r.get("finished_at", "")), reverse=True)

@@ -10,8 +10,10 @@
  * { account, imported_id, date, amount }. Version 3 also names each account's
  * opening-balance row, which the import cannot keep exact on its own:
  * { opening_balances: [{ account, imported_id, date, amount }] }.
- * Beside the push, `kind` may name an audit, a prune, or an empty; an empty
- * carries only `empty_accounts`, the rows the person was shown per account.
+ * Beside the push, `kind` may name an audit, a prune, an align, or an empty; an
+ * empty carries only `empty_accounts`, the rows the person was shown per account.
+ * An align carries a push's request and an audit's, and the `confirmed` ceilings
+ * and `scope` of its removal step (align.mjs).
  *
  * A declared version this file does not know is refused, never read as the
  * legacy shape: that fallthrough would treat "version", "provision" and
@@ -76,6 +78,20 @@ function parseConfirmedCounts(raw, key) {
   return { ...raw };
 }
 
+// Which accounts an align's removal may touch: Actual account id -> 'all' or
+// 'explained'. Required, because a request that said nothing would otherwise be
+// read as permission to prune every account.
+function parseScope(raw) {
+  const isMap = raw !== null && typeof raw === 'object' && !Array.isArray(raw);
+  if (!isMap || !Object.values(raw).every((v) => v === 'all' || v === 'explained')) {
+    throw new Error(
+      'align request: "scope" must be an object of account id to "all" or "explained", ' +
+        `got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { ...raw };
+}
+
 // What a person was shown before an empty: Actual account id -> rows. Unlike a
 // prune's optional ceilings it is REQUIRED and may not be negative: an empty
 // request that told nothing would read as "no ceiling" to a careless reader,
@@ -112,7 +128,8 @@ export function parseEnvelope(payload) {
       payload.kind === 'audit' ||
       payload.kind === 'prune' ||
       payload.kind === 'empty' ||
-      payload.kind === 'marker'
+      payload.kind === 'marker' ||
+      payload.kind === 'align'
         ? payload.kind
         : 'push';
     return {
@@ -132,11 +149,20 @@ export function parseEnvelope(payload) {
       // Only an audit explains orphans, by the imported ids of rows obdi holds
       // as history. Anything that is not a string is dropped: a damaged list
       // can then only explain less, which makes the removal's guard stricter.
-      ...(kind === 'audit'
+      ...(kind === 'audit' || kind === 'align'
         ? {
             history: Array.isArray(payload.history)
               ? payload.history.filter((id) => typeof id === 'string' && id)
               : [],
+          }
+        : {}),
+      // An align's removal step is bounded by the same ceilings a prune is, and
+      // by a scope: which accounts it may touch and whether it may take rows obdi
+      // cannot explain. A malformed scope is refused, never read as "everywhere".
+      ...(kind === 'align'
+        ? {
+            confirmed: parseConfirmedCounts(payload.confirmed, 'confirmed'),
+            scope: parseScope(payload.scope),
           }
         : {}),
       provision: provision.filter(

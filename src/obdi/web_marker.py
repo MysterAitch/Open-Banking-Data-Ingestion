@@ -15,8 +15,10 @@ import html
 from datetime import UTC, datetime
 
 #: Result kinds that write the marker. An audit only reads it, and a prune
-#: neither reads nor writes it, so neither is a write for this purpose.
-WRITING_KINDS = ("push", "marker")
+#: neither reads nor writes it, so neither is a write for this purpose. An align
+#: carries a marker only when it ran every step (applier/watcher.mjs), and a
+#: result that names none is not counted (`_written_name`).
+WRITING_KINDS = ("push", "marker", "align")
 
 PURPOSE = (
     "A device that has caught up shows an account with exactly that name in "

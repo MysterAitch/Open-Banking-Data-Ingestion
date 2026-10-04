@@ -292,6 +292,58 @@ def total_reason(counts: list[OrphanCount]) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class AlignPlan:
+    """What the one-press alignment may remove, per account, judged from an audit.
+
+    `scope` maps Actual account id to "all" (every orphan in it) or "explained" (only the
+    ones obdi's store accounts for), and `confirmed` is the ceiling the applier re-counts
+    against before deleting. `kept_back` names, per account, the orphans obdi cannot explain
+    that this press leaves for the removal form and its extra tick; `uncovered` names accounts
+    left out altogether because the audit gave no breakdown to judge them by.
+    """
+
+    scope: dict[str, str] = field(default_factory=dict)
+    confirmed: dict[str, int] = field(default_factory=dict)
+    kept_back: dict[str, int] = field(default_factory=dict)
+    uncovered: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def removable(self) -> int:
+        return sum(self.confirmed.values())
+
+
+def align_plan(counts: list[OrphanCount]) -> AlignPlan:
+    """The scope and ceilings of one alignment, by the removal form's own thresholds.
+
+    An account the thresholds do not trip may lose every orphan. One they do trip may lose
+    only the orphans obdi explains, and the rest wait for the removal form, whose extra tick
+    is the only thing that lifts the guard. The same functions decide both, so the press can
+    never take what the form would have refused. An account that expects nothing is never
+    in scope: clearing one is its own form, against its own count.
+    """
+    total_tripped = total_reason(counts) is not None
+    scope: dict[str, str] = {}
+    confirmed: dict[str, int] = {}
+    kept_back: dict[str, int] = {}
+    uncovered: dict[str, int] = {}
+    for count in (c for c in counts if c.expected > 0):
+        if not count.orphaned:
+            scope[count.account_id] = "all"
+            confirmed[count.account_id] = 0
+        elif not (total_tripped or high_reasons(count)):
+            scope[count.account_id] = "all"
+            confirmed[count.account_id] = count.orphaned
+        elif count.explained is None:
+            uncovered[count.name] = count.orphaned
+        else:
+            scope[count.account_id] = "explained"
+            confirmed[count.account_id] = count.orphaned - count.unexplained
+            if count.unexplained:
+                kept_back[count.name] = count.unexplained
+    return AlignPlan(scope, confirmed, kept_back, uncovered)
+
+
 def general_reasons(counts: list[OrphanCount]) -> list[str]:
     reasons: list[str] = []
     for count in ordinary_orphans(counts):
@@ -416,6 +468,58 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
         "I understand rows carrying obdi's imported ids that are no longer "
         "expected will be deleted from Actual</label>"
         + _BUTTON.format(label="Remove orphaned imports")
+        + "</form>"
+    )
+
+
+_NEUTRAL_BUTTON = (
+    '<p><button class="button" type="submit" '
+    'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
+    'background:#8882;color:inherit">{label}</button></p>'
+)
+
+
+def align_section(counts: list[OrphanCount]) -> str:
+    """The one press that brings Actual into line, with what it will and will not remove.
+
+    Counts and account names only. What it may remove is `align_plan`'s, and the post is
+    judged again against the newest audit, so nothing here is read back from the browser.
+    """
+    plan = align_plan(counts)
+    notes = ""
+    if plan.kept_back:
+        left = "; ".join(
+            f"{_rows(number)} in {html.escape(name)} that obdi cannot explain "
+            f"{'is' if number == 1 else 'are'} left alone"
+            for name, number in sorted(plan.kept_back.items())
+        )
+        notes += (
+            f'<p class="muted">{left}. Remove them with the form below, which asks for '
+            "its extra tick, once you have checked them against Actual.</p>"
+        )
+    if plan.uncovered:
+        named = ", ".join(html.escape(name) for name in sorted(plan.uncovered))
+        notes += (
+            f'<p class="muted">{named}: the audit gave no breakdown of why its orphaned rows '
+            "are no longer expected, and there are too many to remove unchecked, so this "
+            "press leaves that account out. Run the audit again with the current applier.</p>"
+        )
+    return (
+        '<form method="post" action="/align-actual" '
+        'style="margin:.6rem 0;padding:.6rem;border:1px solid #8884;border-radius:.4rem">'
+        "<p><strong>Bring Actual into line</strong></p>"
+        '<p class="muted">One press, run in the applier in this order, that stops at the '
+        "first step that fails and says which: push (which re-links transfers whose partner "
+        "changed), audit, remove up to "
+        f"{_rows(plan.removable)} from among the orphans the audit counted (the ones obdi can "
+        "explain, and any it cannot while the count stays under the large-removal check), "
+        "push again if the removal unlinked anything, audit again.</p>"
+        + notes
+        + '<label style="display:block;margin:.35rem 0">'
+        '<input type="checkbox" name="confirm" value="yes" required> '
+        "I understand rows carrying obdi's imported ids that are no longer expected, and "
+        "that obdi can explain, will be deleted from Actual</label>"
+        + _NEUTRAL_BUTTON.format(label="Bring Actual into line")
         + "</form>"
     )
 

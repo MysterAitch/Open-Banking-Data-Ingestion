@@ -31,13 +31,8 @@ import { auditAccounts, pruneAccounts } from './audit.mjs';
 import { leaseHeld, releaseLease, takeLease } from './lease.mjs';
 import { byQueuedStamp, mergeBindings, parseEnvelope } from './envelope.mjs';
 import { emptyBudget } from './empty.mjs';
-import {
-  applyAccounts,
-  applyOpeningBalances,
-  linkTransfers,
-  provisionAccounts,
-  withBudget as openBudget,
-} from './lib.mjs';
+import { alignBudget } from './align.mjs';
+import { runPushStage, withBudget as openBudget } from './lib.mjs';
 import { readMarker, writeMarker } from './marker.mjs';
 import { auditTransfers } from './transfers.mjs';
 
@@ -80,8 +75,9 @@ export function failedResult(name, error) {
 // Which kinds write the sync marker is decided HERE and nowhere else: a push
 // writes it as its last step (so a push that failed leaves the old marker),
 // the marker kind writes it alone, an audit only reads it (an audit changes
-// nothing, and the page says so), a prune neither reads nor writes it, and an
-// empty deletes it with every other account (the next push writes it again).
+// nothing, and the page says so), a prune neither reads nor writes it, an
+// empty deletes it with every other account (the next push writes it again),
+// and an align writes it only when every one of its steps ran.
 //
 // Which kinds then refresh the server's snapshot (lib.mjs, refreshSnapshot,
 // says why) is decided here too, always as a job's last step: a push and the
@@ -111,6 +107,7 @@ export async function processRequest(
     confirmed,
     empty_accounts,
     history,
+    scope,
   } = parseEnvelope(payload);
 
   if (kind === 'empty') {
@@ -192,13 +189,46 @@ export async function processRequest(
     };
   }
 
-  const outcome = await run(async (client, session) => {
-    const provisioned = await provisionAccounts(client, provision);
-    const applied = await applyAccounts(client, accounts);
-    const opening = await applyOpeningBalances(client, openings);
-    const linked = await linkTransfers(client, transfers, {
-      onProgress: ({ done, total }) => onProgress({ phase: 'linking', done, total }),
+  if (kind === 'align') {
+    const { outcome, marker, snapshot } = await run(async (client, session) => {
+      const aligned = await alignBudget(
+        client,
+        { provision, accounts, transfers, openings, history, confirmed, scope },
+        { now, onProgress },
+      );
+      // Only a job that ran every step writes the marker and refreshes the
+      // snapshot: a stopped one is partway, and a marker would vouch for it.
+      if (!aligned.complete) return { outcome: aligned };
+      return {
+        outcome: aligned,
+        marker: await writeMarker(client, now()),
+        snapshot: await refresh(session),
+      };
     });
+    if (outcome.bindings.length) {
+      const existing = await readJsonOr(BINDINGS, []);
+      await writeFile(BINDINGS, JSON.stringify(mergeBindings(existing, outcome.bindings), null, 2));
+    }
+    return {
+      ok: true,
+      kind: 'align',
+      request: name,
+      finished_at: now().toISOString(),
+      complete: outcome.complete,
+      stopped_at: outcome.stopped_at,
+      stopped: outcome.stopped,
+      steps: outcome.steps,
+      ...(marker ? { marker } : {}),
+      ...(snapshot ? { snapshot } : {}),
+    };
+  }
+
+  const outcome = await run(async (client, session) => {
+    const { provisioned, applied, opening, linked } = await runPushStage(
+      client,
+      { provision, accounts, openings, transfers },
+      { onLinkProgress: ({ done, total }) => onProgress({ phase: 'linking', done, total }) },
+    );
     // Last, and inside the same session, so it reaches the server with the
     // rows it vouches for and is never written by a push that threw.
     const marker = await writeMarker(client, now());
@@ -313,6 +343,10 @@ async function tick() {
     } else if (result.ok) {
       if (result.kind === 'audit') {
         line = `${name}: audited ${result.accounts.length} account(s)`;
+      } else if (result.kind === 'align') {
+        line = result.complete
+          ? `${name}: aligned (${result.steps.length} step(s))`
+          : `${name}: align STOPPED at ${result.stopped_at} - ${result.stopped}`;
       } else if (result.kind === 'marker') {
         line = `${name}: marker ${result.marker.action} as "${result.marker.name}"`;
       } else {

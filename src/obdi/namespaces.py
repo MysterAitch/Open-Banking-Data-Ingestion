@@ -127,7 +127,7 @@ LEASES = frozenset(
 )
 
 #: Envelope kinds the applier dispatches on.
-QUEUE_KINDS = frozenset({"push", "audit", "prune", "empty", "marker"})
+QUEUE_KINDS = frozenset({"push", "audit", "prune", "empty", "marker", "align"})
 
 #: The annotation ladder: who said so, and who may overwrite whom. The
 #: prefix before any ':' decides, so "rule:sweep" and "rule:v2" rank

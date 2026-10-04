@@ -1168,6 +1168,95 @@ def queue_actual_prune(
     )
 
 
+def queue_actual_align(
+    db_path: Path, scope: Mapping[str, str], confirmed: Mapping[str, int]
+) -> str:
+    """Queue the one job that brings Actual into line: push, audit, removal, push, audit.
+
+    `scope` and `confirmed` are what the removal step may take and the ceiling it re-counts
+    against, as `web_prune.align_plan` judged them from the newest audit. Raises ValueError,
+    in a sentence for the page, when it will not queue. Unlike a push it raises rather than
+    returning a sentence, because the page must not report a refusal as a queued job.
+
+    Refused while any other request is queued or being worked on, as an empty is: the scope
+    was judged from an audit taken before them, and a push or removal ahead of this job would
+    change what that audit described.
+    """
+    from .actual_push import (
+        build_align_envelope,
+        drop_conflicting_bindings,
+        empty_pending_note,
+        merge_pending_bindings,
+        queue_push,
+        queued_requests,
+    )
+
+    if not os.getenv("ACTUAL_SYNC_ID", "").strip():
+        raise ValueError("Actual is not configured (ACTUAL_SYNC_ID empty) - nothing queued.")
+    busy = rebuild_in_progress_note(db_path)
+    if busy:
+        raise ValueError(busy)
+    map_path_env = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not map_path_env:
+        raise ValueError("Set OBDI_ACCOUNT_MAP to the account map path - nothing queued.")
+    actual_dir = _actual_dir(db_path)
+    settle_emptied_budgets_for(db_path)
+    pending = empty_pending_note(actual_dir)
+    if pending:
+        raise ValueError(pending)
+    waiting = queued_requests(actual_dir)
+    if waiting:
+        raise ValueError(
+            f"{len(waiting)} applier request(s) are queued or being worked on "
+            f"({', '.join(sorted(str(w.get('kind', '')) for w in waiting))}). "
+            "Nothing was queued: wait for them to finish, then audit again and press again."
+        )
+    merge_pending_bindings(Path(map_path_env), actual_dir)
+    drop_conflicting_bindings(Path(map_path_env))
+    bindings = _actual_bindings()
+    if not bindings:
+        raise ValueError("no Actual-bound accounts - push first. Nothing was queued.")
+    from .labels import collect_display_labels
+
+    connection_ids: list[str] = []
+    store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
+    if store_path_env:
+        with contextlib.suppress(OSError, ValueError):
+            connection_ids = sorted(ConnectionStore(store_path_env).load())
+    with Store(db_path) as store:
+        account_map = _account_map(store)
+        envelope = build_align_envelope(
+            store,
+            bindings,
+            collect_display_labels(store, account_map, connection_ids),
+            scope=scope,
+            confirmed=confirmed,
+            named_canonicals=_named_canonicals(Path(map_path_env)),
+            families=families_of(store, account_map),
+        )
+    queued = queue_push(envelope, actual_dir, prefix="align")
+    raw_accounts = envelope.get("accounts")
+    count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
+    return (
+        f"queued {queued.name}: {count} bound account(s); the removal step may touch "
+        f"{len(scope)} of them, and only rows carrying obdi's own imported ids"
+    )
+
+
+def _named_canonicals(map_path: Path) -> set[str]:
+    """The canonical accounts a person has named in the account map, for provisioning."""
+    named: set[str] = set()
+    with contextlib.suppress(OSError, ValueError):
+        raw_map = json.loads(map_path.read_text(encoding="utf-8"))
+        raw_bind = raw_map.get("bindings", []) if isinstance(raw_map, dict) else []
+        named = {
+            str(b.get("canonical_id"))
+            for b in raw_bind
+            if isinstance(b, dict) and b.get("canonical_id")
+        }
+    return named
+
+
 def queue_actual_empty(db_path: Path, shown: Mapping[str, int]) -> str:
     """Queue the emptying of the whole Actual budget.
 
@@ -2544,6 +2633,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     ) -> str:
         return queue_actual_prune(db_path, clear_empty, confirmed)
 
+    def align_actual_hook(scope: Mapping[str, str], confirmed: Mapping[str, int]) -> str:
+        return queue_actual_align(db_path, scope, confirmed)
+
     def empty_actual_hook(shown: Mapping[str, int]) -> str:
         return queue_actual_empty(db_path, shown)
 
@@ -3680,6 +3772,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         audit_actual=audit_actual_hook,
         marker_actual=marker_actual_hook,
         prune_actual=prune_actual_hook,
+        align_actual=align_actual_hook,
         empty_actual=empty_actual_hook,
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
