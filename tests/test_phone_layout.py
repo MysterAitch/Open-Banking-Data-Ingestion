@@ -754,6 +754,52 @@ def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(
     assert all(height >= 40 for _, height, _ in boxes), boxes
 
 
+DESKTOP_WIDTH = 1280
+HUB_ROUTES = ["/bring-in", "/checks", "/diagnostics"]
+
+
+@pytest.mark.parametrize("route", HUB_ROUTES)
+def test_HubPage_AtDesktopWidth_UsesTheWidthAsAGridOfRowsNotAPhoneColumn(
+    browser: object, corpus_base: str, route: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": DESKTOP_WIDTH, "height": 900}
+    )
+    try:
+        page.goto(f"{corpus_base}{route}", wait_until="load")
+        facts = page.evaluate(
+            """() => {
+                const main = document.querySelector('main').getBoundingClientRect();
+                const rows = [...document.querySelectorAll('.hub-row')]
+                  .map(r => Math.round(r.getBoundingClientRect().left));
+                return [Math.round(main.width), rows, document.documentElement.scrollWidth];
+            }"""
+        )
+    finally:
+        page.close()
+    main_width, lefts, scroll = facts
+    assert main_width > 640, f"the page is still a phone column: {main_width}px"
+    assert scroll <= DESKTOP_WIDTH, facts
+    assert len(set(lefts)) >= 2, f"rows sit in one column: {lefts}"
+
+
+def test_Navigation_AtDesktopWidth_IsOneRowOfSevenLinks(
+    browser: object, corpus_base: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": DESKTOP_WIDTH, "height": 900}
+    )
+    try:
+        page.goto(f"{corpus_base}/checks", wait_until="load")
+        tops = page.evaluate(
+            "() => [...document.querySelectorAll('.sitenav a')]"
+            ".map(a => Math.round(a.getBoundingClientRect().top))"
+        )
+    finally:
+        page.close()
+    assert len(tops) == 7 and len(set(tops)) == 1, tops
+
+
 def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(
     browser: object, corpus_base: str
 ) -> None:
