@@ -35,9 +35,20 @@ number. `tests/test_stylesheet.py` runs every such pattern over this text alone.
 THE RULES THAT TESTS READ BY SHAPE keep their layout: `.sitenav a`, `.sitenav ul`,
 `a.tap`, `a.button, button.button`, `label.tick`, and the `min-width: 60rem` media
 block. Reformatting them breaks the tests that look for them, deliberately.
+
+THE PAGES' OWN RULES LIVE BESIDE THIS FILE. A page whose layout needs rules that no
+other page uses keeps them in a module of its own (`stylesheet_home`,
+`stylesheet_account`, `stylesheet_actual`), each a string of CSS that uses these tokens
+and declares no colour, face, or size of its own. They are joined to the shared rules
+below into the one `STYLESHEET` every page carries, so the guards on the stylesheet
+(contrast, no colour literal, no money-like text) cover them too.
 """
 
-STYLESHEET = """
+from .stylesheet_account import ACCOUNT_STYLES
+from .stylesheet_actual import ACTUAL_STYLES
+from .stylesheet_home import HOME_STYLES
+
+SHARED_STYLES = """
  :root {
   color-scheme: light dark;
   --paper: #f1f4f2; --card: #fafcfb; --ink: #16202a; --ink-2: #4a5762;
@@ -294,3 +305,6 @@ STYLESHEET = """
   details summary::before { transition: transform .15s; }
  }
 """
+
+#: The one stylesheet a page carries: the shared rules, then each page's own.
+STYLESHEET = SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES
