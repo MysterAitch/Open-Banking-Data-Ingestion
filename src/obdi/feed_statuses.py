@@ -16,6 +16,13 @@ item give the same answer whichever order they are read in.
 THE TIME is `transactionTime`, else `settlementTime`: the one the provider dates a
 row by (`providers.starling.to_transaction`), read here as an instant in UTC.
 
+NO ROW. An item whose newest status the provider's map drops (`STATUS_MAP`) or
+does not list makes no row at all, so only the feed can say it exists.
+An item that a stored row was made from is a row and is not counted as one that
+makes none, even where its newest status is a status that makes none: that is a
+row made from an earlier fetch, and `FeedStatuses.of` is what says so.
+An item that states no time is counted but cannot be placed in a window.
+
 The statuses are the bank's own words (`providers.starling.STATUS_MAP` says
 which it maps), and a status name is not private: only names and counts are
 ever said of them. A size and a recipient are values, compared in code and never
@@ -26,11 +33,11 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .family_anchors import feed_digests, feed_payload
+from .family_anchors import feed_payload
 from .identity import normalise_description
 from .providers.starling import STATUS_MAP
 from .round_up_accounts import feed_uids_by_entity
@@ -55,6 +62,18 @@ class FeedItem:
     minor: int | None
     #: The counterparty as the matcher compares text (`identity.normalise_description`).
     recipient: str
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def makes_no_row(status: str) -> bool:
+    """Whether an item with this status yields no row, by the provider's own map.
+
+    The provider's map is the only place that decides it; a status it does not list
+    is dropped like one it maps to nothing (`providers.starling.payment_unsettled`).
+    """
+    return STATUS_MAP.get(status.strip().upper()) is None
 
 
 def _instant(text: object) -> datetime | None:
@@ -111,6 +130,29 @@ def _landing_order(store: Store) -> dict[str, tuple[str, int]]:
     }
 
 
+def _account_feeds(store: Store, account: str) -> list[str]:
+    """Every landed feed artefact of the feeds that sighted a row of `account`.
+
+    Not only the artefacts that sighted a row: a later fetch that reports a payment
+    DECLINED sights no row of it, since the provider drops it, and is exactly the
+    fetch whose newest status must be read. A feed is named by the account reference
+    its artefacts land under.
+    """
+    return [
+        str(row["digest"])
+        for row in store.connection.execute(
+            "SELECT DISTINCT later.digest AS digest FROM raw_artefacts later "
+            "JOIN raw_artefacts seen ON seen.account_ref = later.account_ref "
+            "WHERE later.source = 'starling-feed' AND seen.digest IN ("
+            "  SELECT s.artefact_digest FROM transaction_sources s "
+            "  JOIN transactions t ON t.entity_id = s.entity_id "
+            "  WHERE t.account_id = ? AND s.source = 'starling' "
+            "  AND s.artefact_digest IS NOT NULL)",
+            (account,),
+        )
+    ]
+
+
 class FeedStatuses:
     """The newest landed feed reading of every item of some accounts, each artefact read once."""
 
@@ -118,7 +160,7 @@ class FeedStatuses:
         digests: set[str] = set()
         self._uids: dict[str, frozenset[str]] = {}
         for account in accounts:
-            digests.update(feed_digests(store, account))
+            digests.update(_account_feeds(store, account))
             self._uids.update(feed_uids_by_entity(store, account))
         order = _landing_order(store)
         #: Feed uid -> (the landing rank of the artefact that last named it, what it said).
@@ -128,6 +170,7 @@ class FeedStatuses:
                 _ITEMS_BY_DIGEST[digest] = _items_in(feed_payload(store, digest))
             for uid, item in _ITEMS_BY_DIGEST[digest].items():
                 self._newest[uid] = (rank, item)
+        self._row_uids = frozenset(uid for uids in self._uids.values() for uid in uids)
 
     def item_of(self, entity: str) -> FeedItem | None:
         """What the newest landed feed says of a stored row's own item, or None where none is.
@@ -152,17 +195,32 @@ class FeedStatuses:
         item = self.item_of(entity)
         return item.at if item is not None else None
 
-    def unmapped(self) -> Mapping[str, int]:
-        """Status name -> how many feed items carry it, for the names the provider's map lacks.
+    def no_row_items(self) -> list[FeedItem]:
+        """The items whose newest status makes no row and that no stored row was made from.
 
-        Such an item yields no row at all, so only the feed can say it exists.
+        Earliest first, an item that states no time last, and the uid breaking a tie,
+        so the order never depends on the order the artefacts were read in.
         """
+        found = [
+            item
+            for uid, (_, item) in self._newest.items()
+            if makes_no_row(item.status) and uid not in self._row_uids
+        ]
+        return sorted(found, key=lambda i: (i.at is None, i.at or _EPOCH, i.uid))
+
+    def unmapped(self) -> Mapping[str, int]:
+        """Status name -> how many no-row items carry it, for the names the provider's map lacks."""
+        return self._counted(lambda status: status not in STATUS_MAP)
+
+    def dropped(self) -> Mapping[str, int]:
+        """Status name -> how many no-row items carry it, for the names the map drops on purpose."""
+        return self._counted(lambda status: status in STATUS_MAP)
+
+    def _counted(self, wanted: Callable[[str], bool]) -> Mapping[str, int]:
         names = Counter(
-            item.status or NO_STATUS
-            for _, item in self._newest.values()
-            if item.status not in STATUS_MAP
+            item.status or NO_STATUS for item in self.no_row_items() if wanted(item.status)
         )
         return dict(sorted(names.items()))
 
 
-__all__ = ["NO_STATUS", "FeedItem", "FeedStatuses"]
+__all__ = ["NO_STATUS", "FeedItem", "FeedStatuses", "makes_no_row"]

@@ -247,6 +247,7 @@ class TestAnItemWithAStatusTheMapDoesNotList:
 
         assert "No feed item carries a status the map does not list." in page
         assert "so no row:" not in page
+        assert "Feed items the map drops on purpose, which make no row: DECLINED (1)." in page
 
     def test_Page_WhenSeveralNamesAreUnmapped_ListsEachWithItsCount(self, make):
         items = [

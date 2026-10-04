@@ -44,6 +44,13 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
   feed status left out  leave the rows of one such status out of the count and
                         either nothing is left to explain, or the unlisted rows
                         still counted sum to what is left
+  no-row status rows    the sum, or minus the sum, of the rows the store counts
+                        whose own feed item is, in the newest landed feed, a status
+                        that makes no row (`feed_statuses.makes_no_row`): a row made
+                        from an earlier fetch whose item the bank later declined, which
+                        the provider drops on the later fetch and nothing voids. The
+                        statuses are taken together, so it holds where no single
+                        status's own test does
   straddling          the rows whose date from the source and stored date fall
                         on different sides of this balance, which would mean the
                         source's dating is not being applied to them
@@ -66,6 +73,14 @@ tests above and changes no verdict or count.
 WHERE A CHANGE EQUALS A ROW OR A SUM OF ROWS, every source is asked whether it lists
 those rows in the window (`ChangeExplanation.searched`, by `_SourceSearch`): counts and
 source names, so the reader sees which sources agree with which.
+
+THE FEED ITEMS THAT MADE NO ROW (`ChangeExplanation.no_rows`, by `_NoRowSearch`) are
+listed beside every change whose window holds one: a declined attempt beside a counted
+payment is the context that explains a difference, and no page showed it. Each is
+compared in code, and only the outcome is kept, with the row it sits nearest among
+those that explain the change: whether it has the same size, whether it has the same
+recipient, and how long before or after that row it sits. It is display only: such an
+item is never money and no row is made for it.
 
 THE IDENTITY. A source's step is the sum of the rows it lists, so the change is
 always (listed, not counted) - (counted, not listed) + (figure differences); a
@@ -98,7 +113,7 @@ from .export_parting import (
     first_parting,
 )
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
-from .feed_statuses import FeedStatuses
+from .feed_statuses import FeedItem, FeedStatuses, makes_no_row
 from .identity import normalise_description
 from .masking import Structural
 from .models import Transaction, TransactionStatus
@@ -137,6 +152,7 @@ COMBINED = "combined"
 ONE_ROW = "one-row"
 FEED_STATUS_ROWS = "feed-status-rows"
 FEED_STATUS_LEFT_OUT = "feed-status-left-out"
+NO_ROW_STATUS_ROWS = "no-row-status-rows"
 STRADDLING = "straddling"
 TIMING_PAIR = "timing-pair"
 UNHELD_SPACE = "unheld-space"
@@ -270,6 +286,42 @@ class RowSet:
 
 
 @dataclass(frozen=True)
+class NoRowItem:
+    """A feed item that made no row, and how it sits beside the row nearest it.
+
+    Every field is structural (`masking`): the size and the recipient were compared in
+    code and only whether they agree is kept, as in `Lookalike`.
+    """
+
+    status: Structural[str]
+    #: "in", "out", or "" where the item states neither.
+    direction: Structural[str]
+    #: The instant the item states, in UTC.
+    at: Structural[datetime]
+    #: Whether any row that explains the change was there to compare with.
+    compared: Structural[bool] = False
+    #: That row's direction, and the instant the feed states for it (None where it states none).
+    row_direction: Structural[str] = ""
+    row_at: Structural[datetime | None] = None
+    #: Whether the item and that row have the same size.
+    same_size: Structural[bool] = False
+    #: Whether they name the same recipient: "agrees", "differs", or "unknown" (`_agreement`).
+    recipient: Structural[str] = ""
+    #: Seconds from that row to the item: negative where the item came first; None where
+    #: either states no time.
+    seconds_after: Structural[int | None] = None
+
+
+@dataclass(frozen=True)
+class NoRowItems:
+    """The feed items in a window that made no row: the first few named, the rest counted."""
+
+    count: Structural[int] = 0
+    named: Structural[tuple[NoRowItem, ...]] = ()
+    more: Structural[int] = 0
+
+
+@dataclass(frozen=True)
 class ChangeExplanation:
     """Which tests hold for one change, in the order they are made."""
 
@@ -288,6 +340,13 @@ class ChangeExplanation:
     one_row_negated: Structural[bool] = False
     #: Each feed status other than SETTLED among the counted rows in the window.
     feed_status_rows: Structural[tuple[StatusRows, ...]] = ()
+    #: Whether the change equals the sum of the counted rows in the window whose own feed
+    #: item is a status that makes no row ("equals"), minus it ("equals minus"), or neither
+    #: (""); the rows are named only where it does.
+    no_row_status_rows: Structural[RowSet] = field(default_factory=RowSet)
+    no_row_status_equals: Structural[str] = ""
+    #: The feed items in the window that made no row at all.
+    no_rows: Structural[NoRowItems] = field(default_factory=NoRowItems)
     straddling: Structural[RowSet] = field(default_factory=RowSet)
     #: Rows the export lists in the window, and sightings of it the store holds there.
     export_rows: Structural[int | None] = None
@@ -388,8 +447,10 @@ class FeedStatusFacts:
     """
 
     by_status: Structural[tuple[StatusCount, ...]] = ()
-    #: Status name -> feed items carrying a status the provider's map does not list.
+    #: Status name -> feed items that made no row, for a status the provider's map does not
+    #: list, and for one it drops on purpose; the two kinds are kept apart.
     unmapped: Structural[tuple[tuple[str, int], ...]] = ()
+    dropped: Structural[tuple[tuple[str, int], ...]] = ()
 
 
 @dataclass(frozen=True)
@@ -491,6 +552,8 @@ class _View:
     #: ones among them.
     by_feed_status: Mapping[str, _Dated] = field(default_factory=dict)
     unlisted_by_feed_status: Mapping[str, _Dated] = field(default_factory=dict)
+    #: Counted rows whose own feed item is a status that makes no row, whatever the status.
+    by_no_row_status: _Dated = field(default_factory=lambda: _Dated(()))
 
 
 @dataclass(frozen=True)
@@ -1260,6 +1323,7 @@ def _view(
     extra: list[_Entry] = []
     by_feed_status: dict[str, list[_Entry]] = defaultdict(list)
     unlisted_by_feed_status: dict[str, list[_Entry]] = defaultdict(list)
+    by_no_row_status: list[_Entry] = []
     for account, rows in evidence.members.items():
         for row in rows:
             if account not in family:
@@ -1273,6 +1337,12 @@ def _view(
                     row.entity_id in listed if listed is not None else row.entity_id in sighted
                 )
                 feed_status = evidence.facts.feed.of(row.entity_id)
+                if feed_status and makes_no_row(feed_status):
+                    by_no_row_status.append(
+                        _Entry(
+                            day, row.amount_minor, row.value_date, evidence.note(row), row.entity_id
+                        )
+                    )
                 if feed_status and feed_status != ORDINARY_FEED_STATUS:
                     by_feed_status[feed_status].append(
                         _Entry(
@@ -1332,6 +1402,7 @@ def _view(
         frozenset(listed or ()),
         {status: _Dated(entries) for status, entries in by_feed_status.items()},
         {status: _Dated(entries) for status, entries in unlisted_by_feed_status.items()},
+        _Dated(by_no_row_status),
     )
 
 
@@ -1349,6 +1420,7 @@ def _explain_one(
     index: int = -1,
     undone: tuple[date | None, date] | None = None,
     search: Callable[[Sequence[str], date | None, date], tuple[SourceSearch, ...]] | None = None,
+    nearby: Callable[[Sequence[str], date | None, date], NoRowItems] | None = None,
 ) -> ChangeExplanation:
     """Which tests hold for one change.
 
@@ -1357,6 +1429,10 @@ def _explain_one(
 
     `search` asks every source what it says of the rows the change is explained by,
     where it is explained by a single row or by a sum of them.
+
+    `nearby` lists the feed items in the window that made no row, each compared with
+    those same rows; it is asked for every change, since an item is context whether or
+    not a test holds.
     """
     listed = view.held_back.within(after, day)
     unlisted = view.unlisted.within(after, day)
@@ -1370,6 +1446,8 @@ def _explain_one(
     negated = False
     straddling: list[_Entry] = []
     feed_status_rows: list[StatusRows] = []
+    no_row_status: list[_Entry] = []
+    no_row_status_equals = ""
     sides: list[_Entry] = []
     sides_negated = False
     export_rows: int | None = None
@@ -1423,6 +1501,11 @@ def _explain_one(
             holds.append(FEED_STATUS_ROWS)
         if any(found.left for found in feed_status_rows):
             holds.append(FEED_STATUS_LEFT_OUT)
+        no_row_status = view.by_no_row_status.within(after, day)
+        no_row_sum = sum(entry.minor for entry in no_row_status)
+        if no_row_sum and delta in (no_row_sum, -no_row_sum):
+            no_row_status_equals = "equals" if delta == no_row_sum else "equals minus"
+            holds.append(NO_ROW_STATUS_ROWS)
         straddling = [
             e for e in view.by_source.within(after, day) if not _inside(e.other, after, day)
         ] + [e for e in view.by_stored.within(after, day) if not _inside(e.other, after, day)]
@@ -1484,6 +1567,9 @@ def _explain_one(
         one_row=one_row,
         one_row_negated=negated,
         feed_status_rows=tuple(feed_status_rows),
+        no_row_status_rows=_rowset(no_row_status) if no_row_status_equals else RowSet(),
+        no_row_status_equals=no_row_status_equals,
+        no_rows=nearby(shape, after, day) if nearby is not None else NoRowItems(),
         straddling=_rowset(straddling),
         index=index,
         undone_on=None if undone is None else undone[1],
@@ -1534,6 +1620,95 @@ class _SourceSearch:
             covers = low <= through and (after is None or high > after)
             found.append(SourceSearch(source, inside, len(entities), sighted - inside, covers))
         return tuple(found)
+
+
+@dataclass(frozen=True)
+class _Anchor:
+    """A row that explains a change, as far as comparing a feed item with it needs."""
+
+    entity: str
+    direction: str
+    minor: int
+    recipient: str
+    at: datetime | None
+
+
+class _NoRowSearch:
+    """The feed items that made no row, placed in a change's window and compared with its rows.
+
+    An item belongs to a window by the UTC day it states, which is the day the provider
+    dates a row by (`feed_statuses`), so the window is the one the rows are placed in.
+    Each is compared with the row of the change it sits nearest: a row of the same
+    recipient first, then the nearest in time, the id breaking a tie so the answer never
+    depends on the order rows were read in. Said once, here.
+    """
+
+    def __init__(self, evidence: _Evidence) -> None:
+        self._evidence = evidence
+        placed = [(item.at.date(), item) for item in evidence.facts.feed.no_row_items() if item.at]
+        self._days = [day for day, _ in placed]
+        self._items = [item for _, item in placed]
+
+    def _anchor(self, entity: str) -> _Anchor | None:
+        row = self._evidence.by_entity.get(entity)
+        if row is None:
+            return None
+        item = self._evidence.facts.feed.item_of(entity)
+        recipient = (item.recipient if item is not None else "") or normalise_description(
+            row.counterparty
+        )
+        return _Anchor(
+            entity,
+            "in" if row.amount_minor >= 0 else "out",
+            abs(row.amount_minor),
+            recipient,
+            item.at if item is not None else None,
+        )
+
+    @staticmethod
+    def _agreement(item: FeedItem, anchor: _Anchor) -> str:
+        if not item.recipient or not anchor.recipient:
+            return UNKNOWN
+        return AGREES if item.recipient == anchor.recipient else DIFFERS
+
+    def _noted(self, item: FeedItem, anchors: Sequence[_Anchor]) -> NoRowItem:
+        assert item.at is not None  # placed items state a time; see __init__
+        if not anchors:
+            return NoRowItem(item.status, item.direction, item.at)
+
+        def seconds(anchor: _Anchor) -> int | None:
+            if anchor.at is None or item.at is None:
+                return None
+            return round((item.at - anchor.at).total_seconds())
+
+        def rank(anchor: _Anchor) -> tuple[int, int, str]:
+            gap = seconds(anchor)
+            return (
+                _recipient_rank(self._agreement(item, anchor)),
+                abs(gap) if gap is not None else 1 << 62,
+                anchor.entity,
+            )
+
+        near = min(anchors, key=rank)
+        return NoRowItem(
+            item.status,
+            item.direction,
+            item.at,
+            True,
+            near.direction,
+            near.at,
+            item.minor == near.minor,
+            self._agreement(item, near),
+            seconds(near),
+        )
+
+    def __call__(self, entities: Sequence[str], after: date | None, through: date) -> NoRowItems:
+        low = 0 if after is None else bisect_right(self._days, after)
+        high = bisect_right(self._days, through)
+        anchors = [found for found in map(self._anchor, entities) if found is not None]
+        items = self._items[low:high]
+        named = tuple(self._noted(item, anchors) for item in items[:NAMED_ROWS])
+        return NoRowItems(len(items), named, len(items) - len(named))
 
 
 def explain_walk(
@@ -1588,6 +1763,7 @@ def explain_walk(
         _RowFacts(store, main, members, by_entity, space_uids or {}, fold_refusals),
     )
     searcher = _SourceSearch(evidence.sightings)
+    no_row_search = _NoRowSearch(evidence)
     anchor_digests = {
         (day, balance): digest
         for digest, reading in exports
@@ -1659,6 +1835,7 @@ def explain_walk(
             index=change.index,
             undone=undone,
             search=searcher,
+            nearby=no_row_search,
         )
         if own and delta != 0:
             found = replace(
@@ -1714,6 +1891,7 @@ def _feed_status_facts(evidence: _Evidence, matches: Iterable[_Matches]) -> Feed
             for status, rows in sorted(by_status.items())
         ),
         tuple(evidence.facts.feed.unmapped().items()),
+        tuple(evidence.facts.feed.dropped().items()),
     )
 
 
@@ -1743,6 +1921,7 @@ __all__ = [
     "LOOKALIKE_DAYS",
     "NAMED_ROWS",
     "NONE",
+    "NO_ROW_STATUS_ROWS",
     "ONE_ROW",
     "ROW_COUNTS",
     "STRADDLING",
@@ -1752,6 +1931,8 @@ __all__ = [
     "ExportFacts",
     "FeedStatusFacts",
     "Lookalike",
+    "NoRowItem",
+    "NoRowItems",
     "ReversedFacts",
     "RowNote",
     "RowSet",

@@ -709,6 +709,17 @@ def _hold_html(change: Any, hold: str) -> str:
             for found in change.feed_status_rows
             if found.left
         )
+    if hold == "no-row-status-rows":
+        statuses = sorted({note.feed_status for note in change.no_row_status_rows.named})
+        return (
+            "<p>The change equals "
+            f"{'minus ' if change.no_row_status_equals == 'equals minus' else ''}the sum of the "
+            f"{_plural(change.no_row_status_rows.count, 'row')} the store counts whose own feed "
+            "item is, in the newest landed feed, a status that makes no row "
+            f"({_esc(', '.join(statuses))}). The store made each from an earlier fetch, and "
+            "nothing has voided it since the bank changed the item:</p>"
+            + _row_list(change.no_row_status_rows)
+        )
     if hold == "timing-pair":
         return (
             f"<p>The change equals {'minus ' if change.sides_negated else ''}the sum of the "
@@ -820,6 +831,62 @@ def _search_html(searched: Any) -> str:
     )
 
 
+def _span_words(seconds: int) -> str:
+    """How long, in the unit a person reads it in."""
+    minutes = seconds // 60
+    if minutes < 1:
+        return "under a minute"
+    if minutes < 120:
+        return _plural(minutes, "minute")
+    if minutes < 2880:
+        hours, rest = divmod(minutes, 60)
+        return _plural(hours, "hour") + (f" {_plural(rest, 'minute')}" if rest else "")
+    return _plural(minutes // 1440, "day")
+
+
+def _no_row_item(item: Any) -> str:
+    """One feed item that made no row, beside the row it sits nearest. Said once, here.
+
+    Only whether the size and the recipient agree is said, never either.
+    """
+    kind = f"{_esc(item.status)} {_esc(item.direction)} item".replace("  ", " ")
+    text = f"{kind} at {_clock_html(item.at)}"
+    if not item.compared:
+        return text
+    row = f"the {_esc(item.row_direction)} row"
+    if item.seconds_after is not None and item.row_at is not None:
+        stated = f"{row} at {_clock_html(item.row_at)}"
+        if abs(item.seconds_after) < 60:
+            text += f", at the same minute as {stated}"
+        else:
+            side = "after" if item.seconds_after > 0 else "before"
+            text += f", {_span_words(abs(item.seconds_after))} {side} {stated}"
+    size = "the same size" if item.same_size else "a different size"
+    if item.recipient == "agrees":
+        return f"{text}, of the same recipient and {size}"
+    if item.recipient == "differs":
+        return f"{text}, of a different recipient and {size}"
+    return f"{text}, whose recipient could not be compared, and of {size}"
+
+
+def _no_rows_html(found: Any) -> str:
+    """The feed items in a change's window that are not rows, or nothing where there are none."""
+    if not found.count:
+        return ""
+    lead = (
+        "The bank's feed also holds 1 item in this window that is not a row:"
+        if found.count == 1
+        else f"The bank's feed also holds {found.count} items in this window that are not rows:"
+    )
+    items = "".join(f"<li>{_no_row_item(item)}</li>" for item in found.named)
+    more = (
+        f"<li>and {found.more} more (the page names at most {len(found.named)})</li>"
+        if found.more
+        else ""
+    )
+    return f"<p>{_esc(lead)}</p><ul>{items}{more}</ul>"
+
+
 def _reversed_html(found: Any) -> str:
     """How many reversed rows are held as history, and what the export and the rows say of them.
 
@@ -868,10 +935,13 @@ def _feed_statuses_html(found: Any, *, exports: bool) -> str:
         sentences.append(
             "A counter-item is a row of the opposite direction and equal size within three days."
         )
+    if found.dropped:
+        names = ", ".join(f"{name} ({count})" for name, count in found.dropped)
+        sentences.append(f"Feed items the map drops on purpose, which make no row: {names}.")
     if found.unmapped:
         names = ", ".join(f"{name} ({count})" for name, count in found.unmapped)
         sentences.append(f"Feed items with a status the map does not list, so no row: {names}.")
-    elif found.by_status:
+    elif found.by_status or found.dropped:
         sentences.append("No feed item carries a status the map does not list.")
     if not sentences:
         return ""
@@ -924,6 +994,7 @@ def _explanations_html(explanation: Any) -> str:
             + "".join(_hold_html(change, hold) for hold in change.holds)
             + _parting_html(change.parting)
             + _search_html(change.searched)
+            + _no_rows_html(change.no_rows)
             + "</div>"
         )
     return body
