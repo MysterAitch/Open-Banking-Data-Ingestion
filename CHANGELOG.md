@@ -26,6 +26,23 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.299] - 2026-10-04
+
+### Added
+- **Identity health counts how often two exact rules hold**, read from the
+  landed artefacts: an aggregator item's own id is a feed item's id, and the
+  export lists a card payment on the day the feed says it settled. In one
+  month read with the owner's permission, 58 of 58 aggregator items carried
+  the feed's id and the matcher read none of them. It also counts where the
+  store's present matching disagrees: a pair the id proves that is held as
+  two rows, and an aggregator sighting on a row whose feed sighting has
+  another id.
+
+This is the measurement and nothing is matched differently. The id join that
+rests on it is built and held back until these counts have been read on the
+real store: a matcher change released on invented cases alone duplicated 245
+rows this morning.
+
 ## [0.4.298] - 2026-10-04
 
 ### Fixed

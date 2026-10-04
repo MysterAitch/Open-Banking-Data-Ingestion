@@ -200,9 +200,9 @@ def _read_artefacts(store: Store, account_map: AccountMap) -> _Landed:
                     continue
                 count = seen.get(item.content_key, 0)
                 seen[item.content_key] = count + 1
-                key = (item.content_key, count)
-                landed.export[account][key] = item
-                landed.export_digest[(account, key)] = str(row["digest"])
+                repeat = (item.content_key, count)
+                landed.export[account][repeat] = item
+                landed.export_digest[(account, repeat)] = str(row["digest"])
     return landed
 
 
