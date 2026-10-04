@@ -732,6 +732,82 @@ def test_PositionPage_WithTheFamilyWalk_AtPhoneWidth_DoesNotScrollSideways(
     _assert_fits(_overflow(browser, f"{family_base}/position"))
 
 
+def _position_with_window(browser: object, base: str, width: int, chip: str) -> object:
+    """The Position page with values shown and a window chosen by its one-tap button."""
+    page = browser.new_page(viewport={"width": width, "height": PHONE_HEIGHT})  # type: ignore[attr-defined]
+    page.goto(f"{base}/position", wait_until="load")
+    page.get_by_role("button", name="Show values").first.click()
+    page.wait_for_load_state("load")
+    page.get_by_role("button", name=chip).first.click()
+    page.wait_for_load_state("load")
+    return page
+
+
+@pytest.mark.parametrize("width", [PHONE_WIDTH, REFLOW_WIDTH])
+def test_PositionPage_WithAWindowChosenAndTheFoldOpen_DoesNotScrollSideways(
+    browser: object, corpus_base: str, width: int
+) -> None:
+    page = _position_with_window(browser, corpus_base, width, "Last 90 days")
+    try:
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        if width == REFLOW_WIDTH:
+            page.add_style_tag(content="html { font-size: 200%; }")
+        _assert_fits(_measure(page))
+    finally:
+        page.close()
+
+
+def test_PositionPage_WindowControls_AreEachAtLeastAThumbTall(
+    browser: object, corpus_base: str
+) -> None:
+    page = _position_with_window(browser, corpus_base, PHONE_WIDTH, "Last 90 days")
+    try:
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        heights = page.evaluate(
+            """() => [...document.querySelectorAll(
+                '.position-window button, .position-window input, .position-window select,'
+                + ' .position-window summary')]
+              .map(e => [e.tagName + ' ' + (e.name || e.textContent.trim().slice(0, 20)),
+                         e.getBoundingClientRect().height])"""
+        )
+        assert heights, "the window's controls were not found"
+        short = [name for name, height in heights if height < 43.5]
+        assert short == [], f"controls under 44px tall: {short}"
+    finally:
+        page.close()
+
+
+def test_PositionPage_EnterInTheLengthField_KeepsTheWindowAlreadyChosen(
+    browser: object, corpus_base: str
+) -> None:
+    page = _position_with_window(browser, corpus_base, PHONE_WIDTH, "Last 90 days")
+    try:
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        page.locator("#window_count").fill("7")
+        with page.expect_navigation():
+            page.locator("#window_count").press("Enter")
+        assert "90 days ending" in page.locator("[data-window-now]").inner_text()
+    finally:
+        page.close()
+
+
+def test_PositionPage_ARefusedWindow_DoesNotScrollSidewaysAndShowsItsSentence(
+    browser: object, corpus_base: str
+) -> None:
+    page = _position_with_window(browser, corpus_base, PHONE_WIDTH, "Last 90 days")
+    try:
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        page.locator("#window_from").fill("2026-02-01")
+        page.locator("#window_to").fill("2026-01-31")
+        page.get_by_role("button", name="Show these dates").click()
+        page.wait_for_load_state("load")
+        assert "is after it ends on" in page.locator("[data-window-refused]").inner_text()
+        assert page.locator(".chart svg").count() == 0
+        _assert_fits(_measure(page))
+    finally:
+        page.close()
+
+
 def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(
     browser: object, corpus_base: str
 ) -> None:
