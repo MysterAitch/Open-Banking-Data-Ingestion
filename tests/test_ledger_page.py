@@ -14,6 +14,7 @@ than from a list somebody remembered to extend.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from datetime import date
 from http.server import HTTPServer
@@ -109,17 +110,30 @@ def served(tmp_path):
         httpd.shutdown()
 
 
+def _unscoped(response: httpx.Response) -> httpx.Response:
+    """The page without its header-cell scopes.
+
+    These tests assert on a cell's text and its neighbour, which is what a reader
+    sees; that every header cell carries a scope is asserted once, over every page,
+    in test_page_accessibility.py and test_page_structure.py.
+    """
+    response._content = re.sub(rb' scope="(?:row|col)"', b"", response.content)
+    return response
+
+
 def get(base: str, **params: str) -> httpx.Response:
-    return httpx.get(f"{base}/ledger", params=params, timeout=20)
+    return _unscoped(httpx.get(f"{base}/ledger", params=params, timeout=20))
 
 
 def post(base: str, ref: str = CURRENT, month: str = "2026-03", **kwargs) -> httpx.Response:
-    return httpx.post(
-        f"{base}/ledger",
-        data={"ref": ref, "month": month},
-        follow_redirects=False,
-        timeout=20,
-        **kwargs,
+    return _unscoped(
+        httpx.post(
+            f"{base}/ledger",
+            data={"ref": ref, "month": month},
+            follow_redirects=False,
+            timeout=20,
+            **kwargs,
+        )
     )
 
 

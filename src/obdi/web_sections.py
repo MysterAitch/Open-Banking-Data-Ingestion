@@ -392,7 +392,7 @@ then verify the file against what that account already holds, before
 anything is stored.</p>
 <form action="/upload" method="post" enctype="multipart/form-data">
   {web.account_picker(labels)}
-  <p><input type="file" name="statement" required></p>
+  <p><input type="file" name="statement" aria-label="Statement file" required></p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
 </form>

@@ -88,7 +88,7 @@ STYLESHEET = """
  :focus-visible { outline: var(--focus-width) solid var(--focus); outline-offset: var(--focus-gap); }
  /* Hidden until focused, so a keyboard user can jump past the navigation. */
  .skip:not(:focus), .visually-hidden:not(:focus) { position: absolute; width: 1px; height: 1px;
-        overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+        padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
  .skip { position: absolute; left: var(--s2); top: var(--s2); z-index: 10; padding: var(--s3) var(--s4);
          background: var(--act); color: var(--act-ink); font: 700 var(--text-md) var(--sans);
          border-radius: var(--radius); }
@@ -182,6 +182,9 @@ STYLESHEET = """
  .linklist { list-style: none; margin: 0; padding: 0; }
  a.tap { position: relative; font-family: var(--sans); font-size: var(--text-md); font-weight: 600; }
  a.tap::after { content: ""; position: absolute; inset: -.75rem -.5rem; }
+ /* Every other link in the page gets the same reach, for the same reason. */
+ main a:not(.button):not(.tap) { position: relative; }
+ main a:not(.button):not(.tap)::after { content: ""; position: absolute; inset: -.75rem -.5rem; }
  a.tap.nowrap { white-space: normal; }
  .overview h2 { margin: var(--s5) 0 var(--s2); }
  /* The Overview: what needs a person is the heaviest thing on the page, and a

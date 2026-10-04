@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .buildinfo import describe
 from .navigation import navigation_html
+from .page_structure import structure_tables
 from .stylesheet import STYLESHEET
 
 
@@ -101,6 +102,7 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
     if prefix:
         title = f"[{prefix}] {title}"
         body = banner + body
+    body = structure_tables(body, fallback_name=html.escape(title))
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

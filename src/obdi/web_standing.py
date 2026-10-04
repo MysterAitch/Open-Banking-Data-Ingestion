@@ -125,7 +125,7 @@ def protection_html(protection: Any, ref: str, month: str) -> str:
                 "<details><summary>Protect through an earlier date</summary>"
                 f'<form method="post" action="/protect"><input type="hidden" name="ref" '
                 f'value="{_esc(ref)}"><input type="hidden" name="month" value="{_esc(month)}">'
-                f'<p><select name="through">{options}</select></p>'
+                f'<p><select name="through" aria-label="Protect through">{options}</select></p>'
                 + submit_button("Protect through the date chosen", secondary=True)
                 + "</form></details>"
             )

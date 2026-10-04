@@ -144,8 +144,13 @@ class TestTheStripFitsTheWidthOfTheScreen:
     def test_Page_WhateverTheRange_NothingOnItScrollsSideways(self, window):
         page = Page(masked(window=window))
 
-        assert page.find("div", role="region") == []
+        # The chart does not scroll. The counts table below it may, inside the box
+        # every wide table is given (marked `data-table-scroll`), and that box
+        # holds no chart.
+        assert [r for r in page.find("div", role="region") if "data-table-scroll" not in r] == []
         for _, attrs in page.elements:
+            if "data-table-scroll" in attrs:
+                continue
             assert "overflow" not in attrs.get("style", "")
             assert "scroll" not in attrs.get("class", "").split()
             assert "max-width:none" not in attrs.get("style", "")

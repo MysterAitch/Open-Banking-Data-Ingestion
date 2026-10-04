@@ -324,6 +324,56 @@ def test_Page_AtPhoneWidth_DoesNotScrollSideways(
     _assert_fits(_overflow(browser, f"{corpus_base}{route}"))
 
 
+#: The narrowest viewport worth supporting with text enlarged to 200% (WCAG 1.4.4
+#: and 1.4.10): a person who enlarges text on a small phone must still read each
+#: line without dragging the page sideways.
+REFLOW_WIDTH = 320
+
+REFLOW_ROUTES = [
+    "/",
+    "/position",
+    "/ledger?ref=synthetic-current",
+    "/ledger?ref=synthetic-card",
+    "/review",
+    "/coverage",
+    "/balance-chart?ref=synthetic-current",
+    "/accounts",
+    "/admin",
+]
+
+
+@pytest.mark.parametrize("route", REFLOW_ROUTES)
+def test_Page_At320PixelsWithTextEnlargedToTwoHundredPercent_DoesNotScrollSideways(
+    browser: object, corpus_base: str, route: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": REFLOW_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        page.goto(f"{corpus_base}{route}", wait_until="load")
+        page.add_style_tag(content="html { font-size: 200%; }")
+        page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
+        _assert_fits(_measure(page))
+    finally:
+        page.close()
+
+
+def test_LedgerPage_WithValuesShown_At320PixelsWithTextEnlarged_DoesNotScrollSideways(
+    browser: object, corpus_base: str
+) -> None:
+    page = browser.new_page(  # type: ignore[attr-defined]
+        viewport={"width": REFLOW_WIDTH, "height": PHONE_HEIGHT}
+    )
+    try:
+        page.goto(f"{corpus_base}/ledger?ref=synthetic-current", wait_until="load")
+        page.get_by_role("button", name="Show values").first.click()
+        page.wait_for_load_state("load")
+        page.add_style_tag(content="html { font-size: 200%; }")
+        _assert_fits(_measure(page))
+    finally:
+        page.close()
+
+
 def test_ActualPage_AtPhoneWidth_DoesNotScrollSideways(
     browser: object, corpus_base: str
 ) -> None:

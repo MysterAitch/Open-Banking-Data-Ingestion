@@ -197,10 +197,10 @@ class TestThePageReportsWhatItSpent:
         # is invisible in a single number and obvious in a table.
         response = _upload(server, 3)
 
-        assert "<th>Phase</th>" in response.text
-        assert "<th>Median</th>" in response.text
-        assert "<th>Most</th>" in response.text
-        assert "<th>Runs</th>" in response.text
+        assert '<th scope="col">Phase</th>' in response.text
+        assert '<th scope="col">Median</th>' in response.text
+        assert '<th scope="col">Most</th>' in response.text
+        assert '<th scope="col">Runs</th>' in response.text
 
     def test_ThePerFileAndAggregateViews_ComeFromTheSameMeasurements(self, server):
         # Measured twice, they could disagree - and a reader with no way to

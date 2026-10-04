@@ -2542,7 +2542,7 @@ def _probe_result_html(report: object) -> str:
 
     pill = "ok" if decisive else "warn"
     return (
-        f'<h1>changesSince probe</h1>'
+        f'<h3>changesSince probe</h3>'
         f'<p class="muted">cutoff {cutoff}</p>'
         f'<p><span class="pill pill-{pill}">'
         f'{"decisive" if decisive else "not decisive"}</span> '
@@ -4097,10 +4097,11 @@ def account_picker(
     options and the same fallback.
     """
     return (
-        f'<p><select name="{html.escape(field)}" style="width:100%;padding:.6rem">'
+        f'<p><select name="{html.escape(field)}" aria-label="Account" '
+        'style="width:100%;padding:.6rem">'
         '<option value="">choose an account...</option>'
         f"{account_options(labels, selected=selected)}</select></p>"
-        f'<p><input name="{html.escape(other_field)}" '
+        f'<p><input name="{html.escape(other_field)}" aria-label="Account name, typed" '
         f'placeholder="{html.escape(other_placeholder)}"></p>'
     )
 
@@ -4507,7 +4508,7 @@ class ConnectionHandler(
             pan = "<p>Pan: " + " | ".join(pan_links) + "</p>"
 
         body = (
-            "<h1>Fetch timeline</h1>"
+            "<h2>Fetch timeline</h2>"
             '<p class="muted">Each row is one ask from the attempt ledger, '
             "newest at the top; the bar spans the history it asked about. "
             "The fetch strategy reads straight off the shapes: tier steps, "
@@ -5262,7 +5263,7 @@ class ConnectionHandler(
             # the full one. Emptiness is checked where both boxes can be
             # seen at once: in the script, and at the door behind it.
             '<p><input type="file" name="file" accept="application/pdf" '
-            'multiple></p>'
+            'aria-label="Statement files" multiple></p>'
             '<p class="muted">Several at once is fine - keeping a statement '
             "asks nothing about it, so a batch carries no more risk than "
             "one.</p>"
@@ -6315,7 +6316,7 @@ class ConnectionHandler(
                 + f"</td><td>{group.get('count', 0)}</td><td>"
                 + '<form action="/review-apply" method="post">'
                 + f'<input type="hidden" name="label" value="{html.escape(label)}">'
-                + '<input type="text" name="value" size="28" '
+                + f'<input type="text" name="value" size="28" aria-label="Answer for {html.escape(label)}" '
                 'placeholder="Group: Leaf" autocomplete="off" required>'
                 + '<button type="submit">Answer all</button>'
                 + "</form>"
@@ -7434,7 +7435,7 @@ class ConnectionHandler(
             f"<h2>Import another into {html.escape(account)}</h2>"
             '<form action="/upload" method="post" enctype="multipart/form-data">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
-            '<p><input type="file" name="statement" required></p>'
+            '<p><input type="file" name="statement" aria-label="Statement file" required></p>'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             "Preview import</button></p></form>"

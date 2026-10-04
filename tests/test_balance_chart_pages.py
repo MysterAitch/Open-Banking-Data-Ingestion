@@ -158,7 +158,9 @@ class TestTheTimelineScale:
     def test_Timeline_WhenMasked_NothingOnThePageIsASidewaysScrollingContainer(self):
         page = Parsed(masked(mixed()))
 
-        assert page.find("div", role="region") == []
+        # The counts table may scroll inside the box every wide table is given.
+        regions = [r for r in page.find("div", role="region") if "data-table-scroll" not in r]
+        assert regions == []
 
     def test_Timeline_LabelsEveryMonthWithItsYear_SoAnyScreenfulSaysTheDate(self):
         page = Parsed(masked(mixed()))
