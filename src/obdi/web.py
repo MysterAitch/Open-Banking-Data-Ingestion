@@ -42,6 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
+from .account_names import merged_names, name_text
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
@@ -4327,7 +4328,7 @@ class ConnectionHandler(
         for group in raw_accounts if isinstance(raw_accounts, list) else []:
             if not isinstance(group, dict):
                 continue
-            parts.append(f"<h2>{html.escape(str(group.get('account')))}</h2>")
+            parts.append(f"<h2>{self._named(str(group.get('account')))}</h2>")
             parts.append(_agreements_html(group.get("entries"), masked=masked))
             rendered_any = True
         if not rendered_any:
@@ -6259,11 +6260,27 @@ class ConnectionHandler(
             "real question.</p>"
             f"{showing}"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + HOME_LINK
+            f"{self._named(text)}</pre>" + HOME_LINK
         )
         self._respond(
             200, render_page(page_name("/review-report"), body), no_store=not masked
         )
+
+    def _account_names(self) -> dict[str, str]:
+        """Reference to label for every account that has one (`account_names`)."""
+        provider: dict[str, str] = {}
+        hook = self.bound_config.display_labels
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                provider = hook()
+        declared: list[AccountRecord] = []
+        with contextlib.suppress(Exception):
+            declared = self.declared_accounts()
+        return merged_names(provider, declared)
+
+    def _named(self, text: str) -> str:
+        """A report's plain text, escaped, with each account's label beside its reference."""
+        return html.escape(name_text(text, self._account_names()))
 
     def _date_lag(self) -> None:
         hook = self.bound_config.date_lag_text
@@ -6313,7 +6330,7 @@ class ConnectionHandler(
                 "one, a pair missing altogether, or a leg paired with the wrong partner. "
                 "These checks count the movements themselves on every day.</p>"
                 f'<pre class="scroll" style="white-space:pre-wrap">'
-                f"{html.escape(movement)}</pre>"
+                f"{self._named(movement)}</pre>"
             )
         )
         exact_section = (
@@ -6326,7 +6343,7 @@ class ConnectionHandler(
                 "feed says it settled. These count how often each holds, read from the "
                 "landed artefacts and not from the stored rows.</p>"
                 f'<pre class="scroll" style="white-space:pre-wrap">'
-                f"{html.escape(exact)}</pre>"
+                f"{self._named(exact)}</pre>"
             )
         )
         body = (
@@ -6338,7 +6355,7 @@ class ConnectionHandler(
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + movement_section + exact_section + HOME_LINK
+            f"{self._named(text)}</pre>" + movement_section + exact_section + HOME_LINK
         )
         self._respond(200, render_page(page_name("/identity-health"), body))
 
@@ -6381,7 +6398,7 @@ class ConnectionHandler(
             "closing balance against the next day's opening.</p>"
             f"{showing}"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + HOME_LINK
+            f"{self._named(text)}</pre>" + HOME_LINK
         )
         self._respond(
             200, render_page(page_name("/balance-reconciliation"), body), no_store=not masked
@@ -6437,7 +6454,7 @@ class ConnectionHandler(
             "by the next period.</p>"
             f"{showing}"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + HOME_LINK
+            f"{self._named(text)}</pre>" + HOME_LINK
         )
         self._respond(
             200, render_page(page_name("/period-reconciliation"), body), no_store=not masked
@@ -6478,7 +6495,7 @@ class ConnectionHandler(
             "transaction explains. This is the store checked against the "
             "bank's own arithmetic.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + HOME_LINK
+            f"{self._named(text)}</pre>" + HOME_LINK
         )
         self._respond(200, render_page(page_name("/balance-walk"), body), no_store=not masked)
 
