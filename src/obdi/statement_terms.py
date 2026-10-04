@@ -315,8 +315,11 @@ _USABLE_BY_DIGEST: dict[str, tuple[int, _Usable | None]] = {}
 
 def _usable(store: Store, digest: str, account: str) -> _Usable | None:
     held_before = _USABLE_BY_DIGEST.get(digest)
+    if held_before is not None and held_before[1] is not None:
+        # A reading that worked is a fact about the bytes, and asks the store nothing.
+        return held_before[1]
     epoch = store.standing_epoch()
-    if held_before is None or (held_before[1] is None and held_before[0] != epoch):
+    if held_before is None or held_before[0] != epoch:
         found = _reading_of(store, digest, account)
         held: _Usable | None = None
         if found is not None:
