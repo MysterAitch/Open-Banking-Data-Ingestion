@@ -25,7 +25,9 @@ the suite honest today, which is the part that cannot wait.
 
 from __future__ import annotations
 
+import functools
 import os
+from collections.abc import Iterator
 
 import pytest
 
@@ -121,6 +123,39 @@ def configuration_prefixes() -> tuple[str, ...]:
     fixture cannot depend on a function-scoped one.
     """
     return CONFIGURATION_PREFIXES
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _one_tls_context_for_every_client() -> Iterator[None]:
+    """Build httpx's default TLS context once per process instead of per client.
+
+    MEASURED: `httpx.get(...)` builds a client, and a client builds a TLS
+    context by loading the whole certificate bundle - 0.71 s of the 0.75 s a
+    page test spent on its single request, on the Windows development machine.
+    About 5,000 tests make a request, so that was the largest single share of the
+    suite. The context is the real one, built the real way, only shared;
+    contexts are safe to share across threads and clients. Nothing here is about
+    certificates: every page test talks plain HTTP to 127.0.0.1, and a test of
+    the providers hands them its own transport.
+    """
+    from httpx._transports import default
+
+    real = default.create_ssl_context
+    cached = functools.cache(real)
+
+    def create(*args, **kwargs):
+        try:
+            return cached(*args, **kwargs)
+        except TypeError:
+            # An unhashable argument cannot be a cache key, and building the
+            # context afresh is always correct.
+            return real(*args, **kwargs)
+
+    default.create_ssl_context = create
+    try:
+        yield
+    finally:
+        default.create_ssl_context = real
 
 
 @pytest.fixture(autouse=True)
