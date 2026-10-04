@@ -26,6 +26,24 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.288] - 2026-10-04
+
+### Fixed
+- **Equal payments close together are matched to their partners as a set.**
+  Two payments of one size three days apart, listed by an export a day or two
+  later, were attached the wrong way round because each export row took the
+  nearest partner in arrival order. Same-date pairs are now taken first and the
+  rest so that none is stranded. A single row with a single candidate behaves
+  as before.
+
+### Changed
+- **A failed scheduler step says what the step is for, what its failure puts
+  at risk, and where it broke**, without quoting data, and its severity follows
+  that risk. The owner's phone showed only an error type and "see the container
+  log" for a failed browsing copy, filed as data at risk.
+- **The accounts page marks archived accounts and nests each Space under its
+  parent.** Four archived Spaces looked the same as two live ones.
+
 ## [0.4.287] - 2026-10-04
 
 ### Added
