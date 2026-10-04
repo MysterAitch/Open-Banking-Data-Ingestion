@@ -26,6 +26,25 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.292] - 2026-10-04
+
+### Added
+- **The ledger says what the bank's own feed calls each counted row.** One
+  permanent difference is left on the account with Spaces: two outgoing
+  payments the feed and the aggregator both report, which the export, the
+  certified statement, and the bank's present balance do not count. The feed's
+  status for a refunded payment is counted as an ordinary booked payment, on an
+  assumption the reversed rows have already contradicted, and the page said
+  nothing of any feed status. It now states, per status, how many counted rows
+  carry it, how many the export lists, and how many have a counter-item, and
+  tests each change against the rows of each status.
+- **A feed status the provider's map does not list is counted by name.** Such
+  an item makes no row, so nothing said it existed.
+
+Nothing is counted differently: this is the measurement, and how a refunded
+payment should be counted is decided from what the page says of the real
+account.
+
 ## [0.4.291] - 2026-10-04
 
 ### Added
