@@ -55,9 +55,6 @@ from .actual_audit import (
 from .actual_audit import (
     count_of as _count_of,
 )
-from .actual_audit import (
-    counted as _counted,
-)
 from .actual_push import NothingQueued, valid_progress
 from .actual_verdict import APPLIER_STALE_SECONDS
 from .alerts import consent_rung
@@ -81,6 +78,7 @@ from .namespaces import (
 )
 from .navigation import current_route
 from .overview import Overview
+from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
 from .review_flags import FlagQueue, Outcome
@@ -1084,8 +1082,8 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
 
     lines = [
         "<h2>Where these rows came from</h2>",
-        f"<p>{transactions:,} transaction(s), {sightings:,} sighting(s), "
-        f"{source_count} source(s). A transaction seen by two pipes is one "
+        f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'sighting')}, "
+        f"{plural(source_count, 'source')}. A transaction seen by two pipes is one "
         "transaction and two sightings.</p>",
         '<div class="row">',
     ]
@@ -1108,12 +1106,12 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
         )
         lines.append(
             f'<span class="muted">{source}</span> {label}: '
-            f"<strong>{count:,}</strong> transaction(s){via}<br>"
+            f"<strong>{count:,}</strong> {word(count, 'transaction')}{via}<br>"
         )
     lines.append("</div>")
     if source_count > 1:
         lines.append(
-            f'<p><span class="ok">{corroborated:,} transaction(s) corroborated '
+            f'<p><span class="ok">{plural(corroborated, "transaction")} corroborated '
             f"by two or more sources</span>; {single:,} seen by one source only. "
             "A row only one pipe has seen is either a gap in the others or a "
             "disagreement worth reading.</p>"
@@ -1151,7 +1149,8 @@ def _shape_html(summary: dict[str, object]) -> str:
     disclosure = ""
     if withheld:
         disclosure = (
-            f'<p class="muted">{withheld} field(s) show shape without values'
+            f'<p class="muted">{plural(withheld, "field")} '
+            f'{"shows" if withheld == 1 else "show"} shape without values'
             + (
                 f", {unclassified} because nothing has classified them yet"
                 if unclassified
@@ -1161,7 +1160,8 @@ def _shape_html(summary: dict[str, object]) -> str:
             "chooses to render, not what was stored.</p>"
         )
     return (
-        f'<p>{summary.get("items", 0)} item(s), {summary.get("bytes", 0):,} bytes</p>'
+        f'<p>{plural(int(str(summary.get("items", 0) or 0)), "item")}, '
+        f'{summary.get("bytes", 0):,} bytes</p>'
         f"{disclosure}"
         '<div class="scroll"><table><tr><th>field</th><th>present</th><th>types</th>'
         f"<th>values / shape</th></tr>{field_rows}</table></div>"
@@ -1900,7 +1900,8 @@ def _holdings_rows(
                 )
             )
             + f"{quiet}{sub}<br>"
-            f"{row.count:,} transactions, {row.earliest} .. <strong>{row.latest}</strong>"
+            f"{plural(row.count, 'transaction')}, {row.earliest} .. "
+            f"<strong>{row.latest}</strong>"
             f"{feeder_note}{bind_form}{strip}{archive_form}</div>"
         )
     # Accounts the store KNOWS about but holds nothing for must not vanish:
@@ -2078,7 +2079,7 @@ def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
     state = str(entry.get("state", ""))
     raw_count = entry.get("count", 0)
     count = raw_count if isinstance(raw_count, int) else 0
-    held = _counted(count, "transaction") if count else "no transactions yet"
+    held = plural(count, "transaction") if count else "no transactions yet"
     form = ""
     # "syncing" is the hook's name for bound; what the page may claim is
     # only that the account is bound, because a bound account that has
@@ -2414,10 +2415,10 @@ def _rebuild_running_html(progress: _RebuildProgress) -> str:
     if progress.records is not None:
         banked = f"{progress.records[0]:,} of {progress.records[1]:,} records"
         if progress.transactions is not None:
-            banked += f" replayed into {progress.transactions:,} transaction(s)"
+            banked += f" replayed into {plural(progress.transactions, 'transaction')}"
         rows.append(f"<p>{banked}.</p>")
     elif progress.transactions is not None:
-        rows.append(f"<p>{progress.transactions:,} transaction(s) so far.</p>")
+        rows.append(f"<p>{plural(progress.transactions, 'transaction')} so far.</p>")
 
     if progress.artefacts is not None:
         where = f"Artefact {progress.artefacts[0]:,} of {progress.artefacts[1]:,}"
@@ -2829,7 +2830,7 @@ def _push_result_row(result: dict[str, object]) -> str:
     )
     detail = (
         f"{result.get('added', 0)} added, "
-        f"{_counted(_count_of(result.get('provisioned')), 'account')} provisioned"
+        f"{plural(_count_of(result.get('provisioned')), 'account')} provisioned"
         f"{_push_transfer_note(result.get('transfers'))}"
         if ok
         else html.escape(str(result.get("error", "")))
@@ -3315,16 +3316,16 @@ def _history_summary(history: _ResultHistory) -> str:
     shown = len(history.results)
     if history.total is None:
         sentence = (
-            f"{_counted(shown, 'result')} shown - this history hook reports no total, "
+            f"{plural(shown, 'result')} shown - this history hook reports no total, "
             "so whether older results were left out is unknown"
         )
     elif history.total > shown:
         sentence = (
-            f"showing {shown} of {_counted(history.total, 'result')} - the newest "
+            f"showing {shown} of {plural(history.total, 'result')} - the newest "
             "ones, the rest are on disk only"
         )
     else:
-        sentence = f"{shown} of {_counted(history.total, 'result')}"
+        sentence = f"{shown} of {plural(history.total, 'result')}"
     if history.unreadable_count:
         named = (
             ": " + ", ".join(html.escape(name) for name in history.unreadable)
@@ -3332,7 +3333,7 @@ def _history_summary(history: _ResultHistory) -> str:
             else " (not named by the hook)"
         )
         sentence += (
-            f". {_counted(history.unreadable_count, 'result file')} could not be read"
+            f". {plural(history.unreadable_count, 'result file')} could not be read"
             f"{named}"
         )
     return f'<p class="muted">{sentence}</p>'
@@ -4764,7 +4765,7 @@ class ConnectionHandler(
         breakdown = raw_breakdown if isinstance(raw_breakdown, dict) else {}
         body = (
             f"<p><strong>{heading}</strong>{id_line}{details_html}<br>"
-            f"{shape.get('count', 0):,} merged transaction(s) "
+            f"{plural(int(str(shape.get('count', 0) or 0)), 'merged transaction')} "
             f"from {source_list or 'unknown sources'}</p>"
             "<p>This is the MERGED layer - what the store believes after "
             "matching - not one payload. The raw artefacts remain the "
@@ -5126,8 +5127,8 @@ class ConnectionHandler(
                 if kept_id
                 else '<span class="alarm">not kept</span>'
             )
-            + f"</td><td>{report.line_count} line(s), "
-            f"{report.page_count} page(s)</td><td>"
+            + f"</td><td>{plural(report.line_count, 'line')}, "
+            f"{plural(report.page_count, 'page')}</td><td>"
             + (
                 "kept"
                 if kept_id and is_new
@@ -5173,13 +5174,13 @@ class ConnectionHandler(
         # moves when the network does and reads as though pages got dearer.
         processing = timings.total() - timings.seconds("receive")
         per_page = (
-            f", {processing / pages:.2f}s per page across {pages} page(s) "
+            f", {processing / pages:.2f}s per page across {plural(pages, 'page')} "
             "to read (receiving is not per page)"
             if pages
             else ""
         )
         summary = (
-            f"<p>{len(read)} file(s) read, {len(kept_ids) - already_held} "
+            f"<p>{plural(len(read), 'file')} read, {len(kept_ids) - already_held} "
             f"newly kept"
             # Named rather than folded into the total. Uploading the same
             # statement twice is the ordinary case when a person cannot
@@ -6092,8 +6093,9 @@ class ConnectionHandler(
             '<a href="/review-report">review queue report</a> lists. That '
             "one holds possible duplicate reports; this one holds payments "
             "with no category.</p>"
-            + f"<p>{covered} of {eligible} eligible transaction(s) carry a "
-            f"category{share}. {legs} confirmed transfer leg(s) are excluded - "
+            + f"<p>{covered:,} of {plural(eligible, 'eligible transaction')} carry a "
+            f"category{share}. {plural(legs, 'confirmed transfer leg')} "
+            f"{'is' if legs == 1 else 'are'} excluded - "
             "money that stayed in the household is not spending.</p>"
             "<p>Answering a group here writes at HUMAN rank: it outranks "
             "every later rule sweep and survives every rebuild. Groups with "
@@ -6142,7 +6144,7 @@ class ConnectionHandler(
             )
             return
         self._review_page(
-            f'<p class="ok">Set aside {marked} row(s) in '
+            f'<p class="ok">Set aside {plural(marked, "row")} in '
             f"{html.escape(label)} - recorded as looked at and undecided, "
             "and still listed.</p>"
         )
@@ -6174,7 +6176,7 @@ class ConnectionHandler(
             )
             return
         self._review_page(
-            f'<p class="ok">Answered {written} row(s) in '
+            f'<p class="ok">Answered {plural(written, "row")} in '
             f"{html.escape(label)} as {html.escape(value)}.</p>"
         )
 
@@ -7109,7 +7111,7 @@ class ConnectionHandler(
             f"<p><strong>{html.escape(filename)}</strong> parsed as "
             f"{html.escape(str(preview.get('parser')))} "
             f"(dates {html.escape(str(preview.get('date_format')))}): "
-            f"{preview.get('rows')} row(s), "
+            f"{plural(int(str(preview.get('rows') or 0)), 'row')}, "
             f"{preview.get('earliest')} .. {preview.get('latest')}</p>"
             + (
                 (
@@ -7805,7 +7807,7 @@ class ConnectionHandler(
             200,
             render_page(
                 "Actual links forgotten",
-                f"<p>Dropped {count} link(s). The account names are kept; "
+                f"<p>Dropped {plural(count, 'link')}. The account names are kept; "
                 "the next push will re-provision by name - existing "
                 "same-named accounts in Actual are reused, and imports "
                 "dedupe by imported id.</p>" + BACK_TO_ADMIN,

@@ -198,7 +198,8 @@ class TestTwoAnchors:
         page = lab.get().text
 
         assert '<span class="pill pill-ok">agrees</span>' in page
-        assert "later anchor(s) differ" not in page
+        assert "later anchor differs" not in page
+        assert "later anchors differ" not in page
         assert "A second anchor turns it into a test." not in page
         assert_no_secret(page)
 
@@ -210,7 +211,7 @@ class TestTwoAnchors:
         shown = lab.show_values().text
 
         assert '<span class="pill pill-bad">differs</span>' in masked
-        assert "1 later anchor(s) differ" in masked
+        assert "1 later anchor differs" in masked
         assert_no_secret(masked)
         assert "£489.89" in shown
         assert "£4,000.00" in shown
@@ -271,7 +272,7 @@ class TestALongRunOfAgreeingAnchorsFolds:
 
         assert "5 later anchors agree with what the rows predict" in page
         assert _outside_details(page).count('<span class="pill pill-bad">differs</span>') == 1
-        assert '<details class="agreeing">' in page and "1 later anchor(s) differ" in page
+        assert '<details class="agreeing">' in page and "1 later anchor differs" in page
         assert "overdrawn or owed £489.89" in _outside_details(shown)
         assert_no_secret(page)
 

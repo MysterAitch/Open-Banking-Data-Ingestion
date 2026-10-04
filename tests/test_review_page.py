@@ -80,8 +80,8 @@ class TestThePageShowsTheEvidence:
         page = httpx.get(f"{base}/review", timeout=20)
 
         assert page.status_code == 200
-        assert "2768 of 7443" in page.text
-        assert "1314" in page.text, "excluded transfer legs stay visible"
+        assert "2,768 of 7,443" in page.text
+        assert "1,314" in page.text, "excluded transfer legs stay visible"
 
     def test_EachGroup_WhenThePayeesAreAskedFor_ShowsARealExampleNotOnlyTheStrippedLabel(
         self, server
@@ -148,7 +148,7 @@ class TestAnsweringAGroup:
 
         assert response.status_code == 200
         assert applied == [("DAP", "Home Bills: Water", "category")]
-        assert "Answered 242 row(s)" in response.text
+        assert "Answered 242 rows" in response.text
 
     def test_AnEmptyAnswer_WritesNothing_AndSaysSo(self, server):
         base, applied = server

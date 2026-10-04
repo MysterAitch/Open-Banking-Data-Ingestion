@@ -76,6 +76,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from .models import Transaction, TransactionStatus
+from .plural import plural as _plural
 from .spaces import LISTING_SOURCE
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -519,10 +520,6 @@ def _with(base: BankReport, meaning: str, agreeing: int, tested: int) -> BankRep
         meaning_tested=tested,
         judged=base.judged if used else 0,
     )
-
-
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}" + ("" if count == 1 else "s")
 
 
 def describe(report: BankReport) -> tuple[str, ...]:

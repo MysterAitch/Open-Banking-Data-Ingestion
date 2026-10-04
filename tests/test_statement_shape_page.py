@@ -250,7 +250,7 @@ class TestABatchOfStatements:
 
             assert response.status_code == 200
             assert len(kept) == 3, "each file kept, not just the first"
-            assert "3 file(s) read, 3 newly kept" in response.text
+            assert "3 files read, 3 newly kept" in response.text
             for name in ("jan.pdf", "feb.pdf", "mar.pdf"):
                 assert name in response.text
             for artefact_id in kept:
@@ -296,7 +296,7 @@ class TestABatchOfStatements:
             assert len(kept) == 1, "the readable one is kept"
             assert "notes.txt" in response.text
             assert "not kept" in response.text
-            assert "2 file(s) read, 1 newly kept" in response.text
+            assert "2 files read, 1 newly kept" in response.text
         finally:
             httpd.shutdown()
             httpd.server_close()

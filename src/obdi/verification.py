@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 from .ingest import dates_cannot_confirm_format
 from .models import Transaction
+from .plural import plural
 from .rawview import balance_walk_report
 
 
@@ -98,7 +99,7 @@ def verify_export(
             Verdict(
                 "structure",
                 ok,
-                f"{len(structural)} data row(s) in the file, {len(parsed)} parsed"
+                f"{plural(len(structural), 'data row')} in the file, {len(parsed)} parsed"
                 + ("" if ok else " - rows are being silently dropped"),
             )
         )
@@ -128,7 +129,7 @@ def verify_export(
                 Verdict(
                     "balance walk",
                     breaks == 0,
-                    f"{checks} balance step(s) verified, {breaks} break(s) "
+                    f"{plural(checks, 'balance step')} verified, {plural(breaks, 'break')} "
                     f"under '{convention}'"
                     + ("" if breaks == 0 else " - money moved that the rows do not explain"),
                 )

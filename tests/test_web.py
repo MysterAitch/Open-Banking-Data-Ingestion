@@ -1353,7 +1353,7 @@ class TestDangerZone:
         assert "118" in line and "137" in line
         assert "4,087" in line
         assert "24,658 of 37,101 records" in line
-        assert "8,032 transaction(s)" in line
+        assert "8,032 transactions" in line
 
     def test_RebuildLine_PartWayThroughAnArtefact_ShowsPositionWithinIt(self):
         """The number that distinguishes a slow batch from a hung one.
@@ -1433,7 +1433,7 @@ class TestDangerZone:
         )
 
         assert "2" in line and "71" in line
-        assert "10 transaction(s) so far" in line
+        assert "10 transactions so far" in line
         assert "remaining" not in line
 
     def test_RebuildLine_WhenCountsHaveNotMovedLately_SaysHowLongTheyHaveBeenStill(
@@ -2374,7 +2374,7 @@ class TestUploadingAFileFromThePage:
         assert previews == [(b"Date,Amount\n", "statement.csv", "halifax-current")]
         assert confirms == []  # nothing landed from a preview
         assert "StarlingCsvParser" in page
-        assert "42 row(s)" in page
+        assert "42 rows" in page
         # The sample is masked until "Show values" is pressed (test_import_masking.py): it keeps
         # the row's date and the shape of its amount and description.
         assert "COFFEE" not in page

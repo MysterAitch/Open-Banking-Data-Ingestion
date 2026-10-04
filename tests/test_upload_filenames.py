@@ -98,7 +98,7 @@ class TestAFolderUploadIsReadNormally:
         )
 
         assert response.status_code == 200
-        assert "1 file(s) read" in response.text
+        assert "1 file read" in response.text
 
     def test_TheNameItArrivedWith_IsStillWhatGetsRecorded(self, server):
         # Sanitising decides where bytes go, not what the document is

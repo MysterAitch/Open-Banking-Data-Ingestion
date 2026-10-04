@@ -156,9 +156,9 @@ class TestArchivedAccountsAreMarked:
         rows = rows_of(rendered(known_of(store)))
 
         assert "not declared" in rows["loose-one"]
-        assert "2 row(s)" in rows["loose-one"]
+        assert "2 rows" in rows["loose-one"]
         assert "not declared" not in rows[MAIN]
-        assert "3 row(s)" in rows[MAIN]
+        assert "3 rows" in rows[MAIN]
 
 
 class TestTheListIsOrderedAndNested:

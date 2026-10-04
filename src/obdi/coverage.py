@@ -29,6 +29,7 @@ from itertools import combinations
 
 from .models import Transaction
 from .money import format_amount
+from .plural import plural
 
 #: Two sources describing the SAME account may date one movement a day or two
 #: apart (statement value date versus feed settlement). Row matching within the
@@ -214,7 +215,7 @@ class Agreement:
             f"[{self.overlap_from} .. {self.overlap_to}]"
         )
         figures = (
-            f"({self.left_count} vs {self.right_count} transactions, "
+            f"({self.left_count:,} vs {plural(self.right_count, 'transaction')}, "
             f"net {format_amount(self.left_net_minor)} vs "
             f"{format_amount(self.right_net_minor)})"
         )
@@ -332,7 +333,10 @@ class Agreement:
                         }
                     )
                 sides.append(
-                    {"heading": f"{name}: {total} rows in the window", "buckets": buckets}
+                    {
+                        "heading": f"{name}: {plural(total, 'row')} in the window",
+                        "buckets": buckets,
+                    }
                 )
 
         return {
@@ -343,7 +347,7 @@ class Agreement:
             "note": note,
             # Counts only. The nets are separate fields because a net is a sum
             # of money and the page decides whether a reader sees it.
-            "figures": f"{self.left_count} vs {self.right_count} transactions",
+            "figures": f"{self.left_count:,} vs {plural(self.right_count, 'transaction')}",
             "net_left": format_amount(self.left_net_minor),
             "net_right": format_amount(self.right_net_minor),
             "sides": sides,
@@ -767,7 +771,7 @@ class StaleFeed:
         return (
             f"{self.account_id}: the {self.source} feed last delivered a row "
             f"dated {self.latest}, but {self.fresher_source} holds rows to "
-            f"{self.fresher_latest} - {self.lag_days} days behind a live "
+            f"{self.fresher_latest} - {plural(self.lag_days, 'day')} behind a live "
             "witness; the feed may be stuck"
         )
 
@@ -841,7 +845,7 @@ class SilentFeed:
         )
         return (
             f"{self.account_id}: the only feed is {self.source}, and {asked} "
-            f"(newest row {self.latest_row}) - {self.silent_days} days without "
+            f"(newest row {self.latest_row}) - {plural(self.silent_days, 'day')} without "
             "a successful ask; the feed may be dead"
         )
 
@@ -1171,7 +1175,7 @@ def assignment_doubt(
     if matcher_agrees is not None and matcher_agrees():
         return None
     return (
-        f"only {worst.matched} of the statement's {worst.file_rows} rows between "
+        f"only {worst.matched} of the statement's {plural(worst.file_rows, 'row')} between "
         f"{worst.overlap_from} and {worst.overlap_to} match what {worst.witness} "
         f"holds for {account}; this is probably another account's statement"
     )
@@ -1187,7 +1191,8 @@ def assignment_corroboration(
     "nothing was there to disagree" must not read alike.
     """
     clauses = [
-        f"{overlap.witness}: {overlap.matched} of {overlap.file_rows} rows match "
+        f"{overlap.witness}: {overlap.matched} of {plural(overlap.file_rows, 'row')} "
+        f"{'matches' if overlap.file_rows == 1 else 'match'} "
         f"over {overlap.overlap_from} to {overlap.overlap_to}"
         for overlap in _overlaps(found, source=source, account=account)
     ]

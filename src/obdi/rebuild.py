@@ -51,6 +51,7 @@ from .namespaces import (
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .period_reconciliation import SAME_MONEY_PHASE
+from .plural import plural
 from .protection import recheck as recheck_protections
 from .providers import starling, truelayer
 from .review_flags import replay_joins
@@ -123,10 +124,10 @@ class RebuildReport:
 
     def describe(self) -> str:
         lines = [
-            f"replayed {self.artefacts_replayed} artefact(s) "
+            f"replayed {plural(self.artefacts_replayed, 'artefact')} "
             f"({self.artefacts_skipped} non-transactional skipped), "
-            f"{self.transactions} transaction(s) resolved, "
-            f"{self.transfers_paired} transfer pair(s) confirmed"
+            f"{plural(self.transactions, 'transaction')} resolved, "
+            f"{plural(self.transfers_paired, 'transfer pair')} confirmed"
         ]
         changed = {
             account: (before, after)
@@ -151,8 +152,7 @@ class RebuildReport:
         for problem in self.problems:
             grouped[problem] = grouped.get(problem, 0) + 1
         for problem, count in grouped.items():
-            noun = "artefact" if count == 1 else "artefacts"
-            lines.append(f"  problem: {problem} ({count} {noun})")
+            lines.append(f"  problem: {problem} ({plural(count, 'artefact')})")
         if self.problems:
             lines.append(
                 "  Each artefact listed as a problem was skipped: the replay "
@@ -171,7 +171,7 @@ class RebuildReport:
                 )
         if self.space_folded or self.space_ambiguous:
             lines.append(
-                f"  {self.space_folded} main-account row(s) folded into their Space "
+                f"  {plural(self.space_folded, 'main-account row')} folded into their Space "
                 f"rows - the same payment, which the aggregator and the export "
                 f"report under the main account and the bank's feed files under "
                 f"the Space. {self.space_ambiguous} more could not be paired "
@@ -187,7 +187,7 @@ class RebuildReport:
                 lines.append(f"  and {hidden} more not folded.")
         if self.same_money_folded:
             lines.append(
-                f"  {self.same_money_folded} feed row(s) folded as the same money a "
+                f"  {plural(self.same_money_folded, 'feed row')} folded as the same money a "
                 "statement itemises differently (the statement's own rows stay "
                 "counted). A folded row no longer counts and is withheld from the "
                 "push; one already in Actual becomes an orphan that the removal "
@@ -199,10 +199,9 @@ class RebuildReport:
                 + SettleReport(self.review_settled, self.review_still_open).describe()
             )
         if self.kept_unassigned:
-            noun = "statement" if self.kept_unassigned == 1 else "statements"
             unread = self.kept_unassigned - self.kept_readable
             lines.append(
-                f"  {self.kept_unassigned} kept {noun} with no account yet, so "
+                f"  {plural(self.kept_unassigned, 'kept statement')} with no account yet, so "
                 f"none was read into rows: {self.kept_readable} a parser "
                 f"recognises, {unread} with no parser yet for its layout. "
                 "The Kept statements page says which, and whether each "
@@ -210,7 +209,7 @@ class RebuildReport:
             )
         if self.kept_sections_replayed or self.kept_sections_unassigned:
             lines.append(
-                f"  {self.kept_sections_replayed} account(s) of all-accounts "
+                f"  {plural(self.kept_sections_replayed, 'account')} of all-accounts "
                 f"statements read back into the accounts they were assigned to; "
                 f"{self.kept_sections_unassigned} more still have no account, so "
                 "contributed no rows."

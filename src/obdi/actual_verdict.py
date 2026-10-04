@@ -39,9 +39,9 @@ from enum import StrEnum
 from .actual_audit import (
     accounts_of,
     count_of,
-    counted,
     differing_accounts,
 )
+from .plural import plural as counted
 from .web_prune import align_plan, counts_from_audit
 
 #: Seconds without a heartbeat after which queued work is called stuck. The applier

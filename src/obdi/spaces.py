@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef
 from .masking import Structural
 from .models import Transaction
+from .plural import plural
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .store import Store
@@ -661,8 +662,8 @@ def _listing_note(space: SpaceListing) -> str:
     )
     if space.skipped_responses:
         note += (
-            f" It was also missing from {space.skipped_responses} earlier "
-            "listing(s) and came back each time."
+            f" It was also missing from {plural(space.skipped_responses, 'earlier listing')} "
+            "and came back each time."
         )
     return note
 

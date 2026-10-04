@@ -34,15 +34,6 @@ def count_of(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def counted(number: int, noun: str) -> str:
-    """A count with its noun in the right number: "1 account", "17 accounts", "1,434 rows".
-
-    The one place a plural is decided, so no sentence says "account(s)". A noun that does
-    not take a plain "s" is not used with this yet; add its plural here when one is.
-    """
-    return f"{number:,} {noun}" if number == 1 else f"{number:,} {noun}s"
-
-
 def accounts_of(result: dict[str, object]) -> list[dict[str, object]]:
     """The per-account entries of an audit result; none where the field is absent or malformed."""
     raw = result.get("accounts")

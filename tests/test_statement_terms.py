@@ -150,7 +150,7 @@ class TestTheReversionWarning:
 
         assert len(found) == 1
         _key, message, rung = found[0]
-        assert "10 day(s)" in message
+        assert "10 days" in message
         assert "1010.00" in message
         assert rung == 3, "inside a fortnight"
 

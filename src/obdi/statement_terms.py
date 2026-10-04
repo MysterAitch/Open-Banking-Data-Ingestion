@@ -26,6 +26,7 @@ from .parsers.pdf_statements import (
     pdf_parser_for,
 )
 from .parsers.statement_reading import StatementReading, reading_from_json, reading_to_json
+from .plural import plural
 from .store import SectionAssignment, Store
 
 
@@ -522,7 +523,7 @@ def reversion_findings(
             (
                 f"reversion:{observation.account_id}:{observation.window_to}",
                 f"{observation.account_id}: the {observation.value}% "
-                f"promotional rate ends in {days} day(s) on "
+                f"promotional rate ends in {plural(days, 'day')} on "
                 f"{observation.window_to}, with "
                 f"{format_amount(owed)} still owed as at "
                 f"{stamped[0] if stamped else 'unknown'}",

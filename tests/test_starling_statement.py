@@ -518,7 +518,7 @@ class TestTheGate:
         with pytest.raises(ParseError) as refused:
             list(StarlingStatementPdfParser().parse(build_starling_pdf(off), account_id="a"))
 
-        assert "1 minor units unexplained across 8 row(s)" in str(refused.value)
+        assert "1 minor units unexplained across 8 rows" in str(refused.value)
 
     def test_PaymentsTotalsThatTheRowsDoNotMatch_AreRefusedEvenWhenTheBalancesAgree(self):
         # In and out each a pound light, closing untouched: the walk from

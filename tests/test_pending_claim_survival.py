@@ -54,7 +54,7 @@ class TestUnreadableBindingClaims:
         assert len(retained) == 1
         assert report.unreadable == [retained[0].name]
         assert report.merged == 0
-        assert "unreadable claim(s) RETAINED" in report.describe()
+        assert "1 unreadable claim RETAINED" in report.describe()
         assert retained[0].name in report.describe()
 
     def test_TruncatedBindingFile_WhenTheNextPushRuns_IsSweptAndReportedAgain(

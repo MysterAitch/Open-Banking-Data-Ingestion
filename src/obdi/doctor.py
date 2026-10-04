@@ -27,6 +27,7 @@ from pathlib import Path
 
 import httpx
 
+from .plural import agree, plural, word
 from .secrets import SecretError, read_secret
 
 # Where a secret comes from is checked only when the deployment claims to have
@@ -244,7 +245,9 @@ def report(results: list[CheckResult]) -> str:
     failures = sum(1 for r in results if not r.ok)
     lines.append("")
     lines.append(
-        "All checks passed." if not failures else f"{failures} check(s) failed - see above."
+        "All checks passed."
+        if not failures
+        else f"{plural(failures, 'check')} failed - see above."
     )
     return "\n".join(lines)
 
@@ -294,8 +297,8 @@ def rebuild_check(runs: Sequence[Mapping[str, object]]) -> CheckResult:
             name="last rebuild",
             ok=True,
             detail=(
-                f"succeeded at {finished} ({build}): {replayed:,} artefact(s) "
-                f"replayed, {resolved:,} row resolutions"
+                f"succeeded at {finished} ({build}): {plural(replayed, 'artefact')} "
+                f"replayed,{resolved:,} row resolutions"
             ),
         )
     reason = str(latest.get("summary") or "").strip() or "no reason recorded"
@@ -306,7 +309,7 @@ def rebuild_check(runs: Sequence[Mapping[str, object]]) -> CheckResult:
         )
     else:
         state = (
-            f"it replayed {replayed:,} artefact(s) before failing, so the store "
+            f"it replayed {plural(replayed, 'artefact')} before failing, so the store "
             "holds part of its data and looks healthy"
         )
     return CheckResult(
@@ -349,7 +352,8 @@ def collision_checks(
             detail=(
                 "every source in the store is declared in namespaces.SOURCES"
                 if not unknown
-                else f"evidence carries undeclared source(s): {sorted(unknown)} - "
+                else f"evidence carries {plural(len(unknown), 'undeclared source')}: "
+                f"{sorted(unknown)} - "
                 "either the registry is stale or a typo shipped"
             ),
         )
@@ -364,7 +368,8 @@ def collision_checks(
             detail=(
                 "no connection carries a first-party ledger id"
                 if not shared
-                else f"connection(s) {sorted(shared)} share an id with a "
+                else f"{word(len(shared), 'connection')} {sorted(shared)} "
+                f"{agree(len(shared), 'shares')} an id with a "
                 "first-party path - their ledger rows and quota arithmetic "
                 "are mixed. Rename with 'obdi rename-connection'"
             ),
@@ -387,7 +392,8 @@ def collision_checks(
             detail=(
                 "every account resolves to a canonical name"
                 if not suspicious
-                else f"{len(suspicious)} account(s) still hold a provider "
+                else f"{plural(len(suspicious), 'account')} still "
+                f"{agree(len(suspicious), 'holds')} a provider "
                 "reference rather than a name - bind them so the map, not "
                 "the provider, decides what they are called"
             ),
@@ -423,7 +429,7 @@ def collision_checks(
             name="work attached to transactions points at transactions that exist",
             ok=not lost,
             detail=(
-                f"nothing stranded across {len(orphans)} entity-keyed column(s)"
+                f"nothing stranded across {plural(len(orphans), 'entity-keyed column')}"
                 if not lost
                 # Named per table rather than totalled: the number says how much
                 # was lost, the name says what KIND of work it was, and they

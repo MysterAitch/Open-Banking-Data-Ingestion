@@ -23,6 +23,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .plural import plural
+
 if TYPE_CHECKING:
     from .coverage import SilentFeed
     from .identity_health import SharedIdentity
@@ -61,8 +63,8 @@ def _stamp(row: Mapping[str, object]) -> datetime | None:
 def _span_text(span: timedelta) -> str:
     hours = int(span.total_seconds() // 3600)
     if hours < 48:
-        return f"{hours} hour(s)"
-    return f"{span.days} day(s)"
+        return plural(hours, "hour")
+    return plural(span.days, "day")
 
 
 #: The failure-rate rungs beneath total silence: half the asks failing
@@ -299,8 +301,9 @@ def shared_identity_findings(shared: Sequence[SharedIdentity]) -> list[Finding]:
         Finding(
             key=f"shared-identity:{entry.account_id}",
             message=(
-                f"{entry.account_id}: {entry.identities} identity(ies) shared by "
-                f"{entry.rows} rows - Actual would keep one row and drop the "
+                f"{entry.account_id}: "
+                f"{plural(entry.identities, 'identity', 'identities')} shared by "
+                f"{plural(entry.rows, 'row')} - Actual would keep one row and drop the "
                 "rest. 'Rebuild from raw' renumbers them; a duplicate that "
                 "survives a rebuild is a defect worth reporting"
             ),
@@ -386,7 +389,9 @@ def stale_apply_finding(
         if newest is not None
         else "nothing has been applied to Actual: no applied push on record"
     )
-    unread = f"; {unreadable} result file(s) could not be read" if unreadable else ""
+    unread = (
+        f"; {plural(unreadable, 'result file')} could not be read" if unreadable else ""
+    )
     seen = (
         f"the applier was last seen at {applier_seen}"
         if applier_seen

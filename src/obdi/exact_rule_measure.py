@@ -35,6 +35,7 @@ from .accounts import AccountMap
 from .matching import REFUSALS, CandidateIndex, resolve, second_row_verdicts
 from .models import MatchTier, Transaction
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
+from .plural import agree, plural
 from .rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
 from .space_attribution import space_parents
 from .stated_times import settlement_days
@@ -186,7 +187,8 @@ class ExactRuleReport:
             lines.extend(f"  {sentence}" for sentence in figures.sentences())
         if self.unreadable:
             lines.append(
-                f"{self.unreadable} landed artefact(s) could not be read and are in no figure."
+                f"{plural(self.unreadable, 'landed artefact')} could not be read and "
+                f"{agree(self.unreadable, 'is')} in no figure."
             )
         lines.append("")
         lines.append(

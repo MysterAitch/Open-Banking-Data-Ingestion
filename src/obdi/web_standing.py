@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
+from .plural import plural
 from .protection import protection_line
 from .web_accounts import submit_button
 
@@ -85,7 +86,9 @@ def protection_html(protection: Any, ref: str, month: str) -> str:
                 f"<p>A change to it was accepted on {_esc(protection.accepted_on.isoformat())}."
                 "</p>"
             )
-        detail += f"<p>{_esc(str(protection.events))} recorded event(s) in its history.</p>"
+        detail += (
+            f"<p>{_esc(plural(protection.events, 'recorded event'))} in its history.</p>"
+        )
         detail += _post(
             "/protect-withdraw", ref, month, "", "Withdraw protection"
         )

@@ -180,7 +180,7 @@ class TestTheFormStillWorksWithoutScripting:
         )
 
         assert response.status_code == 200
-        assert "1 file(s) read" in response.text
+        assert "1 file read" in response.text
 
     def test_ThePageOffersTheOverride_ForWhenAStoredCopyIsDoubted(self, server):
         response = httpx.get(f"{server}/statement-shape", timeout=20)

@@ -478,7 +478,7 @@ class TestTheAccountsPage:
         assert f"/edit-account?ref={MAIN}" not in page, "an undeclared account has nothing to edit"
         assert "/edit-account?ref=tin" in page
         assert "account (starling)" in page, "the provider's own display name"
-        assert "1 more account(s) are held under a provider-qualified name" in page
+        assert "1 more account is held under a provider-qualified name" in page
 
     def test_Page_ExplainsEachInferredKindWithItsReasonAndLeavesTheRestEmpty(self, lab):
         page = lab.get("/accounts").text

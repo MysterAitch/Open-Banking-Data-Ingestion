@@ -23,6 +23,7 @@ from functools import lru_cache
 from ..identity import content_key
 from ..models import SourceTier, Transaction
 from ..namespaces import UK_CARD_STATEMENT_SOURCE
+from ..plural import plural
 from ..statement_columns import Row
 from .base import ParseError, StatementParser
 from .capital_one_pdf import read_statement as read_capital_one
@@ -220,7 +221,7 @@ class PdfStatementParser(StatementParser):
                 f"{self.source}: the rows do not carry the statement's "
                 f"opening balance to its closing one - "
                 f"{reading.discrepancy_minor} minor units unexplained across "
-                f"{len(reading.transactions)} row(s). A missed row or a "
+                f"{plural(len(reading.transactions), 'row')}. A missed row or a "
                 "credit read as a spend both look like this; the file is "
                 "kept, but nothing derived from it is stored"
             )

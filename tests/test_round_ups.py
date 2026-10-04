@@ -395,7 +395,7 @@ class TestTheRoundUpSentenceOnTheMaskedLedgerPage:
         page = render(rebuilt)
 
         assert (
-            "5 feed row(s) carry a round-up. 4 round-up leg(s) to a Space are held, "
+            "5 feed rows carry a round-up. 4 round-up legs to a Space are held, "
             "and 4 of them are paired with a row in that Space. "
             "0 could not be read and hold no leg."
         ) in page

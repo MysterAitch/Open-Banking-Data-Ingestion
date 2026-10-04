@@ -89,7 +89,7 @@ class TestABatchDoesNotPayForWhatItDoesNotShow:
         response = _upload(server, 4)
 
         assert response.status_code == 200
-        assert "4 file(s) read" in response.text
+        assert "4 files read" in response.text
         assert counted == [], f"batch read geometry {len(counted)} time(s)"
 
     def test_TheCostOfABatch_DoesNotGrowWithItsSize(self, server, counted):

@@ -29,6 +29,8 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .plural import agree, plural
+
 _FROM_TO = re.compile(r"from=(\d{4}-\d{2}-\d{2})&to=(\d{4}-\d{2}-\d{2})")
 _CHANGES = re.compile(r"changes[Ss]ince=([0-9T:.+Z-]+)")
 _SINCE = re.compile(r"since=(\d{4}-\d{2}-\d{2})")
@@ -388,7 +390,8 @@ def timeline_svg(
     notes = []
     if mismatches:
         notes.append(
-            f"{len(mismatches)} ask(s) DISAGREE with their own landed "
+            f"{plural(len(mismatches), 'ask')} {agree(len(mismatches), 'disagrees').upper()} with "
+            f"{agree(len(mismatches), 'its')} own landed "
             "artefact about the window asked - investigate: "
             + " | ".join(html.escape(m) for m in mismatches[:3])
         )
@@ -396,7 +399,7 @@ def timeline_svg(
     # can trust, where an absent count reads as "nobody looked".
     notes.append(f"{refused_drawn} of {len(bars)} asks in range refused")
     if undrawn:
-        notes.append(f"{undrawn} point-in-time ask(s) drawn as diamonds")
+        notes.append(f"{plural(undrawn, 'point-in-time ask')} drawn as diamonds")
     if clipped_rows:
         notes.append(f"showing newest {max_rows} asks")
     note_html = (

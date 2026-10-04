@@ -29,6 +29,7 @@ from .matching import (
     SETTLEMENT_KEEPS_ID,
 )
 from .models import SourceTier, TransactionStatus
+from .plural import agree, plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 
@@ -331,8 +332,8 @@ class ReviewReport:
 
     def describe(self, *, masked: bool = True, unmask_hint: str = "") -> str:
         lines = [
-            f"{self.open_flags} open flag(s) across "
-            f"{self.total_transactions} transaction(s)"
+            f"{plural(self.open_flags, 'open flag')} across "
+            f"{plural(self.total_transactions, 'transaction')}"
         ]
         if masked:
             lines.append(
@@ -371,11 +372,13 @@ class ReviewReport:
                 if band in self.breakdown.by_neighbours:
                     lines.append(f"    {band}: {self.breakdown.by_neighbours[band]}")
         lines.append(
-            f"  {self.declaration_matches} flagged transaction(s) match a "
+            f"  {plural(self.declaration_matches, 'flagged transaction')} "
+            f"{agree(self.declaration_matches, 'matches')} a "
             "declared standing order or direct debit"
         )
         lines.append(
-            f"  {self.bank_recurring} flagged transaction(s) are bank-labelled "
+            f"  {plural(self.bank_recurring, 'flagged transaction')} "
+            f"{agree(self.bank_recurring, 'is')} bank-labelled "
             "DIRECT_DEBIT or STANDING_ORDER"
         )
         if self.bank_categories:

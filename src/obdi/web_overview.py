@@ -42,6 +42,7 @@ from .overview import (
     AttentionItem,
     Overview,
 )
+from .plural import plural
 from .proof_rail import build_rail, rail_svg
 from .standing_data import standing_lines
 
@@ -68,11 +69,6 @@ _STATE_PILL = {
 
 #: States for which "when did the provider last answer" is not a question.
 _NOT_ASKED_ABOUT = frozenset({FILE_ONLY, EMPTY, ARCHIVED})
-
-
-def plural(count: int, singular: str, plural_form: str | None = None) -> str:
-    """A count with its noun, so that no sentence on the page says "(s)"."""
-    return f"{count} {singular if count == 1 else plural_form or singular + 's'}"
 
 
 def serial(parts: Sequence[str]) -> str:

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .plural import agree, plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 #: Artefact sources whose records name a payment by an id it will NOT keep.
@@ -96,8 +97,8 @@ class IdentityHealth:
             lines.append("  no rows share an identity")
         for shared in self.shared:
             lines.append(
-                f"  {shared.account_id}: {shared.identities} identity(ies) "
-                f"shared by {shared.rows} row(s)"
+                f"  {shared.account_id}: {plural(shared.identities, 'identity', 'identities')} "
+                f"shared by {plural(shared.rows, 'row')}"
             )
 
         lines.append("")
@@ -123,26 +124,31 @@ class IdentityHealth:
                     "renumbers one payment"
                 )
             if tally.surplus:
-                line += f" - {tally.surplus} more row(s) than ids"
+                line += f" - {plural(tally.surplus, 'more row')} than ids"
             if tally.absorbing_rows:
                 line += (
-                    f" ({tally.absorbing_rows} row(s) have been sighted under "
+                    f" ({plural(tally.absorbing_rows, 'row')} "
+                    f"{agree(tally.absorbing_rows, 'has')} been sighted under "
                     "more than one id)"
                 )
             lines.append(line)
         if self.folded:
             proven = self.folded_listed_together
             lines.append(
-                f"  TOTAL: {self.folded} provider id(s) have no row of their own. "
-                f"{proven} are proven separate payments folded into another row; "
-                f"{self.folded - proven} were never listed beside the id that holds "
+                f"  TOTAL: {plural(self.folded, 'provider id')} "
+                f"{agree(self.folded, 'has')} no row of "
+                f"{agree(self.folded, 'its')} own. "
+                f"{proven} {agree(proven, 'is')} proven separate payments folded into "
+                f"another row; {self.folded - proven} "
+                f"{agree(self.folded - proven, 'was')} never listed beside the id that holds "
                 "the row, which is what one payment given a new id looks like"
             )
         else:
             lines.append("  every provider id reported has a row of its own")
         if self.surplus:
             lines.append(
-                f"  TOTAL: {self.surplus} payment(s) are held by more than one "
+                f"  TOTAL: {plural(self.surplus, 'payment')} {agree(self.surplus, 'is')} "
+                "held by more than one "
                 "row - the same provider id is the only id of two rows, so the "
                 "payment is counted twice"
             )

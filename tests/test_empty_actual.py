@@ -595,7 +595,9 @@ class TestTheQueuedRequest:
         db, _map, actual_dir = actual_env
         queue_push({"version": 3, "kind": "audit", "accounts": {}}, actual_dir, prefix="audit")
 
-        with pytest.raises(ValueError, match=r"1 applier request\(s\) are queued"):
+        with pytest.raises(
+            ValueError, match=r"1 request to the process that applies requests to Actual is queued"
+        ):
             queue_actual_empty(db, SHOWN)
 
         assert not list((actual_dir / "requests").glob("empty-*.json"))
@@ -767,7 +769,7 @@ class TestWhatObdiDoesWhenTheApplierReportsAnEmpty:
         sent = json.loads(request.read_text(encoding="utf-8"))
         assert sorted(p["canonical_id"] for p in sent["provision"]) == [MAIN, POT]
         assert sent["accounts"] == {}
-        assert "forgot 2 link(s)" in summary
+        assert "forgot 2 links" in summary
         assert read_map(map_path)["actual"] == []
 
     def test_NextPush_AfterAPartialEmptyAndAnAudit_StillUsesTheLinksItHad(self, actual_env):
@@ -863,7 +865,7 @@ class TestAPushWhileAnEmptyIsPending:
         sent = json.loads(request.read_text(encoding="utf-8"))
         assert sorted(p["canonical_id"] for p in sent["provision"]) == [MAIN, POT]
         assert sent["accounts"] == {}
-        assert "forgot 2 link(s)" in said
+        assert "forgot 2 links" in said
 
     def test_Push_AfterACompleteEmptyWhileAnotherEmptyIsQueued_SettlesTheOldOneButIsSkipped(
         self, actual_env

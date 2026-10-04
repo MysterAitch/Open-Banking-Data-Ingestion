@@ -198,7 +198,7 @@ class TestEnvelope:
 
         summary = queue_actual_audit(db)
 
-        assert "auditing 1 Actual-bound account(s)" in summary
+        assert "auditing 1 Actual-bound account" in summary
         assert "1 named awaiting provisioning" in summary
         assert "1 unnamed (bind first)" in summary
 

@@ -78,6 +78,7 @@ from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .outbound import install_if_requested as install_outbound_refusal_if_requested
 from .overview import Overview, OverviewCache, build_overview
+from .plural import agree, plural
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
 from .protection import recheck as recheck_protections
@@ -292,8 +293,8 @@ def bind_to_canonical(db_path: Path, provider_ref: str, canonical: str) -> str:
     )
     short = f"{provider_ref[:8]}..." if len(provider_ref) > 12 else provider_ref
     return (
-        f"bound {short} -> {canonical}: {moved} stored "
-        "row(s) moved; artefacts and the attempt ledger follow the new name"
+        f"bound {short} -> {canonical}: {plural(moved, 'stored row')} "
+        "moved; artefacts and the attempt ledger follow the new name"
     )
 
 
@@ -379,8 +380,9 @@ def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
         moved = store.rename_connection(old_name, new_name)
     return (
         f"renamed '{old_name}' to '{new_name}': credentials moved, plus "
-        f"{moved['artefacts']} artefact(s), {moved['attempts']} ledger row(s) "
-        f"and {moved['facts']} provider fact(s). Payload bytes and account "
+        f"{plural(moved['artefacts'], 'artefact')}, "
+        f"{plural(moved['attempts'], 'ledger row')} "
+        f"and {plural(moved['facts'], 'provider fact')}. Payload bytes and account "
         "references are untouched."
     )
 
@@ -519,7 +521,7 @@ def queue_actual_push(db_path: Path) -> str:
     forgotten = settle_emptied_budgets_for(db_path)
     if forgotten is not None:
         lines.append(
-            f"Actual was emptied since the last push: forgot {forgotten} link(s) "
+            f"Actual was emptied since the last push: forgot {plural(forgotten, 'link')} "
             "to accounts that no longer exist, so every account is provisioned afresh"
         )
     # A sentence and not an error: the scheduler runs this after a pull cycle
@@ -551,7 +553,8 @@ def queue_actual_push(db_path: Path) -> str:
         )
     if waiting.names:
         lines.append(
-            f"{len(waiting.names)} earlier push(es) were already waiting; this one differs "
+            f"{plural(len(waiting.names), 'earlier push', 'earlier pushes')} "
+            f"{agree(len(waiting.names), 'was')} already waiting; this one differs "
             "from them (it is built from the store as it is now), so it is queued behind them"
         )
     queued = queue_push(envelope, actual_dir)
@@ -559,8 +562,7 @@ def queue_actual_push(db_path: Path) -> str:
     raw_provision = envelope.get("provision")
     lines.append(
         f"queued {queued.name}: "
-        f"{len(raw_accounts) if isinstance(raw_accounts, dict) else 0} bound "
-        f"account(s), "
+        f"{plural(len(raw_accounts) if isinstance(raw_accounts, dict) else 0, 'bound account')}, "
         f"{len(raw_provision) if isinstance(raw_provision, list) else 0} to "
         "provision"
     )
@@ -1034,7 +1036,7 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
                     Finding(
                         f"consent:{name}",
                         f"connection '{name}': consent expires in "
-                        f"{remaining} day(s) - reconfirm at the bank "
+                        f"{plural(remaining or 0, 'day')} - reconfirm at the bank "
                         f"({label})",
                         rung=rung,
                     )
@@ -1257,8 +1259,8 @@ def queue_actual_prune(
     raw_accounts = envelope.get("accounts")
     count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
     return (
-        f"queued {queued.name}: pruning orphaned imports across {count} "
-        "bound account(s) - only rows carrying our imported ids are ever "
+        f"queued {queued.name}: pruning orphaned imports across "
+        f"{plural(count, 'bound account')} - only rows carrying our imported ids are ever "
         "touched"
     )
 
@@ -1302,7 +1304,8 @@ def queue_actual_align(
     waiting = queued_requests(actual_dir)
     if waiting:
         raise ValueError(
-            f"{len(waiting)} applier request(s) are queued or being worked on "
+            f"{plural(len(waiting), 'request')} to the process that applies requests "
+            f"to Actual {agree(len(waiting), 'is')} queued or being worked on "
             f"({', '.join(sorted(str(w.get('kind', '')) for w in waiting))}). "
             "Nothing was queued: wait for them to finish, then audit again and press again."
         )
@@ -1333,7 +1336,7 @@ def queue_actual_align(
     raw_accounts = envelope.get("accounts")
     count = len(raw_accounts) if isinstance(raw_accounts, dict) else 0
     return (
-        f"queued {queued.name}: {count} bound account(s); the removal step may touch "
+        f"queued {queued.name}: {plural(count, 'bound account')}; the removal step may touch "
         f"{len(scope)} of them, and only rows carrying obdi's own imported ids"
     )
 
@@ -1372,7 +1375,8 @@ def queue_actual_empty(db_path: Path, shown: Mapping[str, int]) -> str:
     waiting = queued_requests(actual_dir)
     if waiting:
         raise ValueError(
-            f"{len(waiting)} applier request(s) are queued or being worked on "
+            f"{plural(len(waiting), 'request')} to the process that applies requests "
+            f"to Actual {agree(len(waiting), 'is')} queued or being worked on "
             f"({', '.join(sorted(str(w.get('kind', '')) for w in waiting))}). "
             "Nothing was queued: wait for them to finish, then press again."
         )
@@ -1380,8 +1384,8 @@ def queue_actual_empty(db_path: Path, shown: Mapping[str, int]) -> str:
         raise ValueError("No accounts to empty - nothing queued.")
     queued = queue_push(build_empty_envelope(shown), actual_dir, prefix="empty")
     return (
-        f"queued {queued.name}: emptying {len(shown)} account(s) holding "
-        f"{sum(shown.values())} row(s) in Actual"
+        f"queued {queued.name}: emptying {plural(len(shown), 'account')} holding "
+        f"{plural(sum(shown.values()), 'row')} in Actual"
     )
 
 
@@ -1480,7 +1484,7 @@ def queue_actual_audit(db_path: Path) -> str:
     )
     unnamed = len({a for a in account_ids if ":" in a})
     return (
-        f"queued {queued.name}: auditing {count} Actual-bound account(s); "
+        f"queued {queued.name}: auditing {plural(count, 'Actual-bound account')}; "
         f"not auditable yet: {awaiting} named awaiting provisioning "
         f"(next push creates them), {unnamed} unnamed (bind first)"
     )
@@ -2806,7 +2810,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 "artefacts that carry running_balance"
             )
         lines = [
-            f"{report['rows']} artefact row(s) held, {with_balance} carry "
+            f"{plural(int(str(report['rows'])), 'artefact row')} held, {with_balance} carry "
             "the bank's own running balance:",
             "",
         ]
@@ -2818,8 +2822,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 checks = int(str(entry["checks"]))
                 breaks = int(str(entry["breaks"]))
                 total_breaks += breaks
-                verdict = "clean" if not breaks else f"{breaks} BREAK(S)"
-                lines.append(f"  {ref}: {checks} chain check(s), {verdict}")
+                verdict = "clean" if not breaks else plural(breaks, "break")
+                lines.append(f"  {ref}: {plural(checks, 'chain check')}, {verdict}")
                 convention = entry.get("convention")
                 if convention:
                     lines.append(
@@ -2829,7 +2833,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 disagreeing = int(str(entry.get("artefacts_disagreeing", 0) or 0))
                 if disagreeing:
                     lines.append(
-                        f"    {disagreeing} artefact(s) fit a different "
+                        f"    {plural(disagreeing, 'artefact')} "
+                        f"{'fits' if disagreeing == 1 else 'fit'} a different "
                         "convention alone - walked under the majority anyway, "
                         "so any break they hide is listed above"
                     )
@@ -2854,7 +2859,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         lines.append("")
         if total_breaks:
             lines.append(
-                f"{total_breaks} break(s): money moved that the held "
+                f"{plural(total_breaks, 'break')}: money moved that the held "
                 "transactions do not explain - candidate missing or "
                 "mis-valued rows worth a targeted re-fetch."
             )
@@ -2884,7 +2889,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if not measured:
             return "no starling rows with both timestamps held yet"
         lines = [
-            f"{measured} payment(s) carry both an economic and a "
+            f"{plural(measured, 'payment')} "
+            f"{'carries' if measured == 1 else 'carry'} both an economic and a "
             "settlement stamp (starling, the truth set):",
             "",
         ]

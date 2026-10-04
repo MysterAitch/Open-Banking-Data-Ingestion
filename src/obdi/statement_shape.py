@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import NewType
 
 from .masking import mask_characters
+from .plural import plural
 from .timings import Timings
 
 #: Text taken verbatim from a statement: payees, addresses, account
@@ -215,16 +216,16 @@ class ShapeReport:
             )
         if not self.line_count:
             return (
-                f"{self.path}: {self.page_count} page(s) but NO TEXT layer - a "
+                f"{self.path}: {plural(self.page_count, 'page')} but NO TEXT layer - a "
                 "scanned or photographed statement. Text-embedded PDFs only "
                 "for now; OCR is a separate problem."
             )
         header = (
-            f"{self.path}: {self.line_count} line(s) across {self.page_count} "
-            f"page(s)"
+            f"{self.path}: {plural(self.line_count, 'line')} across "
+            f"{plural(self.page_count, 'page')}"
             + (
-                f", read as {len(self.rows)} row(s) of "
-                f"{len(self.edges)} column(s)"
+                f", read as {plural(len(self.rows), 'row')} of "
+                f"{plural(len(self.edges), 'column')}"
                 if self.rows
                 else ""
                 if not self.columns_attempted
@@ -290,14 +291,14 @@ def shape_report(
             masked_lines = [mask_line(line) for line in raw[:limit]]
             if len(raw) > limit:
                 masked_lines.append(
-                    MaskedText(f"... {len(raw) - limit} further line(s) not shown")
+                    MaskedText(f"... {plural(len(raw) - limit, 'further line')} not shown")
                 )
             report.lines = masked_lines
         else:
             raw_lines = list(raw[:limit])
             if len(raw) > limit:
                 raw_lines.append(
-                    RawText(f"... {len(raw) - limit} further line(s) not shown")
+                    RawText(f"... {plural(len(raw) - limit, 'further line')} not shown")
                 )
             report.lines = raw_lines
 

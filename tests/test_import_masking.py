@@ -103,7 +103,7 @@ class TestThePreviewIsMaskedByDefault:
         page = preview(served).text
 
         assert "<strong>march.csv</strong> parsed as StarlingCsvParser" in page
-        assert "2 row(s)" in page
+        assert "2 rows" in page
         assert "2026-03-14 .. 2026-03-20" in page
         assert "dates %d/%m/%Y" in page
 

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import Transaction
+from .plural import plural
 from .store import Store
 
 
@@ -80,12 +81,12 @@ class SweepSummary:
             f" ({self.now_categorised / self.eligible:.0%})" if self.eligible else ""
         )
         return (
-            f"considered {self.considered} transaction(s), {self.eligible} "
-            f"eligible after skipping {self.transfer_legs} confirmed transfer "
-            f"leg(s): {self.categorised} newly categorised, {self.agreed} "
+            f"considered {plural(self.considered, 'transaction')}, {self.eligible} "
+            f"eligible after skipping {plural(self.transfer_legs, 'confirmed transfer leg')}: "
+            f"{self.categorised} newly categorised, {self.agreed} "
             f"already agreed, {self.protected} left alone (higher provenance), "
-            f"{self.payees_normalised} payee(s) normalised. "
-            f"{self.now_categorised} of {self.eligible} eligible row(s) now "
+            f"{plural(self.payees_normalised, 'payee')} normalised. "
+            f"{self.now_categorised} of {plural(self.eligible, 'eligible row')} now "
             f"carry a category{share}"
         )
 
@@ -263,10 +264,10 @@ class PropagationReport:
     def describe(self) -> str:
         rows = sum(len(p.targets) for p in self.proposals)
         return (
-            f"{len(self.proposals)} series from {self.seeds} human "
-            f"seed(s): {rows} row(s) proposed, {self.contested} contested "
+            f"{len(self.proposals)} series from {plural(self.seeds, 'human seed')}: "
+            f"{plural(rows, 'row')} proposed, {self.contested} contested "
             f"(compatible with more than one human value - left alone), "
-            f"{self.transfer_legs} confirmed transfer leg(s) outside the "
+            f"{plural(self.transfer_legs, 'confirmed transfer leg')} outside the "
             "pool (transfers stay uncategorised)"
         )
 
@@ -532,7 +533,7 @@ class Explanation:
         if not self.count:
             return f"no transaction matches '{self.needle}'"
         lines = [
-            f"{self.count} transaction(s) matching '{self.needle}': "
+            f"{plural(self.count, 'transaction')} matching '{self.needle}': "
             f"{self.outgoing} out, {self.incoming} in, "
             f"{self.first} .. {self.last}"
         ]
@@ -549,7 +550,7 @@ class Explanation:
         if self.typical_gap_days is not None:
             rhythm = self.cadence()
             named = f" ({rhythm})" if rhythm else " (no regular rhythm)"
-            lines.append(f"  typical gap: {self.typical_gap_days} day(s){named}")
+            lines.append(f"  typical gap: {plural(self.typical_gap_days, 'day')}{named}")
         if self.day_of_month:
             days = ", ".join(str(day) for day in self.day_of_month)
             lines.append(f"  lands on day: {days}")

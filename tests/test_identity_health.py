@@ -277,7 +277,7 @@ class TestProviderIdsAgainstTheRowsThatHoldThem:
         assert tally.surplus == 1
         assert tally.folded == 0
         assert report.surplus == 1
-        assert "1 more row(s) than ids" in text
+        assert "1 more row than ids" in text
         assert "held by more than one row" in text
 
     def test_Report_WhenOnePaymentIsFoldedAndAnotherHeldTwice_NeitherHidesTheOther(
@@ -325,7 +325,7 @@ class TestProviderIdsAgainstTheRowsThatHoldThem:
             report = identity_health(store)
 
         assert report.surplus == 0
-        assert "more row(s) than ids" not in report.describe()
+        assert "more row" not in report.describe()
 
     def test_Report_ForASourceThatCarriesNoIds_SaysNothingAboutIt(self, tmp_path):
         """An export with no provider ids offers nothing to count, and a row

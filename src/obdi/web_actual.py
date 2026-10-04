@@ -24,7 +24,6 @@ from .actual_audit import (
     account_pairs,
     accounts_of,
     count_of,
-    counted,
     differing_accounts,
 )
 from .actual_verdict import (
@@ -38,6 +37,7 @@ from .actual_verdict import (
     unreadable_verdict,
     when,
 )
+from .plural import plural as counted
 from .web_empty import empty_section
 from .web_marker import (
     DIFFERS,

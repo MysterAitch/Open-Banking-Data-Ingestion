@@ -54,4 +54,4 @@ class TestPullReporting:
         assert "unbound" in result.describe()
 
     def test_Pull_WhenNothingNoteworthy_DescriptionStaysTerse(self):
-        assert PullResult(provider="starling", accounts=2).describe() == "starling: 2 account(s)"
+        assert PullResult(provider="starling", accounts=2).describe() == "starling: 2 accounts"

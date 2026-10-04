@@ -631,7 +631,7 @@ class TestAStatementWithNoTransactions:
     def test_NationwideStatement_StartDifferentFromEndWithNoRows_IsRefused(self):
         lost = replaced(QUIET, "|75.25|75.25", "|75.25|80.25")
 
-        assert "500 minor units unexplained across 0 row(s)" in refused_by(lost)
+        assert "500 minor units unexplained across 0 rows" in refused_by(lost)
 
 
 class TestTheGate:
@@ -639,7 +639,7 @@ class TestTheGate:
         # The last row: nothing prints a balance after it to catch it earlier.
         broken = without(STATEMENT, "ELECTRICITY")
 
-        assert "9999 minor units unexplained across 6 row(s)" in refused_by(broken)
+        assert "9999 minor units unexplained across 6 rows" in refused_by(broken)
 
     def test_NationwideStatement_WhenARowIsMissingMidTable_IsRefusedAtTheNextPrintedBalance(self):
         broken = without(STATEMENT, "EMPLOYER")
@@ -652,7 +652,7 @@ class TestTheGate:
     def test_NationwideStatement_WhenEndBalanceIsAPennyOut_IsRefused(self):
         off = replaced(STATEMENT, "|-100.00|470.57", "|-100.00|470.58")
 
-        assert "1 minor units unexplained across 7 row(s)" in refused_by(off)
+        assert "1 minor units unexplained across 7 rows" in refused_by(off)
 
     def test_NationwideStatement_WhenARunningBalanceDoesNotFollow_IsRefused(self):
         off = replaced(STATEMENT, "|-665.50", "|-665.51")

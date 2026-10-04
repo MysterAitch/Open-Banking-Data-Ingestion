@@ -79,6 +79,7 @@ from .accounts import AccountMap, AccountRef
 from .arrival_order import in_arrival_order
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
 from .models import SourceTier, Transaction
+from .plural import plural as _plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -121,10 +122,6 @@ _PDF = "application/pdf"
 
 def _direction(minor: int) -> str:
     return OUT if minor < 0 else IN
-
-
-def _plural(count: int, singular: str, plural: str | None = None) -> str:
-    return f"{count} {singular if count == 1 else plural or singular + 's'}"
 
 
 def _listed(names: Sequence[str]) -> str:

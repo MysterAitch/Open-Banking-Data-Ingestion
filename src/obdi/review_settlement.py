@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .plural import plural
 from .review_report import SETTLED_CLASSES, FlagClass, assess_flags
 from .store import Store
 
@@ -46,15 +47,19 @@ class SettleReport:
 
     def describe(self) -> str:
         if not self.settled:
-            return f"no review flag was settled; {self.still_open} remain open"
+            return (
+                f"no review flag was settled; {self.still_open} "
+                f"{'remains' if self.still_open == 1 else 'remain'} open"
+            )
         parts = ", ".join(
             f"{count} {flag_class.value}"
             for flag_class in SETTLED_CLASSES
             if (count := self.settled.get(flag_class, 0))
         )
         return (
-            f"{self.total} review flag(s) settled by evidence already held "
-            f"({parts}); {self.still_open} remain open"
+            f"{plural(self.total, 'review flag')} settled by evidence already held "
+            f"({parts}); {self.still_open} "
+            f"{'remains' if self.still_open == 1 else 'remain'} open"
         )
 
 

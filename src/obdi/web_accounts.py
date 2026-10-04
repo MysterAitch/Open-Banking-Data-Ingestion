@@ -48,6 +48,7 @@ from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .logs import say
 from .namespaces import validate_canonical_name
 from .overview import ARCHIVED
+from .plural import agree, plural
 from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .standing_data import AccountStanding, standing_lines
@@ -414,7 +415,7 @@ def _known_row(
     detail.append(html.escape(account.kind) if account.kind else "no kind")
     if account.parent and show_parent:
         detail.append(f"under {html.escape(account.parent)}")
-    detail.append(f"{account.rows} row(s)")
+    detail.append(plural(account.rows, "row"))
     if spaces:
         detail.append(_spaces_phrase(spaces, today))
     state = (
@@ -496,9 +497,10 @@ def _listing(
 def _declare_known_section(known: KnownAccounts) -> str:
     waiting = known.undeclared
     unnamed = (
-        f'<p class="muted">{known.unnamed} more account(s) are held under a '
-        "provider-qualified name that no account can carry. Bind them to a name "
-        "first; they cannot be declared as they stand.</p>"
+        f'<p class="muted">{plural(known.unnamed, "more account")} '
+        f"{agree(known.unnamed, 'is')} held under a "
+        "provider-qualified name that no account can carry. Bind a name first: "
+        "such an account cannot be declared as it stands.</p>"
         if known.unnamed
         else ""
     )

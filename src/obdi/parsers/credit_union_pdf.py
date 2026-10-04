@@ -73,6 +73,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
+from ..plural import plural
 from .base import ParseError
 from .statement_reading import StatementReading, StatementRow
 
@@ -487,7 +488,7 @@ def read_statement(grid: list[list[str]]) -> StatementReading:
         refused = StatementReading()
         refused.notes.append(
             f"this statement covers {len(parts)} accounts (its page numbering "
-            f"restarts {len(parts) - 1} time(s)) and so cannot be assigned to "
+            f"restarts {plural(len(parts) - 1, 'time')}) and so cannot be assigned to "
             "one account - refusing rather than filing every account's rows "
             "under one"
         )

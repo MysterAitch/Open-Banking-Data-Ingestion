@@ -298,7 +298,7 @@ class TestTheColumnViewIsMaskedOnTheSameTerms:
 
         text = shape_report(path).describe()
 
-        assert "read as 2 row(s) of 2 column(s)" in text
+        assert "read as 2 rows of 2 columns" in text
         assert "ACME" not in text
         assert "1,234.56" not in text
         assert "SAINSBURYS" not in text

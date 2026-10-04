@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 
 from .accounts import AccountMap
 from .jsontypes import rows, text
+from .plural import agree, plural
 from .providers import starling
 from .store import Store
 
@@ -78,8 +79,8 @@ class ProbeReport:
             return "The probe could not run - see the problems below."
         if self.before_cutoff > 0:
             return (
-                f"UPDATE-TIME SEMANTICS DEMONSTRATED: {self.before_cutoff} "
-                f"item(s) came back whose transactionTime is BEFORE the "
+                f"UPDATE-TIME SEMANTICS DEMONSTRATED: {plural(self.before_cutoff, 'item')} "
+                f"came back whose transactionTime is BEFORE the "
                 "cutoff. They can only be in this response because their "
                 "records CHANGED after it. A rolling changesSince cursor "
                 "will therefore still receive amendments - the safe design "
@@ -87,7 +88,8 @@ class ProbeReport:
             )
         if self.items > 0:
             return (
-                f"INCONCLUSIVE: all {self.items} returned item(s) have "
+                f"INCONCLUSIVE: all {plural(self.items, 'returned item')} "
+                f"{agree(self.items, 'has')} "
                 "transactionTime after the cutoff, which both semantics "
                 "produce when nothing was amended in the window. Use a "
                 "suggested cutoff that straddles a known amendment."

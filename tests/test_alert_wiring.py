@@ -553,7 +553,7 @@ class TestAStalePushReachesTheAlert:
         findings = self._findings(tmp_path)
 
         assert _keys(findings, STALE) == [STALE]
-        assert "30 hour(s)" in _message(findings, STALE)
+        assert "30 hours" in _message(findings, STALE)
 
     @pytest.mark.parametrize(("hours", "expected"), [(23, []), (25, [STALE])])
     def test_Alert_AroundTheThreshold_FiresOnlyBeyondIt(
@@ -592,7 +592,7 @@ class TestAStalePushReachesTheAlert:
         findings = self._findings(tmp_path)
 
         assert _keys(findings, STALE) == [STALE]
-        assert "1 result file(s) could not be read" in _message(findings, STALE)
+        assert "1 result file could not be read" in _message(findings, STALE)
 
     def test_Alert_WhenAnUnreadableFileSitsBesideARecentApply_RaisesNothing(
         self, tmp_path, configured

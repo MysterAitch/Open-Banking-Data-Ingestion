@@ -427,8 +427,8 @@ class TestReconnectDriftIsDetected:
 
         joined = " | ".join(findings)
         assert "ob-halifax -> ob-nationwide" in joined
-        assert "2 account(s) no longer approved" in joined
-        assert "1 new account(s) approved" in joined
+        assert "2 accounts no longer approved" in joined
+        assert "1 new account approved" in joined
 
     def test_FirstEverAuthorisation_HasNothingToCompare(self, tmp_path):
         with Store(tmp_path / "s.sqlite3") as store:

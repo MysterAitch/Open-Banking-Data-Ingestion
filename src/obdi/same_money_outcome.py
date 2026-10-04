@@ -18,13 +18,11 @@ from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
+from .plural import plural
+
 #: How many entries a masked list shows before saying how many more there are,
 #: so a long run of dates stays readable on a phone.
 LIST_CAP = 20
-
-
-def plural(count: int, singular: str, plural_form: str | None = None) -> str:
-    return f"{count} {singular if count == 1 else plural_form or singular + 's'}"
 
 
 def dated_list(items: Iterable[object]) -> str:

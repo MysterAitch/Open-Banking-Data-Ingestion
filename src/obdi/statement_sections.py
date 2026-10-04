@@ -44,6 +44,7 @@ from .namespaces import validate_canonical_name
 from .parsers.base import StatementParser
 from .parsers.pdf_statements import PdfStatementParser, SectionReading
 from .parsers.uk_banks import detect
+from .plural import agree, plural
 from .protection import recheck
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
@@ -411,14 +412,15 @@ def replay_batches(
     except (DataError, ValueError) as exc:
         if assigned:
             result.problems.append(
-                f"{len(assigned)} assigned section(s) of a kept statement could "
+                f"{plural(len(assigned), 'assigned section')} of a kept statement could "
                 f"not be read back: {exc}"
             )
         return result
     if read is None:
         if assigned:
             result.problems.append(
-                f"{len(assigned)} section(s) were assigned, but the statement now "
+                f"{plural(len(assigned), 'section')} {agree(len(assigned), 'was')} assigned, "
+                "but the statement now "
                 "reads as a single account"
             )
         return result

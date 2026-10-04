@@ -610,7 +610,7 @@ class TestTheGate:
     def test_HalifaxAccountStatement_WhenTheClosingBalanceIsAPennyOut_IsRefused(self):
         off = replaced(STATEMENT, "|-100.00|-90.50", "|-100.00|-90.51")
 
-        assert "1 minor units unexplained across 5 row(s)" in refused_by(off)
+        assert "1 minor units unexplained across 5 rows" in refused_by(off)
 
     def test_HalifaxAccountStatement_WhenARunningBalanceDoesNotFollow_NamesTheFirstRowThatFails(
         self,
@@ -673,7 +673,7 @@ class TestAStatementWithNoTransactions:
     def test_HalifaxAccountStatement_BalancesThatDifferWithNoRows_IsRefused(self):
         lost = replaced(QUIET, "|75.25|75.25", "|75.25|80.25")
 
-        assert "500 minor units unexplained across 0 row(s)" in refused_by(lost)
+        assert "500 minor units unexplained across 0 rows" in refused_by(lost)
 
 
 class TestTwoPages:

@@ -216,7 +216,7 @@ class TestARebuildSaysWhatItSettled:
         report = rebuild_from_raw(store)
 
         assert report.review_settled == {FlagClass.LISTED_TOGETHER: 1}
-        assert "1 review flag(s) settled" in report.describe()
+        assert "1 review flag settled" in report.describe()
         assert "0 remain open" in report.describe()
 
     def test_Rebuild_WhenNothingWasSettled_SaysNothingAboutIt(self, store):

@@ -26,6 +26,7 @@ from .balance_anchors import effective_opening, unitemised_for_store
 from .clearing import cleared_entity_ids
 from .family_anchors import Families
 from .models import Transaction
+from .plural import plural, word
 from .replay import (
     ActualAccountBinding,
     OpeningBalance,
@@ -87,11 +88,11 @@ class PendingMergeReport:
             return ""
         note = (
             f"merged {self.merged} of {self.offered} applier-minted "
-            "binding(s) into the account map"
+            f"{word(self.offered, 'binding')} into the account map"
         )
         if self.unreadable:
             note += (
-                f"; {len(self.unreadable)} unreadable claim(s) RETAINED for "
+                f"; {plural(len(self.unreadable), 'unreadable claim')} RETAINED for "
                 "repair (any account they name stays unbound until they are "
                 "readable or removed): " + ", ".join(sorted(self.unreadable))
             )
@@ -489,7 +490,7 @@ def build_envelope(
             )
             head = (
                 f"{named or account_id} [Actual account {account_id}] holds "
-                f"{len(duplicates)} duplicate imported id(s) - two store rows "
+                f"{plural(len(duplicates), 'duplicate imported id')} - two store rows "
                 "share an identity, and Actual would keep one and silently "
                 "drop the other. 'Rebuild from raw' renumbers them; a "
                 "duplicate that survives a rebuild is a defect worth reporting"

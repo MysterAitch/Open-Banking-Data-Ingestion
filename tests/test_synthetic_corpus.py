@@ -534,7 +534,7 @@ class TestAFileThatCorroboratesItself:
         assert walk.ok, f"{walk.detail} (seed {SEED})"
         # One step between each pair of rows: a file of N rows offers N-1
         # chances for the arithmetic to disagree, and all of them are taken.
-        assert f"{delivery['rows'] - 1} balance step(s)" in walk.detail, (
+        assert f"{delivery['rows'] - 1} balance steps" in walk.detail, (
             f"expected {delivery['rows'] - 1} steps from {delivery['rows']} rows, "
             f"got {walk.detail!r} (seed {SEED})"
         )

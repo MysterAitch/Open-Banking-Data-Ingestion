@@ -41,7 +41,7 @@ class TestAFaithfulExport:
 
     def test_TheWalkStatesItsEvidence(self):
         walk = _verdict(_verify(self.FILE), "balance walk")
-        assert "2 balance step(s) verified" in walk.detail
+        assert "2 balance steps verified" in walk.detail
 
 
 class TestASignInvertedExport:

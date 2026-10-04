@@ -49,6 +49,11 @@ UPLOAD_SCRIPT = r"""
     return;
   }
 
+  // The browser-side twin of `obdi.plural.plural`: a count with its noun.
+  function plural(count, noun) {
+    return count.toLocaleString('en-GB') + ' ' + noun + (count === 1 ? '' : 's');
+  }
+
   // Appends rather than replaces. Each stage used to overwrite the last,
   // so "hashing 32 files" flashed past and the answer that followed it -
   // mentioning 31 - looked like a contradiction with no way to check,
@@ -184,7 +189,7 @@ UPLOAD_SCRIPT = r"""
         }
         // The overall figure stays in ONE place that overwrites, because a
         // running total is only ever interesting as its latest value.
-        tick('Overall: ' + position + ' of ' + count + ' file(s), ' +
+        tick('Overall: ' + position + ' of ' + plural(count, 'file') + ', ' +
              sizeOf(done) + ' of ' + sizeOf(total) +
              ' (' + Math.floor((done / total) * 100) + '%), ' +
              // Elapsed so far rather than an estimate of what remains: the
@@ -434,7 +439,7 @@ UPLOAD_SCRIPT = r"""
             untried + ' not attempted - of ' + outcome.sending + ' to send.',
             'bad');
     } else {
-      block('All ' + worked + ' file(s) kept (' + sizeOf(outcome.total) + ').',
+      block('All ' + plural(worked, 'file') + ' kept (' + sizeOf(outcome.total) + ').',
             'ok');
     }
 
@@ -462,7 +467,7 @@ UPLOAD_SCRIPT = r"""
     // Where the files came from, because two boxes make a total that
     // matches neither of them and there is no way to tell from the number
     // alone which one contributed what.
-    block(outcome.chosen + ' file(s) chosen: ' + outcome.picked +
+    block(plural(outcome.chosen, 'file') + ' chosen: ' + outcome.picked +
           ' picked individually, ' + outcome.foldered + ' from the folder.',
           'muted');
     if (outcome.ignored) {
@@ -518,12 +523,15 @@ UPLOAD_SCRIPT = r"""
     var files = chosen.filter(isStatement);
     var ignored = chosen.length - files.length;
     if (!files.length) {
-      say('None of the ' + chosen.length + ' file(s) chosen is a PDF.');
+      say(chosen.length === 1
+          ? 'The file chosen is not a PDF.'
+          : 'None of the ' + chosen.length.toLocaleString('en-GB') +
+            ' files chosen is a PDF.');
       return;
     }
 
     var forcing = force && force.checked;
-    beginRun('Reading ' + files.length + ' PDF(s)...');
+    beginRun('Reading ' + plural(files.length, 'PDF') + '...');
 
     Promise.all(files.map(digestOf)).then(function (digests) {
       // The override skips the asking, not the sending: nothing is held

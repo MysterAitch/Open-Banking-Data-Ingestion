@@ -36,6 +36,7 @@ from datetime import date, timedelta
 
 from .errors import DataError
 from .money import format_amount, parse_amount
+from .plural import plural
 from .providers import truelayer
 from .store import Store
 
@@ -386,12 +387,12 @@ def _describe_account(account: AccountReconciliation, masked: bool) -> list[str]
         verdict = "clean where it could be checked"
     lines = [
         f"  {account.account_id}: {verdict}",
-        f"    {len(account.days)} day(s) with bank figures, "
+        f"    {plural(len(account.days), 'day')} with bank figures, "
         f"{len(account.known_days)} with a known opening and closing, "
         f"{len(account.ambiguous_days)} ambiguous",
-        f"    {len(account.continuity_breaks)} continuity break(s), "
-        f"{len(account.day_mismatches)} day mismatch(es) "
-        f"over {account.days_summed} day(s) summed",
+        f"    {plural(len(account.continuity_breaks), 'continuity break')}, "
+        f"{plural(len(account.day_mismatches), 'day mismatch', 'day mismatches')} "
+        f"over {plural(account.days_summed, 'day')} summed",
     ]
     if account.continuity_breaks:
         lines.append(
@@ -416,7 +417,7 @@ def _describe_account(account: AccountReconciliation, masked: bool) -> list[str]
                     f"{_money(mismatch.expected_minor)}, store holds "
                     f"{_money(mismatch.held_minor)} "
                     f"(difference {_money(mismatch.difference_minor)}, "
-                    f"{mismatch.rows_without_balance} row(s) without a bank balance)"
+                    f"{plural(mismatch.rows_without_balance, 'row')} without a bank balance)"
                 )
     if account.ambiguous_days:
         lines.append(
@@ -425,12 +426,14 @@ def _describe_account(account: AccountReconciliation, masked: bool) -> list[str]
         )
     if account.unwitnessed_days:
         lines.append(
-            f"    {len(account.unwitnessed_days)} day(s) hold rows but no bank figures: "
+            f"    {plural(len(account.unwitnessed_days), 'day')} "
+            f"{'holds' if len(account.unwitnessed_days) == 1 else 'hold'} "
+            "rows but no bank figures: "
             + _dates(account.unwitnessed_days)
         )
     if account.pending_excluded:
         lines.append(
-            f"    {account.pending_excluded} pending row(s) left out - not part of "
+            f"    {plural(account.pending_excluded, 'pending row')} left out - not part of "
             "a booked balance"
         )
     opening = account.opening
@@ -438,7 +441,7 @@ def _describe_account(account: AccountReconciliation, masked: bool) -> list[str]
         lines.append("    opening balance: not known")
     else:
         earlier = sum(1 for d in account.ambiguous_days if d.day < opening.day)
-        note = f" ({earlier} earlier day(s) ambiguous)" if earlier else ""
+        note = f" ({plural(earlier, 'earlier day')} ambiguous)" if earlier else ""
         figure = f" {_money(opening.opening_minor)}" if not masked else ""
         lines.append(f"    opening balance known from {opening.day.isoformat()}{figure}{note}")
     latest = account.latest

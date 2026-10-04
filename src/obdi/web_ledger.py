@@ -41,6 +41,8 @@ from .logs import say
 from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .models import BASIS_ID
+from .plural import agree
+from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
 from .protection import protection_line
 from .web_accounts import archive_controls, archive_label, submit_button
@@ -532,8 +534,12 @@ def _anchors_html(
         + "".join(row(line) for line in anchors if id(line) not in folded)
         + "</ul>"
         '<details class="agreeing"><summary>'
-        f"{len(agreeing)} later anchors "
-        + ("are followed" if balance_only else "agree with what the rows predict")
+        f"{_plural(len(agreeing), 'later anchor')} "
+        + (
+            f"{agree(len(agreeing), 'is')} followed"
+            if balance_only
+            else f"{agree(len(agreeing), 'agrees')} with what the rows predict"
+        )
         + "</summary>"
         '<ul class="anchors">' + "".join(row(line) for line in agreeing) + "</ul>"
         "</details>"
@@ -802,10 +808,6 @@ def _row_list(rows: Any) -> str:
     return f"<ul>{items}{more}</ul>"
 
 
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}" + ("" if count == 1 else "s")
-
-
 def _hold_html(change: Any, hold: str) -> str:
     """The sentence for one explanation that holds. Said once, here."""
     source = _esc(change.source)
@@ -1057,7 +1059,7 @@ def _no_rows_html(found: Any) -> str:
     lead = (
         "The bank's feed also holds 1 item in this window that is not a row:"
         if found.count == 1
-        else f"The bank's feed also holds {found.count} items in this window that are not rows:"
+        else f"The bank's feed also holds {found.count:,} items in this window that are not rows:"
     )
     items = "".join(f"<li>{_no_row_item(item)}</li>" for item in found.named)
     more = (
@@ -1138,7 +1140,7 @@ def _explanations_html(explanation: Any) -> str:
     if facts is not None:
         body += (
             f"<p>The held {'export lists' if facts.exports == 1 else 'exports list'} "
-            f"{facts.rows:,} rows. In its own sequence {facts.out_of_order:,} "
+            f"{_plural(facts.rows, 'row')}. In its own sequence {facts.out_of_order:,} "
             f"{'is' if facts.out_of_order == 1 else 'are'} out of date order, "
             f"{_plural(facts.uncut_days, 'day')} hold a row but have no clean cut and so state "
             f"no balance, and {facts.unsighted:,} "
@@ -1198,15 +1200,14 @@ def _round_ups_html(family: Any) -> str:
             f"feed does not report it in the shape this page reads. {unreadable}</p>"
         )
     return (
-        f'<p class="muted">{_esc(str(family.round_ups_carried))} feed row(s) carry a '
-        f"round-up. {_esc(str(family.round_up_legs))} round-up leg(s) to a Space are held, "
-        f"and {_esc(str(family.round_up_legs_paired))} of them are paired with a row in that "
+        f'<p class="muted">{_plural(family.round_ups_carried, "feed row")} '
+        f"{'carries' if family.round_ups_carried == 1 else 'carry'} a "
+        f"round-up. {_plural(family.round_up_legs, 'round-up leg')} to a Space "
+        f"{'is' if family.round_up_legs == 1 else 'are'} held, "
+        f"and {_esc(str(family.round_up_legs_paired))} of them "
+        f"{'is' if family.round_up_legs_paired == 1 else 'are'} paired with a row in that "
         f"Space. {unreadable}</p>" + _round_up_gaps_html(family.round_up_gaps)
     )
-
-
-def _counted(count: int, singular: str, plural: str) -> str:
-    return f"{count} {singular if count == 1 else plural}"
 
 
 def _days_html(days: Any, total: int) -> str:
@@ -1225,21 +1226,21 @@ def _round_up_gaps_html(gaps: Any) -> str:
     """
     if gaps.no_leg:
         parts = [
-            _counted(
+            _plural(
                 gaps.no_leg_of_nothing, "is a round-up of nothing", "are round-ups of nothing"
             ),
-            _counted(gaps.no_leg_incoming, "is on an incoming item", "are on incoming items"),
-            _counted(
+            _plural(gaps.no_leg_incoming, "is on an incoming item", "are on incoming items"),
+            _plural(
                 gaps.no_leg_reversed_or_declined,
                 "is on a reversed or declined item",
                 "are on reversed or declined items",
             ),
-            _counted(gaps.no_leg_unreadable, "could not be read", "could not be read"),
-            _counted(gaps.no_leg_other, "is other", "are other"),
+            _plural(gaps.no_leg_unreadable, "could not be read", "could not be read"),
+            _plural(gaps.no_leg_other, "is other", "are other"),
         ]
         body = (
             f'<p class="muted">Of the '
-            f"{_counted(gaps.no_leg, 'feed row that carries', 'feed rows that carry')} a "
+            f"{_plural(gaps.no_leg, 'feed row that carries', 'feed rows that carry')} a "
             f"round-up and {'holds' if gaps.no_leg == 1 else 'hold'} no leg, "
             f"{', '.join(parts[:-1])}, and {parts[-1]}.</p>"
         )
@@ -1248,17 +1249,17 @@ def _round_up_gaps_html(gaps: Any) -> str:
     if gaps.unpaired_legs:
         body += (
             f'<p class="muted">Of the '
-            f"{_counted(gaps.unpaired_legs, 'round-up leg that has', 'round-up legs that have')} "
+            f"{_plural(gaps.unpaired_legs, 'round-up leg that has', 'round-up legs that have')} "
             "no pair in a Space, "
-            f"{_counted(gaps.unpaired_on_reversed, 'is', 'are')} on a reversed or dropped payment, "
-            f"{_counted(gaps.unpaired_to_unheld_space, 'goes', 'go')} to a Space whose rows "
-            f"are not held, and {_counted(gaps.unpaired_other, 'is', 'are')} other.</p>"
+            f"{_plural(gaps.unpaired_on_reversed, 'is', 'are')} on a reversed or dropped payment, "
+            f"{_plural(gaps.unpaired_to_unheld_space, 'goes', 'go')} to a Space whose rows "
+            f"are not held, and {_plural(gaps.unpaired_other, 'is', 'are')} other.</p>"
             + _days_html(gaps.unpaired_days, gaps.unpaired_legs)
         )
     else:
         body += '<p class="muted">No round-up leg is without a pair in a Space.</p>'
     if gaps.space_in_unpaired:
-        subject = _counted(
+        subject = _plural(
             gaps.space_in_unpaired,
             "incoming transfer leg in a Space has",
             "incoming transfer legs in a Space have",
@@ -1318,14 +1319,16 @@ def _family_html(family: Any, ref: str = "") -> str:
     body += _opening_note(family)
     if family.before_opening:
         body += (
-            f'<p class="warn"><strong>{_esc(str(family.before_opening))} row(s) are dated on '
+            f'<p class="warn"><strong>{_plural(family.before_opening, "row")} '
+            f"{'is' if family.before_opening == 1 else 'are'} dated on "
             "or before the day the account opened.</strong> An account cannot move money "
             "before it exists, so either the creation date or those rows' dates are wrong, "
             "and the opening cannot be trusted until that is settled.</p>"
         )
     if family.unheld_legs:
         body += (
-            f'<p class="warn"><strong>{_esc(str(family.unheld_legs))} transfer leg(s) go '
+            f'<p class="warn"><strong>{_plural(family.unheld_legs, "transfer leg")} '
+            f"{'goes' if family.unheld_legs == 1 else 'go'} "
             "to or from a Space whose own rows are not held, the first on "
             f'<span class="mono nowrap">{_esc(family.unheld_first)}</span>.</strong> The '
             "whole account cannot balance until that Space's rows are held."
@@ -1354,8 +1357,10 @@ def _family_html(family: Any, ref: str = "") -> str:
     body += _round_ups_html(family)
     if family.refused_figures:
         body += (
-            f'<p class="warn">{_esc(str(family.refused_figures))} printed end-of-day '
-            "balance(s) disagreed with their own statement's rows and were not used.</p>"
+            f'<p class="warn">{_plural(family.refused_figures, "printed end-of-day balance")} '
+            f"disagreed with {'its' if family.refused_figures == 1 else 'their'} own "
+            f"statement's rows and {'was' if family.refused_figures == 1 else 'were'} "
+            "not used.</p>"
         )
     if not family.anchors:
         return body
@@ -1586,8 +1591,10 @@ def _clearing_html(clearing: Any) -> str:
     )
     return _disclosure(
         f"Cleared and uncleared by month ({clearing.cleared} cleared, {clearing.uncleared} not)",
-        f"<p>Across the account, {clearing.cleared} rows are cleared and {clearing.uncleared} "
-        "are not. A row is cleared when a statement, an export, or the bank's own feed lists "
+        f"<p>Across the account, {_plural(clearing.cleared, 'row')} "
+        f"{agree(clearing.cleared, 'is')} cleared and {clearing.uncleared} "
+        f"{agree(clearing.uncleared, 'is')} not. A row is cleared when a statement, an "
+        "export, or the bank's own feed lists "
         "it; the aggregator alone does not clear a row, and a pending row is never cleared."
         f'</p><ul class="plain">{months}</ul>',
     )
@@ -1738,7 +1745,7 @@ def _protect_html(view: Any) -> str:
                 f"<p>A change to it was accepted on {_esc(protection.accepted_on.isoformat())}."
                 "</p>"
             )
-        detail += f"<p>{_esc(str(protection.events))} recorded event(s) in its history.</p>"
+        detail += f"<p>{_plural(protection.events, 'recorded event')} in its history.</p>"
         body += (
             f'<p class="protect-line"><strong>{_esc(protection_line(protection))}</strong></p>'
             + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
@@ -1844,7 +1851,8 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
             differing = sum(1 for line in opening.anchors if line.verdict == "differs")
             if differing:
                 body += (
-                    f'<p class="warn"><strong>{differing} later anchor(s) differ</strong> '
+                    f'<p class="warn"><strong>{_plural(differing, "later anchor")} '
+                    f"{agree(differing, 'differs')}</strong> "
                     "from what the rows predict: rows are missing, duplicated, or "
                     "mis-dated between the anchors.</p>"
                 )
@@ -1863,7 +1871,8 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
                 differing = sum(1 for line in opening.anchors if line.verdict == "differs")
                 if differing:
                     body += (
-                        f'<p class="warn"><strong>{differing} balance(s) differ</strong> '
+                        f'<p class="warn"><strong>{_plural(differing, "balance")} '
+                        f"{agree(differing, 'differs')}</strong> "
                         "from what the rows predict: rows are missing, duplicated, or "
                         "mis-dated.</p>"
                     )
@@ -1873,9 +1882,12 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
             )
     if opening.unusable_statements:
         body += (
-            f'<p class="muted">{_esc(str(opening.unusable_statements))} held statement(s) '
-            "could not supply a balance - unreadable, or its rows do not carry its "
-            "opening balance to its closing one - and are not used.</p>"
+            f'<p class="muted">{_plural(opening.unusable_statements, "held statement")} '
+            "could not supply a balance - unreadable, or "
+            f"{agree(opening.unusable_statements, 'its')} rows do not carry "
+            f"{agree(opening.unusable_statements, 'its')} "
+            "opening balance to its closing one - and "
+            f"{agree(opening.unusable_statements, 'is')} not used.</p>"
         )
     body += (
         _bank_html(opening)
@@ -2006,12 +2018,13 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
     notes = ""
     if typed.live_elsewhere:
         notes += (
-            f"<p class=\"muted\">{_esc(str(typed.live_elsewhere))} more typed "
-            "transaction(s) are dated in other months: step to that month to withdraw one.</p>"
+            f"<p class=\"muted\">{_plural(typed.live_elsewhere, 'more typed transaction')} "
+            f"{agree(typed.live_elsewhere, 'is')} dated in other months: step to that "
+            "month to withdraw one.</p>"
         )
     if typed.withdrawn_total:
         notes += (
-            f"<p class=\"muted\">{_esc(str(typed.withdrawn_total))} typed transaction(s) "
+            f"<p class=\"muted\">{_plural(typed.withdrawn_total, 'typed transaction')} "
             "withdrawn in all. They stay in the record as evidence and count nowhere.</p>"
         )
     return _disclosure(
@@ -2387,7 +2400,7 @@ def render_ledger(
     else:
         month += _month_line(view)
         counts = _disclosure(
-            f"This month's counts and sums ({_esc(str(view.summary.rows))} rows)",
+            f"This month's counts and sums ({_plural(view.summary.rows, 'row')})",
             _summary_html(view.summary, bound=view.actual_bound) + position,
         )
         position = ""

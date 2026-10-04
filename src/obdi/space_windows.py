@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 
+from .plural import plural as _plural
 from .providers import starling
 from .spaces import HistoricalSpace
 from .store import Store
@@ -261,10 +262,6 @@ class HistoryProgress:
                 f"now asking {self.window_days}-day windows"
             )
         return "; ".join(parts)
-
-
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 def history_progress(

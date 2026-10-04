@@ -501,7 +501,7 @@ class TestSpaceTransfersWithNoHeldOtherLeg:
     ):
         page = ledger_text(unheld_space)
 
-        assert "2 transfer leg(s) go to or from a Space whose own rows are not held" in page
+        assert "2 transfer legs go to or from a Space whose own rows are not held" in page
         assert "the first on" in page
         assert "2026-09-08" in page
         assert "The whole account cannot balance until that Space's rows are held" in page

@@ -35,6 +35,7 @@ from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
 from .models import TransactionStatus
+from .plural import plural as _plural
 from .rebuild_hold import RebuildInProgress
 from .scheduler_status import STEPS
 from .store import Store
@@ -464,10 +465,6 @@ def _running_item(hold: RebuildHold) -> AttentionItem:
         remedy=remedy,
         href=ADMIN_HREF,
     )
-
-
-def _plural(count: int, singular: str, plural: str | None = None) -> str:
-    return f"{count} {singular if count == 1 else plural or singular + 's'}"
 
 
 def _uncovered_span_items(

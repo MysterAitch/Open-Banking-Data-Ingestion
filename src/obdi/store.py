@@ -57,6 +57,7 @@ from .namespaces import (
     stored_provenance_rank,
 )
 from .payment_links import stated_link_of
+from .plural import plural
 from .stated_times import recorded_for
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
@@ -3388,13 +3389,13 @@ class Store:
         appeared = new_ids - old_ids
         if vanished:
             findings.append(
-                f"{len(vanished)} account(s) no longer approved: "
+                f"{plural(len(vanished), 'account')} no longer approved: "
                 f"{', '.join(sorted(ref[:8] for ref in vanished))}... - their "
                 "pulls will silently stop"
             )
         if appeared:
             findings.append(
-                f"{len(appeared)} new account(s) approved: "
+                f"{plural(len(appeared), 'new account')} approved: "
                 f"{', '.join(sorted(ref[:8] for ref in appeared))}..."
             )
         return findings

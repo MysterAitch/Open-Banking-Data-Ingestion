@@ -76,6 +76,8 @@ from .fault_structure import (
 )
 from .logs import say
 from .masking import Disclosed
+from .plural import agree
+from .plural import plural as _plural
 from .web_accounts import submit_button
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -157,10 +159,6 @@ _STATED_DASHES = ("", "14 4", "3 3")
 _PREDICTED_DASHES = ("6 5", "1 6", "10 3 2 3")
 
 
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}" + ("" if count == 1 else "s")
-
-
 def _mono(day: object) -> str:
     return f'<span class="mono nowrap">{_esc(str(day))}</span>'
 
@@ -229,14 +227,21 @@ def _structure_html(structure: Any) -> str:
         return "<p>No stated balance is held to judge.</p>"
     if not structure.steps:
         return (
-            f"<p>The difference is nil at all {balances} stated balances: one level, and "
-            f"{_per_cent(1.0)} of the stated balances move from the one before as the rows "
-            "do.</p>"
+            "<p>The difference is nil at "
+            + (
+                "the only stated balance"
+                if balances == 1
+                else f"all {_plural(balances, 'stated balance')}"
+            )
+            + f": one level, and {_per_cent(1.0)} of the stated "
+            f"{'balance moves' if balances == 1 else 'balances move'} from the one before as "
+            "the rows do.</p>"
         )
     steps = len(structure.steps)
     body = (
-        f"<p>{structure.agreeing} of the {balances} stated balances "
-        f"({_per_cent(structure.agreeing / balances)}) move from the one before by exactly "
+        f"<p>{structure.agreeing} of the {_plural(balances, 'stated balance')} "
+        f"({_per_cent(structure.agreeing / balances)}) "
+        f"{agree(structure.agreeing, 'moves')} from the one before by exactly "
         f"what the rows move by; the other {steps} {'is' if steps == 1 else 'are'} the "
         f"{_plural(steps, 'change')} in the difference.</p>" + _levels_html(structure)
     )

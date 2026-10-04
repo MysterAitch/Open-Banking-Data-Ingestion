@@ -538,7 +538,7 @@ class TestWhatCannotBeTested:
     def test_Store_WithNoStatement_SaysThereIsNothingToTest(self, store):
         text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
 
-        assert "0 account(s) with a held statement" in text
+        assert "0 accounts with a held statement" in text
         assert "nothing to test" in text
 
     def test_Report_ScopedToAnotherAccount_OmitsTheAccount(self, store, tmp_path):
@@ -796,7 +796,7 @@ class TestThePageIsMaskedUnlessPostedFor:
     def test_Page_ScopedToAnUnknownAccount_SaysThereIsNothingToTest(self, lab):
         page = httpx.get(f"{lab}/period-reconciliation?ref=nobody", timeout=60).text
 
-        assert "0 account(s) with a held statement" in page
+        assert "0 accounts with a held statement" in page
 
     def test_Page_WithAMarkupReference_EscapesItWhereverItIsPrinted(self, lab):
         page = httpx.get(
@@ -841,7 +841,7 @@ class TestTheCommandLine:
 
         assert main(["--db", str(db), "period-reconciliation", "--account", "nobody"]) == 0
 
-        assert "0 account(s) with a held statement" in capsys.readouterr().out
+        assert "0 accounts with a held statement" in capsys.readouterr().out
 
 
 class TestThePageIsReachable:

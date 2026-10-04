@@ -305,7 +305,7 @@ class TestThePage:
 
         assert "cleared by starling-csv" in page
         assert page.count(">cleared by ") == 1, "the aggregator-only row carries no mark"
-        assert "1 rows are cleared and 1 are not" in page
+        assert "1 row is cleared and 1 is not" in page
 
     def test_Page_WhenMasked_NeverShowsAStatedFigureOrTheOpening(self, store):
         everyday(store)

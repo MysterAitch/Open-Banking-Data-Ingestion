@@ -51,6 +51,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
+from .plural import plural
 from .synthetic_pdf import build_pdf
 
 #: Merchants a household actually repeats, with the shapes their descriptors
@@ -674,7 +675,7 @@ def write_deliveries(world: World, out_dir: Path) -> list[Delivery]:
                 covers=(span[0], span[-1]),
                 fault=(
                     "overlaps the other half of this account by "
-                    f"{len(set(first_half) & set(second_half))} month(s)"
+                    f"{plural(len(set(first_half) & set(second_half)), 'month')}"
                 ),
                 rows=len(rows),
             )

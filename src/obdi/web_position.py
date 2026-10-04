@@ -36,6 +36,8 @@ from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
+from .plural import agree
+from .plural import plural as _plural
 from .position import MonthPoint, Position, ProvisionalPoint, chart_series
 from .web_accounts import submit_button
 from .web_ledger import _balance_word
@@ -67,10 +69,6 @@ _KIND_WORDS = {
 }
 
 _HOME = '<p><a class="button" href="/">Back to overview</a></p>'
-
-
-def _plural(count: int, singular: str, plural: str | None = None) -> str:
-    return f"{count} {singular if count == 1 else plural or singular + 's'}"
 
 
 def _ledger_href(ref: str) -> str:
@@ -113,10 +111,12 @@ def _account_card(view: Any) -> str:
     if view.checks_differ:
         checks = (
             f'<a class="tap bad" href="{_ledger_href(view.ref)}">'
-            f"{_plural(view.checks_differ, 'check')} differ</a>"
+            f"{_plural(view.checks_differ, 'check')} {agree(view.checks_differ, 'differs')}</a>"
         )
     elif view.checks_agree:
-        checks = f"{_plural(view.checks_agree, 'later check')} agree"
+        checks = (
+            f"{_plural(view.checks_agree, 'later check')} {agree(view.checks_agree, 'agrees')}"
+        )
     else:
         checks = '<span class="muted">none: one balance stated, so nothing tests it</span>'
     if view.family_anchors:

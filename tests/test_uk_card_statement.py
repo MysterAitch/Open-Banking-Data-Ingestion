@@ -642,7 +642,7 @@ class TestTheGate:
         with pytest.raises(ParseError) as refused:
             list(UkCardStatementPdfParser().parse(build_card_statement_pdf(broken), account_id="a"))
 
-        assert "-6000 minor units unexplained across 5 row(s)" in str(refused.value)
+        assert "-6000 minor units unexplained across 5 rows" in str(refused.value)
 
     def test_APaymentWithoutItsCreditMarker_IsRefusedBecauseItWouldReadAsASpend(self):
         # +40,000 read as -40,000 is 80,000 out. The cover's own figures are
@@ -662,7 +662,7 @@ class TestTheGate:
         with pytest.raises(ParseError) as refused:
             list(UkCardStatementPdfParser().parse(build_card_statement_pdf(off), account_id="a"))
 
-        assert "-1 minor units unexplained across 6 row(s)" in str(refused.value)
+        assert "-1 minor units unexplained across 6 rows" in str(refused.value)
 
     def test_ACoverNewBalanceThatDisagreesWithTheTable_IsRefused(self):
         off = replaced(STATEMENT, "|107.16|707.16|", "|107.16|717.16|")

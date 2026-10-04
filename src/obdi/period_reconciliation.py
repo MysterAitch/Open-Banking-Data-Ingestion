@@ -78,8 +78,8 @@ from .coverage import Agreement, agreements
 from .models import Transaction
 from .money import format_amount
 from .parsers.pdf_statements import PDF_PARSERS
+from .plural import plural as _plural
 from .same_money_outcome import AccountOutcome, dated_list
-from .same_money_outcome import plural as _plural
 from .statement_membership import ListedStatement, Membership, statement_membership
 from .statement_terms import StatementBalance, held_statement_readings, statement_balances
 from .store import Store
@@ -248,7 +248,8 @@ class PeriodReport:
     accounts: tuple[AccountPeriods, ...]
 
     def describe(self, *, masked: bool = True, unmask_hint: str = "") -> str:
-        lines = [f"{len(self.accounts)} account(s) with a held statement"]
+        held = len(self.accounts)
+        lines = [f"{_plural(held, 'account')} with a held statement"]
         if masked:
             lines.append(
                 "  MASKED: dates, counts, and which explanation holds only"

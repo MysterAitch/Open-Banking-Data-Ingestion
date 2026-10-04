@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from .plural import plural
 from .store import Store
 
 #: How long after its pending date a settlement counterpart may book.
@@ -44,7 +45,7 @@ class PendingResolution:
 
     def describe(self) -> str:
         return (
-            f"{self.voided} vanished pending row(s) voided "
+            f"{plural(self.voided, 'vanished pending row')} voided "
             f"({self.settled} matched a settlement, {self.released} released)"
         )
 

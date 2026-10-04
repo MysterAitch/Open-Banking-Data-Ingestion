@@ -42,6 +42,7 @@ from .jsontypes import JsonObject, text
 from .jsontypes import rows as json_rows
 from .models import Transaction
 from .pending_lifecycle import resolve_vanished_pending
+from .plural import plural
 from .providers import starling, truelayer
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
@@ -113,7 +114,7 @@ class PullResult:
     notes: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
-        head = f"{self.provider}: {self.accounts} account(s)"
+        head = f"{self.provider}: {plural(self.accounts, 'account')}"
         if self.summary:
             head += f" - {self.summary.describe()}"
         return "\n".join([head, *(f"  note: {note}" for note in self.notes)])
@@ -764,7 +765,7 @@ def _heal_unasked_spans(
         store.land_artefact(artefact)
         result.notes.append(
             f"healing {ask.first} to {ask.last} for {provider_id}: asked, "
-            f"{len(records)} record(s) answered"
+            f"{plural(len(records), 'record')} answered"
         )
         if records:
             transactions = [
@@ -1282,7 +1283,7 @@ def pull_starling(
                 missed = cursor.sweep_misses(items, set(stored_dates), feed_cursor)
                 if missed:
                     result.notes.append(
-                        f"SWEEP CAUGHT {len(missed)} item(s) for "
+                        f"SWEEP CAUGHT {plural(len(missed), 'item')} for "
                         f"{qualified_ref} that the incremental path missed "
                         f"({', '.join(uid[:8] for uid in missed[:5])}) - "
                         "the rolling cursor may be unsound, investigate"

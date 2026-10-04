@@ -108,7 +108,7 @@ class TestBankCategories:
             "PURCHASE": 1,
         }
         text = report.describe()
-        assert "2 flagged transaction(s) are bank-labelled" in text
+        assert "2 flagged transactions are bank-labelled" in text
         assert "DIRECT_DEBIT: 1" in text
 
 
