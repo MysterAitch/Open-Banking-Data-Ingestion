@@ -401,7 +401,7 @@ _LINK_WORDS: dict[str, tuple[str, str]] = {
     "balance": ("Open the balance reconciliation", "Open the balance reconciliation"),
     "push-refused": ("Open the Actual sync page", "Open the Actual sync page"),
     "push-stale": ("Open the Actual sync page", "Open the Actual sync page"),
-    "review": ("Answer the review flags", "Answer the review flags"),
+    "review": ("Open the review flags", "Open the review flags"),
     "spaces": ("Open the recovered Spaces", "Open the recovered Spaces"),
     "statement-due": ("Open the accounts page", "Open the accounts page"),
 }
