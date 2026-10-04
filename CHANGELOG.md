@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.309] - 2026-10-04
+
+### Changed
+- **An account's page leads with the account.** It was a page called Ledger
+  whose transactions began some five screens down, after the verification,
+  the explanations, two forms, and a statistics table, all at one weight. It
+  now opens with the account's name, where it is fed from, the proof rail,
+  the verdict, and, when something holds it back, one box that says what and
+  links to the explanation.
+- **Protection is offered where the state is described.** "Protect through"
+  sits under the verdict, and a protected account shows "Withdraw" plainly
+  where it was hidden in a collapsed block. The page says "not protected"
+  for "protected through nowhere", and a broken protection no longer claims
+  the date it broke at.
+- **The month's transactions come next**, one two-line row each, with a
+  picker of every year and month the account has rows in. Reaching a month
+  two years back was twenty-four taps.
+- **Everything else is beneath, folded**, each fold saying what it holds and a
+  count: how the rows were joined, known balances and the opening, cleared by
+  month, the month's sums, stating a balance, typed transactions. The
+  explanation is open when the account is held back.
+- **Removing a stated balance and archiving stand together** in one bordered
+  block at the foot, each still behind its confirmation.
+- **A masked figure looks sealed**: hatched while masked, plain when shown, so
+  the page's state is visible at a glance. Other pages' output is unchanged.
+- **A wide screen has two columns**: the state, month, and folds beside the
+  transactions.
+
+Measured on an invented account of three years at phone width, a month of
+fifty rows: 24.1 screens before; 5.9 after with the folds closed, the first
+transaction about one screen down. The 5.9 is thin under its limit of six and
+depends on the font. An account not bound to Actual is longer, because every
+row says so.
+
+Not done: an explanation does not yet link to the row it names; the summary
+tables' figures are not sealed.
+
 ## [0.4.308] - 2026-10-04
 
 ### Changed
