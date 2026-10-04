@@ -2696,6 +2696,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         source: every known account gets a row stating its fate, and the
         one remaining blocker (no canonical name) carries its remedy.
         """
+        from .actual_push import declared_to_create
         from .labels import collect_display_labels
 
         settle_emptied_budgets_for(db_path)
@@ -2733,8 +2734,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     " GROUP BY account_id"
                 )
             }
+            declared = set(declared_to_create(store))
         rows: list[dict[str, object]] = []
-        for ref in set(counts) | named | actual_bound:
+        for ref in set(counts) | named | actual_bound | declared:
             if ":" in ref:
                 state = "unnamed"
             elif ref in actual_bound:

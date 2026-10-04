@@ -453,6 +453,25 @@ def transactions_to_push(store: Store) -> list[Transaction]:
     return [*store.all_transactions(), *unitemised_for_store(store)]
 
 
+def declared_to_create(store: Store) -> dict[str, str]:
+    """Each open declared account and its label: the accounts a push creates for being declared.
+
+    A declared account is named by the person who declared it, and it is the one kind of
+    account that may never have a row to send: cash, or a mortgage at another bank, is known
+    by a stated balance alone. Left to the rows such an account stayed out of the budget, and
+    the budget's net worth stayed short by its whole balance. Its known balance follows as
+    the opening once the account exists in Actual. A closed one is created only by its rows,
+    as any account is: with none it is history nobody asked to see.
+
+    Read by the push and by the page that says what a push will do, so the two cannot differ.
+    """
+    return {
+        str(record.ref): record.label
+        for record in store.declared_accounts()
+        if record.closed is None
+    }
+
+
 def build_envelope(
     store: Store,
     bindings: list[ActualAccountBinding],
@@ -504,16 +523,18 @@ def build_envelope(
     # moves). Source-qualified fallbacks are accounts nobody has named,
     # and provisioning them would mint Actual accounts called
     # "truelayer:3fc9..." - bind first, push after.
+    # A declared account is named too: see `declared_to_create`.
     already_bound = {binding.canonical_id for binding in bindings}
+    declared = declared_to_create(store)
     candidates = set(unbound_accounts(transactions, bindings)) | (
-        (named_canonicals or set()) - already_bound
+        ((named_canonicals or set()) | set(declared)) - already_bound
     )
     # The applier creates accounts idempotently BY NAME, so two canonicals
     # sharing a display label (both Halifax accounts show the holder's
     # name) would silently bind to one Actual account. Colliding labels
     # fall back to the canonical names, which are unique by construction.
     label_of = {
-        canonical: labels.get(canonical, canonical)
+        canonical: labels.get(canonical) or declared.get(canonical) or canonical
         for canonical in candidates
         if ":" not in canonical
     }

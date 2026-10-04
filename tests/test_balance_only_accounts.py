@@ -267,6 +267,87 @@ class TestPureDerivation:
 BINDING = [ActualAccountBinding(MORTGAGE, "act-mortgage")]
 
 
+def asked_to_create(envelope: dict[str, object]) -> list[dict[str, str]]:
+    provision = envelope["provision"]
+    assert isinstance(provision, list)
+    return provision
+
+
+class TestADeclaredAccountNothingHasCreatedInActualYet:
+    """A declared account is one a person named, so a push asks for it to be created.
+
+    An account reached Actual only by having a row to send or a binding made by hand. A
+    declared account whose balance is stated and never itemised - cash, a mortgage at another
+    bank - has neither until its second stated balance, and one of an ordinary kind never has,
+    so it stayed out of the budget and the budget's net worth stayed short by its balance.
+    """
+
+    def test_Envelope_ForADeclaredAccountWithOneKnownBalanceAndNoRows_AsksForItToBeCreated(
+        self, store
+    ):
+        record_stated_anchor(store, MORTGAGE, JAN, "-200000.00", today=TODAY)
+
+        envelope = build_envelope(store, [], {})
+
+        assert asked_to_create(envelope) == [{"canonical_id": MORTGAGE, "label": "Mortgage"}]
+
+    def test_Envelope_ForADeclaredAccountWithNothingStatedYet_StillAsksForItToBeCreated(
+        self, store
+    ):
+        envelope = build_envelope(store, [], {})
+
+        assert asked_to_create(envelope) == [{"canonical_id": MORTGAGE, "label": "Mortgage"}]
+
+    def test_Envelope_ForADeclaredAccountOfAnOrdinaryKindWithNoRows_AsksForItToBeCreated(
+        self, tmp_path
+    ):
+        with Store(tmp_path / "ordinary.sqlite3") as opened:
+            declare(opened, "hsbc-mortgage", "mortgage")
+            record_stated_anchor(opened, "hsbc-mortgage", JAN, "-200000.00", today=TODAY)
+
+            envelope = build_envelope(opened, [], {})
+
+        assert asked_to_create(envelope) == [
+            {"canonical_id": "hsbc-mortgage", "label": "Hsbc-Mortgage"}
+        ]
+
+    def test_Envelope_WhenADisplayLabelIsKnownForIt_UsesThatLabelOverTheDeclaredOne(self, store):
+        envelope = build_envelope(store, [], {MORTGAGE: "House loan"})
+
+        assert asked_to_create(envelope) == [{"canonical_id": MORTGAGE, "label": "House loan"}]
+
+    def test_Envelope_ForADeclaredAccountAlreadyInActual_DoesNotAskAgain(self, store):
+        record_stated_anchor(store, MORTGAGE, JAN, "-200000.00", today=TODAY)
+
+        envelope = build_envelope(store, BINDING, {})
+
+        assert asked_to_create(envelope) == []
+
+    def test_Envelope_OnceTheAccountIsInActual_CarriesItsKnownBalanceAsTheOpening(self, store):
+        record_stated_anchor(store, MORTGAGE, JAN, "-200000.00", today=TODAY)
+
+        envelope = build_envelope(store, BINDING, {})
+
+        openings = envelope["opening_balances"]
+        assert isinstance(openings, list)
+        assert [(o["account"], o["date"], o["amount"]) for o in openings] == [
+            ("act-mortgage", JAN, -20_000_000)
+        ]
+
+    def test_Envelope_ForAnArchivedDeclaredAccountWithNoRows_DoesNotAskForIt(self, tmp_path):
+        with Store(tmp_path / "archived.sqlite3") as opened:
+            opened.declare_account(
+                AccountRecord(
+                    ref=AccountRef("old-tin"), kind=BALANCE_ONLY_KIND, label="Old tin",
+                    closed=D(2025, 12, 31),
+                )
+            )
+
+            envelope = build_envelope(opened, [], {})
+
+        assert asked_to_create(envelope) == []
+
+
 class TestWhatReachesActual:
     def payload(self, store: Store) -> list[dict[str, object]]:
         from obdi.actual_push import opening_balances
@@ -419,6 +500,13 @@ class TestThePages:
         # Kind is a choice now, each kind said in a line; the mortgage already has this one.
         assert f'<option value="{BALANCE_ONLY_KIND}" selected>' in edit
         assert "Tracked by the balances you state alone" in edit
+
+    def test_ActualPage_ForADeclaredAccountNotYetInActual_SaysTheNextPushCreatesIt(self, lab):
+        page = lab.get("/actual").text
+
+        row = page.split("<strong>Mortgage</strong>")[1].split("</div>")[0]
+        assert "creates on next push" in row
+        assert "no transactions yet" in row
 
     def test_Position_ForAFeedlessAccountWithNoBalance_PointsToBothWaysToCountIt(self, lab):
         page = lab.get("/position").text
