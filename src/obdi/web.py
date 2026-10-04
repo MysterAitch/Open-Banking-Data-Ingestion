@@ -3793,6 +3793,11 @@ def render_index(
     overview: Callable[[bool], Overview] | None = None,
     fresh_overview: bool = False,
     position: Callable[[], object] | None = None,
+    #: The Actual page's other hooks, so the home page's line about Actual reads everything
+    #: that page's verdict reads and the two cannot say different things.
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
+    actual_heartbeat: Callable[[], str] | None = None,
+    actual_configured: Callable[[], bool] | None = None,
 ) -> bytes:
     """The home page: a verdict, four status lines, what needs attention, the accounts, and the
     System facts, and nothing else.
@@ -3820,6 +3825,9 @@ def render_index(
     scheduler_heartbeat=scheduler_heartbeat,
     position=position,
     system_html=system,
+    actual_queue=actual_queue,
+    actual_heartbeat=actual_heartbeat,
+    actual_configured=actual_configured,
 )}
 """
     return render_page("Overview", body, wide=True)
@@ -4082,6 +4090,9 @@ class ConnectionHandler(
                 overview=timer.wrap("overview", config.overview),
                 fresh_overview=params.get("fresh", [""])[0] == "1",
                 position=timer.wrap("position", config.home_position),
+                actual_queue=config.actual_queue,
+                actual_heartbeat=config.actual_heartbeat,
+                actual_configured=config.actual_configured,
             )
             timer.report("/")
             self._respond(200, page)

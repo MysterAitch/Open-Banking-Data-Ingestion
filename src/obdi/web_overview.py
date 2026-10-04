@@ -285,7 +285,12 @@ def verification_line(overview: Overview | None) -> StatusLine:
 
 
 def actual_line(
-    actual_status: Callable[[], list[dict[str, object]]] | None, now: datetime
+    actual_status: Callable[[], list[dict[str, object]]] | None,
+    now: datetime,
+    *,
+    queue: Callable[[], list[dict[str, object]]] | None = None,
+    heartbeat: Callable[[], str] | None = None,
+    configured: Callable[[], bool] | None = None,
 ) -> StatusLine:
     """Whether Actual agrees with obdi, in the Actual page's own verdict.
 
@@ -299,7 +304,7 @@ def actual_line(
     href = "/actual"
     if actual_status is None:
         return StatusLine("Actual", href, "not wired", "pill-quiet", "Not wired on this instance.")
-    verdict = current_verdict(actual_status, now=now)
+    verdict = current_verdict(actual_status, queue, heartbeat, configured, now)
     word, css = _ACTUAL_CHIPS.get(verdict.state.value, ("unknown", "pill-quiet"))
     sentence = f"{verdict.headline}. {verdict.detail}".strip()
     return StatusLine("Actual", href, word, css, sentence)
@@ -760,6 +765,9 @@ def overview_html(
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
     position: Callable[[], object] | None = None,
     system_html: str = "",
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
+    actual_heartbeat: Callable[[], str] | None = None,
+    actual_configured: Callable[[], bool] | None = None,
 ) -> str:
     """The home page's body.
 
@@ -799,7 +807,13 @@ def overview_html(
     lines = [
         data_line(overview, scheduler_heartbeat, now),
         verification_line(overview),
-        actual_line(actual_status, now),
+        actual_line(
+            actual_status,
+            now,
+            queue=actual_queue,
+            heartbeat=actual_heartbeat,
+            configured=actual_configured,
+        ),
         position_line(position, overview),
     ]
     rest = (

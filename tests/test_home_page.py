@@ -525,6 +525,23 @@ class TestTheActualLine:
 
         assert line.word == "push failed"
 
+    def test_Line_WhenActualIsNotConfigured_SaysSoAsTheActualPageDoes(self):
+        """Read without the page's other hooks, the line said "Nothing has been pushed yet"
+        of an instance the Actual page called not configured."""
+        from obdi.web_overview import actual_line
+
+        line = actual_line(lambda: [], NOW_TIME, configured=lambda: False)
+
+        assert (line.word, line.css) == ("not configured", "pill-quiet")
+        assert line.sentence.startswith("Actual is not configured on this instance.")
+
+    def test_Line_WhenActualIsConfiguredAndNothingIsPushed_SaysNothingIsPushed(self):
+        from obdi.web_overview import actual_line
+
+        line = actual_line(lambda: [], NOW_TIME, configured=lambda: True)
+
+        assert line.word == "no push"
+
     def test_Chips_ForEveryStateTheVerdictCanBeIn_HaveAWordOfTheirOwn(self):
         from obdi.actual_verdict import State
         from obdi.web_overview import _ACTUAL_CHIPS
