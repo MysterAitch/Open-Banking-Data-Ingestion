@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
@@ -47,7 +48,7 @@ from .models import (
     TransactionStatus,
 )
 from .payment_links import FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
-from .stated_times import settlement_days_of
+from .stated_times import lists_on_settlement_day, settlement_days_of
 
 _K = TypeVar("_K")
 
@@ -621,6 +622,11 @@ class CandidateIndex:
         self._order[position] = merged
         self._file(merged)
 
+    def row(self, entity_id: str) -> Transaction | None:
+        """The stored row with this entity id, as the index holds it now."""
+        position = self._position.get(entity_id)
+        return None if position is None else self._order[position]
+
     def sighting_sources(self, entity_id: str) -> frozenset[str]:
         """Every source that has stated an id for this row, and the source that wrote it last."""
         found = set(self._ids_of.get(entity_id, {}))
@@ -1092,6 +1098,85 @@ def second_row_verdicts(
             SecondRowVerdict(v.row, REFUSED_SEVERAL) if not v.refused else v for v in verdicts
         ]
     return verdicts
+
+
+def settlement_candidates(incoming: Transaction, index: CandidateIndex) -> list[Transaction]:
+    """The stored rows a settlement day names for a row listed on its settlement day.
+
+    DETECTION ONLY, shared by the rule (`plan_settlement`) and the measurement that says what
+    the rule would do (`exact_rule_measure`), so the two cannot name different rows.
+    A source lists a payment on its settlement day only where its parser says so
+    (`stated_times.lists_on_settlement_day`); for any other source there are no candidates.
+    A candidate is a stored row of the record's size and direction whose feed sightings state
+    that the payment settled on the record's date (`settles_together`, in either zone),
+    inside the matcher's window of it or, beyond it, of the same payee (`reaches`).
+    Never a row that is history, that a person typed, that is an internal leg meeting a source
+    that cannot see Spaces, or that an id contradicts: the guards every pairing is judged by.
+    """
+    if not lists_on_settlement_day(incoming.source):
+        return []
+    judge = _Judgement(incoming, index)
+    return [
+        row
+        for row in index.by_amount(incoming.account_id, incoming.amount_minor)
+        if incoming.value_date in index.settlement_days(row.entity_id)
+        and not row.status.is_history
+        and SourceTier.MANUAL not in (incoming.tier, row.tier)
+        and judge.reaches(row)
+        and not judge.apart_by_kind(row)
+        and not judge.contradicted(row)
+    ]
+
+
+def plan_settlement(batch: Sequence[Transaction], index: CandidateIndex) -> dict[int, str]:
+    """The stored row each record of a batch is, where its settlement day names one, by position.
+
+    THE RULE, read by `exact_rule_measure.settlement_figures` and not yet applied by `resolve`.
+    A record listed on its settlement day (`settlement_candidates`) is the payment
+    its day names, and is that row before its own content key is tried against rows made on
+    that date.
+    Measured on the deployed store: 4611 export rows had exactly one such row, and the store
+    held 33 of them on another row, because the content key found the payment MADE on the
+    row's date before the payment SETTLED on it; with seven equal payments to one payee on
+    consecutive days (`consecutive_days_corpus`) every row sat one payment off.
+    Records of one size and date are a SET: where as many records as rows are named, and every
+    record is of the payee of every row, they are assigned in order (`assign_as_a_set`, the
+    earliest record to the earliest row), because rows of one size and payee settled on one day
+    cannot be told apart by anything but order.
+    Nothing is planned where the day names no row, where more records than rows (or more rows
+    than records) share a day, where a payee differs inside a set, or where two groups name
+    the same row: those records keep the existing order of tiers (`resolve`).
+    """
+    named: dict[int, list[Transaction]] = {}
+    groups: dict[tuple[int, date], list[int]] = {}
+    for position, incoming in enumerate(batch):
+        found = settlement_candidates(incoming, index)
+        if found:
+            named[position] = found
+            groups.setdefault((incoming.amount_minor, incoming.value_date), []).append(position)
+
+    planned: dict[int, str] = {}
+    for positions in groups.values():
+        rows = named[positions[0]]
+        ids = {row.entity_id for row in rows}
+        if len(rows) != len(positions) or any(
+            {row.entity_id for row in named[p]} != ids for p in positions
+        ):
+            continue
+        if len(positions) > 1 and not all(
+            same_payee(batch[p], row) for p in positions for row in rows
+        ):
+            continue
+        planned.update(
+            assign_as_a_set(
+                [(p, batch[p].value_date) for p in positions],
+                [(row.entity_id, row.value_date) for row in rows],
+                lambda _position, _entity: True,
+                preferred=lambda _position, _entity: True,
+            )
+        )
+    claims = Counter(planned.values())
+    return {position: row for position, row in planned.items() if claims[row] == 1}
 
 
 @dataclass(frozen=True)

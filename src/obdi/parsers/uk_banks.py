@@ -36,6 +36,9 @@ class StarlingCsvParser(StatementParser):
     source = "starling-csv"
     date_format = "%d/%m/%Y"
     date_fields = ("Date",)
+    # Measured on the deployed store: all 4821 rows the export listed had a feed item of the
+    # same size and direction that settled on the row's own date (see `matching.settles_together`).
+    lists_on_settlement_day = True
     expected_headers = ("Date", "Counter Party", "Reference", "Type")
 
     def _amount_column(self, row: dict[str, str]) -> tuple[str, str]:

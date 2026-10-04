@@ -26,13 +26,22 @@ writing, so what the join would do to a store is read before it is trusted with 
 from __future__ import annotations
 
 import contextlib
+import itertools
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
-from .matching import REFUSALS, CandidateIndex, resolve, second_row_verdicts
+from .matching import (
+    REFUSALS,
+    CandidateIndex,
+    plan_settlement,
+    resolve,
+    same_payee,
+    second_row_verdicts,
+    settlement_candidates,
+)
 from .models import MatchTier, Transaction
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
 from .plural import agree, plural
@@ -127,6 +136,10 @@ def _rows(count: int) -> str:
     return f"{count} row" if count == 1 else f"{count} rows"
 
 
+def _transactions(count: int) -> str:
+    return f"{count} stored transaction" if count == 1 else f"{count} stored transactions"
+
+
 #: How many pairs of stored rows an account's sentences name before it counts the rest.
 NAMED_PAIRS = 5
 
@@ -168,8 +181,80 @@ def _candidate_pairs(count: int) -> str:
 
 
 @dataclass
+class SettlementFigures:
+    """Where the stored transactions hold an account's export rows, against the settlement day.
+
+    Read from the stored transactions and their sightings by the rule's own detection
+    (`matching.settlement_candidates`, `matching.plan_settlement`), without writing: what
+    the rule would do to a store is read before it is trusted with one.
+    """
+
+    account: str
+    export_rows: int = 0
+    one_candidate: int = 0
+    on_that_transaction: int = 0
+    on_another: int = 0
+    on_another_other_day: int = 0
+    on_another_no_feed: int = 0
+    on_another_other: int = 0
+    on_none: int = 0
+    sharing_one_candidate: int = 0
+    several_candidates: int = 0
+    candidates_two: int = 0
+    candidates_three: int = 0
+    candidates_four_or_more: int = 0
+    in_a_run: int = 0
+    sets_assignable: int = 0
+    sets_fewer_rows_than_candidates: int = 0
+    sets_more_rows_than_candidates: int = 0
+    sets_of_another_payee: int = 0
+    moved: int = 0
+    dates_changed: int = 0
+
+    def sentences(self) -> list[str]:
+        sets_refused = (
+            self.sets_fewer_rows_than_candidates
+            + self.sets_more_rows_than_candidates
+            + self.sets_of_another_payee
+        )
+        return [
+            f"This reads {_rows(self.export_rows)} the export listed, each once however many "
+            "files list it.",
+            f"{self.one_candidate} name exactly one stored transaction by its settlement day.",
+            f"Of those, {self.on_that_transaction} sit on that transaction and "
+            f"{self.on_another} sit on another transaction.",
+            f"Of those on another transaction, {self.on_another_other_day} sit on one whose own "
+            f"feed sighting states a different settlement day, {self.on_another_no_feed} sit on "
+            f"one with no feed sighting at all, and {self.on_another_other} sit on one of "
+            "another kind.",
+            f"{self.on_none} of those one-candidate rows sit on no transaction.",
+            f"{self.sharing_one_candidate} of those share their one transaction with another "
+            "export row of the same size and date, so the settlement rule leaves them to the "
+            "existing order.",
+            f"{self.several_candidates} name several stored transactions by their settlement "
+            f"day: {self.candidates_two} name two, {self.candidates_three} name three, and "
+            f"{self.candidates_four_or_more} name four or more.",
+            f"Of those, {self.in_a_run} are of a payee paid the same size on consecutive days.",
+            f"Taking the export rows of one size and date as a set, {self.sets_assignable} sets "
+            "could be assigned in order, each row to a transaction of its own, and "
+            f"{sets_refused} could not "
+            f"({self.sets_fewer_rows_than_candidates} have fewer rows than transactions, "
+            f"{self.sets_more_rows_than_candidates} have more, and "
+            f"{self.sets_of_another_payee} name a payee that differs or a transaction another "
+            "set names).",
+            f"The settlement rule would move {_rows(self.moved)} from one stored transaction "
+            "to another.",
+            f"{_transactions(self.dates_changed)} would carry another date as a result, "
+            "assuming the export is the last source to sight each; a later feed or aggregator "
+            "sighting of one carries its own date instead, so this is at most.",
+        ]
+
+
+@dataclass
 class ExactRuleReport:
     accounts: list[AccountFigures] = field(default_factory=list)
+    #: Per account, where the stored transactions hold the export's rows (`settlement_figures`).
+    settlement: list[SettlementFigures] = field(default_factory=list)
     #: Artefacts that could not be read, which no figure includes.
     unreadable: int = 0
     #: Per account, the pairs of stored rows an exact rule would join (`pair_figures`).
@@ -190,6 +275,17 @@ class ExactRuleReport:
                 f"{plural(self.unreadable, 'landed artefact')} could not be read and "
                 f"{agree(self.unreadable, 'is')} in no figure."
             )
+        lines.append("")
+        lines.append(
+            "Where the stored transactions hold the export's rows, against the settlement day "
+            "each row's date is, read from the stored transactions and sightings without "
+            "changing them:"
+        )
+        if not self.settlement:
+            lines.append("  No account has export rows landed, so there is nothing to place.")
+        for placed in self.settlement:
+            lines.append(f"{placed.account}:")
+            lines.extend(f"  {sentence}" for sentence in placed.sentences())
         lines.append("")
         lines.append(
             "Stored rows one record's exact rules name twice, read from the stored rows and "
@@ -225,6 +321,9 @@ class _Landed:
     )
     #: Which artefact each export row was read from, by the row's own key.
     export_digest: dict[tuple[str, tuple[str, int]], str] = field(default_factory=dict)
+    #: Every artefact that listed each export row, so a row listed again by a second file is
+    #: looked for on every row either file's sighting sits on.
+    export_digests: dict[tuple[str, tuple[str, int]], list[str]] = field(default_factory=dict)
     unreadable: int = 0
 
 
@@ -263,6 +362,7 @@ def _read_artefacts(store: Store, account_map: AccountMap) -> _Landed:
                 repeat = (item.content_key, count)
                 landed.export[account][repeat] = item
                 landed.export_digest[(account, repeat)] = str(row["digest"])
+                landed.export_digests.setdefault((account, repeat), []).append(str(row["digest"]))
     return landed
 
 
@@ -435,7 +535,182 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
         _count_aggregator(figures, landed.aggregator[account], pool, held)
         _count_export(figures, account, landed, pool, held)
     report.pairs = pair_figures(store, account_map)
+    report.settlement = settlement_figures(store, account_map, landed)
     return report
+
+
+def settlement_figures(
+    store: Store, account_map: AccountMap, landed: _Landed
+) -> list[SettlementFigures]:
+    """Where each account's stored transactions hold its export rows, by the rule's detection.
+
+    A row is placed by the rows its sightings sit on (the export artefact that listed it, the
+    date it stated, and the size), which is what the stored sightings say and what the rule
+    would change. Every artefact that listed a row counts, so a second file listing it again
+    cannot hide where the first put it.
+    """
+    from .family_anchors import families_of
+
+    held = _read_held(store)
+    blind = families_of(store, account_map).blind_in
+    found: list[SettlementFigures] = []
+    for account in sorted(landed.export):
+        records = list(landed.export[account].items())
+        if not records:
+            continue
+        index = CandidateIndex(
+            store.transactions_for_account(account),
+            sightings=store.sighted_ids_for_account(account),
+            space_blind=_blind_in(blind, account),
+            settlements=store.settlement_days_for_account(account),
+            links=store.linked_ids_for_account(account),
+        )
+        made_on = store.sighting_days([account], ["starling"])["starling"]
+        figures = SettlementFigures(account, export_rows=len(records))
+        batch = [row for _, row in records]
+
+        def sits_on(
+            position: int,
+            account: str = account,
+            records: list[tuple[tuple[str, int], Transaction]] = records,
+            batch: list[Transaction] = batch,
+        ) -> set[str]:
+            key = records[position][0]
+            rows: set[str] = set()
+            for digest in landed.export_digests.get((account, key), ()):
+                row = batch[position]
+                rows |= held.export_entities.get(
+                    (digest, row.value_date.isoformat(), row.amount_minor), set()
+                )
+            return rows | {held.folded_into[r] for r in rows if r in held.folded_into}
+
+        candidates = {
+            position: settlement_candidates(row, index) for position, row in enumerate(batch)
+        }
+        planned = plan_settlement(batch, index)
+        sizes: dict[tuple[int, date], list[int]] = defaultdict(list)
+        for position, row in enumerate(batch):
+            if candidates[position]:
+                sizes[(row.amount_minor, row.value_date)].append(position)
+
+        for position, named in candidates.items():
+            if len(named) == 1:
+                _place_one(figures, index, batch[position], named[0], sits_on(position))
+                if position not in planned:
+                    figures.sharing_one_candidate += 1
+            elif len(named) > 1:
+                _count_several(figures, index, batch[position], named, made_on)
+        for positions in sizes.values():
+            named = candidates[positions[0]]
+            if len(named) < 2:
+                continue
+            if len(positions) < len(named):
+                figures.sets_fewer_rows_than_candidates += 1
+            elif len(positions) > len(named):
+                figures.sets_more_rows_than_candidates += 1
+            elif all(p in planned for p in positions):
+                figures.sets_assignable += 1
+            else:
+                figures.sets_of_another_payee += 1
+        _count_moves(figures, index, batch, planned, sits_on, made_on)
+        found.append(figures)
+    return found
+
+
+def _place_one(
+    figures: SettlementFigures,
+    index: CandidateIndex,
+    row: Transaction,
+    target: Transaction,
+    sits: set[str],
+) -> None:
+    figures.one_candidate += 1
+    if target.entity_id in sits:
+        figures.on_that_transaction += 1
+        return
+    if not sits:
+        figures.on_none += 1
+        return
+    figures.on_another += 1
+    kinds = set()
+    for entity in sits:
+        days = index.settlement_days(entity)
+        if days and row.value_date not in days:
+            kinds.add("other day")
+        elif not index.feed_uids_of(entity):
+            kinds.add("no feed")
+        else:
+            kinds.add("other")
+    if "other day" in kinds:
+        figures.on_another_other_day += 1
+    elif "no feed" in kinds:
+        figures.on_another_no_feed += 1
+    else:
+        figures.on_another_other += 1
+
+
+def _count_several(
+    figures: SettlementFigures,
+    index: CandidateIndex,
+    row: Transaction,
+    named: list[Transaction],
+    made_on: Mapping[str, str],
+) -> None:
+    figures.several_candidates += 1
+    if len(named) == 2:
+        figures.candidates_two += 1
+    elif len(named) == 3:
+        figures.candidates_three += 1
+    else:
+        figures.candidates_four_or_more += 1
+    made = sorted(
+        {
+            date.fromisoformat(made_on[t.entity_id][:10])
+            for t in index.by_amount(row.account_id, row.amount_minor)
+            if t.entity_id in made_on
+            and index.feed_uids_of(t.entity_id)
+            and not t.status.is_history
+            and same_payee(row, t)
+        }
+    )
+    if any((later - earlier).days == 1 for earlier, later in itertools.pairwise(made)):
+        figures.in_a_run += 1
+
+
+def _count_moves(
+    figures: SettlementFigures,
+    index: CandidateIndex,
+    batch: list[Transaction],
+    planned: Mapping[int, str],
+    sits_on: Callable[[int], set[str]],
+    made_on: Mapping[str, str],
+) -> None:
+    """Rows the plan would put on another transaction, and the transactions whose date changes."""
+    changed: set[str] = set()
+    losing: list[tuple[str, date]] = []
+    for position, target in planned.items():
+        sits = sits_on(position)
+        listed = batch[position].value_date
+        if sits and target not in sits:
+            figures.moved += 1
+            losing.extend((entity, listed) for entity in sits)
+        gaining = index.row(target)
+        if gaining is not None and gaining.value_date != listed:
+            changed.add(target)
+    receiving = set(planned.values())
+    for entity, listed in losing:
+        if entity in receiving or entity in changed:
+            continue
+        stored = index.row(entity)
+        made = made_on.get(entity)
+        if (
+            stored is not None
+            and stored.value_date == listed
+            and made is not None
+            and date.fromisoformat(made[:10]) != listed
+        ):
+            changed.add(entity)
+    figures.dates_changed = len(changed)
 
 
 def _count_aggregator(

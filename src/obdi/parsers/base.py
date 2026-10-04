@@ -60,6 +60,9 @@ class StatementParser(ABC):
     #: names them. Every one is kept against the payment (`stated_times.recorded_for`), whether
     #: or not it became the row's date, so a parser that adds a date column lists it here.
     date_fields: tuple[str, ...] = ()
+    #: Whether the file lists a card payment on the day it SETTLED rather than the day it was made.
+    #: Set only for a source measured to do so (`stated_times.lists_on_settlement_day`).
+    lists_on_settlement_day: bool = False
 
     def parse_stated_date(self, text: str) -> date:
         """One of `date_fields`' text as a date, in the format this parser pins."""

@@ -137,6 +137,20 @@ def recorded_for(transaction: Transaction) -> list[StatedTime]:
     return stated_times(transaction.raw) if from_file is None else from_file
 
 
+def lists_on_settlement_day(source: str) -> bool:
+    """Whether a file source lists a payment on its settlement day, by its parser's own word.
+
+    The parser is the one place that knows how its file dates a row, so the matcher
+    asks here and never compares a source's name.
+    """
+    from .parsers.uk_banks import PARSERS
+
+    return any(
+        parser_class.source == source and parser_class.lists_on_settlement_day
+        for parser_class in PARSERS
+    )
+
+
 def _last_sunday(year: int, month: int) -> date:
     day = date(year, month + 1, 1) - timedelta(days=1)
     return day - timedelta(days=(day.weekday() + 1) % 7)

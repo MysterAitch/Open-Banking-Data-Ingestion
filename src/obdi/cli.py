@@ -3028,6 +3028,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def exact_rules_text() -> str:
         from .exact_rule_measure import exact_rule_report
 
+        # Read from the stored rows, which a rebuild holding the layer has half built.
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return exact_rule_report(store, _account_map(store)).describe()
 
