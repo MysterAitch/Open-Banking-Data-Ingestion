@@ -26,6 +26,78 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.311] - 2026-10-04
+
+### Fixed
+- **A declared account reaches Actual without having a row.** Cash and HSBC
+  Mortgage, both declared and neither with a row, were in neither the budget
+  nor the Actual page's list. A push asked for an account only when it had a
+  row to send or a binding made by hand, and an account known by a stated
+  balance alone has neither. Every open declared account is now created by
+  the next push, and its known balance follows as the opening on the push
+  after. The Actual page lists such an account as "creates on next push".
+- **"An audit is queued"**, where the Actual page said "A audit". A lone
+  request to bring Actual into line reads as a request, since its short name
+  is not a noun.
+- **The page for answering review flags takes its counts from the shared
+  plural helper**, which the merge of the two had left it without.
+
+### Changed
+- **The navigation is seven destinations**: Today, Accounts, Position,
+  Actual, Bring in, Checks, Diagnostics. Reports and Evidence were lists of
+  links that said nothing; the ways data comes in were scattered over three
+  sections; Admin and the developer pages each had an item of their own.
+  Every address still answers: `/reports` is the Checks page, `/evidence` and
+  `/admin` are the Diagnostics page.
+- **Checks shows each check's result.** One row per report, with a chip (in
+  order, look, cannot say) and a sentence read from the checks the home page
+  already ran, so "is everything healthy?" is one tap where it was fourteen.
+  A row says "in order" only where a check ran and found nothing; the three
+  reports the home page does not run say "cannot say". The seven reports are
+  renamed by the question each answers, and each says its old name once
+  under its heading.
+- **Bring in is one page** for connecting a bank, importing an export,
+  uploading a statement, and the statements kept, each with where it stands.
+- **Diagnostics sets the repairs apart** in a bordered block, and files the
+  per-account field statistics (formerly "Shape") there, off the account's
+  main links.
+- **The fetch timeline's fifteen filter links are two selects and a button.**
+- **Every page in a section has a way back to its section** under its
+  heading, and answer pages of a POST mark their section in the strip.
+- **The position chart says what its lines are and how long it covers.** A
+  key above it draws each line as the chart draws it, beside its name; the
+  axis names each year, ticks the months or quarters between, names the
+  months on a chart of eighteen months or fewer, and says the span in words.
+  It had a sentence about colours beneath it and two month labels.
+- **No page says "row(s)" or "1 rows".** One helper puts a count with its
+  noun, with thousands separators, and a test walks every page for the
+  patterns. About 130 sentences changed; nine were wrong on pages no test had
+  read.
+
+### Added
+- **Two measurements on Identity health, with no change of behaviour.** One
+  says, for the export's rows, how many sit on the transaction that settled
+  on their date, how many sit on another, and how many transactions a
+  settlement-day rule would move and re-date. The other says how many stored
+  transactions have, as the newest status of their own feed item, a status
+  that makes no row (a payment declined after it was booked). The rules they
+  measure are written and held back until both have been read on the real
+  store, since the last matcher change released without its measurement
+  duplicated 245 rows there.
+
+### Not covered
+- The Checks page's cost with the real overview, and which of its rows read
+  "cannot say" there, are not measured.
+- The chart has been looked at over invented figures only.
+- No push has been made with the declared-account change: Cash and HSBC
+  Mortgage appearing in Actual, and their balances, are known from invented
+  data. Both were named by reading the masked Accounts page, where every
+  other open declared account is already bound.
+- The wording pass has done its first item only; "anchor", account
+  references in place of labels, and date formats are as they were. The
+  sentence under the chart repeats the key.
+- The home page still links Import and Admin from its foot.
+
 ## [0.4.310] - 2026-10-04
 
 ### Added
