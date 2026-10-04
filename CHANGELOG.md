@@ -26,6 +26,57 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.315] - 2026-10-04
+
+### Added
+- **The position chart's window of time can be chosen.** The owner asked for
+  a window of any number of days, weeks, months, or years, not only "the last
+  so many", aligned to calendar or fiscal boundaries where wanted. The chart
+  had one extent, everything held, and one resolution, a point per month-end:
+  ninety-four points across a phone over seven years, where a dip that lasts
+  a fortnight does not show at all. A window is now a named period (this or
+  last month, quarter, calendar year, or tax year, and the year to date), a
+  length with a place to sit (ending today, ending on a day, starting on a
+  day), or two dates. Four are one tap; the rest are in a fold.
+- **The chart's resolution follows the window**: a point per day up to 120
+  days, per week (ending Sunday) up to two years, per month beyond, with the
+  axis, the key, the span in words, and the sentence beneath saying which.
+  "Everything" is unchanged to the pence, which a test holds. A household's
+  figures on any list of days come from one pass over each account's rows
+  however many days are asked for.
+- **A window says it is one.** The chart's lowest, highest, and latest are
+  labelled as the window's, and a sentence says the window is narrower than
+  everything held, as it already does when the accounts are narrowed. The
+  month table beneath stays whole.
+
+### Changed
+- The account ticks the chart is drawn from are folded under a one-line
+  summary, so the window and the ticks together do not open the page on a
+  wall of form.
+
+### Conventions, stated in `date_window.py` and nowhere else
+- Both ends of a window are included: twelve months ending 2026-10-04 start
+  on 2025-10-05. Months and years end the day before an anniversary, clamped
+  where that day does not exist, so consecutive windows tile.
+- The tax year is the UK's, 6 April to 5 April, as one constant; a quarter is
+  a calendar quarter.
+- A window is cut at today and at the first day held, and says so; one wholly
+  outside what is held draws nothing and says why; from after to, zero, and a
+  negative length are refused in a sentence and no chart is drawn from a
+  guess.
+- The choice travels in the form's POST body only, as the account ticks do.
+  The masked page shows the control and no chart, whatever its query string.
+
+### Not covered
+- Weeks are a length only: there is no "this week" or "last full week".
+- The key says "partial month" on a daily or weekly chart.
+- The per-account balance chart has no window; the arithmetic is in a module
+  of its own so that it can.
+- Looked at over invented figures at phone and desktop width, light and dark;
+  not seen over the real figures, and the real main account's cost for a
+  daily window has not been timed there (the scaling test holds the shape of
+  the cost at about 5,300 rows over 19 accounts).
+
 ## [0.4.314] - 2026-10-04
 
 ### Added
