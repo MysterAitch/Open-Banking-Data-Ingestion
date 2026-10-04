@@ -1438,9 +1438,21 @@ def queue_actual_audit(db_path: Path) -> str:
     Read-only on both sides: the envelope carries what obdi believes each
     bound account holds, the applier partitions what is actually there
     (present / missing / orphaned / yours / diverged) and answers with a
-    result file the page renders. Nothing is changed anywhere.
+    result file the page renders. Nothing is changed in Actual or in the store.
+
+    The one thing written is obdi's own record of links: an account a push has just created
+    in Actual is linked only in the file the applying process left, until something merges
+    it. A push merges it, and so does this, because an audit pressed between the push that
+    created two accounts and the push after it reported both as differing, "not bound to an
+    obdi account", when each was exactly as the push had made it.
     """
-    from .actual_push import build_audit_envelope, queue_push, waiting_of_kind
+    from .actual_push import (
+        build_audit_envelope,
+        drop_conflicting_bindings,
+        merge_pending_bindings,
+        queue_push,
+        waiting_of_kind,
+    )
 
     if not actual_configured():
         return NothingQueued(ACTUAL_NOT_CONFIGURED)
@@ -1448,6 +1460,10 @@ def queue_actual_audit(db_path: Path) -> str:
     if held_up is not None:
         return held_up
     settle_emptied_budgets_for(db_path)
+    map_path_env = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if map_path_env:
+        merge_pending_bindings(Path(map_path_env), _actual_dir(db_path))
+        drop_conflicting_bindings(Path(map_path_env))
     bindings = _actual_bindings()
     if not bindings:
         return NothingQueued("Nothing queued: no Actual-bound accounts to audit - push first.")

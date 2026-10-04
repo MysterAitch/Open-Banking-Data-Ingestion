@@ -202,6 +202,81 @@ class TestEnvelope:
         assert "1 named awaiting provisioning" in summary
         assert "1 unnamed (bind first)" in summary
 
+    @staticmethod
+    def _audit_after_a_push_created_an_account(
+        tmp_path, monkeypatch, *, created: bool
+    ) -> tuple[str, set[str], set[str]]:
+        """One account already in Actual; a second that a push has just created there, or not.
+
+        The process that applies requests leaves the link it minted in `bindings-pending.json`;
+        it is in the account map only once something merges it.
+        """
+        import json as _json
+
+        from obdi.cli import queue_actual_audit
+
+        map_path = tmp_path / "accounts.json"
+        map_path.write_text(
+            _json.dumps(
+                {
+                    "bindings": [],
+                    "actual": [{"canonical_id": "halifax-current", "actual_account_id": "X"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        actual_dir = tmp_path / "actual"
+        actual_dir.mkdir()
+        if created:
+            (actual_dir / "bindings-pending.json").write_text(
+                _json.dumps([{"canonical_id": "cash", "actual_account_id": "act-cash"}]),
+                encoding="utf-8",
+            )
+        monkeypatch.setenv("ACTUAL_SYNC_ID", "sync-1")
+        monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(map_path))
+        monkeypatch.setenv("OBDI_ACTUAL_DIR", str(actual_dir))
+        db = tmp_path / "s.sqlite3"
+        with Store(db) as store:
+            _seed(store, "halifax-current", "e-1")
+            _seed(store, "cash", "e-2")
+
+        summary = queue_actual_audit(db)
+
+        (request,) = (actual_dir / "requests").glob("audit-*.json")
+        accounts = _json.loads(request.read_text(encoding="utf-8"))["accounts"]
+        linked = {
+            e["canonical_id"]
+            for e in _json.loads(map_path.read_text(encoding="utf-8"))["actual"]
+        }
+        return summary, set(accounts), linked
+
+    def test_Audit_StraightAfterAPushCreatedAnAccount_AuditsThatAccountToo(
+        self, tmp_path, monkeypatch
+    ):
+        """On the real store an audit pressed between the push that created two accounts and
+        the push after it reported both as differing, "not bound to an obdi account": only a
+        push recorded the link, so the audit compared against a map that did not know them."""
+        summary, audited, linked = self._audit_after_a_push_created_an_account(
+            tmp_path, monkeypatch, created=True
+        )
+
+        assert audited == {"X", "act-cash"}
+        assert linked == {"halifax-current", "cash"}
+        assert "auditing 2 Actual-bound accounts" in summary
+        assert "0 named awaiting provisioning" in summary
+
+    def test_Audit_WhenNoPushHasCreatedTheAccount_LeavesItOutAndSaysItAwaitsOne(
+        self, tmp_path, monkeypatch
+    ):
+        summary, audited, linked = self._audit_after_a_push_created_an_account(
+            tmp_path, monkeypatch, created=False
+        )
+
+        assert audited == {"X"}
+        assert linked == {"halifax-current"}
+        assert "auditing 1 Actual-bound account;" in summary
+        assert "1 named awaiting provisioning" in summary
+
     def test_QueueWrite_IsAtomicAndOrdered(self, tmp_path):
         first = queue_push({"version": 2}, tmp_path / "actual")
         second = queue_push({"version": 2}, tmp_path / "actual")
