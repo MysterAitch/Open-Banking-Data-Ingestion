@@ -845,11 +845,16 @@ class TestTheCommandLine:
 
 
 class TestThePageIsReachable:
-    def test_ReportsIndex_ListsThePage(self, lab):
-        page = httpx.get(f"{lab}/reports", timeout=60).text
+    def test_ChecksPage_ListsThePageUnderItsQuestion(self, lab):
+        page = httpx.get(f"{lab}/checks", timeout=60).text
 
         assert 'href="/period-reconciliation"' in page
-        assert "Statement periods" in page
+        assert "Do the statements add up?" in page
+
+    def test_ThePage_SaysItWasFormerlyCalledStatementPeriods(self, lab):
+        page = httpx.get(f"{lab}/period-reconciliation", timeout=60).text
+
+        assert "Formerly called Statement periods." in page
 
     def test_LedgerPage_WithTwoStatementAnchors_LinksToTheAccountsPeriods(self, lab):
         page = httpx.get(

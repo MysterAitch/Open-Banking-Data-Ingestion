@@ -21,6 +21,7 @@ from obdi.navigation import (
     ALIASES,
     DESTINATIONS,
     SECTION_OF_ROUTE,
+    answering,
     navigation_html,
     way_out_html,
     with_way_out,
@@ -368,9 +369,11 @@ class TestTheWayOutUnderTheHeading:
         from obdi.web_answers import ledger_link
 
         marked = current_route.set("/ledger-anchor")
+        replying = answering.set(True)
         try:
             page = render_page("Balance stated", ledger_link("a", "A") + "<p>done</p>").decode()
         finally:
+            answering.reset(replying)
             current_route.reset(marked)
 
         assert (
@@ -399,11 +402,39 @@ class TestTheWayOutUnderTheHeading:
     def test_AnswerThatLeadsWithTheLedgerLink_KeepsThatLinkFirst(self):
         lead = '<p><a class="button" href="/ledger?ref=a">Open the ledger for A</a></p>'
 
-        body = with_way_out(lead + "<p>done</p>", "/ledger-anchor")
+        token = answering.set(True)
+        try:
+            body = with_way_out(lead + "<p>done</p>", "/ledger-anchor")
+        finally:
+            answering.reset(token)
 
         assert body.startswith(lead)
         assert body.index("Back to Accounts") > len(lead) - 1
         assert body.index("Back to Accounts") < body.index("<p>done</p>")
+
+    def test_AnswerThatLeadsWithWhatHappened_KeepsThatSentenceFirst(self):
+        token = answering.set(True)
+        try:
+            body = with_way_out("<p>Nothing queued: not configured.</p><p>more</p>", "/push-actual")
+        finally:
+            answering.reset(token)
+
+        assert body.startswith("<p>Nothing queued: not configured.</p>")
+        assert body.index("Back to Actual") < body.index("<p>more</p>")
+
+    def test_PageThatIsNotAnAnswer_PutsTheWayOutBeforeItsFirstParagraph(self):
+        body = with_way_out("<p>Lede.</p>", "/attempts")
+
+        assert body.startswith('<p class="wayout">')
+
+    def test_AnswerWithNoParagraphToLeadWith_StillGetsTheWayOut(self):
+        token = answering.set(True)
+        try:
+            body = with_way_out("<h2>x</h2>", "/push-actual")
+        finally:
+            answering.reset(token)
+
+        assert body.startswith('<p class="wayout">')
 
     def test_PageOfNoSection_GetsNoWayOut(self):
         assert way_out_html("/no-such-page") == ""

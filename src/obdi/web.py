@@ -76,7 +76,7 @@ from .namespaces import (
     validate_canonical_name,
     validate_connection_name,
 )
-from .navigation import current_route, page_name
+from .navigation import answering, current_route, page_name
 from .overview import Overview
 from .plural import plural, word
 from .position import Position
@@ -6583,11 +6583,13 @@ class ConnectionHandler(
         route = urlparse(self.path).path.rstrip("/") or "/"
         # An answer page is marked with the section its action belongs to, as a GET is.
         marked = current_route.set(route)
+        replying = answering.set(True)
         try:
             self._dispatch_post()
         except Exception as exc:
             self._report_fault("POST", route, exc)
         finally:
+            answering.reset(replying)
             current_route.reset(marked)
             _report_slow_route("POST", route, time.perf_counter() - began)
 

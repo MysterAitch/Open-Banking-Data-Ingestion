@@ -307,13 +307,13 @@ class TestTheKeptStatementsPage:
         assert first == 3, "each of the three statements is asked about once"
         assert len(calls) == first, "a second view re-read the statements"
 
-    def test_KeptStatements_WhenNavigatedTo_MarksTheEvidenceSection(
+    def test_KeptStatements_WhenNavigatedTo_MarksTheBringInSection(
         self, serve, one_of_each
     ):
         page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60).text
 
         assert re.search(
-            r'<a href="/evidence" aria-current="page">Evidence</a>', page
+            r'<a href="/bring-in" aria-current="page">Bring in</a>', page
         )
 
 

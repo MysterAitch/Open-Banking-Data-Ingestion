@@ -198,8 +198,10 @@ def navigation_html(route: str | None = None) -> str:
     return f'<nav class="sitenav" aria-label="Sections"><ul>{"".join(items)}</ul></nav>'
 
 
-#: Where an answer page's lead is already a link the page exists for. The way out goes after it.
-_ANSWER_LEAD = '<p><a class="button" href="/ledger?ref='
+#: Set by the request handler for the duration of one POST. An answer leads with what happened
+#: (or with a link to the account it happened to), so the way out follows that first paragraph
+#: instead of pushing it down the screen.
+answering: ContextVar[bool] = ContextVar("answering", default=False)
 
 
 def way_out_html(route: str | None = None) -> str:
@@ -223,11 +225,11 @@ def way_out_html(route: str | None = None) -> str:
 
 
 def with_way_out(body: str, route: str | None = None) -> str:
-    """`body` with the way out under the heading, after an answer's own lead link if it has one."""
+    """`body` with the way out under the heading; in an answer, after its first paragraph."""
     way_out = way_out_html(route)
     if not way_out:
         return body
-    if body.startswith(_ANSWER_LEAD):
+    if answering.get() and body.startswith("<p") and "</p>" in body:
         end = body.index("</p>") + len("</p>")
         return body[:end] + way_out + body[end:]
     return way_out + body
