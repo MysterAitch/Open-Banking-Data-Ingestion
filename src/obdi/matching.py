@@ -716,6 +716,7 @@ def pair_transfer_entities(
     transactions: Iterable[Transaction],
     *,
     window_days: int = INTERNAL_TRANSFER_WINDOW_DAYS,
+    counterpart: Callable[[Transaction], str | None] | None = None,
 ) -> list[tuple[str, str]]:
     """The pairs themselves, as (debit entity, credit entity).
 
@@ -723,15 +724,52 @@ def pair_transfer_entities(
     paired with which rather than flagging them - the shape a store needs
     to record a confirmation as its own fact instead of overwriting the
     provider's claim.
+
+    THE ORDER OF CHOICE. An internal leg is offered another internal leg first,
+    and only what is left is paired as before.
+    Measured on the deployed store: "in row ... a transfer leg, confirmed paired
+    with the Space starling-space-bills" beside "out row ... a transfer leg with
+    no pair" and "out row ... booked; in the Space starling-space-bills", an
+    ordinary payment of the same size, so the main account's IN leg had taken the
+    payment and left the real leg without a partner.
+
+    `counterpart` names the account a leg says it moved to or from, or None where
+    that is not known (the provider's own category, resolved to an account). A leg
+    whose counterpart account is known pairs only with an internal leg held in
+    that account, and never with an ordinary payment: the feed told us which
+    account the other side is in. A leg with no known counterpart, and every row
+    that is not an internal leg, is paired by amount, sign, and date alone.
     """
     items = sorted(transactions, key=lambda t: (t.value_date, t.account_id))
-    return [
-        (items[i].entity_id, items[j].entity_id)
-        for i, j in _pair_indices(items, timedelta(days=window_days))
-    ]
+    window = timedelta(days=window_days)
+    named = counterpart or (lambda _row: None)
+    paired: set[int] = set()
+
+    def is_leg(row: Transaction) -> bool:
+        return row.is_internal_transfer
+
+    def agree(debit: Transaction, credit: Transaction) -> bool:
+        return all(
+            (account := named(leg)) is None or account == other.account_id
+            for leg, other in ((debit, credit), (credit, debit))
+        )
+
+    def ordinary_or_unplaced(row: Transaction) -> bool:
+        return not (row.is_internal_transfer and named(row) is not None)
+
+    found = _pair_indices(items, window, paired=paired, eligible=is_leg, agree=agree)
+    found += _pair_indices(items, window, paired=paired, eligible=ordinary_or_unplaced)
+    return [(items[i].entity_id, items[j].entity_id) for i, j in found]
 
 
-def _pair_indices(items: list[Transaction], window: timedelta) -> list[tuple[int, int]]:
+def _pair_indices(
+    items: list[Transaction],
+    window: timedelta,
+    *,
+    paired: set[int] | None = None,
+    eligible: Callable[[Transaction], bool] | None = None,
+    agree: Callable[[Transaction, Transaction], bool] | None = None,
+) -> list[tuple[int, int]]:
     """Greedy debit-to-credit pairing over the canonically sorted list.
 
     The original scanned every credit for every debit - a full-store
@@ -741,13 +779,17 @@ def _pair_indices(items: list[Transaction], window: timedelta) -> list[tuple[int
     order the scan used - which is what preserves the greedy choice
     exactly: for each debit, the first eligible credit in that order
     wins, each side consumed once.
+
+    `paired` carries the rows already taken by an earlier pass, and is added
+    to; `eligible` limits a pass to some rows; `agree` is a further test on a
+    debit and a credit of one amount that could pair.
     """
-    paired: set[int] = set()
+    paired = set() if paired is None else paired
     pairs: list[tuple[int, int]] = []
 
     credits_by_amount: dict[int, list[int]] = {}
     for j, item in enumerate(items):
-        if item.amount_minor > 0:
+        if item.amount_minor > 0 and j not in paired and (eligible is None or eligible(item)):
             credits_by_amount.setdefault(item.amount_minor, []).append(j)
     # Debits are visited in non-decreasing date order, so a credit that
     # has fallen behind one debit's window can never re-enter a later
@@ -756,6 +798,8 @@ def _pair_indices(items: list[Transaction], window: timedelta) -> list[tuple[int
 
     for i, debit in enumerate(items):
         if i in paired or debit.amount_minor >= 0:
+            continue
+        if eligible is not None and not eligible(debit):
             continue
         bucket = credits_by_amount.get(-debit.amount_minor)
         if not bucket:
@@ -771,6 +815,8 @@ def _pair_indices(items: list[Transaction], window: timedelta) -> list[tuple[int
             if credit.value_date - debit.value_date > window:
                 break
             if j in paired or credit.account_id == debit.account_id:
+                continue
+            if agree is not None and not agree(debit, credit):
                 continue
             paired.update({i, j})
             pairs.append((i, j))

@@ -1322,7 +1322,7 @@ def _alert(db_path: Path) -> int:
 
 def _pair_transfers(db_path: Path) -> int:
     with Store(db_path) as store:
-        confirmed = pair_transfers_across_store(store)
+        confirmed = pair_transfers_across_store(store, _account_map(store))
         unconfirmed = unconfirmed_transfers(store)
     print(f"confirmed {confirmed} internal transfer pair(s)")
     if unconfirmed:
@@ -2868,7 +2868,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if busy:
             raise TypedRefused(f"nothing was typed in: {busy}")
         with Store(db_path) as store:
-            record_typed_transaction(store, ref, day, direction, amount, description)
+            record_typed_transaction(
+                store, ref, day, direction, amount, description, account_map=_account_map(store)
+            )
 
     def typed_withdraw(ref: str, entry_id: str) -> None:
         from .typed_transactions import TypedRefused, withdraw_typed_transaction
@@ -2877,7 +2879,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if busy:
             raise TypedRefused(f"nothing was withdrawn: {busy}")
         with Store(db_path) as store:
-            withdraw_typed_transaction(store, ref, entry_id)
+            withdraw_typed_transaction(store, ref, entry_id, account_map=_account_map(store))
 
     def actual_queue() -> list[dict[str, object]]:
         from .actual_push import queue_with_progress

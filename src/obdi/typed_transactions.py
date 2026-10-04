@@ -41,6 +41,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
+from .accounts import AccountMap
 from .balance_anchors import known_account, parse_calendar_day, parse_pounds_and_pence
 from .errors import DataError
 from .identity import artefact_digest, content_key
@@ -235,6 +236,7 @@ def record_typed_transaction(
     today: date | None = None,
     now: datetime | None = None,
     entry_id: str | None = None,
+    account_map: AccountMap | None = None,
 ) -> str:
     """Land one typed transaction, resolve it into the account, and return its entry id.
 
@@ -290,12 +292,17 @@ def record_typed_transaction(
         store, [transaction_from_entry(payload, ref, digest)], digest=digest
     )
     settle_review_flags(store)
-    pair_transfers_across_store(store)
+    pair_transfers_across_store(store, account_map)
     return minted
 
 
 def withdraw_typed_transaction(
-    store: Store, ref: str, entry_id: str, *, now: datetime | None = None
+    store: Store,
+    ref: str,
+    entry_id: str,
+    *,
+    now: datetime | None = None,
+    account_map: AccountMap | None = None,
 ) -> None:
     """Retract one typed transaction by landing a withdrawal, then apply it live.
 
@@ -329,7 +336,7 @@ def withdraw_typed_transaction(
         )
     )
     _retract_live(store, entry.digest)
-    pair_transfers_across_store(store)
+    pair_transfers_across_store(store, account_map)
 
 
 def _retract_live(store: Store, entry_digest: str) -> None:

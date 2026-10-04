@@ -668,7 +668,7 @@ def rebuild_from_raw(
     report.review_settled = settled.settled
     report.review_still_open = settled.still_open
     with instrumentation.phase("transfer-pairing"):
-        report.transfers_paired = pair_transfers_across_store(store)
+        report.transfers_paired = pair_transfers_across_store(store, account_map)
     # After pairing, because a confirmed transfer leg is never folded and the
     # pairing table is how the pass knows one.
     with instrumentation.phase(SAME_MONEY_PHASE):

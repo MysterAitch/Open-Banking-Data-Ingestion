@@ -58,7 +58,7 @@ anywhere: those rows are outside the pass.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -363,6 +363,31 @@ def provider_space_claims(store: Store, account_map: AccountMap) -> list[Provide
     return found_claims
 
 
+def category_resolver(store: Store, account_map: AccountMap) -> Callable[[str], str | None]:
+    """The canonical account a Starling category uid names, or None where none is bound.
+
+    A Space is bound by its category uid. A main account's feed is fetched by its
+    default category but bound by its ACCOUNT uid, so the landed
+    `starling-accounts` artefacts say which account a default category belongs to.
+    An unbound category is unknown, and the map's source-qualified fallback for it
+    is never an account.
+    """
+    from .rebuild import _starling_defaults
+
+    defaults = _starling_defaults(
+        store.connection.execute(
+            "SELECT source, payload FROM raw_artefacts WHERE source = 'starling-accounts'"
+        ).fetchall()
+    )
+
+    def resolve(category: str) -> str | None:
+        key = defaults.get(category, category)
+        account = str(account_map.resolve("starling", key))
+        return None if account.startswith("starling:") else account
+
+    return resolve
+
+
 def provider_space_parents(store: Store, account_map: AccountMap) -> dict[str, str]:
     """Each BOUND Space the provider's structure names, with its one main account.
 
@@ -427,6 +452,7 @@ __all__ = [
     "FoldPlan",
     "FoldReport",
     "ProviderSpaceClaim",
+    "category_resolver",
     "fold_space_copies",
     "plan_folds",
     "provider_mains_by_space_uid",

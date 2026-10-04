@@ -23,7 +23,7 @@ from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
-from .space_attribution import fold_space_copies
+from .space_attribution import category_resolver, fold_space_copies
 from .store import Store
 
 #: Whether a source cannot see Spaces in an account, as (source, account).
@@ -285,7 +285,7 @@ def import_file(
     return summary
 
 
-def pair_transfers_across_store(store: Store) -> int:
+def pair_transfers_across_store(store: Store, account_map: AccountMap | None = None) -> int:
     """Confirm internal transfers across the WHOLE store, not just one import.
 
     A separate pass by necessity: a transfer's two sides live in different
@@ -303,14 +303,30 @@ def pair_transfers_across_store(store: Store) -> int:
     account it belongs to has not been ingested yet. Both kinds of evidence
     exclude a movement from spending; only this pass's findings are counted
     here, so the number means "pairs found" rather than "flags written".
+
+    With the account map, a leg's own statement of the category it moved to or
+    from is resolved to an account, and the leg pairs only there
+    (`matching.pair_transfer_entities`). Without one, every leg is paired by
+    amount, sign, and date, as a store with no declared accounts always was.
     """
+    resolver = category_resolver(store, account_map) if account_map is not None else None
+
+    def counterpart(row: Transaction) -> str | None:
+        if resolver is None:
+            return None
+        named = row.raw.get("counterPartyUid")
+        return resolver(named) if isinstance(named, str) and named else None
+
     # A folded row is a second report of a payment, not a movement, so it must
     # not be offered as the leg of a transfer, and nor can a reversed one: the
     # money never moved, so the other side has nothing to pair with.
     pairs = pair_transfer_entities(
-        t
-        for t in store.all_transactions()
-        if t.status not in (TransactionStatus.FOLDED, TransactionStatus.REVERSED)
+        (
+            t
+            for t in store.all_transactions()
+            if t.status not in (TransactionStatus.FOLDED, TransactionStatus.REVERSED)
+        ),
+        counterpart=counterpart,
     )
     store.replace_transfer_pairs(pairs)
     store.connection.commit()
