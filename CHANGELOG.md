@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.302] - 2026-10-04
+
+### Fixed
+- **No GET returns a stored value.** The rule is that reading unmasked data
+  "must be deliberately and explicitly attempted rather than accidentally
+  stumbled across", and four GET pages broke it: the raw payload view
+  returned an artefact's whole payload; the Categorise page printed every
+  payee and reference; the balance walk printed the expected and stated
+  balance of each break; and the per-account and per-artefact shape pages
+  printed payees, descriptions, and payment ids as the values of their
+  category tables. Each is now masked on the GET, with the values behind a
+  press that is not stored. A test plants distinctive amounts, payees,
+  references, and ids in every source's payload and requests every GET route
+  the dispatcher knows: none may appear.
+- **A payment's own identifier is withheld on the shape pages.** They showed
+  provider ids by design, on the reasoning that an id costs only its
+  rotation. A transaction id is a reference to a payment, so it is now
+  withheld; account and entity ids are still shown.
+- **While a rebuild runs, the checks that read derived data are paused.** A
+  deploy's rebuild takes a minute or two, and the Overview reported its
+  half-built state as "Data at risk": thousands of movement faults and over a
+  thousand review flags that did not exist a minute later. The movement,
+  agreement, balance, review-flag, and protection verdicts now say that a
+  rebuild is in progress and when it started, the alert defers them, and
+  nothing is recorded as a break or a heal from a half-built layer. A rebuild
+  that died stops holding when its lease expires and is reported as
+  abandoned.
+
+### Changed
+- **A ledger row's "Dates and joins" says each source's statements once**,
+  with how often it was sighted again, and gives a line of its own only to a
+  later sighting that states something different, saying what changed.
+
+Not covered by the walk: pages whose content depends on state the test store
+lacks, such as provider error text on the attempts page and Actual's push
+history. Those were read, not planted.
+
 ## [0.4.301] - 2026-10-04
 
 ### Added
