@@ -26,6 +26,56 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.293] - 2026-10-04
+
+The owner's framing, in his words: "this is what the balance is known to be on
+this date, transactions should aspirationally aim to match this and
+flags/warnings shown if not"; "the transactions to this date match the known
+balance (and/or are verified as being correct), and should be considered
+protected"; "maybe that should be three concepts not two". Pages now use three
+terms for them: known balance, in agreement, protected.
+
+### Added
+- **A row is cleared when an authoritative listing lists it**: a statement, an
+  export, or the bank's own feed. The aggregator alone does not clear a row,
+  because it relays the bank's records and can drop or re-issue one, which is
+  what walking a statement exists to avoid trusting. The ledger marks each row
+  and counts cleared and uncleared rows per month.
+- **Each account says how far it is in agreement.** It is the latest known
+  balance up to which every known balance is met, no two known balances
+  disagree, and the movement checks report no fault. Agreement is worked out,
+  never declared, and what holds it back is named with a link. A balance
+  cannot see movements that net to nil, which is why the movement checks are
+  part of the rule.
+- **A span that is in agreement can be protected with a press.** In two days a
+  dozen rule changes each re-derived seven years of one account, including
+  twenty-six months that already reproduced every balance, and nothing would
+  have said if one had quietly broken that span. A protection records a
+  fingerprint of the span's rows and survives a rebuild. A span that changes
+  afterwards is reported as broken, at the top of the Overview and in the
+  alert, with what changed in counts and dates. It heals by itself when the
+  cause is fixed, or is accepted or withdrawn behind an are-you-sure.
+- **Earlier history must fit a protected span.** Rows added before it that
+  arrive at a different balance from the one it was verified from are reported
+  as a fault of the new rows, and the protection stays intact.
+- **The Overview and the Accounts page show the three dates per account**, and
+  the Overview raises known balances that disagree with each other and an
+  account not in agreement for more than 45 days.
+
+### Changed
+- **Actual receives cleared only for cleared rows.** Every booked row was sent
+  as cleared. Reconciled is never sent: the applier refuses to change a
+  reconciled row, which would block obdi's own corrections.
+
+Protection is an alarm and not a freeze: a rebuild always completes and
+produces what the rules say. A hard lock was rejected because it would refuse
+the fix for the next fault. Locking is a press and never automatic.
+
+Not proven: any real account. A false fault from the movement checks would
+hold agreement back, and their false-positive rate on the real store has not
+been read. Whether Actual changes the cleared mark of a row it already holds
+is not tested against the applier.
+
 ## [0.4.292] - 2026-10-04
 
 ### Added
