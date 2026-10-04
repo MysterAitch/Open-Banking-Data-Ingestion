@@ -195,10 +195,8 @@ def household(
     """The household with `payments` added, each source arriving in `order` through the
     door a live pull or import uses, and then (when `rebuild`) the whole store rebuilt from raw.
 
-    A rebuild replays artefacts by the time they were landed, and that time is written
-    with the machine's own offset by an import and in UTC by a feed, so on a machine
-    ahead of UTC an import always replays last whatever order it arrived in.
-    Arriving live is the only way these scenarios keep the order they name.
+    A rebuild replays in arrival order (`arrival_order`), so a rebuilt store keeps the
+    order a scenario names.
     """
     store = Store(directory / "household.sqlite3")
     land_evidence(store)
