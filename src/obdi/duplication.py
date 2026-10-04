@@ -36,6 +36,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 
+from .arrival_order import in_arrival_order
 from .store import Store
 
 #: Where a payload keeps its records, in the order the providers use.
@@ -218,9 +219,11 @@ def analyse(store: Store, *, churn_limit: int = 20) -> DuplicationReport:
     varied: set[tuple[str, str]] = set()
     amended: set[tuple[str, str]] = set()
 
-    rows = store.connection.execute(
-        "SELECT source, payload FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
-    ).fetchall()
+    rows = in_arrival_order(
+        store.connection.execute(
+            "SELECT rowid, source, payload, fetched_at FROM raw_artefacts"
+        ).fetchall()
+    )
 
     for row in rows:
         source = str(row["source"])

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import pytest
 
+from obdi.arrival_order import in_arrival_order
 from obdi.movement_completeness import check_rows
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
@@ -92,18 +93,15 @@ def said(store) -> list[str]:
 def export_is_replayed_last(store) -> bool:
     """Whether the rebuild replays the export after the feed and the aggregator.
 
-    Read from the store in the rebuild's own order and not from the order the test landed
-    them in, because the two differ: the replay sorts the stamp as text, a pull stamps UTC,
-    and an import stamps local time with its offset.
-    On a machine ahead of UTC an import therefore replays last whatever order it arrived
-    in, and on one at UTC it replays where it arrived.
-    The build of v0.4.295 failed on exactly that: this scenario's answer was written as
-    true of every order on a machine where every order replays the export last.
+    Read from the store through the rebuild's own ordering (`in_arrival_order`) and not from
+    the order the test landed them in, so the answer is said by the order actually replayed.
     """
     replayed = [
         str(row["source"])
-        for row in store.connection.execute(
-            "SELECT source FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
+        for row in in_arrival_order(
+            store.connection.execute(
+                "SELECT rowid, source, fetched_at FROM raw_artefacts"
+            ).fetchall()
         )
     ]
     listing = ("csv", "starling-feed", "truelayer-booked")

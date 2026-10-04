@@ -35,6 +35,7 @@ from typing import Any
 
 from . import instrumentation
 from .accounts import AccountMap
+from .arrival_order import in_arrival_order
 from .errors import DataError
 from .family_anchors import families_of
 from .ingest import ImportSummary, SpaceBlind, pair_transfers_across_store, reconcile_batch
@@ -429,8 +430,8 @@ def rebuild_from_raw(
     """Wipe the derived layers and replay layer 0 in arrival order.
 
     Arrival order matters: occurrence counting and supersession depend on
-    which sighting came first, and replaying in fetched_at order reproduces
-    the history the store actually lived through.
+    which sighting came first, and replaying in arrival order (see
+    `arrival_order`) reproduces the history the store actually lived through.
 
     Every source-qualified artefact ref is resolved through the CURRENT
     account map - the promise the button makes. Without this, artefacts
@@ -483,10 +484,12 @@ def rebuild_from_raw(
     store.connection.execute("DELETE FROM review_queue WHERE resolved_at IS NULL")
     store.connection.commit()
 
-    artefact_rows = store.connection.execute(
-        "SELECT rowid, source, account_ref, digest, payload, origin, "
-        "record_count FROM raw_artefacts ORDER BY fetched_at ASC, rowid ASC"
-    ).fetchall()
+    artefact_rows = in_arrival_order(
+        store.connection.execute(
+            "SELECT rowid, source, account_ref, digest, payload, origin, "
+            "record_count, fetched_at FROM raw_artefacts"
+        ).fetchall()
+    )
     starling_defaults = _starling_defaults(artefact_rows)
     retracted = withdrawn_entry_ids(
         ((str(row["source"]), row["payload"]) for row in artefact_rows),

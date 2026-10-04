@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
+from .arrival_order import in_arrival_order
 from .balance_anchors import known_account, parse_calendar_day, parse_pounds_and_pence
 from .errors import DataError
 from .identity import artefact_digest, content_key
@@ -199,11 +200,13 @@ def withdrawn_entry_ids(
 
 def typed_entries(store: Store, ref: str) -> list[TypedEntry]:
     """Every entry typed for the account, oldest first, withdrawn ones included."""
-    held = store.connection.execute(
-        "SELECT source, digest, payload FROM raw_artefacts "
-        "WHERE account_ref = ? AND source IN (?, ?) ORDER BY fetched_at, rowid",
-        (ref, MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE),
-    ).fetchall()
+    held = in_arrival_order(
+        store.connection.execute(
+            "SELECT rowid, source, digest, payload, fetched_at FROM raw_artefacts "
+            "WHERE account_ref = ? AND source IN (?, ?)",
+            (ref, MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE),
+        ).fetchall()
+    )
     retracted = withdrawn_entry_ids((str(r["source"]), r["payload"]) for r in held)
     entries = []
     for row in held:
