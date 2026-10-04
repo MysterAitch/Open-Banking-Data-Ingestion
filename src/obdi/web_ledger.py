@@ -34,6 +34,7 @@ from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_balance_chart import structure_summary_html
+from .web_standing import standing_html
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -98,6 +99,13 @@ def _words(items: list[str]) -> str:
 def _row_flags(row: Any) -> str:
     """The pills for what is unusual about a row, or nothing when nothing is."""
     flags = ""
+    if row.cleared_by:
+        flags += _flag(
+            f"cleared by {', '.join(row.cleared_by)}",
+            "An authoritative listing of the account lists this row: a statement, an export, "
+            "or the bank's own feed. The aggregator alone does not clear a row.",
+            "pill-ok",
+        )
     if row.origin == "typed":
         flags += _flag(
             "typed",
@@ -264,6 +272,8 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
             rows += _count(label, number)
         else:
             zero.append(phrase)
+    rows += _count("Cleared rows", summary.cleared)
+    rows += _count("Uncleared rows", summary.uncleared)
     rows += _count("Would be sent to Actual", summary.would_send)
     rows += _count("Withheld from Actual", f"{summary.withheld} ({reasons})")
     if summary.unsendable:
@@ -1226,12 +1236,41 @@ def _bank_html(opening: Any) -> str:
     return body
 
 
+def _clearing_html(clearing: Any) -> str:
+    """Cleared and uncleared rows in all, with the months a click away."""
+    if clearing is None or not (clearing.cleared or clearing.uncleared):
+        return ""
+    months = "".join(
+        f"<li>{_esc(m.month)}: {m.cleared} cleared, {m.uncleared} uncleared</li>"
+        for m in clearing.months
+    )
+    return (
+        f"<p>Across the account, {clearing.cleared} rows are cleared and {clearing.uncleared} "
+        "are not. A row is cleared when a statement, an export, or the bank's own feed lists "
+        "it; the aggregator alone does not clear a row, and a pending row is never cleared."
+        "</p>"
+        f'<details><summary>Cleared and uncleared, month by month</summary><ul class="plain">'
+        f"{months}</ul></details>"
+    )
+
+
+def _verification_html(view: Any) -> str:
+    """The three dates, what holds agreement back, and the cleared counts."""
+    if view.standing is None:
+        return ""
+    return (
+        "<h2>Verification</h2>"
+        + standing_html(view.standing, view.ref)
+        + _clearing_html(view.clearing)
+    )
+
+
 def _opening_html(view: Any, unmasked: bool) -> str:
     """The "Opening balance and anchors" section, and the forms that edit it."""
     opening = view.opening
     if opening is None:
         return ""
-    body = "<h2>Opening balance and anchors</h2>"
+    body = '<h2 id="opening">Opening balance and anchors</h2>'
     if opening.state == "none":
         body += (
             '<p class="warn"><strong>No opening balance: the figures on this page '
@@ -1612,6 +1651,7 @@ def render_ledger(
             "It is declared, but nothing has been imported or fetched for it, or "
             "its feed has been silent since it was set up. This is not a clean "
             "month.</p>"
+            + _verification_html(view)
             + _opening_html(view, unmasked)
             + _unitemised_html(view)
             + _typed_html(view, ref=view.ref, month=view.month)
@@ -1620,6 +1660,7 @@ def render_ledger(
         return render_page("Ledger", body)
 
     body += _mode(view, unmasked)
+    body += _verification_html(view)
     body += f"<h2>{_esc(view.month)}</h2>" + _month_links(view, unmasked)
     if view.state == "empty-month":
         body += (

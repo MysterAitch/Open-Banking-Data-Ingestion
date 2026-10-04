@@ -44,8 +44,10 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 from .accounts import AccountRef
+from .agreement import Standing, standing_of
 from .balance_anchors import (
     CURRENCY,
     STATED,
@@ -54,6 +56,7 @@ from .balance_anchors import (
     effective_opening,
 )
 from .bank_balances import describe as describe_bank
+from .clearing import ClearingView, cleared_by, clearing_counts
 from .family_anchors import Families
 from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
@@ -66,6 +69,9 @@ from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
 from .store import Store
 from .typed_transactions import TypedEntry, typed_entries
+
+if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
+    from .movement_completeness import MovementCompleteness
 
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
@@ -237,6 +243,9 @@ class LedgerRow:
     category: str
     payee: str
 
+    #: The sources that clear this row (`clearing`); empty for a row no authoritative listing holds.
+    cleared_by: Structural[tuple[str, ...]] = ()
+
 
 @dataclass(frozen=True)
 class MonthSummary:
@@ -265,6 +274,9 @@ class MonthSummary:
 
     store_sum: Total[Money]
     sent_sum: Total[Money]
+    #: Rows the account's authoritative sources list, and rows only a relay or a person reports.
+    cleared: Structural[int] = 0
+    uncleared: Structural[int] = 0
 
 
 @dataclass(frozen=True)
@@ -463,6 +475,10 @@ class Ledger:
     typed: Structural[TypedLines | None] = None
     #: The changes derived from a balance-only account's stated balances.
     unitemised: Structural[tuple[UnitemisedLine, ...]] = ()
+    #: Cleared and uncleared rows, per month and in all (`clearing`).
+    clearing: Structural[ClearingView | None] = None
+    #: How far the account is in agreement, and for a family the whole account too (`agreement`).
+    standing: Structural[Standing | None] = None
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -665,6 +681,7 @@ def build_ledger(
     label: str = "",
     archive: ArchiveNote | None = None,
     families: Families | None = None,
+    movement: MovementCompleteness | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
 
@@ -673,9 +690,15 @@ def build_ledger(
     carried onto the result untouched. `families` is which accounts are Spaces
     of which and which sources are blind to them; without it every anchor is
     the account's own (see FAMILY_QUERIES for what asking costs).
+
+    `movement` is the whole store's movement report, which the caller holds because reading
+    it walks every artefact; without it the standing is from the known balances alone and
+    says so (`Agreement.movement_checked`).
     """
     return replace(
-        _ledger_for(store, ref, month, bound=bound, label=label, families=families),
+        _ledger_for(
+            store, ref, month, bound=bound, label=label, families=families, movement=movement
+        ),
         archive=archive,
     )
 
@@ -688,8 +711,10 @@ def _ledger_for(
     bound: bool,
     label: str,
     families: Families | None,
+    movement: MovementCompleteness | None,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
+    members = [ref, *(families.spaces_of(ref) if families is not None else ())]
     if not held:
         declared = store.declared_account(AccountRef(ref)) is not None
         empty = _empty(ref, label, "no-rows" if declared else "unknown", bound)
@@ -701,7 +726,10 @@ def _ledger_for(
         entries = typed_entries(store, ref)
         if not opening.unitemised:
             return replace(
-                empty, opening=opening_view(opening), typed=typed_lines(entries, "")
+                empty,
+                opening=opening_view(opening),
+                typed=typed_lines(entries, ""),
+                standing=standing_of(opening, members, movement),
             )
         # A balance-only account holds no rows of its own, and what its stated
         # balances imply is its ledger.
@@ -760,6 +788,7 @@ def _ledger_for(
             held[1].split(":", 1)[0] for held in (category, payee) if held is not None
         }
         observed_dates = {day for day in seen.values() if day}
+        clearing_sources = cleared_by(seen, str(t.status))
         origin = (
             ORIGIN_UNITEMISED
             if t.source == UNITEMISED_SOURCE
@@ -811,6 +840,7 @@ def _ledger_for(
                     send_refusal=refusal,
                     category=category[0] if category else "",
                     payee=payee[0] if payee else "",
+                    cleared_by=clearing_sources,
                 ),
             )
         )
@@ -887,6 +917,14 @@ def _ledger_for(
             mixed_currency=len({row.currency for row in month_rows}) > 1,
             store_sum=Money(month_store, currency),
             sent_sum=Money(month_sent, currency),
+            cleared=sum(1 for row in month_rows if row.cleared_by),
+            uncleared=sum(
+                1
+                for (t, row) in in_month
+                if not t.status.is_history
+                and row.origin != ORIGIN_UNITEMISED
+                and not row.cleared_by
+            ),
         )
 
     return Ledger(
@@ -909,6 +947,12 @@ def _ledger_for(
         opening=opening_view(opening),
         typed=typed_lines(entries, shown),
         unitemised=unitemised_lines(opening),
+        clearing=clearing_counts(
+            (_month_of(t.value_date), bool(row.cleared_by))
+            for t, row in built
+            if not t.status.is_history and row.origin != ORIGIN_UNITEMISED
+        ),
+        standing=standing_of(opening, members, movement),
     )
 
 

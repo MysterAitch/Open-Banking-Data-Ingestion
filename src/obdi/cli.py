@@ -94,6 +94,7 @@ from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
+from .standing_data import MovementMemo
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -557,6 +558,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 if TYPE_CHECKING:
     from .models import Transaction
+    from .movement_completeness import MovementCompleteness
     from .parsers.base import StatementParser
     from .parsers.pdf_statements import SectionReading
     from .rebuild import RebuildReport
@@ -2896,6 +2898,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return unarchive_account(store, ref)
 
+    movement_memo = MovementMemo()
+
+    def movement_report(store: Store) -> MovementCompleteness:
+        """The whole store's movement report, held while the derived layer is unchanged."""
+        from .movement_completeness import movement_completeness
+
+        account_map = _account_map(store)
+        return movement_memo.get(
+            store,
+            lambda: movement_completeness(
+                store, lambda ref: _canonical_for_ref(account_map, ref)
+            ),
+        )
+
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
 
@@ -2915,6 +2931,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 label=label,
                 archive=archive_notes_for(store, only=ref).get(ref),
                 families=families_of(store, _account_map(store)),
+                movement=movement_report(store),
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:
