@@ -303,17 +303,17 @@ class TestTheDangerZone:
     def test_Removals_SitInTheOneDangerZoneAtTheFootAndNowhereElse(self, base):
         page = get(base)
 
-        zone = at(page, '<details class="danger-zone">')
+        zone = at(page, '<details class="ledger-danger">')
         removals = [m.start() for m in re.finditer("Remove the stated balance for", page)]
         assert len(removals) == 36, "one for each balance stated, a month end for 36 months"
         assert all(position > zone for position in removals)
-        assert page.count('class="danger-zone"') == 1
+        assert page.count('class="ledger-danger"') == 1
         assert at(page, "Archive this account") > zone
 
     def test_DangerZone_IsTheLastThingOnThePage(self, base):
         page = get(base)
 
-        tail = page[at(page, '<details class="danger-zone">') :]
+        tail = page[at(page, '<details class="ledger-danger">') :]
         assert "Show values" not in tail and "<h2>" not in tail
 
     def test_RemovalButton_StillAsksBeforeItActs(self, base):

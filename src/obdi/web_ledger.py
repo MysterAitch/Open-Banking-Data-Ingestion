@@ -2231,7 +2231,7 @@ def _danger_zone(view: Any, *, archive_wired: bool) -> str:
     return _disclosure(
         "Danger zone: remove a stated balance, or archive this account",
         removals + archive,
-        css="danger-zone",
+        css="ledger-danger",
     )
 
 
@@ -2302,7 +2302,7 @@ def _frame(
         + f'<div class="acct-state">{state}</div>'
         + f'<div class="acct-month">{month}</div>'
         + f'<div class="acct-txns">{txns}</div>'
-        + f'<div class="acct-more">{more}</div>'
+        + f'<div class="ledger-more">{more}</div>'
         + "</div>",
         heading=_name(view),
         body_class="ledger-page",

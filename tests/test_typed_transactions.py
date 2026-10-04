@@ -548,7 +548,7 @@ class TestTheTypedTransactionPages:
             assert artefact_count(opened, MANUAL_WITHDRAWAL_SOURCE) == 1
         shown = lab.show_values().text
         listed = shown.split("<h2>Transactions, newest first</h2>")[1].split(
-            '<div class="acct-more">'
+            '<div class="ledger-more">'
         )[0]
         assert SECRET_WORDS not in listed, "a withdrawn entry is not among the counted rows"
         assert '<span class="pill pill-quiet">withdrawn</span>' in shown, (

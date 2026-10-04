@@ -120,14 +120,14 @@ ACCOUNT_STYLES = """
                font-weight: 500; border-bottom: var(--rule-weight) dashed var(--edge); }
 
  /* The folded sections, and the one bordered place for what removes something. */
- .acct-more { margin-top: var(--s2); }
- .acct-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
+ .ledger-more { margin-top: var(--s2); }
+ .ledger-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
  .foot-links { display: flex; flex-wrap: wrap; gap: 0 var(--s5); border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); }
- .acct-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
- details.danger-zone { margin: var(--s5) 0 0; padding: 0 var(--s4); border: var(--rule-weight) solid var(--bad); border-radius: var(--radius); }
- details.danger-zone button.button.secondary { color: var(--bad); border-color: var(--bad); }
- details.danger-zone > summary { color: var(--bad); font-weight: 600; }
- details.danger-zone > summary::before { border-color: var(--bad); }
+ .ledger-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
+ details.ledger-danger { margin: var(--s5) 0 0; padding: 0 var(--s4); border: var(--rule-weight) solid var(--bad); border-radius: var(--radius); }
+ details.ledger-danger button.button.secondary { color: var(--bad); border-color: var(--bad); }
+ details.ledger-danger > summary { color: var(--bad); font-weight: 600; }
+ details.ledger-danger > summary::before { border-color: var(--bad); }
 
  @media (min-width: 60rem) {
   body.ledger-page { max-width: 80rem; }
@@ -137,7 +137,7 @@ ACCOUNT_STYLES = """
   .acct-state { grid-area: state; }
   .acct-month { grid-area: month; }
   .acct-txns { grid-area: txns; }
-  .acct-more { grid-area: more; }
+  .ledger-more { grid-area: more; }
   .acct-txns h2 { margin-top: var(--s4); }
   .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; }
   .year { grid-template-columns: 3rem minmax(0, 1fr); }
