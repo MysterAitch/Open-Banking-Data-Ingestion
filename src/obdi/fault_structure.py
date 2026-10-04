@@ -46,7 +46,13 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .family_anchors import OPENED
-from .fault_explanation import EXPLAINED_CHANGES, NONE, UNHELD_SPACE, Selection
+from .fault_explanation import (
+    EXPLAINED_CHANGES,
+    NONE,
+    UNHELD_SPACE,
+    Selection,
+    WalkExplanation,
+)
 from .masking import Structural, Total
 
 if TYPE_CHECKING:
@@ -407,11 +413,15 @@ def _explained(walk: FamilyWalk) -> dict[int, bool]:
     """Which changes of the walk `fault_explanation` found an explanation for, by
     the position of the stated balance. Its verdict is reused as it stands: the
     Space test is reported on its own, so it does not count here."""
-    if walk.explanation is None:
+    return _explained_by(walk.explanation)
+
+
+def _explained_by(explanation: WalkExplanation | None) -> dict[int, bool]:
+    if explanation is None:
         return {}
     return {
         explained.index: any(hold not in (NONE, UNHELD_SPACE) for hold in explained.holds)
-        for explained in walk.explanation.changes
+        for explained in explanation.changes
     }
 
 
@@ -470,7 +480,8 @@ def account_report(opening: EffectiveOpening) -> StructureReport:
     """The structure of the account's OWN stated balances against its own rows.
 
     No Space legs are looked for here: a Space's rows are not part of what
-    these balances state.
+    these balances state. Which changes are explained is what
+    `EffectiveOpening.explanation` found, by the same rule as a walk's.
     """
     readings = opening.readings
     opened = readings[0].anchor.day if readings and readings[0].anchor.basis == OPENED else None
@@ -478,4 +489,4 @@ def account_report(opening: EffectiveOpening) -> StructureReport:
         Point(r.anchor.day, r.anchor.source or r.anchor.basis, r.difference_minor, index)
         for index, r in enumerate(readings)
     ]
-    return _report(points, opened, (), {})
+    return _report(points, opened, (), _explained_by(opening.explanation))

@@ -417,6 +417,9 @@ class OpeningView:
     #: account whose chart is not the whole-account walk (`balance_chart`);
     #: None where the family walk is the one shown, or nothing differs.
     own_structure: Structural[StructureReport | None]
+    #: Why each change among the account's own anchors happened
+    #: (`EffectiveOpening.explanation`); None where there is nothing to explain.
+    own_explanation: Structural[WalkExplanation | None]
     #: What the bank's own landed balances were and how they were read
     #: (`bank_balances.describe`), then what the newest says about the open
     #: differences (`BankReport.sayings`). Sentences of counts, days, and source
@@ -571,6 +574,7 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
             if not (opening.family and opening.family.readings) and opening.differing
             else None
         ),
+        own_explanation=opening.explanation,
         bank_lines=describe_bank(opening.bank) if opening.bank is not None else (),
         bank_sayings=opening.bank.sayings if opening.bank is not None else (),
         opening=Money(opening.opening_minor or 0, CURRENCY),

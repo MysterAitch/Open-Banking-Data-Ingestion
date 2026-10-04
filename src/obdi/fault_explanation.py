@@ -13,6 +13,14 @@ day], each row on the day THAT source gave it (`sighting_placement`). Where the
 previous balance in the walk came from another source, its own disagreement
 with the rows is not this source's change, which is the first test.
 
+AN ACCOUNT WITHOUT SPACES is explained the same way (`balance_anchors.own_walk`): its
+own anchors are a walk of one account, each stated by the source that lists its rows (a
+held statement, the aggregator, the bank's own feed), and the window of a change with no
+earlier balance from its source starts at the anchor that defined the opening. A source
+says nothing of the days before its first listed row, so a row dated earlier is outside
+what it covers and is never "counted, not listed". Anchors no source lists rows for (a
+person's stated balance) are not explained.
+
 THE TESTS, in order, each decided by exact arithmetic in minor units:
 
   source disagreement   this source's difference has not moved since its own
@@ -186,6 +194,9 @@ class Lookalike:
     sighted_on: Structural[str] = ""
     #: The other row, named, where it is held in the family.
     other: Structural[RowNote | None] = None
+    #: The source whose listing is compared, where it is not the export ("" for the export).
+    #: A statement or a feed lists rows as an export does, so the comparison is the same.
+    source: Structural[str] = ""
 
 
 @dataclass(frozen=True)
@@ -861,6 +872,70 @@ def _absent_note(
     return build
 
 
+def _sighted_twins(
+    evidence: _Evidence,
+    source: str,
+    family: frozenset[str],
+    sighted: Mapping[str, date],
+) -> tuple[
+    Callable[[Transaction, date], Callable[[], Lookalike]],
+    Callable[[Transaction, date], Callable[[], Lookalike]],
+]:
+    """What a source that lists rows (a statement, a feed) lists that is like a counted row
+    it does not list, and what the store counts that is like a row it lists and the store
+    does not. The same two comparisons `_csv_view` makes for an export, from the sightings."""
+    listed_by_figure: dict[int, list[tuple[date, str]]] = defaultdict(list)
+    counted_by_figure: dict[int, list[tuple[date, str]]] = defaultdict(list)
+    for account, rows in evidence.members.items():
+        if account not in family:
+            continue
+        for row in rows:
+            if row.entity_id in sighted:
+                listed_by_figure[row.amount_minor].append((sighted[row.entity_id], row.entity_id))
+            if evidence.counted(row):
+                counted_by_figure[row.amount_minor].append(
+                    (evidence.day(source, row), row.entity_id)
+                )
+
+    def listed_like(row: Transaction, day: date) -> Callable[[], Lookalike]:
+        def build() -> Lookalike:
+            found = _nearest(listed_by_figure.get(row.amount_minor, ()), day)
+            if found is None:
+                return Lookalike("export", False, source=source)
+            there, entity = found
+            other = evidence.by_entity.get(entity)
+            if other is None:
+                return Lookalike(
+                    "export", True, abs((there - day).days), "a row of another account",
+                    source=source,
+                )
+            return Lookalike(
+                "export", True, abs((there - day).days), "another row",
+                evidence.note(other)(), source,
+            )
+
+        return build
+
+    def counted_like(row: Transaction, day: date) -> Callable[[], Lookalike]:
+        def build() -> Lookalike:
+            found = _nearest(counted_by_figure.get(row.amount_minor, ()), day)
+            if found is None:
+                return Lookalike("store", False, source=source)
+            there, entity = found
+            return Lookalike(
+                "store",
+                True,
+                abs((there - day).days),
+                "listed" if entity in sighted else "unlisted",
+                evidence.note(evidence.by_entity[entity])(),
+                source,
+            )
+
+        return build
+
+    return listed_like, counted_like
+
+
 def _view(
     evidence: _Evidence,
     source: str,
@@ -877,6 +952,12 @@ def _view(
     `twin_of` names, for a counted row the source does not list, what the source
     lists that is like it."""
     sighted = evidence.placement.days.get(source, {}) if evidence.placement.places(source) else {}
+    # A source that lists rows says nothing of the days before it began to: a statement
+    # covers its own period, and a row dated earlier is outside it and not one it omits.
+    begins = min(sighted.values()) if listed is None and sighted else None
+    held_twin: Callable[[Transaction, date], Callable[[], Lookalike]] | None = None
+    if listed is None and sighted:
+        twin_of, held_twin = _sighted_twins(evidence, source, family, sighted)
     counted: list[_Entry] = []
     unlisted: list[_Entry] = []
     by_source: list[_Entry] = []
@@ -892,7 +973,7 @@ def _view(
                 is_listed = (
                     row.entity_id in listed if listed is not None else row.entity_id in sighted
                 )
-                if not is_listed:
+                if not is_listed and not (begins is not None and day < begins):
                     unlisted.append(
                         _Entry(
                             day,
@@ -921,7 +1002,15 @@ def _view(
                         evidence.day(source, row),
                         row.amount_minor,
                         row.value_date,
-                        evidence.note(row, why=evidence.why_not_counted(row)),
+                        evidence.note(
+                            row,
+                            why=evidence.why_not_counted(row),
+                            lookalike=(
+                                held_twin(row, evidence.day(source, row))
+                                if held_twin is not None
+                                else None
+                            ),
+                        ),
                     )
                 )
     return _View(
@@ -1113,6 +1202,14 @@ def explain_walk(
     views: dict[str, _View] = {}
     explained: list[ChangeExplanation] = []
     opened = walk.opened
+    # A walk with no evidence of an opening is an account's own anchors (`own_walk`), where
+    # the balance that defined the opening is the start of the first window; a whole-account
+    # walk with none has no start, as it always had.
+    starts = (
+        walk.readings[0].day
+        if walk.evidence is None and walk.readings and walk.readings[0].defines_opening
+        else None
+    )
 
     def window(change: FaultChange) -> tuple[date | None, int, bool]:
         """(the day the same source last stated a balance, the change's size, whether it did)."""
@@ -1129,7 +1226,7 @@ def explain_walk(
         )
         if previous is not None:
             return previous.day, size - (previous.difference_minor or 0), True
-        return (opened.day if opened is not None else None), size, False
+        return (opened.day if opened is not None else starts), size, False
 
     for position in selection.explain:
         change = all_changes[position]

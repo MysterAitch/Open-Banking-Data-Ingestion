@@ -508,11 +508,12 @@ def _lookalike(found: Any) -> str:
     Said once, here. "No figure, no description": a row is the same size and
     direction as another and the sentence never says what size.
     """
+    lister = _esc(found.source) if found.source else "the export"
     if found.side == "export":
         if not found.found:
-            return "; the export lists no row of the same size and direction within thirty days"
+            return f"; {lister} lists no row of the same size and direction within thirty days"
         away = _days_away(found.days_away)
-        lead = f"; the export lists a row of the same size and direction, {away}"
+        lead = f"; {lister} lists a row of the same size and direction, {away}"
         if found.sighted_on == "nothing":
             return f"{lead}, that no stored row carries"
         if found.sighted_on == "this row":
@@ -524,9 +525,9 @@ def _lookalike(found: Any) -> str:
     if not found.found:
         return "; the store counts no row of the same size and direction within thirty days"
     listing = (
-        "which the export lists as another row"
+        f"which {lister} lists as another row"
         if found.sighted_on == "listed"
-        else "which the export does not list"
+        else f"which {lister} does not list"
     )
     other = _row_note(found.other) if found.other is not None else ""
     return (
@@ -593,8 +594,8 @@ def _hold_html(change: Any, hold: str) -> str:
     if hold == "combined":
         return (
             "<p>No one set of rows equals the change, but together they do exactly: the "
-            "rows the export lists that the store does not count, less the rows the store "
-            "counts that the export does not list, plus the differences in figure.</p>"
+            f"rows {source} lists that the store does not count, less the rows the store "
+            f"counts that {source} does not list, plus the differences in figure.</p>"
             + (
                 f"<p>Listed, not counted ({change.listed_not_counted.count}):</p>"
                 + _row_list(change.listed_not_counted)
@@ -1120,6 +1121,7 @@ def _opening_html(view: Any, unmasked: bool) -> str:
                     body += structure_summary_html(
                         opening.own_structure, view.ref, scope=OWN
                     )
+                body += _explanations_html(opening.own_explanation)
         else:
             body += (
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '

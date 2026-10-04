@@ -121,7 +121,7 @@ from .family_anchors import (
     space_fetches,
     unheld_space_legs,
 )
-from .fault_explanation import WalkExplanation, explain_walk
+from .fault_explanation import Selection, WalkExplanation, explain_walk
 from .fault_structure import select_explained
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
@@ -183,6 +183,16 @@ class Anchor:
     #: `source`: it says how the figure is judged (`bank_balances`), and an anchor with
     #: one is judged against the rows as they stood then, not at the end of its day.
     at: datetime | None = field(default=None, compare=False)
+    #: The source that LISTS the rows an anchor of this figure covers, where it is not
+    #: also the source whose dating judges the anchor (`source`): a held statement, or
+    #: the aggregator's running balance. It names whose rows `fault_explanation` compares
+    #: with the store's, and changes nothing about how the anchor is judged.
+    stated_by: str = field(default="", compare=False)
+
+    @property
+    def stating(self) -> str:
+        """The name the anchor goes by in an explanation: whoever states it, else its basis."""
+        return self.stated_by or self.source or self.basis
 
 
 @dataclass(frozen=True)
@@ -410,6 +420,10 @@ class EffectiveOpening:
     #: What the bank's own landed balances were and how they were read; None where
     #: none was landed for the account (`bank_balances`).
     bank: BankReport | None = None
+    #: Why each of the first changes among the account's OWN anchors happened, by exact
+    #: arithmetic (`fault_explanation`). Set where some anchor differs and no whole-account
+    #: walk speaks for the account (`FamilyWalk.explanation` does); None otherwise.
+    explanation: WalkExplanation | None = None
 
     @property
     def defining(self) -> Anchor | None:
@@ -709,7 +723,9 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
             if blind_bank:
                 bank_family.append(FamilyAnchor(b.day, b.balance_minor, RUNNING_BALANCE_SOURCE))
             else:
-                anchors.append(Anchor(b.day, b.balance_minor, BANK))
+                anchors.append(
+                    Anchor(b.day, b.balance_minor, BANK, stated_by=RUNNING_BALANCE_SOURCE)
+                )
     statements, unusable = statement_balances(store, ref)
     anchoring: list[StatementBalance] = []
     for s in statements:
@@ -718,7 +734,7 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
         # account a whole-family figure as its own.
         if families is not None and spaces and s.source and families.blind(s.source, ref):
             continue
-        anchors.append(Anchor(s.day, s.balance_minor, STATEMENT))
+        anchors.append(Anchor(s.day, s.balance_minor, STATEMENT, stated_by=s.source))
         anchoring.append(s)
     placed = statement_membership(store, ref, anchoring).placed if anchoring else {}
     bank = _bank_balances(store, ref, families)
@@ -1068,6 +1084,11 @@ def effective_opening(
     )
     if report is not None:
         report = replace(report, sayings=_bank_sayings(opening, walk))
+    explanation = (
+        _explain_own(store, ref, opening, [*held, *unitemised])
+        if opening.differing and not (walk is not None and walk.readings)
+        else None
+    )
     return replace(
         opening,
         family=walk,
@@ -1075,6 +1096,69 @@ def effective_opening(
         unitemised=unitemised,
         meanings=gathered.meanings,
         bank=report,
+        explanation=explanation,
+    )
+
+
+#: Bases that no source lists rows for, so "the rows it lists that the store does not count"
+#: means nothing for them: a person's stated balance, the nil opening, and a family balance
+#: with the Spaces' rows taken off.
+_NOT_LISTED_BY_ANY_SOURCE = frozenset({STATED, OPENED, FAMILY})
+
+
+def own_walk(ref: str, opening: EffectiveOpening) -> FamilyWalk:
+    """The account's own anchors as a walk of one account, which `explain_walk` reads.
+
+    Each reading goes by whoever states it (`Anchor.stating`), so the explanation compares
+    that source's rows with the store's. There is no Space and no opened anchor: the
+    window of a change with no earlier balance from its own source starts at the anchor
+    that defined the opening.
+    """
+    return FamilyWalk(
+        ref,
+        (),
+        tuple(
+            FamilyReading(
+                r.anchor.day,
+                r.anchor.balance_minor,
+                (r.anchor.stating,),
+                r.defines_opening,
+                r.expected_minor,
+                r.difference_minor,
+            )
+            for r in opening.readings
+        ),
+    )
+
+
+def _explain_own(
+    store: Store, ref: str, opening: EffectiveOpening, rows: Sequence[Transaction]
+) -> WalkExplanation:
+    """Why each change among the account's own anchors happened, for a source that lists rows."""
+    walk = own_walk(ref, opening)
+    listing = {
+        r.anchor.stating
+        for r in opening.readings
+        if r.anchor.basis not in _NOT_LISTED_BY_ANY_SOURCE
+    }
+    # The days each stating source gave the rows, for the explanation only: how an anchor
+    # is judged is unchanged (`derive_opening`), so no verdict moves.
+    placement = sighting_placement(store, [ref], listing)
+    chosen = select_explained(walk)
+    changes = walk.changes
+    wanted = [n for n in chosen.explain if changes[n].source in listing]
+    return explain_walk(
+        store,
+        ref,
+        walk,
+        {ref: rows},
+        placement,
+        selection=Selection(
+            wanted,
+            {first: later for first, later in chosen.pairs.items() if first in wanted},
+            chosen.omitted,
+            chosen.bound,
+        ),
     )
 
 
