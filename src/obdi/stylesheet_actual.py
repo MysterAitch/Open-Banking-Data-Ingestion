@@ -12,21 +12,21 @@ real sequence and so a vertical one; the controls that delete stand in one borde
 ACTUAL_STYLES = r"""
  /* The verdict: a serif sentence, a rail in the colour of its meaning, and a glyph, so it
     reads in greyscale. Teal verified, red disagreement or failure, amber unproven or held. */
- .verdict { margin: var(--s4) 0 var(--s3); padding: var(--s1) 0 var(--s1) var(--s4);
+ .actual-main .verdict { margin: var(--s4) 0 var(--s3); padding: var(--s1) 0 var(--s1) var(--s4);
             border-left: var(--rail) solid var(--rule); }
- .verdict h2 { margin: 0 0 var(--s2); font: 600 var(--text-2xl)/var(--leading-tight) var(--serif); }
- .verdict h2::before { margin-right: var(--s2); font-family: var(--sans); }
- .verdict > p { margin: var(--s1) 0; }
- .verdict-ok { border-left-color: var(--ok); }
- .verdict-ok h2 { color: var(--ok); }
- .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; }
- .verdict-bad { border-left-color: var(--bad); }
- .verdict-bad h2 { color: var(--bad); }
- .verdict-bad h2::before { content: "\2715"; content: "\2715" / ""; }
- .verdict-warn { border-left-color: var(--warn); }
- .verdict-warn h2 { color: var(--warn); }
- .verdict-warn h2::before { content: "\25CB"; content: "\25CB" / ""; }
- .verdict-quiet h2::before { content: "\2022"; content: "\2022" / ""; color: var(--ink-2); }
+ .actual-main .verdict h2 { margin: 0 0 var(--s2); font: 600 var(--text-2xl)/var(--leading-tight) var(--serif); }
+ .actual-main .verdict h2::before { margin-right: var(--s2); font-family: var(--sans); }
+ .actual-main .verdict > p { margin: var(--s1) 0; }
+ .actual-main .verdict-ok { border-left-color: var(--ok); }
+ .actual-main .verdict-ok h2 { color: var(--ok); }
+ .actual-main .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; }
+ .actual-main .verdict-bad { border-left-color: var(--bad); }
+ .actual-main .verdict-bad h2 { color: var(--bad); }
+ .actual-main .verdict-bad h2::before { content: "\2715"; content: "\2715" / ""; }
+ .actual-main .verdict-warn { border-left-color: var(--warn); }
+ .actual-main .verdict-warn h2 { color: var(--warn); }
+ .actual-main .verdict-warn h2::before { content: "\25CB"; content: "\25CB" / ""; }
+ .actual-main .verdict-quiet h2::before { content: "\2022"; content: "\2022" / ""; color: var(--ink-2); }
  /* The remedy sits inside the verdict that calls for it: not a box of its own. */
  .remedy { margin: var(--s3) 0 0; }
  .remedy details summary { min-height: var(--hit); }

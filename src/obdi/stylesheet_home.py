@@ -20,17 +20,17 @@ HOME_STYLES = """
     costs the first screen nothing. */
  main:has(.home) > h1 { position: absolute; width: 1px; height: 1px; overflow: hidden;
         clip-path: inset(50%); white-space: nowrap; margin: 0; }
- .verdict { display: flex; align-items: flex-start; gap: var(--s3); margin: var(--s4) 0 var(--s2);
+ .home .verdict { display: flex; align-items: flex-start; gap: var(--s3); margin: var(--s4) 0 var(--s2);
         font: 600 var(--text-2xl)/130% var(--serif); color: var(--ink); }
- .verdict span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
- .verdict.long { font-size: var(--text-lg); }
- .verdict::before { flex: none; width: 1.75rem; height: 1.75rem; margin-top: .1rem; border-radius: 50%;
+ .home .verdict span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
+ .home .verdict.long { font-size: var(--text-lg); }
+ .home .verdict::before { flex: none; width: 1.75rem; height: 1.75rem; margin-top: .1rem; border-radius: 50%;
         border: var(--edge-weight) solid currentColor; display: grid; place-items: center;
         font: 700 var(--text-md)/1 var(--sans); }
- .verdict.ok::before { content: "\\2713"; content: "\\2713" / ""; color: var(--ok); }
- .verdict.warn::before { content: "!"; content: "!" / ""; color: var(--warn); }
- .verdict.bad::before { content: "\\2715"; content: "\\2715" / ""; color: var(--bad); }
- .verdict-lede { margin: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
+ .home .verdict.ok::before { content: "\\2713"; content: "\\2713" / ""; color: var(--ok); }
+ .home .verdict.warn::before { content: "!"; content: "!" / ""; color: var(--warn); }
+ .home .verdict.bad::before { content: "\\2715"; content: "\\2715" / ""; color: var(--bad); }
+ .home .verdict-lede { margin: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
 
  /* Four status lines: a label and a chip on one line, the sentence beneath, the whole row a link. */
  .status { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }

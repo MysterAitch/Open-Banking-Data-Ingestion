@@ -312,7 +312,8 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         page = fetch(base, "/")
         strip = page.split('id="system"')[1]
 
-        assert "The newest push failed 2026-10-01 12:00." in page.split('id="status"')[1]
+        status = page.split('id="status"')[1]
+        assert "The last push failed. The push of 2026-10-01 12:00 failed" in status
         assert "last rebuild FAILED, 2026-09-30 08:00Z" in strip
         assert "2 banks connected" in strip
         expires = (datetime.now(UTC) + timedelta(days=40)).date().isoformat()

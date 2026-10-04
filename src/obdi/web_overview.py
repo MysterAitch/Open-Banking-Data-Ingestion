@@ -287,63 +287,41 @@ def verification_line(overview: Overview | None) -> StatusLine:
 def actual_line(
     actual_status: Callable[[], list[dict[str, object]]] | None, now: datetime
 ) -> StatusLine:
-    """The newest push and whether the newest audit after it found Actual in agreement.
+    """Whether Actual agrees with obdi, in the Actual page's own verdict.
 
-    Read with the Actual page's own readers (`web._newest_of_kind`, `web._audit_differences`,
-    `web._account_pairs`), so this line and that page cannot disagree about what a result says.
+    THE VERDICT IS WORKED OUT ONCE, by `web_actual.current_verdict`, and this line says it:
+    the headline and its evidence are that page's words, and only the chip's short word is
+    chosen here. A second reading of the results on this page said "push failed" of a push
+    that a later audit had already read past, where the Actual page said they agree.
     """
-    from . import web
+    from .web_actual import current_verdict
 
     href = "/actual"
     if actual_status is None:
         return StatusLine("Actual", href, "not wired", "pill-quiet", "Not wired on this instance.")
-    try:
-        results = actual_status()
-    except Exception:
-        return StatusLine(
-            "Actual", href, "unreadable", "pill-bad", "The latest results could not be read."
-        )
-    push = web._newest_of_kind(results, "push")
-    if push is None:
-        return StatusLine("Actual", href, "no push", "pill-warn", "No push has been recorded.")
-    pushed = _stamp(push.get("finished_at", ""), now)
-    if not push.get("ok"):
-        return StatusLine(
-            "Actual", href, "push failed", "pill-bad", f"The newest push failed {pushed}."
-        )
-    applied = f"Last push applied {pushed}"
-    audit = web._newest_of_kind(results, "audit")
-    if audit is None:
-        return StatusLine(
-            "Actual", href, "never audited", "pill-warn", f"{applied}; no audit has ever run."
-        )
-    if str(audit.get("finished_at", "")) < str(push.get("finished_at", "")):
-        return StatusLine(
-            "Actual", href, "audit is older", "pill-warn",
-            f"{applied}; the newest audit ({_stamp(audit.get('finished_at', ''), now)}) is "
-            "older than the push.",
-        )
-    if not audit.get("ok"):
-        return StatusLine(
-            "Actual", href, "audit failed", "pill-bad", f"{applied}; the newest audit failed."
-        )
-    raw = audit.get("accounts")
-    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
-    differing = sum(
-        1
-        for a in accounts
-        if web._audit_differences(a, web._account_pairs(audit, a.get("account_id")))
-    )
-    if differing:
-        return StatusLine(
-            "Actual", href, "differences", "pill-bad",
-            f"{applied}; the audit after it found differences in {differing} of "
-            f"{plural(len(accounts), 'account')}.",
-        )
-    return StatusLine(
-        "Actual", href, "in agreement", "pill-ok",
-        f"{applied}; the audit after it found Actual in agreement.",
-    )
+    verdict = current_verdict(actual_status, now=now)
+    word, css = _ACTUAL_CHIPS.get(verdict.state.value, ("unknown", "pill-quiet"))
+    sentence = f"{verdict.headline}. {verdict.detail}".strip()
+    return StatusLine("Actual", href, word, css, sentence)
+
+
+#: The chip for each state of the Actual page's verdict (`actual_verdict.State`): its short
+#: word and the meaning of its colour. A state missing here reads "unknown", which a test
+#: forbids for every state the verdict can be in.
+_ACTUAL_CHIPS = {
+    "agrees": ("in agreement", "pill-ok"),
+    "differs": ("differs", "pill-bad"),
+    "unchecked": ("not checked", "pill-warn"),
+    "nothing-pushed": ("no push", "pill-warn"),
+    "push-failed": ("push failed", "pill-bad"),
+    "audit-failed": ("audit failed", "pill-bad"),
+    "align-stopped": ("stopped", "pill-bad"),
+    "request-running": ("working", "pill-quiet"),
+    "request-waiting": ("waiting", "pill-quiet"),
+    "applier-silent": ("applier silent", "pill-bad"),
+    "not-configured": ("not configured", "pill-quiet"),
+    "unreadable": ("unreadable", "pill-bad"),
+}
 
 
 def position_line(

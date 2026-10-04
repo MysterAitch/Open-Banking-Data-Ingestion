@@ -455,61 +455,81 @@ BEFORE = "2026-10-01T09:00:00Z"
 
 
 class TestTheActualLine:
-    """What the line says of the newest push and the newest audit after it."""
+    """The line says the Actual page's own verdict: one reading of the results, not two."""
 
     @pytest.mark.parametrize(
-        ("results", "word", "css", "sentence"),
+        ("results", "word", "css", "begins"),
         [
-            ([], "no push", "pill-warn", "No push has been recorded."),
-            ([push(PUSHED, ok=False)], "push failed", "pill-bad", "The newest push failed 09:30."),
+            ([], "no push", "pill-warn", "Nothing has been pushed yet."),
+            ([push(PUSHED, ok=False)], "push failed", "pill-bad", "The last push failed."),
             (
                 [push(PUSHED)],
-                "never audited",
+                "not checked",
                 "pill-warn",
-                "Last push applied 09:30; no audit has ever run.",
+                "Actual has not been checked since the last push. A push applied at "
+                "2026-10-01 09:30. No audit has been run since.",
             ),
             (
                 [push(PUSHED), audit(BEFORE)],
-                "audit is older",
+                "not checked",
                 "pill-warn",
-                "Last push applied 09:30; the newest audit (09:00) is older than the push.",
+                "Actual has not been checked since the last push. A push applied at "
+                "2026-10-01 09:30. The newest audit (2026-10-01 09:00) ran before it",
             ),
             (
                 [push(PUSHED), audit(AFTER, ok=False)],
                 "audit failed",
                 "pill-bad",
-                "Last push applied 09:30; the newest audit failed.",
+                "The last audit failed.",
             ),
             (
                 [push(PUSHED), audit(AFTER, differing=2)],
-                "differences",
+                "differs",
                 "pill-bad",
-                "Last push applied 09:30; the audit after it found differences in 2 of 3 accounts.",
+                "Actual differs from obdi in 2 accounts.",
             ),
             (
                 [push(PUSHED), audit(AFTER)],
                 "in agreement",
                 "pill-ok",
-                "Last push applied 09:30; the audit after it found Actual in agreement.",
+                "Actual agrees with obdi. The audit of 2026-10-01 09:45, after the push applied "
+                "2026-10-01 09:30, found no differences in 3 accounts.",
             ),
         ],
     )
-    def test_Line_ForTheseResults_SaysTheStateOfThePushAndTheAuditAfterIt(
-        self, results, word, css, sentence
-    ):
+    def test_Line_ForTheseResults_SaysTheActualPagesVerdict(self, results, word, css, begins):
+        from obdi.web_actual import current_verdict
         from obdi.web_overview import actual_line
 
         line = actual_line(lambda: results, NOW_TIME)
+        verdict = current_verdict(lambda: results, now=NOW_TIME)
 
-        assert (line.word, line.css, line.sentence) == (word, css, sentence)
+        assert (line.word, line.css) == (word, css)
+        assert line.sentence.startswith(begins)
+        assert line.sentence == f"{verdict.headline}. {verdict.detail}"
         assert line.href == "/actual"
 
-    def test_Line_WhenAnOlderAuditFollowsANewerFailedPush_StillSaysThePushFailed(self):
+    def test_Line_WhenAnAuditReadActualAfterAFailedPush_SaysWhatTheAuditFound(self):
+        """An earlier form of this line read the results for itself and said "push failed"
+        here, while the Actual page said they agree: the audit had read Actual after it."""
         from obdi.web_overview import actual_line
 
-        line = actual_line(lambda: [push(BEFORE), audit(AFTER), push(PUSHED, ok=False)], NOW_TIME)
+        line = actual_line(lambda: [push(BEFORE), push(PUSHED, ok=False), audit(AFTER)], NOW_TIME)
+
+        assert line.word == "in agreement"
+
+    def test_Line_WhenAPushFailedAfterTheNewestAudit_SaysThePushFailed(self):
+        from obdi.web_overview import actual_line
+
+        line = actual_line(lambda: [push(BEFORE), audit(PUSHED), push(AFTER, ok=False)], NOW_TIME)
 
         assert line.word == "push failed"
+
+    def test_Chips_ForEveryStateTheVerdictCanBeIn_HaveAWordOfTheirOwn(self):
+        from obdi.actual_verdict import State
+        from obdi.web_overview import _ACTUAL_CHIPS
+
+        assert {state.value for state in State} == set(_ACTUAL_CHIPS)
 
     def test_Line_WhenNotWiredOrUnreadable_SaysSoInsteadOfInventingAnAnswer(self):
         from obdi.web_overview import actual_line

@@ -183,3 +183,84 @@ def test_Stylesheet_AgainstEveryMaskedPagePattern_ContainsNoMoneyLikeText(name: 
     found = MONEY_PATTERNS[name].search(stylesheet())
 
     assert found is None, f"{name}: the stylesheet contains {found.group(0)!r}"
+
+
+# Every page carries every page's rules, joined into one stylesheet, so a class two pages style
+# is styled by both on both. The home page and the Actual page each styled `.verdict`: the home
+# page's would have laid the Actual page's verdict out as a row, and the Actual page's would
+# have given the home page's a rail and padding. Each page's rules now lead with a class of its
+# own, and these two tests hold that.
+
+
+def _leading_classes(css: str) -> set[str]:
+    """The first class of every selector in `css`: the class a rule is reached through."""
+    plain = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    found: set[str] = set()
+    for prelude in re.findall(r"([^{}]+)\{", plain):
+        if prelude.strip().startswith("@"):
+            continue
+        for selector in prelude.split(","):
+            first = re.search(r"\.([A-Za-z][\w-]*)", selector)
+            if first is not None:
+                found.add(first.group(1))
+    return found
+
+
+def _bare_class_rules(css: str) -> set[str]:
+    """The classes that `css` styles by a selector that is that class and nothing else."""
+    plain = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    found: set[str] = set()
+    for prelude in re.findall(r"([^{}]+)\{", plain):
+        for selector in prelude.split(","):
+            alone = re.fullmatch(r"\.([A-Za-z][\w-]*)", selector.strip())
+            if alone is not None:
+                found.add(alone.group(1))
+    return found
+
+
+def _page_styles() -> dict[str, str]:
+    from obdi.stylesheet_account import ACCOUNT_STYLES
+    from obdi.stylesheet_actual import ACTUAL_STYLES
+    from obdi.stylesheet_home import HOME_STYLES
+
+    return {"home": HOME_STYLES, "account": ACCOUNT_STYLES, "actual": ACTUAL_STYLES}
+
+
+PAGE_PAIRS = [("home", "account"), ("home", "actual"), ("account", "actual")]
+
+
+@pytest.mark.parametrize(("one", "other"), PAGE_PAIRS)
+def test_PageStyles_OfTwoPages_NeverLeadWithTheSameClass(one: str, other: str) -> None:
+    styles = _page_styles()
+
+    shared = _leading_classes(styles[one]) & _leading_classes(styles[other])
+
+    assert shared == set(), (
+        f"the {one} and {other} pages both style {sorted(shared)}: every page carries both, "
+        "so lead each page's rule with a class of its own"
+    )
+
+
+@pytest.mark.parametrize("page", ["home", "account", "actual"])
+def test_PageStyles_NeverRestyleAClassTheSharedRulesStyleByItself(page: str) -> None:
+    from obdi.stylesheet import SHARED_STYLES
+
+    restyled = _bare_class_rules(_page_styles()[page]) & _bare_class_rules(SHARED_STYLES)
+
+    assert restyled == set(), (
+        f"the {page} page restyles {sorted(restyled)}, which the shared rules style for every page"
+    )
+
+
+def test_LeadingClasses_WhenTwoSheetsBothStyleOneClass_AreFoundInBoth() -> None:
+    """The guard's own check: it must see the collision it exists for."""
+    home = " .verdict { display: flex; }\n .home .tier { margin: 0; }"
+    actual = (
+        " .verdict h2 { margin: 0; }\n"
+        " @media (min-width: 64rem) { .actual-layout { display: grid; } }"
+    )
+    scoped_home = _leading_classes(" .home .verdict { }")
+    scoped_actual = _leading_classes(" .actual-main .verdict { }")
+
+    assert _leading_classes(home) & _leading_classes(actual) == {"verdict"}
+    assert scoped_home & scoped_actual == set()
