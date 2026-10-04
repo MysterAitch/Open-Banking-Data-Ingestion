@@ -61,6 +61,7 @@ from obdi.ledger import (
     ANCHOR_QUERIES,
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,
+    FEED_TIME_QUERIES,
     QUERIES_PER_PAGE,
     SPACE_QUERIES,
     build_ledger,
@@ -1049,9 +1050,14 @@ class TestWhatTheFamilyReadingCosts:
 
         cost = self.statements(family.store, MAIN, found)
 
-        # Two for the family's own listings, then one read of each Space's rows.
+        # Two for the family's own listings, then one read of each Space's rows, and the
+        # reading of the feed's times that any account the bank's own feed fills pays.
         assert cost == (
-            QUERIES_PER_PAGE + ANCHOR_QUERIES + FAMILY_QUERIES + len(found.spaces_of(MAIN))
+            QUERIES_PER_PAGE
+            + ANCHOR_QUERIES
+            + FAMILY_QUERIES
+            + len(found.spaces_of(MAIN))
+            + FEED_TIME_QUERIES
         )
 
     def test_SpaceAccount_CostsOnlyTheReadOfItsListingsMoreThanItDidWithoutFamilies(self, family):

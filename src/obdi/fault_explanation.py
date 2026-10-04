@@ -206,6 +206,9 @@ class RowNote:
     #: The bank's own feed status of the row's item, newest landed (`feed_statuses`);
     #: "" for a row no feed item is its own.
     feed_status: Structural[str] = ""
+    #: The instant the newest landed feed states for the row's item, in UTC (`feed_statuses`);
+    #: None for a row no feed item is its own, or whose item states none.
+    feed_at: Structural[datetime | None] = None
 
 
 @dataclass(frozen=True)
@@ -742,6 +745,7 @@ class _Evidence:
                 about.partner_is_leg,
                 lookalike() if lookalike is not None else None,
                 self.facts.feed.of(row.entity_id),
+                self.facts.feed.time_of(row.entity_id),
             )
 
         return build

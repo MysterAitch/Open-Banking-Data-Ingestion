@@ -16,22 +16,26 @@ to show unmasked is shown unmasked because the VIEW was built with
 from __future__ import annotations
 
 import html
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .balance_anchors import parse_calendar_day
 from .balance_chart import OWN
 from .balance_meaning import READING_THRESHOLD
+from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .errors import DataError
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,
+    FEED_TIME_QUERIES,
     QUERIES_PER_PAGE,
     Ledger,
     LedgerRequestError,
 )
 from .logs import say
+from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_balance_chart import structure_summary_html
@@ -220,10 +224,11 @@ def _row_html(row: Any) -> str:
     sources = "".join(
         f'<span class="pill pill-quiet">{_esc(source)}</span> ' for source in row.sources
     )
+    at = f" {_esc(_clock(row.feed_at))}" if row.feed_at is not None else ""
     return (
         "<li>"
         '<div class="txn-head">'
-        f'<span class="mono nowrap">{_esc(row.dated.isoformat())}</span>'
+        f'<span class="mono nowrap">{_esc(row.dated.isoformat())}{at}</span>'
         f'<span class="mono nowrap">{figure}</span>'
         "</div>"
         f"{dates}"
@@ -456,9 +461,40 @@ def _mono(text: object) -> str:
     return f'<span class="mono nowrap">{_esc(str(text))}</span>'
 
 
+#: The one place the page says which clock its times are on and what that does to a date.
+#: Every time on the page comes from `_clock`, which is what the sentence describes.
+_CLOCK_NOTE = (
+    "Times are London time, as the bank's app shows them. The bank's feed states UTC, which "
+    "is an hour behind London from the last Sunday of March to the last Sunday of October. "
+    "A time past midnight in London but before it in UTC is shown with its London date; "
+    "the row keeps the feed's own (UTC) date and counts toward that day."
+)
+
+
+def _clock(moment: Any) -> str:
+    """A feed time as the bank's app shows it, and its London date where that is not the feed's."""
+    local = london(moment)
+    shown = local.strftime("%H:%M")
+    if local.date() > moment.astimezone(UTC).date():
+        shown += f" on {local.date().isoformat()}"
+    return shown
+
+
+def _clock_html(moment: Any) -> str:
+    return _mono(_clock(moment))
+
+
 def _row_note(note: Any) -> str:
-    """One row, named by who dated it when, which way it moved, and its status."""
-    dated = ", ".join(f"{_esc(source)} {_mono(day)}" for source, day in note.dates)
+    """One row, named by who dated it when, which way it moved, and its status.
+
+    The feed's time stands beside the day the bank's own feed gave: it is the feed's
+    time, so no other source's date carries it.
+    """
+    at = f" {_clock_html(note.feed_at)}" if note.feed_at is not None else ""
+    dated = ", ".join(
+        f"{_esc(source)} {_mono(day)}{at if source == BANK_SOURCE else ''}"
+        for source, day in note.dates
+    )
     seen = ", ".join(_esc(source) for source in note.sources) or "no source"
     kind = "a round-up leg" if note.round_up_leg else "a transfer leg" if note.transfer else ""
     pairing = (
@@ -1666,6 +1702,8 @@ def render_ledger(
         return render_page("Ledger", body)
 
     body += _mode(view, unmasked)
+    if BANK_SOURCE in view.sources:
+        body += f'<p class="muted">{_esc(_CLOCK_NOTE)}</p>'
     body += _verification_html(view)
     body += f"<h2>{_esc(view.month)}</h2>" + _month_links(view, unmasked)
     if view.state == "empty-month":
@@ -1692,7 +1730,9 @@ def render_ledger(
         f"many rows the account holds, plus {ANCHOR_QUERIES} to look for opening "
         "balance anchors and a few more for each held statement or bank record "
         "that has not been read yet. A main account with Spaces adds "
-        f"{FAMILY_QUERIES} and one per Space to check the whole account's balances.</p>"
+        f"{FAMILY_QUERIES} and one per Space to check the whole account's balances. "
+        f"An account the bank's own feed fills adds {FEED_TIME_QUERIES} more to read the "
+        "feed's times.</p>"
     )
     body += _navigation(view, unmasked)
     return render_page("Ledger", body)

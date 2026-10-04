@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from .accounts import AccountRef
@@ -55,11 +55,13 @@ from .balance_anchors import (
     FamilyWalk,
     effective_opening,
 )
+from .bank_balances import BANK_SOURCE
 from .bank_balances import describe as describe_bank
 from .clearing import ClearingView, cleared_by, clearing_counts
 from .family_anchors import Families
 from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
+from .feed_statuses import FeedStatuses
 from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
@@ -119,6 +121,16 @@ ANCHOR_QUERIES = 8
 #: per process.
 FAMILY_QUERIES = 9
 FAMILY_DISCOVERY_QUERIES = 2
+
+#: What an account fed by the bank's own feed adds to any page of it: the feed artefacts
+#: that sighted its rows, the feed uids of its rows, and the order the artefacts landed
+#: in, from which each row's feed time is read (`feed_statuses`). Each such artefact
+#: not yet read adds one more, once per process. An account the bank's feed does not
+#: feed adds nothing.
+FEED_TIME_QUERIES = 3
+
+#: Sorts a row with no feed time, which is never compared with one that has a time.
+_NO_TIME = datetime.min.replace(tzinfo=UTC)
 
 #: What asking for the family reading adds to the page of a SPACE: the one read of the
 #: landed Space listings, whose balance for the Space is a checkpoint of its own
@@ -246,6 +258,9 @@ class LedgerRow:
 
     #: The sources that clear this row (`clearing`); empty for a row no authoritative listing holds.
     cleared_by: Structural[tuple[str, ...]] = ()
+    #: The instant the newest landed feed states for the row's item, in UTC (`feed_statuses`);
+    #: None for a row no feed item is its own. A time is structure, like a date.
+    feed_at: Structural[datetime | None] = None
 
 
 @dataclass(frozen=True)
@@ -787,6 +802,7 @@ def _ledger_for(
         )
         - {UNITEMISED_SOURCE}
     )
+    feed = FeedStatuses(store, [ref]) if BANK_SOURCE in account_sources else None
     # Typed rows are listed as a source but do not make an account "fed by
     # more than one": a typed row is not a feed another feed failed to match.
     feeds = [source for source in account_sources if source != MANUAL_SOURCE]
@@ -878,13 +894,24 @@ def _ledger_for(
                     category=category[0] if category else "",
                     payee=payee[0] if payee else "",
                     cleared_by=clearing_sources,
+                    feed_at=feed.time_of(t.entity_id) if feed is not None else None,
                 ),
             )
         )
 
+    # THE ORDER OF A DAY'S ROWS, newest first: the rows the bank's feed gave a time come
+    # before those it gave none, by that time, so a page lines up against the bank's app;
+    # the rest keep the order they always had (booking date, then id). A row with no time
+    # is never compared with one that has, which keeps the order a total one.
     in_month = sorted(
         (pair for pair in built if first <= pair[0].value_date <= last),
-        key=lambda pair: (pair[0].value_date, pair[0].booking_date, pair[0].entity_id),
+        key=lambda pair: (
+            pair[0].value_date,
+            pair[0].booking_date,
+            pair[1].feed_at is not None,
+            pair[1].feed_at or _NO_TIME,
+            pair[0].entity_id,
+        ),
         reverse=True,
     )
 
