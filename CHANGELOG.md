@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.310] - 2026-10-04
+
+### Added
+- **The open review flags can be answered.** The home page counted eleven
+  open questions on the real store and there was nowhere to answer one: the
+  report only counted them, and the page called Categorise is about something
+  else. `/review-flags` lists each question that the evidence has not already
+  answered as a card - the account, the dates, how each source listed each
+  row, and what the evidence says either way - masked on a GET, with the
+  amounts and descriptions behind the same "Show values" press an account's
+  page uses.
+- **Two answers, each remembered through a rebuild.** "These are two
+  payments" closes the flag, and a rebuild does not ask again. "These are one
+  payment" joins the two rows by the path an exact rule already takes, keeping
+  every sighting, and the join is repeated after a rebuild has replayed the
+  artefacts. An answer is refused when what is held is no longer what the card
+  showed, when a proof on file says the two are separate payments, and when
+  either row is inside a protected period; the refusal says what to do first.
+- **An answer can be withdrawn**, from its result page and from the list of
+  the last twenty answers. Withdrawing "one payment" withdraws the record
+  only: the rows separate at the next rebuild, and the page says so, because
+  nothing takes rows apart without replaying the artefacts.
+
+### Changed
+- The home page's line about open flags and the review report link to the
+  page that answers them.
+
+### Not covered
+- Nothing on the real store changes until an answer is pressed. No answer has
+  been given there, so the join's effect on the real main account, and on what
+  the next push sends to Actual, is known only from invented data.
+- A flag between a row listed only by one source and a row listed only by
+  another could not be raised through the importers, so its card is tested as
+  a function and has not been seen as a page.
+- The three pages with "review" in their name keep their names.
+
 ## [0.4.309] - 2026-10-04
 
 ### Changed
