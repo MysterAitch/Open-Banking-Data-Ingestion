@@ -85,12 +85,33 @@ class TransactionStatus(StrEnum):
         )
 
 
+#: How one sighting came to be on its row, recorded on the sighting (`transaction_sources.basis`).
+#: Strongest first. `matching.resolve` decides which applies; the ledger words each one.
+#: The row that founded it has no join, and its sighting says so.
+BASIS_FOUNDED = "founded"
+#: The aggregator's statement of the feed's uid, or the feed's uid so stated (`payment_links`).
+BASIS_ID = "id"
+#: The same source's own id for the payment, seen again.
+BASIS_OWN_ID = "own-id"
+#: The day the feed states the payment settled is the day the export lists it.
+BASIS_SETTLEMENT = "settlement"
+#: A person's entry joined to a source's row.
+BASIS_MANUAL = "manual"
+#: Amount, a date window, and description: the matcher's guess.
+BASIS_WINDOW = "window"
+#: A main-account row folded into a Space row by amount and date, not by id.
+BASIS_FOLD = "fold"
+
+
 class MatchTier(StrEnum):
     """How a transaction was linked to an existing record.
 
     Recorded on every link so a wrong match can be found and reversed later.
     """
 
+    #: The aggregator's stated first-party id names a row, or the feed's uid is one a row's
+    #: aggregator sighting stated: no date, description, or window was consulted.
+    LINKED_ID = "linked_id"
     SOURCE_ID = "source_id"
     CONTENT_KEY = "content_key"
     FUZZY = "fuzzy"

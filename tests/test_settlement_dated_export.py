@@ -46,6 +46,9 @@ None is the deployed store's order (`FEED_FIRST`). Marked as expected failures
 so that the day they are closed they say so.
 The movement count reports nothing in them either: it compares rows listed with rows
 held per source, and each source's rows are all held.
+With an aggregator that states the feed's uid (`TestWhenTheAggregatorStatesTheFeedsUid`, which
+is what a real one does) the third of them passes, by id; the first two stay open, because
+the id joins the feed to the aggregator's row and nothing absorbs the export's second row.
 """
 
 from __future__ import annotations
@@ -191,6 +194,29 @@ class TestLateSettlement:
             m for m in store.stated_times_for(late[0].entity_id) if m["field"] == "settlementTime"
         ]
         assert moment["stated"].startswith("2027-01-20T02:44:19")
+
+
+class TestWhenTheAggregatorStatesTheFeedsUid:
+    """The same household with an aggregator that states the feed's own uid, as a real one does.
+
+    The id joins the aggregator's item to the feed's row whatever date the row carries
+    (`matching._Judgement.named_by_id`), which closes the order the settlement build left open
+    (the aggregator arriving after the export had moved the row's date away from its own).
+    """
+
+    @pytest.mark.parametrize(
+        "order",
+        [
+            pytest.param(o, id=order_id(o), marks=OPEN if o in FEED_LAST_AFTER_BOTH else ())
+            for o in ORDERS
+        ],
+    )
+    def test_Payments_WhenTheAggregatorStatesTheUid_EachIsOneRowSeenByAllThree(self, made, order):
+        store = made(order, late_settlement_payments(), linked=True)
+
+        rows = payment_rows(store, LATE_MINORS)
+        assert len(rows) == 6
+        assert [sources(store, t) for t in rows] == [ALL_THREE] * 6
 
 
 class TestASecondExportOfAnOverlappingSpan:

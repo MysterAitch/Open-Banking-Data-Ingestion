@@ -1300,7 +1300,10 @@ def _fold_refusals(
     """
     rows = [*held, *(row for rows_of in members.values() for row in rows_of)]
     sightings = store.sighting_sources({ref, *members})
-    plan = plan_folds(rows, sightings, families.feeds, families.parents)
+    links, uids = store.stated_ids_by_entity()
+    plan = plan_folds(
+        rows, sightings, families.feeds, families.parents, links=links, uids=uids
+    )
     return {refusal.entity_id: refusal.describe() for refusal in plan.refusals}
 
 

@@ -148,6 +148,8 @@ class FoldPlan:
     unmatched: int
     #: One entry per ambiguous copy, earliest first.
     refusals: tuple[FoldRefusal, ...] = ()
+    #: The folded rows an id decided (`plan_folds` says how); the rest folded by amount and date.
+    by_id: frozenset[str] = frozenset()
 
 
 def _sighted(
@@ -172,12 +174,30 @@ def plan_folds(
     sightings: Mapping[str, Mapping[str, str]],
     feeds: Mapping[str, Collection[str]],
     parents: Mapping[str, str],
+    *,
+    links: Mapping[str, Collection[str]] | None = None,
+    uids: Mapping[str, Collection[str]] | None = None,
 ) -> FoldPlan:
     """Which main-account rows are copies of Space rows. Pure.
 
     `feeds` maps each source to every account the map binds it to;
     `parents` maps each known Space to its main account (`space_parents`).
+
+    THE ID COMES FIRST. `links` is the first-party ids each row's aggregator sightings
+    stated, and `uids` the feed uids each row's first-party sightings carry
+    (`Store.stated_ids_by_entity`).
+    An aggregator's Space-blind copy of a Space payment states the SPACE feed item's own uid,
+    so a copy whose stated id is a Space row's uid, of the same size, IS that row's copy: no
+    date or window is consulted and nothing else is a candidate for it.
+    Measured on one real month, 58 of 58 aggregator items stated a feed uid, across the main
+    account and its Spaces.
+    The amount-and-date rule below is the fallback for every row an id does not reach, and
+    the only rule for an account with no first-party feed; it never pairs a row with a
+    Space row that an id says is another payment: a Space row another copy's id names, or one
+    whose uid is not the id this copy states.
     """
+    row_links = links or {}
+    space_uids = uids or {}
     spaces_of_main: dict[str, set[str]] = defaultdict(set)
     for space, main in parents.items():
         spaces_of_main[main].add(space)
@@ -216,8 +236,28 @@ def plan_folds(
         if witnessed:
             targets[(row.account_id, row.amount_minor)].append((row, witnessed))
 
+    target_of_uid: dict[str, list[Transaction]] = defaultdict(list)
+    for candidates in targets.values():
+        for target, _witnessed in candidates:
+            for uid in space_uids.get(target.entity_id, ()):
+                target_of_uid[uid].append(target)
+    claimed_by: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        for link in row_links.get(row.entity_id, ()):
+            claimed_by[link].add(row.entity_id)
+
+    def an_id_says_otherwise(row: Transaction, target: Transaction) -> bool:
+        wanted = set(row_links.get(row.entity_id, ()))
+        held_uids = set(space_uids.get(target.entity_id, ()))
+        if wanted and held_uids and not wanted & held_uids:
+            return True
+        return any(
+            owner != row.entity_id for uid in held_uids for owner in claimed_by.get(uid, ())
+        )
+
     edges: dict[str, list[tuple[int, str]]] = {}
     held: dict[str, Transaction] = {}
+    by_id: set[str] = set()
     unmatched = 0
     for row in rows:
         if row.status not in _FOLDABLE:
@@ -233,9 +273,22 @@ def plan_folds(
         ]
         if not blind_to:
             continue
+        named = {
+            target.entity_id
+            for link in row_links.get(row.entity_id, ())
+            for target in target_of_uid.get(link, ())
+            if target.account_id in blind_to and target.amount_minor == row.amount_minor
+        }
+        if named:
+            edges[row.entity_id] = [(0, target_id) for target_id in sorted(named)]
+            held[row.entity_id] = row
+            by_id.add(row.entity_id)
+            continue
         found: list[tuple[int, str]] = []
         for space in blind_to:
             for target, witnessed in targets.get((space, row.amount_minor), ()):
+                if an_id_says_otherwise(row, target):
+                    continue
                 apart = (
                     same_movement_days(
                         row.amount_minor, seen_on, target.amount_minor, there_on
@@ -270,7 +323,11 @@ def plan_folds(
         )
     )
     return FoldPlan(
-        folds=folds, ambiguous=len(refusals), unmatched=unmatched, refusals=refusals
+        folds=folds,
+        ambiguous=len(refusals),
+        unmatched=unmatched,
+        refusals=refusals,
+        by_id=frozenset(by_id & set(folds)),
     )
 
 
@@ -522,13 +579,19 @@ def fold_space_copies(store: Store, account_map: AccountMap) -> FoldReport:
     }
 
     rows = store.all_transactions()
+    links, uids = store.stated_ids_by_entity()
     plan = plan_folds(
-        rows, store.genuine_sightings(), feeds, space_parents(store, account_map)
+        rows,
+        store.genuine_sightings(),
+        feeds,
+        space_parents(store, account_map),
+        links=links,
+        uids=uids,
     )
     # Only this pass's folds: a row folded as the same money as a statement's
     # (`same_money_fold`) is that pass's to report and to release.
     before = store.space_folded_ids()
-    store.replace_space_folds(plan.folds)
+    store.replace_space_folds(plan.folds, plan.by_id)
     after = set(plan.folds)
     return FoldReport(
         folded=len(after),

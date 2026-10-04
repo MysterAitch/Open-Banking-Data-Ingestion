@@ -40,7 +40,15 @@ from .accounts import (
     read_registry_file,
 )
 from .errors import DataError
-from .models import RawArtefact, SourceTier, Transaction, TransactionStatus, Valuation
+from .models import (
+    BASIS_FOLD,
+    BASIS_ID,
+    RawArtefact,
+    SourceTier,
+    Transaction,
+    TransactionStatus,
+    Valuation,
+)
 from .namespaces import (
     API_SOURCES,
     MANUAL_SOURCE,
@@ -48,6 +56,7 @@ from .namespaces import (
     provenance_rank,
     stored_provenance_rank,
 )
+from .payment_links import stated_link_of
 from .stated_times import recorded_for
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
@@ -80,7 +89,12 @@ from .stated_times import recorded_for
 #: 13 -> 14: the `protections` and `protection_history` tables, likewise.
 #:
 #: 14 -> 15: the `sighting_times` table, likewise.
-SCHEMA_VERSION = 15
+#:
+#: 15 -> 16: `basis` and `linked_id` on transaction_sources, and `sighting_times` keyed by
+#: the sighting's entity instead of the source's own id (most sources state none).
+#: The old table is dropped, not converted: it is derived, and the rebuild every deploy runs
+#: fills the new one from raw.
+SCHEMA_VERSION = 16
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -304,6 +318,15 @@ CREATE TABLE IF NOT EXISTS transaction_sources (
     -- to the merged date rather than inventing one.
     observed_date TEXT NOT NULL DEFAULT '',
     first_seen_at TEXT NOT NULL,
+    -- How this sighting came to be on its row (`matching.BASIS_*` names each): the
+    -- evidence that joined it, recorded where the sighting is so that it survives
+    -- supersession and is rebuilt from raw with the rest. Empty on a copy placed on a
+    -- Space row by a fold that predates the column, and never guessed.
+    basis TEXT NOT NULL DEFAULT '',
+    -- The first-party id this sighting STATED for its payment (`payment_links`), empty
+    -- where its source states none. Kept per sighting because a row holds only its last
+    -- writer's record, and the matcher needs every id any of its sightings stated.
+    linked_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (entity_id, source, artefact_digest)
 );
 
@@ -504,18 +527,18 @@ CREATE TABLE IF NOT EXISTS protection_history (
 -- Every date and instant a source stated for a payment, one record per field of each
 -- sighting (`stated_times` says what is read and from which sources).
 -- DERIVED: a rebuild empties it and replays it from the raw artefacts.
--- Keyed on the sighting (source, artefact, the source's own id), not on a stored row, so
--- that a merge or a re-merge of rows cannot lose it; a stored row's times are found
--- through its sightings in transaction_sources (`Store.stated_times_for`).
+-- Keyed on the sighting exactly as transaction_sources is (entity, source, artefact),
+-- because most sources state no id of their own: an export row, a statement line, and an
+-- aggregator item without one have nothing else to key on (`Store.stated_times_for`).
 CREATE TABLE IF NOT EXISTS sighting_times (
+    entity_id       TEXT NOT NULL,
     source          TEXT NOT NULL,
     artefact_digest TEXT NOT NULL,
-    source_id       TEXT NOT NULL,
     field           TEXT NOT NULL,
     stated          TEXT NOT NULL,
     kind            TEXT NOT NULL,
     zone            TEXT NOT NULL,
-    PRIMARY KEY (source, artefact_digest, source_id, field)
+    PRIMARY KEY (entity_id, source, artefact_digest, field)
 );
 """
 
@@ -598,14 +621,14 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     ],
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
     'same_money_outcomes': ['account', 'outcome'],
-    'sighting_times': ['artefact_digest', 'field', 'kind', 'source', 'source_id', 'stated', 'zone'],
+    'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
     ],
     'transaction_sources': [
-        'artefact_digest', 'entity_id', 'first_seen_at', 'observed_date', 'source',
-        'source_id',
+        'artefact_digest', 'basis', 'entity_id', 'first_seen_at', 'linked_id',
+        'observed_date', 'source', 'source_id',
     ],
     'transactions': [
         'account_id', 'amount_minor', 'artefact_digest', 'booking_date',
@@ -821,16 +844,17 @@ _COPY_PATTERN = FOLDED_SIGHTING_PREFIX + "%"
 
 _RECORD_SOURCE_SQL = """
     INSERT INTO transaction_sources
-        (entity_id, source, source_id, artefact_digest, observed_date, first_seen_at)
-    VALUES (?,?,?,?,?,?)
+        (entity_id, source, source_id, artefact_digest, observed_date, first_seen_at,
+         basis, linked_id)
+    VALUES (?,?,?,?,?,?,?,?)
     ON CONFLICT(entity_id, source, artefact_digest) DO NOTHING
 """
 
 _RECORD_TIME_SQL = """
     INSERT INTO sighting_times
-        (source, artefact_digest, source_id, field, stated, kind, zone)
+        (entity_id, source, artefact_digest, field, stated, kind, zone)
     VALUES (?,?,?,?,?,?,?)
-    ON CONFLICT(source, artefact_digest, source_id, field) DO NOTHING
+    ON CONFLICT(entity_id, source, artefact_digest, field) DO NOTHING
 """
 
 _QUEUE_REVIEW_SQL = (
@@ -928,6 +952,8 @@ class Store:
         self._migrate_transaction_tier_and_occurrence()
         self._migrate_sighting_artefact_digest()
         self._migrate_sighting_observed_date()
+        self._migrate_sighting_basis()
+        self._migrate_sighting_times_key()
         self._migrate_declared_account_date_basis()
         self._migrate_valuation_income_columns()
         self._migrate_attempt_artefact_column()
@@ -1065,6 +1091,31 @@ class Store:
                 "transaction_sources", set(self._table_columns("transaction_sources"))
             )
         )
+
+    def _migrate_sighting_basis(self) -> None:
+        """Give sightings the basis they joined on and the id they stated.
+
+        Existing rows keep both empty, which is honest: nothing recorded either, and a
+        rebuild (which every deploy runs) replays them with both.
+        """
+        held = self._table_columns("transaction_sources")
+        for column in ("basis", "linked_id"):
+            if column not in held:
+                self.connection.execute(
+                    f"ALTER TABLE transaction_sources ADD COLUMN {column} "
+                    "TEXT NOT NULL DEFAULT ''"
+                )
+
+    def _migrate_sighting_times_key(self) -> None:
+        """Replace the stated-times table keyed by the source's own id with the entity-keyed one.
+
+        Dropped rather than converted: it is derived from the artefacts, and the old rows
+        cannot name the entity of an id-less sighting.
+        """
+        if "entity_id" in self._table_columns("sighting_times"):
+            return
+        self.connection.execute("DROP TABLE sighting_times")
+        self.connection.executescript(table_ddl("sighting_times"))
 
     def _migrate_declared_account_date_basis(self) -> None:
         """Give declared accounts a place to say where their dates came from.
@@ -2813,8 +2864,10 @@ class Store:
             (str(row[0]), str(row[1]), str(row[2]), bool(row[3]), bool(row[4])) for row in rows
         ]
 
-    def record_source(self, transaction: Transaction) -> None:
+    def record_source(self, transaction: Transaction, *, basis: str = "") -> None:
         """Note that this source has seen this transaction, in this artefact.
+
+        `basis` is how the sighting came to be on its row (`matching.BASIS_*`).
 
         Idempotent per (entity, source, artefact): re-landing the same artefact
         adds nothing, while a NEW artefact from the same source adds a sighting
@@ -2835,12 +2888,14 @@ class Store:
             # different question once a second source has superseded it.
             transaction.value_date.isoformat(),
             now,
+            basis,
+            stated_link_of(transaction),
         )
         times = [
             (
+                transaction.entity_id,
                 transaction.source,
                 transaction.artefact_digest,
-                transaction.source_id,
                 stated.field,
                 stated.stated,
                 stated.kind,
@@ -2863,39 +2918,80 @@ class Store:
         Empty for a row whose sources are not yet recorded (`stated_times`).
         """
         rows = self.connection.execute(
-            "SELECT t.source, t.artefact_digest, t.source_id, t.field, t.stated, t.kind, t.zone "
-            "FROM sighting_times t JOIN transaction_sources s "
-            "ON s.source = t.source AND s.artefact_digest = t.artefact_digest "
-            "AND s.source_id = t.source_id "
-            "WHERE s.entity_id = ? "
-            "ORDER BY t.source, t.source_id, t.artefact_digest, t.field",
+            "SELECT source, artefact_digest, field, stated, kind, zone "
+            "FROM sighting_times WHERE entity_id = ? "
+            "ORDER BY source, artefact_digest, field",
             (entity_id,),
         ).fetchall()
         return [
             {
                 "source": str(row[0]),
                 "artefact_digest": str(row[1]),
-                "source_id": str(row[2]),
-                "field": str(row[3]),
-                "stated": str(row[4]),
-                "kind": str(row[5]),
-                "zone": str(row[6]),
+                "field": str(row[2]),
+                "stated": str(row[3]),
+                "kind": str(row[4]),
+                "zone": str(row[5]),
             }
             for row in rows
         ]
 
+    def linked_ids_for_account(self, account_id: str) -> list[tuple[str, str]]:
+        """(entity, first-party id) for every id a sighting of the account's rows stated.
+
+        Sightings copied onto a Space row are not a source's own statement.
+        """
+        rows = self.connection.execute(
+            "SELECT DISTINCT s.entity_id, s.linked_id FROM transaction_sources s "
+            "JOIN transactions t ON t.entity_id = s.entity_id "
+            "WHERE t.account_id = ? AND s.linked_id != '' "
+            "AND (s.source_id IS NULL OR s.source_id NOT LIKE ?)",
+            (account_id, _COPY_PATTERN),
+        ).fetchall()
+        return [(str(row[0]), str(row[1])) for row in rows]
+
+    def stated_ids_by_entity(self) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """(links, uids): per entity, the first-party ids its aggregator sightings stated,
+        and the feed uids its first-party sightings carry. Copies are not included."""
+        from .payment_links import FIRST_PARTY_FEEDS
+
+        links: dict[str, set[str]] = {}
+        uids: dict[str, set[str]] = {}
+        for entity, source, source_id, linked in self.connection.execute(
+            "SELECT entity_id, source, source_id, linked_id FROM transaction_sources "
+            "WHERE source_id IS NULL OR source_id NOT LIKE ?",
+            (_COPY_PATTERN,),
+        ):
+            if linked:
+                links.setdefault(str(entity), set()).add(str(linked))
+            if source in FIRST_PARTY_FEEDS and source_id:
+                uids.setdefault(str(entity), set()).add(str(source_id))
+        return links, uids
+
+    def bases_by_entity(self, account_id: str) -> dict[str, list[tuple[str, str, str]]]:
+        """Entity -> (source, basis, first-seen date) of each sighting of the account's rows."""
+        found: dict[str, list[tuple[str, str, str]]] = {}
+        for row in self.connection.execute(
+            "SELECT s.entity_id, s.source, s.basis, s.observed_date FROM transaction_sources s "
+            "JOIN transactions t ON t.entity_id = s.entity_id WHERE t.account_id = ? "
+            "ORDER BY s.first_seen_at, s.source",
+            (account_id,),
+        ):
+            found.setdefault(str(row[0]), []).append((str(row[1]), str(row[2]), str(row[3])))
+        return found
+
     def settlement_days_for_account(self, account_id: str) -> dict[str, set[date]]:
         """Entity id -> the days each of its sightings' settlement could be listed under."""
+        from .payment_links import FIRST_PARTY_FEEDS
         from .stated_times import SETTLEMENT_FIELD, StatedTime, days_of
 
+        # Placeholders only - the interpolation builds "?,?", never data.
+        marks = ",".join("?" for _ in FIRST_PARTY_FEEDS)
+
         rows = self.connection.execute(
-            "SELECT DISTINCT s.entity_id, t.stated, t.kind, t.zone "
-            "FROM sighting_times t JOIN transaction_sources s "
-            "ON s.source = t.source AND s.artefact_digest = t.artefact_digest "
-            "AND s.source_id = t.source_id "
-            "JOIN transactions x ON x.entity_id = s.entity_id "
-            "WHERE x.account_id = ? AND t.field = ?",
-            (account_id, SETTLEMENT_FIELD),
+            "SELECT DISTINCT t.entity_id, t.stated, t.kind, t.zone "  # noqa: S608
+            "FROM sighting_times t JOIN transactions x ON x.entity_id = t.entity_id "
+            f"WHERE x.account_id = ? AND t.field = ? AND t.source IN ({marks})",
+            (account_id, SETTLEMENT_FIELD, *sorted(FIRST_PARTY_FEEDS)),
         ).fetchall()
         found: dict[str, set[date]] = {}
         for entity_id, stated, kind, zone in rows:
@@ -3146,9 +3242,13 @@ class Store:
             listed[row["digest"]].add(row["entity_id"])
         return listed
 
-    def replace_space_folds(self, folds: Mapping[str, str]) -> None:
+    def replace_space_folds(
+        self, folds: Mapping[str, str], by_id: Collection[str] = ()
+    ) -> None:
         """Make `folds` - folded entity id to the Space row's entity id - the
         store's folds, replacing the previous pass's.
+        `by_id` names the folded rows whose fold an id decided; each copy carries that
+        basis (`matching.BASIS_ID`), and every other the amount-and-date one.
 
         Delete-and-rewrite, as the pairing table is, because a fold is a
         derived fact about the evidence held now: a fold that outlived its
@@ -3158,6 +3258,7 @@ class Store:
         each, marked by `FOLDED_SIGHTING_PREFIX` on its provider id.
         """
         execute = self.connection.execute
+        by_id_set = set(by_id)
         # Only the rows THIS pass folded come back: a row folded as the same
         # money as a statement's rows (`replace_statement_folds`) has no copy
         # on any Space row, and is that pass's to release, not this one's.
@@ -3179,10 +3280,16 @@ class Store:
             )
             execute(
                 "INSERT OR IGNORE INTO transaction_sources "
-                "(entity_id, source, source_id, artefact_digest, observed_date, first_seen_at) "
-                "SELECT ?, source, ?, artefact_digest, observed_date, first_seen_at "
+                "(entity_id, source, source_id, artefact_digest, observed_date, first_seen_at, "
+                "basis) "
+                "SELECT ?, source, ?, artefact_digest, observed_date, first_seen_at, ? "
                 "FROM transaction_sources WHERE entity_id = ?",
-                (space_id, FOLDED_SIGHTING_PREFIX + folded_id, folded_id),
+                (
+                    space_id,
+                    FOLDED_SIGHTING_PREFIX + folded_id,
+                    BASIS_ID if folded_id in by_id_set else BASIS_FOLD,
+                    folded_id,
+                ),
             )
         self.connection.commit()
 

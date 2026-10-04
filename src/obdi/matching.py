@@ -35,7 +35,18 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TypeVar
 
-from .models import MatchTier, SourceTier, Transaction, TransactionStatus
+from .models import (
+    BASIS_ID,
+    BASIS_MANUAL,
+    BASIS_OWN_ID,
+    BASIS_SETTLEMENT,
+    BASIS_WINDOW,
+    MatchTier,
+    SourceTier,
+    Transaction,
+    TransactionStatus,
+)
+from .payment_links import FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
 from .stated_times import settlement_days_of
 
 _K = TypeVar("_K")
@@ -60,6 +71,12 @@ ASSIGNMENT_SET_LIMIT = 12
 #: reissues a payment under a new id when it settles must not be here, or
 #: every settlement would read as a second payment.
 SETTLEMENT_KEEPS_ID = frozenset({"starling"})
+
+#: Ends the reason of a review flag raised because exact rules disagree (an id against a size,
+#: or two ids against each other), which `review_report.assess_flags` never settles for it:
+#: the duplicate-report passes close a flag when no neighbour is live, and here no neighbour
+#: is the question.
+EXACT_RULE_DOUBT = "(exact-rule doubt)"
 
 
 def could_be_one_payment(
@@ -300,6 +317,11 @@ class MatchResult:
     # ambiguous case: a repeated payment and a duplicate report have the same
     # shape, and being wrong is expensive in both directions.
     near_misses: tuple[Transaction, ...] = ()
+    #: How the record came to be on `existing` (`models.BASIS_*`), empty when it is new.
+    basis: str = ""
+    #: A doubt the exact rules raised, for the row the record ends on to be queued with:
+    #: empty when they raised none.
+    review: str = ""
 
     @property
     def is_new(self) -> bool:
@@ -352,7 +374,11 @@ class CandidateIndex:
         sightings: Iterable[tuple[str, str, str, bool, bool]] = (),
         space_blind: Callable[[str], bool] | None = None,
         settlements: Mapping[str, Iterable[date]] | None = None,
+        links: Iterable[tuple[str, str]] = (),
     ) -> None:
+        # Every first-party id any sighting of a row stated, which only grows like the ids above.
+        self._links_of: dict[str, set[str]] = {}
+        self._by_link: dict[tuple[str, str], list[str]] = {}
         # The days each row's sightings state it settled under, which only grow:
         # a row's stored record is its last writer's, and the sightings say the rest.
         self._settle: dict[str, set[date]] = {
@@ -400,7 +426,40 @@ class CandidateIndex:
                     self._seen_pending.add(key)
                 if was_settled:
                     self._seen_settled.add(key)
+        for entity_id, link in links:
+            position = self._position.get(entity_id)
+            if position is not None:
+                self.note_link(entity_id, self._order[position].account_id, link)
         self._recording_evidence = True
+
+    def note_link(self, entity_id: str, account_id: str, link: str) -> None:
+        """Record that a sighting of this row stated this first-party id. Never undone."""
+        if not link:
+            return
+        self._links_of.setdefault(entity_id, set()).add(link)
+        held = self._by_link.setdefault((account_id, link), [])
+        if entity_id not in held:
+            held.append(entity_id)
+
+    def links_of(self, entity_id: str) -> frozenset[str]:
+        """The first-party ids the row's aggregator sightings stated."""
+        return frozenset(self._links_of.get(entity_id, ()))
+
+    def feed_uids_of(self, entity_id: str) -> frozenset[str]:
+        """The feed uids the row's first-party sightings carry."""
+        sighted = self._ids_of.get(entity_id, {})
+        return frozenset(uid for source in FIRST_PARTY_FEEDS for uid in sighted.get(source, ()))
+
+    def rows_stating(self, account_id: str, link: str) -> list[Transaction]:
+        """Rows an aggregator sighting stated this first-party id for."""
+        return self._in_arrival_order(self._by_link.get((account_id, link), []))
+
+    def rows_with_feed_uid(self, account_id: str, uid: str) -> list[Transaction]:
+        """Rows a first-party feed sighted under this uid."""
+        found: list[Transaction] = []
+        for source in sorted(FIRST_PARTY_FEEDS):
+            found.extend(self.by_source_id(account_id, source, uid))
+        return found
 
     def __len__(self) -> int:
         return len(self._order)
@@ -520,6 +579,9 @@ class CandidateIndex:
             transaction.source_id,
             record_evidence=self._recording_evidence,
         )
+        self.note_link(
+            transaction.entity_id, transaction.account_id, stated_link_of(transaction)
+        )
         if transaction.source_id:
             key = (transaction.account_id, transaction.source, transaction.source_id)
             self._by_source_id.setdefault(key, []).append(transaction.entity_id)
@@ -636,6 +698,72 @@ class _Judgement:
         self.index = index
         self.account = incoming.account_id
         self.incoming_days = settlement_days_of(incoming)
+        self.link = stated_link_of(incoming)
+        self.feed_uid = feed_uid_of(incoming)
+        #: Set when an id names a row of another size, for `resolve` to flag.
+        self.size_conflict = ""
+
+    def named_by_id(self) -> Transaction | None:
+        """THE ID TIER. The row an id names for this record, or None.
+
+        An aggregator item states the uid of the feed item it reports, and the feed item's
+        uid is what that statement names: so the item IS that payment, and no date,
+        description, or window is consulted.
+        Measured on one real month: 58 of 58 aggregator items carried a feed item's own
+        uid, all agreeing with it on size and direction, and the matcher read none of them.
+        Where the id names a row of another size the two cannot be one payment, so
+        nothing merges and the doubt is flagged (`size_conflict`): a source's id that
+        disagrees with its own figures is worth a person's eye, never a quiet pairing.
+        """
+        index = self.index
+        if self.link:
+            candidates = index.rows_with_feed_uid(self.account, self.link)
+        elif self.feed_uid:
+            candidates = index.rows_stating(self.account, self.feed_uid)
+        else:
+            return None
+        for candidate in candidates:
+            if self.taken(candidate):
+                continue
+            if candidate.amount_minor != self.incoming.amount_minor:
+                self.size_conflict = (
+                    "its id names a payment of another size, so the two were not merged: "
+                    "an id that disagrees with its own figures needs a person's eye"
+                )
+                continue
+            return candidate
+        return None
+
+    def contradicted(self, candidate: Transaction) -> bool:
+        """Whether an exact rule says this row is a different payment from the record.
+
+        The row is already known, by an id a sighting of it stated or carries, to be another
+        payment: a row sighted under feed uid U is not the payment an aggregator item names L,
+        and a row an aggregator sighting names L is not the feed item U.
+        A heuristic pairing never overrides that, which is what stopped two equal payments
+        minutes apart from swapping their sightings.
+        """
+        index, entity = self.index, candidate.entity_id
+        if self.link:
+            uids = index.feed_uids_of(entity)
+            if uids and self.link not in uids:
+                return True
+            links = index.links_of(entity)
+            if links and self.link not in links:
+                return True
+        if self.feed_uid:
+            links = index.links_of(entity)
+            if links and self.feed_uid not in links:
+                return True
+        return False
+
+    def heuristic_basis(self, candidate: Transaction) -> str:
+        """The basis of a pairing the exact rules did not decide."""
+        if SourceTier.MANUAL in (self.incoming.tier, candidate.tier):
+            return BASIS_MANUAL
+        if self.settled_together(candidate):
+            return BASIS_SETTLEMENT
+        return BASIS_WINDOW
 
     # Provider ids are only unique within a provider's own namespace, so tier 1
     # matches on (source, source_id) rather than the id alone. Two sources
@@ -653,7 +781,7 @@ class _Judgement:
 
     def one_payment(self, candidate: Transaction, *, same_content: bool) -> bool:
         incoming, index = self.incoming, self.index
-        if self.taken(candidate) or self.apart_by_kind(candidate):
+        if self.taken(candidate) or self.apart_by_kind(candidate) or self.contradicted(candidate):
             return False
         # Where a source keeps a payment's id through settlement, a row it
         # has already called by a different id is a different payment, and
@@ -674,18 +802,43 @@ class _Judgement:
         return could_be_one_payment(incoming, candidate, same_content=same_content)
 
     def exact(self) -> MatchResult | None:
-        """Tiers 1 and 2: the row this record names by id or by content."""
+        """The row this record names by an id, or by the content key.
+
+        The source's own id and the id-link are each exact.
+        Where they name DIFFERENT rows the evidence disagrees with itself, so the join already
+        made stands (the sighting is on that row, and moving it would rewrite what a source
+        said) and nothing new is merged on the other id: the row is flagged for a person.
+        """
         incoming, index = self.incoming, self.index
+        own: Transaction | None = None
         if incoming.source_id:
             for candidate in index.by_source_id(
                 self.account, incoming.source, incoming.source_id
             ):
                 if not self.taken(candidate):
-                    return MatchResult(MatchTier.SOURCE_ID, candidate)
+                    own = candidate
+                    break
+        named = self.named_by_id()
+        if own is not None:
+            review = ""
+            if named is not None and named.entity_id != own.entity_id:
+                review = (
+                    "its own id and the id it states for the bank's payment name different "
+                    "rows, so nothing further was merged: one payment may be held twice, or "
+                    "two joined that are not one"
+                )
+            return MatchResult(MatchTier.SOURCE_ID, own, basis=BASIS_OWN_ID, review=review)
+        if named is not None:
+            return MatchResult(MatchTier.LINKED_ID, named, basis=BASIS_ID)
         if incoming.content_key:
             for candidate in index.by_content_key(self.account, incoming.content_key):
                 if self.one_payment(candidate, same_content=True):
-                    return MatchResult(MatchTier.CONTENT_KEY, candidate)
+                    return MatchResult(
+                        MatchTier.CONTENT_KEY,
+                        candidate,
+                        basis=self.heuristic_basis(candidate),
+                        review=self.size_conflict,
+                    )
         return None
 
     # A hand-entered date is remembered rather than observed, so the window
@@ -718,7 +871,9 @@ class _Judgement:
         # A pair kept apart by kind is certain, not a near-miss, so it is never
         # put to the reviewer as a puzzle.
         return [
-            t for t in self.same_amount() if self.reaches(t) and not self.apart_by_kind(t)
+            t
+            for t in self.same_amount()
+            if self.reaches(t) and not self.apart_by_kind(t) and not self.contradicted(t)
         ]
 
     def near(self, similar: Sequence[Transaction]) -> list[Transaction]:
@@ -759,6 +914,7 @@ def resolve(
     found = judge.exact()
     if found is not None:
         return found
+    conflict = judge.size_conflict
 
     same_amount = judge.same_amount()
     similar = judge.similar()
@@ -783,13 +939,18 @@ def resolve(
             None,
             near_misses=rejected,
             recurring=belongs_to_established_series(incoming, same_amount),
+            review=conflict,
         )
 
     for candidate in near:
         if candidate.entity_id == partner:
-            return MatchResult(MatchTier.FUZZY, candidate)
+            return MatchResult(
+                MatchTier.FUZZY, candidate, basis=judge.heuristic_basis(candidate), review=conflict
+            )
     near.sort(key=lambda t: (not judge.settled_together(t), _distance_days(incoming, t)))
-    return MatchResult(MatchTier.FUZZY, near[0])
+    return MatchResult(
+        MatchTier.FUZZY, near[0], basis=judge.heuristic_basis(near[0]), review=conflict
+    )
 
 
 @dataclass(frozen=True)

@@ -207,6 +207,7 @@ def household(
     extra_feed: tuple[dict[str, Any], ...] = (),
     rebuild: bool = False,
     linked: bool = False,
+    aggregator_reversed: bool = False,
 ) -> Store:
     """The household with `payments` added, each source arriving in `order` through the
     door a live pull or import uses, and then (when `rebuild`) the whole store rebuilt from raw.
@@ -261,6 +262,8 @@ def household(
         reported = [
             aggregator_item(p, link=linked) for p in payments if p.reported is not None
         ]
+        if aggregator_reversed:
+            reported.reverse()
         arrive(
             truelayer.artefact_for(
                 json.dumps({"results": reported}).encode(), account_id="tl-main", kind="booked"

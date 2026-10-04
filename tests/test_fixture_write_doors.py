@@ -162,6 +162,10 @@ JUSTIFIED = {
     "marker shows that opening an old store grows the tables the first press needs",
     ("test_sighting_times.py", "obdi_meta"): "stamps a store with the version BEFORE the "
     "sighting_times table existed, for the same reason as the entries above",
+    ("test_sighting_times.py", "sighting_times"): "writes one row in the schema-15 shape, keyed "
+    "by the source's own id, to prove the schema-16 migration replaces that table: no current "
+    "writer can produce the old shape, and the migration is reachable only on a real store "
+    "at upgrade time",
     ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
     "upgrade path to run",
     ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "

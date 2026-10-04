@@ -18,9 +18,17 @@ from pathlib import Path
 from . import instrumentation
 from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
-from .matching import CandidateIndex, pair_transfer_entities, plan_partners, resolve, supersede
-from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
+from .matching import (
+    EXACT_RULE_DOUBT,
+    CandidateIndex,
+    pair_transfer_entities,
+    plan_partners,
+    resolve,
+    supersede,
+)
+from .models import BASIS_FOUNDED, RawArtefact, SourceTier, Transaction, TransactionStatus
 from .parsers.uk_banks import detect
+from .payment_links import stated_link_of
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import category_resolver, fold_space_copies
@@ -414,6 +422,7 @@ def preview_reconcile(
                 sightings=store.sighted_ids_for_account(transaction.account_id),
                 space_blind=_blind_in(space_blind, transaction.account_id),
                 settlements=store.settlement_days_for_account(transaction.account_id),
+                links=store.linked_ids_for_account(transaction.account_id),
             )
             loaded.begin_batch()
             by_account[transaction.account_id] = loaded
@@ -555,6 +564,7 @@ def _reconcile_all(
                     sightings=store.sighted_ids_for_account(transaction.account_id),
                     space_blind=_blind_in(space_blind, transaction.account_id),
                     settlements=store.settlement_days_for_account(transaction.account_id),
+                    links=store.linked_ids_for_account(transaction.account_id),
                 )
             loaded.begin_batch(pending_snapshot=pending_snapshot)
             by_account[transaction.account_id] = loaded
@@ -638,10 +648,12 @@ def _reconcile(
         sighting = replace(
             transaction, entity_id=result.existing.entity_id, artefact_digest=digest
         )
-        store.record_source(sighting)
+        store.record_source(sighting, basis=result.basis)
         existing.note_sighting(
             sighting.entity_id, sighting.account_id, sighting.source, sighting.source_id
         )
+        existing.note_link(sighting.entity_id, sighting.account_id, stated_link_of(sighting))
+        _flag(store, summary, result.existing.entity_id, result.review)
         summary.matched += 1
         return result.existing, result.existing.entity_id
 
@@ -657,10 +669,11 @@ def _reconcile(
         sighting = replace(
             transaction, entity_id=result.existing.entity_id, artefact_digest=digest
         )
-        store.record_source(sighting)
+        store.record_source(sighting, basis=result.basis)
         existing.note_sighting(
             sighting.entity_id, sighting.account_id, sighting.source, sighting.source_id
         )
+        _flag(store, summary, result.existing.entity_id, result.review)
         summary.matched += 1
         return result.existing, result.existing.entity_id
 
@@ -679,8 +692,10 @@ def _reconcile(
         # that would otherwise be lost - and it is the one that makes this a
         # corroboration rather than a repeat.
         store.record_source(
-            replace(transaction, entity_id=result.existing.entity_id, artefact_digest=digest)
+            replace(transaction, entity_id=result.existing.entity_id, artefact_digest=digest),
+            basis=result.basis,
         )
+        _flag(store, summary, result.existing.entity_id, result.review)
         if merged.status != result.existing.status:
             summary.superseded += 1
         else:
@@ -704,8 +719,9 @@ def _reconcile(
         artefact_digest=digest,
     )
     store.upsert_transaction(fresh, match_tier=result.tier.value)
-    store.record_source(fresh)
+    store.record_source(fresh, basis=BASIS_FOUNDED)
     summary.inserted += 1
+    _flag(store, summary, fresh.entity_id, result.review)
 
     # Only the genuinely ambiguous cases: something matched on amount and date
     # and was kept apart solely by the same-source rule. Flagging every new
@@ -720,6 +736,14 @@ def _reconcile(
         summary.needs_review += 1
 
     return fresh, None
+
+
+def _flag(store: Store, summary: ImportSummary, entity_id: str, reason: str) -> None:
+    """Queue a doubt the exact rules raised, where there is one."""
+    if not reason:
+        return
+    store.queue_for_review(entity_id, f"{reason} {EXACT_RULE_DOUBT}")
+    summary.needs_review += 1
 
 
 def _occurrence_once_merged(

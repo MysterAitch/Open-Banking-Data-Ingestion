@@ -213,3 +213,50 @@ class TestUpgrade:
 
         with Store(path) as reopened:
             assert reopened.stated_times_for("no-such-row") == []
+
+    def test_Store_OpenedAtSchemaFifteen_GainsTheBasisColumnsAndTheEntityKeyedTimes(
+        self, tmp_path
+    ):
+        path = tmp_path / "fifteen.sqlite3"
+        with Store(path):
+            pass
+        connection = sqlite3.connect(path)
+        connection.execute("DROP TABLE sighting_times")
+        connection.execute(
+            "CREATE TABLE sighting_times (source TEXT NOT NULL, artefact_digest TEXT NOT NULL, "
+            "source_id TEXT NOT NULL, field TEXT NOT NULL, stated TEXT NOT NULL, "
+            "kind TEXT NOT NULL, zone TEXT NOT NULL, "
+            "PRIMARY KEY (source, artefact_digest, source_id, field))"
+        )
+        connection.execute(
+            "INSERT INTO sighting_times VALUES ('starling', 'd', 'u', 'settlementTime', "
+            "'2026-09-15T03:00:00Z', 'instant', 'Z')"
+        )
+        connection.execute("ALTER TABLE transaction_sources DROP COLUMN basis")
+        connection.execute("ALTER TABLE transaction_sources DROP COLUMN linked_id")
+        connection.execute(
+            "UPDATE obdi_meta SET value = '15' WHERE key = 'schema_version'",
+        )
+        connection.commit()
+        connection.close()
+
+        with Store(path) as reopened:
+            def columns(table: str) -> set[str]:
+                info = reopened.connection.execute(f"PRAGMA table_info({table})")
+                return {row[1] for row in info}
+
+            assert {"basis", "linked_id"} <= columns("transaction_sources")
+            assert "entity_id" in columns("sighting_times")
+            assert "source_id" not in columns("sighting_times")
+            kept = reopened.connection.execute("SELECT COUNT(*) FROM sighting_times").fetchone()
+            assert kept[0] == 0
+
+    def test_Store_WhenCreatedFresh_HasTheSameShapeAsOneUpgradedFromFifteen(self, tmp_path):
+        with Store(tmp_path / "fresh.sqlite3") as fresh:
+            columns = {
+                row[1]
+                for row in fresh.connection.execute("PRAGMA table_info(transaction_sources)")
+            }
+
+        assert {"basis", "linked_id"} <= columns
+        assert SCHEMA_VERSION == 16

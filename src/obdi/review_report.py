@@ -22,7 +22,12 @@ from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 from .identity_health import PENDING_SNAPSHOT_SOURCES
-from .matching import FUZZY_WINDOW_DAYS, MANUAL_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
+from .matching import (
+    EXACT_RULE_DOUBT,
+    FUZZY_WINDOW_DAYS,
+    MANUAL_WINDOW_DAYS,
+    SETTLEMENT_KEEPS_ID,
+)
 from .models import SourceTier, TransactionStatus
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -206,6 +211,12 @@ def assess_flags(store: Store) -> dict[str, FlagAssessment]:
             assessments[entity_id] = FlagAssessment(
                 FlagClass.ROW_IS_HISTORY, account, source, when, (), 0
             )
+            continue
+
+        if str(flag["reason"]).endswith(EXACT_RULE_DOUBT):
+            # Not a duplicate-report question, so no neighbour can answer it: two exact
+            # rules disagree, and only a person can say which is right.
+            assessments[entity_id] = FlagAssessment(FlagClass.OPEN, account, source, when, (), 0)
             continue
 
         widest = timedelta(days=max(FUZZY_WINDOW_DAYS, MANUAL_WINDOW_DAYS))

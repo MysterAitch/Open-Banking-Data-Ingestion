@@ -53,6 +53,12 @@ DELIBERATELY_UNEXERCISED = {
         "before the first-party connection was named - can only exist in a store "
         "that predates that change and has not been opened since."
     ),
+    "sighting_times_key": (
+        "replaces the stated-times table as schema 15 shaped it, which no snapshot "
+        "captured: the newest shipped shape (19) predates the table altogether. "
+        "Exercised by test_sighting_times.py, which rewinds a store to the "
+        "schema-15 table and opens it."
+    ),
     "declared_accounts_from_file": (
         "triggered by a legacy accounts file beside the store, not by the "
         "store's shape, and gated on a completion marker so it runs at most "
