@@ -4,8 +4,10 @@ A flag asks whether a row stored as new is a repeated payment or a duplicate
 report. Several kinds of flag ask a question that has an answer on file (see
 `review_report.FlagClass`): the flagged row is gone or is history, every
 neighbour is history, one response named the row and every neighbour under
-different provider ids, or the source never reuses an id. This pass deletes
-those flags and leaves the rest for a person.
+different provider ids, the source never reuses an id, or the known balances on
+both sides are reproduced only with both rows counted. This pass deletes those
+flags and leaves the rest for a person. What a proof needs is stated once, on
+the class, in `review_report.FlagClass`.
 
 It is a DERIVED pass, like the Space fold: it reads the evidence held now and
 runs after every fold, so a flag the evidence later answers is closed on the

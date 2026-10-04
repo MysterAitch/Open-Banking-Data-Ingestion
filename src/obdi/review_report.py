@@ -17,10 +17,14 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 
+from .accounts import is_balance_only
+from .agreement import DEFINES, MET, UNMET, Known, known_of_opening
+from .balance_anchors import effective_opening
 from .identity_health import PENDING_SNAPSHOT_SOURCES
 from .matching import (
     EXACT_RULE_DOUBT,
@@ -49,6 +53,46 @@ class FlagClass(StrEnum):
     #: payment by one id for life. Also holds where the neighbours are a mix of
     #: this proof and `LISTED_TOGETHER`: the weaker of the two names the class.
     IDS_KEPT_FOR_LIFE = "ids-kept-for-life"
+    #: The rows reproduce a known balance before every row of the pair and one on or after
+    #: every row, with both counted, so dropping either would put the later balance out.
+    #: THE PROOF'S CONDITIONS ARE STATED ONCE, here, and `balance_proof` enforces them:
+    #:
+    #:   - Some source LISTS both rows as separate lines in one response (`_listed_in_one`),
+    #:     for every neighbour that no id proof has already separated. A statement reader can
+    #:     read one line twice at a page boundary, and the balance is what rules that out; where
+    #:     no source lists both, the rows may be one payment seen by two sources and the
+    #:     balance is not independent of either, so the flag stays open however it looks.
+    #:   - Every row of the set (the flagged row and all its live neighbours) is BOOKED, in one
+    #:     account, with a non-nil amount. A pending row is not in a bank's or a statement's
+    #:     booked balance, so its being counted proves nothing.
+    #:   - K1 is the latest known balance dated strictly BEFORE the earliest row, and K2 the
+    #:     earliest dated on or after the latest row. A known balance is a figure for the END
+    #:     of its day and includes that day's rows (`balance_anchors.derive_opening`), so a
+    #:     statement dated on the rows' own day closes them and cannot open them.
+    #:   - K2 must be TESTED: the rows reproduce it. K1 may be tested or may be the one that
+    #:     DEFINES the opening, because the proof is the difference between the two, which the
+    #:     opening cancels out of. A nil opening is a premise rather than a known balance and
+    #:     never serves, so a pair before the first known balance is open: the opening is
+    #:     worked out backwards from that balance and absorbs any error.
+    #:   - Every known balance from K1 to K2, whichever source states it, is reproduced, and no
+    #:     two sources state different figures for one day in that span. A balance stated for a
+    #:     moment is never K1 or K2 but is still held to this.
+    #:   - The account is not tracked by its stated balances alone (those are followed: a row is
+    #:     derived to make each agree, so nothing is tested) and has no known Space (its
+    #:     balances may be the whole family's, which needs the account map that this report is
+    #:     not given). An account fed by the bank's own feed counts as possibly having Spaces.
+    #:
+    #: THE HONEST LIMIT. A duplicate offset by a MISSING row of the same size in the same span
+    #: would also reproduce K2. The money is then still right and no row changes, so the flag
+    #: is closed in name only; that is accepted because the balance is what the flag protects.
+    #: Rows are placed by their stored dates: a source whose own dating moves a row across a
+    #: known balance is not separately checked, and nor are the movement checks that the
+    #: account's agreement also reads.
+    #:
+    #: WHEN IT STOPS HOLDING it behaves as the other settled classes do: the flag is already
+    #: deleted and stays so until a rebuild, which raises it again and closes it only if the
+    #: proof still holds.
+    BALANCES_NEED_BOTH = "balances-need-both"
     #: Everything else: a real question for a person.
     OPEN = "open"
 
@@ -60,12 +104,38 @@ SETTLED_CLASSES: tuple[FlagClass, ...] = (
     FlagClass.NO_LIVE_NEIGHBOUR,
     FlagClass.LISTED_TOGETHER,
     FlagClass.IDS_KEPT_FOR_LIFE,
+    FlagClass.BALANCES_NEED_BOTH,
 )
+
+#: What a class proved, in words, for the report. Only the proofs that are not obvious from
+#: their names are said.
+PROOF_WORDS: dict[FlagClass, str] = {
+    FlagClass.BALANCES_NEED_BOTH: (
+        "the rows reproduce the known balances before and after with both counted"
+    ),
+}
 
 ROW_GONE_LABEL = "(row gone)"
 NO_NEIGHBOUR_LABEL = "(none)"
 
 _HISTORY_STATUSES = tuple(s.value for s in TransactionStatus if s.is_history)
+
+
+#: Why the balance proof could not be made although it was tried, as a word the card turns into
+#: a sentence: no known balance before the rows, none on or after them, or only one.
+GAP_BEFORE = "before"
+GAP_AFTER = "after"
+GAP_SINGLE = "single"
+
+
+@dataclass(frozen=True)
+class BalanceGap:
+    """A known balance that is missing, and the day the card names. Counts and dates only."""
+
+    kind: str
+    #: The earliest row's day for `GAP_BEFORE`, the latest row's for `GAP_AFTER`, and the one
+    #: known balance's own day for `GAP_SINGLE`.
+    day: date
 
 
 @dataclass(frozen=True)
@@ -78,6 +148,9 @@ class FlagAssessment:
     #: Distinct sources of the live neighbours.
     neighbour_sources: tuple[str, ...]
     live_neighbours: int
+    #: Set where the balance proof was tried for an open flag and a missing known balance is
+    #: what stopped it; None for every other flag.
+    balance_gap: BalanceGap | None = None
 
 
 @dataclass
@@ -236,8 +309,129 @@ def neighbour_proof(store: Store, entity_id: str, neighbour_id: str) -> FlagClas
     return None
 
 
+def _listed_in_one(store: Store, entity_id: str, neighbour_id: str) -> bool:
+    """Whether one source listed both rows, each as a line of its own, in one response.
+
+    The same join as `_listed_together` without its different-ids condition: a source that
+    names no id (a statement) lists each payment once per file. A pending snapshot and a copy
+    placed by a fold are set aside for the reasons given there, and so is an id both rows have
+    been sighted under, which is one payment held twice.
+    """
+    placeholders = ",".join("?" for _ in PENDING_SNAPSHOT_SOURCES)
+    found = store.connection.execute(
+        "SELECT 1 FROM transaction_sources a "  # noqa: S608
+        "JOIN transaction_sources b "
+        "  ON b.source = a.source AND b.artefact_digest = a.artefact_digest "
+        "WHERE a.entity_id = ? AND b.entity_id = ? "
+        "AND a.artefact_digest != '' "
+        "AND COALESCE(a.source_id, '') NOT LIKE ? AND COALESCE(b.source_id, '') NOT LIKE ? "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM transaction_sources c "
+        "  JOIN transaction_sources d ON d.source = c.source AND d.source_id = c.source_id "
+        "  WHERE c.entity_id = a.entity_id AND d.entity_id = b.entity_id "
+        "  AND c.source = a.source AND c.source_id IS NOT NULL AND c.source_id != ''"
+        ") "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM raw_artefacts r "
+        "  WHERE r.digest = a.artefact_digest "
+        # Placeholders only - the interpolation builds "?,?", never data.
+        f"  AND r.source IN ({placeholders})"
+        ") LIMIT 1",
+        (
+            entity_id,
+            neighbour_id,
+            FOLDED_SIGHTING_PREFIX + "%",
+            FOLDED_SIGHTING_PREFIX + "%",
+            *PENDING_SNAPSHOT_SOURCES,
+        ),
+    ).fetchone()
+    return found is not None
+
+
+def _may_have_spaces(store: Store, account: str) -> bool:
+    """Whether the account might be a Space, or have Spaces, whose balances are the family's.
+
+    Read from the store alone, because settlement runs from places that hold no account map:
+    a declared parent either way, or any row or sighting from the bank's own feed or export,
+    which is the only kind of source that has Spaces. Too cautious by design.
+    """
+    declared = store.connection.execute(
+        "SELECT 1 FROM declared_accounts WHERE (ref = ? AND parent IS NOT NULL) OR parent = ? "
+        "LIMIT 1",
+        (account, account),
+    ).fetchone()
+    if declared is not None:
+        return True
+    fed = store.connection.execute(
+        "SELECT 1 FROM transactions t WHERE t.account_id = ? AND ("
+        "  t.source IN ('starling', 'starling-csv') OR EXISTS ("
+        "    SELECT 1 FROM transaction_sources s WHERE s.entity_id = t.entity_id "
+        "    AND s.source IN ('starling', 'starling-csv'))) LIMIT 1",
+        (account,),
+    ).fetchone()
+    return fed is not None
+
+
+def account_knowns(store: Store, account: str) -> list[Known] | None:
+    """The account's known balances as the agreement rule reads them, or None where none can
+    serve the proof (see `FlagClass.BALANCES_NEED_BOTH`). The costly step: once per account."""
+    if is_balance_only(store.declared_kind(account)) or _may_have_spaces(store, account):
+        return None
+    opening = effective_opening(store, account)
+    if opening.withheld or opening.balance_only:
+        return None
+    return known_of_opening(opening)
+
+
+def balance_proof(
+    knowns: Sequence[Known], first: date, last: date
+) -> tuple[bool, BalanceGap | None]:
+    """Whether the known balances prove rows dated `first` to `last` are all needed, and where
+    they do not, which known balance is missing. Pure; the conditions are on
+    `FlagClass.BALANCES_NEED_BOTH`."""
+    stated = [k for k in knowns if not k.instant]
+    days = {k.day for k in stated}
+    if len(days) == 1:
+        (only,) = days
+        if only >= last:
+            return False, BalanceGap(GAP_SINGLE, only)
+        if only < first:
+            return False, BalanceGap(GAP_AFTER, last)
+        return False, BalanceGap(GAP_BEFORE, first)
+    before = [k for k in stated if k.day < first]
+    after = [k for k in stated if k.day >= last]
+    if not before:
+        return False, BalanceGap(GAP_BEFORE, first)
+    if not after:
+        return False, BalanceGap(GAP_AFTER, last)
+    openers = [k for k in before if k.verdict in (DEFINES, MET)]
+    closers = [k for k in after if k.verdict == MET]
+    if not openers or not closers:
+        return False, None
+    start = max(k.day for k in openers)
+    end = min(k.day for k in closers)
+    span = [k for k in knowns if start <= k.day <= end]
+    if any(k.verdict == UNMET for k in span):
+        return False, None
+    for day in {k.day for k in span}:
+        if len({k.figure for k in span if k.day == day and not k.instant}) > 1:
+            return False, None
+    return True, None
+
+
 def assess_flags(store: Store) -> dict[str, FlagAssessment]:
-    """Every OPEN flag, assessed. Resolved flags are a person's work and are not read."""
+    """Every OPEN flag, assessed. Resolved flags are a person's work and are not read.
+
+    The balance proof reads an account's whole balance history, so it is worked out once per
+    account that has a flag reaching it, however many flags that account holds.
+    """
+    knowns: dict[str, list[Known] | None] = {}
+
+    def knowns_of(account: str) -> list[Known] | None:
+        if account not in knowns:
+            knowns[account] = account_knowns(store, account)
+        return knowns[account]
+
     assessments: dict[str, FlagAssessment] = {}
     for flag in store.review_queue():
         entity_id = str(flag["entity_id"])
@@ -269,25 +463,65 @@ def assess_flags(store: Store) -> dict[str, FlagAssessment]:
         live = live_neighbours(store, entity_id)
         sources = tuple(sorted({source_name for _, source_name in live}))
 
+        gap: BalanceGap | None = None
         if not live:
             flag_class = FlagClass.NO_LIVE_NEIGHBOUR
         else:
-            proofs: list[FlagClass] = []
-            for neighbour_id, _ in live:
-                proof = neighbour_proof(store, entity_id, neighbour_id)
-                if proof is None:
-                    break
-                proofs.append(proof)
-            if len(proofs) < len(live):
+            proofs = [neighbour_proof(store, entity_id, n) for n, _ in live]
+            unproven = [n for (n, _), proof in zip(live, proofs, strict=True) if proof is None]
+            if unproven:
                 flag_class = FlagClass.OPEN
+                proved, gap = _balances_prove(
+                    store, entity_id, [n for n, _ in live], unproven, account, knowns_of
+                )
+                if proved:
+                    flag_class = FlagClass.BALANCES_NEED_BOTH
             elif all(proof is FlagClass.LISTED_TOGETHER for proof in proofs):
                 flag_class = FlagClass.LISTED_TOGETHER
             else:
                 flag_class = FlagClass.IDS_KEPT_FOR_LIFE
         assessments[entity_id] = FlagAssessment(
-            flag_class, account, source, when, sources, len(live)
+            flag_class, account, source, when, sources, len(live), gap
         )
     return assessments
+
+
+def _balances_prove(
+    store: Store,
+    entity_id: str,
+    neighbours: list[str],
+    unproven: list[str],
+    account: str,
+    knowns_of: Callable[[str], list[Known] | None],
+) -> tuple[bool, BalanceGap | None]:
+    """The balance proof for a flag whose `unproven` neighbours no id has separated.
+
+    The cheap conditions first, so the account's balances are read only for a flag that can
+    use them: every neighbour no id separates is listed with the flagged row by one source,
+    and every row is booked and not nil.
+    """
+    if not all(_listed_in_one(store, entity_id, n) for n in unproven):
+        return False, None
+    members = [entity_id, *neighbours]
+    placeholders = ",".join("?" for _ in members)
+    rows = store.connection.execute(
+        "SELECT value_date, status, amount_minor FROM transactions "  # noqa: S608
+        # Placeholders only - the interpolation builds "?,?", never data.
+        f"WHERE entity_id IN ({placeholders})",
+        members,
+    ).fetchall()
+    if len(rows) != len(members):
+        return False, None
+    if any(
+        str(r["status"]) != TransactionStatus.BOOKED.value or int(r["amount_minor"]) == 0
+        for r in rows
+    ):
+        return False, None
+    held = knowns_of(account)
+    if held is None:
+        return False, None
+    days = [date.fromisoformat(str(r["value_date"])) for r in rows]
+    return balance_proof(held, min(days), max(days))
 
 
 def classify_flags(store: Store) -> dict[str, FlagClass]:
@@ -345,7 +579,11 @@ class ReviewReport:
             lines.append("  by class (strongest proof first):")
             for flag_class in FlagClass:
                 if flag_class in classes:
-                    lines.append(f"    {flag_class.value}: {classes[flag_class]}")
+                    said = PROOF_WORDS.get(flag_class)
+                    lines.append(
+                        f"    {flag_class.value}: {classes[flag_class]}"
+                        + (f" - {said}" if said else "")
+                    )
             lines.append("  by class and account:")
             for (flag_class, account), count in sorted(
                 self.breakdown.by_class_account.items(),
