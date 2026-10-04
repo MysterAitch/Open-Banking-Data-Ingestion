@@ -107,14 +107,14 @@ class TestEachStepSaysWhatItsFailureRisks:
 
         assert item.severity == BANDS[DECLARED[name][1]]
 
-    def test_Severity_WhenAFailedBrowsingCopy_IsHousekeepingNotDataAtRisk(self, db):
+    def test_Severity_WhenAFailedBrowsingCopy_IsWhenConvenientNotAFault(self, db):
         clock = Clock()
         whole_cycle(db, clock, failing="export-raw")
         [(key, message)] = findings(reading(db, clock.now))
 
         item = _alert_item(Finding(key, message), lambda ref: ref)
 
-        assert item.severity_word == "Housekeeping"
+        assert item.severity_word == "When convenient"
 
     def test_Severity_WhenTheStepIsNotOneTheSchedulerDeclares_StaysDataAtRisk(self):
         item = _alert_item(Finding("scheduler-failed:unheard-of", "failed"), lambda ref: ref)

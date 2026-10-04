@@ -270,11 +270,17 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         assert "Everything else, by section" not in page
         assert 'id="attention"' in page and 'id="accounts"' in page
 
-    def test_Home_CarriesFiveFactsEachLinkingToThePageThatOwnsIt(self, serve):
+    def test_Home_CarriesFourSystemFactsEachLinkingToThePageThatOwnsIt(self, serve):
         page = fetch(serve(), "/")
 
         facts = re.findall(r'<li class="fact"><a class="tap" href="([^"]+)"', page)
-        assert facts == ["/connections", "/actual", "/connections", "/admin", "/admin"]
+        assert facts == ["/connections", "/connections", "/admin", "/admin"]
+
+    def test_Home_StatesTheActualFactAsAStatusLineAndNotAsASystemFact(self, serve):
+        page = fetch(serve(), "/")
+
+        assert 'class="tap status-row" href="/actual"' in page
+        assert "<strong>Actual</strong>" not in page.split('id="system"')[1]
 
     def test_Home_AccountsSection_LinksToCoverageDeclaredImportAndCategorise(self, serve):
         accounts = fetch(serve(), "/").split('id="accounts"')[1]
@@ -301,9 +307,10 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
             },
         )
 
-        strip = fetch(base, "/").split('id="system"')[1]
+        page = fetch(base, "/")
+        strip = page.split('id="system"')[1]
 
-        assert "last push FAILED 2026-10-01 12:00Z" in strip
+        assert "The newest push failed 2026-10-01 12:00." in page.split('id="status"')[1]
         assert "last rebuild FAILED, 2026-09-30 08:00Z" in strip
         assert "2 banks connected" in strip
         expires = (datetime.now(UTC) + timedelta(days=40)).date().isoformat()
@@ -311,10 +318,11 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         assert "scheduler last completed a cycle" in strip
 
     def test_SystemStrip_WithNothingWired_SaysSoRatherThanGoingMissing(self, serve):
-        strip = fetch(serve(), "/").split('id="system"')[1]
+        page = fetch(serve(), "/")
+        strip = page.split('id="system"')[1]
 
         assert "no scheduler cycle recorded" in strip
-        assert "not wired on this instance" in strip
+        assert "Not wired on this instance." in page.split('id="status"')[1]
         assert "no banks connected" in strip
         assert "no rebuild recorded" in strip
 

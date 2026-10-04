@@ -52,15 +52,20 @@ ACTUAL_HREF = "/actual"
 ADMIN_HREF = "/admin"
 ACCOUNTS_HREF = "/#accounts"
 
-#: Severity bands. Lower is more urgent, and the order is the page's order.
+#: Severity bands, named by what a person should DO. Lower is more urgent, and the order is the
+#: page's order.
 #:
-#:   1  data is being lost or misreported NOW: a feed has gone dark, rows
-#:      cannot be told apart, the derived layer is empty or failed to replay,
-#:      the budget is not receiving what it should, or a check that watches
-#:      one of these could not run (an unwatched condition might be any of them).
-#:   2  something WILL break soon unless acted on: consent expiring, a full disk.
-#:   3  housekeeping: work waiting for a person that is losing nothing meanwhile.
-NOW, SOON, HOUSEKEEPING = 1, 2, 3
+#:   1  a fault, to look at now: rows disagree with a balance the bank states, a protection is
+#:      broken, a movement is wrong, a feed has gone dark, the derived layer is empty or failed
+#:      to replay, a push failed, or a check that watches one of these could not run (an
+#:      unwatched condition might be any of them).
+#:   2  to look at soon: something WILL break unless acted on (consent expiring, a full disk), or
+#:      two sources disagree and only a person can say which is right.
+#:   3  when convenient: work waiting for a person that is losing nothing meanwhile, such as a
+#:      statement not yet uploaded.
+#:   4  information: a fact with nothing for a person to do about it. It is said once, quietly,
+#:      and is never counted as something needing attention.
+NOW, SOON, HOUSEKEEPING, INFORMATION = 1, 2, 3, 4
 
 #: How a scheduler step's declared severity (`scheduler_status.STEPS`) maps onto the bands.
 _STEP_BANDS = {
@@ -70,9 +75,10 @@ _STEP_BANDS = {
 }
 
 SEVERITY_WORDS = {
-    NOW: "Data at risk",
-    SOON: "Will break soon",
-    HOUSEKEEPING: "Housekeeping",
+    NOW: "Look at now",
+    SOON: "Look at soon",
+    HOUSEKEEPING: "When convenient",
+    INFORMATION: "For information",
 }
 
 #: Within a band, the order kinds appear in. Anything not listed sorts after
@@ -111,7 +117,7 @@ _KIND_ORDER = (
 #: message, so that each item says what is wrong and then what to do.
 _KINDS: dict[str, tuple[int, str]] = {
     "rebuild-running": (
-        HOUSEKEEPING,
+        INFORMATION,
         "Nothing is wrong and nothing is lost by waiting; refresh when the rebuild has finished.",
     ),
     "rebuild:abandoned": (
@@ -185,7 +191,7 @@ _KINDS: dict[str, tuple[int, str]] = {
         "the pull container's log shows what it is doing.",
     ),
     "scheduler-late-wait": (
-        HOUSEKEEPING,
+        INFORMATION,
         "Nothing is broken: the pull waits for its slot so that a restart does not overspend the "
         "bank's allowance. A pull run by hand in that container by an older build was recorded "
         "as scheduled and still counts toward the slot.",
@@ -193,18 +199,17 @@ _KINDS: dict[str, tuple[int, str]] = {
     "consent": (SOON, "Reconnect the bank before consent lapses."),
     "disk": (SOON, "Free space on the data volume or enlarge it."),
     "review": (
-        HOUSEKEEPING,
-        "Open the review queue report to see what the flags are made of "
-        "(counts only; no page resolves them yet).",
+        INFORMATION,
+        "The review queue report shows what the flags are made of; nothing resolves them yet.",
     ),
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
     "known-balances-disagree": (
-        HOUSEKEEPING,
+        SOON,
         "Open the account's ledger and decide which source is right; remove a stated balance "
         "that is wrong, or look at the statement.",
     ),
     "agreement-lapsed": (
-        HOUSEKEEPING,
+        NOW,
         "Open the account's ledger to see which known balance the rows stopped reproducing, "
         "or which movement fault holds it back.",
     ),
@@ -331,6 +336,11 @@ class AttentionItem:
     def severity_word(self) -> str:
         return SEVERITY_WORDS[self.severity]
 
+    @property
+    def needs_attention(self) -> bool:
+        """Whether a person has something to do; an information item is said but not counted."""
+        return self.severity != INFORMATION
+
 
 @dataclass(frozen=True)
 class AccountOverview:
@@ -350,6 +360,11 @@ class AccountOverview:
     #: The three dates and what holds agreement back (`standing_data`); None for an account
     #: whose standing could not be read, which says nothing rather than something false.
     standing: AccountStanding | None = None
+    #: The main account this is a Space of, where the registry says so.
+    parent: str | None = None
+    #: The date of the first row held, where the proof rail's history begins for an account
+    #: with no known balance.
+    first: date | None = None
 
 
 @dataclass(frozen=True)
@@ -362,6 +377,16 @@ class Overview:
     #: Set when a rebuild held the derived layer as this was assembled: the checks that read it
     #: did not run (`DERIVED_OVERVIEW_CHECKS`), and this Overview is never reused by the cache.
     rebuilding: RebuildHold | None = None
+
+    @property
+    def attention(self) -> tuple[AttentionItem, ...]:
+        """The items a person has something to do about, most urgent first."""
+        return tuple(item for item in self.items if item.needs_attention)
+
+    @property
+    def notes(self) -> tuple[AttentionItem, ...]:
+        """The items that are only information."""
+        return tuple(item for item in self.items if not item.needs_attention)
 
 
 def _account_href(ref: str) -> str:
@@ -581,8 +606,9 @@ def movement_items_from(report: MovementCompleteness) -> list[AttentionItem]:
 #: Overview says so. A statement-only account is in agreement through its latest statement, which
 #: is at most a month old plus the days a bank takes to issue it, so a limit shorter than that
 #: would flag every account that is fine; one past a quarter would hide a statement that never
-#: arrived. Six weeks is that month and a fortnight of slack, and the Overview asks for nothing
-#: more urgent than housekeeping because the money is not at risk meanwhile.
+#: arrived. Six weeks is that month and a fortnight of slack. A held-back account past it is a
+#: fault (rows that do not reproduce a balance the bank states); an account merely waiting for its
+#: next statement is a reminder, and the two are told apart by the band each is raised in.
 STALE_AGREEMENT_DAYS = 45
 
 
@@ -592,7 +618,7 @@ def standing_items_from(
     closed_by_today: Callable[[str], bool],
     today: date,
 ) -> list[AttentionItem]:
-    """Housekeeping items from each account's standing.
+    """Items from each account's standing: reminders, and faults where agreement is held back.
 
     Known balances that disagree with each other are one item per account.
     An account whose agreement is HELD BACK (an unmet known balance or a movement fault) and has
@@ -620,7 +646,7 @@ def standing_items_from(
             items.append(
                 AttentionItem(
                     kind="known-balances-disagree",
-                    severity=HOUSEKEEPING,
+                    severity=_KINDS["known-balances-disagree"][0],
                     message=(
                         f"{label_of(ref)}: known balances disagree with each other on "
                         f"{_plural(len(conflicts), 'day')}, the first {first.isoformat()} "
@@ -652,7 +678,7 @@ def standing_items_from(
         items.append(
             AttentionItem(
                 kind="agreement-lapsed",
-                severity=HOUSEKEEPING,
+                severity=_KINDS["agreement-lapsed"][0],
                 message=(
                     f"{label_of(ref)} has known balances but is {said}, more than "
                     f"{STALE_AGREEMENT_DAYS} days ago. {held_sentence(own)}"
@@ -735,11 +761,11 @@ def _review_items(store: Store) -> list[AttentionItem]:
     return [
         AttentionItem(
             kind="review",
-            severity=HOUSEKEEPING,
+            severity=_KINDS["review"][0],
             message=(
                 f"{_plural(len(flags), 'transaction')} "
                 f"{'is' if len(flags) == 1 else 'are'} flagged for a decision "
-                "the matcher could not make."
+                "that could not be made automatically."
             ),
             remedy=_KINDS["review"][1],
             href="/review-report",
@@ -867,6 +893,24 @@ def held_by_account(
     return held, sources
 
 
+def first_row_dates(store: Store) -> dict[str, date]:
+    """The date of each account's first row, history excluded as `held_by_account` excludes it.
+
+    One grouped statement for the whole store, so drawing a rail per account costs nothing per
+    account.
+    """
+    history = tuple(s.value for s in TransactionStatus if s.is_history)
+    marks = ",".join("?" for _ in history)
+    return {
+        str(row["account_id"]): date.fromisoformat(str(row["first"]))
+        for row in store.connection.execute(
+            "SELECT account_id, MIN(value_date) AS first "  # noqa: S608
+            f"FROM transactions WHERE status NOT IN ({marks}) GROUP BY account_id",
+            history,
+        )
+    }
+
+
 def build_overview(
     store: Store,
     *,
@@ -935,6 +979,7 @@ def build_overview(
         return record is not None and record.closed is not None and record.closed <= now.date()
 
     held, sources = held_by_account(store)
+    first_rows = first_row_dates(store)
     standing_by_account: dict[str, AccountStanding] = {}
 
     def standing_check() -> list[AttentionItem]:
@@ -1029,6 +1074,10 @@ def build_overview(
                 closed=closed,
                 declared=declared is not None,
                 standing=standing_by_account.get(ref),
+                parent=(
+                    str(declared.parent) if declared is not None and declared.parent else None
+                ),
+                first=first_rows.get(ref),
             )
         )
     accounts.sort(

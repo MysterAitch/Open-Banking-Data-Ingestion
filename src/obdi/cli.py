@@ -3194,6 +3194,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families=families_of(store, _account_map(store)),
             )
 
+    def position_memo_key(store: Store) -> tuple[object, ...]:
+        # The date is in the key because the position is "as at" today; the rest is what the
+        # standings read, which is what the position's accounts and balances are read from.
+        return (*standing_key(store), *account_map_stamp(), datetime.now(UTC).date().isoformat())
+
+    position_memo: KeyedMemo[Position] = KeyedMemo(
+        position_memo_key, name="home position", epoch=rebuild_epoch
+    )
+
+    def home_position() -> Position:
+        """`position_data`, held while nothing it reads has changed, for the home page."""
+        with Store(db_path) as store:
+            return position_memo.get(store, position_data)
+
     def anchor_save(ref: str, day: str, amount: str, currency: str) -> None:
         from .balance_anchors import record_stated_anchor
 
@@ -4091,6 +4105,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
         position_data=position_data,
+        home_position=home_position,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,
         typed_save=typed_save,

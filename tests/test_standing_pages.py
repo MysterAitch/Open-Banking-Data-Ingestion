@@ -71,13 +71,13 @@ class TestAccountsNotInAgreementForLong:
         assert items(store, D(2026, 5, 5)) == []
         assert items(store, D(2027, 7, 1)) == []
 
-    def test_Items_WhenAKnownBalanceIsUnmetAndOldEnough_IsHousekeepingNamingTheDate(self, store):
+    def test_Items_WhenAKnownBalanceIsUnmetAndOldEnough_IsAFaultNamingTheDate(self, store):
         record_stated_anchor(store, ACCOUNT, "2026-03-25", "1.00")
 
         found = items(store, D(2026, 5, 5))
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
-        assert found[0].severity == 3, "housekeeping"
+        assert found[0].severity == 1, "a fault: the rows do not reproduce a stated balance"
         assert "in agreement through 2026-03-20" in found[0].message
         assert f"more than {STALE_AGREEMENT_DAYS} days ago" in found[0].message
         assert "Held back by the known balance for 2026-03-25" in found[0].message
@@ -135,7 +135,7 @@ class TestKnownBalancesThatDisagree:
         assert "disagree with each other on 1 day, the first 2026-03-10" in found[0].message
         assert "halifax-statement-pdf" in found[0].message
         assert "not a fault in the rows" in found[0].message
-        assert found[0].severity == 3
+        assert found[0].severity == 2, "to look at soon: only a person can say which is right"
 
 
 class TestTheCards:

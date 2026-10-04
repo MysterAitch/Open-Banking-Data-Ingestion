@@ -228,11 +228,13 @@ def system_strip_html(
     rebuild_status: Callable[[], dict[str, object]] | None,
     recent_rebuilds: Callable[[], list[dict[str, object]]] | None,
     now: datetime | None = None,
+    with_actual: bool = True,
 ) -> str:
-    """Five facts about the machinery, each a link to the page that owns it.
+    """Facts about the machinery, each a link to the page that owns it.
 
     Links only: the home page carries no controls, so nothing here can be
-    pressed by accident while scrolling past.
+    pressed by accident while scrolling past. `with_actual` is False where the page
+    already carries the push's state as a status line of its own.
     """
     from . import web
 
@@ -242,7 +244,7 @@ def system_strip_html(
     )
     facts = (
         _fact("Scheduler", "/connections", scheduler)
-        + _fact("Actual", "/actual", _actual_fact(actual_status))
+        + (_fact("Actual", "/actual", _actual_fact(actual_status)) if with_actual else "")
         + _fact("Connections", "/connections", _connections_fact(store, moment))
         + _fact("Rebuild", "/admin", _rebuild_fact(rebuild_status, recent_rebuilds))
         + _fact("Build", "/admin", f'<p class="mono">{_esc(describe())}</p>')

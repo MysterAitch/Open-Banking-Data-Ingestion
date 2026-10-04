@@ -39,6 +39,7 @@ from obdi.overview import (
     EMPTY,
     FILE_ONLY,
     HOUSEKEEPING,
+    INFORMATION,
     NEVER_ASKED,
     NOW,
     OVERVIEW_CHECKS,
@@ -332,7 +333,8 @@ class TestTheOverviewsOwnChecks:
 
         (item,) = [i for i in assemble(path).items if i.kind == "review"]
 
-        assert item.severity == HOUSEKEEPING
+        assert item.severity == INFORMATION, "nothing for a person to do, so not counted"
+        assert not item.needs_attention
         assert item.href == "/review-report"
         assert item.message.startswith("1 transaction is flagged")
         assert item.accounts == ("current-account",)
@@ -347,7 +349,7 @@ class TestTheOverviewsOwnChecks:
         (item,) = [i for i in assemble(path).items if i.kind == "review"]
 
         assert "decide" not in item.remedy
-        assert "no page resolves them yet" in item.remedy
+        assert "nothing resolves them yet" in item.remedy
 
     def test_ReviewFlags_WhenNoneIsOpen_RaisesNothing(self, household):
         assert [i for i in assemble(household).items if i.kind == "review"] == []

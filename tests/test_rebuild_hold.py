@@ -24,6 +24,7 @@ KNOWN ANSWERS (decided before the first run):
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -219,15 +220,30 @@ class TestThePagesWhileARebuildRuns:
         assert PAUSED not in after
         assert "1 row of one size and direction listed, 0 held" in after
 
-    def test_Overview_OnTheHomePageDuringARebuild_ShowsTheSentenceOnEveryCard(
+    def test_Overview_OnTheHomePageDuringARebuild_SaysTheSentenceOnceAsTheVerdictAndPausesTheRest(
         self, served, household, monkeypatch
     ):
         with rebuild_underway(household, monkeypatch):
             page = httpx.get(f"{served}/?fresh=1").text
 
-        assert page.count(PAUSED) >= 2
+        verdict = re.search(r'<p class="verdict[^"]*" id="verdict"><span>(.*?)</span>', page)
+        assert verdict is not None and PAUSED in verdict.group(1)
+        assert page.count(PAUSED) == 1, "said once, not on every row"
+        assert page.count("Paused while the rebuild runs.") == 3, "data, verification, position"
         assert "Movement completeness" not in page
-        assert "Data at risk" not in page
+        assert "Look at now" not in page
+        assert "in agreement through" not in page, "no account is given a verdict"
+
+    def test_Overview_OnTheHomePageAfterTheRebuild_SaysTheVerdictAgain(
+        self, served, household, monkeypatch
+    ):
+        with rebuild_underway(household, monkeypatch):
+            httpx.get(f"{served}/?fresh=1")
+        page = httpx.get(f"{served}/?fresh=1").text
+
+        assert PAUSED not in page
+        assert "Paused while the rebuild runs." not in page
+        assert "fault to look at now" in page, "the household's movement fault is back"
 
     def test_BalanceReconciliation_WhenARebuildHoldsTheLayer_SaysTheSentence(
         self, served, household, monkeypatch

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import threading
 from collections.abc import Callable
+from html import unescape as html_unescape
 from http.server import HTTPServer
 from typing import ClassVar
 
@@ -69,6 +70,24 @@ def text_of(page: str) -> str:
     return re.sub(r"<[^>]+>", " ", page)
 
 
+def verdict_of_page(page: str) -> str:
+    found = re.search(r'<p class="verdict[^"]*" id="verdict"><span>(.*?)</span>', page)
+    assert found is not None, "the page has no verdict"
+    return html_unescape(found.group(1))
+
+
+def row_of(page: str, ref: str) -> str:
+    """One account's row: its link and the facts folded beneath it, up to the next row."""
+    marker = f'<a class="tap acct-row" href="/ledger?ref={ref}">'
+    assert marker in page, f"no row for {ref}"
+    return re.split(r'<li class="acct|</li>', page.split(marker)[1], maxsplit=1)[0]
+
+
+def head_of_row(page: str, ref: str) -> str:
+    """The row's link alone, which is what a person reads without opening anything."""
+    return row_of(page, ref).split("</a>")[0]
+
+
 class TestNeedsAttention:
     def test_Home_ByDefault_IsTitledAndHeadedOverview(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
@@ -77,16 +96,20 @@ class TestNeedsAttention:
         assert "<h1>Overview</h1>" in page
         assert "Bank connections" not in page
 
-    def test_Home_WhenNothingNeedsAttention_SaysSoInWordsWithWhatWasCheckedAndWhen(
+    def test_Home_WhenNothingNeedsAttention_SaysSoInAPositiveVerdictAndKeepsTheChecksBehindAFold(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        assert "19 checks run at 14:02Z: nothing needs attention." in page
-        assert "Checked: silent feeds" in page
-        assert 'class="attention"' not in page
+        assert verdict_of_page(page) == "Everything checked is in order."
+        assert 'class="verdict ok' in page
+        assert "<summary>19 checks run at 14:02</summary>" in page
+        assert re.search(r"\d\d:\d\dZ", page) is None, "the zone is said once, not on each time"
+        assert "All times are UTC." in page
+        assert '<ol class="attention">' not in page
+        assert "Nothing needs attention." in page
 
-    def test_Home_WhenSomethingNeedsAttention_ListsItWithItsLinkAndDoesNotSayAllClear(
+    def test_Home_WhenSomethingNeedsAttention_RanksItInBandsNamedByWhatToDoAndLinksWhereItGoes(
         self, tmp_path, household
     ):
         page = home(
@@ -100,14 +123,34 @@ class TestNeedsAttention:
             ),
         )
 
-        assert "nothing needs attention" not in page
-        assert "2 things need attention." in page
+        assert verdict_of_page(page) == "1 fault to look at now and 1 thing to look at soon."
+        assert "Everything checked is in order" not in page
         assert page.index("acct-silent: gone quiet") < page.index("the data volume is 91% full")
-        assert 'href="/account?ref=acct-silent"' in page
-        assert 'href="/admin"' in page
-        assert "Data at risk" in page and "Will break soon" in page
+        assert page.index("1 fault to look at now</h3>") < page.index(
+            "1 thing to look at soon</h3>"
+        )
+        assert 'href="/account?ref=acct-silent">Open acct-silent&#x27;s account page</a>' in page
+        assert 'href="/admin">Open the admin page</a>' in page
+        for old in ("Data at risk", "Will break soon", "Housekeeping"):
+            assert old not in page
+        assert ">Open</a>" not in page, "every link says where it goes"
 
-    def test_Home_WhenACheckCouldNotRun_SaysThatCheckDidNotRunAndCountsOnlyThoseThatDid(
+    def test_Home_WhenOnlyRemindersRemain_SaysThereAreNoFaultsBeforeCountingThem(
+        self, tmp_path, household
+    ):
+        page = home(
+            tmp_path,
+            lambda fresh: assemble(
+                household, findings=lambda: [Finding("scheduler-late-wait", "waiting")]
+            ),
+        )
+
+        assert verdict_of_page(page) == "Everything checked is in order."
+        assert 'id="notes"' in page, "a fact with nothing to do is said, quietly, below"
+        assert "waiting" in page.split('id="notes"')[1]
+        assert "<ol class=\"attention\">" not in page
+
+    def test_Home_WhenACheckCouldNotRun_SaysThatCheckDidNotRunAndTheVerdictCallsItAFault(
         self, tmp_path, household
     ):
         def boom():
@@ -116,8 +159,10 @@ class TestNeedsAttention:
         page = home(tmp_path, lambda fresh: assemble(household, findings=boom))
 
         assert "The alert check could not run (RuntimeError)" in page
-        assert "8 of 19 checks run at 14:02Z; the rest could not run" in page
-        assert "nothing needs attention" not in page
+        assert "<summary>8 of 19 checks run at 14:02; the rest could not run</summary>" in page
+        assert "Only 8 of 19 checks could run" in page
+        assert "fault to look at now" in verdict_of_page(page)
+        assert "Everything checked is in order" not in page
         assert "secret detail" not in page
 
     def test_Home_WhenTheOverviewCannotBeAssembled_SaysNoChecksRanRatherThanShowingNothing(
@@ -185,31 +230,47 @@ class TestAccounts:
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        assert page.count('<span class="mono muted">acct-multi</span>') == 1
-        row = page.split('<span class="mono muted">acct-multi</span>')[1].split("</li>")[0]
+        assert page.count('<a class="tap acct-row" href="/ledger?ref=acct-multi">') == 1
+        row = row_of(page, "acct-multi")
         for source in ("csv-export", "starling", "truelayer"):
-            assert f">{source}</span>" in row
+            assert f">{source}</span>" in row, "the sources are behind the row's disclosure"
+        assert "csv-export" not in head_of_row(page, "acct-multi")
 
     def test_Home_DeclaredButEmptyAccount_AppearsMarkedEmpty(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        card = page.split('<span class="mono muted">acct-empty</span>')[0].rsplit("<li", 1)[1]
-        assert ">empty</span>" in card
+        head = head_of_row(page, "acct-empty")
+        assert ">empty</span>" in head and "declared, no rows held" in head
+        assert "Label of acct-empty" in head and ">acct-empty</span>" in head, "name, then ref"
 
     def test_Home_ArchivedAccount_IsLabelledWithItsDateAndListedLast(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        rows = re.findall(r'<span class="mono muted">(acct-[a-z]+)</span>', page)
+        rows = re.findall(r'<a class="tap acct-row" href="/ledger\?ref=(acct-[a-z]+)">', page)
         assert rows[-1] == "acct-old"
-        card = page.split('<span class="mono muted">acct-old</span>')[0].rsplit("<li", 1)[1]
-        assert ">archived</span> since 2026-01-31" in card
+        head = head_of_row(page, "acct-old")
+        assert ">archived</span>" in head and "archived since 2026-01-31" in head
 
-    def test_Home_EveryAccount_LinksToItsLedgerAndItsShapePage(self, tmp_path, household):
+    def test_Home_EveryAccount_IsOneTapToItsLedgerWithItsAccountPageBehindTheDisclosure(
+        self, tmp_path, household
+    ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
         for ref in ("acct-current", "acct-multi", "acct-empty", "acct-old"):
-            assert f'href="/ledger?ref={ref}"' in page
-            assert f'href="/account?ref={ref}"' in page
+            assert f'<a class="tap acct-row" href="/ledger?ref={ref}">' in page
+            assert f'href="/account?ref={ref}"' in row_of(page, ref).split("</a>", 1)[1]
+
+    def test_Home_Accounts_AreListedHeldBackThenUnprovenThenInAgreementThenQuietThenArchived(
+        self, tmp_path, household
+    ):
+        page = home(tmp_path, lambda fresh: assemble(household))
+
+        order = re.findall(r'<a class="tap acct-row" href="/ledger\?ref=(acct-[a-z]+)">', page)
+
+        # None of the household has a known balance, so every live account is unproven;
+        # the idle ones follow, then the archived one.
+        assert order.index("acct-current") < order.index("acct-quiet") < order.index("acct-empty")
+        assert order[-1] == "acct-old"
 
     def test_Home_AccountWithItemsConcerningIt_ShowsTheCountAsALinkToTheList(
         self, tmp_path, household
@@ -225,12 +286,12 @@ class TestAccounts:
             ),
         )
 
-        row = page.split('<span class="mono muted">acct-silent</span>')[1].split("</li>")[0]
-        assert 'href="#attention">2 items</a>' in row
-        other = page.split('<span class="mono muted">acct-current</span>')[1].split("</li>")[0]
-        assert "none</span>" in other
+        assert 'href="#attention">2 items</a>' in row_of(page, "acct-silent")
+        assert "none</span>" in row_of(page, "acct-current")
 
-    def test_Home_ShowsEachStateAsAWordAndALegendWithEveryRule(self, tmp_path, household):
+    def test_Home_ShowsEachFeedStateAsAWordBehindTheRowAndALegendWithEveryRule(
+        self, tmp_path, household
+    ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
         for state, rule in STATE_RULES.items():
@@ -258,9 +319,9 @@ class TestAccounts:
         page = home(tmp_path, lambda fresh: assemble(path))
 
         assert "No account is held or declared yet." in page
-        assert 'class="accounts"' not in page.split('id="accounts"')[1].split("</section>")[0]
+        assert 'class="accounts-list"' not in page.split('id="accounts"')[1].split("</section>")[0]
 
-    def test_Home_Accounts_AreCardsAndNotATable_SoNothingScrollsSidewaysOnAPhone(
+    def test_Home_Accounts_AreRowsAndNotATable_SoNothingScrollsSidewaysOnAPhone(
         self, tmp_path, household
     ):
         """Eight columns did not fit a phone: the reference wrapped mid-word and
@@ -268,7 +329,7 @@ class TestAccounts:
         page = home(tmp_path, lambda fresh: assemble(household))
         accounts = page.split('id="accounts"')[1].split("</section>")[0]
 
-        assert '<ul class="accounts">' in accounts
+        assert '<ul class="accounts-list">' in accounts
         assert "<table" not in accounts
 
     def test_Home_Controls_AreThumbSizedTapTargets(self, tmp_path, household):

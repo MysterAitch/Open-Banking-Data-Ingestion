@@ -709,6 +709,10 @@ class WebConfig:
     #: same reason `ledger_data` is data: the page decides in one place whether
     #: a reader may see them.
     position_data: Callable[[], Position] | None = None
+    #: The same position for the home page's masked status line, held while nothing it reads has
+    #: changed, so opening the home page does not re-walk every account (`position_data` costs
+    #: several statements per account).
+    home_position: Callable[[], Position] | None = None
     #: State a balance for an account: (ref, day, amount, currency), all as
     #: typed. Raises a DataError whose text never quotes the amount.
     anchor_save: Callable[[str, str, str, str], None] | None = None
@@ -4182,24 +4186,34 @@ def render_index(
     bank_authorisation: bool = True,
     overview: Callable[[bool], Overview] | None = None,
     fresh_overview: bool = False,
+    position: Callable[[], object] | None = None,
 ) -> bytes:
-    """The home page: the Overview, then the System strip, and nothing else.
+    """The home page: a verdict, four status lines, what needs attention, the accounts, and the
+    System facts, and nothing else.
 
     No forms live here. Everything a person does is on a page of its own,
     reached from the navigation strip; the banners stay because a secret that
     cannot work, a rebuild mid-replay, and a backfill racing its window are
     each a reason to look before doing anything anywhere.
     """
+    system = system_strip_html(
+        store,
+        scheduler_heartbeat=scheduler_heartbeat,
+        actual_status=actual_status,
+        rebuild_status=rebuild_status,
+        recent_rebuilds=recent_rebuilds,
+        with_actual=False,
+    )
     body = f"""
 {_credential_banner(bank_authorisation)}
 {_rebuild_running_banner(rebuild_status, rebuild_busy_note)}
-{_backfill_running_banner(backfill_status)}{overview_html(overview, fresh=fresh_overview)}
-{system_strip_html(
-    store,
-    scheduler_heartbeat=scheduler_heartbeat,
+{_backfill_running_banner(backfill_status)}{overview_html(
+    overview,
+    fresh=fresh_overview,
     actual_status=actual_status,
-    rebuild_status=rebuild_status,
-    recent_rebuilds=recent_rebuilds,
+    scheduler_heartbeat=scheduler_heartbeat,
+    position=position,
+    system_html=system,
 )}
 """
     return render_page("Overview", body, wide=True)
@@ -4461,6 +4475,7 @@ class ConnectionHandler(
                 backfill_status=timer.wrap("backfill_status", config.backfill_status),
                 overview=timer.wrap("overview", config.overview),
                 fresh_overview=params.get("fresh", [""])[0] == "1",
+                position=timer.wrap("position", config.home_position),
             )
             timer.report("/")
             self._respond(200, page)

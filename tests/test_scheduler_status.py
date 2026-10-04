@@ -719,10 +719,11 @@ class TestNeedsAttention:
 
         assert [f for f in found if f.key.startswith("scheduler")] == []
 
-    def test_LateWait_WhenFound_IsHousekeepingNotAFailure(self):
+    def test_LateWait_WhenFound_IsInformationNotAFailureAndNotCounted(self):
         item = _alert_item(Finding("scheduler-late-wait", "waiting"), lambda ref: ref)
 
-        assert item.severity == 3
+        assert item.severity == 4
+        assert not item.needs_attention
         assert "Nothing is broken" in item.remedy
 
 
