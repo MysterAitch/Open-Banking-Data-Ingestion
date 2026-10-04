@@ -94,7 +94,10 @@ from .stated_times import recorded_for
 #: the sighting's entity instead of the source's own id (most sources state none).
 #: The old table is dropped, not converted: it is derived, and the rebuild every deploy runs
 #: fills the new one from raw.
-SCHEMA_VERSION = 16
+#:
+#: 16 -> 17: the one-row `standing_epoch` table and the triggers that move it (see EPOCH_TABLES).
+#: A store stamped 16 has neither, and only an open that does work creates them.
+SCHEMA_VERSION = 17
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -540,7 +543,83 @@ CREATE TABLE IF NOT EXISTS sighting_times (
     zone            TEXT NOT NULL,
     PRIMARY KEY (entity_id, source, artefact_digest, field)
 );
+
+-- One row, moved by a trigger on every table whose writes can change an account's standing
+-- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
+CREATE TABLE IF NOT EXISTS standing_epoch (
+    id    INTEGER PRIMARY KEY CHECK (id = 1),
+    epoch INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO standing_epoch (id, epoch) VALUES (1, 0);
 """
+
+#: The tables a write to which can change an account's standing: its known balances, what it
+#: agrees through, what is protected, or the account it is filed under. Every write to one of
+#: them moves the `standing_epoch` row inside the same transaction, by a trigger, so a writer
+#: cannot forget to and a door added later is covered without being edited.
+#:
+#: A reviewer edited an account's kind, refiled an artefact, and assigned a statement section,
+#: and the Accounts page and the Overview went on saying the old standing because the memo's key
+#: was a list of counted tables that none of those moved. A longer list of counts would have
+#: failed the same way on the next write nobody listed.
+EPOCH_TABLES: tuple[str, ...] = (
+    "raw_artefacts",
+    "artefact_origins",
+    "transactions",
+    "transfer_pairs",
+    "transaction_sources",
+    "sighting_times",
+    "valuations",
+    "review_queue",
+    "declared_accounts",
+    "declared_account_limits",
+    "declared_account_rates",
+    "statement_sections",
+    "statement_readings",
+    "same_money_outcomes",
+    "protections",
+    "protection_history",
+)
+
+#: Every other table, and why a write to it cannot change a standing. A table added to SCHEMA
+#: must be placed in one list or the other (tests/test_standing_epoch.py refuses otherwise).
+NOT_STANDING_TABLES: dict[str, str] = {
+    "annotations": (
+        "categories, payees, and deferrals label a row for the person and are read by no "
+        "standing or movement check"
+    ),
+    "events": "the outbox of changes to publish, written after the change it describes",
+    "fetch_attempts": (
+        "the log of provider requests and their answers, read by the scheduler's spacing "
+        "rules and never by a standing"
+    ),
+    "obdi_meta": "the schema version and migration markers, which describe the file itself",
+    "provider_facts": (
+        "what a pull learned about a connection (cursors, windows, depths), read by the "
+        "pull and the coverage page and never by a standing"
+    ),
+    "rebuild_runs": (
+        "the history of rebuilds and their timings; the rows a rebuild rewrites are "
+        "classified in their own tables"
+    ),
+    "standing_epoch": "is the epoch: a trigger on it would move itself",
+}
+
+
+def _epoch_triggers() -> str:
+    """The script that creates a trigger per write kind on each of EPOCH_TABLES.
+
+    Run after every migration, not inside SCHEMA, because a migration that rebuilds a table by
+    rename-and-drop takes the table's triggers with the dropped copy.
+    """
+    # Table names come from EPOCH_TABLES in this module, never from input.
+    return "\n".join(
+        f"CREATE TRIGGER IF NOT EXISTS standing_epoch_{table}_{suffix} "  # noqa: S608
+        f"AFTER {event} ON {table} "
+        "BEGIN UPDATE standing_epoch SET epoch = epoch + 1; END;"
+        for table in EPOCH_TABLES
+        for suffix, event in (("i", "INSERT"), ("u", "UPDATE"), ("d", "DELETE"))
+    )
 
 
 #: Every table SCHEMA creates. Read out of the schema text rather than
@@ -622,6 +701,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
     'same_money_outcomes': ['account', 'outcome'],
     'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
+    'standing_epoch': ['epoch', 'id'],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
@@ -974,6 +1054,7 @@ class Store:
         self._migrate_starling_connection_id()
         self._migrate_artefact_connection_attribution()
         self._migrate_declared_accounts_from_file()
+        self.connection.executescript(_epoch_triggers())
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1494,6 +1575,15 @@ class Store:
         )
         self.connection.commit()
         return bool(cursor.rowcount)
+
+    def standing_epoch(self) -> int:
+        """A number that rises with every write to a table in `EPOCH_TABLES`.
+
+        Read from the store each time, never held, so a write by another process (the scheduler
+        container shares the file) is seen by the page that holds a standing.
+        """
+        row = self.connection.execute("SELECT epoch FROM standing_epoch WHERE id = 1").fetchone()
+        return int(row[0]) if row else 0
 
     def close(self) -> None:
         self.connection.close()

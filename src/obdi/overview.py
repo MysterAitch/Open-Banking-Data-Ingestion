@@ -1076,23 +1076,32 @@ class OverviewCache:
         self._seconds = seconds
         self._clock = clock
         self._lock = threading.Lock()
-        self._held: tuple[float, Overview] | None = None
+        self._held: tuple[float, Overview, object] | None = None
 
     @property
     def seconds(self) -> float:
         return self._seconds
 
-    def get(self, build: Callable[[], Overview], *, fresh: bool = False) -> Overview:
-        """The held Overview if young enough, else a new one; `fresh` skips the hold."""
+    def get(
+        self, build: Callable[[], Overview], *, fresh: bool = False, key: object = None
+    ) -> Overview:
+        """The held Overview if young enough and built under the same `key`, else a new one.
+
+        `key` says what the Overview was read from (the standing epoch and the account-map
+        file): a person who has just imported a file or stated a balance must not be shown a
+        page up to a minute older than their own press, so a changed key ends the hold.
+        `fresh` skips the hold.
+        """
         with self._lock:
             now = self._clock()
             if (
                 not fresh
                 and self._held is not None
                 and self._held[1].rebuilding is None
+                and self._held[2] == key
                 and now - self._held[0] < self._seconds
             ):
                 return self._held[1]
             built = build()
-            self._held = (now, built)
+            self._held = (now, built, key)
             return built

@@ -261,4 +261,4 @@ class TestUpgrade:
             }
 
         assert {"basis", "linked_id"} <= columns
-        assert SCHEMA_VERSION == 16
+        assert SCHEMA_VERSION >= 16

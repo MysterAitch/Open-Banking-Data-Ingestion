@@ -116,6 +116,23 @@ def _store_path(explicit: str | None) -> Path:
     return Path(explicit or os.getenv("OBDI_DB_PATH") or DEFAULT_DB)
 
 
+def account_map_stamp() -> tuple[object, ...]:
+    """What identifies the account-map file as it stands: its path, size, and modification time.
+
+    `_account_map` reads the file at every call, so a page that holds a value derived from it
+    keys the value on this, and an edit to a binding or a Space's ownership is seen on the next
+    view instead of at the next restart. Empty when no file is named or it is not there.
+    """
+    path = os.getenv("OBDI_ACCOUNT_MAP", "").strip()
+    if not path:
+        return ()
+    try:
+        found = Path(path).stat()
+    except OSError:
+        return ()
+    return (path, found.st_size, found.st_mtime_ns)
+
+
 def _account_map(source: Store | Path | None = None) -> AccountMap:
     """Load the account map: which provider account is which real account.
 
@@ -2981,14 +2998,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def rebuild_epoch() -> RebuildEpoch:
         return epoch_for(db_path)
 
+    def movement_memo_key(store: Store) -> tuple[object, ...]:
+        return (*movement_key(store), *account_map_stamp())
+
+    def standings_memo_key(store: Store) -> tuple[object, ...]:
+        return (*standing_key(store), *account_map_stamp())
+
     movement_memo: KeyedMemo[MovementCompleteness] = KeyedMemo(
-        movement_key,
+        movement_memo_key,
         name="movement report",
         detail=lambda report: report.timing_detail(),
         epoch=rebuild_epoch,
     )
     standings_memo: KeyedMemo[Mapping[str, AccountStanding]] = KeyedMemo(
-        standing_key, name="account standings", epoch=rebuild_epoch
+        standings_memo_key, name="account standings", epoch=rebuild_epoch
     )
 
     def movement_report(store: Store) -> MovementCompleteness:
@@ -3856,8 +3879,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         # Fresh while a rebuild runs: an Overview held from before it began would still be
         # reporting the layer the rebuild has since emptied.
+        with Store(db_path) as store:
+            key: tuple[object, ...] = (store.standing_epoch(), *account_map_stamp())
         return overview_cache.get(
-            assemble_overview, fresh=fresh or hold_for(db_path) is not None
+            assemble_overview, fresh=fresh or hold_for(db_path) is not None, key=key
         )
 
     def assemble_overview() -> Overview:

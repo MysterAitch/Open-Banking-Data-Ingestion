@@ -305,11 +305,18 @@ def _day_balances(
 #: that can be trusted. A document's bytes never change, so a reading is valid
 #: for the life of the process, and a ledger page that re-extracted every held
 #: statement's text on each view would be unusable.
-_USABLE_BY_DIGEST: dict[str, _Usable | None] = {}
+#:
+#: Only a reading that WORKED is held for good. A document that yielded nothing is held with the
+#: standing epoch it was tried at and tried again once the store has moved, because the nothing
+#: can be a failure that is not a property of the bytes (an unreadable payload at that moment, a
+#: parser that raised) and a failure held for the life of the process is never seen to be one.
+_USABLE_BY_DIGEST: dict[str, tuple[int, _Usable | None]] = {}
 
 
 def _usable(store: Store, digest: str, account: str) -> _Usable | None:
-    if digest not in _USABLE_BY_DIGEST:
+    held_before = _USABLE_BY_DIGEST.get(digest)
+    epoch = store.standing_epoch()
+    if held_before is None or (held_before[1] is None and held_before[0] != epoch):
         found = _reading_of(store, digest, account)
         held: _Usable | None = None
         if found is not None:
@@ -325,8 +332,8 @@ def _usable(store: Store, digest: str, account: str) -> _Usable | None:
             ):
                 days, rejected = _day_balances(reading, opening, closing, reading.statement_date)
                 held = _Usable(source, (reading.statement_date, closing), days, rejected)
-        _USABLE_BY_DIGEST[digest] = held
-    return _USABLE_BY_DIGEST[digest]
+        _USABLE_BY_DIGEST[digest] = (epoch, held)
+    return _USABLE_BY_DIGEST[digest][1]
 
 
 def statement_day_balances(

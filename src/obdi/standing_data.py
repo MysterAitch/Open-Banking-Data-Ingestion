@@ -32,7 +32,11 @@ T = TypeVar("T")
 
 
 def movement_key(store: Store) -> tuple[object, ...]:
-    """A value that differs whenever the rows or artefacts the movement checks read have changed."""
+    """A value that differs whenever the rows or artefacts the movement checks read have changed.
+
+    The store's standing epoch is what guarantees that (`store.EPOCH_TABLES`); the counts and
+    stamps beside it are kept as a second witness that costs nothing.
+    """
     rows = store.connection.execute(
         "SELECT COUNT(*), COALESCE(MAX(last_seen_at), ''), COALESCE(MAX(first_seen_at), '') "
         "FROM transactions"
@@ -40,12 +44,16 @@ def movement_key(store: Store) -> tuple[object, ...]:
     pairs = store.connection.execute("SELECT COUNT(*) FROM transfer_pairs").fetchone()
     artefacts = store.connection.execute("SELECT COUNT(*) FROM raw_artefacts").fetchone()
     sightings = store.connection.execute("SELECT COUNT(*) FROM transaction_sources").fetchone()
-    return (*tuple(rows), pairs[0], artefacts[0], sightings[0])
+    return (*tuple(rows), pairs[0], artefacts[0], sightings[0], store.standing_epoch())
 
 
 def standing_key(store: Store) -> tuple[object, ...]:
     """`movement_key` and what else an account's standing reads: the balances a person stated,
-    the account registry, and the protections."""
+    the account registry, and the protections.
+
+    Anything that file-backed reads, such as the account-map file, is the caller's to add: this
+    reads the store alone.
+    """
     stated = store.connection.execute(
         "SELECT COUNT(*), COALESCE(MAX(ingested_at), '') FROM valuations"
     ).fetchone()
