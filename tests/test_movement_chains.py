@@ -152,7 +152,9 @@ class TestTheOwnersFourMovements:
             (MAIN, BILLS, DAY, 2, 1),
         }
         said = [f.says() for f in report.chain_faults if f.day.day == DAY]
-        assert f"2026-09-06 {MAIN} to {BILLS}: 2 leave, 1 arrive" in said
+        assert (
+            f"2026-09-06 {MAIN} to {BILLS}: 2 leave, 1 arrive: 1 transfer leg, unpaired" in said
+        )
 
     @pytest.mark.parametrize("order", CASES)
     def test_Chain_WhenTheSpaceHoldsNone_NamesBothDirectionsAndTheDay(self, stores, order):
@@ -236,7 +238,7 @@ class TestAChainOfTransfers:
 
         assert [f.says() for f in faults] == [
             f"2026-09-06 {MAIN} to {BILLS}: 1 leave, 1 arrive "
-            "- the same number, but not of the same sizes"
+            "- the same number, but not of the same sizes: 2 transfer legs, neither paired"
         ]
 
 

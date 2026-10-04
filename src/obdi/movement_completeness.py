@@ -52,6 +52,7 @@ movement are stamped from one event, so a movement that crosses midnight is not
 a fault, while a window of a day would let a missing movement hide behind
 another of its size on the next. A leg with no time of its own is judged by the
 pairing window, in days.
+A leg that names no account is placed by its partner (`_chain_account`).
 
 This module only reports, like `identity_health`: whether a finding is a fault
 in the matcher or the pairing is decided from the number.
@@ -108,6 +109,12 @@ def _direction(minor: int) -> str:
 
 def _plural(count: int, singular: str, plural: str | None = None) -> str:
     return f"{count} {singular if count == 1 else plural or singular + 's'}"
+
+
+def _listed(names: Sequence[str]) -> str:
+    if len(names) <= 2:
+        return " and ".join(names)
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
 
 
 @dataclass(frozen=True)
@@ -185,6 +192,13 @@ class ChainFault:
     #: Of those, how many have no counterpart of their own size on the other side.
     leaving_unmatched: int
     arriving_unmatched: int
+    #: What the unmatched legs are, so a line says where to look.
+    round_up_legs: int = 0
+    transfer_legs: int = 0
+    #: Of the unmatched legs, how many the pairing pass confirmed a partner for.
+    paired: int = 0
+    #: The accounts those partners sit in, sorted.
+    partner_accounts: tuple[str, ...] = ()
 
     def says(self) -> str:
         line = (
@@ -193,7 +207,37 @@ class ChainFault:
         )
         if self.leaving == self.arriving:
             line += " - the same number, but not of the same sizes"
-        return line
+        explained = self._explanation()
+        return f"{line}: {explained}" if explained else line
+
+    def _explanation(self) -> str:
+        total = self.round_up_legs + self.transfer_legs
+        if not total:
+            return ""
+        kinds = [
+            _plural(count, name)
+            for count, name in (
+                (self.round_up_legs, "round-up leg"),
+                (self.transfer_legs, "transfer leg"),
+            )
+            if count
+        ]
+        text = " and ".join(kinds)
+        everyone = {1: "", 2: "both "}.get(total, "all ")
+        nobody = {1: "un", 2: "neither "}.get(total, "none ")
+        if self.paired == total:
+            text += f", {everyone}paired"
+        elif not self.paired:
+            text += f", {nobody}paired" if total > 1 else ", unpaired"
+        else:
+            text += f", {self.paired} paired"
+        if self.partner_accounts:
+            text += (
+                f", its partner in {_listed(self.partner_accounts)}"
+                if self.paired == 1
+                else f", their partners in {_listed(self.partner_accounts)}"
+            )
+        return text
 
 
 @dataclass
@@ -675,16 +719,67 @@ def _unmatched(
     return left_over, right_over
 
 
+def _partners(
+    rows: Sequence[Transaction], pairs: Sequence[tuple[str, str]]
+) -> dict[str, list[Transaction]]:
+    by_entity = {row.entity_id: row for row in rows}
+    found: dict[str, list[Transaction]] = defaultdict(list)
+    for debit, credit in pairs:
+        if debit in by_entity and credit in by_entity:
+            found[debit].append(by_entity[credit])
+            found[credit].append(by_entity[debit])
+    return found
+
+
+def _chain_account(
+    row: Transaction,
+    resolver: Callable[[str], str | None] | None,
+    partners: dict[str, list[Transaction]],
+) -> str | None:
+    """The account a leg moved to or from, for the chain check.
+
+    A leg names its own counterpart where it can.
+    A leg that names no account that resolves is still the other side of a movement when its ONE
+    paired partner is a leg that names the very account this one sits in: the Space's arriving
+    item of a round-up names nothing that resolves to the main account, while the main account's
+    leaving leg names the Space.
+    Measured on the deployed store: 612 legs named no resolvable account, every leg had its
+    partner, and 231 account-pair days read "1 leave, 0 arrive" because the arrival was never
+    counted.
+    A leg whose partner sits in another account than the one the partner names is left uncounted
+    here, and it is a fault of the leg check (`check_legs`).
+    """
+    named = _named_account(row, resolver)
+    if named is not None:
+        return named
+    found = partners.get(row.entity_id, [])
+    if len(found) != 1:
+        return None
+    partner = found[0]
+    if _is_leg(partner) and _named_account(partner, resolver) == row.account_id:
+        return partner.account_id
+    return None
+
+
 def check_chains(
-    rows: Iterable[Transaction], resolver: Callable[[str], str | None] | None
+    rows: Iterable[Transaction],
+    resolver: Callable[[str], str | None] | None,
+    pairs: Sequence[tuple[str, str]] = (),
 ) -> tuple[int, list[ChainFault]]:
-    """(account-pair days compared, faults) for the legs that name an account."""
+    """(account-pair days compared, faults) for the legs that name an account.
+
+    `pairs` are the confirmed transfer pairs (`ingest.pair_transfers_across_store`); with them,
+    a leg that names no account is placed by its partner (`_chain_account`) and an unmatched leg
+    says whether it is paired and where its partner sits.
+    """
+    held = list(rows)
+    partners = _partners(held, pairs)
     leaving: dict[tuple[str, str], list[Transaction]] = defaultdict(list)
     arriving: dict[tuple[str, str], list[Transaction]] = defaultdict(list)
-    for row in rows:
+    for row in held:
         if not _is_leg(row):
             continue
-        named = _named_account(row, resolver)
+        named = _chain_account(row, resolver, partners)
         if named is None or named == row.account_id:
             continue
         if row.amount_minor < 0:
@@ -699,6 +794,10 @@ def check_chains(
         compared += len({r.value_date for r in (*out_legs, *in_legs)})
         out_over, in_over = _unmatched(out_legs, in_legs)
         for day in sorted({r.value_date for r in (*out_over, *in_over)}):
+            left = [r for r in out_over if r.value_date == day]
+            right = [r for r in in_over if r.value_date == day]
+            unmatched = [*left, *right]
+            partner_rows = [p for r in unmatched for p in partners.get(r.entity_id, [])]
             faults.append(
                 ChainFault(
                     flow[0],
@@ -706,8 +805,12 @@ def check_chains(
                     day,
                     sum(1 for r in out_legs if r.value_date == day),
                     sum(1 for r in in_legs if r.value_date == day),
-                    sum(1 for r in out_over if r.value_date == day),
-                    sum(1 for r in in_over if r.value_date == day),
+                    len(left),
+                    len(right),
+                    round_up_legs=sum(1 for r in unmatched if "roundUpOf" in r.raw),
+                    transfer_legs=sum(1 for r in unmatched if "roundUpOf" not in r.raw),
+                    paired=sum(1 for r in unmatched if partners.get(r.entity_id)),
+                    partner_accounts=tuple(sorted({p.account_id for p in partner_rows})),
                 )
             )
     faults.sort(key=lambda f: (f.day, f.from_account, f.to_account))
@@ -731,10 +834,11 @@ def movement_completeness(
     resolver = (
         category_resolver(store, _CanonicalMap(canonical_for_ref)) if canonical_for_ref else None
     )
+    pairs = store.confirmed_transfer_pairs()
     legs, verified, unverifiable, unverifiable_pairs, leg_faults = check_legs(
-        rows, store.confirmed_transfer_pairs(), resolver
+        rows, pairs, resolver
     )
     report.legs, report.legs_verified, report.legs_unverifiable = legs, verified, unverifiable
     report.pairs_unverifiable, report.leg_faults = unverifiable_pairs, leg_faults
-    report.chain_days, report.chain_faults = check_chains(rows, resolver)
+    report.chain_days, report.chain_faults = check_chains(rows, resolver, pairs)
     return report
