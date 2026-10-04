@@ -26,6 +26,37 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.303] - 2026-10-04
+
+Three measurements and no change to what is matched or counted. Each makes a
+page say more by arithmetic, so that the next reading of the real store
+settles a cause that invented data could not.
+
+### Added
+- **A row-count fault says whether its rows come from one artefact, what ids
+  they state, and whether the account's known balances are met as held.** A
+  card account's aggregator lists two rows of one size where the store holds
+  one. Whether the store lost a payment or the aggregator listed one twice
+  could not be reproduced through the importers in any order, so nothing was
+  changed: the balances either side of the day will say which.
+- **A surplus row from the bank's own feed says how many later fetches asked
+  for its day without listing it**, how each asked, and whether another id of
+  the same size and recipient appeared when it went. A rule that a row the
+  feed stops listing has been withdrawn was not built: one of the feed's two
+  ways of asking lists only what changed, where absence means nothing.
+- **Identity health counts the pairs of stored rows an exact rule names as one
+  payment, and the pairs its guards refuse, without joining any.** The step
+  that joins two such rows is built and held back. It deletes a row and has
+  only met invented data; on the real store the feed arrived first, so it is
+  expected to join nothing, and this count is how that expectation is read
+  before it is trusted.
+
+Found while testing a week of equal payments to one payee, and not fixed: an
+export row dated D is joined to the payment MADE on D where the feed says
+another payment SETTLED on D, because the row's own key is tried before the
+settlement rule. Money is unaffected; the export's sighting sits one payment
+off. It is pinned as an expected failure with the measured cases.
+
 ## [0.4.302] - 2026-10-04
 
 ### Fixed
