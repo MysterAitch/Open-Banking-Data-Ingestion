@@ -42,14 +42,15 @@ def _get(tmp_path, route: str, **hooks: object) -> str:
 
 
 class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
-    def test_ReportWithFlags_SaysWhatAFlagIsAndThatNoPageResolvesThem(self, tmp_path):
+    def test_ReportWithFlags_SaysWhatAFlagIsAndLinksThePageThatAnswersThem(self, tmp_path):
         page = _get(
             tmp_path, "/review-report", review_report_text=lambda masked: "9 open flag(s)"
         )
 
         assert "9 open flag(s)" in page
         assert "repeated payment" in page and "duplicate report" in page
-        assert "There is no page that resolves these yet" in page
+        assert 'href="/review-flags"' in page
+        assert "There is no page that resolves these yet" not in page
 
     def test_ReportWithFlags_PointsAtCategoriseOnlyAsADifferentQueue(self, tmp_path):
         page = _get(
@@ -65,7 +66,7 @@ class TestTheReviewQueueReportSaysWhereFlagsAreDecided:
         )
 
         assert "0 open flag(s)" in page
-        assert "There is no page that resolves these yet" in page
+        assert 'href="/review-flags"' in page
 
 class TestTheReviewQueueReportIsMaskedUnlessPostedFor:
     @staticmethod

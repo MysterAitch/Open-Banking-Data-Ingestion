@@ -97,6 +97,7 @@ from .replay import (
     build_transfer_pairs,
     unbound_accounts,
 )
+from .review_flags import FlagQueue, Outcome
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .scheduler_status import StepHandle, run_step
@@ -2961,6 +2962,42 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 masked=masked, unmask_hint="press the Show values button on this page"
             )
 
+    def _flags_held() -> None:
+        """Refuses while a rebuild holds the derived layer, which a half-built queue misreads."""
+        from .review_flags import FlagRefused
+
+        if (paused := paused_text()) is not None:
+            raise FlagRefused(paused)
+
+    def review_flags_data() -> FlagQueue:
+        from .review_flags import build_queue
+
+        _flags_held()
+        labels = display_labels()
+        with Store(db_path) as store:
+            declared = {
+                str(record.ref): record.label
+                for record in store.declared_accounts()
+                if record.label
+            }
+            return build_queue(store, lambda ref: declared.get(ref) or labels.get(ref) or ref)
+
+    def review_flags_answer(answer: str, flag: str, neighbour: str, fingerprint: str) -> Outcome:
+        from .review_flags import answer_one_payment, answer_two_payments
+
+        _flags_held()
+        with Store(db_path) as store:
+            if answer == "one":
+                return answer_one_payment(store, flag, neighbour, fingerprint)
+            return answer_two_payments(store, flag, fingerprint)
+
+    def review_flags_undo(answer: str, flag: str, other: str) -> Outcome:
+        from .review_flags import undo
+
+        _flags_held()
+        with Store(db_path) as store:
+            return undo(store, answer, flag, other)
+
     def identity_health_text() -> str:
         from .identity_health import identity_health
 
@@ -4097,6 +4134,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         actual_history=actual_history,
         actual_heartbeat=actual_heartbeat,
         review_report_text=review_report_text,
+        review_flags_data=review_flags_data,
+        review_flags_answer=review_flags_answer,
+        review_flags_undo=review_flags_undo,
         identity_health_text=identity_health_text,
         movement_completeness_text=movement_completeness_text,
         exact_rules_text=exact_rules_text,

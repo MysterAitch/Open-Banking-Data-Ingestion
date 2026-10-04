@@ -83,6 +83,7 @@ from .navigation import current_route
 from .overview import Overview
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
+from .review_flags import FlagQueue, Outcome
 from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
 from .space_windows import RANGE_REFUSAL_MARK
@@ -107,6 +108,7 @@ from .web_empty import (
     empty_result_row,
     plan_from_audit,
 )
+from .web_flags import FlagPages
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
@@ -677,6 +679,14 @@ class WebConfig:
     #: with True for the masked rendering (counts only) and False for the one
     #: that adds descriptions, which only a request made on purpose receives.
     review_report_text: Callable[[bool], str] | None = None
+    #: The open review flags as cards a person can answer (`review_flags`), as DATA with real
+    #: values, so the page decides in one place whether a reader may see them.
+    review_flags_data: Callable[[], FlagQueue] | None = None
+    #: Answer one flag: ("two" or "one", flag id, neighbour id, fingerprint of what was shown).
+    #: Raises `FlagRefused`, with a sentence the page shows, where the answer is not taken.
+    review_flags_answer: Callable[[str, str, str, str], Outcome] | None = None
+    #: Withdraw an answer: ("two" or "one", flag or surviving row id, joined row id).
+    review_flags_undo: Callable[[str, str, str], Outcome] | None = None
     #: The uncategorised worklist as data: coverage, then groups with the
     #: evidence needed to judge them (a real example, how many distinct
     #: strings, whether it is a reference code rather than a payee).
@@ -3842,6 +3852,7 @@ DISCLOSURE_PHRASE = "SHOW REAL VALUES"
 class ConnectionHandler(
     AccountPages,
     LedgerPages,
+    FlagPages,
     BalanceChartPages,
     PositionPages,
     IndexPages,
@@ -4035,6 +4046,9 @@ class ConnectionHandler(
             return
         if route == "/review-report":
             self._review_report(masked=True)
+            return
+        if route == "/review-flags":
+            self._flags_get()
             return
         if route == "/date-lag":
             self._date_lag()
@@ -6200,9 +6214,9 @@ class ConnectionHandler(
             "duplicate report: another transaction in the same account "
             "matches it on value and date, and only the same-source rule "
             "kept them apart. Each needs a person to confirm it is a "
-            "repeated payment and not a duplicate report. There is no page "
-            "that resolves these yet. The "
-            '<a href="/review">Categorise</a> page is a different queue '
+            "repeated payment and not a duplicate report. "
+            '<a href="/review-flags">The review flags page</a> is where they are '
+            'answered. The <a href="/review">Categorise</a> page is a different queue '
             "(payments with no category) and does not clear them.</p>"
             "<p>What the open flags are made of: each is given the "
             "strongest proof on file that it is two payments, and a rule "
@@ -6642,6 +6656,19 @@ class ConnectionHandler(
             return
         if route == "/review-report":
             self._review_report(masked=False)
+            return
+        if route == "/review-flags":
+            # A POST because showing values is a decision, not a link.
+            self._flags_post()
+            return
+        if route == "/review-flags-two":
+            self._flags_answer_post(self._read_form(), one=False)
+            return
+        if route == "/review-flags-one":
+            self._flags_answer_post(self._read_form(), one=True)
+            return
+        if route == "/review-flags-undo":
+            self._flags_undo_post(self._read_form())
             return
         if route == "/agreements":
             self._agreements_page(masked=False)

@@ -46,6 +46,7 @@ below into the one `STYLESHEET` every page carries, so the guards on the stylesh
 
 from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
+from .stylesheet_flags import FLAGS_STYLES
 from .stylesheet_home import HOME_STYLES
 
 SHARED_STYLES = """
@@ -307,4 +308,4 @@ SHARED_STYLES = """
 """
 
 #: The one stylesheet a page carries: the shared rules, then each page's own.
-STYLESHEET = SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES
+STYLESHEET = SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES
