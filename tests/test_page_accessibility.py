@@ -59,7 +59,8 @@ _UNHEADED_TABLES = """() => [...document.querySelectorAll('table')]
   .flatMap(t => {
     const bad = [];
     if (!t.querySelector('caption')) bad.push('no caption');
-    if ([...t.querySelectorAll('th')].some(th => !th.hasAttribute('scope'))) bad.push('th without scope');
+    const heads = [...t.querySelectorAll('th')];
+    if (heads.some(th => !th.hasAttribute('scope'))) bad.push('th without scope');
     return bad.map(b => b + ': ' + (t.textContent || '').trim().slice(0, 40));
   })"""
 
@@ -89,7 +90,8 @@ _SHORT_LINKS = """() => [...document.querySelectorAll('main a')]
     const link = e => e !== null && e.closest('a') !== null;
     return r.height < 44 && !(link(above) && link(below));
   })
-  .map(a => (a.textContent || '').trim().slice(0, 30) + ' ' + Math.round(a.getBoundingClientRect().height))"""
+  .map(a => (a.textContent || '').trim().slice(0, 30) + ' '
+            + Math.round(a.getBoundingClientRect().height))"""
 
 
 def _open(browser: object, base: str, route: str) -> object:  # noqa: F811
@@ -109,7 +111,8 @@ def test_Page_Structure_HasOneMainOneTopHeadingAndASkipLinkAsTheFirstStop(
                 mains: document.querySelectorAll('main#main').length,
                 h1: document.querySelectorAll('h1').length,
                 lang: document.documentElement.lang,
-                first: (document.querySelector('a, button, input, select, summary') || {}).className,
+                first: (document.querySelector('a, button, input, select, summary') || {})
+                    .className,
                 skip: (document.querySelector('a.skip') || {}).hash,
                 h1InMain: !!document.querySelector('main#main h1'),
             })"""
@@ -166,7 +169,9 @@ def test_SkipLink_WhenFocusedByKeyboard_IsVisibleAndLandsOnTheContent(
 ) -> None:
     page = _open(browser, corpus_base, "/")
     try:
-        before = page.evaluate("() => document.querySelector('a.skip').getBoundingClientRect().width")
+        before = page.evaluate(
+            "() => document.querySelector('a.skip').getBoundingClientRect().width"
+        )
         page.keyboard.press("Tab")
         after = page.evaluate(
             """() => {
@@ -192,7 +197,7 @@ def test_Focus_OnEveryKindOfControl_ShowsARing(
     try:
         page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
         missing = []
-        for index in range(120):
+        for _stop in range(120):
             page.keyboard.press("Tab")
             state = page.evaluate(
                 """() => {
@@ -200,7 +205,9 @@ def test_Focus_OnEveryKindOfControl_ShowsARing(
                     if (!e || e === document.body) return null;
                     // A date field's calendar button is a browser-drawn stop whose
                     // host is not :focus-visible; the field's own stops are checked.
-                    if (e.type === 'date' && !e.matches(':focus-visible')) return ['skip', 'solid', 3];
+                    if (e.type === 'date' && !e.matches(':focus-visible')) {
+                        return ['skip', 'solid', 3];
+                    }
                     const s = getComputedStyle(e);
                     return [e.tagName.toLowerCase() + '.' + e.className + ' ' + (e.name || ''),
                             s.outlineStyle, parseFloat(s.outlineWidth)];

@@ -40,7 +40,9 @@ def test_Header_WhichAlreadyDeclaresAScope_IsLeftAlone() -> None:
 
 
 def test_Table_Captioned_IsNamedByTheNearestHeadingAndNotTheFirst() -> None:
-    out = _structured("<h2>First</h2><p>x</p><h3>Second <em>one</em></h3><table><tr><td>1</td></tr></table>")
+    out = _structured(
+        "<h2>First</h2><p>x</p><h3>Second <em>one</em></h3><table><tr><td>1</td></tr></table>"
+    )
 
     assert '<caption class="visually-hidden">Second one</caption>' in out
 
@@ -86,7 +88,8 @@ def test_Table_AlreadyInAScrollingBox_IsNotWrappedAgain() -> None:
 
 def test_Table_UnderAHeadingThatLooksLikeMarkup_NeverLetsItIntoTheAttributeOrCaption() -> None:
     page = render_page(
-        "T", "<h2>&lt;script&gt;x&lt;/script&gt; &quot;q&quot;</h2><table><tr><td>1</td></tr></table>"
+        "T",
+        "<h2>&lt;script&gt;x&lt;/script&gt; &quot;q&quot;</h2><table><tr><td>1</td></tr></table>",
     ).decode()
 
     assert "<script>" not in page

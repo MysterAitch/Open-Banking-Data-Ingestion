@@ -110,6 +110,15 @@ def test_ContrastFunction_OnKnownPairs_AgreesWithPublishedValues() -> None:
     assert contrast("#767676", "#ffffff") == pytest.approx(4.54, abs=0.01)
 
 
+def test_ContrastFunction_OnTheColoursTheOldStylesheetUsed_ReproducesTheReviewsFailures() -> None:
+    """The calculator agrees with the figures measured on the old pages, so a pass
+    here means what the review's failure meant: red text on black 3.25, the blue
+    outline on black 4.06, amber text on its own 13 per cent tint 4.18 in light."""
+    assert contrast("#b91c1c", "#000000") == pytest.approx(3.25, abs=0.01)
+    assert contrast("#2563eb", "#000000") == pytest.approx(4.06, abs=0.01)
+    assert contrast("#b45309", "#f5e8de") == pytest.approx(4.18, abs=0.02)
+
+
 def test_Tokens_EveryColourHasALightAndADarkValue() -> None:
     css = stylesheet()
     light, dark = light_tokens(css), dark_tokens(css)

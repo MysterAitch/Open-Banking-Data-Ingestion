@@ -52,11 +52,9 @@ def _scoped_row(row: re.Match[str]) -> str:
 
 def _name_before(body: str, position: int, fallback: str) -> str:
     """The text of the nearest heading or summary above `position`, already escaped."""
-    found = None
-    for found in _NAMING.finditer(body, 0, position):
-        pass
-    if found is not None:
-        inner = found.group("heading") or found.group("summary") or ""
+    found = list(_NAMING.finditer(body, 0, position))
+    if found:
+        inner = found[-1].group("heading") or found[-1].group("summary") or ""
         text = " ".join(_TAG.sub("", inner).split())
         if text:
             return text

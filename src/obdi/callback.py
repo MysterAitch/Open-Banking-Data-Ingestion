@@ -109,7 +109,8 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
 <title>{html.escape(title)}</title>
 <style>
 {STYLESHEET}</style></head>
-<body{' class="wide"' if wide else ""}><a class="skip" href="#main">Skip to content</a>{navigation_html()}
+<body{' class="wide"' if wide else ""}><a class="skip" href="#main">Skip to content</a>
+{navigation_html()}
 <main id="main"><h1>{html.escape(title)}</h1>{body}</main>
 <footer>obdi {html.escape(describe())}</footer></body></html>
 """.encode()

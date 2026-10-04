@@ -2580,7 +2580,8 @@ def _add_a_bank_section(available: bool) -> str:
         )
     return """<h2>Add a bank</h2>
 <form action="/connect" method="get">
-  <p><input name="name" aria-label="Connection name" placeholder="a name you will recognise, e.g. halifax" required></p>
+  <p><input name="name" aria-label="Connection name"
+     placeholder="a name you will recognise, e.g. halifax" required></p>
   <p><button class="button" type="submit"
      style="width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
 </form>
@@ -6316,7 +6317,8 @@ class ConnectionHandler(
                 + f"</td><td>{group.get('count', 0)}</td><td>"
                 + '<form action="/review-apply" method="post">'
                 + f'<input type="hidden" name="label" value="{html.escape(label)}">'
-                + f'<input type="text" name="value" size="28" aria-label="Answer for {html.escape(label)}" '
+                + f'<input type="text" name="value" size="28" '
+                f'aria-label="Answer for {html.escape(label)}" '
                 'placeholder="Group: Leaf" autocomplete="off" required>'
                 + '<button type="submit">Answer all</button>'
                 + "</form>"

@@ -389,7 +389,9 @@ def _chart(
     # not be mistaken for one another.
     if len(dotted) > 1:
         parts.append(
-            line(dotted, 0, len(dotted) - 1, ' stroke-dasharray="1 5"', "provisional", "var(--warn)")
+            line(
+                dotted, 0, len(dotted) - 1, ' stroke-dasharray="1 5"', "provisional", "var(--warn)"
+            )
         )
     if len(known) > 1:
         if complete_index > 0:
@@ -408,7 +410,8 @@ def _chart(
         )
     if known:
         parts.append(
-            f'<circle cx="{x(known[-1][0]):.1f}" cy="{y(known[-1][1]):.1f}" r="4" fill="var(--act)"/>'
+            f'<circle cx="{x(known[-1][0]):.1f}" cy="{y(known[-1][1]):.1f}" r="4" '
+            'fill="var(--act)"/>'
         )
     label = 'font-size="12" fill="currentColor"'
     if high == low:

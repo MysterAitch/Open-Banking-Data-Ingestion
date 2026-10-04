@@ -1,3 +1,7 @@
+# ruff: noqa: E501
+# The text below is CSS, and a rule reads best as one declaration block; wrapping
+# it to the code's line length would make it harder to compare with the rules the
+# tests read by shape.
 """The one stylesheet every page carries, inline, so a page renders from its own response.
 
 DESIGN. A paper-coloured ground; serif for prose, verdicts, and headings; the
@@ -142,7 +146,7 @@ STYLESHEET = """
  .pill-warn::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; }
  .muted { color: var(--ink-2); }
  .mono { font-family: var(--mono); font-size: .85em; font-variant-numeric: tabular-nums;
-         word-break: break-all; }
+         overflow-wrap: anywhere; }
  /* A date or a figure is read whole. The monospace rule above breaks
     anywhere, which is right for a long identifier and split a date across
     three lines in a narrow table cell. Only the date or figure itself is
@@ -251,7 +255,8 @@ STYLESHEET = """
  /* A report that is sentences in a fixed block wraps in a proportional face;
     a block that is aligned columns keeps its fixed face and scrolls. */
  pre[style*="pre-wrap"] { font: var(--text-md)/150% var(--sans); overflow-wrap: anywhere; }
- input[type="checkbox"] { flex: none; width: 1.5rem; min-height: 0; height: 1.5rem; margin: 0 var(--s2) 0 0; }
+ input[type="checkbox"] { flex: none; width: 1.5rem; min-height: 0; height: 1.5rem; margin: 0 var(--s2) 0 0;
+                          accent-color: var(--act); }
  /* A tick the thumb can hit: the whole row is the target, not the box. */
  label.tick { display: flex; align-items: center; gap: var(--s3); min-height: var(--hit);
               padding: var(--s1) 0; font-size: var(--text-md); }
