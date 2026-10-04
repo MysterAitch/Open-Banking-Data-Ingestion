@@ -26,6 +26,17 @@ from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
 from .store import Store
 
+#: Whether a source cannot see Spaces in an account, as (source, account).
+#: `family_anchors.Families.blind_in` is the one answer; the matcher is handed it
+#: and never derives one (`matching.is_internal_leg_meeting_space_blind_source`).
+SpaceBlind = Callable[[str, str], bool]
+
+
+def _blind_in(space_blind: SpaceBlind | None, account: str) -> Callable[[str], bool] | None:
+    if space_blind is None:
+        return None
+    return lambda source: space_blind(source, account)
+
 
 @dataclass
 class ImportSummary:
@@ -260,7 +271,13 @@ def import_file(
     # identity resolution cannot drift between the two routes - the same
     # payment arriving by file and by API must resolve identically.
     summary = ImportSummary(artefact_new=is_new_artefact, rows_offered=offered)
-    reconcile_batch(store, incoming, digest=digest, summary=summary)
+    blind = None
+    if account_map is not None:
+        # Imported here: `family_anchors` reaches the store's readers, which reach this module.
+        from .family_anchors import families_of
+
+        blind = families_of(store, account_map).blind_in
+    reconcile_batch(store, incoming, digest=digest, summary=summary, space_blind=blind)
     if account_map is not None:
         summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
@@ -356,7 +373,9 @@ class MatcherPreview:
         return f"{self.clause[0].upper()}{self.clause[1:]}."
 
 
-def preview_reconcile(store: Store, transactions: list[Transaction]) -> MatcherPreview:
+def preview_reconcile(
+    store: Store, transactions: list[Transaction], *, space_blind: SpaceBlind | None = None
+) -> MatcherPreview:
     """Count how a batch would resolve against what is stored, writing nothing.
 
     The same loop `_reconcile_all` runs - the same numbering, the same
@@ -377,6 +396,7 @@ def preview_reconcile(store: Store, transactions: list[Transaction]) -> MatcherP
             existing = CandidateIndex(
                 store.transactions_for_account(transaction.account_id),
                 sightings=store.sighted_ids_for_account(transaction.account_id),
+                space_blind=_blind_in(space_blind, transaction.account_id),
             )
             existing.begin_batch()
             by_account[transaction.account_id] = existing
@@ -428,6 +448,7 @@ def reconcile_batch(
     summary: ImportSummary | None = None,
     on_record: Callable[[int], None] | None = None,
     candidate_cache: dict[str, CandidateIndex] | None = None,
+    space_blind: SpaceBlind | None = None,
 ) -> ImportSummary:
     """Resolve a batch against what is already stored, and persist the outcome.
 
@@ -444,6 +465,13 @@ def reconcile_batch(
     entry whenever it mutates that account's rows outside the fold
     (vanished-pending resolution does exactly that). Live pulls pass
     nothing and keep the load-per-batch behaviour.
+
+    space_blind says which sources cannot see an account's Spaces
+    (`Families.blind_in`), for the rule that keeps an internal leg apart from
+    their rows. A caller that has no account map passes nothing, and then the
+    rule is not applied: a rebuild with the map re-resolves every row under it.
+    A cached index keeps the answer it was built with, so the cache and the
+    argument must come from the same map.
 
     on_record is called with the number resolved so far, once per record.
     A batch of several thousand is minutes of work with nothing to show
@@ -469,7 +497,7 @@ def reconcile_batch(
     store.begin_batch()
     try:
         _reconcile_all(
-            store, numbered, by_account, digest, result, on_record
+            store, numbered, by_account, digest, result, on_record, space_blind
         )
     except BaseException:
         # Discard the failed batch's buffers: nothing of it may reach
@@ -490,6 +518,7 @@ def _reconcile_all(
     digest: str,
     result: ImportSummary,
     on_record: Callable[[int], None] | None,
+    space_blind: SpaceBlind | None = None,
 ) -> None:
     # One call is one response; a cached index may have seen earlier ones.
     # Read from the artefact, as the stored sightings are, so a live pull and a
@@ -504,6 +533,7 @@ def _reconcile_all(
                 existing = CandidateIndex(
                     store.transactions_for_account(transaction.account_id),
                     sightings=store.sighted_ids_for_account(transaction.account_id),
+                    space_blind=_blind_in(space_blind, transaction.account_id),
                 )
             existing.begin_batch(pending_snapshot=pending_snapshot)
             by_account[transaction.account_id] = existing

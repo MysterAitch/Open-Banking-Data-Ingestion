@@ -114,6 +114,16 @@ class Families:
         fed = self.feeds.get(source, frozenset())
         return not any(space in fed for space in self.spaces_of(main))
 
+    def blind_in(self, source: str, account: str) -> bool:
+        """Whether `source` cannot see Spaces in `account`, which is how the matcher asks.
+
+        `blind` says it of a main account.
+        A Space has no Spaces of its own, so `blind` would call every source
+        blind there, the feed that fills it included; the matcher's rule is about
+        what a source can see of a main account and not about a Space's own rows.
+        """
+        return account not in self.parents and self.blind(source, account)
+
 
 def families_of(store: Store, account_map: AccountMap) -> Families:
     return Families(

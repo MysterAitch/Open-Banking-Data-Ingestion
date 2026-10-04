@@ -29,7 +29,7 @@ credit. Unpaired, it inflates both spending and income.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import TypeVar
@@ -161,6 +161,37 @@ def could_be_reissue(incoming: Transaction, candidate: Transaction) -> bool:
     )
 
 
+def is_internal_leg_meeting_space_blind_source(
+    incoming: Transaction, candidate: Transaction, blind: Callable[[str], bool]
+) -> bool:
+    """Whether one of these is an internal leg and the other's source cannot see Spaces.
+
+    THE RULE. A row that is an internal leg is never a candidate for a row from a
+    source that cannot see Spaces, in either direction.
+    An internal leg is the feed's item whose counterparty is one of the account's
+    own categories, or a derived round-up leg: `Transaction.is_internal_transfer`,
+    which the feed's provider sets for exactly those.
+    A source cannot see Spaces when the account map binds it to none of the
+    account's Spaces (`Families.blind`), and `blind` answers that for this account.
+
+    Why: the export and the aggregator list a payment made from a Space under the
+    one account and never list a movement between the account and its Space.
+    Merged by amount and nearby date into a transfer leg or a round-up leg, the
+    payment's row stood in for a movement it could not have reported:
+    "out row dated starling 2021-11-10, starling-csv 2021-11-11, truelayer
+    2021-11-11; seen by starling, starling-csv, truelayer; booked, a transfer leg,
+    confirmed paired with the Space starling-space-bills", while the Space's own
+    payment row was counted with no export sighting.
+    Whether the pair merged also depended on which source arrived first.
+
+    The test reads each row's own `source`, the last to observe it, because that
+    is the only source a candidate carries into resolution.
+    """
+    return (incoming.is_internal_transfer and blind(candidate.source)) or (
+        candidate.is_internal_transfer and blind(incoming.source)
+    )
+
+
 def belongs_to_established_series(
     incoming: Transaction, candidates: Sequence[Transaction]
 ) -> bool:
@@ -270,7 +301,13 @@ class CandidateIndex:
         self,
         transactions: Iterable[Transaction] = (),
         sightings: Iterable[tuple[str, str, str, bool, bool]] = (),
+        space_blind: Callable[[str], bool] | None = None,
     ) -> None:
+        # Whether a source cannot see this account's Spaces, which only the
+        # account map knows. None means nothing is known, so the rule that
+        # keeps internal legs apart (`is_internal_leg_meeting_space_blind_source`)
+        # has nothing to ask and every pair is judged as it was before it.
+        self.space_blind: Callable[[str], bool] = space_blind or (lambda source: False)
         self._order: list[Transaction] = []
         self._position: dict[str, int] = {}
         self._by_source_id: dict[tuple[str, str, str], list[str]] = {}
@@ -552,8 +589,11 @@ def resolve(
             if not taken(candidate):
                 return MatchResult(MatchTier.SOURCE_ID, candidate)
 
+    def apart_by_kind(candidate: Transaction) -> bool:
+        return is_internal_leg_meeting_space_blind_source(incoming, candidate, index.space_blind)
+
     def one_payment(candidate: Transaction, *, same_content: bool) -> bool:
-        if taken(candidate):
+        if taken(candidate) or apart_by_kind(candidate):
             return False
         # Where a source keeps a payment's id through settlement, a row it
         # has already called by a different id is a different payment, and
@@ -587,10 +627,12 @@ def resolve(
         return timedelta(days=FUZZY_WINDOW_DAYS)
 
     same_amount = index.by_amount(account, incoming.amount_minor)
+    # A pair kept apart by kind is certain, not a near-miss, so it is never put
+    # to the reviewer as a puzzle.
     similar = [
         t
         for t in same_amount
-        if abs(t.value_date - incoming.value_date) <= window_for(t)
+        if abs(t.value_date - incoming.value_date) <= window_for(t) and not apart_by_kind(t)
     ]
 
     # Applies whether or not the source numbers its rows: two rows of one file

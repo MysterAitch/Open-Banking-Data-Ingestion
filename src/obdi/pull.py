@@ -36,6 +36,7 @@ from .asked_coverage import (
     heal_plan,
 )
 from .connections import Connection, ConnectionStore, apply_refresh
+from .family_anchors import families_of
 from .ingest import ImportSummary, reconcile_batch
 from .jsontypes import JsonObject, text
 from .jsontypes import rows as json_rows
@@ -175,6 +176,7 @@ def pull_truelayer(
     )
     result = PullResult(provider=f"truelayer/{connection.connection_id}")
     summary = ImportSummary(artefact_new=True)
+    space_blind = families_of(store, account_map).blind_in
 
     # Tiered windows for routine pulls. TrueLayer filters on TRANSACTION
     # date, so amendments to old records arrive only through windows that
@@ -428,7 +430,13 @@ def pull_truelayer(
                 )
                 for record in records
             ]
-            reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
+            reconcile_batch(
+                store,
+                transactions,
+                digest=artefact.digest,
+                summary=summary,
+                space_blind=space_blind,
+            )
             if pending:
                 # The pending endpoint returns the COMPLETE current set, so
                 # a stored pending row absent from it has settled or been
@@ -514,6 +522,7 @@ def pull_truelayer(
                 window_transactions,
                 digest=window_artefact.digest,
                 summary=summary,
+                space_blind=space_blind,
             )
 
     # Deep pulls and routine cycles both walk every card; an explicit window
@@ -611,6 +620,7 @@ def pull_truelayer(
                     card_transactions,
                     digest=card_artefact.digest,
                     summary=summary,
+                    space_blind=space_blind,
                 )
 
     # The tiers above ask only the most recent days, so a feed unasked for
@@ -766,7 +776,13 @@ def _heal_unasked_spans(
                 )
                 for record in records
             ]
-            reconcile_batch(store, transactions, digest=artefact.digest, summary=summary)
+            reconcile_batch(
+                store,
+                transactions,
+                digest=artefact.digest,
+                summary=summary,
+                space_blind=families_of(store, account_map).blind_in,
+            )
 
 
 def _closed_space_categories(
@@ -1286,7 +1302,11 @@ def pull_starling(
                 continue
 
             reconcile_batch(
-                store, _transactions_of(items, target, digest), digest=digest, summary=summary
+                store,
+                _transactions_of(items, target, digest),
+                digest=digest,
+                summary=summary,
+                space_blind=families_of(store, account_map).blind_in,
             )
 
     # The feed's Space rows may be the other half of a copy already held.

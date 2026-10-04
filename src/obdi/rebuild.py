@@ -36,7 +36,8 @@ from typing import Any
 from . import instrumentation
 from .accounts import AccountMap
 from .errors import DataError
-from .ingest import ImportSummary, pair_transfers_across_store, reconcile_batch
+from .family_anchors import families_of
+from .ingest import ImportSummary, SpaceBlind, pair_transfers_across_store, reconcile_batch
 from .jsontypes import rows as json_rows
 from .matching import CandidateIndex
 from .models import Transaction
@@ -377,6 +378,7 @@ def _replay_sections(
     payload: bytes,
     account_map: AccountMap | None,
     candidate_cache: dict[str, CandidateIndex],
+    space_blind: SpaceBlind | None = None,
 ) -> SectionBatches:
     """Read each assigned section of one kept statement back into its account.
 
@@ -398,6 +400,7 @@ def _replay_sections(
                 digest=digest,
                 summary=ImportSummary(artefact_new=False),
                 candidate_cache=candidate_cache,
+                space_blind=space_blind,
             )
             report.transactions += len(transactions)
         report.kept_sections_replayed += 1
@@ -498,6 +501,9 @@ def rebuild_from_raw(
     # cannot diverge - except where this loop itself mutates rows
     # outside reconcile_batch, which is handled at that site below.
     candidate_cache: dict[str, CandidateIndex] = {}
+    # Read from the raw artefacts and the map alone, so it is the same answer
+    # at every point of the replay, whatever has been resolved so far.
+    space_blind = None if account_map is None else families_of(store, account_map).blind_in
     for index, row in enumerate(artefact_rows, start=1):
         report.current_index = index
         report.current_records = sizes.get(int(row["rowid"]), 0)
@@ -527,7 +533,13 @@ def rebuild_from_raw(
             if source == "statement":
                 with instrumentation.phase("reconcile"):
                     replay = _replay_sections(
-                        store, report, digest, bytes(payload), account_map, candidate_cache
+                        store,
+                        report,
+                        digest,
+                        bytes(payload),
+                        account_map,
+                        candidate_cache,
+                        space_blind,
                     )
                 waiting = not replay.every_section_assigned
             if waiting:
@@ -605,6 +617,7 @@ def rebuild_from_raw(
                     summary=summary,
                     on_record=tick if progress is not None else None,
                     candidate_cache=candidate_cache,
+                    space_blind=space_blind,
                 )
             report.transactions += len(transactions)
         # Banked only once the batch has committed. Counting the artefact
