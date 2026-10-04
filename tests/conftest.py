@@ -158,6 +158,31 @@ def _one_tls_context_for_every_client() -> Iterator[None]:
         default.create_ssl_context = real
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _test_servers_stop_promptly() -> Iterator[None]:
+    """Make `server.shutdown()` return in milliseconds rather than half a second.
+
+    MEASURED: 691 tests spent 0.5 s each in teardown, 354 s of test time across
+    the suite, all of it `shutdown()` waiting for `serve_forever` to wake from
+    its default 0.5 s poll. Some 100 test modules start their own server with
+    that default, so the interval is set once here rather than at every call.
+    A shorter poll costs an idle thread a few wake-ups per second, and no test
+    is about how a server idles.
+    """
+    from socketserver import BaseServer
+
+    real = BaseServer.serve_forever
+
+    def serve_forever(self: BaseServer, poll_interval: float = 0.01) -> None:
+        real(self, poll_interval)
+
+    BaseServer.serve_forever = serve_forever  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        BaseServer.serve_forever = real  # type: ignore[method-assign]
+
+
 @pytest.fixture(autouse=True)
 def _no_card_list_over_the_network(monkeypatch) -> None:
     """A routine TrueLayer pull asks for the card list, so a test that stubs
