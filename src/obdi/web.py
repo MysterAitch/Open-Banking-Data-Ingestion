@@ -628,7 +628,7 @@ class WebConfig:
     #: Settlement-lag measurement from the starling truth set.
     date_lag_text: Callable[[], str] | None = None
     #: Balance-walk integrity: bank running balances vs held transactions.
-    balance_walk_text: Callable[[], str] | None = None
+    balance_walk_text: Callable[[bool], str] | None = None
     #: Rows sharing an identity, and payments with no row of their own.
     #: Counts and account names only, by design of the report itself.
     identity_health_text: Callable[[], str] | None = None
@@ -4343,7 +4343,7 @@ class ConnectionHandler(
             self._statements_page()
             return
         if route == "/review":
-            self._review_page()
+            self._review_page(masked=True)
             return
         if route == "/actual-history":
             self._actual_history()
@@ -4800,23 +4800,21 @@ class ConnectionHandler(
             artefact_id = int(params.get("id", ["0"])[0])
         except ValueError:
             artefact_id = 0
-        want_payload = params.get("view", [""])[0] == "payload"
-        detail = hook(artefact_id, with_payload=want_payload)
+        # The payload is every amount, name, and reference the artefact holds, so it is never
+        # read for a GET: an address that showed it could be followed, shared, and cached.
+        # An old address asking for it gets this page and the sentence saying where it went.
+        asked_for_payload = params.get("view", [""])[0] == "payload"
+        detail = hook(artefact_id, with_payload=False)
         if detail is None:
             self._respond(404, error_page("Not found", "<p>No such artefact.</p>"))
             return
 
-        if want_payload:
-            pretty = html.escape(str(detail.get("payload_pretty", "")))
-            body = (
-                f'<p><a class="button" href="/artefact?id={artefact_id}">'
-                "Back to the analysis</a></p>"
-                f'<pre style="overflow-x:auto;white-space:pre-wrap">{pretty}</pre>'
-                + HOME_LINK
-            )
-            self._respond(200, render_page("Payload", body))
-            return
-
+        moved = (
+            '<p class="warn">The payload is no longer shown at an address. '
+            "Press the button at the foot of this page to see it.</p>"
+            if asked_for_payload
+            else ""
+        )
         raw_meta = detail.get("request_meta")
         meta = raw_meta if isinstance(raw_meta, dict) else {}
         meta_rows = "".join(
@@ -4846,7 +4844,8 @@ class ConnectionHandler(
             if str(name) != str(detail.get("origin", ""))
         ]
         body = (
-            f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
+            moved
+            + f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
             f'fetched {html.escape(str(detail.get("fetched_at", "")))}<br>'
             f'<span style="opacity:.7;word-break:break-all">'
@@ -4894,10 +4893,43 @@ class ConnectionHandler(
                 'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
                 "Refile</button></p></form>"
             )
-            + f'<p><a class="button" href="/artefact?id={artefact_id}&view=payload">'
-            "View payload</a></p>" + HOME_LINK
+            + "<h2>The stored payload</h2>"
+            '<p class="muted">Every amount, name, and reference the artefact holds, '
+            "unmasked. Shown only to a request made on purpose, and marked not to be "
+            "kept.</p>"
+            '<form method="post" action="/artefact">'
+            f'<input type="hidden" name="id" value="{artefact_id}">'
+            '<p><button class="button" type="submit" '
+            'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
+            "Show the payload (unmasked)</button></p></form>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
+
+    def _artefact_payload_post(self, form: dict[str, list[str]]) -> None:
+        """The stored payload, unmasked, for a request somebody made on purpose.
+
+        A POST, never kept (`no_store`), and behind the cross-site refusal every POST has,
+        because reading unmasked data must be deliberately attempted rather than stumbled on.
+        """
+        hook = self.bound_config.artefact_detail
+        if hook is None:
+            self._respond(404, error_page("Not available", "<p>No browser wired.</p>"))
+            return
+        try:
+            artefact_id = int(form.get("id", ["0"])[0])
+        except ValueError:
+            artefact_id = 0
+        detail = hook(artefact_id, with_payload=True)
+        if detail is None:
+            self._respond(404, error_page("Not found", "<p>No such artefact.</p>"))
+            return
+        pretty = html.escape(str(detail.get("payload_pretty", "")))
+        body = (
+            f'<p><a class="button" href="/artefact?id={artefact_id}">'
+            "Back to the analysis</a></p>"
+            f'<pre style="overflow-x:auto;white-space:pre-wrap">{pretty}</pre>' + HOME_LINK
+        )
+        self._respond(200, render_page("Payload", body), no_store=True)
 
     def _layout_offer(self, artefact_id: int, media_type: str) -> str:
         """The question the computed-shape panel above cannot answer.
@@ -6222,13 +6254,17 @@ class ConnectionHandler(
         )
         self._respond(200, render_page("Statement contents", body))
 
-    def _review_page(self, note: str = "") -> None:
+    def _review_page(self, note: str = "", *, masked: bool = False) -> None:
         """The worklist, with the evidence needed to judge each group.
 
         Deliberately not a list of transactions: the fastest way to empty a
         thousand-row pile is to answer the ten groups that dominate it, and
         the fastest way to answer one wrongly is to be shown a stripped
         label with no example behind it.
+
+        A group's label and example are payees and references, so a GET shows the groups by
+        their counts alone and the labels only to a POST made on purpose, marked not to be kept.
+        The answers are forms inside that rendering, and what they answer comes back as one.
         """
         hook = self.bound_config.categorise_overview
         if hook is None:
@@ -6248,7 +6284,12 @@ class ConnectionHandler(
         share = f" ({covered / eligible:.0%})" if eligible else ""
         rows = []
         groups = overview.get("groups")
-        for group in groups if isinstance(groups, list) else []:
+        for number, group in enumerate(groups if isinstance(groups, list) else [], start=1):
+            if masked:
+                rows.append(
+                    f'<tr><td>Group {number}</td><td>{group.get("count", 0)}</td></tr>'
+                )
+                continue
             label = str(group.get("label", ""))
             example = str(group.get("example", ""))
             marks = []
@@ -6313,7 +6354,16 @@ class ConnectionHandler(
             "no obvious answer are better left alone than guessed - the "
             "shape of a payment identifies it when the string does not.</p>"
             + (
-                "<table><tr><th>Group</th><th>Rows</th><th>Answer</th></tr>"
+                (
+                    '<p class="muted">Showing the MASKED rendering: the groups are counted, '
+                    "and neither their payees nor their references appear.</p>"
+                    '<form method="post" action="/review">'
+                    '<button class="button" type="submit" style="width:100%">'
+                    "Show the payees and answer them</button></form>"
+                    "<table><tr><th>Group</th><th>Rows</th></tr>"
+                    if masked
+                    else "<table><tr><th>Group</th><th>Rows</th><th>Answer</th></tr>"
+                )
                 + "".join(rows)
                 + "</table>"
                 if rows
@@ -6321,7 +6371,7 @@ class ConnectionHandler(
             )
             + HOME_LINK
         )
-        self._respond(200, render_page("Categorise", body))
+        self._respond(200, render_page("Categorise", body), no_store=not masked)
 
     def _review_defer(self) -> None:
         hook = self.bound_config.categorise_defer
@@ -6617,21 +6667,37 @@ class ConnectionHandler(
             200, render_page("Statement periods", body), no_store=not masked
         )
 
-    def _balance_walk(self) -> None:
+    def _balance_walk(self, *, masked: bool = True) -> None:
+        """The walk, masked when fetched and unmasked only when posted for.
+
+        A break names the balance the rows explain and the balance the bank stated,
+        so the figures answer only a request somebody made on purpose, and the
+        answer is marked not to be kept.
+        """
         hook = self.bound_config.balance_walk_text
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
         try:
-            text = hook()
+            text = hook(masked)
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
             )
             return
+        showing = (
+            '<p class="muted">Showing the MASKED rendering: counts and artefact names only.</p>'
+            '<form method="post" action="/balance-walk">'
+            '<button class="button" type="submit" style="width:100%">'
+            "Show the figures</button></form>"
+            if masked
+            else '<p class="warn">Showing the UNMASKED rendering: balances are visible.</p>'
+            '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
+        )
         body = (
             "<h2>Balance walk</h2>"
-            "<p>TrueLayer reports the account's running balance on each "
+            + showing
+            + "<p>TrueLayer reports the account's running balance on each "
             "transaction. Consecutive balances must differ by exactly the "
             "amounts in between - a break means money moved that no held "
             "transaction explains. This is the store checked against the "
@@ -6639,7 +6705,7 @@ class ConnectionHandler(
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{html.escape(text)}</pre>" + HOME_LINK
         )
-        self._respond(200, render_page("Balance walk", body))
+        self._respond(200, render_page("Balance walk", body), no_store=not masked)
 
     def _statement_held(self) -> None:
         """Which of these digests is already held - asked before sending.
@@ -6776,6 +6842,20 @@ class ConnectionHandler(
         if route == "/balance-chart":
             # A POST because showing values is a decision, not a link.
             self._balance_chart_post(self._read_form())
+            return
+        if route == "/artefact":
+            # A POST because showing values is a decision, not a link.
+            self._artefact_payload_post(self._read_form())
+            return
+        if route == "/balance-walk":
+            # A POST because showing balances is a decision, not a link.
+            self._discard_small_body()
+            self._balance_walk(masked=False)
+            return
+        if route == "/review":
+            # A POST because showing payees is a decision, not a link.
+            self._discard_small_body()
+            self._review_page()
             return
         if route == "/position":
             # A POST because showing values is a decision, not a link.

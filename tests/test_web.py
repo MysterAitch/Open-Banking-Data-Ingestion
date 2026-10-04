@@ -2785,7 +2785,8 @@ class TestBrowsingRawArtefactsFromThePage:
         assert "100.96.178.101" in page
         assert "660" in page
         assert "2024-08-02T00:00:00Z" in page
-        assert 'href="/artefact?id=7&view=payload"' in page
+        assert 'href="/artefact?id=7&view=payload"' not in page
+        assert '<form method="post" action="/artefact">' in page
 
     def test_Detail_WhenTheSameBytesArrivedUnderSeveralNames_ShowsEveryName(
         self, tmp_path
@@ -2836,7 +2837,7 @@ class TestBrowsingRawArtefactsFromThePage:
 
         assert "Also seen as" not in page
 
-    def test_PayloadView_RendersPrettyAndEscaped(self, tmp_path):
+    def test_PayloadView_WhenPostedFor_RendersPrettyEscapedAndUnkept(self, tmp_path):
         detail = {
             "id": 7,
             "source": "truelayer-booked",
@@ -2844,12 +2845,14 @@ class TestBrowsingRawArtefactsFromThePage:
         }
         httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: detail)
         try:
-            page = httpx.get(f"{base}/artefact", params={"id": "7", "view": "payload"}).text
+            response = httpx.post(f"{base}/artefact", data={"id": "7"})
         finally:
             httpd.shutdown()
 
+        page = response.text
         assert "&lt;script&gt;" in page, "payload content must never execute in the page"
         assert "<script>alert" not in page
+        assert response.headers["Cache-Control"] == "no-store"
 
     def test_Detail_UnknownId_IsANotFoundWithTheWayHome(self, tmp_path):
         httpd, base = self._server(tmp_path, lambda: [], lambda _id, with_payload=False: None)

@@ -138,7 +138,8 @@ class TestTheCategorisePageNamesTheOtherQueue:
         page = _get(tmp_path, "/review", categorise_overview=lambda: overview)
 
         assert "not the queue" in page
-        assert "DAP" in page
+        assert "Group 1" in page
+        assert "DAP" not in page, "a GET counts the groups and names no payee"
 
 
 def _entry(verdict: str, *, warn: bool, note: str = "") -> dict[str, object]:

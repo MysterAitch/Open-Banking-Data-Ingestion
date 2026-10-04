@@ -770,6 +770,10 @@ UNKNOWN_NOTE = (
 #: categories top out around twenty) and well below free text.
 CATEGORICAL_LIMIT = 64
 
+#: The levels at which a field's values are shown, so the only ones its values may appear
+#: under anywhere else (`redact_summary`).
+_VALUES_SHOWN = frozenset({SHOW, CATEGORICAL, OPAQUE_ID, PROVIDER_PARTIAL})
+
 #: Keys in a field summary that carry actual values rather than shape.
 _VALUE_KEYS = ("values", "min", "max", "prefix")
 #: Keys that carry a value but are a legitimate RANGE.
@@ -848,6 +852,18 @@ def redact_summary(summary: dict[str, object]) -> dict[str, object]:
     result["fields"] = fields
     result["withheld_fields"] = withheld
     result["unclassified_fields"] = unclassified
+    # The cross-field tables name a field's VALUES in their rows, so they obey the field's own
+    # level: a payee or a reference with few enough distinct values to count as a category once
+    # printed every one of them in the sign table, whatever the field table beside it withheld.
+    for table, fields_of in (("sign_by", ("field",)), ("presence_links", ("by",))):
+        rows = summary.get(table)
+        if isinstance(rows, list):
+            result[table] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and all(classify(str(row.get(name, ""))) in _VALUES_SHOWN for name in fields_of)
+            ]
     return result
 
 

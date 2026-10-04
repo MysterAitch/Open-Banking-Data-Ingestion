@@ -2702,7 +2702,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def replay_artefact(artefact_id: int) -> str:
         return replay_single_artefact(db_path, artefact_id)
 
-    def balance_walk_text() -> str:
+    def balance_walk_text(masked: bool) -> str:
         from .rawview import balance_walk_report
 
         artefacts: list[dict[str, object]] = []
@@ -2765,6 +2765,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 examples = entry.get("examples")
                 for item in examples if isinstance(examples, list) else []:
                     if not isinstance(item, dict):
+                        continue
+                    if masked:
+                        lines.append(
+                            f"    break at row {item['position']}: the balance is not "
+                            f"what the rows explain (figures hidden) [{item['artefact']}]"
+                        )
                         continue
                     expected = int(str(item["expected"])) / 100
                     got = int(str(item["got"])) / 100

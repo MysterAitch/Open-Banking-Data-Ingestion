@@ -83,25 +83,47 @@ class TestThePageShowsTheEvidence:
         assert "2768 of 7443" in page.text
         assert "1314" in page.text, "excluded transfer legs stay visible"
 
-    def test_EachGroup_ShowsARealExample_NotOnlyTheStrippedLabel(self, server):
+    def test_EachGroup_WhenThePayeesAreAskedFor_ShowsARealExampleNotOnlyTheStrippedLabel(
+        self, server
+    ):
+        base, _ = server
+
+        page = httpx.post(f"{base}/review", timeout=20)
+
+        assert "DAP90481679" in page.text
+        assert "AMAZON* 204-3267781-49" in page.text
+        assert page.headers["Cache-Control"] == "no-store"
+
+    def test_EachGroup_WhenFetchedPlainly_IsCountedAndNamesNoPayeeOrReference(self, server):
         base, _ = server
 
         page = httpx.get(f"{base}/review", timeout=20)
 
-        assert "DAP90481679" in page.text
-        assert "AMAZON* 204-3267781-49" in page.text
+        assert "DAP" not in page.text
+        assert "AMAZON" not in page.text
+        assert "Group 1" in page.text
+        assert 'action="/review"' in page.text
+        assert "Cache-Control" not in page.headers or page.headers["Cache-Control"] != "no-store"
+
+    def test_ThePayeesAsked_FromAnotherSite_AreRefused(self, server):
+        base, _ = server
+
+        page = httpx.post(f"{base}/review", headers={"Origin": "https://evil.example"}, timeout=20)
+
+        assert page.status_code == 403
+        assert "DAP" not in page.text
 
     def test_ARepeatingReference_IsMarkedAsIdentifiable(self, server):
         base, _ = server
 
-        page = httpx.get(f"{base}/review", timeout=20)
+        page = httpx.post(f"{base}/review", timeout=20)
 
         assert "identify it once" in page.text
 
     def test_AScatterOfReferences_IsMarkedAsAGuess(self, server):
         base, _ = server
 
-        page = httpx.get(f"{base}/review", timeout=20)
+        page = httpx.post(f"{base}/review", timeout=20)
 
         assert "would be a guess" in page.text
 
