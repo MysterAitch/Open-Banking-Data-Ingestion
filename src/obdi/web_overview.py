@@ -26,6 +26,7 @@ from .overview import (
     OVERVIEW_CACHE_SECONDS,
     OVERVIEW_CHECKS,
     QUIET,
+    REBUILDING,
     SILENT,
     SOON,
     STATE_RULES,
@@ -48,6 +49,7 @@ _STATE_PILL = {
     FILE_ONLY: "pill-quiet",
     EMPTY: "pill-quiet",
     ARCHIVED: "pill-quiet",
+    REBUILDING: "pill-warn",
 }
 
 #: States for which "when did the provider last answer" is not a question.
@@ -136,7 +138,7 @@ def _asked_html(account: AccountOverview, today: date) -> str:
     return f"{asked.isoformat()} ({_days_ago(asked, today)})"
 
 
-def _account_row(account: AccountOverview, today: date) -> str:
+def _account_row(account: AccountOverview, today: date, rebuilding: str = "") -> str:
     target = quote(account.ref, safe="")
     if account.bound is None:
         bound = '<span class="muted">-</span>'
@@ -173,7 +175,9 @@ def _account_row(account: AccountOverview, today: date) -> str:
         + fact("Actual", bound)
         + fact("Needs attention", items)
         + (
-            ""
+            fact("Verification", _esc(rebuilding))
+            if rebuilding
+            else ""
             if account.standing is None
             else fact(
                 "Verification",
@@ -189,7 +193,8 @@ def _account_row(account: AccountOverview, today: date) -> str:
 
 def _accounts_html(overview: Overview) -> str:
     today = overview.generated_at.date()
-    rows = "".join(_account_row(account, today) for account in overview.accounts)
+    paused = overview.rebuilding.sentence() if overview.rebuilding is not None else ""
+    rows = "".join(_account_row(account, today, paused) for account in overview.accounts)
     legend = "".join(
         f"<li><strong>{_esc(state)}</strong> - {_esc(rule)}</li>"
         for state, rule in STATE_RULES.items()

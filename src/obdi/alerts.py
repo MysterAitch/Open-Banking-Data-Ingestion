@@ -428,10 +428,29 @@ def _read_state(path: Path) -> dict[str, _Announced]:
     return state
 
 
+#: The keys of findings read from the derived layer, by prefix.
+#: While a rebuild holds that layer none of them is evaluated (`rebuild_hold`),
+#: so none may be sent and none may be read as having cleared.
+#: The `check-failed` entries are the guarded names of the checks that produce the others.
+DERIVED_FINDING_PREFIXES = (
+    "silent-feed:",
+    "stale-feed:",
+    "push-refused",
+    "shared-identity:",
+    "protection-broken:",
+    "check-failed:silent-feeds",
+    "check-failed:push-build",
+    "check-failed:shared-identity",
+    "check-failed:protections",
+)
+
+
 def process(
     findings: Sequence[Finding],
     state_path: Path,
     send: Callable[[str], bool],
+    *,
+    deferred: Sequence[str] = (),
 ) -> list[str]:
     """Announce edges and escalations, remember only what was DELIVERED.
 
@@ -441,6 +460,10 @@ def process(
     of clearance is not news); a disappearance announces its resolution. A
     send that fails leaves the state untouched for that key, so the
     announcement retries next cycle instead of being dropped.
+
+    A key that starts with a `deferred` prefix was not evaluated this cycle, so its
+    absence says nothing: it is neither announced as resolved nor forgotten, and a
+    rebuild that clears a finding is announced when the finding is next evaluated.
     """
     announced = _read_state(state_path)
     current = {finding.key for finding in findings}
@@ -454,7 +477,11 @@ def process(
                 delivered.append(finding.message)
         elif finding.rung < known.rung:
             announced[finding.key] = _Announced(finding.rung, finding.message)
-    for key in [key for key in announced if key not in current]:
+    for key in [
+        key
+        for key in announced
+        if key not in current and not key.startswith(tuple(deferred))
+    ]:
         message = f"resolved: {announced[key].message}"
         if send(message):
             del announced[key]

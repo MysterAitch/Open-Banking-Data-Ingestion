@@ -1470,6 +1470,8 @@ def _clearing_html(clearing: Any) -> str:
 
 def _verification_html(view: Any) -> str:
     """The three dates, what holds agreement back, and the cleared counts."""
+    if view.rebuilding:
+        return f'<h2>Verification</h2><p class="warn">{_esc(view.rebuilding)}</p>'
     if view.standing is None:
         return ""
     protection = view.protection

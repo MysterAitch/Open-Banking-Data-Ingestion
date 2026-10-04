@@ -504,6 +504,9 @@ class Ledger:
     protection: Structural[ProtectionView | None] = None
     #: The account's rows by how their sightings joined, over every month (`join_basis`).
     joins: Structural[JoinCounts | None] = None
+    #: The sentence the verification says while a rebuild holds the derived layer
+    #: (`rebuild_hold`), in place of the standing and the protection; empty otherwise.
+    rebuilding: Structural[str] = ""
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:

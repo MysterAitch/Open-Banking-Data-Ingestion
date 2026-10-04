@@ -26,6 +26,7 @@ from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .movement_completeness import MovementCompleteness
+    from .rebuild_hold import RebuildEpoch
 
 T = TypeVar("T")
 
@@ -79,11 +80,13 @@ class KeyedMemo(Generic[T]):
         name: str = "memo",
         clock: Callable[[], float] = time.perf_counter,
         detail: Callable[[T], str] | None = None,
+        epoch: Callable[[], RebuildEpoch] | None = None,
     ) -> None:
         self._key = key
         self._name = name
         self._clock = clock
         self._detail = detail
+        self._epoch = epoch
         self._lock = threading.Lock()
         self._held: tuple[object, T] | None = None
         self._flights: dict[object, _Flight[T]] = {}
@@ -103,6 +106,7 @@ class KeyedMemo(Generic[T]):
                 raise flight.error
             return cast(T, flight.value)
         started = self._clock()
+        began = None if self._epoch is None else self._epoch()
         try:
             value = compute()
         except BaseException as exc:
@@ -121,8 +125,16 @@ class KeyedMemo(Generic[T]):
                 file=sys.stderr,
                 flush=True,
             )
-            with self._lock:
-                self._held = (key, value)
+            # The key was read before the computation began, so a rebuild that reproduces the
+            # same rows leaves it unchanged and would keep a value read from a half-built layer
+            # for as long as the key holds. The value is kept only if no rebuild held the layer
+            # when it began and none began or ended while it ran.
+            settled = self._epoch is None or (
+                began is not None and not began.held and began == self._epoch()
+            )
+            if settled:
+                with self._lock:
+                    self._held = (key, value)
             return value
         finally:
             with self._lock:

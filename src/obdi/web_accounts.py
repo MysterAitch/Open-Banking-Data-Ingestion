@@ -48,6 +48,7 @@ from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .logs import say
 from .namespaces import validate_canonical_name
 from .overview import ARCHIVED
+from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .standing_data import AccountStanding, standing_lines
 from .web_sections import back_link, referring_page
@@ -528,8 +529,12 @@ def accounts_page(
     known: KnownAccounts | None = None,
     plan: ParentPlan | None = None,
     standings: Mapping[str, AccountStanding] | None = None,
+    rebuilding: str = "",
 ) -> bytes:
     """Which accounts exist, as declared by a person.
+
+    `rebuilding` is the sentence the verification lines are replaced by while a rebuild holds
+    the derived layer (`rebuild_hold`); said once above the list rather than on every line.
 
     Declared state, not derived: a mortgage with no feed and cash in a tin
     have no artefact anything could be replayed from, so this list is the
@@ -546,6 +551,7 @@ def accounts_page(
             "holding rows or by being bound in the account map; it is declared when "
             "it has a record in the registry, which is where its kind, parent, and "
             "dates are kept.</p>"
+            + (f'<p class="warn">{html.escape(rebuilding)}</p>' if rebuilding else "")
             + (
                 _listing(known.accounts, today, standings)
                 or "<p>No account is held or declared yet.</p>"
@@ -942,10 +948,13 @@ class AccountPages:
         hook = self.bound_config.known_accounts
         known, plan = (None, None) if hook is None else hook()
         standings = None
+        rebuilding = ""
         standings_hook = self.bound_config.account_standings
         if standings_hook is not None:
             try:
                 standings = standings_hook()
+            except RebuildInProgress as paused:
+                rebuilding = paused.hold.sentence()
             except Exception as fault:
                 # A line of verification is an addition: the list of accounts must not depend on it.
                 say("accounts.standings.fault", kind=type(fault).__name__)
@@ -957,6 +966,7 @@ class AccountPages:
                 known=known,
                 plan=plan,
                 standings=standings,
+                rebuilding=rebuilding,
             ),
         )
 

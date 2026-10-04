@@ -16,7 +16,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -81,6 +81,14 @@ from .position import Position
 from .probing import StepRefused, sca_note, walk_history
 from .protection import recheck as recheck_protections
 from .pull import STARLING_CONNECTION, PullResult, pull_starling, pull_truelayer
+from .rebuild_hold import (
+    RebuildEpoch,
+    RebuildInProgress,
+    abandoned_for,
+    epoch_for,
+    hold_for,
+    require_idle,
+)
 from .replay import (
     ActualAccountBinding,
     build_opening_entries,
@@ -913,27 +921,42 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
 
     now = now or datetime.now(UTC)
     findings: list[Finding] = []
+    # While a rebuild holds the derived layer every condition read from it is skipped, not
+    # reported: the live instance said thousands of days disagreed with their sources, and a
+    # phone would have been told so.
+    # `process` is given `DERIVED_FINDING_PREFIXES` as deferred, so nothing skipped reads as
+    # cleared.
+    hold = hold_for(db_path, now)
+    held: list[Transaction] = []
+    silent: list[Finding] = []
+    refused: list[Finding] = []
+    shared: list[Finding] = []
+    protections: list[Finding] = []
     with Store(db_path) as store:
-        held = store.transactions_by_sighting()
         attempts = store.attempts(limit=1000)
         rebuilds = store.recent_rebuild_runs(limit=1)
         watched = _scheduled_sources()
-        silent = _guarded(
-            "silent-feeds", lambda: _silent_feed_findings(store, held, watched, now)
-        )
-        refused = _guarded("push-build", lambda: _push_refusal_findings(db_path, store))
-        shared = _guarded(
-            "shared-identity",
-            lambda: shared_identity_findings(identity_health(store).shared),
-        )
-        protections = _guarded("protections", lambda: _protection_findings(store))
+        if hold is None:
+            held = store.transactions_by_sighting()
+            silent = _guarded(
+                "silent-feeds", lambda: _silent_feed_findings(store, held, watched, now)
+            )
+            refused = _guarded("push-build", lambda: _push_refusal_findings(db_path, store))
+            shared = _guarded(
+                "shared-identity",
+                lambda: shared_identity_findings(identity_health(store).shared),
+            )
+            protections = _guarded("protections", lambda: _protection_findings(store))
     # First, because an empty derived layer makes every finding below it
     # meaningless: no sightings means no stale feeds and no coverage, so a
     # silent store would otherwise look like a quiet one.
     emptied = empty_rebuild_finding(rebuilds)
     if emptied is not None:
         findings.append(emptied)
-    if watched:
+    abandoned = abandoned_for(db_path, now)
+    if abandoned is not None:
+        findings.append(Finding("rebuild:abandoned", abandoned))
+    if watched and hold is None:
         findings += [
             Finding(f"stale-feed:{stale.account_id}:{stale.source}", stale.describe())
             for stale in stale_feeds(coverage(held), watched=watched)
@@ -1393,8 +1416,9 @@ def queue_actual_audit(db_path: Path) -> str:
 
 
 def _alert(db_path: Path) -> int:
-    from .alerts import process, send_heartbeat, send_ntfy
+    from .alerts import DERIVED_FINDING_PREFIXES, process, send_heartbeat, send_ntfy
 
+    began_held = hold_for(db_path)
     findings = collect_alert_findings(db_path)
     state_path = Path(
         os.getenv("OBDI_ALERT_STATE", "").strip()
@@ -1410,7 +1434,21 @@ def _alert(db_path: Path) -> int:
         def deliver(message: str) -> bool:
             print(f"alert (no OBDI_NTFY_URL configured): {message}")
             return True
-    delivered = process(findings, state_path, deliver)
+    # Asked on both sides of the collection: a rebuild that began or ended while it ran leaves
+    # the findings of one side missing, and a missing finding must not read as a cleared one.
+    hold = began_held or hold_for(db_path)
+    delivered = process(
+        findings,
+        state_path,
+        deliver,
+        deferred=DERIVED_FINDING_PREFIXES if hold is not None else (),
+    )
+    if hold is not None:
+        print(
+            "alert: deferred every finding read from the derived layer (stale and silent feeds, "
+            "shared identities, protected spans, a refused push build) - "
+            f"{hold.sentence()} Findings that do not read it were still sent."
+        )
     for finding in findings:
         print(finding.message)
     if not findings:
@@ -2832,9 +2870,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return apply_to_group(store, label, value, kind=kind or "category")
 
+    def paused_text() -> str | None:
+        """The sentence a report says instead of its findings while a rebuild holds the layer."""
+        hold = hold_for(db_path)
+        return None if hold is None else hold.sentence()
+
     def review_report_text(masked: bool) -> str:
         from .review_report import review_report
 
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return review_report(store).describe(
                 masked=masked, unmask_hint="press the Show values button on this page"
@@ -2843,10 +2888,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def identity_health_text() -> str:
         from .identity_health import identity_health
 
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return identity_health(store).describe()
 
     def movement_completeness_text() -> str:
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return movement_report(store).describe()
 
@@ -2859,6 +2908,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def balance_reconciliation_text(masked: bool) -> str:
         from .balance_reconciliation import balance_reconciliation
 
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return balance_reconciliation(store).describe(
                 masked=masked, unmask_hint="press the Show the figures button on this page"
@@ -2867,6 +2918,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def period_reconciliation_text(masked: bool, ref: str) -> str:
         from .period_reconciliation import period_reconciliation
 
+        if (paused := paused_text()) is not None:
+            return paused
         with Store(db_path) as store:
             return period_reconciliation(
                 store,
@@ -2919,17 +2972,28 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return unarchive_account(store, ref)
 
+    def rebuild_epoch() -> RebuildEpoch:
+        return epoch_for(db_path)
+
     movement_memo: KeyedMemo[MovementCompleteness] = KeyedMemo(
-        movement_key, name="movement report", detail=lambda report: report.timing_detail()
+        movement_key,
+        name="movement report",
+        detail=lambda report: report.timing_detail(),
+        epoch=rebuild_epoch,
     )
     standings_memo: KeyedMemo[Mapping[str, AccountStanding]] = KeyedMemo(
-        standing_key, name="account standings"
+        standing_key, name="account standings", epoch=rebuild_epoch
     )
 
     def movement_report(store: Store) -> MovementCompleteness:
-        """The whole store's movement report, held while the derived layer is unchanged."""
+        """The whole store's movement report, held while the derived layer is unchanged.
+
+        Raises `RebuildInProgress` while a rebuild holds the layer: the report is a verdict
+        read from it, and every reader of this one function says the same sentence.
+        """
         from .movement_completeness import movement_completeness
 
+        require_idle(db_path)
         account_map = _account_map(store)
         return movement_memo.get(
             store,
@@ -2940,7 +3004,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def account_standings(store: Store | None = None) -> Mapping[str, AccountStanding]:
         """Every account's standing for the Overview and the Accounts page, held while nothing
-        it reads has changed, so neither page re-walks every account to draw itself."""
+        it reads has changed, so neither page re-walks every account to draw itself.
+
+        Raises `RebuildInProgress` while a rebuild holds the layer."""
+        require_idle(db_path)
 
         def compute(opened: Store) -> Mapping[str, AccountStanding]:
             refs = [
@@ -2966,8 +3033,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         A request that arrives while this runs waits on the same computation
         (`standing_data.KeyedMemo`).
+
+        Computes nothing while a rebuild holds the derived layer: the first page after the
+        rebuild pays for it instead, over the finished layer.
         """
-        account_standings()
+        with contextlib.suppress(RebuildInProgress):
+            account_standings()
 
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
@@ -2979,7 +3050,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # provider-label scan succeeding.
             label = ""
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
+        hold = hold_for(db_path)
         with Store(db_path) as store:
+            if hold is not None:
+                # The rows are shown as they stand, and the verification - agreement and the
+                # protection's comparison with its span - says the one sentence instead.
+                built = build_ledger(
+                    store,
+                    ref,
+                    month or None,
+                    bound=bound,
+                    label=label,
+                    archive=archive_notes_for(store, only=ref).get(ref),
+                    families=families_of(store, _account_map(store)),
+                    movement=None,
+                    with_protection=False,
+                )
+                return replace(
+                    built, standing=None, protection=None, rebuilding=hold.sentence()
+                )
             return build_ledger(
                 store,
                 ref,
@@ -3759,10 +3848,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         notification can never disagree about what is wrong. The result is
         stamped with when it was assembled, so a reused one says how old it is.
         """
-        return overview_cache.get(assemble_overview, fresh=fresh)
+        # Fresh while a rebuild runs: an Overview held from before it began would still be
+        # reporting the layer the rebuild has since emptied.
+        return overview_cache.get(
+            assemble_overview, fresh=fresh or hold_for(db_path) is not None
+        )
 
     def assemble_overview() -> Overview:
         now = datetime.now(UTC)
+        hold = hold_for(db_path, now)
         try:
             labels = display_labels()
         except Exception:
@@ -3786,6 +3880,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 rebuild_status=rebuild_status_for(db_path),
                 standings=lambda: account_standings(store),
                 movement=lambda: movement_report(store),
+                rebuilding=hold,
             )
 
     def fetch_now(name: str, psu_ip: str | None) -> str:

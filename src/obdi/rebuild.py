@@ -695,7 +695,7 @@ def rebuild_from_raw(
     # Last, so a protected span is compared with the finished derivation. The check only
     # records; `protection` says why a rebuild is never refused or altered by one.
     with instrumentation.phase("protection"):
-        recheck_protections(store)
+        recheck_protections(store, finished_rebuild=True)
     after_counts = {
         str(row[0]): int(row[1])
         for row in store.connection.execute(

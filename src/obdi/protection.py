@@ -399,13 +399,24 @@ def broken_sentence(check: Check) -> str:
     return f"{check.account}: a protected span has changed - {said}."
 
 
-def recheck(store: Store, *, now: datetime | None = None) -> list[Check]:
+def recheck(
+    store: Store, *, now: datetime | None = None, finished_rebuild: bool = False
+) -> list[Check]:
     """Check every protection, and record each break and each heal. Idempotent.
 
     Called after every rebuild, import, pull, assignment, and typed entry, so a break is
     recorded when it happens and not when somebody next opens the page. It never changes a
     protection's span or fingerprint: that is a person's decision (`accept`).
+
+    While another rebuild holds the derived layer it checks nothing and records nothing, and
+    returns no checks: a span compared with a half-built layer reads as broken, and a break
+    written into the history is permanent, as is the heal that follows it. `finished_rebuild`
+    is the rebuild's own final pass, which runs under its own lease over the finished layer.
     """
+    from .rebuild_hold import hold_for
+
+    if not finished_rebuild and hold_for(store.path) is not None:
+        return []
     stamp = _now(now)
     checks = []
     wrote = False

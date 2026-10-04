@@ -35,12 +35,14 @@ from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
 from .models import TransactionStatus
+from .rebuild_hold import RebuildInProgress
 from .scheduler_status import STEPS
 from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .identity_health import IdentityHealth
     from .movement_completeness import MovementCompleteness
+    from .rebuild_hold import RebuildHold
     from .standing_data import AccountStanding
 
 #: Where a person goes to act on each kind of attention item. Declared once,
@@ -76,7 +78,9 @@ SEVERITY_WORDS = {
 #: Within a band, the order kinds appear in. Anything not listed sorts after
 #: the listed kinds of its band, so an unknown kind is shown rather than dropped.
 _KIND_ORDER = (
+    "rebuild-running",
     "rebuild:empty",
+    "rebuild:abandoned",
     "protection-broken",
     "check-failed",
     "silent-feed",
@@ -106,6 +110,15 @@ _KIND_ORDER = (
 #: Kind -> (band, what to do about it). The sentence after a finding's own
 #: message, so that each item says what is wrong and then what to do.
 _KINDS: dict[str, tuple[int, str]] = {
+    "rebuild-running": (
+        HOUSEKEEPING,
+        "Nothing is wrong and nothing is lost by waiting; refresh when the rebuild has finished.",
+    ),
+    "rebuild:abandoned": (
+        NOW,
+        "Open Admin and run 'Rebuild from raw' again; until one finishes, what the checks read "
+        "may be only part of the store.",
+    ),
     "rebuild:empty": (
         NOW,
         "Open Admin and check the last rebuild before anything else is trusted.",
@@ -215,6 +228,17 @@ ALERT_CONDITIONS = (
     "emptied rebuild",
     "scheduler cycle",
 )
+
+#: The alert's conditions that read the derived rows, which `collect_alert_findings` skips while
+#: a rebuild holds that layer (`rebuild_hold`). The others read attempts, leases, files, and the
+#: rebuild's own run record, none of which a rebuild half-builds.
+DERIVED_ALERT_CONDITIONS = (
+    "silent feeds",
+    "stale feeds",
+    "push build",
+    "shared identities",
+    "protected spans",
+)
 _ALERT_GUARDS = {
     "silent-feeds": "silent feeds",
     "push-build": "push build",
@@ -236,6 +260,17 @@ OVERVIEW_CHECKS = (
     "last rebuild",
 )
 
+#: The Overview's own checks that read the derived rows, paused while a rebuild holds that layer.
+#: "uncovered spans" reads the attempt ledger and "recovered Spaces" the landed artefacts and the
+#: registry, so neither is half-built by a rebuild and both keep running.
+DERIVED_OVERVIEW_CHECKS = (
+    "identity health",
+    "movement completeness",
+    "balance reconciliation",
+    "known balances and agreement",
+    "review flags",
+)
+
 #: How long since the newest row, with the provider answering, before an
 #: account is "quiet" rather than "current".
 QUIET_ROW_DAYS = 7
@@ -247,12 +282,18 @@ NEVER_ASKED = "never asked"
 FILE_ONLY = "file-only"
 EMPTY = "empty"
 ARCHIVED = "archived"
+REBUILDING = "rebuilding"
 
 #: The freshness states, in the order they are decided, each with the one rule
 #: that decides it. The page's legend is this table, so the rule shown is the
 #: rule applied. Precedence is the order below: the first that holds wins.
+#: `freshness` decides every state but REBUILDING, which `build_overview` applies over it.
 STATE_RULES: dict[str, str] = {
     ARCHIVED: "the registry gives it a closing date that has passed; nothing is expected of it.",
+    REBUILDING: (
+        "a rebuild is replaying the derived rows, so the rows held and their newest date are "
+        "not yet a fact about the account."
+    ),
     EMPTY: "declared in the registry, but no rows are held.",
     FILE_ONLY: "no scheduled source feeds it, so rows only arrive when a file is imported.",
     NEVER_ASKED: "a scheduled source feeds it, but the provider has never answered for it.",
@@ -318,6 +359,9 @@ class Overview:
     checks_run: int
     items: tuple[AttentionItem, ...]
     accounts: tuple[AccountOverview, ...]
+    #: Set when a rebuild held the derived layer as this was assembled: the checks that read it
+    #: did not run (`DERIVED_OVERVIEW_CHECKS`), and this Overview is never reused by the cache.
+    rebuilding: RebuildHold | None = None
 
 
 def _account_href(ref: str) -> str:
@@ -379,6 +423,18 @@ def _failed_check(name: str, error: BaseException) -> AttentionItem:
             f"The {name} check could not run ({type(error).__name__}), so that "
             "condition is unwatched until it does."
         ),
+        remedy=remedy,
+        href=ADMIN_HREF,
+    )
+
+
+def _running_item(hold: RebuildHold) -> AttentionItem:
+    """The one item that stands in for every paused check, whatever the number."""
+    band, remedy = _KINDS["rebuild-running"]
+    return AttentionItem(
+        kind="rebuild-running",
+        severity=band,
+        message=hold.sentence(),
         remedy=remedy,
         href=ADMIN_HREF,
     )
@@ -823,6 +879,7 @@ def build_overview(
     rebuild_status: Mapping[str, object],
     standings: Callable[[], Mapping[str, AccountStanding]] | None = None,
     movement: Callable[[], MovementCompleteness] | None = None,
+    rebuilding: RebuildHold | None = None,
 ) -> Overview:
     """Everything the Overview shows, from one store and the injected checks.
 
@@ -838,13 +895,22 @@ def build_overview(
 
     Every check is guarded individually. One that raises becomes an item saying
     it could not run, and is not counted among the checks that ran.
+
+    `rebuilding` is the hold a rebuild has on the derived layer (`rebuild_hold`).
+    While it is set the checks that read that layer are not run, nor counted as run: one item
+    says why, once, and no account is given a verdict.
+    `findings` must itself skip the alert's derived conditions (`DERIVED_ALERT_CONDITIONS`).
     """
     items: list[AttentionItem] = []
     failed_checks = 0
+    deferred_alert = len(DERIVED_ALERT_CONDITIONS) if rebuilding is not None else 0
+    deferred_own = len(DERIVED_OVERVIEW_CHECKS) if rebuilding is not None else 0
+    if rebuilding is not None:
+        items.append(_running_item(rebuilding))
 
     try:
         alert_findings = list(findings())
-        alert_run = len(ALERT_CONDITIONS)
+        alert_run = len(ALERT_CONDITIONS) - deferred_alert
     except Exception as error:
         alert_findings = []
         alert_run = 0
@@ -905,8 +971,15 @@ def build_overview(
         ("last rebuild", lambda: _rebuild_items(rebuild_status)),
     ]
     for name, check in own_checks:
+        if rebuilding is not None and name in DERIVED_OVERVIEW_CHECKS:
+            continue
         try:
             items.extend(check())
+        except RebuildInProgress as began:
+            # A rebuild took the layer after this assembly looked: the check is paused, not broken.
+            failed_checks += 1
+            if not any(item.kind == "rebuild-running" for item in items):
+                items.append(_running_item(began.hold))
         except Exception as error:
             failed_checks += 1
             items.append(_failed_check(name, error))
@@ -932,6 +1005,16 @@ def build_overview(
         rows, newest = held.get(ref, (0, None))
         declared = registry.get(ref)
         closed = declared.closed if declared is not None else None
+        state = freshness(
+            rows=rows,
+            newest=newest,
+            watched_source=bool(sources.get(ref, set()) & set(watched)),
+            last_asked=last_asked.get(ref),
+            closed=closed,
+            today=today,
+        )
+        if rebuilding is not None and state != ARCHIVED:
+            state = REBUILDING
         accounts.append(
             AccountOverview(
                 ref=ref,
@@ -940,14 +1023,7 @@ def build_overview(
                 rows=rows,
                 newest=newest,
                 last_asked=last_asked.get(ref),
-                state=freshness(
-                    rows=rows,
-                    newest=newest,
-                    watched_source=bool(sources.get(ref, set()) & set(watched)),
-                    last_asked=last_asked.get(ref),
-                    closed=closed,
-                    today=today,
-                ),
+                state=state,
                 bound=None if actual_bound is None else ref in actual_bound,
                 items=concerning[ref],
                 closed=closed,
@@ -968,9 +1044,10 @@ def build_overview(
     return Overview(
         generated_at=now,
         checks_total=total,
-        checks_run=alert_run + len(OVERVIEW_CHECKS) - failed_checks,
+        checks_run=alert_run + len(OVERVIEW_CHECKS) - deferred_own - failed_checks,
         items=ordered,
         accounts=tuple(accounts),
+        rebuilding=rebuilding,
     )
 
 
@@ -1012,6 +1089,7 @@ class OverviewCache:
             if (
                 not fresh
                 and self._held is not None
+                and self._held[1].rebuilding is None
                 and now - self._held[0] < self._seconds
             ):
                 return self._held[1]

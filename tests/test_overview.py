@@ -43,6 +43,7 @@ from obdi.overview import (
     NOW,
     OVERVIEW_CHECKS,
     QUIET,
+    REBUILDING,
     SILENT,
     SOON,
     STATE_RULES,
@@ -567,7 +568,7 @@ class TestEachFreshnessStateArisesFromAKnownCase:
 
     def test_EveryStateHasOneStatedRule(self):
         assert set(STATE_RULES) == {
-            CURRENT, QUIET, SILENT, NEVER_ASKED, FILE_ONLY, EMPTY, ARCHIVED
+            CURRENT, QUIET, SILENT, NEVER_ASKED, FILE_ONLY, EMPTY, ARCHIVED, REBUILDING
         }
         assert all(rule.endswith(".") for rule in STATE_RULES.values())
 
