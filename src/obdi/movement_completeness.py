@@ -66,6 +66,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
+from typing import NamedTuple
 
 from .accounts import AccountMap, AccountRef
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS
@@ -132,6 +133,8 @@ class RowCountFault:
     held: int
     #: Of `held`, how many are history (void, folded, or reversed).
     held_as_history: int = 0
+    #: Where the sightings are, from `transaction_sources` (`_explain`).
+    explanation: str = ""
 
     def says(self) -> str:
         where = f"{self.day.isoformat()} {self.account} via {self.source} ({self.direction})"
@@ -141,10 +144,11 @@ class RowCountFault:
                 f"{where}: {_plural(self.listed, 'row')} of one size and direction "
                 f"listed, held dated {when}"
             )
-        return (
+        line = (
             f"{where}: {_plural(self.listed, 'row')} of one size and direction "
             f"listed, {self.held} held"
         )
+        return f"{line}: {self.explanation}" if self.explanation else line
 
 
 @dataclass(frozen=True)
@@ -406,18 +410,41 @@ def _counted(rows: list[Transaction] | None) -> Counter[_ListKey] | None:
     )
 
 
-def _held_by_key(
-    store: Store, digest_accounts: dict[str, set[str]]
-) -> tuple[Counter[tuple[str, str, str, int, date]], Counter[tuple[str, str, str, int, date]]]:
-    """(held, held as history) per (account, source, direction, size, day).
+class _Sighting(NamedTuple):
+    """One artefact's sighting of one stored row, as `transaction_sources` holds it."""
+
+    entity_id: str
+    source: str
+    digest: str
+    observed: date
+    #: The account the count attributes the sighting to.
+    account: str
+    #: The account the stored row actually sits in.
+    stored_account: str
+    value_date: date
+    status: str
+    direction: str
+    size: int
+
+
+@dataclass
+class _Held:
+    held: Counter[tuple[str, str, str, int, date]] = field(default_factory=Counter)
+    history: Counter[tuple[str, str, str, int, date]] = field(default_factory=Counter)
+    sightings: list[_Sighting] = field(default_factory=list)
+    #: How many sources sighted each stored row, which says how well a row is supported.
+    support: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+
+
+def _held_by_key(store: Store, digest_accounts: dict[str, set[str]]) -> _Held:
+    """The sightings of listed artefacts, counted per (account, source, direction, size, day).
 
     An entity is counted once per source and day however many artefacts of that
     source sighted it. The account is the artefact's own where the row sits
     elsewhere (a Space-blind row merged onto a Space row), the row's where the
     artefact was filed under it.
     """
-    held: Counter[tuple[str, str, str, int, date]] = Counter()
-    history: Counter[tuple[str, str, str, int, date]] = Counter()
+    found = _Held()
     seen: set[tuple[str, str, str, date]] = set()
     for row in store.connection.execute(
         "SELECT s.entity_id AS entity_id, s.source AS source, "
@@ -428,21 +455,151 @@ def _held_by_key(
         "WHERE s.source_id IS NULL OR s.source_id NOT LIKE ?",
         (FOLDED_SIGHTING_PREFIX + "%",),
     ):
+        found.support[str(row["entity_id"])].add(str(row["source"]))
         accounts = digest_accounts.get(str(row["digest"]))
         if accounts is None:
             continue
         account = str(row["account"]) if str(row["account"]) in accounts else min(accounts)
         day = date.fromisoformat(str(row["observed"] or row["value_date"]))
+        minor = int(row["minor"])
+        found.sightings.append(
+            _Sighting(
+                str(row["entity_id"]),
+                str(row["source"]),
+                str(row["digest"]),
+                day,
+                account,
+                str(row["account"]),
+                date.fromisoformat(str(row["value_date"])),
+                str(row["status"]),
+                _direction(minor),
+                abs(minor),
+            )
+        )
         marker = (account, str(row["source"]), str(row["entity_id"]), day)
         if marker in seen:
             continue
         seen.add(marker)
-        minor = int(row["minor"])
         key = (account, str(row["source"]), _direction(minor), abs(minor), day)
-        held[key] += 1
-        if str(row["status"]) in ("void", "folded", "reversed"):
-            history[key] += 1
-    return held, history
+        found.held[key] += 1
+        if str(row["status"]) in _HISTORY:
+            found.history[key] += 1
+    return found
+
+
+_HISTORY = ("void", "folded", "reversed")
+
+
+def _dates(days: Iterable[date]) -> str:
+    return _listed(sorted({d.isoformat() for d in days}))
+
+
+def _status_word(status: str) -> str:
+    return "history" if status in _HISTORY else status
+
+
+@dataclass(frozen=True)
+class _Cell:
+    """The (account, source, direction, size, day) a count disagrees on, with both counts."""
+
+    account: str
+    source: str
+    direction: str
+    size: int
+    day: date
+    listed: int
+    held: int
+
+
+def _explain(
+    fault: _Cell,
+    *,
+    wanted: Counter[tuple[str, str, str, int, date]],
+    held: _Held,
+    by_shape: dict[tuple[str, str, int], list[_Sighting]],
+    listing_digests: set[str],
+) -> str:
+    """Where the sightings of the rows an artefact lists are, for a fault of the counts.
+
+    Listed more than held: the sightings of the listing's artefacts that match its rows are on
+    one stored row dated D, on a stored row of another day or account, or on none.
+    A sighting counts as elsewhere only when its own day holds more than is listed there, so an
+    equal payment the same artefact lists on another day is not mistaken for the missing one.
+    Held more than listed: the stored rows are ranked by status and by how many sources sighted
+    them, the best supported are taken as the listed ones, and the rest are the surplus. Which
+    of two equally supported rows is the surplus is therefore decided by that rank and not by
+    the evidence, and the line names only what the surplus row's own sightings say.
+    Counts, dates, account and source names only.
+    """
+    size = fault.size
+    shape = by_shape.get((fault.source, fault.direction, size), [])
+    if fault.listed > fault.held:
+        mine = [s for s in shape if s.digest in listing_digests]
+        here = {
+            s.entity_id: s for s in mine if s.account == fault.account and s.observed == fault.day
+        }
+        elsewhere: dict[tuple[str | None, date], None] = {}
+        for sighting in mine:
+            if sighting.entity_id in here:
+                continue
+            cell = (sighting.account, fault.source, fault.direction, size, sighting.observed)
+            if held.held[cell] > wanted.get(cell, 0):
+                same = sighting.stored_account == fault.account
+                elsewhere[(None if same else sighting.stored_account, sighting.observed)] = None
+        if fault.listed == 1:
+            subject = "the listed row is"
+        elif fault.listed == 2:
+            subject = "both listed rows are"
+        else:
+            subject = f"all {fault.listed} listed rows are"
+        places = [
+            f"a stored row of another account, {account}, observed {day.isoformat()}"
+            if account is not None
+            else f"a stored row of another day, observed {day.isoformat()}"
+            for account, day in sorted(elsewhere, key=lambda k: (k[1], k[0] or ""))
+        ]
+        if here:
+            rows = "one stored row" if len(here) == 1 else f"{len(here)} stored rows"
+            placed = f"{rows}, dated {_dates(s.value_date for s in here.values())}"
+            if places:
+                subject = "the listed rows are"
+                placed += ", and on " + " and ".join(places)
+            return f"{subject} sighted on {placed}"
+        if places:
+            subject = "the listed row is" if fault.listed == 1 else "the listed rows are"
+            return f"{subject} sighted on {' and '.join(places)}"
+        return f"{subject} sighted on no stored row"
+
+    here_rows: dict[str, list[_Sighting]] = defaultdict(list)
+    for sighting in shape:
+        if sighting.account == fault.account and sighting.observed == fault.day:
+            here_rows[sighting.entity_id].append(sighting)
+    ranked = sorted(
+        here_rows,
+        key=lambda e: (
+            _status_word(here_rows[e][0].status) != "booked",
+            _status_word(here_rows[e][0].status) != "pending",
+            -len(held.support[e]),
+            e,
+        ),
+    )
+    surplus = ranked[fault.listed :]
+    kept_digests = {s.digest for e in ranked[: fault.listed] for s in here_rows[e]}
+    others = [s for e in surplus for s in here_rows[e] if s.digest not in kept_digests]
+    states = Counter(_status_word(here_rows[e][0].status) for e in surplus)
+    named = " and ".join(f"{n} {word}" for word, n in sorted(states.items()))
+    what = (
+        f"the surplus row is {next(iter(states))}"
+        if len(surplus) == 1
+        else f"the {len(surplus)} surplus rows are {named}"
+    )
+    artefacts = len({s.digest for s in others})
+    if not artefacts:
+        return f"{what}, sighted by no artefact other than those that sight the listed row"
+    return (
+        f"{what}, sighted by {_plural(artefacts, 'other artefact')} of {fault.source} "
+        f"(observed {_dates(s.observed for s in others)})"
+    )
 
 
 def check_rows(
@@ -465,6 +622,7 @@ def check_rows(
     listed: dict[tuple[str, str], Counter[tuple[date, str, int]]] = defaultdict(Counter)
     digest_accounts: dict[str, set[str]] = defaultdict(set)
     read: set[tuple[str, str]] = set()
+    listing_digests: dict[tuple[str, str, str, int, date], set[str]] = defaultdict(set)
     for artefact in artefacts:
         source = str(artefact["source"])
         if source in _READS_NO_ROWS or source in _PENDING_SOURCES:
@@ -485,8 +643,23 @@ def check_rows(
         for (row_source, day, direction, size), count in listing.items():
             union = listed[(account, row_source)]
             union[(day, direction, size)] = max(union[(day, direction, size)], count)
+            listing_digests[(account, row_source, direction, size, day)].add(digest)
 
-    held, history = _held_by_key(store, digest_accounts)
+    sighted = _held_by_key(store, digest_accounts)
+    held, history = sighted.held, sighted.history
+    by_shape: dict[tuple[str, str, int], list[_Sighting]] = defaultdict(list)
+    for sighting in sighted.sightings:
+        by_shape[(sighting.source, sighting.direction, sighting.size)].append(sighting)
+
+    def explained(cell: tuple[str, str, str, int, date], listed: int, kept: int) -> str:
+        return _explain(
+            _Cell(*cell, listed=listed, held=kept),
+            wanted=wanted,
+            held=sighted,
+            by_shape=by_shape,
+            listing_digests=listing_digests.get(cell, set()),
+        )
+
     wanted: Counter[tuple[str, str, str, int, date]] = Counter()
     for (account, source), union in listed.items():
         for (day, direction, size), count in union.items():
@@ -532,6 +705,7 @@ def check_rows(
                         wanted[cell],
                         held_count,
                         history.get(cell, 0),
+                        explained(cell, wanted[cell], held_count),
                     )
                 )
     for group, days in extra.items():
@@ -549,6 +723,7 @@ def check_rows(
                         wanted.get(cell, 0),
                         held[cell],
                         history.get(cell, 0),
+                        explained(cell, wanted.get(cell, 0), held[cell]),
                     )
                 )
     report.row_faults = sorted(faults, key=lambda f: (f.day, f.account, f.source, f.direction))

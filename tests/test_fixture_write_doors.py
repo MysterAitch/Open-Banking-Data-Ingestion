@@ -192,6 +192,13 @@ JUSTIFIED = {
     ("test_movement_leg_partners.py", "transfer_pairs"): "re-points a confirmed pair at the "
     "wrong row, which the pairing pass is built never to do, so the state exists for the "
     "check to find and no door produces it",
+    ("test_movement_row_fault_causes.py", "transaction_sources"): "moves a sighting to "
+    "another observed day, so the explanation can say a listed row is sighted elsewhere: "
+    "the importer dates every sighting by the artefact that gave it, so it cannot place "
+    "one days away from the row it lists",
+    ("test_movement_row_fault_causes.py", "transactions"): "moves a stored row to another "
+    "account for the same scenario: the explanation names the account a listed row's "
+    "sighting sits in, and the importer files a row under the account of its own artefact",
     ("test_movement_rows_listed.py", "transaction_sources"):"removes a sighting, moves "
     "one to another day, and adds a second row's: the store disagreeing with the "
     "artefact it came from, which the importer derives both from the same bytes and so "
