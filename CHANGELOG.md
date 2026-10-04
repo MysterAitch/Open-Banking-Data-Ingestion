@@ -26,6 +26,53 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.305] - 2026-10-04
+
+### Fixed
+- **The Overview and the Accounts page follow every change that can alter an
+  account's standing.** Both read it from a held value whose key was a list
+  of counts and stamps, and several changes moved none of them: editing an
+  account's kind, parent, or closed date, refiling an artefact, assigning a
+  statement section. The two pages then contradicted the ledger until
+  something else changed or the process restarted. A counter in the store is
+  now moved, inside the writer's own transaction, by every write to a table
+  that can affect a standing, and a test refuses a table nobody has
+  classified. Adding more counts to the key was rejected: that is how the gap
+  arose. The Overview's own one-minute hold ends on the same counter, so a
+  change he has just made is on the page he returns to.
+- **Every flow ends at the account it concerned.** After an import, a
+  statement read in, a declaration or edit, a stated or removed balance, a
+  refile, or a binding, the answer page offered only "Back to overview". It
+  now opens with a link to the account's ledger and says what the flow did
+  to its verification.
+- **Removing a stated balance asks first and keeps a record.** It was one tap
+  under the save form, with no confirmation, on a figure the page never
+  shows. A removed balance can now be read back and stated again.
+- **The Actual page says when nothing can happen.** Unconfigured, it titled an
+  answer "Push queued" over "nothing queued" and offered three live presses.
+  An identical request already waiting is not queued a second time.
+- **The import preview and result are masked until "Show values"** and are
+  never cached. They showed sample rows and mismatches with amounts and
+  descriptions on a page Back returned to.
+- **Pickers list every account that holds rows as well as every declared
+  one**, and a guess at a close spelling is never the first button: a card
+  statement was offered to an unrelated account that way. Kind and Parent are
+  chosen, not typed.
+- **A payment the feed joins last is no longer counted twice.** When the
+  aggregator and the export both arrive before the feed, each makes a row of
+  its own and the feed joined only one. Two stored rows are now joined where
+  an exact rule names both, and never on a guess. The count of such pairs was
+  read on the deployed store first: none, with 224 candidate pairs refused by
+  the guards. So this changes nothing there today; it is for a connection
+  added after its statements were imported.
+- **The development harness** gives each run a directory of its own and can no
+  longer reach a bank: its Connect made a real request to the provider's
+  token endpoint with dummy credentials.
+
+Schema 17: the counter and its triggers, and the record of removed balances.
+What a trigger costs on every row written has not been timed on a store of
+the deployed size; the rebuild's duration after a deploy is the measure.
+
 ## [0.4.304] - 2026-10-04
 
 The first step of a redesign, from three critical reviews of the interface the
