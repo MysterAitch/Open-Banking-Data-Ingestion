@@ -37,6 +37,7 @@ from .coverage import (
     assignment_corroboration,
     assignment_doubt,
 )
+from .declined_items import void_declined_items
 from .errors import DataError
 from .ingest import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
 from .models import Transaction
@@ -362,6 +363,7 @@ def assign_section(
         summary=summary,
         space_blind=families_of(store, account_map).blind_in,
     )
+    void_declined_items(store)
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)

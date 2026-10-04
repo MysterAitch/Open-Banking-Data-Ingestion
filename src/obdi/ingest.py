@@ -302,6 +302,10 @@ def import_file(
 
         blind = families_of(store, account_map).blind_in
     reconcile_batch(store, incoming, digest=digest, summary=summary, space_blind=blind)
+    # Imported here: `declined_items` reaches the feed readers, which reach this module.
+    from .declined_items import void_declined_items
+
+    void_declined_items(store)
     if account_map is not None:
         summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
@@ -341,14 +345,19 @@ def pair_transfers_across_store(store: Store, account_map: AccountMap | None = N
         named = row.raw.get("counterPartyUid")
         return resolver(named) if isinstance(named, str) and named else None
 
+    # Imported here: `declined_items` reaches the feed readers, which reach this module.
+    from .declined_items import declined_void_entities
+
     # A folded row is a second report of a payment, not a movement, so it must
-    # not be offered as the leg of a transfer, and nor can a reversed one: the
-    # money never moved, so the other side has nothing to pair with.
+    # not be offered as the leg of a transfer, and nor can a reversed one or one the bank
+    # declined: the money never moved, so the other side has nothing to pair with.
+    never_moved = declined_void_entities(store)
     pairs = pair_transfer_entities(
         (
             t
             for t in store.all_transactions()
             if t.status not in (TransactionStatus.FOLDED, TransactionStatus.REVERSED)
+            and t.entity_id not in never_moved
         ),
         counterpart=counterpart,
     )

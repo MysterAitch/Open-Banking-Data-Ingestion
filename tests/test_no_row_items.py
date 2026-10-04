@@ -14,9 +14,11 @@ KNOWN ANSWERS, decided before the first run:
         the balance moves by the top-up less the payment and by nothing for the item
     a DECLINED item of another merchant a day before the unlisted payment
         listed too, of a different recipient
-    a payment SETTLED in one fetch and DECLINED in a later one
-        the store keeps its row, so the item is a row and not "not a row": 0 listed, and
-        the change equals the sum of the rows whose own feed item makes no row
+    a payment SETTLED (or PENDING) in one fetch and DECLINED in a later one
+        the row is void and not counted (`declined_items`), so the change has no difference
+        left to explain; with the pass off, the store keeps the row, the item is a row and
+        not "not a row": 0 listed, and the change equals the sum of the rows whose own feed
+        item makes no row
     the same two fetches landed the other way round
         the newest status is SETTLED, so nothing is declined and the test does not hold
 """
@@ -38,6 +40,7 @@ from feed_morning_corpus import (
     morning,
     top_up,
 )
+from obdi import rebuild
 from obdi.balance_anchors import effective_opening
 from obdi.family_anchors import families_of
 from obdi.fault_explanation import NO_ROW_STATUS_ROWS
@@ -185,7 +188,11 @@ class TestTheCapOnTheListOfItems:
 
 
 class TestARowWhoseItemTheBankLaterDeclined:
-    """A payment made from an earlier fetch, whose item a later fetch reports DECLINED."""
+    """A payment made from an earlier fetch, whose item a later fetch reports DECLINED.
+
+    The rule (`declined_items.void_declined_items`) makes such a row history, so the family
+    holds no money for it: `test_declined_items` has every arrival order and the exceptions.
+    """
 
     def settled_then_declined(self, make, **more):
         return make(
@@ -195,10 +202,50 @@ class TestARowWhoseItemTheBankLaterDeclined:
             **more,
         )
 
-    def test_Store_WhenAnItemIsSettledThenDeclined_TheRowIsStillCounted(self, make):
+    def test_Store_WhenAnItemIsSettledThenDeclined_TheRowIsVoidAndNotCounted(self, make):
         store = self.settled_then_declined(make)
 
-        assert balance(store, MAIN) == MAIN_BALANCE + TOP_UP_MINOR - PAYMENT_MINOR
+        (held,) = [t for t in store.transactions_for_account(MAIN) if t.source_id == "f-cafe"]
+
+        assert held.status.value == "void"
+        assert balance(store, MAIN) == MAIN_BALANCE + TOP_UP_MINOR
+
+    def test_Change_WhenAnItemIsSettledThenDeclined_LeavesNoRowWhoseItemMakesNoRow(self, make):
+        explanation = walk_of(self.settled_then_declined(make)).explanation
+
+        assert all(NO_ROW_STATUS_ROWS not in change.holds for change in explanation.changes)
+        assert not explanation.changes, "the export omits the payment and so do the rows"
+
+    def test_Store_WhenAPendingPaymentIsLaterDeclined_TheRowIsVoid(self, make):
+        store = make(
+            [cafe_payment(status="PENDING"), top_up()],
+            export_extra=(TOP_UP_LISTED,),
+            main_refetches=([cafe_payment(status="DECLINED")],),
+        )
+
+        (held,) = [t for t in store.transactions_for_account(MAIN) if t.source_id == "f-cafe"]
+
+        assert held.status.value == "void"
+
+
+class TestTheExplanationOfARowLeftCounted:
+    """A row counted although its item is, in the newest landed feed, a status that makes no row.
+
+    The pass voids such a row unless another source also lists it, so the explanation that
+    names it is read with the pass off: it stands for a row left counted, whichever way.
+    """
+
+    @pytest.fixture(autouse=True)
+    def without_the_pass(self, monkeypatch):
+        monkeypatch.setattr(rebuild, "void_declined_items", lambda store: None)
+
+    def settled_then_declined(self, make, **more):
+        return make(
+            [cafe_payment(), top_up()],
+            export_extra=(TOP_UP_LISTED,),
+            main_refetches=([cafe_payment(status="DECLINED")],),
+            **more,
+        )
 
     def test_Change_WhenAnItemIsSettledThenDeclined_EqualsTheRowsWhoseItemMakesNoRow(self, make):
         (change, *_) = walk_of(self.settled_then_declined(make)).explanation.changes
@@ -223,17 +270,6 @@ class TestARowWhoseItemTheBankLaterDeclined:
         ).explanation.changes
 
         assert NO_ROW_STATUS_ROWS in change.holds
-
-    def test_Store_WhenAPendingPaymentIsLaterDeclined_TheRowIsLeftPendingNotVoided(self, make):
-        store = make(
-            [cafe_payment(status="PENDING"), top_up()],
-            export_extra=(TOP_UP_LISTED,),
-            main_refetches=([cafe_payment(status="DECLINED")],),
-        )
-
-        (held,) = [t for t in store.transactions_for_account(MAIN) if t.source_id == "f-cafe"]
-
-        assert held.status.value == "pending", "nothing voids a row whose item was declined"
 
     def test_Change_WhenDeclinedThenSettled_NothingIsDeclinedAndTheTestDoesNotHold(self, make):
         store = make(

@@ -10,8 +10,8 @@ from rows would change with the order the sources arrived in
 THE NEWEST WINS. An item's status changes over time (settled, then refunded),
 so what the feed says of a uid is what the artefact landed last says, whole: its
 status, its time, and the rest are never mixed from two fetches. Landing order is
-the artefact's first landing time, then its position, so two fetches of one
-item give the same answer whichever order they are read in.
+the artefact's latest landing time (`_landing_order` says why), then its position, so two
+fetches of one item give the same answer whichever order they are read in.
 
 THE TIME is `transactionTime`, else `settlementTime`: the one the provider dates a
 row by (`providers.starling.to_transaction`), read here as an instant in UTC.
@@ -155,12 +155,26 @@ def _items_in(payload: bytes) -> dict[str, FeedItem]:
 
 
 def _landing_order(store: Store) -> dict[str, tuple[str, int]]:
-    """Each landed feed artefact's digest -> (first landing time, first position)."""
+    """Each landed feed artefact's digest -> (latest landing time, first position).
+
+    The LATEST time any name landed the bytes under (`artefact_origins`), because identical
+    bytes are one artefact however often they land: an item that was settled, declined, and
+    settled again in three fetches whose bodies repeat the first's is one landing of those
+    bytes by the artefact's own stamp, and read as older than the declined fetch it follows
+    it said "declined" last. Each fetch is asked under its own name (`changesSince` its own
+    stamp), which is what records the later landing.
+    Bytes landed again under a name already seen record nothing, so a repeat of an ask
+    whose answer came back byte for byte the same stays at its first landing.
+    """
     return {
         str(row["digest"]): (str(row["at"]), int(row["position"]))
         for row in store.connection.execute(
-            "SELECT digest, MIN(fetched_at) AS at, MIN(rowid) AS position "
-            "FROM raw_artefacts WHERE source = 'starling-feed' GROUP BY digest"
+            "SELECT a.digest AS digest, "
+            "MAX(MIN(a.fetched_at), COALESCE(MAX(o.first_seen_at), MIN(a.fetched_at))) AS at, "
+            "MIN(a.rowid) AS position "
+            "FROM raw_artefacts a LEFT JOIN artefact_origins o "
+            "ON o.digest = a.digest AND o.account_ref = a.account_ref AND o.source = a.source "
+            "WHERE a.source = 'starling-feed' GROUP BY a.digest"
         )
     }
 
@@ -269,6 +283,92 @@ class FeedStatuses:
         return dict(sorted(names.items()))
 
 
+_STATUS_KEY = re.compile(rb'"status"\s*:\s*"([^"]*)"')
+_UID_KEY = re.compile(rb'"feedItemUid"')
+_CHUNK = 400
+
+
+def _may_hold_a_no_row_item(payload: bytes | str) -> bool:
+    """Whether a landed feed body may hold an item whose status makes no row, read as bytes.
+
+    CONSERVATIVE: true when the body names more items than it gives row-making statuses, so an
+    item with a no-row status, an unlisted one, none, or a null is always caught. A body whose
+    items all state a row-making status is never read further. A nested "status" field could
+    in principle hide an item with none; the bank's items carry none.
+    """
+    data = payload.encode("utf-8") if isinstance(payload, str) else bytes(payload or b"")
+    making = sum(
+        1
+        for found in _STATUS_KEY.findall(data)
+        if STATUS_MAP.get(found.decode("utf-8", "replace").strip().upper()) is not None
+    )
+    return len(_UID_KEY.findall(data)) > making
+
+
+def uids_with_a_no_row_status_anywhere(store: Store) -> frozenset[str]:
+    """Every feed uid some landed artefact gives a status that makes no row, whatever a later says.
+
+    The gate that keeps a pass over the whole store from reading it: one statement scans the
+    landed feed bodies as bytes, and only the bodies that may hold such an item are parsed.
+    An item a later fetch settles is in this set too; `FeedStatuses` says which is newest.
+    """
+    connection = store.connection
+    connection.create_function("obdi_may_hold_no_row_item", 1, _may_hold_a_no_row_item)
+    digests = [
+        str(row[0])
+        for row in connection.execute(
+            "SELECT DISTINCT digest FROM raw_artefacts WHERE source = 'starling-feed' "
+            "AND obdi_may_hold_no_row_item(payload)"
+        )
+    ]
+    found: set[str] = set()
+    for digest in digests:
+        if digest not in _ITEMS_BY_DIGEST:
+            _ITEMS_BY_DIGEST[digest] = _items_in(feed_payload(store, digest))
+        found.update(
+            uid for uid, item in _ITEMS_BY_DIGEST[digest].items() if makes_no_row(item.status)
+        )
+    return frozenset(found)
+
+
+def accounts_holding_counted_rows_of(store: Store, uids: frozenset[str]) -> list[str]:
+    """The accounts with a counted row the bank's feed sighted under one of `uids`."""
+    if not uids:
+        return []
+    ordered = sorted(uids)
+    accounts: set[str] = set()
+    sources = sorted(FIRST_PARTY_FEEDS)
+    for start in range(0, len(ordered), _CHUNK):
+        chunk = ordered[start : start + _CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        source_marks = ",".join("?" for _ in sources)
+        accounts.update(
+            str(row[0])
+            for row in store.connection.execute(
+                "SELECT DISTINCT t.account_id FROM transactions t "  # noqa: S608
+                "JOIN transaction_sources s ON s.entity_id = t.entity_id "
+                f"WHERE s.source IN ({source_marks}) AND s.source_id IN ({marks}) "
+                "AND t.status NOT IN ('void', 'folded', 'reversed')",
+                (*sources, *chunk),
+            )
+        )
+    return sorted(accounts)
+
+
+def feed_sighted_accounts(store: Store) -> list[str]:
+    """The accounts that hold a row the bank's own feed has sighted, in name order."""
+    marks = ",".join("?" for _ in FIRST_PARTY_FEEDS)
+    return [
+        str(row[0])
+        for row in store.connection.execute(
+            "SELECT DISTINCT t.account_id FROM transactions t "  # noqa: S608
+            "JOIN transaction_sources s ON s.entity_id = t.entity_id "
+            f"WHERE s.source IN ({marks}) ORDER BY t.account_id",
+            tuple(sorted(FIRST_PARTY_FEEDS)),
+        )
+    ]
+
+
 @dataclass(frozen=True)
 class RowWithNoRowStatus:
     """A stored row, not history, whose feed item the newest landed feed gives no-row status."""
@@ -311,6 +411,7 @@ __all__ = [
     "FeedItem",
     "FeedStatuses",
     "RowWithNoRowStatus",
+    "feed_sighted_accounts",
     "makes_no_row",
     "rows_with_no_row_status",
 ]

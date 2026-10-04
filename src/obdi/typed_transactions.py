@@ -44,6 +44,7 @@ from datetime import UTC, date, datetime
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
 from .balance_anchors import known_account, parse_calendar_day, parse_pounds_and_pence
+from .declined_items import void_declined_items
 from .errors import DataError
 from .identity import artefact_digest, content_key
 from .ingest import pair_transfers_across_store, reconcile_batch
@@ -301,6 +302,7 @@ def record_typed_transaction(
     reconcile_batch(
         store, [transaction_from_entry(payload, ref, digest)], digest=digest, space_blind=blind
     )
+    void_declined_items(store)
     settle_review_flags(store)
     pair_transfers_across_store(store, account_map)
     recheck(store)

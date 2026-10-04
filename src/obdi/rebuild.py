@@ -36,6 +36,7 @@ from typing import Any
 from . import instrumentation
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
+from .declined_items import void_declined_items
 from .errors import DataError
 from .family_anchors import families_of
 from .ingest import ImportSummary, SpaceBlind, pair_transfers_across_store, reconcile_batch
@@ -669,6 +670,9 @@ def rebuild_from_raw(
                     emit_events=False,
                 )
 
+    # First, so a payment the bank later declined is history before anything folds or pairs it.
+    with instrumentation.phase("declined-items"):
+        void_declined_items(store)
     # Before pairing, so a main-account copy of a Space payment is not
     # offered as one leg of a transfer. Without an account map there is no way
     # to know which accounts are siblings, so nothing is folded.

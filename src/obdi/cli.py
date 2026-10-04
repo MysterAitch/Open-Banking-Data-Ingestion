@@ -59,6 +59,7 @@ from .coverage import (
     transpositions,
 )
 from .coverage import report as coverage_report
+from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
@@ -1217,6 +1218,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
                 summary=ImportSummary(artefact_new=False),
                 space_blind=families_of(store, _account_map(store)).blind_in,
             )
+            void_declined_items(store)
             fold_space_copies(store, _account_map(store))
             fold_same_money(store, _account_map(store))
             settle_review_flags(store)
@@ -3643,6 +3645,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 summary=summary,
                 space_blind=families_of(store, _account_map(store)).blind_in,
             )
+            void_declined_items(store)
             summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
             summary.same_money_folded += fold_same_money(
                 store, _account_map(store)

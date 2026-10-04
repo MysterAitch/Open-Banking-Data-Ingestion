@@ -48,7 +48,8 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
                         whose own feed item is, in the newest landed feed, a status
                         that makes no row (`feed_statuses.makes_no_row`): a row made
                         from an earlier fetch whose item the bank later declined, which
-                        the provider drops on the later fetch and nothing voids. The
+                        the provider drops on the later fetch and which stays counted
+                        only where another source also lists it (`declined_items`). The
                         statuses are taken together, so it holds where no single
                         status's own test does
   straddling          the rows whose date from the source and stored date fall

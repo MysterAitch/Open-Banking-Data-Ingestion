@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
-from .feed_statuses import RowWithNoRowStatus, rows_with_no_row_status
+from .feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
 from .matching import (
     REFUSALS,
     CandidateIndex,
@@ -600,17 +600,10 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
 
 def no_row_status_figures(store: Store) -> list[NoRowStatusFigures]:
     """For each account the bank's feed sighted, the stored rows whose item makes no row."""
-    marks = ",".join("?" for _ in FIRST_PARTY_FEEDS)
-    accounts = [
-        str(row[0])
-        for row in store.connection.execute(
-            "SELECT DISTINCT t.account_id FROM transactions t "  # noqa: S608
-            "JOIN transaction_sources s ON s.entity_id = t.entity_id "
-            f"WHERE s.source IN ({marks}) ORDER BY t.account_id",
-            tuple(sorted(FIRST_PARTY_FEEDS)),
-        )
+    return [
+        NoRowStatusFigures(account, rows_with_no_row_status(store, account))
+        for account in feed_sighted_accounts(store)
     ]
-    return [NoRowStatusFigures(a, rows_with_no_row_status(store, a)) for a in accounts]
 
 
 def settlement_figures(

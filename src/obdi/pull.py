@@ -36,6 +36,7 @@ from .asked_coverage import (
     heal_plan,
 )
 from .connections import Connection, ConnectionStore, apply_refresh
+from .declined_items import void_declined_items
 from .family_anchors import families_of
 from .ingest import ImportSummary, SpaceBlind, reconcile_batch
 from .jsontypes import JsonObject, text
@@ -651,6 +652,7 @@ def pull_truelayer(
         # so the same window is simply offered again next cycle.
         tiers.stamp(store, "truelayer", connection.connection_id, tier_choice)
 
+    void_declined_items(store)
     # The aggregator cannot see Spaces, so this is where its copies of Space
     # payments arrive.
     summary.folded += fold_space_copies(store, account_map).newly_folded
@@ -1312,6 +1314,7 @@ def pull_starling(
                 space_blind=families_of(store, account_map).blind_in,
             )
 
+    void_declined_items(store)
     # The feed's Space rows may be the other half of a copy already held.
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded

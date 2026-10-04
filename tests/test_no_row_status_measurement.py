@@ -32,6 +32,7 @@ from datetime import date
 import pytest
 
 from late_settlement_corpus import export_text
+from obdi import rebuild
 from obdi.exact_rule_measure import NAMED_DATES, exact_rule_report
 from obdi.ingest import import_file
 from obdi.providers import starling
@@ -49,6 +50,18 @@ ROUND_UP = {"goalCategoryUid": "cat-bills", "amount": {"currency": "GBP", "minor
 
 def payment(day: int, status: str = "SETTLED", **more):
     return card_payment(f"f-day-{day}", f"Shop {day}", 100 + day, day, status=status, **more)
+
+
+@pytest.fixture(autouse=True)
+def without_the_rule(monkeypatch):
+    """A rebuild as it was before a row whose item the bank declined was voided.
+
+    The measurement says what the rule WOULD change in a store built without it, so these
+    stores are built without it. `test_declined_items` asserts that the same measurement says
+    none once the rule has run. A live landing here never runs the pass (it is a call a pull
+    and an import make), so only the rebuild has to be told.
+    """
+    monkeypatch.setattr(rebuild, "void_declined_items", lambda store: None)
 
 
 @pytest.fixture
