@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -3848,6 +3849,7 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
             ).append(str(name["origin"]))
 
     written = 0
+    unreadable: Counter[str] = Counter()
     for row in rows:
         stamp = row["fetched_at"][:16].replace(":", "").replace("T", "T")
         name = f"{stamp}_{row['digest'][:8]}"
@@ -3855,7 +3857,7 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
         folder = out_dir / row["source"]
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{name}{extension}").write_bytes(row["payload"])
-        sidecar = {
+        sidecar: dict[str, object] = {
             "account_ref": row["account_ref"],
             "origin": row["origin"],
             "origins": origins.get(
@@ -3863,14 +3865,31 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
             ),
             "fetched_at": row["fetched_at"],
             "digest": row["digest"],
-            "request_meta": json.loads(row["request_meta"]) if row["request_meta"] else {},
+            "request_meta": {},
         }
+        # One artefact's request record must never end the export.
+        # A record that was not JSON raised here and stopped the loop at that
+        # artefact, so every artefact landed after it was missing from the
+        # files - and the scheduler ran this step with its failure discarded,
+        # so nothing said so until the cycle's steps were recorded.
+        if row["request_meta"]:
+            try:
+                sidecar["request_meta"] = json.loads(row["request_meta"])
+            except ValueError:
+                sidecar["request_meta_unreadable"] = str(row["request_meta"])
+                unreadable[str(row["source"])] += 1
         (folder / f"{name}.meta.json").write_text(
             json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
         )
         written += 1
 
     print(f"exported {written} artefact(s) to {out_dir}")
+    if unreadable:
+        by_source = ", ".join(f"{source}: {count}" for source, count in sorted(unreadable.items()))
+        print(
+            f"{sum(unreadable.values())} carried a request record that is not JSON "
+            f"({by_source}); each is exported as text under request_meta_unreadable"
+        )
     return 0
 
 

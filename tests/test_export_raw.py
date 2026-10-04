@@ -108,3 +108,77 @@ class TestExportRaw:
         second = sorted(p.as_posix() for p in out.rglob("*") if p.is_file())
 
         assert first == second, "a projection re-runs cleanly; it never accumulates"
+
+    def test_Export_WhenOneRequestRecordIsNotJson_StillExportsEveryArtefactAndSaysSo(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """One unreadable request record once ended the whole export at that
+        artefact, so everything landed after it was missing from the files."""
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
+        monkeypatch.setattr("obdi.cli.load_dotenv", lambda *a, **k: None)
+        with Store(tmp_path / "store.sqlite3") as store:
+            _land(
+                store,
+                source="truelayer-booked",
+                digest="aaaa000011112222",
+                payload=b'{"results": [1]}',
+                origin="https://api/one",
+                meta="attended from the kitchen",
+            )
+            _land(
+                store,
+                source="truelayer-balance",
+                digest="bbbb000011112222",
+                payload=b'{"results": [2]}',
+                origin="https://api/two",
+                meta='{"trigger": "scheduled"}',
+            )
+
+        out = tmp_path / "raw"
+        assert main(["export-raw", "--dir", str(out)]) == 0
+
+        payloads = sorted(
+            p.relative_to(out).as_posix()
+            for p in out.rglob("*")
+            if p.is_file() and not p.name.endswith(".meta.json")
+        )
+        assert payloads == [
+            "truelayer-balance/2026-08-01T2230_bbbb0000.json",
+            "truelayer-booked/2026-08-01T2230_aaaa0000.json",
+        ]
+        unreadable = json.loads(
+            (out / "truelayer-booked/2026-08-01T2230_aaaa0000.meta.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert unreadable["request_meta"] == {}
+        assert unreadable["request_meta_unreadable"] == "attended from the kitchen"
+        readable = json.loads(
+            (out / "truelayer-balance/2026-08-01T2230_bbbb0000.meta.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert readable["request_meta"] == {"trigger": "scheduled"}
+        assert "request_meta_unreadable" not in readable
+        said = capsys.readouterr().out
+        assert "exported 2 artefact(s)" in said
+        assert "1 carried a request record that is not JSON (truelayer-booked: 1)" in said
+
+    def test_Export_WhenEveryRequestRecordIsReadable_SaysNothingAboutUnreadableOnes(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "store.sqlite3"))
+        monkeypatch.setattr("obdi.cli.load_dotenv", lambda *a, **k: None)
+        with Store(tmp_path / "store.sqlite3") as store:
+            _land(
+                store,
+                source="truelayer-balance",
+                digest="cccc000011112222",
+                payload=b"{}",
+                origin="https://api/balance",
+                meta='{"trigger": "scheduled"}',
+            )
+
+        assert main(["export-raw", "--dir", str(tmp_path / "raw")]) == 0
+
+        assert "not JSON" not in capsys.readouterr().out

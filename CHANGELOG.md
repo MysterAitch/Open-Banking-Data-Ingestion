@@ -26,6 +26,16 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.285] - 2026-10-04
+
+### Fixed
+- **The raw export no longer stops at an artefact whose request record is not
+  JSON.** It raised at that artefact, so everything landed after it was missing
+  from the exported files, and the scheduler discarded the failure. The first
+  cycle to record its steps showed it. Every artefact is now exported, an
+  unreadable record is kept as text, and the export says how many there were
+  and from which sources.
+
 ## [0.4.284] - 2026-10-04
 
 ### Fixed
