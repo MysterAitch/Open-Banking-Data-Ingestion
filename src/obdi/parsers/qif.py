@@ -75,7 +75,11 @@ class QifParser(StatementParser):
 
     source = "qif"
     date_format = "%d/%m/%Y"
+    date_fields = ("D",)
     expected_headers = ()
+
+    def parse_stated_date(self, text: str) -> date:
+        return parse_qif_date(text)
 
     def sniff(self, payload: bytes) -> bool:
         try:

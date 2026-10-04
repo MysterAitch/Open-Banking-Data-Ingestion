@@ -3,8 +3,8 @@
 A real Starling feed item states three: when the payment was made, when it
 settled, and when the bank last touched the record. The row keeps only one of
 them as its date, so the others are held per sighting (`sighting_times`), found
-by parsing every top-level field and not by a list of names. The aggregator, the
-export, and the statements are not yet recorded.
+by parsing every field and not by a list of names. Every other source is recorded
+too (`test_stated_times_every_source.py`).
 
 KNOWN ANSWERS, decided before the first run (invented feed; amounts in pence):
 
@@ -14,8 +14,7 @@ KNOWN ANSWERS, decided before the first run (invented feed; amounts in pence):
         its kind, and the offset it carried; nothing else
     the same after a rebuild from raw
     a round-up leg derived from the item holds none
-    an item the aggregator reported too: the feed's moments are the row's; the
-        aggregator contributes none
+    an item the aggregator reported too: each source's own moments are the row's
 """
 
 from __future__ import annotations
@@ -125,7 +124,7 @@ class TestWhoseMomentsAreKept:
         assert store.stated_times_for(leg.entity_id) == []
         assert len(moments(store, -4210)) == len(STATED)
 
-    def test_Row_WhenTheAggregatorAlsoReportedIt_KeepsOnlyTheFeedsMoments(self, store):
+    def test_Row_WhenTheAggregatorAlsoReportedIt_KeepsEachSourcesOwnMoments(self, store):
         land_feed(store, [feed_with()], origin=FEED_ORIGIN)
         record = {
             "transaction_id": "volatile-1",
@@ -143,7 +142,10 @@ class TestWhoseMomentsAreKept:
         )
         rebuild_from_raw(store, account_map=MAP)
 
-        assert {source for source, _ in moments(store, -4210)} == {"starling"}
+        held = moments(store, -4210)
+        assert {source for source, _ in held} == {"starling", "truelayer"}
+        assert held[("truelayer", "timestamp")] == ("2026-09-14T10:00:00Z", "instant", "Z")
+        assert len(held) == len(STATED) + 1
         assert "truelayer" in store.sources_for(row_of(store, -4210).entity_id)
 
 

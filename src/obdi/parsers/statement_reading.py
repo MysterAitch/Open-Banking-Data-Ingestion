@@ -17,6 +17,10 @@ class StatementRow:
     value_date: date
     description: str
     amount_minor: int
+    #: The second date a row states where its format states two (the date the card issuer
+    #: posted or entered it, beside the date of the transaction), or None where it states one.
+    #: Never the row's own date: that is `value_date`.
+    posted: date | None = None
 
 
 @dataclass(frozen=True)
@@ -101,7 +105,7 @@ def reading_to_json(reading: StatementReading) -> str:
             "credit_limit_minor": reading.credit_limit_minor,
             "account_name": reading.account_name,
             "transactions": [
-                [row.value_date.isoformat(), row.description, row.amount_minor]
+                [row.value_date.isoformat(), row.description, row.amount_minor, _day(row.posted)]
                 for row in reading.transactions
             ],
             "end_of_day_minor": [
@@ -116,6 +120,20 @@ def reading_to_json(reading: StatementReading) -> str:
     )
 
 
+def _row_from_json(item: list[object]) -> StatementRow:
+    """One row as `reading_to_json` wrote it: three fields, or four with the posting date.
+
+    A reading kept before rows carried a posting date has three, and reads as having none.
+    """
+    day, description, minor, *rest = item
+    return StatementRow(
+        date.fromisoformat(str(day)),
+        str(description),
+        int(str(minor)),
+        _maybe_day(rest[0]) if rest else None,
+    )
+
+
 def reading_from_json(text: str) -> StatementReading:
     """The reading `reading_to_json` wrote. Refuses text that is not one, with
     ValueError, KeyError, or TypeError, rather than returning a partial reading."""
@@ -127,8 +145,8 @@ def reading_from_json(text: str) -> StatementReading:
         credit_limit_minor=found["credit_limit_minor"],
         account_name=str(found["account_name"]),
         transactions=[
-            StatementRow(date.fromisoformat(day), str(description), int(minor))
-            for day, description, minor in found["transactions"]
+            _row_from_json(item)
+            for item in found["transactions"]
         ],
         end_of_day_minor=[
             (date.fromisoformat(day), int(minor)) for day, minor in found["end_of_day_minor"]

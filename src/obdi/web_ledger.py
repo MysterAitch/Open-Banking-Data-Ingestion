@@ -27,6 +27,7 @@ from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .errors import DataError
 from .feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
+from .join_basis import BASIS_WORDS, count_sentence, moment_text
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,
@@ -186,6 +187,52 @@ def _status_pill(status: str) -> str:
     return f'<span class="pill {css}">{_esc(status)}</span>'
 
 
+def _sighting_line(sighting: Any) -> str:
+    """One source's sighting: how it came to be on the row, then everything it stated."""
+    words = BASIS_WORDS.get(sighting.basis, BASIS_WORDS[""])
+    how = f"copied from the main account's row, {words}" if sighting.copy else words
+    stated = ", ".join(
+        f"{_esc(moment.field)} {_esc(moment_text(moment))}" for moment in sighting.moments
+    )
+    tail = f": {stated}" if stated else ""
+    return f'<p class="muted"><strong>{_esc(sighting.source)}</strong> - {_esc(how)}{tail}</p>'
+
+
+def _sightings_html(row: Any) -> str:
+    """What each source stated of the row and how its sighting joined, one click away.
+
+    Times are London time, the clock the rest of the page uses (`_CLOCK_NOTE`); a date is as stated.
+    """
+    if not row.sightings:
+        return ""
+    return (
+        '<details class="muted"><summary>Dates and joins</summary>'
+        + "".join(_sighting_line(sighting) for sighting in row.sightings)
+        + "</details>"
+    )
+
+
+def _joins_html(joins: Any) -> str:
+    """The account's rows by how they joined, and the guessed ones' dates a click away."""
+    if joins is None:
+        return ""
+    counts = dict(joins.by_basis)
+    sentence = count_sentence(counts)
+    if not sentence:
+        return ""
+    guessed = joins.heuristic_days
+    listing = (
+        f"<details><summary>{len(guessed)} joined by the matcher's guess: the dates</summary>"
+        "<p>" + ", ".join(_mono(day) for day in guessed) + "</p></details>"
+        if guessed
+        else '<p class="muted">No row rests on the matcher\'s guess.</p>'
+    )
+    return (
+        "<h3>How the rows were joined</h3>"
+        f"<p>{_esc(sentence[0].upper() + sentence[1:])}.</p>{listing}"
+    )
+
+
 def _row_html(row: Any) -> str:
     """One transaction as a list item that wraps instead of scrolling.
 
@@ -236,6 +283,7 @@ def _row_html(row: Any) -> str:
         f"<p><strong>{_esc(row.description)}</strong>{counterparty}</p>"
         f'<p class="pills">{_status_pill(row.status)} {sources}{_row_flags(row)}</p>'
         f"{annotation}"
+        f"{_sightings_html(row)}"
         "</li>"
     )
 
@@ -1834,6 +1882,7 @@ def render_ledger(
     if BANK_SOURCE in view.sources:
         body += f'<p class="muted">{_esc(_CLOCK_NOTE)}</p>'
     body += _verification_html(view)
+    body += _joins_html(view.joins)
     body += f"<h2>{_esc(view.month)}</h2>" + _month_links(view, unmasked)
     if view.state == "empty-month":
         body += (

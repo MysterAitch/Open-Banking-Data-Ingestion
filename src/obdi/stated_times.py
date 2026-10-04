@@ -7,11 +7,14 @@ settlement day, which is the day the bank's export lists a card payment under)
 then has nothing to read. So every top-level field of the item whose value
 parses as an ISO instant or date is kept, found by parsing and not by a list of
 names, so a field the bank adds later is kept too.
+A field nested at any depth is kept under its path ("meta.provider_date").
 
-WHICH SOURCES. `RECORDING_SOURCES` names the sources whose items are read this
-way.
-The feed is the only one so far; the aggregator, the export, and the statements
-state their dates in other shapes and are not yet recorded.
+WHICH SOURCES. Every source is recorded (`recorded_for` says how each is read):
+a feed item and an aggregator item by parsing every field;
+a statement's row likewise, from the dates its parser puts in the row's record
+(the transaction date, and the posting date where the format states one);
+a file export's row from the date columns its parser declares (`date_fields`), because
+a file dates in the format its parser pins and not in ISO, and each is kept in ISO.
 
 THE SETTLEMENT DAY. The one field the matcher reads is `SETTLEMENT_FIELD`, by
 `settlement_days`, which is where its rule is stated and the only place that
@@ -24,11 +27,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
+from .errors import DataError
 from .jsontypes import JsonObject
 from .models import Transaction
-
-#: Sources whose items state their moments in ISO form and are recorded.
-RECORDING_SOURCES = frozenset({"starling"})
+from .payment_links import FIRST_PARTY_FEEDS
 
 SETTLEMENT_FIELD = "settlementTime"
 
@@ -71,30 +73,68 @@ def _parse(text: str) -> tuple[str, datetime | date] | None:
         return None
 
 
-def stated_times(raw: Mapping[str, object]) -> list[StatedTime]:
-    """Each top-level field of a record that states a date or an instant, in field order."""
-    found: list[StatedTime] = []
-    for field, value in raw.items():
-        if not isinstance(value, str):
-            continue
+def _walk(path: str, value: object, found: list[StatedTime]) -> None:
+    if isinstance(value, Mapping):
+        for key, inner in value.items():
+            _walk(f"{path}.{key}" if path else str(key), inner, found)
+    elif isinstance(value, list):
+        for position, inner in enumerate(value):
+            _walk(f"{path}[{position}]", inner, found)
+    elif isinstance(value, str):
         parsed = _parse(value.strip())
         if parsed is not None:
-            found.append(StatedTime(field, value.strip(), parsed[0], _zone_of(value.strip())))
+            found.append(StatedTime(path, value.strip(), parsed[0], _zone_of(value.strip())))
+
+
+def stated_times(raw: Mapping[str, object]) -> list[StatedTime]:
+    """Each field of a record, at any depth, that states a date or an instant, in field order."""
+    found: list[StatedTime] = []
+    _walk("", raw, found)
     return found
 
 
+def _file_moments(transaction: Transaction) -> list[StatedTime] | None:
+    """The date columns of a file export's row, or None where the source is not a file parser.
+
+    Each is read by the parser that pinned its format and kept in ISO form, which is what
+    the other kinds of source state and what every reader of this table parses.
+    A cell that is empty or not a date in the pinned format is left out: a file that
+    cannot be read at all is refused at import, long before this.
+    """
+    from .parsers.uk_banks import PARSERS
+
+    for parser_class in PARSERS:
+        if parser_class.source != transaction.source:
+            continue
+        parser = parser_class()
+        found: list[StatedTime] = []
+        for field in parser.date_fields:
+            cell = transaction.raw.get(field)
+            if not isinstance(cell, str) or not cell.strip():
+                continue
+            try:
+                day = parser.parse_stated_date(cell)
+            except DataError:
+                continue
+            found.append(StatedTime(field, day.isoformat(), DATE, ""))
+        return found
+    return None
+
+
 def recorded_for(transaction: Transaction) -> list[StatedTime]:
-    """What to keep of this sighting: nothing unless its source is recorded and it is
-    a record of the source's own item.
-    A round-up leg is derived from an item and is not the item, so the item's moments
-    are not its own."""
+    """What to keep of this sighting: every date and instant its source states for it.
+
+    A round-up leg is derived from a feed item and is not the item, so the item's moments
+    are not its own.
+    """
     from .providers.starling import ROUND_UP_LEG_SUFFIX
 
-    if transaction.source not in RECORDING_SOURCES or not transaction.source_id:
-        return []
-    if transaction.source_id.endswith(ROUND_UP_LEG_SUFFIX):
-        return []
-    return stated_times(transaction.raw)
+    if transaction.source in FIRST_PARTY_FEEDS:
+        if not transaction.source_id or transaction.source_id.endswith(ROUND_UP_LEG_SUFFIX):
+            return []
+        return stated_times(transaction.raw)
+    from_file = _file_moments(transaction)
+    return stated_times(transaction.raw) if from_file is None else from_file
 
 
 def _last_sunday(year: int, month: int) -> date:
@@ -132,9 +172,9 @@ def days_of(stated: StatedTime) -> frozenset[date]:
 
 
 def settlement_days_of(transaction: Transaction) -> frozenset[date]:
-    """The days a sighting's own settlement could be listed under, empty for a source
-    that is not recorded and for a derived leg (`recorded_for` says why)."""
-    if not recorded_for(transaction):
+    """The days a sighting's own settlement could be listed under, empty for any source but
+    the bank's own feed and for a derived leg (`recorded_for` says why)."""
+    if transaction.source not in FIRST_PARTY_FEEDS or not recorded_for(transaction):
         return frozenset()
     return settlement_days(transaction.raw)
 

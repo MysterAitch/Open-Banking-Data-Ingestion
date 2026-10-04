@@ -56,6 +56,14 @@ class StatementParser(ABC):
     date_format: str
     expected_headers: tuple[str, ...]
     encoding: str = "utf-8"
+    #: The fields of a row's own record (`Transaction.raw`) that state a date, as the file
+    #: names them. Every one is kept against the payment (`stated_times.recorded_for`), whether
+    #: or not it became the row's date, so a parser that adds a date column lists it here.
+    date_fields: tuple[str, ...] = ()
+
+    def parse_stated_date(self, text: str) -> date:
+        """One of `date_fields`' text as a date, in the format this parser pins."""
+        return parse_date(text, self.date_format)
 
     def sniff(self, payload: bytes) -> bool:
         """Whether this parser recognises the payload's header row.

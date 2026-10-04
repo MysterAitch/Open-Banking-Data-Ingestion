@@ -292,6 +292,7 @@ UNASSIGNED_ACCOUNT = "(unassigned)"
 ENTITY_KEYED_TABLES: dict[str, tuple[str, ...]] = {
     "transactions": ("entity_id", "matched_entity_id"),
     "transaction_sources": ("entity_id",),
+    "sighting_times": ("entity_id",),
     "review_queue": ("entity_id",),
     "annotations": ("entity_id",),
     "events": ("entity_id",),

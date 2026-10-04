@@ -63,6 +63,7 @@ from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
 from .feed_statuses import FeedStatuses
 from .identity_health import provider_ids_by_row, shared_identity_groups
+from .join_basis import JoinCounts, SightingView, join_counts, sighting_views
 from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import MANUAL_SOURCE, UNITEMISED_SOURCE
@@ -78,9 +79,10 @@ if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
 
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
-#: review flags, and the two annotation kinds. An account with no rows adds
+#: review flags, the two annotation kinds, and the one read of every sighting's basis
+#: and stated dates (`join_basis`). An account with no rows adds
 #: the registry lookup that tells "declared but empty" from "unknown".
-QUERIES_PER_PAGE = 9
+QUERIES_PER_PAGE = 10
 
 #: Statements issued to look for the account's opening-balance anchors when it
 #: has no TrueLayer records and no held statements: the stated balances, the
@@ -261,6 +263,8 @@ class LedgerRow:
     #: The instant the newest landed feed states for the row's item, in UTC (`feed_statuses`);
     #: None for a row no feed item is its own. A time is structure, like a date.
     feed_at: Structural[datetime | None] = None
+    #: Each source's sighting: the basis it joined on and every date it stated (`join_basis`).
+    sightings: Structural[tuple[SightingView, ...]] = ()
 
 
 @dataclass(frozen=True)
@@ -498,6 +502,8 @@ class Ledger:
     #: The account's protection (`protection`), set by the caller that reads the declared state
     #: so that the ledger proper costs the statements it always did.
     protection: Structural[ProtectionView | None] = None
+    #: The account's rows by how their sightings joined, over every month (`join_basis`).
+    joins: Structural[JoinCounts | None] = None
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -794,6 +800,7 @@ def _ledger_for(
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
 
     sightings = _sightings(store, ref)
+    details = store.sighting_details(ref)
     # A derived row has no source in the sense this list means: nothing fed it.
     account_sources = sorted(
         (
@@ -895,6 +902,7 @@ def _ledger_for(
                     payee=payee[0] if payee else "",
                     cleared_by=clearing_sources,
                     feed_at=feed.time_of(t.entity_id) if feed is not None else None,
+                    sightings=sighting_views(details.get(t.entity_id, ())),
                 ),
             )
         )
@@ -1022,6 +1030,11 @@ def _ledger_for(
             protection_view(store, ref, opening, held, final_standing, check=check)
             if with_protection
             else None
+        ),
+        joins=join_counts(
+            (t.value_date, row.sightings)
+            for t, row in built
+            if not t.status.is_history and row.origin == ""
         ),
     )
 

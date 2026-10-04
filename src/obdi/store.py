@@ -767,6 +767,19 @@ class ArtefactLanding:
 
 
 @dataclass
+class SightingDetail:
+    """One source's sighting of a stored row, as the ledger shows it."""
+
+    source: str
+    #: How the sighting joined its row (`models.BASIS_*`), empty where none was recorded.
+    basis: str
+    #: Placed on a Space row by a fold, not reported by the source for this row.
+    copy: bool
+    #: (field, stated text, kind, zone) for each date or instant the sighting stated.
+    moments: list[tuple[str, str, str, str]]
+
+
+@dataclass
 class _WriteBatch:
     """One reconcile batch's pending writes, stamped once."""
 
@@ -2966,6 +2979,38 @@ class Store:
             if source in FIRST_PARTY_FEEDS and source_id:
                 uids.setdefault(str(entity), set()).add(str(source_id))
         return links, uids
+
+    def sighting_details(self, account_id: str) -> dict[str, list[SightingDetail]]:
+        """Entity -> its sightings in the order they first arrived: the source, the basis it
+        joined the row on, whether it is a copy placed by a fold, and every date and instant
+        that sighting stated, in one read of the account.
+
+        A copy placed on a Space row by a fold states nothing of its own: its source's
+        statements are on the row it was copied from.
+        """
+        found: dict[str, list[SightingDetail]] = {}
+        position: dict[tuple[str, str, str], SightingDetail] = {}
+        for row in self.connection.execute(
+            "SELECT s.entity_id, s.source, s.artefact_digest, s.basis, "
+            "COALESCE(s.source_id, '') LIKE ?, t.field, t.stated, t.kind, t.zone "
+            "FROM transaction_sources s JOIN transactions x ON x.entity_id = s.entity_id "
+            "LEFT JOIN sighting_times t ON t.entity_id = s.entity_id AND t.source = s.source "
+            "AND t.artefact_digest = s.artefact_digest "
+            "WHERE x.account_id = ? "
+            "ORDER BY s.first_seen_at, s.source, s.artefact_digest, t.rowid",
+            (_COPY_PATTERN, account_id),
+        ):
+            key = (str(row[0]), str(row[1]), str(row[2]))
+            sighting = position.get(key)
+            if sighting is None:
+                sighting = SightingDetail(
+                    source=str(row[1]), basis=str(row[3]), copy=bool(row[4]), moments=[]
+                )
+                position[key] = sighting
+                found.setdefault(key[0], []).append(sighting)
+            if row[5] is not None:
+                sighting.moments.append((str(row[5]), str(row[6]), str(row[7]), str(row[8])))
+        return found
 
     def bases_by_entity(self, account_id: str) -> dict[str, list[tuple[str, str, str]]]:
         """Entity -> (source, basis, first-seen date) of each sighting of the account's rows."""

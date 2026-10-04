@@ -276,6 +276,7 @@ def read_statement(lines: list[str]) -> StatementReading:
             value_date=row.day,
             description=f"{row.description} {row.foreign}" if row.foreign else row.description,
             amount_minor=row.amount_minor,
+            posted=row.entered,
         )
         for row in rows
     ]
@@ -290,6 +291,7 @@ class _Open:
     description: str
     amount_minor: int
     foreign: str = ""
+    entered: date | None = None
 
 
 def _row(found: re.Match[str], statement: date | None, notes: list[str]) -> _Open | None:
@@ -319,4 +321,19 @@ def _row(found: re.Match[str], statement: date | None, notes: list[str]) -> _Ope
         day=stated,
         description=_tidy(found.group(5)),
         amount_minor=amount if found.group(7) == "CR" else -amount,
+        entered=_entered_date(found, entered, statement),
     )
+
+
+def _entered_date(found: re.Match[str], month: int, statement: date) -> date | None:
+    """The date the issuer entered the row, or None where it is not a real one.
+
+    Kept beside the date of the transaction and never in its place: it is a second date
+    the statement states, and the year is worked out from the statement as for the first.
+    A misread one costs only itself, so it is left out rather than refusing the statement.
+    """
+    year = statement.year - 1 if month > statement.month else statement.year
+    try:
+        return date(year, month, int(found.group(3)))
+    except ValueError:
+        return None

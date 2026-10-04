@@ -285,8 +285,12 @@ class PdfStatementParser(StatementParser):
                     value_date=row.value_date,
                     description=row.description,
                 ),
+                # Every date the row states, ISO, so each is kept against the payment
+                # (`stated_times.recorded_for`) and none is lost to the one that became its date.
                 raw={
                     "statement_date": str(reading.statement_date or ""),
+                    "transaction_date": row.value_date.isoformat(),
+                    **({"posting_date": row.posted.isoformat()} if row.posted else {}),
                     "description": row.description,
                     "amount": row.amount_minor / 100,
                 },

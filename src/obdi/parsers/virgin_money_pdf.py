@@ -42,13 +42,29 @@ _MONTHS = {
     )
 }
 
+def _posting_date(row: re.Match[str]) -> date | None:
+    """The row's second date, or None where it is not a real one.
+
+    Kept beside the transaction date and never in its place: the statement gives both
+    so that no year has to be inferred, and a posting date lost here cannot be recovered
+    from the row's own date.
+    """
+    month = _MONTHS.get(row.group(5).lower())
+    if month is None:
+        return None
+    try:
+        return date(2000 + int(row.group(6)), month, int(row.group(4)))
+    except ValueError:
+        return None
+
+
 #: `<dd> <Mon><yy>  <dd><Mon> <yy>  <description>  [<merchant>]  [-]£<amount>`
 #: Spacing inside each date is deliberately loose: the extracted text runs
 #: month into year on some rows and not others, and a parser that insisted
 #: on one form would read half a statement.
 _TRANSACTION = re.compile(
     r"^(\d{1,2})\s*([A-Za-z]{3})\s*(\d{2})\s+"
-    r"\d{1,2}\s*[A-Za-z]{3}\s*\d{2}\s+"
+    r"(\d{1,2})\s*([A-Za-z]{3})\s*(\d{2})\s+"
     r"(.+?)"
     r"\s+(-)?£\s*([\d,]+\.\d{2})\s*$"
 )
@@ -130,16 +146,17 @@ def read_statement(lines: list[str]) -> StatementReading:
             month = _MONTHS.get(row.group(2).lower())
             if month is None:
                 continue
-            amount = _minor(row.group(6))
+            amount = _minor(row.group(9))
             reading.transactions.append(
                 StatementRow(
                     # Two-digit years, from a card that cannot predate the
                     # century it was issued in.
                     value_date=date(2000 + int(row.group(3)), month, int(row.group(1))),
-                    description=re.sub(r"\s{2,}", "  ", row.group(4)).strip(),
+                    description=re.sub(r"\s{2,}", "  ", row.group(7)).strip(),
                     # A minus is the only thing that makes money arrive
                     # here; there is no credit marker in this format.
-                    amount_minor=amount if row.group(5) else -amount,
+                    amount_minor=amount if row.group(8) else -amount,
+                    posted=_posting_date(row),
                 )
             )
     return reading

@@ -35,6 +35,7 @@ class StarlingCsvParser(StatementParser):
 
     source = "starling-csv"
     date_format = "%d/%m/%Y"
+    date_fields = ("Date",)
     expected_headers = ("Date", "Counter Party", "Reference", "Type")
 
     def _amount_column(self, row: dict[str, str]) -> tuple[str, str]:
@@ -116,6 +117,7 @@ class MonzoCsvParser(StatementParser):
 
     source = "monzo-csv"
     date_format = "%d/%m/%Y"
+    date_fields = ("Date",)
     expected_headers = ("Transaction ID", "Date", "Amount")
     encoding = "utf-8-sig"
 
@@ -164,6 +166,7 @@ class AmexUkCsvParser(StatementParser):
 
     source = "amex-uk-csv"
     date_format = "%d/%m/%Y"
+    date_fields = ("Date",)
     expected_headers = ("Date", "Description", "Amount")
 
     def parse(self, payload: bytes, *, account_id: str) -> Iterator[Transaction]:
