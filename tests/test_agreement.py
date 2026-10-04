@@ -42,6 +42,7 @@ from obdi.models import Transaction, TransactionStatus
 from obdi.movement_completeness import MISSING, MovementCompleteness, RowCountFault
 from obdi.namespaces import CLEARING_SOURCES, SOURCES
 from obdi.store import Store
+from round_up_corpus import rows_the_provider_makes
 from test_balance_anchors import ACCOUNT, everyday
 from test_ledger import land, txn
 
@@ -321,7 +322,7 @@ class TestClearing:
         assert CLEARING_SOURCES <= SOURCES
         for relay in ("truelayer", "truelayer-booked", "truelayer-card-booked", "manual"):
             assert relay not in CLEARING_SOURCES
-        for lister in ("starling-feed", "starling-csv", "halifax-statement-pdf", "qif"):
+        for lister in ("starling", "starling-csv", "halifax-statement-pdf", "qif"):
             assert lister in CLEARING_SOURCES
 
     def test_ClearedBy_WhenOnlyTheAggregatorListsTheRow_IsNotCleared(self):
@@ -349,7 +350,7 @@ class TestClearing:
             txn(ACCOUNT, "starling-csv", "c5", D(2026, 3, 6), -500, "FIVE VOID",
                 status=TransactionStatus.VOID),
         )
-        land(store, "d-feed", txn(ACCOUNT, "starling-feed", "f6", D(2026, 4, 2), -600, "SIX"))
+        land(store, "d-feed", *rows_the_provider_makes(ACCOUNT, "f6", "SIX", 600, "2026-04-02"))
 
         march = build_ledger(store, ACCOUNT, "2026-03", bound=False)
 

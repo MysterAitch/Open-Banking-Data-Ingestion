@@ -113,11 +113,15 @@ UNITEMISED_SOURCE = "unitemised"
 SOURCES = API_SOURCES | FILE_SOURCES | MANUAL_SOURCES
 
 #: The sources whose listing of a row CLEARS it (`clearing` states the rule and why).
+#: Each name is the `source` a ROW and its sighting carry, which is the parser's or the
+#: provider's own name and never the raw artefact's: the registry once named the feed's
+#: artefact source (`starling-feed`), no row carries it, and no feed-only row was cleared.
+#: `tests/test_feed_clears.py` holds the rule that every name here is one some door gives a row.
 #: Derived from the registry above, so a file format added there clears rows by default
 #: and a new pipe has to be named here before it does.
 #: The unparsed "statement" holds no rows, so it is not a lister; the aggregator is a relay of
 #: the bank's records and does not clear; a typed row is a person's own entry.
-CLEARING_SOURCES = frozenset(FILE_SOURCES - {"statement"}) | {"starling-feed"}
+CLEARING_SOURCES = frozenset(FILE_SOURCES - {"statement"}) | {"starling"}
 
 #: Cooperative lease names. Both the Python side and the Node applier take
 #: leases in this set; a name that exists on only one side is a lease

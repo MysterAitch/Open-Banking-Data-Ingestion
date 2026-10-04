@@ -82,6 +82,18 @@ def card_payment(
     return item
 
 
+def rows_the_provider_makes(
+    account: str, uid: str, name: str, minor: int, when: str, **more: Any
+) -> list[Transaction]:
+    """What `providers.starling` makes of one invented booked payment dated `when` (an ISO date).
+
+    For scenarios built on a hand-chosen account that need a feed row without the household:
+    the source and the raw record are the provider's, never invented by the test.
+    """
+    item = card_payment(uid, name, minor, 1, transactionTime=f"{when}T10:00:00.000Z", **more)
+    return starling.to_transactions(item, account_id=account)
+
+
 def round_up_of(minor: int, space: str = "cat-bills") -> dict[str, Any]:
     return {"goalCategoryUid": space, "amount": {"currency": "GBP", "minorUnits": minor}}
 

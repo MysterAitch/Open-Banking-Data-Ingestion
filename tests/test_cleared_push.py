@@ -10,7 +10,8 @@ March 2026 in one account, bound to an Actual account:
     c1  03-02  starling-csv, booked                    cleared
     c2  03-03  truelayer-booked only                   not cleared: the aggregator alone
     c3  03-04  starling-csv, PENDING                   not cleared: pending is never cleared
-    c4  03-05  starling-feed, booked                   cleared
+    c4  03-05  the bank's feed, booked, as the provider  cleared
+               makes it (source `starling`)
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from obdi.actual_push import build_envelope
 from obdi.models import TransactionStatus
 from obdi.replay import ActualAccountBinding, is_cleared, to_actual_transaction
 from obdi.store import Store
+from round_up_corpus import rows_the_provider_makes
 from test_ledger import land, txn
 
 D = date
@@ -37,7 +39,7 @@ def store(tmp_path):
              txn(ACCOUNT, "starling-csv", "c3", D(2026, 3, 4), -300, "THREE",
                  status=TransactionStatus.PENDING))
         land(opened, "d2", txn(ACCOUNT, "truelayer-booked", "c2", D(2026, 3, 3), -200, "TWO"))
-        land(opened, "d3", txn(ACCOUNT, "starling-feed", "c4", D(2026, 3, 5), -400, "FOUR"))
+        land(opened, "d3", *rows_the_provider_makes(ACCOUNT, "c4", "FOUR", 400, "2026-03-05"))
         yield opened
 
 

@@ -17,8 +17,13 @@ a source that is an AUTHORITATIVE LISTING of the account lists it.
 WHICH SOURCES CLEAR (`namespaces.CLEARING_SOURCES`), decided once:
 
   clear      a statement the parsers read, an export (CSV, QIF), and the bank's own feed
-             (`starling-feed`). Each is the bank's own record of the account, so a row it lists has
-             been found in a record the owner could compare by hand.
+             (rows the provider makes, whose source is `starling`). Each is the bank's own record
+             of the account, so a row it lists has been found in a record the owner could compare
+             by hand.
+  round-up   a round-up leg is derived from a feed item and is not itself an item, and it CLEARS
+             when the payment that states it is booked: the bank's item carries the amount and the
+             Space, and the Space's own feed lists the money arriving. It follows its payment's
+             status, so the leg of a pending payment is not cleared.
   do not     the aggregator (`truelayer-*`): it relays the bank's records, can report a row and
              later drop or re-issue it, and the aggregator ALONE is exactly the evidence the owner
              walked a statement to avoid trusting. A typed row is the owner's own entry, which a
