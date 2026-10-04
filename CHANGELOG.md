@@ -26,6 +26,26 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.287] - 2026-10-04
+
+### Added
+- **A push re-links a transfer whose partner changed**, where every row
+  involved is one obdi created. A rebuild that changed which rows pair with
+  which left 20 transfers that the push refused to touch, and the only way
+  through was to empty the budget. A partner made by hand in Actual is still
+  left alone, with the reason.
+- **One press, "Bring Actual into line"**, after an audit that found
+  differences: push, audit, remove, push again if anything was unlinked, and
+  audit, as a single job that stops at the first failing step and says which.
+
+### Changed
+- **The removal's size check counts only the leftover rows obdi cannot
+  explain.** Rows that became history or moved to another account are
+  explained by obdi's own store and no longer need the extra confirmation. A
+  removal of 107 rows, 92 of them newly reversed, had demanded a check against
+  Actual that the person pressing could not make, and forced two full rebuilds
+  in one day. The page shows how each leftover is explained.
+
 ## [0.4.286] - 2026-10-04
 
 ### Fixed
