@@ -657,8 +657,9 @@ def _shape_sentence(found: Any) -> str:
         )
     if found.days_apart is not None:
         parts.append(
-            f"states both times, {_plural(found.days_apart, 'day')} apart, as "
-            f"{_percent_words(found.days_apart_percent)} of comparable items do"
+            f"its settlement time is {_plural(found.days_apart, 'day')} after its transaction "
+            f"time, a gap at least that long in {_percent_words(found.days_apart_percent)} "
+            "of comparable items"
         )
     if found.changed:
         parts.append("between its first and latest landing, " + ", ".join(found.changed))

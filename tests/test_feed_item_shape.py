@@ -16,7 +16,10 @@ KNOWN ANSWERS, decided before the first run:
     80 crowd items carry settlementTime, the payment has none   lacks settlementTime
     94 crowd items carry country (91 GB, 3 DE), payment says DE country DE, carried by 3%
     payment's amount in GBP and its sourceAmount in EUR         names both currencies
-    transaction time on day 9, settlement time on day 11        both times, 2 days apart
+    transaction time on day 9, settlement time on day 11        settles 2 days after, a rare gap
+    80 crowd items settle the next day, the payment does too    nothing said of the gap
+    80 crowd items settle the next day, the payment 135 days    settles 135 days after, under 1%
+        later
     landed pending with no settlementTime, then settled with    status changed from PENDING
         one                                                     to SETTLED; settlementTime appeared
     a source no other item has                                  too few comparable items
@@ -159,13 +162,40 @@ class TestAnItemStatingBothTimes:
         late = cafe_payment(settlementTime="2026-09-11T05:11:00.000Z")
         page = page_of(make([late, top_up()]))
 
-        assert "states both times, 2 days apart, as under 1% of comparable items do" in page
+        assert (
+            "its settlement time is 2 days after its transaction time, "
+            "a gap at least that long in under 1% of comparable items"
+        ) in page
 
     def test_Row_WhenSettlementIsTheSameDay_SaysNothingOfTheGap(self, make):
         same = cafe_payment(settlementTime="2026-09-09T09:11:00.000Z")
         page = page_of(make([same, top_up()]))
 
-        assert "days apart" not in page
+        assert "after its transaction time" not in page
+
+    @staticmethod
+    def settling_next_day(index: int) -> dict[str, Any]:
+        """A crowd item of day `1 + index % 8` (see `crowd`) that settles the day after."""
+        return {"settlementTime": f"2026-09-{2 + index % 8:02d}T06:00:00.000Z"}
+
+    def test_Row_WhenItSettlesTheNextDayAsMostComparableItemsDo_SaysNothingOfTheGap(self, make):
+        items, rows = crowd(80, extra=self.settling_next_day)
+        usual = cafe_payment(settlementTime="2026-09-10T05:11:00.000Z")
+        page = page_of(make([*items, usual, top_up()], rows))
+
+        assert "after its transaction time" not in page
+
+    def test_Row_WhenItSettlesMonthsLaterAmongItemsThatSettleTheNextDay_SaysHowRareTheGapIs(
+        self, make
+    ):
+        items, rows = crowd(80, extra=self.settling_next_day)
+        late = cafe_payment(settlementTime="2027-01-22T02:44:00.000Z")
+        page = page_of(make([*items, late, top_up()], rows))
+
+        assert (
+            "its settlement time is 135 days after its transaction time, "
+            "a gap at least that long in under 1% of comparable items"
+        ) in page
 
 
 class TestAnItemLandedInSeveralFetches:

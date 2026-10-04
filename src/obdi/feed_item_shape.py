@@ -68,9 +68,9 @@ class ItemShape:
     rare_values: Structural[tuple[tuple[str, str, int], ...]] = ()
     #: The two currencies where `amount` and `sourceAmount` name different ones, else "".
     currencies: Structural[tuple[str, str]] = ("", "")
-    #: Whole days between `transactionTime` and `settlementTime` where both are stated and
-    #: at least one day apart, else None; and the percent of comparable items with a gap
-    #: that long.
+    #: Whole days between `transactionTime` and `settlementTime` where both are stated, at
+    #: least one day apart, and fewer than one in ten comparable items have a gap at least
+    #: that long, else None; and the percent of comparable items that do.
     days_apart: Structural[int | None] = None
     days_apart_percent: Structural[int] = 0
     #: What changed between the oldest and newest landing of the item, each as a phrase
@@ -101,7 +101,10 @@ def _group(item: FeedItem) -> tuple[str, str, str]:
 def _days(item: FeedItem) -> int | None:
     if item.transacted is None or item.settled is None:
         return None
-    return abs((item.settled - item.transacted).days)
+    # By calendar date, not elapsed time: what a gap is compared with is the DATE another
+    # source gives the payment, and a payment made at ten and settled at six the next
+    # morning is a day apart on every statement though twenty hours apart by the clock.
+    return abs((item.settled.date() - item.transacted.date()).days)
 
 
 def _percent(count: int, of: int) -> int:
@@ -186,12 +189,17 @@ class FeedShapes:
             and carried[name] >= enough
             and held[(name, mine[name])] * 10 < total
         )
+        # A gap is said only where it is rare: most card payments settle a day or two after
+        # they are made, and a sentence on each of them would bury the one that matters.
+        # The one that mattered settled 135 days later, and the export dates a payment by
+        # its settlement, so the store held it twice.
         gap = _days(item)
         gap_percent = 0
         if gap is not None and gap >= 1:
-            gap_percent = _percent(
-                sum(1 for other in others if (_days(other) or 0) >= 1), total
-            )
+            as_long = sum(1 for other in others if (_days(other) or 0) >= gap)
+            gap_percent = _percent(as_long, total)
+            if as_long * 10 >= total:
+                gap = None
         return ItemShape(
             status,
             direction,
