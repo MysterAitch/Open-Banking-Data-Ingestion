@@ -56,7 +56,7 @@ from .doctor import shape_problems
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import Ledger
 from .logs import say
-from .masking import MASKED_TOTAL
+from .masking import MASKED_TOTAL, mask_text
 from .namespaces import (
     QUEUE_KINDS,
     UNASSIGNED_ACCOUNT,
@@ -273,6 +273,7 @@ class UploadSession:
     def __init__(self) -> None:
         self._pending: dict[str, tuple[bytes, str, datetime, bool]] = {}
         self._landed: dict[str, tuple[str, str, datetime]] = {}
+        self._results: dict[str, tuple[dict[str, object], datetime]] = {}
 
     def mark_landed(self, token: str, filename: str, account: str) -> None:
         """Remember that the import held under `token` went through.
@@ -288,6 +289,27 @@ class UploadSession:
     def landed(self, token: str) -> tuple[str, str, datetime] | None:
         """(file name, account, when) of an import that went through under `token`."""
         return self._landed.get(token)
+
+    def keep_result(self, result: dict[str, object]) -> str:
+        """Hold an import's answer, so its values can be shown by a later press.
+
+        The answer page is masked, and the press that shows values comes back with this token
+        instead of recomputing the comparison from rows that have since changed. Read without
+        being consumed, because the page can be asked again; it lapses with the stash.
+        """
+        now = datetime.now(UTC)
+        for token in [t for t, (_, made) in self._results.items() if now - made > self.LIFETIME]:
+            del self._results[token]
+        token = token_urlsafe(16)
+        self._results[token] = (result, now)
+        return token
+
+    def result(self, token: str) -> dict[str, object] | None:
+        """The answer held under `token`, or None where there is none or it has lapsed."""
+        held = self._results.get(token)
+        if held is None or datetime.now(UTC) - held[1] > self.LIFETIME:
+            return None
+        return held[0]
 
     def stash(self, payload: bytes, filename: str, *, doubted: bool = False) -> str:
         """`doubted` rides the stash so the CONFIRM can enforce the
@@ -305,6 +327,13 @@ class UploadSession:
         token = token_urlsafe(16)
         self._pending[token] = (payload, filename, now, doubted)
         return token
+
+    def peek(self, token: str) -> tuple[bytes, str]:
+        """The held file, left in place. KeyError where there is none or it has lapsed."""
+        payload, filename, created, _ = self._pending[token]
+        if datetime.now(UTC) - created > self.LIFETIME:
+            raise KeyError("upload expired - upload the file again")
+        return payload, filename
 
     def claim(self, token: str) -> tuple[bytes, str, bool]:
         payload, filename, created, doubted = self._pending.pop(token)
@@ -7019,6 +7048,9 @@ class ConnectionHandler(
                 int(self.headers.get("Content-Length") or 0)
             ).decode("utf-8")))
             return
+        if route == "/upload-result":
+            self._upload_result(self._read_form())
+            return
         if route == "/starling-probe":
             self._starling_probe(parse_qs(self.rfile.read(
                 int(self.headers.get("Content-Length") or 0)
@@ -7282,11 +7314,24 @@ class ConnectionHandler(
             )
             return
         try:
-            payload, filename, _ = self.uploads.claim(token)
-        except KeyError as exc:
-            self._respond(410, error_page(
-                    "Upload expired", f"<p>{html.escape(str(exc))}</p>", BACK_TO_IMPORT
-                ))
+            if "show_values" in form:
+                # Showing or hiding values previews the same file again, so the page it came
+                # from can still be imported from: the press must not use up its token.
+                payload, filename = self.uploads.peek(token)
+            else:
+                payload, filename, _ = self.uploads.claim(token)
+        except KeyError:
+            self._respond(
+                410,
+                error_page(
+                    "Upload expired",
+                    "<p>No file is held for this press: it was held for more than "
+                    f"{int(UploadSession.LIFETIME.total_seconds() // 60)} minutes, or this "
+                    "server has restarted. Upload the file again.</p>",
+                    BACK_TO_IMPORT,
+                ),
+                no_store=True,
+            )
             return
         account = self.chosen_account(
             typed=typed,
@@ -7300,10 +7345,20 @@ class ConnectionHandler(
         )
         if account is None:
             return
-        self._preview_import(payload, filename, account)
+        self._preview_import(
+            payload, filename, account, show_values=form.get("show_values") == ["yes"]
+        )
 
-    def _preview_import(self, payload: bytes, filename: str, account: str) -> None:
-        """Parse without landing, and offer the single confirm button."""
+    def _preview_import(
+        self, payload: bytes, filename: str, account: str, *, show_values: bool = False
+    ) -> None:
+        """Parse without landing, and offer the single confirm button.
+
+        The sample rows and the comparison with other sources are masked unless the person has
+        pressed "Show values", and the page is never cached either way: it answers a POST, so
+        Back returns to it, and a preview that showed an amount and a payee to anyone pressing
+        Back was the reviewer's finding.
+        """
         hook = self.bound_config.preview_upload
         if hook is None:
             self._respond(
@@ -7315,11 +7370,13 @@ class ConnectionHandler(
             preview = hook(payload, filename, account)
         except Exception as exc:
             self._respond(
-                400, error_page(
+                400,
+                error_page(
                     "Could not read the file",
                     f"<p>{html.escape(str(exc))}</p>",
                     BACK_TO_IMPORT,
-                )
+                ),
+                no_store=True,
             )
             return
         doubt_messages = []
@@ -7330,10 +7387,14 @@ class ConnectionHandler(
         doubt_message = " ALSO: ".join(doubt_messages)
         token = self.uploads.stash(payload, filename, doubted=bool(doubt_message))
         raw_sample = preview.get("sample")
+        def shown(value: object) -> str:
+            text = str(value)
+            return text if show_values else mask_text(text)
+
         sample_rows = "".join(
             f'<tr><td>{html.escape(str(r.get("date")))}</td>'
-            f'<td style="text-align:right">{html.escape(str(r.get("amount")))}</td>'
-            f'<td>{html.escape(str(r.get("description")))}</td></tr>'
+            f'<td style="text-align:right">{html.escape(shown(r.get("amount")))}</td>'
+            f'<td>{html.escape(shown(r.get("description")))}</td></tr>'
             for r in (raw_sample if isinstance(raw_sample, list) else [])
             if isinstance(r, dict)
         )
@@ -7369,14 +7430,20 @@ class ConnectionHandler(
         )
         raw_agreements = preview.get("agreement_preview")
         agreement_html = ""
-        # Answers a POST (the upload), so its figures are the direct response
-        # to a deliberate request rather than something a link can reach.
-        rendered_agreements = _agreements_html(raw_agreements, masked=False)
+        rendered_agreements = _agreements_html(raw_agreements, masked=not show_values)
         if rendered_agreements:
             agreement_html = (
                 f"<h2>Against what {html.escape(account)} already holds</h2>"
                 + rendered_agreements
             )
+        values_form = (
+            '<form method="post" action="/upload-preview">'
+            f'<input type="hidden" name="token" value="{token}">'
+            f'<input type="hidden" name="account" value="{html.escape(account)}">'
+            f'<input type="hidden" name="show_values" value="{"no" if show_values else "yes"}">'
+            + submit_button("Hide values" if show_values else "Show values", secondary=True)
+            + "</form>"
+        )
         body = (
             f"<p><strong>{html.escape(filename)}</strong> parsed as "
             f"{html.escape(str(preview.get('parser')))} "
@@ -7408,6 +7475,7 @@ class ConnectionHandler(
                 if doubt_message
                 else ""
             )
+            + values_form
             + f"<p>Nothing has been stored yet. Confirm to import into "
             f"<strong>{html.escape(account)}</strong>.</p>"
             '<form method="post" action="/upload-confirm">'
@@ -7424,7 +7492,7 @@ class ConnectionHandler(
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             f"Import into {html.escape(account)}</button></p></form>" + BACK_TO_IMPORT
         )
-        self._respond(200, render_page("Preview import", body))
+        self._respond(200, render_page("Preview import", body), no_store=True)
 
     def _upload_gone_page(self, token: str, account: str) -> bytes:
         """The answer to Import pressed for a token nothing holds, saying whether it landed.
@@ -7521,15 +7589,48 @@ class ConnectionHandler(
             return
         self.uploads.mark_landed(token, filename, account)
         print(f"web import: {filename} -> {account}", file=sys.stderr)
+        verification = self.answer_sentence(account, before)
+        result_token = self.uploads.keep_result(
+            {"summary": summary, "account": account, "verification": verification}
+        )
+        self._respond(
+            200,
+            self._import_result_page(
+                summary, account, verification, result_token, show_values=False
+            ),
+            no_store=True,
+        )
+
+    def _import_result_page(
+        self,
+        summary: str | dict[str, object],
+        account: str,
+        verification: str,
+        result_token: str,
+        *,
+        show_values: bool,
+    ) -> bytes:
+        """What an import did, with the comparison against other sources masked by default.
+
+        The comparison names rows and amounts, which a person who has just uploaded a file did
+        not ask to be shown a second time; "Show values" asks, and "Hide values" undoes it.
+        """
         if isinstance(summary, dict):
             summary_html = (
                 f"<p>{html.escape(str(summary.get('summary')))}</p>"
-                + _agreements_html(summary.get("agreements"), masked=False)
+                + _agreements_html(summary.get("agreements"), masked=not show_values)
             )
         else:
             summary_html = "".join(
                 f"<p>{html.escape(line)}</p>" for line in summary.splitlines()
             )
+        values_form = (
+            '<form method="post" action="/upload-result">'
+            f'<input type="hidden" name="result" value="{result_token}">'
+            f'<input type="hidden" name="show_values" value="{"no" if show_values else "yes"}">'
+            + submit_button("Hide values" if show_values else "Show values", secondary=True)
+            + "</form>"
+        )
         # A statement-chunk session imports many files into ONE account;
         # sending the person back to the homepage to re-scroll and re-pick
         # the same destination each time taxes exactly the workflow the
@@ -7545,17 +7646,44 @@ class ConnectionHandler(
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             "Preview import</button></p></form>"
         )
-        verification = self.answer_sentence(account, before)
+        return render_page(
+            "Imported",
+            self.answer_link(account)
+            + summary_html
+            + (f"<p>{html.escape(verification)}</p>" if verification else "")
+            + values_form
+            + another
+            + BACK_TO_IMPORT,
+        )
+
+    def _upload_result(self, form: dict[str, list[str]]) -> None:
+        """Show or hide the values on an import's answer, from the answer held for it."""
+        token = (form.get("result", [""])[0] or "").strip()
+        held = self.uploads.result(token)
+        if held is None:
+            self._respond(
+                410,
+                error_page(
+                    "Result expired",
+                    "<p>This import's answer is no longer held, so its values cannot be "
+                    "shown again. The import itself is recorded: look in the account's "
+                    "ledger.</p>",
+                    BACK_TO_IMPORT,
+                ),
+                no_store=True,
+            )
+            return
+        summary = held["summary"]
         self._respond(
             200,
-            render_page(
-                "Imported",
-                self.answer_link(account)
-                + summary_html
-                + (f"<p>{html.escape(verification)}</p>" if verification else "")
-                + another
-                + BACK_TO_IMPORT,
+            self._import_result_page(
+                summary if isinstance(summary, (str, dict)) else "",
+                str(held["account"]),
+                str(held["verification"]),
+                token,
+                show_values=form.get("show_values") == ["yes"],
             ),
+            no_store=True,
         )
 
     def _starling_probe(self, params: dict[str, list[str]]) -> None:

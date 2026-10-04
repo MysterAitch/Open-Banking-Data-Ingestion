@@ -2375,7 +2375,11 @@ class TestUploadingAFileFromThePage:
         assert confirms == []  # nothing landed from a preview
         assert "StarlingCsvParser" in page
         assert "42 row(s)" in page
-        assert "COFFEE" in page
+        # The sample is masked until "Show values" is pressed (test_import_masking.py): it keeps
+        # the row's date and the shape of its amount and description.
+        assert "COFFEE" not in page
+        assert "-99.99" in page
+        assert "XXXXXX" in page
         # The preview shows the pre-import cross-source comparison, and a
         # single confirm button carries the already-chosen account. String
         # entries render as paragraphs; outline dicts render as a heading
