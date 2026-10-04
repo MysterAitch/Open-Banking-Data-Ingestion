@@ -17,18 +17,23 @@ by its own id; an export row once by its content and occurrence, as an importer 
 repeats. The feed items an account's aggregator can name are its own and its Spaces',
 because an aggregator cannot see Spaces and reports a Space's payment under the main account.
 Only accounts that have both a first-party feed and an aggregator are reported.
+
+THE PAIRS OF STORED ROWS are a different reading: `pair_figures` replays the join of two stored
+rows (`matching.second_row_named_by_exact_rules`) over the stored rows and sightings, without
+writing, so what the join would do to a store is read before it is trusted with one.
 """
 
 from __future__ import annotations
 
 import contextlib
-from collections import defaultdict
-from collections.abc import Mapping
+from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
-from .models import Transaction
+from .matching import REFUSALS, CandidateIndex, resolve, second_row_verdicts
+from .models import MatchTier, Transaction
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
 from .rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
 from .space_attribution import space_parents
@@ -121,19 +126,61 @@ def _rows(count: int) -> str:
     return f"{count} row" if count == 1 else f"{count} rows"
 
 
+#: How many pairs of stored rows an account's sentences name before it counts the rest.
+NAMED_PAIRS = 5
+
+
+@dataclass
+class PairFigures:
+    """Pairs of stored rows one exact rule names for a record and another exact rule names too."""
+
+    account: str
+    #: One sentence per pair the rule would join, in date order.
+    joins: list[str] = field(default_factory=list)
+    #: Candidate pairs a guard refuses, by the guard's reason (`matching.REFUSALS`).
+    refused: Counter[str] = field(default_factory=Counter)
+
+    def sentences(self) -> list[str]:
+        lines = [
+            f"{_pairs_of_rows(len(self.joins))} the exact rules name as one payment and the "
+            "store holds as two."
+        ]
+        lines += [f"  {line}" for line in self.joins[:NAMED_PAIRS]]
+        if len(self.joins) > NAMED_PAIRS:
+            lines.append(f"  and {len(self.joins) - NAMED_PAIRS} more")
+        if not self.refused:
+            lines.append("No candidate pair is refused by a guard.")
+        for reason in REFUSALS:
+            if self.refused[reason]:
+                lines.append(
+                    f"{_candidate_pairs(self.refused[reason])} refused: {reason}."
+                )
+        return lines
+
+
+def _pairs_of_rows(count: int) -> str:
+    return "1 pair of stored rows" if count == 1 else f"{count} pairs of stored rows"
+
+
+def _candidate_pairs(count: int) -> str:
+    return "1 candidate pair" if count == 1 else f"{count} candidate pairs"
+
+
 @dataclass
 class ExactRuleReport:
     accounts: list[AccountFigures] = field(default_factory=list)
     #: Artefacts that could not be read, which no figure includes.
     unreadable: int = 0
+    #: Per account, the pairs of stored rows an exact rule would join (`pair_figures`).
+    pairs: list[PairFigures] = field(default_factory=list)
 
     def describe(self) -> str:
+        lines: list[str] = []
         if not self.accounts:
-            return (
+            lines.append(
                 "No account is fed by both a first-party feed and an aggregator, "
                 "so there is no pair of reports to compare."
             )
-        lines: list[str] = []
         for figures in self.accounts:
             lines.append(f"{figures.account}:")
             lines.extend(f"  {sentence}" for sentence in figures.sentences())
@@ -141,6 +188,17 @@ class ExactRuleReport:
             lines.append(
                 f"{self.unreadable} landed artefact(s) could not be read and are in no figure."
             )
+        lines.append("")
+        lines.append(
+            "Stored rows one record's exact rules name twice, read from the stored rows and "
+            "sightings without changing them:"
+        )
+        if not self.pairs:
+            lines.append("  No account holds a record whose id names one row and whose "
+                         "settlement day names another.")
+        for found in self.pairs:
+            lines.append(f"{found.account}:")
+            lines.extend(f"  {sentence}" for sentence in found.sentences())
         return "\n".join(lines)
 
 
@@ -267,6 +325,93 @@ def _feed_uids_on(held: _Held, rows: set[str]) -> set[str]:
     return uids
 
 
+def _blind_in(blind: Callable[[str, str], bool], account: str) -> Callable[[str], bool]:
+    return lambda source: blind(source, account)
+
+
+def _seen_by(store: Store, row: Transaction) -> str:
+    sources = store.sources_for(row.entity_id)
+    return f"{sources[0]} alone" if len(sources) == 1 else " and ".join(sources)
+
+
+def pair_figures(store: Store, account_map: AccountMap) -> list[PairFigures]:
+    """The pairs of stored rows the join would make on the store as it stands, and the refusals.
+
+    A READ-ONLY replay of the join (`matching.second_row_named_by_exact_rules`): every feed and
+    aggregator record the landed artefacts hold is resolved against the stored rows and sightings
+    of its account as if it had just arrived, and where an id names a stored row the settlement
+    rule's other candidates are judged. Nothing is written, and nothing is read from a wall clock.
+    A pair is counted once however many records name it, and a pair that any record would join
+    is not counted as refused. A pair refused by two guards, or by one for each of two records,
+    is counted under each reason, so the reasons add up to more than the pairs where they overlap.
+    """
+    from .family_anchors import families_of
+
+    records: dict[str, dict[tuple[str, str], Transaction]] = defaultdict(dict)
+    rows = store.connection.execute(
+        "SELECT rowid, source, account_ref, digest, payload, origin FROM raw_artefacts "
+        "ORDER BY fetched_at ASC, rowid ASC"
+    ).fetchall()
+    defaults = _starling_defaults(rows)
+    for row in rows:
+        source = str(row["source"])
+        if source not in (_FEED_ARTEFACT, "truelayer-booked", "truelayer-card-booked"):
+            continue
+        account = resolve_artefact_ref(row, account_map, defaults)
+        with contextlib.suppress(Exception):
+            for item in parse_artefact_transactions(
+                source, row["payload"], account, str(row["digest"])
+            ):
+                if item.source_id:
+                    records[account][(item.source, item.source_id)] = item
+    blind = families_of(store, account_map).blind_in
+
+    found: list[PairFigures] = []
+    for account in sorted(records):
+        index = CandidateIndex(
+            store.transactions_for_account(account),
+            sightings=store.sighted_ids_for_account(account),
+            space_blind=_blind_in(blind, account),
+            settlements=store.settlement_days_for_account(account),
+            links=store.linked_ids_for_account(account),
+        )
+        joined: dict[frozenset[str], tuple[str, Transaction, Transaction, MatchTier]] = {}
+        refused: set[tuple[frozenset[str], str]] = set()
+        for incoming in records[account].values():
+            result = resolve(incoming, index)
+            if result.existing is None or result.tier not in (
+                MatchTier.SOURCE_ID,
+                MatchTier.LINKED_ID,
+            ):
+                continue
+            for verdict in second_row_verdicts(incoming, index, result.existing):
+                key = frozenset((result.existing.entity_id, verdict.row.entity_id))
+                if verdict.refused:
+                    refused.add((key, verdict.refused))
+                else:
+                    joined.setdefault(
+                        key, (incoming.source, result.existing, verdict.row, result.tier)
+                    )
+        figures = PairFigures(account)
+        for source, first, second, tier in sorted(
+            joined.values(), key=lambda j: (j[1].value_date, j[2].value_date, j[1].entity_id)
+        ):
+            names = (
+                f"{source}'s own id"
+                if tier is MatchTier.SOURCE_ID
+                else f"the id {source} states"
+            )
+            figures.joins.append(
+                f"{names} names the row dated {first.value_date.isoformat()} seen by "
+                f"{_seen_by(store, first)}; its settlement day and payee name the row dated "
+                f"{second.value_date.isoformat()} seen by {_seen_by(store, second)}"
+            )
+        figures.refused = Counter(reason for key, reason in refused if key not in joined)
+        if figures.joins or figures.refused:
+            found.append(figures)
+    return found
+
+
 def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     """How often each exact rule holds, account by account, from the landed artefacts."""
     landed = _read_artefacts(store, account_map)
@@ -287,6 +432,7 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
         report.accounts.append(figures)
         _count_aggregator(figures, landed.aggregator[account], pool, held)
         _count_export(figures, account, landed, pool, held)
+    report.pairs = pair_figures(store, account_map)
     return report
 
 

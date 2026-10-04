@@ -92,10 +92,12 @@ class Payment:
     stated: dict[str, Any] = field(default_factory=dict)
     #: False for a payment only the other sources report.
     in_feed: bool = True
+    #: The status the bank's feed gives the item.
+    feed_status: str = "SETTLED"
 
     def feed_item(self) -> dict[str, Any]:
         day = int(self.made[8:10])
-        item = card_payment(self.uid, self.name, self.minor, day)
+        item = card_payment(self.uid, self.name, self.minor, day, status=self.feed_status)
         item["transactionTime"] = self.made
         if self.settled is not None:
             item["settlementTime"] = self.settled

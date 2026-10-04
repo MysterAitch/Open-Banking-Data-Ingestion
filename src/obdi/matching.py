@@ -621,6 +621,25 @@ class CandidateIndex:
         self._order[position] = merged
         self._file(merged)
 
+    def sighting_sources(self, entity_id: str) -> frozenset[str]:
+        """Every source that has stated an id for this row, and the source that wrote it last."""
+        found = set(self._ids_of.get(entity_id, {}))
+        found.add(self._order[self._position[entity_id]].source)
+        return frozenset(found)
+
+    def could_be_one_row(self, first: str, second: str) -> bool:
+        """Whether no source has called these two rows by different ids.
+
+        A source that has called two rows by ids of its own, different from each other, has
+        said they are two payments (`could_be_one_payment`), and no other evidence joins them.
+        """
+        ids = self._ids_of
+        return not any(
+            known and other and known != other
+            for source, known in ids.get(first, {}).items()
+            for other in [ids.get(second, {}).get(source, set())]
+        )
+
     def _in_arrival_order(self, entity_ids: list[str]) -> list[Transaction]:
         return [
             self._order[self._position[entity_id]]
@@ -951,6 +970,96 @@ def resolve(
     return MatchResult(
         MatchTier.FUZZY, near[0], basis=judge.heuristic_basis(near[0]), review=conflict
     )
+
+
+def second_row_named_by_exact_rules(
+    incoming: Transaction, index: CandidateIndex, kept: Transaction
+) -> Transaction | None:
+    """The one other stored row the exact rules also name for `incoming`, or None.
+
+    THE RULE. A record whose id names the stored row `kept` (its own id, or the feed uid an
+    aggregator item states) may also have the settlement rule name another row: the other
+    row lies on a day the record states it settled (or states one the record's own day is),
+    of one size, direction, and payee (`settles_together`, `same_payee`).
+    Two rows an exact rule each names for one record are one payment held twice, which arose
+    where the records that would have joined them arrived in the one order that left each
+    alone: an aggregator and an export before the feed that links them, the aggregator's row
+    with no settlement day to reach the export's, and the export's row beyond the window of
+    the aggregator's.
+    Only ONE other row may be named: where the settlement day names several (two equal payments
+    to one payee settled on one day, two export rows) it cannot say which belongs, and nothing
+    is joined. The other row is never one the record's own source has already sighted (two feed
+    rows of one size are two payments), never one an id contradicts (`contradicted`), and never
+    one a source has called by an id of its own that differs from the kept row's
+    (`CandidateIndex.could_be_one_row`).
+    `second_row_verdicts` says, of every row the settlement rule names, which guard refuses it.
+    """
+    allowed = [v for v in second_row_verdicts(incoming, index, kept) if not v.refused]
+    return allowed[0].row if len(allowed) == 1 else None
+
+
+REFUSED_KIND = "a typed or history row"
+REFUSED_CONTRADICTED = "a row an id contradicts"
+REFUSED_OTHER_ID = "a row a source calls by another id"
+REFUSED_SAME_SOURCE = "a row the record's source already sighted"
+REFUSED_SEVERAL = "two or more settlement candidates"
+REFUSALS = (
+    REFUSED_SEVERAL,
+    REFUSED_SAME_SOURCE,
+    REFUSED_CONTRADICTED,
+    REFUSED_OTHER_ID,
+    REFUSED_KIND,
+)
+
+
+@dataclass(frozen=True)
+class SecondRowVerdict:
+    """A row the settlement rule names for a record, and the guard that refuses it ("" if none).
+
+    Where several guards would refuse a row the first of `REFUSED_KIND`, `REFUSED_CONTRADICTED`,
+    `REFUSED_SAME_SOURCE`, `REFUSED_OTHER_ID` is named: a row that is not a payment's own at all
+    outranks the id evidence, which outranks the sighting evidence.
+    """
+
+    row: Transaction
+    refused: str
+
+
+def second_row_verdicts(
+    incoming: Transaction, index: CandidateIndex, kept: Transaction
+) -> list[SecondRowVerdict]:
+    """Every row other than `kept` that the settlement rule names for `incoming`, judged.
+
+    The rule and its guards are stated at `second_row_named_by_exact_rules`.
+    Several rows that pass every row guard are all refused (`REFUSED_SEVERAL`): the settlement
+    day cannot say which belongs.
+    """
+    judge = _Judgement(incoming, index)
+    kept_unfit = kept.status.is_history or SourceTier.MANUAL in (incoming.tier, kept.tier)
+    verdicts: list[SecondRowVerdict] = []
+    for row in index.by_amount(incoming.account_id, incoming.amount_minor):
+        if row.entity_id == kept.entity_id:
+            continue
+        if not (judge.settled_together(row) and same_payee(incoming, row)):
+            continue
+        refused = ""
+        if kept_unfit or row.status.is_history or SourceTier.MANUAL in (incoming.tier, row.tier):
+            refused = REFUSED_KIND
+        elif judge.contradicted(row):
+            refused = REFUSED_CONTRADICTED
+        elif incoming.source in index.sighting_sources(row.entity_id):
+            refused = REFUSED_SAME_SOURCE
+        elif not index.could_be_one_row(kept.entity_id, row.entity_id) or not judge.one_payment(
+            row, same_content=False
+        ):
+            refused = REFUSED_OTHER_ID
+        verdicts.append(SecondRowVerdict(row, refused))
+    passing = [v for v in verdicts if not v.refused]
+    if len(passing) > 1:
+        verdicts = [
+            SecondRowVerdict(v.row, REFUSED_SEVERAL) if not v.refused else v for v in verdicts
+        ]
+    return verdicts
 
 
 @dataclass(frozen=True)
