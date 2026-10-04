@@ -113,6 +113,12 @@ ANCHOR_QUERIES = 8
 FAMILY_QUERIES = 9
 FAMILY_DISCOVERY_QUERIES = 2
 
+#: What asking for the family reading adds to the page of a SPACE: the one read of the
+#: landed Space listings, whose balance for the Space is a checkpoint of its own
+#: (`bank_balances.landed_listing_balances`). Each listing not yet read adds nothing
+#: further: its body is read once per process from the same statement.
+SPACE_QUERIES = 1
+
 _MONTH = re.compile(r"^(\d{4})-(\d{2})$")
 
 #: Symbols for the currencies the store is likely to hold. Any other currency

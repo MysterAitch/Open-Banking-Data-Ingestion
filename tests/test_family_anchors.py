@@ -62,6 +62,7 @@ from obdi.ledger import (
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,
     QUERIES_PER_PAGE,
+    SPACE_QUERIES,
     build_ledger,
 )
 from obdi.models import TransactionStatus
@@ -1053,11 +1054,11 @@ class TestWhatTheFamilyReadingCosts:
             QUERIES_PER_PAGE + ANCHOR_QUERIES + FAMILY_QUERIES + len(found.spaces_of(MAIN))
         )
 
-    def test_SpaceAccount_CostsNoMoreThanItDidWithoutFamilies(self, family):
+    def test_SpaceAccount_CostsOnlyTheReadOfItsListingsMoreThanItDidWithoutFamilies(self, family):
         found = families(family)
 
-        assert self.statements(family.store, BILLS, found) == self.statements(
-            family.store, BILLS, None
+        assert self.statements(family.store, BILLS, found) == (
+            self.statements(family.store, BILLS, None) + SPACE_QUERIES
         )
 
     def test_DiscoveringTheFamilies_CostsTheDocumentedNumberOfStatements(self, family):

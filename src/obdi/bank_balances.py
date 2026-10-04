@@ -25,6 +25,15 @@ which reading each figure took and by what test (`BankReport`).
 The test reads only the Spaces' rows, so a fault in the main account's rows
 cannot hide the figure that would expose it.
 
+A SPACE'S OWN BALANCE is stated by each landed listing of its account's Spaces, which
+carries a `totalSaved` (a currency and minor units) for every savings goal. The field's
+name and shape come from the repository's own list of provider fields (`classification`)
+and the fixtures, and are not confirmed on a real account or against the provider's
+published schema, so the figure is tested like any other: against the Space's own rows.
+A listing is read as a balance of its fetch instant
+(`landed_listing_balances`) and judged exactly as the account's own are. A listing that
+omits the Space after naming it is no balance, and the newest run of those is counted.
+
 WHICH FIGURES ARE ANCHORS. Cleared and total cleared: the booked balance, which
 is what `balance_anchors` counts rows toward for every bank basis. The effective
 figure moves again when a pending item settles, so judged later against settled
@@ -67,6 +76,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from .models import Transaction, TransactionStatus
+from .spaces import LISTING_SOURCE
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 #: The source whose dating places rows for these balances: the bank's own feed.
@@ -167,6 +177,10 @@ class BankBalances:
 
     usable: tuple[LandedBalance, ...] = ()
     refused: tuple[str, ...] = ()
+    #: For a Space: how many of the newest listings of its account omit it, in a row,
+    #: and the day of the first of them. Nil while the newest listing names it.
+    absent: int = 0
+    absent_since: date | None = None
 
     @property
     def judged(self) -> tuple[LandedBalance, ...]:
@@ -200,6 +214,89 @@ def landed_balances(store: Store, provider_ids: Collection[str]) -> BankBalances
         else:
             usable.append(LandedBalance(when, read, digest))
     return BankBalances(tuple(usable), tuple(refused))
+
+
+#: Listing artefact digest -> each Space it names -> its balance in minor units, or the
+#: reason it cannot be read; None where the body is not a Space listing at all.
+#: The bytes never change, so a reading is good for the life of the process.
+_LISTED: dict[str, dict[str, int | str] | None] = {}
+
+
+def _read_listing(payload: bytes) -> dict[str, int | str] | None:
+    """What a Space listing states of each Space's own balance (`totalSaved`).
+
+    Starling's savings-goal record carries `totalSaved` as a currency and minor
+    units, which is read exactly as the account balance's figures are (`_figure`).
+    An unreadable body is not an empty listing: it says nothing about any Space.
+    """
+    try:
+        body = json.loads(payload)
+    except ValueError:
+        return None
+    goals = body.get("savingsGoals") if isinstance(body, dict) else None
+    if not isinstance(goals, list):
+        return None
+    found: dict[str, int | str] = {}
+    for goal in goals:
+        if isinstance(goal, dict) and goal.get("savingsGoalUid"):
+            found[str(goal["savingsGoalUid"])] = _figure(goal, "totalSaved")
+    return found
+
+
+def landed_listing_balances(
+    store: Store, space_uids: Collection[str], parent_uids: Collection[str]
+) -> BankBalances:
+    """The balance each landed Space listing states for one Space, read once per process each.
+
+    A listing is a statement about its moment, like the account's own balance, so each
+    becomes a `LandedBalance` at the instant it was fetched and is judged exactly as
+    those are. A listing that names the Space without a readable figure is refused with
+    the reason, and one that omits it is no balance at all: the newest run of omissions
+    after the Space was last named is counted (`BankBalances.absent`), which is how an
+    archived Space reads. Only the listings of the Space's own parent account count as
+    omitting it, where that parent's id is known.
+    """
+    wanted = {uid for uid in space_uids if uid}
+    if not wanted:
+        return BankBalances()
+    parents = {f"starling:{uid}" for uid in parent_uids if uid}
+    usable: list[LandedBalance] = []
+    refused: list[str] = []
+    seen = False
+    absent = 0
+    absent_since: date | None = None
+    for row in store.connection.execute(
+        "SELECT digest, account_ref, fetched_at, payload FROM raw_artefacts "
+        "WHERE source = ? ORDER BY fetched_at, digest",
+        (LISTING_SOURCE,),
+    ):
+        digest = str(row["digest"])
+        if digest not in _LISTED:
+            payload = row["payload"]
+            raw = payload.encode("utf-8") if isinstance(payload, str) else bytes(payload or b"")
+            _LISTED[digest] = _read_listing(raw)
+        listed = _LISTED[digest]
+        when = _instant(str(row["fetched_at"]))
+        if listed is None:
+            continue
+        named = sorted(wanted & listed.keys())
+        if not named:
+            if seen and (not parents or str(row["account_ref"]) in parents):
+                absent += 1
+                if absent_since is None and when is not None:
+                    absent_since = when.date()
+            continue
+        absent, absent_since, seen = 0, None, True
+        figure = listed[named[0]]
+        if isinstance(figure, str):
+            refused.append(f"the Space's entry in a listing: {figure}")
+        elif when is None:
+            refused.append("the fetch time cannot be read")
+        else:
+            usable.append(
+                LandedBalance(when, Figures(figure, figure, figure, figure), digest)
+            )
+    return BankBalances(tuple(usable), tuple(refused), absent, absent_since)
 
 
 def _instant(text: str) -> datetime | None:
@@ -338,6 +435,9 @@ class BankReport:
     pending_tested: int = 0
     pending_included: int = 0
     newest_day: date | None = None
+    #: For a Space: the newest listings in a row that omit it, and the day of the first.
+    absent: int = 0
+    absent_since: date | None = None
     #: What the bank's balance says about the open differences, one sentence per scope.
     sayings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -476,6 +576,14 @@ def describe(report: BankReport) -> tuple[str, ...]:
             else "The total differs from the cleared figure while the Spaces' rows sum to "
             "nothing, so no balance the bank stated is used."
         )
+    if report.absent:
+        since = report.absent_since.isoformat() if report.absent_since else "an unknown day"
+        lines.append(
+            f"The Space is omitted from the newest {_plural(report.absent, 'listing')} of its "
+            f"account, the first on {since}, "
+            "so no balance is stated for it after the last listing that named it. That is how "
+            "an archived Space reads, and nothing here says that it was."
+        )
     if report.pending_tested:
         lines.append(
             f"The effective figure includes pending items in {report.pending_included} of "
@@ -565,6 +673,7 @@ __all__ = [
     "counts_at",
     "describe",
     "landed_balances",
+    "landed_listing_balances",
     "read_meaning",
     "rows_through",
     "say",

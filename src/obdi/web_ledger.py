@@ -315,6 +315,7 @@ _BASIS_WORDS = {
     "family": "the whole account's stated balance, less its Spaces' own rows",
     "opened": "the day before the account was created, with its feed held from then",
     "export": "the export's own balance, read as the main account's",
+    "assumed-nil": "assumed, not shown: a Space's rows are taken to start from nil",
 }
 
 
@@ -332,7 +333,10 @@ def _anchor_row(line: Any, *, balance_only: bool = False) -> str:
     On a balance-only account a later STATED balance is followed, never tested,
     so it is not given the verdict of a check it did not pass.
     """
-    if line.defines_opening:
+    if line.basis == "assumed-nil":
+        role = '<span class="pill pill-quiet">assumed</span>'
+        detail = ": the nil the listings' balances are tested against"
+    elif line.defines_opening:
         role = '<span class="pill pill-quiet">defines the opening balance</span>'
         detail = ""
     elif balance_only and line.basis == "stated":
@@ -1166,6 +1170,16 @@ def _opening_html(view: Any, unmasked: bool) -> str:
                     )
                 body += _explanations_html(opening.own_explanation)
         else:
+            if any(line.verdict for line in opening.anchors):
+                # Tested against nil (a Space's listings): the verdicts are the finding.
+                body += _anchors_html(opening.anchors, balance_only=opening.balance_only)
+                differing = sum(1 for line in opening.anchors if line.verdict == "differs")
+                if differing:
+                    body += (
+                        f'<p class="warn"><strong>{differing} balance(s) differ</strong> '
+                        "from what the rows predict: rows are missing, duplicated, or "
+                        "mis-dated.</p>"
+                    )
             body += (
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
                 f"{_esc(opening.withheld)}.</p>"

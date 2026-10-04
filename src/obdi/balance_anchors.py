@@ -102,6 +102,7 @@ from .bank_balances import (
     FeedMoments,
     by_source,
     landed_balances,
+    landed_listing_balances,
     read_meaning,
     rows_through,
     say,
@@ -140,13 +141,26 @@ BANK = "bank"
 STATEMENT = "statement"
 FAMILY = "family"
 EXPORT = "export"
+#: Nil before a Space's first row, which is assumed and never shown (`_space_nil`).
+ASSUMED_NIL = "assumed-nil"
 
 #: Which basis wins when two anchors fall on one day, and so which of them
 #: defines the opening: what a person said outranks a document, and a
 #: document outranks a feed. The loser is then a check, which is the useful
 #: outcome when the two disagree. A family anchor comes last: it is a
 #: document's or a feed's figure with an assumption about the Spaces applied.
-_PRECEDENCE = {OPENED: -1, STATED: 0, STATEMENT: 1, BANK: 2, EXPORT: 2, FAMILY: 3}
+_PRECEDENCE = {
+    OPENED: -1, ASSUMED_NIL: -1, STATED: 0, STATEMENT: 1, BANK: 2, EXPORT: 2, FAMILY: 3,
+}
+
+#: The bases of a nil opening, which define the opening whatever day they fall on.
+_NIL_BASES = (OPENED, ASSUMED_NIL)
+
+#: What a Space's page says in place of an opening it was never given.
+SPACE_NIL_NOTE = (
+    "the Space's rows are taken to start from nil, so that each balance its listings state can "
+    "be tested; that is an assumption and not an opening, so none is derived, shown, or sent"
+)
 
 #: An anchor with no instant sorts before one stated for a moment of the same day.
 _NO_INSTANT = datetime.min.replace(tzinfo=UTC)
@@ -435,7 +449,7 @@ class EffectiveOpening:
     def single_anchor(self) -> bool:
         """Only one anchor defines the opening and nothing tests it. The opened
         anchor is not that: it is the account's creation, which needs no test."""
-        return len(self.readings) == 1 and self.readings[0].anchor.basis != OPENED
+        return len(self.readings) == 1 and self.readings[0].anchor.basis not in _NIL_BASES
 
     @property
     def differing(self) -> list[AnchorReading]:
@@ -491,7 +505,7 @@ def derive_opening(
     ordered = sorted(
         distinct.values(),
         key=lambda a: (
-            a.basis != OPENED,
+            a.basis not in _NIL_BASES,
             a.day,
             a.at or _NO_INSTANT,
             _PRECEDENCE.get(a.basis, len(_PRECEDENCE)),
@@ -525,7 +539,7 @@ def derive_opening(
             anchor.source
             if sightings is not None
             and not by_statement
-            and anchor.basis not in (STATED, OPENED)
+            and anchor.basis not in (STATED, *_NIL_BASES)
             and sightings.places(anchor.source)
             else ""
         )
@@ -695,9 +709,19 @@ class _Gathered:
 
 
 def _bank_balances(store: Store, ref: str, families: Families | None) -> BankBalances:
-    """The balances landed for a main account of the bank's own feed, none for any other."""
-    if families is None or ref in families.parents:
+    """The balances landed for an account of the bank's own feed, none for any other.
+
+    A main account's are the balances landed with each pull; a Space's are what each
+    listing of its account states for it.
+    """
+    if families is None:
         return BankBalances()
+    if ref in families.parents:
+        return landed_listing_balances(
+            store,
+            families.provider_ids.get(ref, frozenset()),
+            families.provider_ids.get(families.parents[ref], frozenset()),
+        )
     return landed_balances(store, families.provider_ids.get(ref, frozenset()))
 
 
@@ -1009,6 +1033,9 @@ def effective_opening(
             refused=gathered.bank.refused,
             landed=len(gathered.bank.usable),
         )
+        report = replace(
+            report, absent=gathered.bank.absent, absent_since=gathered.bank.absent_since
+        )
         for balance in judged:
             if report.gives_main:
                 anchors.append(
@@ -1083,6 +1110,22 @@ def effective_opening(
                     fold_refusals=lambda: _fold_refusals(store, families, ref, members, held),
                 ),
             )
+    own_anchors = {id(a) for a in gathered.own}
+    assumed_nil = False
+    if families is not None and ref in families.parents and anchors:
+        if own_anchors:
+            # A Space that has an opening of its own keeps it: a listing dated before
+            # the earliest anchor it has is not a test of that opening, and would
+            # otherwise become its definition.
+            earliest = min(a.day for a in gathered.own)
+            anchors = [a for a in anchors if id(a) in own_anchors or a.day >= earliest]
+        else:
+            # A Space with only its listings' balances is tested against rows that
+            # start from nil, the assumption `family_main_anchors` already makes of it.
+            dated = [t.value_date for t in held if not t.status.is_history]
+            start = min([a.day for a in anchors] + dated)
+            anchors.append(Anchor(start - timedelta(days=1), 0, ASSUMED_NIL))
+            assumed_nil = True
     opening = derive_opening(
         ref,
         anchors,
@@ -1092,6 +1135,10 @@ def effective_opening(
         sightings=sightings,
         moments=moments,
     )
+    if assumed_nil:
+        # The nil only tests the listings. It is not an opening: nothing derives, shows, or
+        # pushes one, so a Space that had none still has none.
+        opening = replace(opening, opening_minor=None, as_at=None, withheld=SPACE_NIL_NOTE)
     if report is not None:
         report = replace(report, sayings=_bank_sayings(opening, walk))
     explanation = (
@@ -1113,7 +1160,7 @@ def effective_opening(
 #: Bases that no source lists rows for, so "the rows it lists that the store does not count"
 #: means nothing for them: a person's stated balance, the nil opening, and a family balance
 #: with the Spaces' rows taken off.
-_NOT_LISTED_BY_ANY_SOURCE = frozenset({STATED, OPENED, FAMILY})
+_NOT_LISTED_BY_ANY_SOURCE = frozenset({STATED, OPENED, ASSUMED_NIL, FAMILY})
 
 
 def own_walk(ref: str, opening: EffectiveOpening) -> FamilyWalk:
@@ -1204,6 +1251,10 @@ def _bank_sayings(opening: EffectiveOpening, walk: FamilyWalk | None) -> tuple[s
         for r in opening.readings
         if r.anchor.source != BANK_SOURCE and r.difference_minor is not None
     )
+    if not others:
+        # Nothing else is stated, so "every other balance agrees" would claim a test
+        # that was never made (a Space has only the balances its listings state).
+        return ()
     newest_own = bank_own[-1]
     said = say(newest_own.anchor.day, newest_own.difference_minor or 0, others)
     return (said,) if said else ()
