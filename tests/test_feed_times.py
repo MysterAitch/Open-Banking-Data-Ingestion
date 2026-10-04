@@ -149,7 +149,8 @@ class TestThePageShowsTheFeedsTime:
         untimed = Row("Cheque", -1111, 9, 9)
         page = plain(render(make(morning(), export_extra=(TOP_UP_LISTED, untimed))))
 
-        assert re.search(r"2026-09-09(?! \d\d:\d\d)out", page), "a row with no time shows none"
+        # A row's date is followed by its chips, the status first.
+        assert re.search(r"2026-09-09(?! \d\d:\d\d)booked", page), "a row with no time shows none"
 
     def test_Explanation_WhenARowIsNamed_SaysTheFeedTimeBesideTheDayTheFeedGave(self, make):
         page = plain(render(listed_morning(make)))
@@ -212,14 +213,14 @@ class TestARowEitherSideOfAClockChangeOrMidnight:
 
         page = plain(render(store, "2026-09"))
 
-        assert "2026-09-30 01:10out" in page
+        assert "2026-09-30 01:10booked" in page
 
     def test_Winter_ARowJustBeforeMidnightUtc_ShowsTheSameClockAndNoSecondDate(self, make):
         store = self.stored(make, "2026-12-15T23:30:00.000Z")
 
         page = plain(render(store, "2026-12"))
 
-        assert "2026-12-15 23:30out" in page
+        assert "2026-12-15 23:30booked" in page
         assert " on 2026-12-16" not in page
 
     def test_ClocksGoingBack_TwoRowsAMinuteApart_AreOrderedByInstantNotByTheClockShown(self, make):

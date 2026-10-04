@@ -84,7 +84,14 @@ def instance_identity() -> tuple[str, str]:
     )
 
 
-def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
+def render_page(
+    title: str,
+    body: str,
+    *,
+    wide: bool = False,
+    heading: str | None = None,
+    body_class: str = "",
+) -> bytes:
     """A plain confirmation page.
 
     Deliberately styled to be unmistakable at a glance, because the failure
@@ -97,21 +104,26 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
 
     `wide` is for a page made of cards, which then sit abreast on a desktop.
     A page of prose and forms stays narrow, where a line is short enough to read.
+
+    `heading` is the page's `<h1>` where that is not its title: the title is the browser's tab,
+    and a page about one thing leads with that thing's own name. `body_class` is a page's own
+    class on `<body>`, for rules that lay out only that page.
     """
     banner, prefix = instance_identity()
     if prefix:
         title = f"[{prefix}] {title}"
         body = banner + body
     body = structure_tables(body, fallback_name=html.escape(title))
+    classes = " ".join(part for part in ("wide" if wide else "", body_class) if part)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
 {STYLESHEET}</style></head>
-<body{' class="wide"' if wide else ""}><a class="skip" href="#main">Skip to content</a>
+<body{f' class="{classes}"' if classes else ""}><a class="skip" href="#main">Skip to content</a>
 {navigation_html()}
-<main id="main"><h1>{html.escape(title)}</h1>{body}</main>
+<main id="main"><h1>{html.escape(title if heading is None else heading)}</h1>{body}</main>
 <footer>obdi {html.escape(describe())}</footer></body></html>
 """.encode()
 

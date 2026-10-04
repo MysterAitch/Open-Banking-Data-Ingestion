@@ -383,7 +383,7 @@ class TestThePages:
     def test_Ledger_Masked_ListsTheChangesByDateAndShowsNoFigure(self, lab):
         page = lab.ledger().text
 
-        assert "<h2>Unitemised changes</h2>" in page
+        assert "<summary>Unitemised changes (" in page
         assert "2026-02-28" in page and "2026-03-31" in page
         assert "since the balance stated for the end of 2026-01-31" in page
         assert '<span class="pill pill-quiet">followed</span>' in page

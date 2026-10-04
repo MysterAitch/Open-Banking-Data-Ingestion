@@ -164,7 +164,9 @@ class TestTheAccountsCountOfJoins:
                 MAIN,
             )
 
-        sentence = re.search(r"How the rows were joined</h3><p>(.*?)\.</p>", page_of(bare))
+        sentence = re.search(
+            r"How the rows were joined \([^)]*\)</summary><p>(.*?)\.</p>", page_of(bare)
+        )
         assert sentence is not None
         # The payment is joined by id once whatever the fetches; each fetch adds two other
         # payments (one from the feed, one from the aggregator) that no second source reached.

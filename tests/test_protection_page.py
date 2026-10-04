@@ -100,7 +100,8 @@ class TestOfferingAProtection:
 
         assert "Protect through 2026-03-20" in page
         assert 'action="/protect"' in page
-        assert "in agreement through 2026-03-20; protected through nowhere" in page
+        assert "in agreement through 2026-03-20; not protected." in page
+        assert "protected through nowhere" not in page, "nothing protects it, so no place"
 
     def test_Ledger_WhenNoBalanceIsKnown_OffersNothingAndSaysWhy(self, tmp_path, lab):
         with Store(lab.db) as store:
@@ -196,7 +197,8 @@ class TestABreakOnThePage:
         assert "The protection is broken" in page
         assert "1 row added to the span (dated 2026-03-07)" in page
         assert "Accept the change and protect again" in page
-        assert "protected through 2026-03-20" in page
+        assert "the protection through 2026-03-20 is broken" in page, "the verdict says so too"
+        assert "; protected through 2026-03-20" not in page, "a broken span is not claimed"
         assert_no_secret(page)
 
     def test_Ledger_WhenBrokenAndIntact_NeverHidesTheBreakInACollapsedBlock(self, lab):
@@ -207,14 +209,27 @@ class TestABreakOnThePage:
             "the break is inside a collapsed block"
         )
 
-    def test_Ledger_WhenIntact_CollapsesTheProtectionToOneLineWithTheDetailBehindIt(self, lab):
+    def test_Ledger_WhenIntact_ShowsOneLineWithWithdrawVisibleAndTheDetailBehindIt(self, lab):
         lab.press()
 
         page = lab.get().text
 
-        assert re.search(r"<details><summary><strong>Protected through 2026-03-20: 5 rows", page)
-        assert "Withdraw protection" in page
+        assert re.search(
+            r'<p class="protect-line"><strong>Protected through 2026-03-20: 5 rows', page
+        )
+        assert "protected through 2026-03-20." in page, "the verdict names the span"
+        before = page[: page.index("Withdraw protection")]
+        assert before.count("<details") == before.count("</details>"), (
+            "the way out is inside a collapsed block"
+        )
+        assert re.search(r"<summary>About this protection</summary>", page)
         assert "The protection is broken" not in page
+
+    def test_Ledger_WhenNotProtected_OffersTheProtectionAndNoWithdrawal(self, lab):
+        page = lab.get().text
+
+        assert "Protect through 2026-03-20" in page
+        assert "Withdraw protection" not in page, "there is nothing to withdraw"
 
     def test_Accept_AfterConfirmation_ProtectsTheNewStateAndRecordsIt(self, lab):
         self.broken(lab)

@@ -138,7 +138,7 @@ class TestAnAccountWithNoAnchor:
     def test_Page_SaysThereIsNoOpeningBalanceAndThatTheFiguresStartFromZero(self, lab):
         page = lab.get().text
 
-        assert "Opening balance and anchors" in page
+        assert "Known balances and the opening (none stated)" in page
         assert "No opening balance: the figures on this page start from zero." in page
         assert "Opening balance, at the end of" not in page
 
@@ -312,7 +312,7 @@ class TestOnlyShowValuesIsAPrimaryButton:
         page = lab.get(month="2026-04").text
 
         assert 'class="tap" href="/ledger?ref=everyday&amp;month=2026-03"' in page
-        assert page.index("Previous month") < page.index("Opening balance and anchors")
+        assert page.index("Previous month") < page.index("Known balances and the opening")
 
 
 class TestMaskingHoldsWhateverTheQueryString:

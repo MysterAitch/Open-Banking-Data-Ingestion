@@ -282,8 +282,8 @@ class TestThePage:
         page = self.page(store)
 
         assert "Held back by the known balance for 2026-03-15" in page
-        assert 'href="/ledger?ref=everyday#opening"' in page
-        assert 'id="opening"' in page
+        assert 'href="#opening"' in page, "the explanation is on this page"
+        assert '<details id="opening" open>' in page, "held back, so it is open to be read"
 
     def test_Page_WhenAMovementFaultHoldsAgreementBack_LinksTheMovementChecks(self, store):
         everyday(store)
@@ -304,7 +304,7 @@ class TestThePage:
         page = self.page(store)
 
         assert "cleared by starling-csv" in page
-        assert page.count("cleared by") == 1, "the aggregator-only row carries no mark"
+        assert page.count(">cleared by ") == 1, "the aggregator-only row carries no mark"
         assert "1 rows are cleared and 1 are not" in page
 
     def test_Page_WhenMasked_NeverShowsAStatedFigureOrTheOpening(self, store):

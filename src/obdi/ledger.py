@@ -40,7 +40,9 @@ or listed, and are marked by their origin.
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -267,6 +269,14 @@ class LedgerRow:
     feed_at: Structural[datetime | None] = None
     #: Each source's sighting: the basis it joined on and every date it stated (`join_basis`).
     sightings: Structural[tuple[SightingView, ...]] = ()
+    #: A stable key for the page to anchor the row by (`row_anchor`): derived from the row's id and
+    #: carrying nothing of its amount, description, or date.
+    anchor: Structural[str] = ""
+
+
+def row_anchor(entity_id: str) -> str:
+    """A short, stable, opaque key for a row, so a link can name the row without any value in it."""
+    return hashlib.sha256(entity_id.encode()).hexdigest()[:12]
 
 
 @dataclass(frozen=True)
@@ -524,6 +534,9 @@ class Ledger:
     #: The sentence the verification says while a rebuild holds the derived layer
     #: (`rebuild_hold`), in place of the standing and the protection; empty otherwise.
     rebuilding: Structural[str] = ""
+    #: Rows held in each month, oldest first, (ISO "YYYY-MM", count): what a month picker needs
+    #: and read from the rows already in hand, so it costs no statement.
+    month_counts: Structural[tuple[tuple[str, int], ...]] = ()
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -861,7 +874,8 @@ def _ledger_for(
     categories = store.annotations("category")
     payees = store.annotations("payee")
 
-    months_held = sorted({_month_of(t.value_date) for t in rows})
+    per_month = Counter(_month_of(t.value_date) for t in rows)
+    months_held = sorted(per_month)
     if month is None or not month.strip():
         shown = months_held[-1]
     else:
@@ -941,6 +955,7 @@ def _ledger_for(
                     cleared_by=clearing_sources,
                     feed_at=feed.time_of(t.entity_id) if feed is not None else None,
                     sightings=sighting_views(details.get(t.entity_id, ())),
+                    anchor=row_anchor(t.entity_id),
                 ),
             )
         )
@@ -1052,6 +1067,7 @@ def _ledger_for(
         next_month=_neighbour(year, number, 1) if shown < months_held[-1] else "",
         oldest_month=months_held[0],
         newest_month=months_held[-1],
+        month_counts=tuple((month, per_month[month]) for month in months_held),
         summary=summary,
         position=position,
         rows=tuple(row for _, row in in_month),

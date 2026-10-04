@@ -418,7 +418,7 @@ class TestMonthLinksSitAtTheTop:
 
     def test_EmptyMonth_StillOffersBothStepsAndTheNewestMonthAtTheTop(self, served):
         page = get(served, ref=CURRENT, month="2026-04").text
-        top = page.split("<h2>Running position</h2>")[0]
+        top = page.split("<summary>Running position</summary>")[0]
 
         assert "Previous month, 2026-03" in top
         assert "Next month, 2026-05" in top
@@ -626,8 +626,8 @@ class TestEachTransactionKeepsEverythingTheTableShowed:
     def test_Salary_CarriesDateAmountDescriptionStatusAndSourceTogether(self, served):
         item = _item_holding(post(served).text, "SALARY ZEBRA LTD")
 
-        assert 'class="mono nowrap">2026-03-09</span>' in item
-        assert 'class="mono nowrap">in £2,500.00</span>' in item
+        assert 'class="t-when mono nowrap">2026-03-09</span>' in item
+        assert 'class="t-fig mono nowrap fig">in £2,500.00</span>' in item
         assert ">booked<" in item
         assert ">src-b<" in item
 
