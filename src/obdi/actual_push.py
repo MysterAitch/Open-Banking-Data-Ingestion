@@ -525,9 +525,11 @@ def build_envelope(
     # "truelayer:3fc9..." - bind first, push after.
     # A declared account is named too: see `declared_to_create`.
     already_bound = {binding.canonical_id for binding in bindings}
-    declared = declared_to_create(store)
+    # Every declared account's label, closed ones included: an archived account that holds
+    # rows is created by those rows, and is called what the person called it.
+    declared = {str(record.ref): record.label for record in store.declared_accounts()}
     candidates = set(unbound_accounts(transactions, bindings)) | (
-        ((named_canonicals or set()) | set(declared)) - already_bound
+        ((named_canonicals or set()) | set(declared_to_create(store))) - already_bound
     )
     # The applier creates accounts idempotently BY NAME, so two canonicals
     # sharing a display label (both Halifax accounts show the holder's

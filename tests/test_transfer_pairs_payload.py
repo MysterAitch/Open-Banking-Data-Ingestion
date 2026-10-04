@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import date
 
-from obdi.accounts import AccountBinding, AccountMap
+from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.actual_push import build_audit_envelope, build_envelope, build_prune_envelope
 from obdi.models import TransactionStatus
 from obdi.providers import starling
@@ -261,6 +262,61 @@ class TestWhatIsNotPaired:
             listed = build_transfer_pairs(store.all_transactions(), BOUND_BOTH, [])
 
         assert listed == []
+
+
+def _archive_the_pot(store: Store) -> None:
+    store.declare_account(
+        AccountRecord(
+            ref=AccountRef(POT), kind="starling-space", label="Savings pot",
+            closed=date(2026, 9, 30),
+        )
+    )
+
+
+class TestAnArchivedAccountThatHoldsATransfersOtherLeg:
+    """An archived account is still sent, so a historical transfer has an account to land in.
+
+    Archiving says the account is no longer in use, not that its history is gone: the main
+    account's 1500.00 to the pot is only a transfer in Actual while the pot is there to
+    receive it, and without the pot main's own balance would still be right and the money
+    would simply have left the budget.
+    """
+
+    def test_Envelope_WhenTheArchivedAccountIsNotInActualYet_AsksForItToBeCreated(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _household(store)
+            _archive_the_pot(store)
+
+            envelope = build_envelope(store, [ActualAccountBinding(MAIN, "act-main")], {})
+
+        assert envelope["provision"] == [{"canonical_id": POT, "label": "Savings pot"}]
+
+    def test_Envelope_WhenTheArchivedAccountIsInActual_SendsItsRowsAndListsThePair(self, tmp_path):
+        with Store(tmp_path / "s.sqlite3") as store:
+            _household(store)
+            _archive_the_pot(store)
+
+            envelope = build_envelope(store, BOUND_BOTH, {})
+
+        accounts = envelope["accounts"]
+        assert isinstance(accounts, dict)
+        assert _sums(accounts) == {"act-main": 40000, "act-pot": 30000}
+        pairs = envelope["transfers"]
+        assert isinstance(pairs, list) and len(pairs) == 1
+        assert pairs[0]["debit"]["account"] == "act-main"
+        assert pairs[0]["credit"]["account"] == "act-pot"
+
+    def test_Envelope_WhenTheAccountIsNotArchived_IsTheSame(self, tmp_path):
+        with Store(tmp_path / "open.sqlite3") as store:
+            _household(store)
+            open_envelope = build_envelope(store, BOUND_BOTH, {})
+        with Store(tmp_path / "archived.sqlite3") as store:
+            _household(store)
+            _archive_the_pot(store)
+            archived_envelope = build_envelope(store, BOUND_BOTH, {})
+
+        for part in ("accounts", "transfers", "provision"):
+            assert archived_envelope[part] == open_envelope[part], part
 
 
 class TestTwoIdenticalTransfersOnOneDay:
