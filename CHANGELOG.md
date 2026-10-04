@@ -26,6 +26,47 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.313] - 2026-10-04
+
+### Fixed
+- **A payment the bank later declines becomes history.** A feed item booked
+  or pending in one fetch and declined in a later one kept its row counted,
+  because a declined item makes no record and so the later fetch said nothing
+  the matcher could apply. A pass after each batch, live and at the end of a
+  rebuild, reads the newest landed status of each counted row's own feed item
+  and voids the row where that status makes no row. A row another source also
+  lists is left counted and queued for review, since an export listing the
+  payment contradicts the feed. The measurement released in 0.4.311 found
+  none on the real store, so this changes nothing there today.
+- **An audit pressed straight after a push that created accounts no longer
+  reports them as differing.** The link to a created account sat in a file
+  until a push merged it, so the audit compared against a map that did not
+  know them: on the real store Cash and HSBC Mortgage read "not bound to an
+  obdi account" until a second push. An audit now merges those links first.
+
+### Changed
+- **The settlement-day measurement on Identity health is exact and adds up.**
+  Read on the real main account it said 36 rows would move and "at most 220"
+  transactions would be re-dated, and its sentences accounted for 4,110 of
+  the export's 4,821 rows. The bound counted every planned target whose date
+  differed from its export row's, moved or not. It now applies the planned
+  moves over the stored sightings without writing, gives each transaction the
+  date of its latest sighting, and counts the ones that change; it says how
+  many days would then hold a different total and how many re-dated
+  transactions fall in a protected period; and it says what the rows that
+  name no transaction are, so the three kinds add up to the rows listed.
+- Three sentences of the aggregator's measurement no longer say "uid" or
+  "the matcher".
+
+### Not covered
+- The rule the settlement measurement describes is still held back, until
+  the exact figures have been read on the real store.
+- The declined-payment pass was measured on an invented store of 400 feed
+  artefacts (one statement and 0.006 s per call); the real store holds about
+  2,500 and has not been timed.
+- A re-dated transaction inside a protected period could not be built on
+  invented data, so that count is tested at nil only.
+
 ## [0.4.312] - 2026-10-04
 
 ### Changed
