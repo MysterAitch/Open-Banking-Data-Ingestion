@@ -38,7 +38,7 @@ from __future__ import annotations
 import itertools
 import json
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -87,6 +87,11 @@ class Payment:
     listed: date | None
     #: The aggregator's own day for it, or None when it does not report it.
     reported: int | None = None
+    #: Fields the aggregator states for it beyond the common ones, replacing any of them.
+    #: A key whose value is None is left out, so an item can state no id at all.
+    stated: dict[str, Any] = field(default_factory=dict)
+    #: False for a payment only the other sources report.
+    in_feed: bool = True
 
     def feed_item(self) -> dict[str, Any]:
         day = int(self.made[8:10])
@@ -170,9 +175,14 @@ def export_text(listed: list[tuple[str, int, date]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def aggregator_item(payment: Payment) -> dict[str, Any]:
+def aggregator_item(payment: Payment, *, link: bool = False) -> dict[str, Any]:
+    """The aggregator's report of a payment.
+
+    With `link`, it also states the feed item's own uid, as a real one does:
+    at the top level and again under `meta`.
+    """
     assert payment.reported is not None
-    return {
+    item: dict[str, Any] = {
         "transaction_id": f"volatile-{payment.uid}",
         "normalised_provider_transaction_id": f"tl-{payment.uid}",
         "timestamp": f"2026-09-{payment.reported:02}T10:00:00Z",
@@ -181,6 +191,11 @@ def aggregator_item(payment: Payment) -> dict[str, Any]:
         "currency": "GBP",
         "transaction_type": "DEBIT",
     }
+    if link:
+        item["provider_transaction_id"] = payment.uid
+        item["meta"] = {"provider_id": payment.uid}
+    item.update(payment.stated)
+    return {key: value for key, value in item.items() if value is not None}
 
 
 def household(
@@ -191,6 +206,7 @@ def household(
     extra_listed: tuple[tuple[str, int, date], ...] = (),
     extra_feed: tuple[dict[str, Any], ...] = (),
     rebuild: bool = False,
+    linked: bool = False,
 ) -> Store:
     """The household with `payments` added, each source arriving in `order` through the
     door a live pull or import uses, and then (when `rebuild`) the whole store rebuilt from raw.
@@ -221,7 +237,7 @@ def household(
         fold_space_copies(store, MAP)
 
     def feed() -> None:
-        items = [*main_feed(), *(p.feed_item() for p in payments), *extra_feed]
+        items = [*main_feed(), *(p.feed_item() for p in payments if p.in_feed), *extra_feed]
         body = json.dumps({"feedItems": items}).encode()
         main = starling.artefact_for(
             body,
@@ -242,7 +258,9 @@ def household(
         import_file(store, path, account_id=MAIN, account_map=MAP)
 
     def aggregate() -> None:
-        reported = [aggregator_item(p) for p in payments if p.reported is not None]
+        reported = [
+            aggregator_item(p, link=linked) for p in payments if p.reported is not None
+        ]
         arrive(
             truelayer.artefact_for(
                 json.dumps({"results": reported}).encode(), account_id="tl-main", kind="booked"

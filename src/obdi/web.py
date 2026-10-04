@@ -635,6 +635,10 @@ class WebConfig:
     #: Whether every listed row is held once, every transfer leg has its partner,
     #: and the two sides of a chain agree. Shown on the identity health page.
     movement_completeness_text: Callable[[], str] | None = None
+    #: How often each exact rule (the aggregator's own id, the settlement day) holds,
+    #: counted from the landed artefacts; counts and account names only.
+    #: Shown on the identity health page beside the movement checks.
+    exact_rules_text: Callable[[], str] | None = None
     #: The store's rows against the bank's end-of-day balances. The argument
     #: is whether to MASK the figures, and the page only passes False when
     #: the viewer asked for them.
@@ -6461,9 +6465,11 @@ class ConnectionHandler(
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
         movement_hook = self.bound_config.movement_completeness_text
+        exact_hook = self.bound_config.exact_rules_text
         try:
             text = hook()
             movement = "" if movement_hook is None else movement_hook()
+            exact = "" if exact_hook is None else exact_hook()
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
@@ -6481,6 +6487,19 @@ class ConnectionHandler(
                 f"{html.escape(movement)}</pre>"
             )
         )
+        exact_section = (
+            ""
+            if exact_hook is None
+            else (
+                "<h3>Exact rules</h3>"
+                "<p>Two facts could replace guesswork in matching: an aggregator item's own "
+                "id is a feed item's uid, and the export lists a card payment on the day the "
+                "feed says it settled. These count how often each holds, read from the "
+                "landed artefacts and not from the stored rows.</p>"
+                f'<pre class="scroll" style="white-space:pre-wrap">'
+                f"{html.escape(exact)}</pre>"
+            )
+        )
         body = (
             "<h2>Identity health</h2>"
             "<p>Two faults the merged layer cannot show from inside: rows "
@@ -6491,7 +6510,7 @@ class ConnectionHandler(
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{html.escape(text)}</pre>" + movement_section + HOME_LINK
+            f"{html.escape(text)}</pre>" + movement_section + exact_section + HOME_LINK
         )
         self._respond(200, render_page("Identity health", body))
 

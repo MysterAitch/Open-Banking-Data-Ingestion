@@ -2850,6 +2850,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return movement_report(store).describe()
 
+    def exact_rules_text() -> str:
+        from .exact_rule_measure import exact_rule_report
+
+        with Store(db_path) as store:
+            return exact_rule_report(store, _account_map(store)).describe()
+
     def balance_reconciliation_text(masked: bool) -> str:
         from .balance_reconciliation import balance_reconciliation
 
@@ -3889,6 +3895,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         review_report_text=review_report_text,
         identity_health_text=identity_health_text,
         movement_completeness_text=movement_completeness_text,
+        exact_rules_text=exact_rules_text,
         balance_reconciliation_text=balance_reconciliation_text,
         period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,
