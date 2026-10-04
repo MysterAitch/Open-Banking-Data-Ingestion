@@ -288,7 +288,13 @@ def held_sentence(agreement: Agreement) -> str:
             "the rows."
         )
     if held.kind == HELD_UNMET:
-        by = f" (stated by {', '.join(held.sources)})" if any(held.sources) else ""
+        named = [s for s in held.sources if s and s != "stated"]
+        if named:
+            by = f" (stated by {', '.join(named)})"
+        elif held.sources:
+            by = " (a balance you stated)"
+        else:
+            by = ""
         return f"Held back by the known balance for {day}{by}, which the rows do not reproduce."
     return f"Held back by a movement fault dated {day}: {held.says}."
 

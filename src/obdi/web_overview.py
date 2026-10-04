@@ -33,6 +33,7 @@ from .overview import (
     AttentionItem,
     Overview,
 )
+from .standing_data import standing_lines
 
 _esc = html.escape
 
@@ -171,6 +172,14 @@ def _account_row(account: AccountOverview, today: date) -> str:
         + fact("Provider last answered", _asked_html(account, today))
         + fact("Actual", bound)
         + fact("Needs attention", items)
+        + (
+            ""
+            if account.standing is None
+            else fact(
+                "Verification",
+                "<br>".join(_esc(line) for line in standing_lines(account.standing)),
+            )
+        )
         + "</dl>"
         f'<p class="account-links"><a class="tap" href="/ledger?ref={_esc(target)}">Ledger</a> '
         f'<a class="tap" href="/account?ref={_esc(target)}">Shape</a></p>'

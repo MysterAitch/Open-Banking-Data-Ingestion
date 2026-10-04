@@ -82,7 +82,7 @@ class TestNeedsAttention:
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        assert "18 checks run at 14:02Z: nothing needs attention." in page
+        assert "19 checks run at 14:02Z: nothing needs attention." in page
         assert "Checked: silent feeds" in page
         assert 'class="attention"' not in page
 
@@ -116,7 +116,7 @@ class TestNeedsAttention:
         page = home(tmp_path, lambda fresh: assemble(household, findings=boom))
 
         assert "The alert check could not run (RuntimeError)" in page
-        assert "7 of 18 checks run at 14:02Z; the rest could not run" in page
+        assert "8 of 19 checks run at 14:02Z; the rest could not run" in page
         assert "nothing needs attention" not in page
         assert "secret detail" not in page
 

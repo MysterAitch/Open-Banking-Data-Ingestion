@@ -71,6 +71,7 @@ from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
 from .space_windows import RANGE_REFUSAL_MARK
 from .spaces import RECOVERY_BOUND, ArchiveNote
+from .standing_data import AccountStanding
 from .statement_shape import ShapeReport
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
@@ -664,6 +665,8 @@ class WebConfig:
     typed_save: Callable[[str, str, str, str, str], None] | None = None
     #: Withdraw a typed transaction: (ref, entry id). Same refusal rule.
     typed_withdraw: Callable[[str, str], None] | None = None
+    #: Every account's known balances, agreement, and protection, for the Accounts page.
+    account_standings: Callable[[], Mapping[str, AccountStanding]] | None = None
     #: Protect an account through a date: (ref, through). Raises a DataError whose
     #: text never quotes a figure (`protection`).
     protect: Callable[[str, str], None] | None = None

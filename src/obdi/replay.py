@@ -29,6 +29,7 @@ categorisation - which is what makes replaying safe to do casually.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date
 
@@ -49,11 +50,37 @@ class ActualAccountBinding:
     label: str = ""
 
 
-def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
+def is_cleared(transaction: Transaction, cleared: Collection[str] | None) -> bool:
+    """Whether a row goes to Actual as cleared.
+
+    With `cleared`, the entity ids `clearing.cleared_entity_ids` found, a row is cleared when an
+    authoritative listing lists it (`clearing` says which and why), or when it is the account's own
+    arithmetic from balances its owner stated (`UNITEMISED_SOURCE`), which no source lists and which
+    is as authoritative as a figure gets. Without it, any row that is not pending, the rule before
+    clearing was a fact about a row.
+
+    A pending row is never cleared: it will be superseded by its settled form.
+    """
+    if transaction.status is TransactionStatus.PENDING:
+        return False
+    if cleared is None:
+        return True
+    return transaction.source == UNITEMISED_SOURCE or transaction.entity_id in cleared
+
+
+def to_actual_transaction(
+    transaction: Transaction, *, cleared: Collection[str] | None = None
+) -> dict[str, object]:
     """Map one canonical transaction into Actual's import shape.
 
     Amounts pass through unchanged: Actual also stores integer minor units with
     a negative outflow, so there is no conversion to get wrong.
+
+    `cleared` is passed through to `is_cleared`. THE ENVELOPE NEVER CARRIES `reconciled`, and that
+    is decided here: the applier will not change a reconciled row (`applier/lib.mjs`, `audit.mjs`),
+    so a row obdi marked reconciled could never again be corrected by obdi's own push, and obdi's
+    corrections are exactly what a rebuild produces. Actual's reconcile is the owner's own act, made
+    in Actual, and obdi's equivalent is protection (`protection`), which alarms and never freezes.
     """
     if not transaction.content_key:
         raise ReplayError(
@@ -92,7 +119,7 @@ def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
         # Pending transactions are explicitly uncleared: a pending record will
         # later be superseded by its settled form, and marking it cleared would
         # freeze it against that.
-        "cleared": transaction.status is not TransactionStatus.PENDING,
+        "cleared": is_cleared(transaction, cleared),
     }
 
 
@@ -239,6 +266,7 @@ def build_payload(
     transactions: list[Transaction],
     bindings: list[ActualAccountBinding],
     openings: list[OpeningBalance] | None = None,
+    cleared: Collection[str] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     """Group transactions by Actual account, ready to import.
 
@@ -261,7 +289,7 @@ def build_payload(
         if actual_account is not None:
             payload[actual_account].append(to_actual_opening(opening))
     for transaction, actual_account in _sendable(transactions, bindings):
-        payload[actual_account].append(to_actual_transaction(transaction))
+        payload[actual_account].append(to_actual_transaction(transaction, cleared=cleared))
     return dict(payload)
 
 

@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .balance_anchors import effective_opening, unitemised_for_store
+from .clearing import cleared_entity_ids
 from .family_anchors import Families
 from .models import Transaction
 from .replay import (
@@ -461,7 +462,7 @@ def build_envelope(
 ) -> dict[str, object]:
     transactions = transactions_to_push(store)
     openings = opening_balances(store, bindings, families=families)
-    payload = build_payload(transactions, bindings, openings)
+    payload = build_payload(transactions, bindings, openings, cleared_entity_ids(store))
     # Two store rows sharing one imported id would reach Actual as one row:
     # importTransactions treats the id as THE identity, so the second row is
     # silently absorbed and a real payment vanishes from the budget. Refuse
@@ -576,7 +577,7 @@ def build_audit_envelope(
     """
     transactions = transactions_to_push(store)
     openings = opening_balances(store, bindings, families=families)
-    accounts = build_payload(transactions, bindings, openings)
+    accounts = build_payload(transactions, bindings, openings, cleared_entity_ids(store))
     for binding in bindings:
         accounts.setdefault(binding.actual_account_id, [])
     return {

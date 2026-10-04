@@ -95,7 +95,7 @@ from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
-from .standing_data import MovementMemo
+from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -1469,6 +1469,7 @@ def _replay(db_path: Path, out: Path | None) -> int:
         return 2
 
     from .actual_push import opening_balances, transactions_to_push
+    from .clearing import cleared_entity_ids
 
     with Store(db_path) as store:
         transactions = transactions_to_push(store)
@@ -1476,8 +1477,9 @@ def _replay(db_path: Path, out: Path | None) -> int:
         openings = opening_balances(
             store, bindings, families=families_of(store, _account_map(store))
         )
+        cleared = cleared_entity_ids(store)
 
-    payload = build_payload(transactions, bindings, openings)
+    payload = build_payload(transactions, bindings, openings, cleared)
     missing = unbound_accounts(transactions, bindings)
 
     # The envelope shape, so the manual apply links transfers exactly as
@@ -2916,7 +2918,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return unarchive_account(store, ref)
 
-    movement_memo = MovementMemo()
+    movement_memo: KeyedMemo[MovementCompleteness] = KeyedMemo(movement_key)
+    standings_memo: KeyedMemo[Mapping[str, AccountStanding]] = KeyedMemo(standing_key)
 
     def movement_report(store: Store) -> MovementCompleteness:
         """The whole store's movement report, held while the derived layer is unchanged."""
@@ -2929,6 +2932,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, lambda ref: _canonical_for_ref(account_map, ref)
             ),
         )
+
+    def account_standings(store: Store | None = None) -> Mapping[str, AccountStanding]:
+        """Every account's standing for the Overview and the Accounts page, held while nothing
+        it reads has changed, so neither page re-walks every account to draw itself."""
+
+        def compute(opened: Store) -> Mapping[str, AccountStanding]:
+            refs = [
+                str(row[0])
+                for row in opened.connection.execute(
+                    "SELECT DISTINCT account_id FROM transactions ORDER BY account_id"
+                )
+            ]
+            return standings_for(
+                opened,
+                refs,
+                families=families_of(opened, _account_map(opened)),
+                movement=movement_report(opened),
+            )
+
+        if store is not None:
+            return standings_memo.get(store, lambda: compute(store))
+        with Store(db_path) as opened:
+            return standings_memo.get(opened, lambda: compute(opened))
 
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
@@ -3745,6 +3771,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     else None
                 ),
                 rebuild_status=rebuild_status_for(db_path),
+                standings=lambda: account_standings(store),
+                movement=lambda: movement_report(store),
             )
 
     def fetch_now(name: str, psu_ip: str | None) -> str:
@@ -3863,6 +3891,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         anchor_remove=anchor_remove,
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
+        account_standings=account_standings,
         protect=protect,
         protect_withdraw=protect_withdraw,
         protect_accept=protect_accept,

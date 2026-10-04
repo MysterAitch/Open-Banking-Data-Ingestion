@@ -40,6 +40,7 @@ from .store import Store
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .identity_health import IdentityHealth
     from .movement_completeness import MovementCompleteness
+    from .standing_data import AccountStanding
 
 #: Where a person goes to act on each kind of attention item. Declared once,
 #: here, because the navigation strip and the items below must agree about them.
@@ -95,6 +96,8 @@ _KIND_ORDER = (
     "scheduler-stuck",
     "scheduler-late-wait",
     "review",
+    "known-balances-disagree",
+    "agreement-lapsed",
     "spaces",
 )
 
@@ -180,6 +183,16 @@ _KINDS: dict[str, tuple[int, str]] = {
         "(counts only; no page resolves them yet).",
     ),
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
+    "known-balances-disagree": (
+        HOUSEKEEPING,
+        "Open the account's ledger and decide which source is right; remove a stated balance "
+        "that is wrong, or look at the statement.",
+    ),
+    "agreement-lapsed": (
+        HOUSEKEEPING,
+        "Open the account's ledger to see which known balance the rows stopped reproducing, "
+        "or whether the next statement is simply late.",
+    ),
 }
 
 #: The conditions `collect_alert_findings` evaluates, so that "N checks run"
@@ -214,6 +227,7 @@ OVERVIEW_CHECKS = (
     "identity health",
     "movement completeness",
     "balance reconciliation",
+    "known balances and agreement",
     "review flags",
     "recovered Spaces",
     "last rebuild",
@@ -289,6 +303,9 @@ class AccountOverview:
     items: int
     closed: date | None
     declared: bool
+    #: The three dates and what holds agreement back (`standing_data`); None for an account
+    #: whose standing could not be read, which says nothing rather than something false.
+    standing: AccountStanding | None = None
 
 
 @dataclass(frozen=True)
@@ -501,6 +518,81 @@ def movement_items_from(report: MovementCompleteness) -> list[AttentionItem]:
     ]
 
 
+#: How long an account with known balances may go without being in agreement before the
+#: Overview says so. A statement-only account is in agreement through its latest statement, which
+#: is at most a month old plus the days a bank takes to issue it, so a limit shorter than that
+#: would flag every account that is fine; one past a quarter would hide a statement that never
+#: arrived. Six weeks is that month and a fortnight of slack, and the Overview asks for nothing
+#: more urgent than housekeeping because the money is not at risk meanwhile.
+STALE_AGREEMENT_DAYS = 45
+
+
+def standing_items_from(
+    standings: Mapping[str, AccountStanding],
+    label_of: Callable[[str], str],
+    closed_by_today: Callable[[str], bool],
+    today: date,
+) -> list[AttentionItem]:
+    """Housekeeping items from each account's standing: known balances that disagree with each
+    other, and an account that has had known balances but has not been in agreement for longer
+    than `STALE_AGREEMENT_DAYS`.
+
+    An account whose balances disagree is named for that alone: it is not in agreement because of
+    it, and saying both would give one cause two items. A closed account is left out, and so is
+    one with no known balance, which is unverifiable and not lapsed.
+    """
+    items: list[AttentionItem] = []
+    for ref in sorted(standings):
+        if closed_by_today(ref):
+            continue
+        standing = standings[ref].standing
+        conflicts = {c.day: c.sources for c in standing.own.conflicts}
+        if standing.whole is not None:
+            conflicts.update({c.day: c.sources for c in standing.whole.conflicts})
+        if conflicts:
+            first = min(conflicts)
+            items.append(
+                AttentionItem(
+                    kind="known-balances-disagree",
+                    severity=HOUSEKEEPING,
+                    message=(
+                        f"{label_of(ref)}: known balances disagree with each other on "
+                        f"{_plural(len(conflicts), 'day')}, the first {first.isoformat()} "
+                        f"({' and '.join(conflicts[first])}). That is a conflict between "
+                        "sources, not a fault in the rows."
+                    ),
+                    remedy=_KINDS["known-balances-disagree"][1],
+                    href=f"/ledger?ref={quote(ref, safe='')}#opening",
+                    accounts=(ref,),
+                )
+            )
+            continue
+        own = standing.own
+        if own.known_from is None or own.known_to is None:
+            continue
+        since = own.through or own.known_from
+        if (today - since).days > STALE_AGREEMENT_DAYS:
+            said = (
+                f"in agreement through {own.through.isoformat()}"
+                if own.through
+                else f"never in agreement since its first known balance, {since.isoformat()}"
+            )
+            items.append(
+                AttentionItem(
+                    kind="agreement-lapsed",
+                    severity=HOUSEKEEPING,
+                    message=(
+                        f"{label_of(ref)} has known balances but is {said}, more than "
+                        f"{STALE_AGREEMENT_DAYS} days ago."
+                    ),
+                    remedy=_KINDS["agreement-lapsed"][1],
+                    href=f"/ledger?ref={quote(ref, safe='')}",
+                    accounts=(ref,),
+                )
+            )
+    return items
+
+
 def _balance_items(store: Store, label_of: Callable[[str], str]) -> list[AttentionItem]:
     """Per account, counts only: the report object also holds real balances."""
     from .balance_reconciliation import balance_reconciliation
@@ -691,6 +783,8 @@ def build_overview(
     labels: Mapping[str, str],
     actual_bound: Collection[str] | None,
     rebuild_status: Mapping[str, object],
+    standings: Callable[[], Mapping[str, AccountStanding]] | None = None,
+    movement: Callable[[], MovementCompleteness] | None = None,
 ) -> Overview:
     """Everything the Overview shows, from one store and the injected checks.
 
@@ -698,6 +792,11 @@ def build_overview(
     this module stays ignorant of the environment it reads. `canonical_for_ref`
     is the ledger-ref translation the silent-feed detector uses, applied to the
     ledger's landed asks and to refusal findings alike.
+
+    `standings` and `movement` are the account standings and the movement report as the
+    deployment holds them (`standing_data`), so the cards and the movement item agree and the
+    report is read once. Without `standings` each account's is read from its balances alone,
+    which is the same rule over less evidence.
 
     Every check is guarded individually. One that raises becomes an item saying
     it could not run, and is not counted among the checks that ran.
@@ -731,6 +830,20 @@ def build_overview(
         record = registry.get(ref)
         return record is not None and record.closed is not None and record.closed <= now.date()
 
+    held, sources = held_by_account(store)
+    standing_by_account: dict[str, AccountStanding] = {}
+
+    def standing_check() -> list[AttentionItem]:
+        if standings is not None:
+            standing_by_account.update(standings())
+        else:
+            from .standing_data import standings_for
+
+            standing_by_account.update(
+                standings_for(store, sorted(held), families=None, movement=None)
+            )
+        return standing_items_from(standing_by_account, label_of, closed_by_today, now.date())
+
     own_checks: list[tuple[str, Callable[[], list[AttentionItem]]]] = [
         (
             "uncovered spans",
@@ -739,8 +852,16 @@ def build_overview(
             ),
         ),
         ("identity health", lambda: _identity_items(store)),
-        ("movement completeness", lambda: _movement_items(store, canonical_for_ref)),
+        (
+            "movement completeness",
+            lambda: (
+                movement_items_from(movement())
+                if movement is not None
+                else _movement_items(store, canonical_for_ref)
+            ),
+        ),
         ("balance reconciliation", lambda: _balance_items(store, label_of)),
+        ("known balances and agreement", standing_check),
         ("review flags", lambda: _review_items(store)),
         ("recovered Spaces", lambda: _space_items(store)),
         ("last rebuild", lambda: _rebuild_items(rebuild_status)),
@@ -758,7 +879,6 @@ def build_overview(
         for ref in set(item.accounts):
             concerning[ref] += 1
 
-    held, sources = held_by_account(store)
     last_asked: dict[str, datetime] = {}
     for ask in store.last_landed_asks():
         canonical = canonical_for_ref(str(ask["account_ref"]))
@@ -794,6 +914,7 @@ def build_overview(
                 items=concerning[ref],
                 closed=closed,
                 declared=declared is not None,
+                standing=standing_by_account.get(ref),
             )
         )
     accounts.sort(

@@ -664,6 +664,8 @@ def protection_view(
     allowed = () if standing is None else tested_days(opening, standing)
     if opening.balance_only:
         not_offered = "an account tracked by its stated balances alone has no rows to protect"
+    elif standing is not None and standing.own.known_count == 0:
+        not_offered = "there is no known balance to verify the account against"
     elif standing is None or not allowed:
         not_offered = "the account is not in agreement through any known balance yet"
     elif opening.opening_minor is None:

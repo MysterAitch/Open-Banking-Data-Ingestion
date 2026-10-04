@@ -485,6 +485,22 @@ class TestABrokenProtectionIsLoud:
         assert overview.items[0].kind == "protection-broken", "it sorts above every other item"
 
 
+class TestNoViewCarriesAFigure:
+    def test_Views_HaveNoFieldThatCouldHoldAFigure(self):
+        from dataclasses import fields
+
+        from obdi.agreement import Agreement, Conflict, HeldBack, Standing
+        from obdi.clearing import ClearedMonth, ClearingView
+        from obdi.protection import ProtectionView
+
+        for view in (ProtectionView, Agreement, HeldBack, Conflict, Standing, ClearingView,
+                     ClearedMonth):
+            names = [f.name for f in fields(view)]
+            assert not [n for n in names if any(w in n for w in ("minor", "figure", "amount"))], (
+                view.__name__
+            )
+
+
 class TestTheSchemaUpgrade:
     def test_Store_OpenedAtTheVersionBeforeTheTables_GrowsThemOnOpenAndKeepsWhatWasThere(
         self, tmp_path

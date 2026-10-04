@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import html
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from difflib import SequenceMatcher
@@ -45,9 +45,11 @@ from .callback import render_page
 from .coverage import DoubtReport
 from .errors import DataError
 from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
+from .logs import say
 from .namespaces import validate_canonical_name
 from .overview import ARCHIVED
 from .spaces import FINAL_MOVEMENTS_MEANING
+from .standing_data import AccountStanding, standing_lines
 from .web_sections import back_link, referring_page
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -341,6 +343,7 @@ def _known_row(
     spaces: list[KnownAccount] | None = None,
     depth: int = 0,
     show_parent: bool = True,
+    standing: AccountStanding | None = None,
 ) -> str:
     """One account obdi holds, on a line that wraps rather than scrolls."""
     ref = quote(account.ref, safe="")
@@ -363,15 +366,24 @@ def _known_row(
     # Indented inline, because the shared stylesheet is searched by other pages' tests
     # for words and figures, and a rule added there is read by all of them.
     indent = f' style="margin-left:{1.25 * depth:g}rem"' if depth else ""
+    verification = (
+        ""
+        if standing is None
+        else "".join(f"<br>{html.escape(line)}" for line in standing_lines(standing))
+    )
     return (
         f'<div class="row"{indent}><strong>'
         f"{html.escape(account.label)}</strong> {state}{archived}<br>"
         + " - ".join(detail)
-        + f"<br>{links}</div>"
+        + f"{verification}<br>{links}</div>"
     )
 
 
-def _listing(accounts: Iterable[KnownAccount], today: date) -> str:
+def _listing(
+    accounts: Iterable[KnownAccount],
+    today: date,
+    standings: Mapping[str, AccountStanding] | None = None,
+) -> str:
     """Live accounts first, archived last, each Space beneath its parent in the same order.
 
     A Space whose parent is not among the accounts listed stays at the top level and names its
@@ -399,7 +411,12 @@ def _listing(accounts: Iterable[KnownAccount], today: date) -> str:
         spaces = sorted(children.get(account.ref, []), key=order)
         out.append(
             _known_row(
-                account, today, spaces=spaces, depth=depth, show_parent=account.parent not in held
+                account,
+                today,
+                spaces=spaces,
+                depth=depth,
+                show_parent=account.parent not in held,
+                standing=None if standings is None else standings.get(account.ref),
             )
         )
         for space in spaces:
@@ -510,6 +527,7 @@ def accounts_page(
     today: date,
     known: KnownAccounts | None = None,
     plan: ParentPlan | None = None,
+    standings: Mapping[str, AccountStanding] | None = None,
 ) -> bytes:
     """Which accounts exist, as declared by a person.
 
@@ -529,7 +547,7 @@ def accounts_page(
             "it has a record in the registry, which is where its kind, parent, and "
             "dates are kept.</p>"
             + (
-                _listing(known.accounts, today)
+                _listing(known.accounts, today, standings)
                 or "<p>No account is held or declared yet.</p>"
             )
             + _declare_known_section(known)
@@ -923,6 +941,14 @@ class AccountPages:
     def _accounts_page(self) -> None:
         hook = self.bound_config.known_accounts
         known, plan = (None, None) if hook is None else hook()
+        standings = None
+        standings_hook = self.bound_config.account_standings
+        if standings_hook is not None:
+            try:
+                standings = standings_hook()
+            except Exception as fault:
+                # A line of verification is an addition: the list of accounts must not depend on it.
+                say("accounts.standings.fault", kind=type(fault).__name__)
         self._respond(
             200,
             accounts_page(
@@ -930,6 +956,7 @@ class AccountPages:
                 today=datetime.now(UTC).date(),
                 known=known,
                 plan=plan,
+                standings=standings,
             ),
         )
 
