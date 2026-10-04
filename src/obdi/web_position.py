@@ -15,12 +15,20 @@ masked page draws no chart at all and says when one is drawn. The chart needs
 numbers, which a `Disclosed` view hands back as text, so it is built from the
 record itself, and only on the branch where `unmasked` is true: `_history`
 takes the flag and returns a sentence, having read nothing, when it is false.
+
+THE CHART CAN LEAVE ACCOUNTS OUT, and nothing else does. The unit of choice is
+the account or asset, not a group, because the page groups by which way a
+balance sits and a mortgage shares "overdrawn or owed" with every card. The
+ticks ride in the form that asks for values, so a choice is a view and is stored
+nowhere; `chart_chosen` says one was made, since an unticked box is not sent.
+The headline, the totals, and the month table stay whole, and the page says so
+beside the chart. The sums are `position.chart_series`.
 """
 
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -28,7 +36,7 @@ from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
-from .position import MonthPoint, Position, ProvisionalPoint
+from .position import MonthPoint, Position, ProvisionalPoint, chart_series
 from .web_accounts import submit_button
 from .web_ledger import _balance_word
 
@@ -326,13 +334,16 @@ def _chart(
     points: tuple[MonthPoint, ...],
     complete_from: str,
     provisional: tuple[ProvisionalPoint, ...] = (),
+    *,
+    narrowed: bool = False,
 ) -> str:
     """The net-worth line, and the provisional line when there is one, as inline SVG.
 
     Called only where values are shown. The scale covers both lines, so neither
     is drawn against the other's range. The known months are a subset of the
     provisional ones, which end in the same month, so one column per provisional
-    month places both.
+    month places both. A `narrowed` chart is drawn from some accounts only, and
+    says so in its own text, since a figure copied out of it is not the net worth.
     """
     width, height = 400, 240
     left, right, top, bottom = 12, 12, 30, 42
@@ -413,7 +424,7 @@ def _chart(
         )
     latest = (
         f'<text x="{width - right}" y="{height - bottom + 16}" text-anchor="end" {label}>'
-        f"latest {_esc(_signed(known[-1][1]))}</text>"
+        f"{'chosen only, ' if narrowed else ''}latest {_esc(_signed(known[-1][1]))}</text>"
         if known
         else ""
     )
@@ -433,10 +444,13 @@ def _chart(
         )
     )
     desc = f"From {months[0]} to {months[-1]}, at each month-end. "
+    if narrowed:
+        desc += "Drawn from the chosen accounts only, so not the net worth. "
     if known:
         desc += (
-            f"Net worth, lowest {_signed(min(v for _, v in known))}, highest "
-            f"{_signed(max(v for _, v in known))}, latest {_signed(known[-1][1])}. "
+            f"{'Chosen total' if narrowed else 'Net worth'}, "
+            f"lowest {_signed(min(v for _, v in known))}, "
+            f"highest {_signed(max(v for _, v in known))}, latest {_signed(known[-1][1])}. "
         )
     if dotted:
         desc += (
@@ -448,6 +462,8 @@ def _chart(
         else "Provisional total" if dotted
         else "Net worth"
     )
+    if narrowed:
+        what = f"Chosen accounts only, not the net worth: {what.lower()}"
     return (
         '<svg role="img" aria-labelledby="chart-title chart-desc" '
         f'viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
@@ -498,24 +514,88 @@ def _month_rows(view: Any) -> str:
     return f'<div class="scroll"><table><tr>{head}</tr>' + "".join(rows) + "</table></div>"
 
 
-def _legend(has_known: bool, has_provisional: bool) -> str:
+def _legend(has_known: bool, has_provisional: bool, *, narrowed: bool = False) -> str:
     """The sentence under the chart saying which line is which."""
     text = "One figure per month-end. "
     if has_known:
-        text += (
-            "The solid blue line is the net worth that is known, dashed for the partial "
-            "months. "
+        what = "the total of the chosen accounts that is known" if narrowed else (
+            "the net worth that is known"
         )
+        text += f"The solid blue line is {what}, dashed for the partial months. "
     if has_provisional:
         text += (
             "The dotted line is the provisional total, which counts each unknown opening "
             "balance as nil. The provisional line's shape shows real movement; its height "
             "is offset by the unknown opening balances. "
         )
-    return text + "The newest month is drawn at everything held now."
+    return text + (
+        "The newest month is drawn at everything chosen now."
+        if narrowed
+        else "The newest month is drawn at everything held now."
+    )
 
 
-def _history(position: Position, view: Any, *, unmasked: bool) -> str:
+def _label_and_ref(item: Any) -> str:
+    return _esc(item.label) if item.label == item.ref else f"{_esc(item.label)} ({_esc(item.ref)})"
+
+
+def _serial(names: list[str]) -> str:
+    if len(names) < 3:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
+
+
+_TICK_ROLES = {
+    "account": "",
+    "asset": " (asset)",
+    "uncounted": " (not counted: moves only the provisional line)",
+}
+
+
+def _ticks(view: Any, drawn: frozenset[str] | None, *, unmasked: bool) -> str:
+    """One tick per account and asset the chart adds up, in the form that asks for values.
+
+    The names, kinds, and directions are structure, so the masked page offers the
+    same ticks and a choice can be made before values are shown. The button says
+    which of the two requests it makes.
+    """
+    boxes = []
+    for item in view.chart_items:
+        ticked = drawn is None or item.key in drawn
+        kind = f' <span class="muted">{_esc(_KIND_WORDS.get(item.kind, item.kind))}</span>' if (
+            item.kind
+        ) else ""
+        way = f' <span class="muted">{_esc(_balance_word(item.direction))}</span>' if (
+            item.direction
+        ) else ""
+        boxes.append(
+            '<label class="tick"><input type="checkbox" name="chart_in" '
+            f'value="{_esc(item.key)}"{" checked" if ticked else ""}> '
+            f"<span>{_label_and_ref(item)}{kind}{way}"
+            f'<span class="muted">{_esc(_TICK_ROLES[item.role])}</span></span></label>'
+        )
+    liability_note = (
+        '<p class="muted">Leaving out a liability leaves the asset it is secured against '
+        "in the chart unless that is unticked too.</p>"
+        if any(item.role == "asset" for item in view.chart_items)
+        else ""
+    )
+    button = "Redraw the chart" if unmasked else "Show values, chart drawn from these"
+    return (
+        '<form method="post" action="/position"><fieldset class="chart-choice">'
+        "<legend>Draw the chart from</legend>"
+        '<input type="hidden" name="chart_chosen" value="1">'
+        + "".join(boxes)
+        + liability_note
+        + "</fieldset>"
+        + submit_button(button)
+        + "</form>"
+    )
+
+
+def _history(
+    position: Position, view: Any, *, unmasked: bool, chart_in: Collection[str] | None = None
+) -> str:
     body = "<h2>History, month by month</h2>"
     if not view.history and not view.provisional_history:
         return body + "<p>There is no history yet: nothing is counted.</p>"
@@ -536,15 +616,39 @@ def _history(position: Position, view: Any, *, unmasked: bool) -> str:
             "Earlier months are marked partial: they leave out the accounts and assets "
             "that had no known figure yet, so they are not comparable with later ones.</p>"
         )
+    # Only an unmasked page reads the choice; the masked one offers every tick, ticked.
+    keys = {item.key for item in position.chart_items}
+    drawn = frozenset(set(chart_in) & keys) if unmasked and chart_in is not None else None
+    ticks = _ticks(view, drawn, unmasked=unmasked)
     if unmasked:
-        legend = _legend(bool(position.history), bool(position.provisional_history))
-        body += (
-            '<div class="chart">'
-            + _chart(position.history, position.complete_from, position.provisional_history)
-            + f'</div><p class="muted">{legend}</p>'
-        )
+        narrowed = drawn is not None and drawn != keys
+        series = chart_series(position, drawn)
+        body += ticks
+        if narrowed:
+            left_out = [_label_and_ref(i) for i in view.chart_items if i.key not in (drawn or ())]
+            body += (
+                f'<p class="warn"><strong>The chart leaves out: {_serial(left_out)}.</strong> '
+                "The headline and every total on this page still count everything held; only "
+                "the chart is narrower, so its lines are not the household's net worth.</p>"
+            )
+        if drawn is not None and not drawn:
+            body += "<p>Nothing is ticked, so no chart is drawn. Tick at least one to draw it.</p>"
+        elif not series.history and not series.provisional:
+            body += (
+                "<p>Nothing that is ticked has a figure in any month yet, so no chart is "
+                "drawn.</p>"
+            )
+        else:
+            legend = _legend(bool(series.history), bool(series.provisional), narrowed=narrowed)
+            body += (
+                '<div class="chart">'
+                + _chart(
+                    series.history, series.complete_from, series.provisional, narrowed=narrowed
+                )
+                + f'</div><p class="muted">{legend}</p>'
+            )
     else:
-        body += (
+        body += ticks + (
             "<p>The chart is drawn when values are shown. Its shape would disclose how "
             "large the figures are, so the masked page does not draw one.</p>"
         )
@@ -583,7 +687,13 @@ _LIMITS = (
 )
 
 
-def render_position(position: Position, *, unmasked: bool) -> bytes:
+def render_position(
+    position: Position, *, unmasked: bool, chart_in: Collection[str] | None = None
+) -> bytes:
+    """The page; `chart_in` names the items the chart is drawn from, None for all.
+
+    Names that match no item are ignored. The masked rendering never reads it.
+    """
     view = Disclosed(position, unmasked=unmasked)
     body = _mode(unmasked) + _headline(view)
     if view.groups:
@@ -616,7 +726,7 @@ def render_position(position: Position, *, unmasked: bool) -> bytes:
             + "".join(_entitlement_card(e) for e in view.entitlements)
             + "</ul>"
         )
-    body += _history(position, view, unmasked=unmasked)
+    body += _history(position, view, unmasked=unmasked, chart_in=chart_in)
     limits = _LIMITS + (_LIMIT_PROVISIONAL if view.uncounted else "")
     body += _LIMITS_HEAD + limits + "</ul>" + _HOME
     return render_page("Position", body, wide=True)
@@ -642,10 +752,14 @@ class PositionPages:
         # method was used.
         self._position(unmasked=False)
 
-    def _position_post(self) -> None:
-        self._position(unmasked=True)
+    def _position_post(self, form: dict[str, list[str]]) -> None:
+        # A choice exists only where the form says it was made: a bare "Show values"
+        # carries no ticks and means everything, where a made choice with no ticks
+        # means nothing.
+        chosen = "chart_chosen" in form
+        self._position(unmasked=True, chart_in=form.get("chart_in", []) if chosen else None)
 
-    def _position(self, *, unmasked: bool) -> None:
+    def _position(self, *, unmasked: bool, chart_in: Collection[str] | None = None) -> None:
         hook: Callable[[], Position] | None = self.bound_config.position_data
         if hook is None:
             # A destination in the navigation strip must resolve, as the
@@ -663,4 +777,8 @@ class PositionPages:
             say("position.fault", kind=type(fault).__name__)
             self._respond(500, _page("Position failed", "The position could not be built."))
             return
-        self._respond(200, render_position(position, unmasked=unmasked), no_store=unmasked)
+        self._respond(
+            200,
+            render_position(position, unmasked=unmasked, chart_in=chart_in),
+            no_store=unmasked,
+        )

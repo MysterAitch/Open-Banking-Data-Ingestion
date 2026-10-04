@@ -57,6 +57,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import accumulate
@@ -202,6 +203,37 @@ class ProvisionalPoint:
 
 
 @dataclass(frozen=True)
+class ChartItem:
+    """One account or asset as the month-end chart adds it up.
+
+    `figures` is what the item contributes at each of `Position.chart_months`,
+    taken from the same per-item lookups the history sums, so a chart drawn
+    from some items is a sum of figures and never a total minus a guess. None
+    is a month in which the item has no figure yet.
+    """
+
+    #: The tick's name: "account:<ref>" or "asset:<id>". Unique across the page.
+    key: Structural[str]
+    ref: Structural[str]
+    label: Structural[str]
+    kind: Structural[str]
+    #: "account" (counted), "asset", or "uncounted" (moves only the provisional line).
+    role: Structural[str]
+    #: Which way the item sits now, or "" for an account whose balance is not known.
+    direction: Structural[str]
+    figures: Total[tuple[int | None, ...]]
+
+
+@dataclass(frozen=True)
+class ChartSeries:
+    """The lines a chart draws, for everything held or for the items chosen."""
+
+    history: tuple[MonthPoint, ...]
+    complete_from: str
+    provisional: tuple[ProvisionalPoint, ...]
+
+
+@dataclass(frozen=True)
 class Position:
     as_of: Structural[str]
     accounts_total: Structural[int]
@@ -225,6 +257,10 @@ class Position:
     #: nothing is counted.
     provisional_history: Structural[tuple[ProvisionalPoint, ...]]
     provisional_direction: Structural[str]
+    #: The month-ends the chart is drawn at, oldest first, and every item that
+    #: feeds it. See `chart_series` for drawing from some of them.
+    chart_months: Structural[tuple[str, ...]]
+    chart_items: Structural[tuple[ChartItem, ...]]
 
     #: None when nothing at all is counted.
     net_worth: Total[Money | None]
@@ -460,6 +496,137 @@ def _provisional_history(
     return tuple(points)
 
 
+def _cut(label: str, today: date) -> date | None:
+    """The month-end a month's figure is read at; None for the newest month, read as now."""
+    if label == _month_label(today):
+        return None
+    year, month = (int(part) for part in label.split("-"))
+    return _month_end(year, month)
+
+
+def _chart_items(
+    months: Sequence[str],
+    today: date,
+    counted: Sequence[tuple[AccountInput, AccountPosition]],
+    held: Sequence[tuple[AssetPosition, list[tuple[date, int]]]],
+    movers: Sequence[AccountInput],
+) -> tuple[ChartItem, ...]:
+    """Each item's figure at each month-end, by the lookups `_history` sums."""
+    cuts = [_cut(label, today) for label in months]
+    out: list[ChartItem] = []
+    for item, view in counted:
+        cumulative = _Cumulative(item.opening.opening_minor or 0, item.rows)
+        as_at = item.opening.as_at
+        out.append(
+            ChartItem(
+                key=f"account:{item.ref}",
+                ref=item.ref,
+                label=item.label,
+                kind=item.kind,
+                role="account",
+                direction=view.direction,
+                figures=tuple(
+                    None if as_at is None or (cut is not None and as_at > cut)
+                    else cumulative.through(cut)
+                    for cut in cuts
+                ),
+            )
+        )
+    for asset, series in held:
+        out.append(
+            ChartItem(
+                key=f"asset:{asset.asset_id}",
+                ref=asset.asset_id,
+                label=asset.asset_id,
+                kind=asset.kind,
+                role="asset",
+                direction=asset.direction,
+                figures=tuple(
+                    next(
+                        (v for when, v in reversed(series) if cut is None or when <= cut), None
+                    )
+                    for cut in cuts
+                ),
+            )
+        )
+    for item in movers:
+        cumulative = _Cumulative(0, item.rows)
+        first = min((t.value_date for t in item.rows if not t.status.is_history), default=None)
+        out.append(
+            ChartItem(
+                key=f"account:{item.ref}",
+                ref=item.ref,
+                label=item.label,
+                kind=item.kind,
+                role="uncounted",
+                direction="",
+                figures=tuple(
+                    None if first is None or (cut is not None and first > cut)
+                    else cumulative.through(cut)
+                    for cut in cuts
+                ),
+            )
+        )
+    return tuple(out)
+
+
+def chart_series(position: Position, drawn: AbstractSet[str] | None = None) -> ChartSeries:
+    """The chart's lines drawn from the chosen items alone; None draws everything.
+
+    Each month's figure is the sum of the chosen items' own figures for it
+    (`ChartItem.figures`), added the way `_history` and `_provisional_history`
+    add them, so choosing every item reproduces `Position.history` exactly.
+    A month before any chosen item has a figure is not drawn, because a nil
+    there would be a balance nobody had. Names that match no item are ignored.
+    """
+    if drawn is None:
+        return ChartSeries(position.history, position.complete_from, position.provisional_history)
+    items = [i for i in position.chart_items if i.key in drawn]
+    known = [i for i in items if i.role != "uncounted"]
+    movers = [i for i in items if i.role == "uncounted"]
+    months = position.chart_months
+
+    def first_figure(chosen: Sequence[ChartItem]) -> int:
+        return min(
+            (
+                index
+                for index in range(len(months))
+                if any(i.figures[index] is not None for i in chosen)
+            ),
+            default=len(months),
+        )
+
+    def figure(item: ChartItem, index: int) -> int:
+        value = item.figures[index]
+        return 0 if value is None else value
+
+    history = []
+    for index in range(first_figure(known), len(months)):
+        included = sum(1 for i in known if i.figures[index] is not None)
+        total = sum(figure(i, index) for i in known)
+        history.append(
+            MonthPoint(
+                month=months[index],
+                included=included,
+                of=len(known),
+                partial=included < len(known),
+                direction=direction_of(total),
+                net_worth=Money(total, CURRENCY),
+            )
+        )
+    complete = next((p.month for p in history if not p.partial), "")
+    provisional = []
+    if movers and position.provisional_history:
+        for index in range(first_figure(items), len(months)):
+            total = sum(figure(i, index) for i in items)
+            provisional.append(
+                ProvisionalPoint(
+                    month=months[index], direction=direction_of(total), total=Money(total, CURRENCY)
+                )
+            )
+    return ChartSeries(tuple(history), complete, tuple(provisional))
+
+
 def build_position(
     accounts: Sequence[AccountInput], assets: Sequence[AssetInput], *, today: date
 ) -> Position:
@@ -511,6 +678,16 @@ def build_position(
     )
     moved_total = sum(view.moved.minor for view in uncounted if view.moved is not None)
     provisional = net + moved_total
+    provisional_history = _provisional_history(history, movers, today) if movers else ()
+    chart_months = tuple(p.month for p in (provisional_history or history))
+    # `held` and `series_by_asset` were appended together, so they pair by position.
+    chart_items = _chart_items(
+        chart_months,
+        today,
+        [(item, view) for item, view, _ in counted],
+        list(zip(held, series_by_asset, strict=True)),
+        movers,
+    )
     return Position(
         as_of=today.isoformat(),
         accounts_total=len(accounts),
@@ -526,8 +703,10 @@ def build_position(
         entitlements=tuple(sorted(entitlements, key=lambda e: e.asset_id)),
         history=history,
         complete_from=complete,
-        provisional_history=_provisional_history(history, movers, today) if movers else (),
+        provisional_history=provisional_history,
         provisional_direction=direction_of(provisional) if movers else "",
+        chart_months=chart_months,
+        chart_items=chart_items,
         net_worth=None if nothing else Money(net, CURRENCY),
         assets_subtotal=Money(assets_total, CURRENCY),
         provisional_total=Money(provisional, CURRENCY) if movers else None,

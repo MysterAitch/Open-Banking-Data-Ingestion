@@ -236,6 +236,15 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
                            font-weight: 700; color: #2563eb; }}
  details[open] summary::before {{ content: "-"; }}
  input[type="checkbox"] {{ width: auto; margin-right: .4rem; }}
+ /* A tick the thumb can hit: the whole row is the target, not the box. */
+ label.tick {{ display: flex; align-items: center; gap: .6rem; min-height: 44px;
+              padding: .15rem 0; box-sizing: border-box; }}
+ label.tick input {{ flex: none; width: 1.5rem; height: 1.5rem; margin: 0; }}
+ label.tick > span {{ min-width: 0; overflow-wrap: anywhere; }}
+ /* A fieldset will not shrink below its widest word unless told it may, and an
+    account reference is one long word. */
+ fieldset.chart-choice {{ border: 1px solid #8884; border-radius: .5rem; margin: .5rem 0;
+                         padding: .3rem .8rem; min-width: 0; }}
  /* What a page is for, in one or two sentences before anything else. */
  .lede {{ margin: .2rem 0 1rem; }}
  /* The newest push and audit, readable at a glance. */

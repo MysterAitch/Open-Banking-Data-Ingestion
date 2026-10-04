@@ -6779,7 +6779,7 @@ class ConnectionHandler(
             return
         if route == "/position":
             # A POST because showing values is a decision, not a link.
-            self._position_post()
+            self._position_post(self._read_form())
             return
         if route == "/ledger-anchor":
             self._anchor_save_post(self._read_form())
