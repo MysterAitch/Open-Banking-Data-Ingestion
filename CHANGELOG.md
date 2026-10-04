@@ -26,6 +26,29 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.286] - 2026-10-04
+
+### Fixed
+- **A copy of a payment folds into a payment row only.** The Space's transfer
+  legs of the same size were counted as rows the copy might belong to, so one
+  copy had two choices and was left unfolded and counted twice. On a real
+  account this was the one row the rebuild kept reporting as not paired.
+- **A transfer leg pairs with the leg in the Space it names, never with a
+  payment of the same size.** A transfer out of a Space and a payment from it
+  of one amount on one day could pair the main account's leg with the payment
+  and leave the real leg unpaired.
+- **Every path that reconciles rows applies the rule that keeps a Space-blind
+  source's row out of an internal leg**, not only the rebuild, the pull, and
+  the file import.
+
+### Added
+- **A refused fold says which refusal it was**, in the rebuild summary and on
+  the ledger.
+- **A row one side holds and the other does not says what the other side
+  holds that is like it**: a row of the same size within thirty days, how far
+  away, and what it is attached to. A transfer leg says what kind of row it is
+  paired with.
+
 ## [0.4.285] - 2026-10-04
 
 ### Fixed
