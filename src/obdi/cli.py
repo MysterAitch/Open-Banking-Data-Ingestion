@@ -79,6 +79,7 @@ from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
+from .protection import recheck as recheck_protections
 from .pull import STARLING_CONNECTION, PullResult, pull_starling, pull_truelayer
 from .replay import (
     ActualAccountBinding,
@@ -925,6 +926,7 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
             "shared-identity",
             lambda: shared_identity_findings(identity_health(store).shared),
         )
+        protections = _guarded("protections", lambda: _protection_findings(store))
     # First, because an empty derived layer makes every finding below it
     # meaningless: no sightings means no stale feeds and no coverage, so a
     # silent store would otherwise look like a quiet one.
@@ -940,6 +942,7 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
     findings += refusal_trends(attempts)
     findings += refused
     findings += _guarded("push-stale", lambda: _stale_apply_findings(db_path, now))
+    findings += protections
     findings += shared
     alert_store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     if alert_store_path and Path(alert_store_path).exists():
@@ -962,6 +965,16 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
         findings.append(volume)
     findings += _guarded("scheduler", lambda: _scheduler_findings(db_path, now))
     return findings
+
+
+def _protection_findings(store: Store) -> list[Finding]:
+    """One finding per broken protection, read live from the span so it never lags a rebuild."""
+    from .protection import broken_protections, broken_sentence
+
+    return [
+        Finding(f"protection-broken:{check.account}", broken_sentence(check))
+        for check in broken_protections(store)
+    ]
 
 
 def _scheduler_findings(db_path: Path, now: datetime) -> list[Finding]:
@@ -1120,6 +1133,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
             fold_space_copies(store, _account_map(store))
             fold_same_money(store, _account_map(store))
             settle_review_flags(store)
+            recheck_protections(store)
         after = store.counts().get("transactions", 0)
     return (
         f"replayed {source} for {account_ref}: {len(transactions)} parsed, "
@@ -1415,6 +1429,9 @@ def _alert(db_path: Path) -> int:
 def _pair_transfers(db_path: Path) -> int:
     with Store(db_path) as store:
         confirmed = pair_transfers_across_store(store, _account_map(store))
+        # The scheduled cycle's pairing step follows every pull, and `pull.py` is not where a
+        # post-batch check belongs, so this is where a pull's effect on a protection is recorded.
+        recheck_protections(store)
         unconfirmed = unconfirmed_transfers(store)
     print(f"confirmed {confirmed} internal transfer pair(s)")
     if unconfirmed:
@@ -2455,6 +2472,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 summary = import_file(
                     store, path, account_id=account, account_map=_account_map(store)
                 )
+                recheck_protections(store)
                 # The cross-source verdict at the moment it becomes
                 # answerable: does this file agree with every other
                 # source of the same account over the period they share?
@@ -2932,6 +2950,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 archive=archive_notes_for(store, only=ref).get(ref),
                 families=families_of(store, _account_map(store)),
                 movement=movement_report(store),
+                with_protection=True,
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:
@@ -2990,6 +3009,35 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             record_typed_transaction(
                 store, ref, day, direction, amount, description, account_map=_account_map(store)
             )
+
+    def protect(ref: str, through: str) -> None:
+        from .agreement import standing_of
+        from .balance_anchors import effective_opening
+        from .protection import ProtectionRefused, press
+
+        busy = rebuild_in_progress_note(db_path)
+        if busy:
+            raise ProtectionRefused(f"nothing was protected: {busy}")
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            families = families_of(store, account_map)
+            opening = effective_opening(store, ref, families=families)
+            standing = standing_of(
+                opening, [ref, *families.spaces_of(ref)], movement_report(store)
+            )
+            press(store, ref, through, opening=opening, standing=standing)
+
+    def protect_withdraw(ref: str) -> None:
+        from .protection import withdraw
+
+        with Store(db_path) as store:
+            withdraw(store, ref)
+
+    def protect_accept(ref: str) -> None:
+        from .protection import accept
+
+        with Store(db_path) as store:
+            accept(store, ref)
 
     def typed_withdraw(ref: str, entry_id: str) -> None:
         from .typed_transactions import TypedRefused, withdraw_typed_transaction
@@ -3303,6 +3351,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, _account_map(store)
             ).newly_folded
             settle_review_flags(store)
+            recheck_protections(store)
         return (
             f"{row['origin']} assigned to {destination} and read by "
             f"{parser.source}: {summary.describe()}; {check.outcome_note}"
@@ -3814,6 +3863,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         anchor_remove=anchor_remove,
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
+        protect=protect,
+        protect_withdraw=protect_withdraw,
+        protect_accept=protect_accept,
         categorise_overview=categorise_overview,
         categorise_apply=categorise_apply,
         categorise_defer=categorise_defer,
@@ -4864,6 +4916,7 @@ def main(argv: list[str] | None = None) -> int:
             except DataError as exc:
                 print(f"Refused to import: {exc}", file=sys.stderr)
                 return 1
+            recheck_protections(store)
         if not summary.artefact_new:
             print("(this exact file was already landed; re-derived anyway)")
         print(summary.describe())

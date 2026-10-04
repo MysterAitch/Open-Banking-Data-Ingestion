@@ -983,6 +983,7 @@ def effective_opening(
     rows: list[Transaction] | None = None,
     *,
     families: Families | None = None,
+    explain_after: date | None = None,
 ) -> EffectiveOpening:
     """The account's opening balance as the store can derive it right now.
 
@@ -990,6 +991,11 @@ def effective_opening(
     reading them again. `families` says which accounts are Spaces of which and
     which sources are blind to them; without it every anchor is taken as the
     account's own, which is right for any account with no known Spaces.
+
+    `explain_after` leaves unexplained every change at or before it, which is what a protected
+    span asks (`protection`): the explanation is the costly part of a reading, and a span a
+    person has verified is not worth explaining again. Which anchors agree is still judged for
+    the whole account, so a balance that stops agreeing inside the span is still seen.
     """
     gathered = _gather(store, ref, families)
     held = store.transactions_for_account(ref) if rows is None else rows
@@ -1106,7 +1112,7 @@ def effective_opening(
                         space: families.provider_ids.get(space, frozenset())
                         for space in members
                     },
-                    selection=select_explained(walk),
+                    selection=_after(select_explained(walk), walk.changes, explain_after),
                     fold_refusals=lambda: _fold_refusals(store, families, ref, members, held),
                 ),
             )
@@ -1142,7 +1148,7 @@ def effective_opening(
     if report is not None:
         report = replace(report, sayings=_bank_sayings(opening, walk))
     explanation = (
-        _explain_own(store, ref, opening, [*held, *unitemised])
+        _explain_own(store, ref, opening, [*held, *unitemised], explain_after)
         if opening.differing and not (walk is not None and walk.readings)
         else None
     )
@@ -1188,8 +1194,27 @@ def own_walk(ref: str, opening: EffectiveOpening) -> FamilyWalk:
     )
 
 
+def _after(
+    selection: Selection, changes: Sequence[FaultChange], after: date | None
+) -> Selection:
+    """The selection without the changes dated on or before `after`."""
+    if after is None:
+        return selection
+    kept = [n for n in selection.explain if changes[n].day > after]
+    return Selection(
+        kept,
+        {first: later for first, later in selection.pairs.items() if first in kept},
+        selection.omitted,
+        selection.bound,
+    )
+
+
 def _explain_own(
-    store: Store, ref: str, opening: EffectiveOpening, rows: Sequence[Transaction]
+    store: Store,
+    ref: str,
+    opening: EffectiveOpening,
+    rows: Sequence[Transaction],
+    explain_after: date | None = None,
 ) -> WalkExplanation:
     """Why each change among the account's own anchors happened, for a source that lists rows."""
     walk = own_walk(ref, opening)
@@ -1201,8 +1226,8 @@ def _explain_own(
     # The days each stating source gave the rows, for the explanation only: how an anchor
     # is judged is unchanged (`derive_opening`), so no verdict moves.
     placement = sighting_placement(store, [ref], listing)
-    chosen = select_explained(walk)
     changes = walk.changes
+    chosen = _after(select_explained(walk), changes, explain_after)
     wanted = [n for n in chosen.explain if changes[n].source in listing]
     return explain_walk(
         store,

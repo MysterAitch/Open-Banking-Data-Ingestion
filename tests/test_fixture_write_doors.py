@@ -157,6 +157,9 @@ JUSTIFIED = {
     "store grows the table the first pass needs",
     ("test_same_money_outcomes.py", "obdi_meta"): "stamps a store with the version BEFORE "
     "the same_money_outcomes table existed, for the same reason as the entries above",
+    ("test_protection.py", "obdi_meta"): "stamps a store with the version BEFORE the "
+    "protections tables existed, for the same reason as the entries above: only a rewound "
+    "marker shows that opening an old store grows the tables the first press needs",
     ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
     "upgrade path to run",
     ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "

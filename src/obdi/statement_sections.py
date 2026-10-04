@@ -44,6 +44,7 @@ from .namespaces import validate_canonical_name
 from .parsers.base import StatementParser
 from .parsers.pdf_statements import PdfStatementParser, SectionReading
 from .parsers.uk_banks import detect
+from .protection import recheck
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import fold_space_copies
@@ -363,6 +364,7 @@ def assign_section(
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
     settle_review_flags(store)
+    recheck(store)
     return (
         f"{prepared.origin}, the account labelled {masked(prepared.label)}, assigned to "
         f"{prepared.destination} and read by {prepared.parser.source}: "

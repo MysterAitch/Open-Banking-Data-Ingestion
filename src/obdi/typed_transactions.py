@@ -49,6 +49,7 @@ from .ingest import pair_transfers_across_store, reconcile_batch
 from .jsontypes import JsonObject, as_object, text, whole_number
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from .namespaces import MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE
+from .protection import recheck
 from .review_settlement import settle_review_flags
 from .store import Store
 
@@ -299,6 +300,7 @@ def record_typed_transaction(
     )
     settle_review_flags(store)
     pair_transfers_across_store(store, account_map)
+    recheck(store)
     return minted
 
 
@@ -343,6 +345,7 @@ def withdraw_typed_transaction(
     )
     _retract_live(store, entry.digest)
     pair_transfers_across_store(store, account_map)
+    recheck(store)
 
 
 def _retract_live(store: Store, entry_digest: str) -> None:

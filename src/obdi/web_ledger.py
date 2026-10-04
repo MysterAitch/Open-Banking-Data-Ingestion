@@ -19,6 +19,7 @@ import html
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .balance_anchors import parse_calendar_day
 from .balance_chart import OWN
 from .balance_meaning import READING_THRESHOLD
 from .callback import render_page
@@ -34,7 +35,7 @@ from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_balance_chart import structure_summary_html
-from .web_standing import standing_html
+from .web_standing import protection_html, standing_html
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -1258,9 +1259,14 @@ def _verification_html(view: Any) -> str:
     """The three dates, what holds agreement back, and the cleared counts."""
     if view.standing is None:
         return ""
+    protection = view.protection
+    protected = (
+        protection.through if protection is not None and protection.state != "none" else None
+    )
     return (
         "<h2>Verification</h2>"
-        + standing_html(view.standing, view.ref)
+        + standing_html(view.standing, view.ref, protected)
+        + protection_html(protection, view.ref, view.month)
         + _clearing_html(view.clearing)
     )
 
@@ -1801,6 +1807,141 @@ class LedgerPages:
             unmasked=False,
             notice=f"Removed: the stated balance for the end of {day}.",
             no_store=True,
+        )
+
+    def _confirm_page(
+        self, action: str, ref: str, month: str, question: str, label: str, extra: str = ""
+    ) -> None:
+        """Ask "are you sure" before a protection is made, accepted, or withdrawn.
+
+        The route answers its first POST with this and changes nothing; only the form here, which
+        carries `confirmed`, acts. Every protection press goes through it, because what the
+        owner's manual flow asked for was a lock whose release is behind an are-you-sure.
+        """
+        back = _url("/ledger", ref=ref, month=month)
+        self._respond(
+            200,
+            render_page(
+                "Are you sure?",
+                f"<p><strong>{_esc(question)}</strong></p>"
+                f'<form method="post" action="{action}">'
+                f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+                f'<input type="hidden" name="month" value="{_esc(month)}">'
+                f'<input type="hidden" name="confirmed" value="yes">{extra}'
+                + submit_button(label)
+                + "</form>"
+                f'<p><a class="tap" href="{back}">No, go back to the ledger</a></p>',
+            ),
+            no_store=True,
+        )
+
+    def _protection_action(
+        self,
+        form: dict[str, list[str]],
+        *,
+        hook_name: str,
+        refused_title: str,
+        refused_lead: str,
+        done: str,
+        question: str,
+        label: str,
+        with_through: bool = False,
+    ) -> None:
+        """The shared shape of the three protection POSTs: confirm first, then act, then answer
+        with the MASKED ledger. Nothing typed is echoed except a date that has been read as one."""
+        hook = getattr(self.bound_config, hook_name)
+        if hook is None:
+            self._respond(404, _page("Not available", "Protection is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        through = ""
+        extra = ""
+        if with_through:
+            try:
+                day = parse_calendar_day((form.get("through", [""])[0] or "").strip())
+            except DataError as exc:
+                self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.")
+                return
+            through = day.isoformat()
+            extra = f'<input type="hidden" name="through" value="{_esc(through)}">'
+        if (form.get("confirmed", [""])[0] or "") != "yes":
+            self._confirm_page(
+                self._route_of(hook_name),
+                ref,
+                month,
+                question.format(through=through),
+                label,
+                extra,
+            )
+            return
+        try:
+            hook(ref, through) if with_through else hook(ref)
+        except DataError as exc:
+            self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.")
+            return
+        except Exception as fault:
+            say(f"ledger.{hook_name}.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500, refused_title, f"{refused_lead} An unexpected fault stopped it."
+            )
+            return
+        self._ledger(
+            ref, month, unmasked=False, notice=done.format(through=through), no_store=True
+        )
+
+    @staticmethod
+    def _route_of(hook_name: str) -> str:
+        return {
+            "protect": "/protect",
+            "protect_withdraw": "/protect-withdraw",
+            "protect_accept": "/protect-accept",
+        }[hook_name]
+
+    def _protect_post(self, form: dict[str, list[str]]) -> None:
+        self._protection_action(
+            form,
+            hook_name="protect",
+            refused_title="Not protected",
+            refused_lead="Nothing was protected.",
+            done="Protected through {through}. It is an alarm on change and never a freeze.",
+            question=(
+                "Protect this account through {through}? From now on a rebuild, import, or "
+                "pull that adds, removes, or changes any row dated up to then, or re-pairs one "
+                "of its transfers, is reported as a broken protection. Nothing is blocked: "
+                "the change still happens."
+            ),
+            label="Protect",
+            with_through=True,
+        )
+
+    def _protect_withdraw_post(self, form: dict[str, list[str]]) -> None:
+        self._protection_action(
+            form,
+            hook_name="protect_withdraw",
+            refused_title="Protection not withdrawn",
+            refused_lead="Nothing was withdrawn.",
+            done="Withdrawn: the account's protection. The withdrawal is in its history.",
+            question=(
+                "Withdraw this account's protection? Changes to its rows will no longer be "
+                "reported."
+            ),
+            label="Withdraw protection",
+        )
+
+    def _protect_accept_post(self, form: dict[str, list[str]]) -> None:
+        self._protection_action(
+            form,
+            hook_name="protect_accept",
+            refused_title="Change not accepted",
+            refused_lead="Nothing was accepted.",
+            done="Accepted: the protected span is now as it stands, and the acceptance is "
+            "recorded beside the original.",
+            question=(
+                "Accept the change and protect again? The protection will describe the span as "
+                "it is now. The original and this acceptance both stay in its history."
+            ),
+            label="Accept the change and protect again",
         )
 
     def _typed_save_post(self, form: dict[str, list[str]]) -> None:

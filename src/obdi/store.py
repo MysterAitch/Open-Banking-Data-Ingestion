@@ -75,7 +75,9 @@ from .namespaces import (
 #: 11 -> 12: the `statement_readings` table, for the same reason as the last.
 #:
 #: 12 -> 13: the `same_money_outcomes` table, likewise.
-SCHEMA_VERSION = 13
+#:
+#: 13 -> 14: the `protections` and `protection_history` tables, likewise.
+SCHEMA_VERSION = 14
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -460,6 +462,41 @@ CREATE TABLE IF NOT EXISTS same_money_outcomes (
     account TEXT PRIMARY KEY,
     outcome TEXT NOT NULL
 );
+
+-- DECLARED: which spans a person decided are verified (`protection` says what that means).
+-- Like the registry and the statement assignments above, nothing that regenerates the derived
+-- layers may touch it: a rebuild is exactly what a protection exists to watch.
+-- The figures (the opening and the known balance the span was verified against) are private,
+-- so they are held here and never reach a page; `snapshot` holds the span's rows as they were
+-- when it was protected, so that a break can say WHAT changed rather than only that something did.
+CREATE TABLE IF NOT EXISTS protections (
+    account         TEXT PRIMARY KEY,
+    through         TEXT NOT NULL,
+    span_start      TEXT NOT NULL,
+    opening_day     TEXT NOT NULL,
+    opening_minor   INTEGER NOT NULL,
+    verified_source TEXT NOT NULL,
+    verified_day    TEXT NOT NULL,
+    verified_minor  INTEGER NOT NULL,
+    pressed_at      TEXT NOT NULL,
+    fingerprint     TEXT NOT NULL,
+    snapshot        TEXT NOT NULL,
+    broken_at       TEXT,
+    healed_at       TEXT,
+    accepted_at     TEXT
+);
+
+-- Every press, extension, acceptance, withdrawal, break, and heal, in order and never edited.
+-- `detail` is counts and dates only.
+CREATE TABLE IF NOT EXISTS protection_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account     TEXT NOT NULL,
+    event       TEXT NOT NULL,
+    at          TEXT NOT NULL,
+    through     TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    detail      TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -523,6 +560,12 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'detail', 'error_code', 'http_status', 'outcome', 'request_meta', 'source',
     ],
     'obdi_meta': ['key', 'value'],
+    'protection_history': ['account', 'at', 'detail', 'event', 'fingerprint', 'id', 'through'],
+    'protections': [
+        'accepted_at', 'account', 'broken_at', 'fingerprint', 'healed_at', 'opening_day',
+        'opening_minor', 'pressed_at', 'snapshot', 'span_start', 'through', 'verified_day',
+        'verified_minor', 'verified_source',
+    ],
     'provider_facts': ['connection_id', 'fact', 'observed_at', 'source', 'value'],
     'raw_artefacts': [
         'account_ref', 'connection_id', 'digest', 'fetched_at', 'media_type',
@@ -3111,6 +3154,66 @@ class Store:
     def clear_same_money_outcomes(self) -> None:
         """Forget what the last pass recorded, in the open transaction."""
         self.connection.execute("DELETE FROM same_money_outcomes")
+
+    def protection_record(self, account: str) -> sqlite3.Row | None:
+        """The account's protection as declared, or None. Never touched by a rebuild."""
+        found: sqlite3.Row | None = self.connection.execute(
+            "SELECT * FROM protections WHERE account = ?", (account,)
+        ).fetchone()
+        return found
+
+    def protection_records(self) -> list[sqlite3.Row]:
+        return self.connection.execute("SELECT * FROM protections ORDER BY account").fetchall()
+
+    def write_protection(self, fields: Mapping[str, object]) -> None:
+        """Declare or replace an account's protection, in the open transaction.
+
+        Every column is named by the caller, so a column added later cannot be silently left to
+        a default by an old call site.
+        """
+        columns = table_columns("protections")
+        missing = [column for column in columns if column not in fields]
+        if missing:
+            raise KeyError(f"a protection needs {missing}")
+        self.connection.execute(
+            f"INSERT OR REPLACE INTO protections ({', '.join(columns)}) "  # noqa: S608
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            tuple(fields[column] for column in columns),
+        )
+
+    def set_protection_health(
+        self, account: str, *, broken_at: str | None, healed_at: str | None
+    ) -> None:
+        """Record that a protection broke or healed, in the open transaction."""
+        self.connection.execute(
+            "UPDATE protections SET broken_at = ?, healed_at = ? WHERE account = ?",
+            (broken_at, healed_at, account),
+        )
+
+    def delete_protection(self, account: str) -> None:
+        self.connection.execute("DELETE FROM protections WHERE account = ?", (account,))
+
+    def add_protection_event(
+        self,
+        account: str,
+        event: str,
+        *,
+        at: str,
+        through: str,
+        fingerprint: str,
+        detail: str = "",
+    ) -> None:
+        """Append to the protection's history, in the open transaction."""
+        self.connection.execute(
+            "INSERT INTO protection_history (account, event, at, through, fingerprint, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (account, event, at, through, fingerprint, detail),
+        )
+
+    def protection_events(self, account: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT * FROM protection_history WHERE account = ? ORDER BY id", (account,)
+        ).fetchall()
 
     def statement_folded_ids(self) -> set[str]:
         """Rows folded as the same money as a statement's rows: every folded row

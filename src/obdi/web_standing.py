@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import quote
 
 from .agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
+from .protection import protection_line
+from .web_accounts import submit_button
 
 _esc = html.escape
 
@@ -43,6 +45,93 @@ def line_html(agreement: Any, protected_through: Any, *, with_protection: bool =
     css = "warn" if agreement.state == NONE else ""
     said = standing_line(agreement, protected_through, with_protection=with_protection)
     return f'<p class="{css}"><strong>{_esc(said)}</strong></p>'
+
+
+def _post(action: str, ref: str, month: str, extra: str, label: str) -> str:
+    """One button that asks for a POST. Nothing here changes anything: the route answers with a
+    confirmation, and only the form on that page, carrying `confirmed`, acts."""
+    return (
+        f'<form method="post" action="{action}">'
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<input type="hidden" name="month" value="{_esc(month)}">'
+        f"{extra}" + submit_button(label, secondary=True) + "</form>"
+    )
+
+
+def _through(day: Any) -> str:
+    return f'<input type="hidden" name="through" value="{_esc(day.isoformat())}">'
+
+
+def protection_html(protection: Any, ref: str, month: str) -> str:
+    """The protection: a line when intact, the whole story when broken, and what can be pressed."""
+    if protection is None:
+        return ""
+    body = ""
+    state = protection.state
+    if state == "intact":
+        detail = (
+            f"<p>The span runs from {_esc(protection.span_start.isoformat())} to "
+            f"{_esc(protection.through.isoformat())}. It is an alarm on change and never a "
+            "freeze: a rebuild or an import still does what the rules say, and says here if "
+            "that changed anything inside the span.</p>"
+        )
+        if protection.healed_on:
+            detail += (
+                f"<p>It broke on {_esc(protection.broken_on.isoformat())} and a later "
+                f"derivation restored it on {_esc(protection.healed_on.isoformat())}.</p>"
+            )
+        if protection.accepted_on:
+            detail += (
+                f"<p>A change to it was accepted on {_esc(protection.accepted_on.isoformat())}."
+                "</p>"
+            )
+        detail += f"<p>{_esc(str(protection.events))} recorded event(s) in its history.</p>"
+        detail += _post(
+            "/protect-withdraw", ref, month, "", "Withdraw protection"
+        )
+        body += (
+            f"<details><summary><strong>{_esc(protection_line(protection))}</strong></summary>"
+            f"{detail}</details>"
+        )
+    elif state == "broken":
+        said = "".join(f"<li>{_esc(line)}</li>" for line in protection.changes)
+        body += (
+            '<p class="bad"><strong>The protection is broken: the protected span, through '
+            f"{_esc(protection.through.isoformat())}, has changed since "
+            f"{_esc(protection.pressed_on.isoformat())}.</strong></p>"
+            f'<ul class="plain">{said}</ul>'
+            '<p class="muted">Nothing was changed back or updated: the protection stays broken '
+            "until a later rebuild restores the span, or you accept the new state.</p>"
+            + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
+            + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
+        )
+    if protection.earlier_said:
+        body += (
+            '<p class="warn"><strong>A fault in the data before the protected span, not a '
+            f"change to it:</strong> {_esc(protection.earlier_said)}</p>"
+        )
+    offer = protection.offer
+    if offer:
+        newest = offer[-1]
+        body += _post(
+            "/protect", ref, month, _through(newest), f"Protect through {newest.isoformat()}"
+        )
+        if len(offer) > 1:
+            options = "".join(
+                f'<option value="{_esc(d.isoformat())}">{_esc(d.isoformat())}</option>'
+                for d in reversed(offer)
+            )
+            body += (
+                "<details><summary>Protect through an earlier date</summary>"
+                f'<form method="post" action="/protect"><input type="hidden" name="ref" '
+                f'value="{_esc(ref)}"><input type="hidden" name="month" value="{_esc(month)}">'
+                f'<p><select name="through">{options}</select></p>'
+                + submit_button("Protect through the date chosen", secondary=True)
+                + "</form></details>"
+            )
+    elif protection.not_offered and state == "none":
+        body += f'<p class="muted">Not offered: {_esc(protection.not_offered)}.</p>'
+    return body
 
 
 def standing_html(standing: Any, ref: str, protected_through: Any = None) -> str:

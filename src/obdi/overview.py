@@ -75,6 +75,7 @@ SEVERITY_WORDS = {
 #: the listed kinds of its band, so an unknown kind is shown rather than dropped.
 _KIND_ORDER = (
     "rebuild:empty",
+    "protection-broken",
     "check-failed",
     "silent-feed",
     "refusals",
@@ -107,6 +108,11 @@ _KINDS: dict[str, tuple[int, str]] = {
     "check-failed": (
         NOW,
         "Read the web log for the error; until this check runs, that condition is unwatched.",
+    ),
+    "protection-broken": (
+        NOW,
+        "Open the account's ledger to see what changed in the protected span, then fix the "
+        "cause or accept the change.",
     ),
     "silent-feed": (
         NOW,
@@ -187,6 +193,7 @@ ALERT_CONDITIONS = (
     "push build",
     "push applied",
     "shared identities",
+    "protected spans",
     "consent expiry",
     "disk space",
     "emptied rebuild",
@@ -197,6 +204,7 @@ _ALERT_GUARDS = {
     "push-build": "push build",
     "push-stale": "push applied",
     "shared-identity": "shared identities",
+    "protections": "protected spans",
     "scheduler": "scheduler cycle",
 }
 
@@ -312,6 +320,8 @@ def _alert_item(finding: Finding, canonical_for_ref: Callable[[str], str]) -> At
     if kind in ("silent-feed", "stale-feed"):
         account = rest.rsplit(":", 1)[0]
         accounts, href = (account,), _account_href(account)
+    elif kind == "protection-broken":
+        accounts, href = (rest,), f"/ledger?ref={quote(rest, safe='')}"
     elif kind == "shared-identity":
         accounts, href = (rest,), "/identity-health"
     elif kind == "refusals":

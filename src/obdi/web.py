@@ -664,6 +664,13 @@ class WebConfig:
     typed_save: Callable[[str, str, str, str, str], None] | None = None
     #: Withdraw a typed transaction: (ref, entry id). Same refusal rule.
     typed_withdraw: Callable[[str, str], None] | None = None
+    #: Protect an account through a date: (ref, through). Raises a DataError whose
+    #: text never quotes a figure (`protection`).
+    protect: Callable[[str, str], None] | None = None
+    #: Withdraw an account's protection: (ref).
+    protect_withdraw: Callable[[str], None] | None = None
+    #: Accept a changed protected span as the new protected state: (ref).
+    protect_accept: Callable[[str], None] | None = None
     #: Move a connection's name everywhere it was recorded.
     rename_connection: Callable[[str, str], str] | None = None
     #: Land a refused authorisation in the attempt ledger.
@@ -6761,6 +6768,15 @@ class ConnectionHandler(
             return
         if route == "/ledger-typed-withdraw":
             self._typed_withdraw_post(self._read_form())
+            return
+        if route == "/protect":
+            self._protect_post(self._read_form())
+            return
+        if route == "/protect-withdraw":
+            self._protect_withdraw_post(self._read_form())
+            return
+        if route == "/protect-accept":
+            self._protect_accept_post(self._read_form())
             return
         if route == "/statement-held":
             self._statement_held()

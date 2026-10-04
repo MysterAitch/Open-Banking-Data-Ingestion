@@ -64,6 +64,7 @@ from .identity_health import provider_ids_by_row, shared_identity_groups
 from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import MANUAL_SOURCE, UNITEMISED_SOURCE
+from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
@@ -479,6 +480,9 @@ class Ledger:
     clearing: Structural[ClearingView | None] = None
     #: How far the account is in agreement, and for a family the whole account too (`agreement`).
     standing: Structural[Standing | None] = None
+    #: The account's protection (`protection`), set by the caller that reads the declared state
+    #: so that the ledger proper costs the statements it always did.
+    protection: Structural[ProtectionView | None] = None
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -682,6 +686,8 @@ def build_ledger(
     archive: ArchiveNote | None = None,
     families: Families | None = None,
     movement: MovementCompleteness | None = None,
+    explain_after: date | None = None,
+    with_protection: bool = False,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
 
@@ -693,14 +699,32 @@ def build_ledger(
 
     `movement` is the whole store's movement report, which the caller holds because reading
     it walks every artefact; without it the standing is from the known balances alone and
-    says so (`Agreement.movement_checked`).
+    says so (`Agreement.movement_checked`). `explain_after` is the end of a protected span,
+    whose faults are not explained again (`effective_opening`).
+
+    `with_protection` reads the account's protection (`protection`): the view of it is set on
+    the result, and an INTACT protection supplies `explain_after`. A broken one does not, since
+    the fault explanations are what a person reads to find out why it broke.
     """
-    return replace(
-        _ledger_for(
-            store, ref, month, bound=bound, label=label, families=families, movement=movement
-        ),
-        archive=archive,
+    check = None
+    record = store.protection_record(ref) if with_protection else None
+    if record is not None:
+        check = check_span(store, record)
+        if check.intact and explain_after is None:
+            explain_after = date.fromisoformat(str(record["through"]))
+    built = _ledger_for(
+        store,
+        ref,
+        month,
+        bound=bound,
+        label=label,
+        families=families,
+        movement=movement,
+        explain_after=explain_after,
+        with_protection=with_protection,
+        check=check,
     )
+    return replace(built, archive=archive)
 
 
 def _ledger_for(
@@ -712,6 +736,9 @@ def _ledger_for(
     label: str,
     families: Families | None,
     movement: MovementCompleteness | None,
+    explain_after: date | None,
+    with_protection: bool,
+    check: Check | None,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -722,19 +749,29 @@ def _ledger_for(
             return empty
         # An account declared before any money moved can still have had its
         # balance stated, and that is exactly the figure a new account needs.
-        opening = effective_opening(store, ref, [], families=families)
+        opening = effective_opening(
+            store, ref, [], families=families, explain_after=explain_after
+        )
         entries = typed_entries(store, ref)
         if not opening.unitemised:
+            standing = standing_of(opening, members, movement)
             return replace(
                 empty,
                 opening=opening_view(opening),
                 typed=typed_lines(entries, ""),
-                standing=standing_of(opening, members, movement),
+                standing=standing,
+                protection=(
+                    protection_view(store, ref, opening, [], standing, check=check)
+                    if with_protection
+                    else None
+                ),
             )
         # A balance-only account holds no rows of its own, and what its stated
         # balances imply is its ledger.
     else:
-        opening = effective_opening(store, ref, held, families=families)
+        opening = effective_opening(
+            store, ref, held, families=families, explain_after=explain_after
+        )
         entries = typed_entries(store, ref)
     rows = [*held, *opening.unitemised]
 
@@ -927,6 +964,7 @@ def _ledger_for(
             ),
         )
 
+    final_standing = standing_of(opening, members, movement)
     return Ledger(
         ref=ref,
         label=label,
@@ -952,7 +990,12 @@ def _ledger_for(
             for t, row in built
             if not t.status.is_history and row.origin != ORIGIN_UNITEMISED
         ),
-        standing=standing_of(opening, members, movement),
+        standing=final_standing,
+        protection=(
+            protection_view(store, ref, opening, held, final_standing, check=check)
+            if with_protection
+            else None
+        ),
     )
 
 

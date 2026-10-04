@@ -50,6 +50,7 @@ from .namespaces import (
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .period_reconciliation import SAME_MONEY_PHASE
+from .protection import recheck as recheck_protections
 from .providers import starling, truelayer
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
@@ -687,6 +688,10 @@ def rebuild_from_raw(
     # pairing table is how the pass knows one.
     with instrumentation.phase(SAME_MONEY_PHASE):
         report.same_money_folded = fold_same_money(store, account_map).folded
+    # Last, so a protected span is compared with the finished derivation. The check only
+    # records; `protection` says why a rebuild is never refused or altered by one.
+    with instrumentation.phase("protection"):
+        recheck_protections(store)
     after_counts = {
         str(row[0]): int(row[1])
         for row in store.connection.execute(
