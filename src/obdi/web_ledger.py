@@ -27,7 +27,7 @@ from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .errors import DataError
 from .feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
-from .join_basis import BASIS_WORDS, count_sentence, moment_text
+from .join_basis import count_sentence, how_words, moment_text
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,
@@ -189,8 +189,7 @@ def _status_pill(status: str) -> str:
 
 def _sighting_line(sighting: Any) -> str:
     """One source's sighting: how it came to be on the row, then everything it stated."""
-    words = BASIS_WORDS.get(sighting.basis, BASIS_WORDS[""])
-    how = f"copied from the main account's row, {words}" if sighting.copy else words
+    how = how_words(sighting)
     stated = ", ".join(
         f"{_esc(moment.field)} {_esc(moment_text(moment))}" for moment in sighting.moments
     )

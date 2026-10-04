@@ -14,7 +14,7 @@ a masked page. Nothing here is a value.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from .london_clock import london
@@ -28,6 +28,7 @@ from .models import (
     BASIS_SETTLEMENT,
     BASIS_WINDOW,
 )
+from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
 from .store import SightingDetail
 
 #: What each basis says of a sighting, in the words the ledger uses.
@@ -90,13 +91,88 @@ def moment_text(moment: StatedMoment) -> str:
 
 @dataclass(frozen=True)
 class SightingView:
-    """One source's sighting of a row: its basis, and what it stated."""
+    """One source's sighting of a row, or its sightings that stated exactly the same.
+
+    A source fetched again re-sights its rows by their own id and states what it stated before,
+    so those sightings are one view with a count. A later sighting that states something else is
+    a view of its own, and says what changed.
+    """
 
     source: Structural[str]
     basis: Structural[str]
     #: Placed on a Space row by a fold; its source's statements are on the row copied from.
     copy: Structural[bool]
     moments: Structural[tuple[StatedMoment, ...]]
+    #: Later sightings that stated exactly these moments, folded into this view.
+    repeats: Structural[int] = 0
+    #: The basis those later sightings joined on, and "" where it was not one basis throughout.
+    repeats_basis: Structural[str] = ""
+    #: What this view stated that the same source's previous view did not, or "".
+    change: Structural[str] = ""
+
+
+def how_words(view: SightingView) -> str:
+    """How a sighting came to be on the row, what changed since the source's last, and how often
+    it was seen again, in the words the ledger uses.
+
+    A free function reading only fields, because a record reached through `masking.Disclosed`
+    exposes its fields and nothing else.
+    """
+    words = BASIS_WORDS.get(view.basis, BASIS_WORDS[""])
+    text = f"copied from the main account's row, {words}" if view.copy else words
+    if view.change:
+        text += f" ({view.change})"
+    if view.repeats:
+        fetched = view.source in FIRST_PARTY_FEEDS | AGGREGATORS
+        noun = "fetch" if fetched else "sighting"
+        plural = "fetches" if fetched else "sightings"
+        count = f"{view.repeats} later {noun if view.repeats == 1 else plural}"
+        by = " by its own id" if view.repeats_basis == BASIS_OWN_ID else ""
+        text += f", sighted again{by} in {count}"
+    return text
+
+
+#: Where a field falls among the events of a payment, by the words its name carries: made, then
+#: settled or posted, then the record last touched. The names are the sources' own and found by
+#: parsing, so an unrecognised name counts as the payment's own moment.
+_LATER_EVENTS = (
+    (("updat", "modif", "touch", "amend"), 2),
+    (("settle", "post", "book", "clear"), 1),
+)
+
+
+def _event_rank(field: str) -> int:
+    lowered = field.casefold()
+    for words, rank in _LATER_EVENTS:
+        if any(word in lowered for word in words):
+            return rank
+    return 0
+
+
+def _in_event_order(moments: Iterable[StatedMoment]) -> tuple[StatedMoment, ...]:
+    """Each moment once, ordered by when its event happens and otherwise as stated."""
+    unique: list[StatedMoment] = []
+    for moment in moments:
+        if moment not in unique:
+            unique.append(moment)
+    return tuple(sorted(unique, key=lambda moment: _event_rank(moment.field)))
+
+
+def _what_changed(
+    before: tuple[StatedMoment, ...], after: tuple[StatedMoment, ...]
+) -> str:
+    earlier = {moment.field: moment for moment in before}
+    later = {moment.field: moment for moment in after}
+    parts = []
+    for field, moment in later.items():
+        if field not in earlier:
+            parts.append(f"{field} appeared")
+        elif moment_text(earlier[field]) != moment_text(moment):
+            parts.append(
+                f"{field} moved from {moment_text(earlier[field])} to {moment_text(moment)}"
+            )
+    parts += [f"{field} is no longer stated" for field in earlier if field not in later]
+    return "; ".join(parts) or "its statements differed"
 
 
 @dataclass(frozen=True)
@@ -109,22 +185,52 @@ class JoinCounts:
 
 
 def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...]:
-    """A row's sightings, with each source's repeated statements shown once.
+    """A row's sightings, one view per source and distinct set of stated moments.
 
-    A source that sighted the row in several artefacts states the same fields in each, and
-    a field that changed between them (a record's last-touched time) is shown under each value.
+    A source that sighted the row in several artefacts (the feed on every pull) states the same
+    fields in each, so a later sighting that states what an earlier one did, and joined by the
+    source's own id or on the same basis, is counted on that view and not listed again.
+    A later sighting that states something else is a view of its own, saying what changed since
+    the source's previous view.
+    Every basis other than a source's own id again is kept on its view, so the weakest join of a
+    row (`_weakest`) is the same as it was when every sighting was listed.
     """
-    merged: dict[tuple[str, str, bool], list[StatedMoment]] = {}
+    views: list[SightingView] = []
     for detail in details:
-        moments = merged.setdefault((detail.source, detail.basis, detail.copy), [])
-        for field, stated, kind, zone in detail.moments:
-            moment = StatedMoment(field, stated, kind, zone)
-            if moment not in moments:
-                moments.append(moment)
-    return tuple(
-        SightingView(source=source, basis=basis, copy=copy, moments=tuple(moments))
-        for (source, basis, copy), moments in merged.items()
-    )
+        moments = _in_event_order(
+            StatedMoment(field, stated, kind, zone) for field, stated, kind, zone in detail.moments
+        )
+        same_source = [v for v in views if (v.source, v.copy) == (detail.source, detail.copy)]
+        again = next(
+            (
+                position
+                for position, view in enumerate(views)
+                if view in same_source
+                and view.moments == moments
+                and detail.basis in (view.basis, BASIS_OWN_ID)
+            ),
+            None,
+        )
+        if again is not None:
+            view = views[again]
+            same_basis = view.repeats == 0 or view.repeats_basis == detail.basis
+            views[again] = replace(
+                view,
+                repeats=view.repeats + 1,
+                repeats_basis=detail.basis if same_basis else "",
+            )
+            continue
+        change = _what_changed(same_source[-1].moments, moments) if same_source else ""
+        views.append(
+            SightingView(
+                source=detail.source,
+                basis=detail.basis,
+                copy=detail.copy,
+                moments=moments,
+                change=change,
+            )
+        )
+    return tuple(views)
 
 
 def _weakest(views: Iterable[SightingView]) -> str:
