@@ -114,6 +114,7 @@ from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
 from .round_up_accounts import RoundUpGaps, feed_carriers, legs_by_payment, round_up_gaps
 from .sighting_placement import SightingPlacement, sighting_placement
+from .space_attribution import plan_folds
 from .statement_membership import statement_membership
 from .statement_terms import StatementBalance, statement_balances
 from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
@@ -917,6 +918,7 @@ def effective_opening(
                         for space in members
                     },
                     selection=select_explained(walk),
+                    fold_refusals=lambda: _fold_refusals(store, families, ref, members, held),
                 ),
             )
     opening = derive_opening(
@@ -934,6 +936,25 @@ def effective_opening(
         unitemised=unitemised,
         meanings=gathered.meanings,
     )
+
+
+def _fold_refusals(
+    store: Store,
+    families: Families,
+    ref: str,
+    members: Mapping[str, Sequence[Transaction]],
+    held: Sequence[Transaction],
+) -> dict[str, str]:
+    """Each main-account row of the family the Space fold left counted -> why, in a sentence.
+
+    The fold is a pure function of the rows, their sightings, and the account map
+    (`space_attribution.plan_folds`), so the family's own rows answer for the
+    family: a copy's candidates are all in the main account or its Spaces.
+    """
+    rows = [*held, *(row for rows_of in members.values() for row in rows_of)]
+    sightings = store.sighting_sources({ref, *members})
+    plan = plan_folds(rows, sightings, families.feeds, families.parents)
+    return {refusal.entity_id: refusal.describe() for refusal in plan.refusals}
 
 
 def effective_openings(

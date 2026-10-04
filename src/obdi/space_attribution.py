@@ -86,6 +86,58 @@ class FoldReport:
     #: yet. Rows in accounts with no known Space are outside the pass and are
     #: not counted here.
     unmatched: int = 0
+    #: Which refusal each of the `ambiguous` rows was.
+    refusals: tuple[FoldRefusal, ...] = ()
+
+
+#: More Space rows lie near a group's copies than there are copies.
+MORE_SPACE_ROWS = "more-space-rows"
+#: More copies than Space rows, so one copy would have no Space row of its own.
+MORE_COPIES = "more-copies"
+#: As many of each, but one Space row is the only choice of two copies or more.
+NO_ONE_TO_ONE = "no-one-to-one"
+
+
+@dataclass(frozen=True)
+class FoldRefusal:
+    """One main-account copy the fold left counted, and which refusal it was.
+
+    Measured on the deployed store: "727 main-account row(s) folded into their
+    Space rows ... 1 more could not be paired one to one and stay counted in the
+    main account", with the copy and the Space's payment both counted and nothing
+    to say which of the ways of not pairing one to one it was.
+    """
+
+    entity_id: str
+    #: The main account the copy is held in, and its stored day.
+    account: str
+    day: date
+    reason: str
+    #: The group the copy belongs to: its copies, and the Space rows near them.
+    copies: int
+    space_rows: int
+
+    def describe(self) -> str:
+        """The refusal in a sentence, said once, for the page and the rebuild summary."""
+        if self.reason == MORE_SPACE_ROWS:
+            return (
+                f"{_rows(self.space_rows, 'Space row')} of its size lie near "
+                f"{_rows(self.copies, 'copy', 'copies')}, so which one it copies cannot be told"
+            )
+        if self.reason == MORE_COPIES:
+            return (
+                f"{_rows(self.copies, 'copy', 'copies')} lie near "
+                f"{_rows(self.space_rows, 'Space row')} of its size, so one copy would have "
+                "no Space row of its own"
+            )
+        return (
+            f"{_rows(self.copies, 'copy', 'copies')} and {_rows(self.space_rows, 'Space row')} "
+            "lie near one another, but some copies can only be paired with the same Space row"
+        )
+
+
+def _rows(count: int, noun: str, plural: str = "") -> str:
+    return f"{count} {noun if count == 1 else plural or noun + 's'}"
 
 
 @dataclass(frozen=True)
@@ -94,6 +146,8 @@ class FoldPlan:
     folds: Mapping[str, str]
     ambiguous: int
     unmatched: int
+    #: One entry per ambiguous copy, earliest first.
+    refusals: tuple[FoldRefusal, ...] = ()
 
 
 def _sighted(
@@ -145,6 +199,15 @@ def plan_folds(
     for row in rows:
         if row.status is not TransactionStatus.BOOKED:
             continue
+        # A copy of a payment is never a copy of a movement between the account
+        # and a Space: the sources that cannot see Spaces list no such movement.
+        # Counted as a candidate, a transfer leg of the payment's size stood
+        # beside the payment and made one copy two choices: "out row dated
+        # starling-csv 2022-10-28, truelayer 2022-10-28; seen by starling-csv,
+        # truelayer; booked; in the main account", counted again beside "out row
+        # dated starling 2022-10-28; seen by starling; booked; in the Space".
+        if row.is_internal_transfer:
+            continue
         witnessed = [
             (source, day)
             for source, day in _sighted(row, sightings)
@@ -154,6 +217,7 @@ def plan_folds(
             targets[(row.account_id, row.amount_minor)].append((row, witnessed))
 
     edges: dict[str, list[tuple[int, str]]] = {}
+    held: dict[str, Transaction] = {}
     unmatched = 0
     for row in rows:
         if row.status not in _FOLDABLE:
@@ -184,21 +248,41 @@ def plan_folds(
                     found.append((nearest, target.entity_id))
         if found:
             edges[row.entity_id] = sorted(found)
+            held[row.entity_id] = row
         else:
             unmatched += 1
 
-    folds, ambiguous = _settle_components(edges)
-    return FoldPlan(folds=folds, ambiguous=ambiguous, unmatched=unmatched)
+    folds, refused = _settle_components(edges)
+    refusals = tuple(
+        sorted(
+            (
+                FoldRefusal(
+                    entity_id=entity_id,
+                    account=held[entity_id].account_id,
+                    day=held[entity_id].value_date,
+                    reason=reason,
+                    copies=copies,
+                    space_rows=space_rows,
+                )
+                for entity_id, reason, copies, space_rows in refused
+            ),
+            key=lambda refusal: (refusal.day, refusal.account, refusal.entity_id),
+        )
+    )
+    return FoldPlan(
+        folds=folds, ambiguous=len(refusals), unmatched=unmatched, refusals=refusals
+    )
 
 
 def _settle_components(
     edges: Mapping[str, Sequence[tuple[int, str]]],
-) -> tuple[dict[str, str], int]:
+) -> tuple[dict[str, str], list[tuple[str, str, int, int]]]:
     """Fold each connected group of rows and Space rows that pairs off exactly.
 
     A group folds only when it holds as many main rows as Space rows and every
     main row can be given its own Space row. Anything else cannot say which
-    row is the copy of which, and is left alone.
+    row is the copy of which, and is left alone, with which of the three ways
+    it failed to pair: (entity id, reason, copies in the group, Space rows in it).
     """
     parent: dict[str, str] = {}
 
@@ -220,14 +304,21 @@ def _settle_components(
         spaces.update(target_id for _, target_id in options)
 
     folds: dict[str, str] = {}
-    ambiguous = 0
+    refused: list[tuple[str, str, int, int]] = []
     for mains, spaces in groups.values():
         paired = _pair_off(sorted(mains), edges) if len(mains) == len(spaces) else None
-        if paired is None:
-            ambiguous += len(mains)
-        else:
+        if paired is not None:
             folds.update(paired)
-    return folds, ambiguous
+            continue
+        reason = (
+            MORE_SPACE_ROWS
+            if len(spaces) > len(mains)
+            else MORE_COPIES
+            if len(mains) > len(spaces)
+            else NO_ONE_TO_ONE
+        )
+        refused.extend((row_id, reason, len(mains), len(spaces)) for row_id in mains)
+    return folds, refused
 
 
 def _pair_off(
@@ -445,11 +536,16 @@ def fold_space_copies(store: Store, account_map: AccountMap) -> FoldReport:
         released=len(before - after),
         ambiguous=plan.ambiguous,
         unmatched=plan.unmatched,
+        refusals=plan.refusals,
     )
 
 
 __all__ = [
+    "MORE_COPIES",
+    "MORE_SPACE_ROWS",
+    "NO_ONE_TO_ONE",
     "FoldPlan",
+    "FoldRefusal",
     "FoldReport",
     "ProviderSpaceClaim",
     "category_resolver",

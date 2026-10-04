@@ -54,7 +54,7 @@ from .providers import starling, truelayer
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
 from .same_money_fold import fold_same_money
-from .space_attribution import fold_space_copies
+from .space_attribution import FoldRefusal, fold_space_copies
 from .statement_sections import SectionBatches, replay_batches
 from .store import Store
 from .typed_transactions import transaction_from_entry, withdrawn_entry_ids
@@ -108,6 +108,8 @@ class RebuildReport:
     space_folded: int = 0
     space_ambiguous: int = 0
     space_unmatched: int = 0
+    #: Which refusal each of the `space_ambiguous` rows was.
+    space_refusals: tuple[FoldRefusal, ...] = ()
     #: Feed rows folded as the same money a statement itemises - see
     #: `same_money_fold`.
     same_money_folded: int = 0
@@ -172,6 +174,14 @@ class RebuildReport:
                 f"the Space. {self.space_ambiguous} more could not be paired "
                 f"one to one and stay counted in the main account."
             )
+            for refusal in self.space_refusals[:_REFUSALS_NAMED]:
+                lines.append(
+                    f"  not folded: the {refusal.account} row dated {refusal.day.isoformat()} - "
+                    f"{refusal.describe()}."
+                )
+            hidden = len(self.space_refusals) - _REFUSALS_NAMED
+            if hidden > 0:
+                lines.append(f"  and {hidden} more not folded.")
         if self.same_money_folded:
             lines.append(
                 f"  {self.same_money_folded} feed row(s) folded as the same money a "
@@ -233,6 +243,9 @@ _READS_NO_ROWS = _NON_TRANSACTIONAL | {MANUAL_WITHDRAWAL_SOURCE}
 #: ("source:provider_ref") and get resolved through the account map at
 #: replay time; anything else is already a canonical name.
 _SOURCES = ("starling", "truelayer")
+
+#: How many unfolded copies the summary names before it only counts the rest.
+_REFUSALS_NAMED = 5
 
 
 #: The provider-true identity of a feed fetch, recorded at landing time:
@@ -660,6 +673,7 @@ def rebuild_from_raw(
         report.space_folded = folds.folded
         report.space_ambiguous = folds.ambiguous
         report.space_unmatched = folds.unmatched
+        report.space_refusals = folds.refusals
     # After the fold, because a row folded into a Space row is history and its
     # flag is one of the questions this closes. It runs with or without an
     # account map: most of what it settles has nothing to do with Spaces.

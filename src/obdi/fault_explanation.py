@@ -143,6 +143,9 @@ class RowNote:
     #: coming in lies within `COUNTER_ITEM_DAYS`, paired with something else or not;
     #: None for any other row.
     arrival_near: Structural[bool | None] = None
+    #: For a main-account row the Space fold left counted: why it could not be
+    #: paired one to one with a Space row (`space_attribution.FoldRefusal`); "" for any other row.
+    fold_refusal: Structural[str] = ""
 
 
 @dataclass(frozen=True)
@@ -328,6 +331,7 @@ class RowAbout:
     carries: str
     counter_item: bool | None
     arrival_near: bool | None
+    fold_refusal: str = ""
 
 
 class _RowFacts:
@@ -344,12 +348,15 @@ class _RowFacts:
         members: Mapping[str, Sequence[Transaction]],
         by_entity: Mapping[str, Transaction],
         space_uids: Mapping[str, frozenset[str]],
+        fold_refusals: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
         self.store = store
         self.main = main
         self.members = members
         self.by_entity = by_entity
         self.space_uids = space_uids
+        self._refusals_of = fold_refusals
+        self._refusals: Mapping[str, str] | None = None
         self._pairs: dict[str, str] | None = None
         self._carriers: dict[str, Carrier] | None = None
         self._uids: dict[str, frozenset[str]] = {}
@@ -437,6 +444,12 @@ class _RowFacts:
             for row in rows
         )
 
+    def fold_refusal(self, row: Transaction) -> str:
+        """Why the Space fold left this row counted, or "" where it did not refuse it."""
+        if self._refusals is None:
+            self._refusals = self._refusals_of() if self._refusals_of is not None else {}
+        return self._refusals.get(row.entity_id, "")
+
     def about(self, row: Transaction) -> RowAbout:
         partner = self.pairs.get(row.entity_id)
         pairing = ""
@@ -453,6 +466,7 @@ class _RowFacts:
                 self.counter_item(row) if row.status is TransactionStatus.REVERSED else None
             ),
             arrival_near=self.arrival_near(row) if unpaired_leg else None,
+            fold_refusal=self.fold_refusal(row),
         )
 
 
@@ -505,6 +519,7 @@ class _Evidence:
                 about.carries,
                 about.counter_item,
                 about.arrival_near,
+                about.fold_refusal,
             )
 
         return build
@@ -873,11 +888,15 @@ def explain_walk(
     placement: SightingPlacement,
     space_uids: Mapping[str, frozenset[str]] | None = None,
     selection: Selection | None = None,
+    fold_refusals: Callable[[], Mapping[str, str]] | None = None,
 ) -> WalkExplanation:
     """Explain the changes `selection` names, and describe the exports.
 
     `space_uids` is each Space account's provider ids, which tie a round-up leg's
     named Space to the account whose rows are searched for its arrival.
+
+    `fold_refusals` is asked at most once, and only when a row is named: each
+    main-account row the Space fold left counted -> why, in a sentence.
 
     Without a `selection` the walk's changes are explained in order, none paired,
     up to `EXPLAINED_CHANGES`; the ledger always passes one
@@ -910,7 +929,7 @@ def explain_walk(
         store.sighting_sources(family),
         folds,
         by_entity,
-        _RowFacts(store, main, members, by_entity, space_uids or {}),
+        _RowFacts(store, main, members, by_entity, space_uids or {}, fold_refusals),
     )
     anchor_digests = {
         (day, balance): digest

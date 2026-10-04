@@ -474,6 +474,11 @@ def _row_note(note: Any) -> str:
             )
             if note.arrival_near is not None
             else "",
+            (
+                f"; not folded into a Space row: {_esc(note.fold_refusal)}"
+                if note.fold_refusal
+                else ""
+            ),
         )
     )
     return f"{_esc(note.direction)} row dated {dated}; seen by {seen}; {_esc(note.status)}{extras}"
