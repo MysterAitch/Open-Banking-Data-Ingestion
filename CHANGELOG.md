@@ -26,6 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.306] - 2026-10-04
+
+### Fixed
+- **The count of rows listed against rows held identifies a listed row by its
+  own id, where the source states one.** Two faults remained on the deployed
+  store, and the measurements of 0.4.303, read there, showed both were the
+  count and not the store. A card account's aggregator listed one item twice
+  in one listing, under one id, and the statement's balances either side were
+  met with one row: the same id twice in one artefact is now one listed row,
+  said once as information. A Space held two payments of one size on one day
+  that no single fetch ever listed together, because the feed's incremental
+  fetches list only what changed: for the bank's own feed, whose ids last an
+  item's life, listed rows are now the distinct ids across fetches. That is
+  not extended to the aggregator, whose id for one payment changes between
+  fetches.
+- **A re-issued item keeps a fault of its own**: a row whose id the feed
+  stopped listing when another id of the same size and recipient appeared,
+  which may be one payment held twice. Only a fetch that asks by a window of
+  time can show an item gone; an incremental fetch says nothing of an item
+  that did not change, so a re-issue seen only through those is not seen.
+
+Expected on the deployed store, and not known until read: the card's line
+becomes the information sentence, the Space's line goes, and neither holds
+its account's agreement back.
+
 ## [0.4.305] - 2026-10-04
 
 ### Fixed
