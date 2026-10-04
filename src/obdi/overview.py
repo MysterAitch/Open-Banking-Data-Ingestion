@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from . import scheduler_status
+from .agreement import held_sentence
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
@@ -98,6 +99,7 @@ _KIND_ORDER = (
     "review",
     "known-balances-disagree",
     "agreement-lapsed",
+    "statement-due",
     "spaces",
 )
 
@@ -191,8 +193,9 @@ _KINDS: dict[str, tuple[int, str]] = {
     "agreement-lapsed": (
         HOUSEKEEPING,
         "Open the account's ledger to see which known balance the rows stopped reproducing, "
-        "or whether the next statement is simply late.",
+        "or which movement fault holds it back.",
     ),
+    "statement-due": (HOUSEKEEPING, "Upload the next statement for each."),
 }
 
 #: The conditions `collect_alert_findings` evaluates, so that "N checks run"
@@ -533,15 +536,22 @@ def standing_items_from(
     closed_by_today: Callable[[str], bool],
     today: date,
 ) -> list[AttentionItem]:
-    """Housekeeping items from each account's standing: known balances that disagree with each
-    other, and an account that has had known balances but has not been in agreement for longer
-    than `STALE_AGREEMENT_DAYS`.
+    """Housekeeping items from each account's standing.
 
+    Known balances that disagree with each other are one item per account.
+    An account whose agreement is HELD BACK (an unmet known balance or a movement fault) and has
+    lagged more than `STALE_AGREEMENT_DAYS` is one item naming what holds it back.
+    An account in agreement through its last known balance is not lapsed: where it has rows after
+    that balance the next statement is simply not uploaded, and all such accounts share ONE item;
+    where it has none there is nothing to say.
+    The deployed Overview said "has known balances but is in agreement through D, more than 45
+    days ago" of all three, seven times, for accounts that were in agreement.
     An account whose balances disagree is named for that alone: it is not in agreement because of
     it, and saying both would give one cause two items. A closed account is left out, and so is
     one with no known balance, which is unverifiable and not lapsed.
     """
     items: list[AttentionItem] = []
+    awaiting: list[tuple[str, date]] = []
     for ref in sorted(standings):
         if closed_by_today(ref):
             continue
@@ -571,25 +581,53 @@ def standing_items_from(
         if own.known_from is None or own.known_to is None:
             continue
         since = own.through or own.known_from
-        if (today - since).days > STALE_AGREEMENT_DAYS:
-            said = (
-                f"in agreement through {own.through.isoformat()}"
-                if own.through
-                else f"never in agreement since its first known balance, {since.isoformat()}"
+        if (today - since).days <= STALE_AGREEMENT_DAYS:
+            continue
+        if own.held is None:
+            newest = standings[ref].newest_row
+            if newest is not None and newest > own.known_to:
+                awaiting.append((ref, since))
+            continue
+        said = (
+            f"in agreement through {own.through.isoformat()}"
+            if own.through
+            else f"never in agreement since its first known balance, {since.isoformat()}"
+        )
+        items.append(
+            AttentionItem(
+                kind="agreement-lapsed",
+                severity=HOUSEKEEPING,
+                message=(
+                    f"{label_of(ref)} has known balances but is {said}, more than "
+                    f"{STALE_AGREEMENT_DAYS} days ago. {held_sentence(own)}"
+                ),
+                remedy=_KINDS["agreement-lapsed"][1],
+                href=f"/ledger?ref={quote(ref, safe='')}",
+                accounts=(ref,),
             )
-            items.append(
-                AttentionItem(
-                    kind="agreement-lapsed",
-                    severity=HOUSEKEEPING,
-                    message=(
-                        f"{label_of(ref)} has known balances but is {said}, more than "
-                        f"{STALE_AGREEMENT_DAYS} days ago."
-                    ),
-                    remedy=_KINDS["agreement-lapsed"][1],
-                    href=f"/ledger?ref={quote(ref, safe='')}",
-                    accounts=(ref,),
-                )
+        )
+    if awaiting:
+        named = [f"{label_of(ref)} (since {since.isoformat()})" for ref, since in awaiting]
+        listed = (
+            " and ".join(named)
+            if len(named) <= 2
+            else f"{', '.join(named[:-1])}, and {named[-1]}"
+        )
+        subject = (
+            "1 account has rows after its last known balance"
+            if len(awaiting) == 1
+            else f"{len(awaiting)} accounts have rows after their last known balance"
+        )
+        items.append(
+            AttentionItem(
+                kind="statement-due",
+                severity=HOUSEKEEPING,
+                message=f"{subject} and none in the last {STALE_AGREEMENT_DAYS} days: {listed}.",
+                remedy=_KINDS["statement-due"][1],
+                href="/accounts",
+                accounts=tuple(ref for ref, _since in awaiting),
             )
+        )
     return items
 
 

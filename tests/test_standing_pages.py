@@ -63,13 +63,24 @@ class TestAccountsNotInAgreementForLong:
     def test_Items_WhenAgreementIsExactlyTheLimitOld_SaysNothing(self, store):
         assert items(store, D(2026, 5, 4)) == []
 
-    def test_Items_WhenAgreementIsOneDayOlderThanTheLimit_IsHousekeepingNamingTheDate(self, store):
+    def test_Items_WhenInAgreementThroughTheLastKnownBalanceWithNoRowAfterIt_SaysNothingHoweverOld(
+        self, store
+    ):
+        """The deployed Overview said this of a quiet account whose newest row was 489 days old.
+        The held-back and awaiting-statement items are in test_agreement_housekeeping."""
+        assert items(store, D(2026, 5, 5)) == []
+        assert items(store, D(2027, 7, 1)) == []
+
+    def test_Items_WhenAKnownBalanceIsUnmetAndOldEnough_IsHousekeepingNamingTheDate(self, store):
+        record_stated_anchor(store, ACCOUNT, "2026-03-25", "1.00")
+
         found = items(store, D(2026, 5, 5))
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
         assert found[0].severity == 3, "housekeeping"
         assert "in agreement through 2026-03-20" in found[0].message
         assert f"more than {STALE_AGREEMENT_DAYS} days ago" in found[0].message
+        assert "Held back by the known balance for 2026-03-25" in found[0].message
         assert found[0].accounts == (ACCOUNT,)
 
     def test_Items_WhenTheAccountIsClosed_SaysNothing(self, store):

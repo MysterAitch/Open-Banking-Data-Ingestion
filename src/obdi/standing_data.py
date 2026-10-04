@@ -146,6 +146,8 @@ class AccountStanding:
     standing: Standing
     protected_through: date | None
     protection_broken: bool
+    #: The date of the newest row that counts as money, or None where the account holds none.
+    newest_row: date | None = None
 
 
 def standings_for(
@@ -177,6 +179,7 @@ def standings_for(
             standing_of(opening, members, movement),
             None if record is None else date.fromisoformat(str(record["through"])),
             record is not None and not check_span(store, record).intact,
+            max((r.value_date for r in rows if not r.status.is_history), default=None),
         )
     return found
 
