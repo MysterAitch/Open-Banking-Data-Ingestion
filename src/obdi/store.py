@@ -41,7 +41,6 @@ from .accounts import (
 )
 from .errors import DataError
 from .models import RawArtefact, SourceTier, Transaction, TransactionStatus, Valuation
-from .stated_times import recorded_for
 from .namespaces import (
     API_SOURCES,
     MANUAL_SOURCE,
@@ -49,6 +48,7 @@ from .namespaces import (
     provenance_rank,
     stored_provenance_rank,
 )
+from .stated_times import recorded_for
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
 #: the ONLY thing that makes an open do work, so a store at this version

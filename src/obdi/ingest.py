@@ -413,6 +413,7 @@ def preview_reconcile(
                 store.transactions_for_account(transaction.account_id),
                 sightings=store.sighted_ids_for_account(transaction.account_id),
                 space_blind=_blind_in(space_blind, transaction.account_id),
+                settlements=store.settlement_days_for_account(transaction.account_id),
             )
             loaded.begin_batch()
             by_account[transaction.account_id] = loaded
@@ -450,7 +451,9 @@ def preview_reconcile(
                 transaction.source_id,
             )
             continue
-        superseded = supersede(held, transaction)
+        superseded = supersede(
+            held, transaction, settled_on=existing.settlement_days(held.entity_id)
+        )
         existing.replace(
             replace(
                 superseded,
@@ -553,6 +556,7 @@ def _reconcile_all(
                     store.transactions_for_account(transaction.account_id),
                     sightings=store.sighted_ids_for_account(transaction.account_id),
                     space_blind=_blind_in(space_blind, transaction.account_id),
+                    settlements=store.settlement_days_for_account(transaction.account_id),
                 )
             loaded.begin_batch(pending_snapshot=pending_snapshot)
             by_account[transaction.account_id] = loaded
@@ -663,7 +667,11 @@ def _reconcile(
         return result.existing, result.existing.entity_id
 
     if result.existing is not None:
-        merged = supersede(result.existing, transaction)
+        merged = supersede(
+            result.existing,
+            transaction,
+            settled_on=existing.settlement_days(result.existing.entity_id),
+        )
         merged = replace(
             merged,
             artefact_digest=digest,

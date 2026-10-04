@@ -29,12 +29,15 @@ credit. Unpaired, it inflates both spending and income.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterable, Iterator, Sequence
+import re
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TypeVar
 
+from .identity import content_key
 from .models import MatchTier, SourceTier, Transaction, TransactionStatus
+from .stated_times import settlement_days_of
 
 _K = TypeVar("_K")
 
@@ -196,6 +199,49 @@ def is_internal_leg_meeting_space_blind_source(
     )
 
 
+def _name_of(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.casefold())
+
+
+def same_payee(first: Transaction, second: Transaction) -> bool:
+    """Whether the two name the same payee, by their description or counterparty alone.
+
+    Spelling, case, and spacing are ignored; a name that is empty names nobody.
+    """
+    names = {n for n in (_name_of(first.description), _name_of(first.counterparty)) if n}
+    return any(
+        n in names for n in (_name_of(second.description), _name_of(second.counterparty)) if n
+    )
+
+
+def settles_together(
+    incoming: Transaction,
+    incoming_days: frozenset[date],
+    candidate: Transaction,
+    candidate_days: frozenset[date],
+) -> bool:
+    """Whether the date one of these carries is the settlement day the other states.
+
+    THE RULE. A bank's export dates a card payment by its SETTLEMENT day, so an export
+    row and a feed row of one size and direction are the same payment when the export's
+    day is the day the feed states it settled, however far that is from the day it was made
+    (`stated_times.settlement_days` says which days a settlement can be listed under).
+    Measured on the deployed store: two card payments of 2021-12-06 settled, and were
+    listed by the export, on 2022-04-21; the export's rows lay outside the matcher's
+    window of the payments, found no partner, and the store counted both payments twice
+    for want of this.
+    Where two rows of one size both lie inside an export row's window, the one whose
+    settlement day is the export's day is its partner, and the window decides only when
+    no settlement day does (`plan_partners` and `resolve` both read this).
+    A wider window was rejected: it would pair unrelated payments of one size for every
+    payment it rescued.
+    Beyond the window the two must also name the same payee (`same_payee`), because the
+    day and the size alone are then the only evidence; within it the matcher has never
+    asked that of two sources, and does not here.
+    """
+    return incoming.value_date in candidate_days or candidate.value_date in incoming_days
+
+
 def belongs_to_established_series(
     incoming: Transaction, candidates: Sequence[Transaction]
 ) -> bool:
@@ -306,7 +352,13 @@ class CandidateIndex:
         transactions: Iterable[Transaction] = (),
         sightings: Iterable[tuple[str, str, str, bool, bool]] = (),
         space_blind: Callable[[str], bool] | None = None,
+        settlements: Mapping[str, Iterable[date]] | None = None,
     ) -> None:
+        # The days each row's sightings state it settled under, which only grow:
+        # a row's stored record is its last writer's, and the sightings say the rest.
+        self._settle: dict[str, set[date]] = {
+            entity_id: set(days) for entity_id, days in (settlements or {}).items()
+        }
         # Whether a source cannot see this account's Spaces, which only the
         # account map knows. None means nothing is known, so the rule that
         # keeps internal legs apart (`is_internal_leg_meeting_space_blind_source`)
@@ -454,7 +506,14 @@ class CandidateIndex:
         held = self._claimed.get(entity_id, {}).get(source)
         return held is not None and held != source_id
 
+    def settlement_days(self, entity_id: str) -> frozenset[date]:
+        """The days any sighting of this row states it settled under."""
+        return frozenset(self._settle.get(entity_id, ()))
+
     def _file(self, transaction: Transaction) -> None:
+        own = settlement_days_of(transaction)
+        if own:
+            self._settle.setdefault(transaction.entity_id, set()).update(own)
         self.note_sighting(
             transaction.entity_id,
             transaction.account_id,
@@ -577,6 +636,7 @@ class _Judgement:
         self.incoming = incoming
         self.index = index
         self.account = incoming.account_id
+        self.incoming_days = settlement_days_of(incoming)
 
     # Provider ids are only unique within a provider's own namespace, so tier 1
     # matches on (source, source_id) rather than the id alone. Two sources
@@ -640,15 +700,26 @@ class _Judgement:
     def same_amount(self) -> list[Transaction]:
         return self.index.by_amount(self.account, self.incoming.amount_minor)
 
+    def settled_together(self, candidate: Transaction) -> bool:
+        """Whether the day one carries is the settlement day the other states."""
+        return settles_together(
+            self.incoming,
+            self.incoming_days,
+            candidate,
+            self.index.settlement_days(candidate.entity_id),
+        )
+
+    def reaches(self, candidate: Transaction) -> bool:
+        """Whether the candidate lies inside the window, or beyond it by settlement and payee."""
+        if abs(candidate.value_date - self.incoming.value_date) <= self.window_for(candidate):
+            return True
+        return self.settled_together(candidate) and same_payee(self.incoming, candidate)
+
     def similar(self) -> list[Transaction]:
         # A pair kept apart by kind is certain, not a near-miss, so it is never
         # put to the reviewer as a puzzle.
-        incoming = self.incoming
         return [
-            t
-            for t in self.same_amount()
-            if abs(t.value_date - incoming.value_date) <= self.window_for(t)
-            and not self.apart_by_kind(t)
+            t for t in self.same_amount() if self.reaches(t) and not self.apart_by_kind(t)
         ]
 
     def near(self, similar: Sequence[Transaction]) -> list[Transaction]:
@@ -718,7 +789,7 @@ def resolve(
     for candidate in near:
         if candidate.entity_id == partner:
             return MatchResult(MatchTier.FUZZY, candidate)
-    near.sort(key=lambda t: _distance_days(incoming, t))
+    near.sort(key=lambda t: (not judge.settled_together(t), _distance_days(incoming, t)))
     return MatchResult(MatchTier.FUZZY, near[0])
 
 
@@ -791,19 +862,31 @@ def plan_partners(batch: Sequence[Transaction], index: CandidateIndex) -> Partne
     for group in _groups_sharing_candidates(options):
         if len(group) < 2:
             continue
-        partner.update(_assign_group(batch, options, group))
+        partner.update(_assign_group(batch, options, group, index))
     return PartnerPlan(partner, frozenset(partner.values()))
 
 
 def _assign_group(
-    batch: Sequence[Transaction], options: dict[int, list[Transaction]], group: list[int]
+    batch: Sequence[Transaction],
+    options: dict[int, list[Transaction]],
+    group: list[int],
+    index: CandidateIndex,
 ) -> dict[int, str]:
     reach = {position: {t.entity_id for t in options[position]} for position in group}
     rows = {t.entity_id: t for position in group for t in options[position]}
+    settled = {
+        position: {
+            t.entity_id
+            for t in options[position]
+            if _Judgement(batch[position], index).settled_together(t)
+        }
+        for position in group
+    }
     return assign_as_a_set(
         [(position, batch[position].value_date) for position in group],
         [(entity_id, row.value_date) for entity_id, row in rows.items()],
         lambda position, entity_id: entity_id in reach[position],
+        preferred=lambda position, entity_id: entity_id in settled[position],
     )
 
 
@@ -832,12 +915,15 @@ def assign_as_a_set(
     wanting: Sequence[tuple[int, date]],
     offered: Sequence[tuple[str, date]],
     allowed: Callable[[int, str], bool],
+    preferred: Callable[[int, str], bool] | None = None,
 ) -> dict[int, str]:
     """Pair records with rows by the rule `plan_partners` states.
 
     `wanting` is each record's key and date; `offered` each row's key and date;
     `allowed` says whether a record could take a row at all.
-    Same-date pairs come first, taken in date order and then in the order given.
+    `preferred` says whether a record and a row are paired by settlement
+    (`settles_together`), and those pairs come before every other, in the same order.
+    Same-date pairs come next, taken in date order and then in the order given.
     The rest are solved exactly for the fewest records left unpaired, then the
     least total distance, when no more than `ASSIGNMENT_SET_LIMIT` records and
     rows remain in a connected group; a larger group is left unpaired here.
@@ -847,7 +933,20 @@ def assign_as_a_set(
     result: dict[int, str] = {}
     used: set[int] = set()
 
+    if preferred is not None:
+        for _, (key, _day) in records:
+            for row_index, (entity_id, _row_day) in rows:
+                if row_index in used:
+                    continue
+                if not (allowed(key, entity_id) and preferred(key, entity_id)):
+                    continue
+                used.add(row_index)
+                result[key] = entity_id
+                break
+
     for _, (key, day) in records:
+        if key in result:
+            continue
         for row_index, (entity_id, row_day) in rows:
             if row_index in used or row_day != day or not allowed(key, entity_id):
                 continue
@@ -930,7 +1029,12 @@ def _solve_exactly(
     return result
 
 
-def supersede(previous: Transaction, observation: Transaction) -> Transaction:
+def supersede(
+    previous: Transaction,
+    observation: Transaction,
+    *,
+    settled_on: frozenset[date] = frozenset(),
+) -> Transaction:
     """Apply a later sighting of a transaction already held.
 
     A pending transaction that settles often arrives with a NEW provider id and
@@ -938,7 +1042,30 @@ def supersede(previous: Transaction, observation: Transaction) -> Transaction:
     identity, the newer observation supplies the current facts, and both raw
     payloads remain in the raw layer. Modelling it this way is what makes a
     rebuild from raw reproducible.
+
+    `settled_on` is the days the held row's sightings state it settled under.
+    A sighting dated on one of them is the bank's export listing the payment by
+    its settlement (`settles_together`), and it does not move the row off the day
+    the payment was made: that day is the row's date for the ledger, the push to
+    Actual, and its identity, and the export's own day is kept as the sighting's
+    (`sighting_placement`).
     """
+    merged = _supersede(previous, observation)
+    if observation.value_date in settled_on and not settlement_days_of(observation):
+        merged = replace(
+            merged,
+            value_date=previous.value_date,
+            booking_date=previous.booking_date,
+            content_key=content_key(
+                amount_minor=merged.amount_minor,
+                value_date=previous.value_date,
+                description=merged.description,
+            ),
+        )
+    return merged
+
+
+def _supersede(previous: Transaction, observation: Transaction) -> Transaction:
     return replace(
         observation,
         entity_id=previous.entity_id,

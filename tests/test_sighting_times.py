@@ -119,7 +119,9 @@ class TestWhoseMomentsAreKept:
         land_feed(store, [], origin=SPACE_FEED_ORIGIN)
         rebuild_from_raw(store, account_map=MAP)
 
-        (leg,) = [t for t in store.transactions_for_account(MAIN) if t.source_id.endswith(":round-up")]
+        (leg,) = [
+            t for t in store.transactions_for_account(MAIN) if t.source_id.endswith(":round-up")
+        ]
         assert store.stated_times_for(leg.entity_id) == []
         assert len(moments(store, -4210)) == len(STATED)
 
@@ -148,10 +150,20 @@ class TestWhoseMomentsAreKept:
 class TestReadingMoments:
     def test_StatedTimes_WhenValuesAreNotMoments_AreNotRead(self):
         found = stated_times(
-            {"a": "hello", "b": 5, "c": None, "d": "2026-09-14", "e": "2026-09-14T10:00:00", "f": "2026-9-4"}
+            {
+                "a": "hello",
+                "b": 5,
+                "c": None,
+                "d": "2026-09-14",
+                "e": "2026-09-14T10:00:00",
+                "f": "2026-9-4",
+            }
         )
 
-        assert [(t.field, t.kind, t.zone) for t in found] == [("d", "date", ""), ("e", "instant", "")]
+        assert [(t.field, t.kind, t.zone) for t in found] == [
+            ("d", "date", ""),
+            ("e", "instant", ""),
+        ]
 
     def test_SettlementDays_WhenSettledAtMidnightInSummer_AreBothDaysInEitherZone(self):
         days = settlement_days({"settlementTime": "2026-07-01T23:30:00Z"})
@@ -176,7 +188,9 @@ class TestReadingMoments:
     def test_LondonDate_AtTheClockChanges_FollowsTheLastSundays(self, instant, local):
         from datetime import datetime
 
-        assert london_date(datetime.fromisoformat(instant.replace("Z", "+00:00"))).isoformat() == local
+        stated = datetime.fromisoformat(instant.replace("Z", "+00:00"))
+
+        assert london_date(stated).isoformat() == local
 
     def test_SettlementDays_WhenNoneStated_AreEmpty(self):
         assert settlement_days({"transactionTime": "2026-09-14T10:00:00Z"}) == frozenset()

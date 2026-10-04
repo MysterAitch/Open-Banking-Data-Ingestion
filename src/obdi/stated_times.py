@@ -110,8 +110,9 @@ def london_date(instant: datetime) -> date:
     not installed everywhere this runs.
     """
     utc = instant.astimezone(UTC)
-    start = datetime.combine(_last_sunday(utc.year, 3), datetime.min.time(), UTC) + timedelta(hours=1)
-    end = datetime.combine(_last_sunday(utc.year, 10), datetime.min.time(), UTC) + timedelta(hours=1)
+    changeover = timedelta(hours=1)
+    start = datetime.combine(_last_sunday(utc.year, 3), datetime.min.time(), UTC) + changeover
+    end = datetime.combine(_last_sunday(utc.year, 10), datetime.min.time(), UTC) + changeover
     summer = start <= utc < end
     return (utc + timedelta(hours=1 if summer else 0)).date()
 
@@ -128,6 +129,14 @@ def days_of(stated: StatedTime) -> frozenset[date]:
             value = value.replace(tzinfo=UTC)
         return frozenset({value.astimezone(UTC).date(), london_date(value)})
     return frozenset({value}) if kind == DATE else frozenset()
+
+
+def settlement_days_of(transaction: Transaction) -> frozenset[date]:
+    """The days a sighting's own settlement could be listed under, empty for a source
+    that is not recorded and for a derived leg (`recorded_for` says why)."""
+    if not recorded_for(transaction):
+        return frozenset()
+    return settlement_days(transaction.raw)
 
 
 def settlement_days(raw: JsonObject | Mapping[str, object]) -> frozenset[date]:
