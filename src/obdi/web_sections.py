@@ -383,6 +383,7 @@ def render_import(
     *,
     display_labels: Callable[[], dict[str, str]] | None = None,
     declared_accounts: Callable[[], list[AccountRecord]] | None = None,
+    held_accounts: Callable[[], list[str]] | None = None,
 ) -> bytes:
     import contextlib
 
@@ -395,9 +396,15 @@ def render_import(
     if display_labels is not None:
         with contextlib.suppress(Exception):
             labels = display_labels()
+    declared: list[AccountRecord] = []
+    held: list[str] = []
     if declared_accounts is not None:
         with contextlib.suppress(Exception):
-            labels = picker_labels(labels, declared_accounts())
+            declared = declared_accounts()
+    if held_accounts is not None:
+        with contextlib.suppress(Exception):
+            held = held_accounts()
+    labels = picker_labels(labels, declared, held)
     lede = _lede(
         "Two ways to bring history in from outside a bank connection: a bank's CSV "
         "or QIF export, or a PDF statement."
@@ -523,6 +530,7 @@ class SectionPages:
         page = render_import(
             display_labels=timer.wrap("display_labels", config.display_labels),
             declared_accounts=timer.wrap("declared_accounts", config.declared_accounts),
+            held_accounts=timer.wrap("held_accounts", config.held_accounts),
         )
         timer.report("/import")
         self._respond(200, page)

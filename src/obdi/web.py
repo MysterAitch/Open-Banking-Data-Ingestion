@@ -82,7 +82,6 @@ from .web_accounts import (
     archive_controls,
     archive_label,
     doubt_token,
-    picker_labels,
     submit_button,
 )
 from .web_balance_chart import BalanceChartPages
@@ -785,6 +784,9 @@ class WebConfig:
     #: Wiring them is also what arms the typed-name guard: without a place
     #: to declare an account there is nothing to confirm against.
     declared_accounts: Callable[[], list[AccountRecord]] | None = None
+    #: The references of the accounts that hold rows, declared or not, so a picker can offer an
+    #: account that was imported into but never declared.
+    held_accounts: Callable[[], list[str]] | None = None
     declare_account: Callable[[AccountRecord], AccountRecord] | None = None
     #: Every account obdi holds, declared or not, with the parent changes the
     #: provider's structure would make. Reads only; names, kinds, and counts.
@@ -4886,7 +4888,7 @@ class ConnectionHandler(
         # Declared accounts included: an account with no feed is invisible
         # to every provider-derived label, and filing a document into one
         # is the reason it was declared.
-        refile_labels = picker_labels(refile_labels, self.declared_accounts())
+        refile_labels = self.picker_account_labels(refile_labels)
         # Names beyond the first, which the line above already shows. The
         # same document arrives under a folder path and bare, and a
         # rolling fetch re-lands identical bytes under each window it
@@ -5700,7 +5702,7 @@ class ConnectionHandler(
         if hook is not None:
             with contextlib.suppress(Exception):
                 labels = hook()
-        return picker_labels(labels, self.declared_accounts())
+        return self.picker_account_labels(labels)
 
     def _statements_page(self) -> None:
         """Every kept statement, grouped by what it is waiting for.

@@ -3894,6 +3894,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return store.declared_accounts()
 
+    def held_accounts() -> list[str]:
+        with Store(db_path) as store:
+            return [
+                str(row[0])
+                for row in store.connection.execute(
+                    "SELECT DISTINCT account_id FROM transactions ORDER BY account_id"
+                )
+            ]
+
     def _labels_or_none() -> dict[str, str]:
         try:
             return display_labels()
@@ -4050,6 +4059,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         starling_status=starling_status,
         display_labels=display_labels,
         declared_accounts=declared_accounts,
+        held_accounts=held_accounts,
         declare_account=declare_account,
         known_accounts=known_accounts_data,
         declare_known=declare_known,

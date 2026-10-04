@@ -296,7 +296,9 @@ class TestDeclaringAnAccount:
         # precisely so a statement can be filed into it.
         lab.post("/save-account", {"ref": "piggy-bank", "label": "Piggy bank"})
 
-        assert '<option value="piggy-bank">Piggy bank</option>' in lab.get("/import").text
+        assert (
+            '<option value="piggy-bank">Piggy bank (declared)</option>' in lab.get("/import").text
+        )
 
     def test_DeclaringAnAccount_MakesItSelectableOnTheStatementAssignForm(self, lab):
         lab.post("/save-account", {"ref": "piggy-bank", "label": "Piggy bank"})
@@ -402,8 +404,9 @@ class TestEditingAnAccount:
 
         assert 'name="ref" value="halifax-clarity"' in page
         assert 'name="label" value="Halifax Clarity"' in page
-        assert 'name="kind" value="credit-card"' in page
-        assert 'name="parent" value="halifax-current"' in page
+        # Kind and parent are choices now, so the saved ones come back selected.
+        assert '<option value="credit-card" selected>' in page
+        assert '<option value="halifax-current" selected>' in page
         assert 'name="opened" value="2025-07-01"' in page
         assert 'name="closed" value="2026-03-31"' in page
 

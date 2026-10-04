@@ -72,21 +72,43 @@ NEW_ACCOUNT_FIELD = "confirm_new_account"
 #: worse than no suggestion, because it invites a wrong tap.
 NEAR_ENOUGH = 0.8
 
-#: Offered, never enforced. The kind is free text in the record and in the
-#: store, and a closed list here would silently drop a kind that arrived
-#: from a registry file or an older release the moment somebody edited an
-#: unrelated field.
-KIND_SUGGESTIONS = (
-    "current-account",
-    "savings",
-    "credit-card",
-    "mortgage",
-    "loan",
-    "cash",
-    "investment",
-    "pension",
-    BALANCE_ONLY_KIND,
+#: The kinds the code treats as something, each with one line on what it does. Offered as a
+#: choice, never enforced: the kind is free text in the record and in the store, and a closed
+#: list here would silently drop a kind that arrived from a registry file or an older release
+#: the moment somebody edited an unrelated field, so "other" carries the free text and an
+#: existing kind this list does not know is kept as it is.
+#:
+#: Only `balance-only` (`accounts.is_balance_only`) and `starling-space` (`spaces.SPACE_KIND`)
+#: are compared anywhere; `credit-card` is the kind `known_accounts` suggests for an account fed
+#: by card statements. The rest are names for the person, and say so.
+ACCOUNT_KINDS: tuple[tuple[str, str], ...] = (
+    ("current-account", "An everyday account. The word is for you; it changes nothing."),
+    ("savings", "A savings account. The word is for you; it changes nothing."),
+    (
+        "credit-card",
+        "A card. obdi suggests this for an account fed by card statements; otherwise the word "
+        "is for you.",
+    ),
+    ("mortgage", "Money owed on a home. The word is for you; state its balance as a minus figure."),
+    ("loan", "Money owed. The word is for you; state its balance as a minus figure."),
+    ("cash", "Cash held. The word is for you; it changes nothing."),
+    ("investment", "An investment account. The word is for you; it changes nothing."),
+    ("pension", "A pension. The word is for you; it changes nothing."),
+    (
+        BALANCE_ONLY_KIND,
+        "Tracked by the balances you state alone, such as a mortgage at another bank: the change "
+        "between two stated balances is counted as it happened instead of being reported as a "
+        "failed check.",
+    ),
+    (
+        "starling-space",
+        "A Starling Space. obdi sets this itself when it recovers one from the bank's feed; it "
+        "decides how a closed Space is read.",
+    ),
 )
+
+#: What the kind select sends when the kind is one the list above does not hold.
+OTHER_KIND = "other"
 
 #: Sized for a thumb and consistent with every other action on the site.
 #: A bare submit renders as a small grey rectangle directly above a
@@ -151,18 +173,30 @@ def nearest_name(typed: str, candidates: Iterable[str]) -> str | None:
 
 
 def picker_labels(
-    base: dict[str, str], declared: Iterable[AccountRecord]
+    base: dict[str, str], declared: Iterable[AccountRecord], held: Iterable[str] = ()
 ) -> dict[str, str]:
-    """Every account a picker may offer, declared ones included.
+    """Every account a picker may offer: declared ones, and ones that hold rows.
 
     A registry nothing can select from is useless: an account is declared
     precisely so a document can be filed into it, and until this merge the
     picker only knew accounts some provider had already mentioned. The
     declared name wins where both exist - a person named the account.
+
+    An account that holds rows but was never declared is just as real a destination, and
+    leaving it out sent a person to the free-text box, where a name that matched nothing was
+    answered with a suggestion of something unrelated. Each option says which it is, so the
+    two can be told apart.
     """
     merged = dict(base)
+    held_refs = set(held)
+    declared_refs: set[str] = set()
     for record in declared:
-        merged[str(record.ref)] = record.label or str(record.ref)
+        ref = str(record.ref)
+        declared_refs.add(ref)
+        mark = "declared, holds rows" if ref in held_refs else "declared"
+        merged[ref] = f"{record.label or ref} ({mark})"
+    for ref in held_refs - declared_refs:
+        merged[ref] = f"{merged.get(ref) or ref} (holds rows, not declared)"
     return merged
 
 
@@ -230,29 +264,56 @@ def account_form(record: AccountRecord | None, declared: list[AccountRecord]) ->
             "Display name",
             note="what you call it; rename it as freely as you like",
         )
-        + _text_field(
-            "kind",
-            record.kind if record else "",
-            "Kind",
-            note=(
-                f"type {BALANCE_ONLY_KIND} for an account tracked by the balances you "
-                "state for it alone, such as a mortgage at another bank"
-            ),
-            suggestions="account-kinds",
-        )
-        + _text_field(
-            "parent",
-            str(record.parent) if record and record.parent else "",
-            "Parent account",
-            note="optional - the account this one sits under",
-            suggestions="declared-accounts",
-        )
+        + _kind_field(record.kind if record else "")
+        + _parent_field(record.parent if record else None, parents)
         + _date_field("opened", record.opened if record else None, "Opened")
         + _date_field("closed", record.closed if record else None, "Closed")
         + submit_button("Save changes" if editing else "Declare account")
         + "</form>"
-        + _datalist("account-kinds", KIND_SUGGESTIONS)
-        + _datalist("declared-accounts", parents)
+    )
+
+
+def _kind_field(kind: str) -> str:
+    """Kind as a choice of the kinds the code knows, each said in a line, and "other"."""
+    known = {name for name, _ in ACCOUNT_KINDS}
+    is_other = bool(kind) and kind not in known
+    options = '<option value="">(none)</option>' + "".join(
+        f'<option value="{html.escape(name)}"{" selected" if name == kind else ""}>'
+        f"{html.escape(name)}</option>"
+        for name, _ in ACCOUNT_KINDS
+    )
+    options += f'<option value="{OTHER_KIND}"{" selected" if is_other else ""}>other</option>'
+    lines = "".join(
+        f"<li><strong>{html.escape(name)}</strong> - {html.escape(line)}</li>"
+        for name, line in ACCOUNT_KINDS
+    )
+    return (
+        "<p><label>Kind<br>"
+        f'<select name="kind" style="width:100%;padding:.6rem">{options}</select></label></p>'
+        f'<p><label>If other, the kind in your own words<br>'
+        f'<input name="kind_other" value="{html.escape(kind if is_other else "")}"></label></p>'
+        f'<ul class="muted">{lines}</ul>'
+    )
+
+
+def _parent_field(parent: AccountRef | None, candidates: list[str]) -> str:
+    """Parent as a choice among the declared accounts."""
+    chosen = str(parent) if parent else ""
+    names = list(candidates)
+    if chosen and chosen not in names:
+        # A parent that is no longer declared stays on the form, so saving does not drop it
+        # without the person having said so.
+        names.append(chosen)
+    options = '<option value="">(none)</option>' + "".join(
+        f'<option value="{html.escape(name)}"{" selected" if name == chosen else ""}>'
+        f"{html.escape(name)}{'' if name in candidates else ' (not declared)'}</option>"
+        for name in names
+    )
+    return (
+        "<p><label>Parent account<br>"
+        '<span class="muted">optional - the account this one sits under</span><br>'
+        f'<select name="parent" style="width:100%;padding:.6rem">{options}</select>'
+        "</label></p>"
     )
 
 
@@ -642,9 +703,12 @@ def account_from_form(fields: dict[str, str]) -> AccountRecord:
     problem = closing_problem(opened, closed)
     if problem is not None:
         raise ValueError(problem)
+    kind = fields.get("kind", "").strip()
+    if kind == OTHER_KIND:
+        kind = fields.get("kind_other", "").strip()
     return AccountRecord(
         ref=AccountRef(ref),
-        kind=fields.get("kind", "").strip(),
+        kind=kind,
         label=fields.get("label", "").strip(),
         parent=AccountRef(parent) if parent else None,
         opened=opened,
@@ -685,28 +749,32 @@ def unknown_account_page(
     if typed.nearest is not None:
         near = html.escape(typed.nearest)
         nearest_form = (
-            f"<p>The closest account already declared is <strong>{near}</strong>. "
-            "If that is the one meant, take it - nothing new is created.</p>"
+            f"<p>Or did you mean <strong>{near}</strong>, which already exists? It is "
+            f"suggested only because its spelling is close to what you typed, "
+            f"<strong>{escaped}</strong>; nothing else links the two. If it is the one meant, "
+            "take it - nothing new is created.</p>"
             f'<form method="post" action="{html.escape(action)}">{hidden}'
             f'<input type="hidden" name="account" value="{near}">'
-            + submit_button(f"Use {typed.nearest}")
+            + submit_button(f"Use {typed.nearest} instead", secondary=True)
             + "</form>"
         )
+    # What was typed leads. A guess is only ever the second thing offered: the first version
+    # put "Use <the closest name>" first, and a card statement was offered to an account
+    # nothing connected it with.
     return render_page(
         "No such account",
-        f"<p>Nothing is declared as <strong>{escaped}</strong>, and creating "
-        "an account is a separate, deliberate act: one typo would otherwise "
-        "put a second account beside the real one, with this filed into "
-        "it.</p>"
-        + nearest_form
-        + f"<p>Otherwise declare <strong>{escaped}</strong> now and carry on. "
-        "The details - kind, parent, dates - can be filled in afterwards on "
-        "its own page.</p>"
+        f"<p>Nothing is declared as <strong>{escaped}</strong>, and no account holds rows under "
+        "that name. Creating an account is a separate, deliberate act: one typo would "
+        "otherwise put a second account beside the real one, with this filed into it.</p>"
+        f"<p>To go on with <strong>{escaped}</strong>, declare it now. The button below does "
+        f"this: {html.escape(proceed_label[:1].lower() + proceed_label[1:])}. The details - "
+        "kind, parent, dates - can be filled in afterwards on its own page.</p>"
         f'<form method="post" action="{html.escape(action)}">{hidden}'
         f'<input type="hidden" name="account_other" value="{escaped}">'
         f'<input type="hidden" name="{NEW_ACCOUNT_FIELD}" value="{escaped}">'
-        + submit_button(proceed_label)
+        + submit_button(f"Declare {typed.ref} and continue")
         + "</form>"
+        + nearest_form
         + BACK_LINKS,
     )
 
@@ -935,6 +1003,21 @@ class AccountPages(AnswerPages):
     def declared_accounts(self) -> list[AccountRecord]:
         hook = self.bound_config.declared_accounts
         return [] if hook is None else hook()
+
+    def held_accounts(self) -> list[str]:
+        """The accounts that hold rows, for the pickers. A hook that fails offers none: the
+        pickers are a convenience, and the declared accounts still show."""
+        hook = self.bound_config.held_accounts
+        if hook is None:
+            return []
+        try:
+            return list(hook())
+        except Exception:
+            return []
+
+    def picker_account_labels(self, base: dict[str, str]) -> dict[str, str]:
+        """`base` with every declared account and every account that holds rows, each marked."""
+        return picker_labels(base, self.declared_accounts(), self.held_accounts())
 
     def _accounts_page(self) -> None:
         hook = self.bound_config.known_accounts
@@ -1243,12 +1326,14 @@ class AccountPages(AnswerPages):
         A name counts as KNOWN more widely than the registry: a
         provider-fed reference is a real destination whether or not
         anybody declared it, and questioning one would refuse the very
-        accounts the pulls created. Only DECLARED names are candidates for
-        "did you mean", because they are the ones a person chose and can
-        recognise.
+        accounts the pulls created, and so is an account that holds rows.
+        Declared names and names of accounts holding rows are the candidates
+        for "did you mean", because they are the ones a person chose or
+        imported into and can recognise.
         """
         declared = sorted(str(record.ref) for record in self.declared_accounts())
-        known = set(declared)
+        held = self.held_accounts()
+        known = set(declared) | set(held)
         labels = self.bound_config.display_labels
         if labels is not None:
             # A naming hook is a convenience, never a gate: one that fails
@@ -1258,7 +1343,7 @@ class AccountPages(AnswerPages):
         return TypedAccount(
             ref=typed,
             known=typed in known,
-            nearest=nearest_name(typed, declared),
+            nearest=nearest_name(typed, sorted(set(declared) | set(held))),
         )
 
     def doubt_acknowledged(
