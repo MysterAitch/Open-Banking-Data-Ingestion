@@ -1025,7 +1025,7 @@ class TestANewAccountAndADoubtTogether:
             first = _post(base, "/statement-assign", {"artefact": "4", "account_other": "acct-new"})
             action, fields = _form_with(first.text, ANYWAY)
             second = _post(base, action, fields)
-            action, fields = _form_with(second.text, "Declare it")
+            action, fields = _form_with(second.text, "and continue")
             third = _post(base, action, fields)
         finally:
             stop()
@@ -1081,7 +1081,7 @@ class TestANewAccountAndADoubtTogether:
         base, stop = _stub_server(tmp_path, calls, doubt=False)
         try:
             first = _post(base, "/statement-assign", {"artefact": "4", "account_other": "acct-new"})
-            action, fields = _form_with(first.text, "Declare it")
+            action, fields = _form_with(first.text, "and continue")
             _post(base, action, fields)
         finally:
             stop()

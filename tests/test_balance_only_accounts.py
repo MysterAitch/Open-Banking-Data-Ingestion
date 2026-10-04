@@ -416,8 +416,9 @@ class TestThePages:
 
         assert "For an account obdi has no feed for" in page
         assert f"<strong>{BALANCE_ONLY_KIND}</strong>" in page
-        assert f'<option value="{BALANCE_ONLY_KIND}">' in edit
-        assert "an account tracked by the balances you state for it alone" in edit
+        # Kind is a choice now, each kind said in a line; the mortgage already has this one.
+        assert f'<option value="{BALANCE_ONLY_KIND}" selected>' in edit
+        assert "Tracked by the balances you state alone" in edit
 
     def test_Position_ForAFeedlessAccountWithNoBalance_PointsToBothWaysToCountIt(self, lab):
         page = lab.get("/position").text
