@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.300] - 2026-10-04
+
+The owner asked whether what the sources state could replace guesswork in
+matching: "fallback to heuristics if the dates aren't present". Measured on
+the deployed store with 0.4.299, across the main account: all 4,411
+aggregator items carry the id of a feed item and agree with it on size and
+direction, all 4,821 export rows have a feed item settled on their date, and
+for 44 aggregator items the store had joined the sighting to a different row
+of the same size than the id names.
+
+### Changed
+- **An aggregator item that carries a feed item's id is that payment**, with
+  no date, description, or window consulted. The same id attributes the
+  aggregator's copy of a Space payment to the Space's own row before the
+  amount-and-date rule is tried. The settlement day is the second tier and
+  the existing rules the third, unchanged, for whatever neither reaches.
+- **A guess that an id contradicts is not made.** An id naming an item of
+  another size merges nothing and raises a review flag.
+
+### Added
+- **Every sighting records how it joined its row**: by id, by settlement day,
+  by window and description, by its own source's id, or by hand. The ledger
+  shows it per row, and per account counts the rows by their weakest join,
+  with the guessed ones a click away.
+- **Every date and time every source states is kept and shown per row**: the
+  aggregator's at any depth, each date column of an export, and each date a
+  statement line states. Two statement parsers read a posting date and
+  discarded it; it is now kept.
+
+It closes the arrival order 0.4.297 left open, where the aggregator states
+ids. Still open: the feed arriving after both the aggregator and the export
+leaves two rows, because joining two stored rows is not built.
+
+Not proven: the real store under the id tier. Expected there: the 44 pairs
+re-joined, and no change to rows listed against rows held or to any balance.
+
 ## [0.4.299] - 2026-10-04
 
 ### Added
