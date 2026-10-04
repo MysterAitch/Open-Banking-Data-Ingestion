@@ -26,7 +26,44 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.296] - 2026-10-04
+
+### Fixed
+- **A payment the export lists on its settlement day is no longer counted
+  twice.** The last permanent difference on the account with Spaces was two
+  card payments made on 2021-12-06 that the bank settled on 2022-04-21. The
+  bank's feed states both moments, the export dates a payment by its
+  settlement, and the provider kept only the first. The export's two rows sat
+  136 days outside the matcher's window, became rows of their own, and the
+  store counted both payments twice. An export row and a feed row of one size
+  and direction are now one payment when the export's date is the feed's
+  settlement date, however far that is from the purchase; beyond the window
+  they must also name the same payee. A wider window was rejected: it would
+  pair unrelated payments of one size for every payment it rescued.
+
+### Added
+- **Every date and instant a Starling feed item states is kept against the
+  payment**, as stated, found by parsing the item and not from a list of
+  names. The owner: "ensure we record/extract as much of the data as possible
+  and do not disregard/discard them". The discarded settlement time is what
+  hid the difference above. Other sources, and showing these on the ledger,
+  follow.
+
+### Changed
+- **A release runs only the changed tests on this machine, and the build runs
+  its checks side by side.** A release took twelve minutes, most of it the
+  suite run twice. The build's run gates the image and is kept whole.
+  `OBDI_RELEASE_SUITE=full` runs everything here first.
+
+Not fixed: two arrival orders, the export and the aggregator both before the
+feed, still count such a payment twice, because joining two stored rows is not
+built. The real store's artefacts replay feed first. They are pinned as
+expected failures.
+
 ## [0.4.295] - 2026-10-04
+
+**Not published**: its build failed on a test whose answer depended on the
+machine's time zone, and 0.4.296 carries everything below.
 
 Five defects that 0.4.293 showed only on the real store, and one in 0.4.294's
 wording. Three of the five existed because a test built its rows by hand in a
