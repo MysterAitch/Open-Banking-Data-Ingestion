@@ -111,7 +111,37 @@ export function expectedBalance(expectedRows) {
   return expectedRows.reduce((sum, row) => sum + row.amount, 0);
 }
 
-export async function auditAccounts(client, accounts) {
+/**
+ * Why obdi no longer expects an orphan, from what the request itself says.
+ *
+ * - elsewhere: another account's expected rows carry the id, so a bind or a
+ *   Space fold moved the payment and the row here is the old copy.
+ * - history: the id is one of `history`, the imported ids of stored rows that
+ *   are no longer money (reversed, void, or folded).
+ * - unknown: neither, so obdi holds no row with that identity (re-identified by
+ *   a matching change, or never obdi's; another importer's ids land here too).
+ *
+ * Only the Python side's `explained_orphans` says what "explained" is worth to
+ * the removal's size guard. An absent `history` list classifies nothing as
+ * history, which only ever makes the guard stricter.
+ */
+export function explainOrphans(orphans, accountId, accounts, history) {
+  const owners = new Map();
+  for (const [owner, rows] of Object.entries(accounts)) {
+    for (const row of rows) if (!owners.has(row.imported_id)) owners.set(row.imported_id, owner);
+  }
+  const counts = { history: 0, elsewhere: 0, unknown: 0 };
+  for (const { imported_id: id } of orphans) {
+    const owner = owners.get(id);
+    if (owner !== undefined && owner !== accountId) counts.elsewhere += 1;
+    else if (history.has(id)) counts.history += 1;
+    else counts.unknown += 1;
+  }
+  return counts;
+}
+
+export async function auditAccounts(client, accounts, options = {}) {
+  const history = new Set(options.history ?? []);
   const known = await client.getAccounts();
   const nameOf = new Map(known.map((account) => [account.id, account.name]));
   const report = [];
@@ -157,11 +187,14 @@ export async function auditAccounts(client, accounts) {
     // their total; the partition above says whether that is the cause.
     const expected = expectedBalance(expectedRows);
     const actual = await client.getAccountBalance(accountId);
+    const partition = partitionAccount(expectedRows, rows);
     report.push({
       account_id: accountId,
       name: nameOf.get(accountId),
       missing_account: false,
-      ...summariseAudit(partitionAccount(expectedRows, rows)),
+      ...summariseAudit(partition),
+      // The three classes add up to `orphaned`.
+      orphaned_explained: explainOrphans(partition.orphaned, accountId, accounts, history),
       // Every top-level row the account holds, whoever owns it: the partition
       // above counts a duplicated imported id once, so its numbers cannot add
       // up to this, and an empty of the whole budget is confirmed against it.

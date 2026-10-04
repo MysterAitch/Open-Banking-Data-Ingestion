@@ -31,6 +31,7 @@ from .replay import (
     build_opening_entries,
     build_payload,
     build_transfer_pairs,
+    history_imported_ids,
     unbound_accounts,
 )
 from .store import Store
@@ -581,6 +582,8 @@ def build_audit_envelope(
         "version": ENVELOPE_VERSION,
         "kind": "audit",
         "accounts": accounts,
+        # What lets the audit say an orphan is a row obdi now holds as history.
+        "history": history_imported_ids(transactions),
         # The pairs a push would link, so the audit can say whether they are.
         "transfers": build_transfer_pairs(
             transactions, bindings, store.confirmed_transfer_pairs()

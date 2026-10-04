@@ -96,6 +96,34 @@ def to_actual_transaction(transaction: Transaction) -> dict[str, object]:
     }
 
 
+def history_imported_ids(transactions: list[Transaction]) -> list[str]:
+    """The imported ids of stored rows that are history, for the audit to explain orphans by.
+
+    A row that is void, folded, or reversed is no longer sent, so a copy of it already in
+    Actual is an orphan; this is how the audit tells such an orphan from one obdi has never
+    held. The id is the one a send would have carried (`to_actual_transaction`), so a stored
+    row maps back to a row in Actual by content key and occurrence, which survive a rebuild
+    where the entity id does not.
+
+    An id that a row still being sent carries is left out, so a history row sharing an
+    identity with a live one can never explain away the live one. A row with no content key
+    has no id to give and is left out rather than invented.
+    """
+    sent = {
+        f"{t.content_key}:{t.occurrence}"
+        for t in transactions
+        if t.content_key and not t.status.is_history
+    }
+    return sorted(
+        {
+            f"{t.content_key}:{t.occurrence}"
+            for t in transactions
+            if t.content_key and t.status.is_history
+        }
+        - sent
+    )
+
+
 def _notes_for(transaction: Transaction) -> str:
     """The transaction's own words, not ours.
 

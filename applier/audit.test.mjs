@@ -740,3 +740,61 @@ test('the audit counts an opening row expected and present, and its balance incl
   assert.deepEqual(altered.balance, { expected: 97500, actual: 87500, agrees: false });
   assert.equal(altered.diverged, 1);
 });
+
+test('an orphan is explained as history, held elsewhere, or unknown, and the three add up to the orphans', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const kept = { imported_id: `${hex('1')}:0`, date: '2026-09-01', amount: -2500 };
+  const moved = { imported_id: `${hex('2')}:0`, date: '2026-09-02', amount: -300 };
+  const reversed = { imported_id: `${hex('3')}:0`, date: '2026-09-03', amount: -400 };
+  const reversedToo = { imported_id: `${hex('4')}:0`, date: '2026-09-04', amount: -500 };
+  const reidentified = { imported_id: `${hex('5')}:0`, date: '2026-09-05', amount: -600 };
+  const client = {
+    getAccounts: async () => [
+      { id: 'act-1', name: 'Main' },
+      { id: 'act-2', name: 'Space' },
+    ],
+    getAccountBalance: async () => 0,
+    getTransactions: async (id) =>
+      id === 'act-1' ? [kept, moved, reversed, reversedToo, reidentified] : [moved],
+  };
+
+  const [main, space] = await auditAccounts(
+    client,
+    { 'act-1': [kept], 'act-2': [moved] },
+    { history: [reversed.imported_id, reversedToo.imported_id] },
+  );
+
+  assert.equal(main.orphaned, 4);
+  assert.deepEqual(main.orphaned_explained, { history: 2, elsewhere: 1, unknown: 1 });
+  assert.equal(space.orphaned, 0);
+  assert.deepEqual(space.orphaned_explained, { history: 0, elsewhere: 0, unknown: 0 });
+});
+
+test('an audit sent no history list explains nothing as history, so the guard is stricter not looser', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const reversed = { imported_id: `${hex('3')}:0`, date: '2026-09-03', amount: -400 };
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'Main' }],
+    getAccountBalance: async () => 0,
+    getTransactions: async () => [reversed],
+  };
+
+  const [main] = await auditAccounts(client, { 'act-1': [] });
+
+  assert.deepEqual(main.orphaned_explained, { history: 0, elsewhere: 0, unknown: 1 });
+});
+
+test('an opening row obdi no longer sends is unknown, never explained', async () => {
+  const { auditAccounts } = await import('./audit.mjs');
+  const client = {
+    getAccounts: async () => [{ id: 'act-1', name: 'Main' }],
+    getAccountBalance: async () => 0,
+    getTransactions: async () => [
+      { imported_id: 'obdi-opening:main', date: '2026-08-31', amount: 100 },
+    ],
+  };
+
+  const [main] = await auditAccounts(client, { 'act-1': [] }, { history: [`${hex('3')}:0`] });
+
+  assert.deepEqual(main.orphaned_explained, { history: 0, elsewhere: 0, unknown: 1 });
+});

@@ -129,6 +129,16 @@ export function parseEnvelope(payload) {
           }
         : {}),
       ...(kind === 'empty' ? { empty_accounts: parseEmptyAccounts(payload.empty_accounts) } : {}),
+      // Only an audit explains orphans, by the imported ids of rows obdi holds
+      // as history. Anything that is not a string is dropped: a damaged list
+      // can then only explain less, which makes the removal's guard stricter.
+      ...(kind === 'audit'
+        ? {
+            history: Array.isArray(payload.history)
+              ? payload.history.filter((id) => typeof id === 'string' && id)
+              : [],
+          }
+        : {}),
       provision: provision.filter(
         (entry) => entry && typeof entry.canonical_id === 'string' && entry.canonical_id,
       ),

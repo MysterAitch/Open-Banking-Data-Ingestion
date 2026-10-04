@@ -29,6 +29,19 @@ STAY_REASONS = {
     "foreign": "it carries an id from another importer",
 }
 
+#: THE THRESHOLDS BELOW COUNT ONLY THE ORPHANS OBDI CANNOT EXPLAIN.
+#: What they guard against is a wrong binding about to delete rows that are
+#: really expected. For an orphan whose imported id obdi's own store accounts for
+#: (the row is history, or is held under another account now), that question is
+#: already answered, so it adds nothing to the count however many there are.
+#: Measured on the live instance, where 107 orphans in one account, 92 of them
+#: rows that had just become history because a reversed payment is no longer
+#: counted, demanded a tick the operator cannot honestly give (Actual cannot be
+#: seen from the page), and the only way through was to empty the budget and
+#: push about 9,000 rows again, twice in one day.
+#: An audit that does not say (`explained` absent) explains nothing, so every
+#: orphan counts, as it did before the classes existed.
+
 #: One account losing this many rows is a large absolute loss whatever the
 #: size of the account, and a stale binding rarely leaves that many behind.
 STATIC_ROWS = 100
@@ -78,6 +91,45 @@ class OrphanCount:
     orphaned: int
     will_go: int | None = None
     staying: dict[str, int] = field(default_factory=dict)
+    #: How many orphans obdi's store explains, by class (`EXPLAINED_CLASSES`), or
+    #: None when the audit did not say or the classes do not add up to `orphaned`.
+    explained: dict[str, int] | None = None
+
+    @property
+    def unexplained(self) -> int:
+        """The orphans obdi cannot account for, which the size guard counts."""
+        if self.explained is None:
+            return self.orphaned
+        return self.explained["unknown"]
+
+
+#: The classes an audit sorts each orphan into (applier/audit.mjs, explainOrphans,
+#: which owns what each means), and what each reads as on the page.
+EXPLAINED_CLASSES = {
+    "history": "now history (reversed, void, or folded)",
+    "elsewhere": "held under another account now",
+    "unknown": "not a row obdi holds",
+}
+
+
+def explained_from_audit(entry: dict[str, object], orphaned: int) -> dict[str, int] | None:
+    """The audit's classes for one account's orphans, or None unless all three are
+    present, whole, and add up to the orphaned count.
+
+    Dropped rather than repaired for the reason `removal_split` gives: a breakdown
+    that does not add up would put a figure on the page the ceiling does not support,
+    and here it would also loosen a guard on the strength of it.
+    """
+    raw = entry.get("orphaned_explained")
+    if not isinstance(raw, dict):
+        return None
+    found: dict[str, int] = {}
+    for key in EXPLAINED_CLASSES:
+        count = _whole(raw.get(key))
+        if count is None or count < 0:
+            return None
+        found[key] = count
+    return found if sum(found.values()) == orphaned else None
 
 
 class PruneRefused(Exception):
@@ -123,6 +175,7 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
                 orphaned,
                 will_go,
                 staying,
+                explained_from_audit(entry, orphaned),
             )
         )
     return found
@@ -170,6 +223,18 @@ def outcome_sentence(count: OrphanCount) -> str:
     return sentence
 
 
+def explained_sentence(count: OrphanCount, lead: str = "of") -> str:
+    """How many of the orphans obdi's store explains, by class, as escaped HTML;
+    empty when the audit did not classify them."""
+    if count.explained is None:
+        return ""
+    parts = ", ".join(
+        f"{number} {html.escape(EXPLAINED_CLASSES[key])}"
+        for key, number in count.explained.items()
+    )
+    return f"{lead} the {count.orphaned}: {parts}"
+
+
 def expects_nothing(counts: list[OrphanCount]) -> list[OrphanCount]:
     """Accounts the general removal skips and a clearing form can empty."""
     return [c for c in counts if c.expected == 0 and c.orphaned > 0]
@@ -190,29 +255,38 @@ def high_reasons(count: OrphanCount) -> list[str]:
     Plain text, not HTML: the account name is escaped where it is rendered.
     """
     reasons: list[str] = []
-    if count.orphaned >= STATIC_ROWS:
+    unexplained = count.unexplained
+    counted = _rows(unexplained) + _cannot_explain(count.explained is not None)
+    if unexplained >= STATIC_ROWS:
         reasons.append(
-            f"it would remove {_rows(count.orphaned)} from {count.name}, and "
+            f"it would remove {counted} from {count.name}, and "
             f"{STATIC_ROWS} rows or more from one account is more than a stale "
             "binding usually leaves"
         )
     imported = count.present + count.orphaned
     if (
-        count.orphaned >= DYNAMIC_FLOOR_ROWS
-        and count.orphaned * DYNAMIC_SHARE_DENOMINATOR >= imported
+        unexplained >= DYNAMIC_FLOOR_ROWS
+        and unexplained * DYNAMIC_SHARE_DENOMINATOR >= imported
     ):
         reasons.append(
-            f"it would remove {_rows(count.orphaned)} of the {imported} obdi has "
+            f"it would remove {counted} of the {imported} obdi has "
             f"imported into {count.name}, which is at least a quarter of them"
         )
     return reasons
 
 
+def _cannot_explain(classified: bool) -> str:
+    """Says which rows a guard counted, whenever the audit classified the orphans."""
+    return " that obdi cannot explain" if classified else ""
+
+
 def total_reason(counts: list[OrphanCount]) -> str | None:
-    total = sum(c.orphaned for c in ordinary_orphans(counts))
+    shown = ordinary_orphans(counts)
+    total = sum(c.unexplained for c in shown)
     if total >= TOTAL_ROWS:
+        said = _cannot_explain(any(c.explained is not None for c in shown))
         return (
-            f"it would remove {_rows(total)} in all, and {TOTAL_ROWS} rows or "
+            f"it would remove {_rows(total)}{said} in all, and {TOTAL_ROWS} rows or "
             "more at once is more than ordinary drift produces"
         )
     return None
@@ -256,7 +330,8 @@ def _clear_form(count: OrphanCount) -> str:
         "hand are never touched. It cannot be "
         "undone from here, and binding the account again would re-send its rows "
         "on the next push. The audit counted "
-        f"{_rows(count.orphaned)} carrying an imported id{_outcome_clause(count)}</p>"
+        f"{_rows(count.orphaned)} carrying an imported id{_outcome_clause(count)}"
+        + (f" {explained_sentence(count, 'Of')}.</p>" if count.explained is not None else "</p>")
         + _warning(high_reasons(count))
         + f'<input type="hidden" name="clear_account" value="{ident}">'
         f'<input type="hidden" name="clear_count" value="{count.orphaned}">'
@@ -290,6 +365,7 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
             items = "".join(
                 f"<li>{html.escape(c.name)}: {_rows(c.orphaned)}"
                 + (f" ({outcome_sentence(c)})" if c.will_go is not None else "")
+                + (f" ({explained_sentence(c)})" if c.explained is not None else "")
                 + "</li>"
                 for c in shown
             )
@@ -313,6 +389,12 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
                 "other leg stays, as an ordinary row:</p>"
                 f"<ul>{items}</ul><p>{summary}</p>"
             )
+            if any(c.explained is not None for c in shown):
+                listing += (
+                    '<p class="muted">Rows obdi can explain (now history, or held '
+                    "under another account) are not counted by the large-removal "
+                    "check; only rows it cannot explain are.</p>"
+                )
             hidden = "".join(
                 f'<input type="hidden" name="confirmed" value="{c.orphaned}:'
                 f'{html.escape(c.account_id)}">'

@@ -110,6 +110,7 @@ export async function processRequest(
     clear_empty,
     confirmed,
     empty_accounts,
+    history,
   } = parseEnvelope(payload);
 
   if (kind === 'empty') {
@@ -150,7 +151,7 @@ export async function processRequest(
 
   if (kind === 'audit') {
     const { report, pairs, marker } = await run(async (client) => ({
-      report: await auditAccounts(client, accounts),
+      report: await auditAccounts(client, accounts, { history }),
       pairs: await auditTransfers(client, transfers),
       marker: await readMarker(client),
     }));

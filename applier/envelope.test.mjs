@@ -247,6 +247,23 @@ test('an empty envelope that was not told what the person saw is refused, never 
   }
 });
 
+test('the history list is read on an audit, drops what is not an id, and is absent on a push', () => {
+  const audit = parseEnvelope({
+    version: 3,
+    kind: 'audit',
+    accounts: {},
+    history: ['a:0', 5, '', null, 'b:0'],
+  });
+  assert.deepEqual(audit.history, ['a:0', 'b:0']);
+  assert.deepEqual(parseEnvelope({ version: 3, kind: 'audit', accounts: {} }).history, []);
+  assert.deepEqual(
+    parseEnvelope({ version: 3, kind: 'audit', accounts: {}, history: 'nope' }).history,
+    [],
+  );
+  const push = parseEnvelope({ version: 3, accounts: {}, history: ['a:0'] });
+  assert.equal('history' in push, false);
+});
+
 test('the empty counts are read only on an empty, so a stray key cannot widen another kind', () => {
   for (const kind of ['push', 'audit', 'prune', 'anything-else']) {
     const parsed = parseEnvelope({ version: 3, kind, accounts: {}, empty_accounts: { 'act-1': 5 } });
