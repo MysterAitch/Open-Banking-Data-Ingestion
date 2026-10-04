@@ -1665,11 +1665,11 @@ class TestActualRoster:
         assert "953" in rendered_with_stray
 
         assert "audit: differences" in rendered
-        assert "2 entered by hand in Actual are never compared or touched" in rendered
-        assert "exists in Actual but no" in rendered_with_stray
+        assert "2 rows entered by hand in Actual are never compared or touched" in rendered
+        assert "Exists in Actual but no" in rendered_with_stray
         assert "3 rows in Actual carry an imported id this account does not expect" in rendered
-        assert 'class="warn">halifax-instant-saver' in rendered
-        assert 'class="muted">halifax-current-account' in rendered
+        assert 'pill-bad">differs</span> halifax-instant-saver' in rendered
+        assert "halifax-current-account: agrees" in rendered
 
     def test_AuditResults_CleanRun_GetsTheOkPill(self):
         from obdi.web import _actual_rows
@@ -1762,7 +1762,7 @@ class TestActualRoster:
         finally:
             httpd.shutdown()
 
-        assert "12 result(s)" in page
+        assert "12 results" in page
         assert "11 added" in page
         assert "0 added" in page
 

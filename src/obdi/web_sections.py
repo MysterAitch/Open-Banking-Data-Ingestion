@@ -308,6 +308,7 @@ def render_actual(
     marker_actual: Callable[[], str] | None = None,
     align_actual: Callable[..., str] | None = None,
     actual_configured: Callable[[], bool] | None = None,
+    now: datetime | None = None,
 ) -> bytes:
     from . import web
 
@@ -330,25 +331,14 @@ def render_actual(
         marker_available=marker_actual is not None,
         align_available=align_actual is not None,
         configured=configured,
-    )
-    not_configured = (
-        ""
-        if configured
-        else '<p class="warn"><strong>Actual is not configured on this instance.</strong> '
-        "It has not been told which budget to sync with, so nothing can be sent to it, read "
-        "back from it, or marked in it. The presses below are off until it is.</p>"
+        now=now,
     )
     body = (
-        not_configured
-        + web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
-        + _lede(
-            "Where the budget in Actual is brought up to date with what is held here. Push to "
-            "send new rows; audit to read Actual back and see whether it agrees. "
-            "No amounts are shown on this page."
-        )
+        web._rebuild_running_banner(rebuild_status, rebuild_busy_note)
         + (section or _nothing_wired("The Actual sync"))
+        + '<p class="muted">No amounts are shown on this page.</p>'
     )
-    return render_page("Actual sync", body)
+    return render_page("Actual sync", body, wide=True)
 
 
 def render_coverage(

@@ -152,13 +152,13 @@ class TestPressesWhenActualIsNotConfigured:
 
         body = page[page.index("</style>") :]
         assert body.index("Actual is not configured on this instance") < body.index(
-            "Where the budget in Actual"
+            "Push to Actual now"
         )
         assert SETTING not in page
         for label in ("Push to Actual now", "Audit Actual now", "Write a sync marker now"):
             button = re.search(rf"<button[^>]*>{label}</button>", page)
             assert button is not None, label
-            assert " disabled " in button.group(0), label
+            assert re.search(r"\sdisabled[\s>]", button.group(0)), label
         assert page.count("Off: Actual is not configured.") == 3
 
     def test_ActualPage_WhenConfigured_SaysNothingOfTheKindAndOffersLivePresses(self, bound):
@@ -167,7 +167,7 @@ class TestPressesWhenActualIsNotConfigured:
         page = httpx.get(f"{base}/actual", timeout=60).text
 
         assert "not configured" not in page
-        assert " disabled " not in page
+        assert not re.search(r"\sdisabled[\s>]", page)
 
 
 class TestAuditWhenNothingIsBound:

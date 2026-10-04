@@ -8,6 +8,10 @@ outrank, and against the one above it that must outrank it.
 
 from __future__ import annotations
 
+import json
+
+import httpx
+
 from actual_states import MARKER, align, audit, push, queued
 from obdi.actual_verdict import (
     APPLIER_STALE_SECONDS,
@@ -18,6 +22,7 @@ from obdi.actual_verdict import (
     actual_verdict,
     unreadable_verdict,
 )
+from test_actual_not_configured import serve
 
 ALIVE = {"applier_seen": "10:39:30", "applier_age_seconds": 30.0}
 SILENT = {"applier_seen": "10:02:00", "applier_age_seconds": 2280.0}
@@ -109,9 +114,15 @@ class TestDiffers:
     def test_Verdict_WhenSeveralAccountsDiffer_CountsThemAndLimitsTheNamesItListsInTheSentence(
         self,
     ):
-        orphans = {name: 1 for name in ("halifax-current-account", "halifax-instant-saver",
-                                        "halifax-regular-saver", "halifax-credit-card",
-                                        "starling-main", "starling-joint")}
+        names = (
+            "halifax-current-account",
+            "halifax-instant-saver",
+            "halifax-regular-saver",
+            "halifax-credit-card",
+            "starling-main",
+            "starling-joint",
+        )
+        orphans = dict.fromkeys(names, 1)
 
         verdict = _verdict(push(10), audit(20, orphaned=orphans))
 
@@ -374,3 +385,33 @@ class TestPrecedence:
         verdict = _verdict(push(10, marker_name=MARKER), audit(20))
 
         assert verdict.state is State.AGREES
+
+
+class TestTheResultsTheLivePageReads:
+    """The page reads results from the applier's directory through the web configuration. A
+    handful of audits after the one push must not push that push out of what it reads, or the
+    page says nothing has been pushed while Actual is full."""
+
+    def _page(self, tmp_path, monkeypatch, results: list[dict[str, object]]) -> str:
+        directory = tmp_path / "actual" / "results"
+        directory.mkdir(parents=True)
+        for number, result in enumerate(results):
+            (directory / f"{number:03d}.json").write_text(json.dumps(result), encoding="utf-8")
+        httpd, base, _, _ = serve(tmp_path, monkeypatch, configured=True, bound=True)
+        try:
+            return httpx.get(f"{base}/actual", timeout=60).text
+        finally:
+            httpd.shutdown()
+
+    def test_Page_WhenSixAuditsFollowTheOnlyPush_StillSaysActualAgrees(self, tmp_path, monkeypatch):
+        results = [push(10, marker_name=MARKER)] + [audit(20 + n) for n in range(6)]
+
+        page = self._page(tmp_path, monkeypatch, results)
+
+        assert 'data-state="agrees"' in page
+        assert "Nothing has been pushed yet" not in page
+
+    def test_Page_WhenNoResultsExist_SaysNothingHasBeenPushed(self, tmp_path, monkeypatch):
+        page = self._page(tmp_path, monkeypatch, [])
+
+        assert 'data-state="nothing-pushed"' in page

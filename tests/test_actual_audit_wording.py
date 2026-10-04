@@ -65,7 +65,10 @@ class TestRosterSaysBoundNotSyncing:
     def test_RosterTally_UsesTheBoundWording(self):
         page = web._actual_rows(lambda: [], True, lambda: self._roster())
 
-        assert "1 bound, 1 created on the next push, 1 not bound - need a name" in page
+        assert (
+            "A push will send rows to 1 bound account, create 1 account in Actual, "
+            "and leave 1 account waiting for a name." in page
+        )
 
     def test_UnnamedAccount_IsNotClaimedToBeSynced(self):
         page = web._actual_rows(lambda: [], True, lambda: self._roster())
@@ -86,7 +89,7 @@ class TestAuditSaysWhatEachDifferenceMeansAndWhatToDo:
     def test_AccountWithRowsToPush_SaysTheNextPushAddsThem(self):
         page = _render(_account(missing=37, present=910))
 
-        assert "example-current: differs" in page
+        assert 'pill-bad">differs</span> example-current' in page
         assert "37 expected rows are not in Actual - the next push adds them" in page
 
     def test_AccountWithOrphans_PointsToRemoveOrphanedImportsAndItsLimits(self):
@@ -107,7 +110,7 @@ class TestAuditSaysWhatEachDifferenceMeansAndWhatToDo:
     def test_YoursRows_AreInformationNeverADifference(self):
         page = web._actual_rows(lambda: [_audit(_account(human=12))], True)
 
-        assert "12 entered by hand in Actual are never compared or touched" in page
+        assert "12 rows entered by hand in Actual are never compared or touched" in page
         assert "audit clean" in page
         assert "audit: differences" not in page
 
@@ -152,7 +155,8 @@ class TestAuditSaysWhatEachDifferenceMeansAndWhatToDo:
             "1 transfer pair not linked - a push links what it can and names each pair it skips"
             in page
         )
-        assert "transfers linked 2 of 3 pair(s)" in page
+        assert "transfers linked 2 of 3 pairs" in page
+        assert "(s)" not in page
 
     def test_OrphansTheRemovalWillTake_AreSaidInWords_NotAsAnUnknownCategory(self):
         """Met on the deployed instance: the audit began reporting how many

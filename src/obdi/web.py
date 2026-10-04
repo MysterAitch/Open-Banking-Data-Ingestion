@@ -50,16 +50,13 @@ from .actual_audit import (
     WORDED_DIFFERENCES as _AUDIT_WORDED_DIFFERENCES,
 )
 from .actual_audit import (
-    account_pairs as _account_pairs,
-)
-from .actual_audit import (
-    audit_differences as _audit_differences,
-)
-from .actual_audit import (
     audit_has_differences as _audit_has_differences,
 )
 from .actual_audit import (
     count_of as _count_of,
+)
+from .actual_audit import (
+    counted as _counted,
 )
 from .actual_push import NothingQueued, valid_progress
 from .actual_verdict import APPLIER_STALE_SECONDS
@@ -108,12 +105,11 @@ from .web_empty import (
     EmptyPlan,
     check_empty_post,
     empty_result_row,
-    empty_section,
     plan_from_audit,
 )
 from .web_indexes import IndexPages
 from .web_ledger import LedgerPages
-from .web_marker import marker_lines, marker_result_row
+from .web_marker import marker_result_row
 from .web_overview import overview_html
 from .web_position import PositionPages
 from .web_prune import (
@@ -121,10 +117,8 @@ from .web_prune import (
     STAY_REASONS,
     PruneRefused,
     align_plan,
-    align_section,
     check_prune_post,
     counts_from_audit,
-    prune_section,
     removal_split,
 )
 from .web_scheduler import scheduler_row
@@ -2074,7 +2068,7 @@ def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
     state = str(entry.get("state", ""))
     raw_count = entry.get("count", 0)
     count = raw_count if isinstance(raw_count, int) else 0
-    held = f"{count:,} transaction(s)" if count else "no transactions yet"
+    held = _counted(count, "transaction") if count else "no transactions yet"
     form = ""
     # "syncing" is the hook's name for bound; what the page may claim is
     # only that the account is bound, because a bound account that has
@@ -2825,7 +2819,7 @@ def _push_result_row(result: dict[str, object]) -> str:
     )
     detail = (
         f"{result.get('added', 0)} added, "
-        f"{result.get('provisioned', 0)} account(s) provisioned"
+        f"{_counted(_count_of(result.get('provisioned')), 'account')} provisioned"
         f"{_push_transfer_note(result.get('transfers'))}"
         if ok
         else html.escape(str(result.get("error", "")))
@@ -3229,103 +3223,10 @@ def _align_result_row(result: dict[str, object]) -> str:
 
 
 def _audit_result_row(result: dict[str, object]) -> str:
-    """One audit outcome: a verdict pill, then a line per account, then
-    the sampled rows behind each account's counts.
+    """One audit outcome, summarised: `web_actual.audit_row` builds it."""
+    from .web_actual import audit_row
 
-    "yours" is the count of rows without an imported id - the person's own
-    entries, counted to show they were seen and deliberately not compared.
-    """
-    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
-    if not result.get("ok"):
-        return (
-            f'<div class="row"><strong>{stamp}Z</strong> '
-            '<span class="pill pill-bad">audit failed</span>'
-            f'<br><span class="muted">{html.escape(str(result.get("error", "")))}'
-            "</span></div>"
-        )
-    raw = result.get("accounts")
-    accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
-
-    badge = (
-        '<span class="pill pill-bad">audit: differences</span>'
-        if _audit_has_differences(result)
-        else '<span class="pill pill-ok">audit clean</span>'
-    )
-    shared = _shared_labels(
-        [str(a.get("name") or a.get("account_id", "")) for a in accounts]
-    )
-    lines = []
-    for account in accounts:
-        raw_name = str(account.get("name") or account.get("account_id", ""))
-        # The audit knows an account by Actual's own id, not by its canonical
-        # reference, so that id is the only reference there is to show.
-        name = html.escape(raw_name) + (
-            _reference_tag(str(account.get("account_id", "")))
-            if raw_name in shared
-            else ""
-        )
-        pairs = _account_pairs(result, account.get("account_id"))
-        differences = _audit_differences(account, pairs)
-        if account.get("missing_account"):
-            lines.append(
-                f'<span class="warn">{name}: account missing from Actual '
-                f"({account.get('expected', 0)} expected row(s))</span>"
-            )
-            continue
-        if account.get("unbound_in_actual"):
-            lines.append(
-                f'<span class="warn">{name}: exists in Actual but no '
-                f"canonical account maps to it ({account.get('rows', 0)} "
-                "row(s)) - delete it there, or bind something to it</span>"
-            )
-            continue
-        compared = _count_of(account.get("expected"))
-        detail = f"{'differs' if differences else 'agrees'} - {compared} rows compared"
-        balance = account.get("balance")
-        if isinstance(balance, dict):
-            # Words only: the figures behind the verdict are not shown on
-            # a page served on a GET.
-            detail += (
-                ", balance agrees"
-                if balance.get("agrees") is True
-                else ", balance differs"
-            )
-        if pairs is not None:
-            detail += f", transfers linked {pairs[0]} of {pairs[1]} pair(s)"
-        yours = _count_of(account.get("human"))
-        yours_note = (
-            f"{yours} entered by hand in Actual are never compared or touched"
-            if yours
-            else ""
-        )
-        if not differences:
-            if yours_note:
-                detail += f"; {yours_note}"
-            lines.append(f'<span class="muted">{name}: {detail}</span>')
-            continue
-        lines.append(f'<span class="warn">{name}: {detail}</span>')
-        lines.extend(
-            f'<span class="muted">- {sentence}</span>'
-            for sentence in _audit_difference_sentences(account, differences)
-        )
-        if yours_note:
-            lines.append(f'<span class="muted">- {yours_note}</span>')
-        lines.extend(_audit_sample_lines(account))
-    totals = result.get("transfers")
-    if isinstance(totals, dict):
-        lines.append(
-            f'<span class="muted">transfer pairs: {_count_of(totals.get("pairs"))} '
-            f'in all, {_count_of(totals.get("linked"))} linked, '
-            f'{_count_of(totals.get("unlinked"))} unlinked, '
-            f'{_count_of(totals.get("leg_missing"))} with a leg missing</span>'
-        )
-    # The verdict is the row; the per-account lines are the evidence for it.
-    return (
-        f'<div class="row"><strong>{stamp}Z</strong> {badge}'
-        f"<details><summary>Per-account detail ({len(accounts)} accounts)</summary>"
-        + "<br>".join(lines)
-        + "</details></div>"
-    )
+    return audit_row(result)
 
 
 #: One renderer per queue kind, keyed by the kind the applier stamps on
@@ -3404,16 +3305,16 @@ def _history_summary(history: _ResultHistory) -> str:
     shown = len(history.results)
     if history.total is None:
         sentence = (
-            f"{shown} result(s) shown - this history hook reports no total, "
+            f"{_counted(shown, 'result')} shown - this history hook reports no total, "
             "so whether older results were left out is unknown"
         )
     elif history.total > shown:
         sentence = (
-            f"showing {shown} of {history.total} result(s) - the newest "
+            f"showing {shown} of {_counted(history.total, 'result')} - the newest "
             "ones, the rest are on disk only"
         )
     else:
-        sentence = f"{shown} of {history.total} result(s)"
+        sentence = f"{shown} of {_counted(history.total, 'result')}"
     if history.unreadable_count:
         named = (
             ": " + ", ".join(html.escape(name) for name in history.unreadable)
@@ -3421,7 +3322,7 @@ def _history_summary(history: _ResultHistory) -> str:
             else " (not named by the hook)"
         )
         sentence += (
-            f". {history.unreadable_count} result file(s) could not be read"
+            f". {_counted(history.unreadable_count, 'result file')} could not be read"
             f"{named}"
         )
     return f'<p class="muted">{sentence}</p>'
@@ -3454,167 +3355,24 @@ def _actual_rows(
     marker_available: bool = False,
     align_available: bool = False,
     configured: bool = True,
+    now: datetime | None = None,
 ) -> str:
-    """The budget sync, visible and pressable: the state lines first (the
-    last push, the newest audit, the sync marker), then what is in flight,
-    then the buttons (the push the heaviest), then the latest results, then
-    the roster and the destructive prune and empty folded away as reference
-    and rarely-used controls, the empty last.
+    """The Actual page's body; `web_actual.actual_rows` builds it."""
+    from .web_actual import actual_rows
 
-    Where Actual is not configured the page says so first, the three presses that could only
-    answer "nothing queued" are shown off with the reason beside them, and the destructive
-    controls are not offered at all: a reviewer pressed three live buttons on a page that never
-    said there was no budget behind them."""
-    if actual_status is None and not push_available:
-        return ""
-    roster_html = ""
-    if actual_roster is not None:
-        try:
-            roster = actual_roster()
-        except Exception:
-            roster = []
-        if roster:
-            roster_html = _roster_block(roster)
-    queued_html = ""
-    if actual_queue is not None:
-        try:
-            queued = actual_queue()
-        except Exception:
-            queued = []
-        heartbeat = ""
-        if actual_heartbeat is not None:
-            try:
-                heartbeat = actual_heartbeat()
-            except Exception:
-                heartbeat = ""
-        now = datetime.now(UTC)
-        # Progress is only as good as the beat that carried it: past the
-        # staleness threshold the page shows the warning and not a count
-        # that may be minutes old.
-        _, heartbeat_age = _heartbeat_reading(heartbeat, now)
-        beating = heartbeat_age is not None and heartbeat_age <= _HEARTBEAT_STALE_SECONDS
-        parts = []
-        for entry in queued:
-            stamp = html.escape(str(entry.get("queued_at", ""))[11:19]) or html.escape(
-                str(entry.get("name", ""))
-            )
-            kind_note = _queued_kind_note(str(entry.get("kind", "")))
-            since = str(entry.get("in_progress_since", ""))
-            if since:
-                what = f"in progress{kind_note}"
-                note = (
-                    "the applier picked this up at "
-                    f"{html.escape(since[11:19])}Z and is working on it"
-                )
-                sentence = _progress_sentence(entry.get("progress")) if beating else ""
-                if sentence:
-                    note += f" - {html.escape(sentence)}"
-            else:
-                what = f"queued{kind_note}"
-                note = "waiting for the applier"
-            parts.append(
-                f'<div class="row"><strong>{stamp}Z</strong> '
-                f'<span class="pill pill-quiet">{what}</span>'
-                f'<br><span class="muted">{note}</span></div>'
-            )
-        queued_html = "".join(parts)
-        queued_html += _applier_liveness(heartbeat, len(queued), now)
-    results: list[dict[str, object]] = []
-    summary_html = ""
-    if actual_status is not None:
-        try:
-            results = actual_status()
-            summary_html = _actual_summary(results)
-        except Exception:
-            results = []
-            summary_html = (
-                '<p><span class="pill pill-bad">unreadable</span> The latest '
-                "results could not be read, so the last push and the newest "
-                "audit cannot be summarised.</p>"
-            )
-    rows = [_result_row(result) for result in results]
-    off = "" if configured else " disabled"
-    why = "" if configured else ' <span class="muted">Off: Actual is not configured.</span>'
-    button = (
-        '<form method="post" action="/push-actual">'
-        f'<p><button class="button" type="submit"{off} '
-        'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-        f"Push to Actual now</button>{why}</p></form>"
-        if push_available
-        else ""
-    )
-    audit_button = (
-        '<form method="post" action="/audit-actual">'
-        f'<p><button class="button secondary" type="submit"{off} '
-        'style="width:100%;font-size:inherit;cursor:pointer">'
-        f"Audit Actual now</button>{why}</p></form>"
-        if audit_available
-        else ""
-    )
-    marker_button = (
-        '<form method="post" action="/marker-actual">'
-        f'<p><button class="button secondary" type="submit"{off} '
-        'style="width:100%;font-size:inherit;cursor:pointer">'
-        f"Write a sync marker now</button>{why}</p></form>"
-        if marker_available
-        else ""
-    )
-    prune_button = (
-        prune_section(counts_from_audit(_newest_of_kind(results, "audit")))
-        if prune_available and configured
-        else ""
-    )
-    align_audit = _newest_of_kind(results, "audit")
-    align_block = (
-        align_section(counts_from_audit(align_audit) or [])
-        if align_available
-        and configured
-        and align_audit is not None
-        and _audit_has_differences(align_audit)
-        else ""
-    )
-    empty_block = (
-        empty_section(*_empty_plan(results)) if empty_available and configured else ""
-    )
-    explanation = (
-        "<details><summary>How the sync works</summary>"
-        "<p>Pushes run through the applier container: bound accounts import, "
-        "named accounts are created in Actual automatically (empty ones "
-        "included) and their transactions ride the next push. The applier "
-        "checks the queue about every 20 seconds; the scheduler also "
-        "queues a push after each pull cycle, every six hours.</p>"
-        "<p>The audit reads each bound account back from Actual and "
-        "reports differences without changing anything - rows without an "
-        "imported id are yours and are only counted.</p>"
-        "<p>The sync marker is an off-budget account with no transactions "
-        "whose name is the time obdi last wrote to the budget. Every "
-        "successful push renames it, and so does its own button; an audit "
-        "only reads it, and a removal of orphaned imports never touches "
-        "it.</p>"
-        "<p>After a push, a marker, a removal that took rows, or an emptying, "
-        "obdi also re-uploads the budget file to the server (the server "
-        "snapshot), so a device downloading afresh starts from there instead "
-        "of replaying every change since an old file. &quot;Write a sync "
-        "marker now&quot; is therefore also the on-demand way to refresh "
-        "it.</p></details>"
-    )
-    return (
-        summary_html
-        + queued_html
-        + button
-        + audit_button
-        + align_block
-        + marker_button
-        + ("<h3>Latest results</h3>" + "".join(rows) if rows else "")
-        + (
-            '<p><a class="tap" href="/actual-history">Full sync history</a></p>'
-            if rows
-            else ""
-        )
-        + roster_html
-        + prune_button
-        + empty_block
-        + explanation
+    return actual_rows(
+        actual_status,
+        push_available,
+        actual_roster,
+        actual_queue,
+        audit_available,
+        actual_heartbeat,
+        prune_available,
+        empty_available,
+        marker_available,
+        align_available,
+        configured,
+        now,
     )
 
 
@@ -3631,30 +3389,6 @@ def _empty_plan(results: list[dict[str, object]]) -> tuple[EmptyPlan | None, str
     return plan_from_audit(audit, emptied_since=emptied_since)
 
 
-def _roster_block(roster: list[dict[str, object]]) -> str:
-    """The per-account plan, folded, with its tally outside the fold.
-
-    Left open when an account has no name, because that row carries the form
-    that unblocks it and a folded form is one nobody finds.
-    """
-    needs_name = [e for e in roster if e.get("state") not in {"syncing", "provision"}]
-    bound = sum(1 for e in roster if e.get("state") == "syncing")
-    provision = sum(1 for e in roster if e.get("state") == "provision")
-    tally = f"{bound} bound, {provision} created on the next push"
-    if needs_name:
-        tally += f", {len(needs_name)} not bound - need a name"
-    shared = _shared_labels([str(e.get("label", "")) for e in roster])
-    return (
-        f"<details{' open' if needs_name else ''}>"
-        f"<summary>Accounts and what a push does to them ({tally})</summary>"
-        + "".join(
-            _roster_row(entry, str(entry.get("label", "")) in shared)
-            for entry in roster
-        )
-        + "</details>"
-    )
-
-
 def _newest_of_kind(
     results: list[dict[str, object]], kind: str
 ) -> dict[str, object] | None:
@@ -3664,72 +3398,8 @@ def _newest_of_kind(
 
 
 def _stamp_z(result: dict[str, object]) -> str:
+    """A result's finish time as the row lists write it: date, minute, and the zone mark."""
     return html.escape(str(result.get("finished_at", ""))[:16].replace("T", " ")) + "Z"
-
-
-def _actual_summary(results: list[dict[str, object]]) -> str:
-    """The lines a person can read at a glance: the last push, the newest audit,
-    and the sync marker (web_marker.py).
-
-    Counts and words only. A GET never shows an amount, and the audit's
-    per-account detail lives behind a fold on its own row.
-    """
-    push = _newest_of_kind(results, "push")
-    if push is None:
-        first = '<p><span class="pill pill-quiet">no push yet</span> No push has been recorded.</p>'
-    elif push.get("ok"):
-        first = (
-            f'<p><span class="pill pill-ok">push applied</span> The last push '
-            f"was applied {_stamp_z(push)}.</p>"
-        )
-    else:
-        applied = next(
-            (
-                r
-                for r in sorted(
-                    results, key=lambda r: str(r.get("finished_at", "")), reverse=True
-                )
-                if (str(r.get("kind", "")) or "push") == "push" and r.get("ok")
-            ),
-            None,
-        )
-        earlier = (
-            f" The last push that applied was {_stamp_z(applied)}."
-            if applied is not None
-            else " No push has ever applied."
-        )
-        first = (
-            f'<p><span class="pill pill-bad">push failed</span> The newest push '
-            f"failed {_stamp_z(push)}.{earlier}</p>"
-        )
-    audit = _newest_of_kind(results, "audit")
-    if audit is None:
-        second = '<p><span class="pill pill-quiet">no audit yet</span> No audit has been run.</p>'
-    elif not audit.get("ok"):
-        second = (
-            f'<p><span class="pill pill-bad">audit failed</span> The newest audit '
-            f"failed {_stamp_z(audit)}.</p>"
-        )
-    else:
-        raw = audit.get("accounts")
-        accounts = [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
-        differing = sum(
-            1
-            for a in accounts
-            if _audit_differences(a, _account_pairs(audit, a.get("account_id")))
-        )
-        if differing:
-            second = (
-                f'<p><span class="pill pill-bad">audit: differences</span> The newest '
-                f"audit ({_stamp_z(audit)}) found differences in {differing} of "
-                f"{len(accounts)} accounts.</p>"
-            )
-        else:
-            second = (
-                f'<p><span class="pill pill-ok">audit clean</span> The newest audit '
-                f"({_stamp_z(audit)}) found no differences in {len(accounts)} accounts.</p>"
-            )
-    return f'<div class="leadlines">{first}{second}{marker_lines(results)}</div>'
 
 
 def _knowledge_rows(
@@ -5207,8 +4877,8 @@ class ConnectionHandler(
         history = _read_history(payload)
         body = (
             "<h2>Actual sync history</h2>"
-            "<p>Recorded outcomes, newest first - the home page shows "
-            "only the latest handful. Times are UTC (marked Z).</p>"
+            "<p>Recorded outcomes, newest first - the Actual page shows "
+            "only the newest audit and the few results before it. Times are UTC (marked Z).</p>"
             + "".join(_result_row(result) for result in history.results)
             + (
                 _history_summary(history)

@@ -492,8 +492,8 @@ def test_ActualPage_WithTheSyncMarkerLinesShown_AtPhoneWidth_DoesNotScrollSidewa
             marker_actual=lambda: "q",
             actual_status=lambda: results,
         ).decode()
-        assert "server is behind" in body
-        assert "snapshot not refreshed" in body
+        assert "the server itself is behind" in body
+        assert "The server snapshot was not refreshed" in body
         assert "Write a sync marker now" in body
         page.set_content(body)
         _assert_fits(_measure(page))

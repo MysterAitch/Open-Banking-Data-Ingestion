@@ -29,7 +29,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi import leases, web
+from obdi import leases, web, web_actual
 from obdi.actual_push import build_marker_envelope
 from obdi.cli import queue_actual_marker
 from obdi.connections import ConnectionStore
@@ -89,63 +89,78 @@ def audit(finished: str, *found: str | None, with_marker: bool = True) -> dict[s
 
 
 def summary(*results: dict[str, object]) -> str:
-    return web._actual_summary(list(results))
+    """The page's step-by-step account of the sync, for these results."""
+    return web_actual.chain_block(list(results))
 
 
-class TestTheLinesSayWhatWasWrittenAndWhatTheServerHolds:
-    def test_Summary_WithNothingRecorded_SaysThereIsNoMarkerYet(self):
+def step(text: str, name: str) -> str:
+    """The markup of the one step called `name`."""
+    for item in re.findall(r'<li class="step.*?</li>', text, flags=re.S):
+        if f"<strong>{name}</strong>" in item:
+            return item
+    raise AssertionError(f"no step called {name!r}")
+
+
+class TestTheStepsSayWhatWasWrittenAndWhatTheServerHolds:
+    def test_Chain_WithNothingRecorded_SaysThereIsNoMarkerYet(self):
         text = summary()
 
-        assert "no marker yet" in text
+        assert 'pill-quiet">not yet' in step(text, "Marker written")
+        assert "No sync marker write appears" in step(text, "Marker written")
         assert PURPOSE in text
 
-    def test_Summary_AfterAPushThatWroteAMarker_NamesItAndSaysTheServerIsUnchecked(self):
+    def test_Chain_AfterAPushThatWroteAMarker_NamesItAndSaysTheServerIsUnchecked(self):
         text = summary(push("2026-10-02T20:41:09.000Z"))
 
-        assert f"<strong>{A}</strong>" in text
-        assert "2026-10-02 20:41Z" in text
-        assert "No successful audit has looked" in text
+        assert f"<strong>{A}</strong>" in step(text, "Marker written")
+        assert "2026-10-02 20:41" in step(text, "Marker written")
+        assert "No successful audit has looked" in step(text, "Server has the marker")
         assert "behind" not in text
 
-    def test_Summary_WhenTheNewestAuditFoundTheSameMarker_SaysTheServerHasIt(self):
+    def test_Chain_WhenTheNewestAuditFoundTheSameMarker_SaysTheServerHasIt(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z", A)
         )
 
-        assert "server has it" in text
+        assert 'pill-ok">done' in step(text, "Server has the marker")
+        assert "found that marker on the server" in step(text, "Server has the marker")
         assert "behind" not in text
 
-    def test_Summary_WhenTheNewestAuditFoundAnOlderMarker_SaysTheServerItselfIsBehind(self):
+    def test_Chain_WhenTheNewestAuditFoundAnOlderMarker_SaysTheServerItselfIsBehind(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z", OLDER)
         )
 
-        assert "server is behind" in text
-        assert f"<strong>{A}</strong>" in text
-        assert OLDER in text
-        assert "the server itself is behind" in text
+        server = step(text, "Server has the marker")
+        assert 'pill-bad">failed' in server
+        assert f"<strong>{A}</strong>" in step(text, "Marker written")
+        assert OLDER in server
+        assert "the server itself is behind" in server
 
-    def test_Summary_WhenTheNewestAuditFoundNoMarkerAccount_SaysTheServerIsBehind(self):
+    def test_Chain_WhenTheNewestAuditFoundNoMarkerAccount_SaysTheServerIsBehind(self):
         text = summary(push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z"))
 
-        assert "server is behind" in text
-        assert "found no marker account" in text
+        server = step(text, "Server has the marker")
+        assert 'pill-bad">failed' in server
+        assert "found no marker account" in server
 
-    def test_Summary_WhenTheAuditRanBeforeTheMarkerWasWritten_NeverClaimsTheServerIsBehind(self):
+    def test_Chain_WhenTheAuditRanBeforeTheMarkerWasWritten_NeverClaimsTheServerIsBehind(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:30:00.000Z", OLDER)
         )
 
-        assert "ran before that marker was written" in text
-        assert "server is behind" not in text
-        assert 'pill-ok">server has it' not in text
+        server = step(text, "Server has the marker")
+        assert "ran before that marker was written" in server
+        assert 'pill-warn">stale' in server
+        assert "the server itself is behind" not in text
+        assert 'pill-ok">done' not in server
 
-    def test_Summary_WhenTheAuditAndTheWriteShareASecond_TheAuditIsTakenToHaveSeenIt(self):
+    def test_Chain_WhenTheAuditAndTheWriteShareASecond_TheAuditIsTakenToHaveSeenIt(self):
         text = summary(push("2026-10-02T20:41:09Z"), audit("2026-10-02T20:41:09.000Z", A))
 
-        assert "server has it" in text
+        assert 'pill-ok">done' in step(text, "Server has the marker")
 
-    def test_Summary_WhenAnAuditFoundTwoMarkers_SaysSoAndWhatObdiDoesWithThem(self):
+    def test_Chain_WhenAnAuditFoundTwoMarkers_SaysSoAndWhatObdiDoesWithThem(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z", A, OLDER)
         )
@@ -153,23 +168,23 @@ class TestTheLinesSayWhatWasWrittenAndWhatTheServerHolds:
         assert "2 marker accounts" in text
         assert "renames the first" in text
 
-    def test_Summary_WithAnAuditFromAnApplierThatReportsNoMarker_SaysItDidNotReportOne(self):
+    def test_Chain_WithAnAuditFromAnApplierThatReportsNoMarker_SaysItDidNotReportOne(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"),
             audit("2026-10-02T20:50:00.000Z", with_marker=False),
         )
 
         assert "did not report a marker" in text
-        assert "server is behind" not in text
+        assert "the server itself is behind" not in text
 
-    def test_Summary_WithAnAuditButNoMarkerEverWritten_ReportsWhatTheAuditFoundAndNothingMore(self):
+    def test_Chain_WithAnAuditButNoMarkerEverWritten_ReportsWhatTheAuditFoundAndNothingMore(self):
         text = summary(audit("2026-10-02T20:50:00.000Z", OLDER))
 
-        assert "no marker yet" in text
-        assert OLDER in text
-        assert "server is behind" not in text
+        assert "No sync marker write appears" in step(text, "Marker written")
+        assert OLDER in step(text, "Server has the marker")
+        assert "the server itself is behind" not in text
 
-    def test_Summary_WhenAMarkerRequestWroteLaterThanAPush_ThatIsTheMarkerWritten(self):
+    def test_Chain_WhenAMarkerRequestWroteLaterThanAPush_ThatIsTheMarkerWritten(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), marker_request("2026-10-03T01:02:00.000Z", B)
         )
@@ -177,35 +192,36 @@ class TestTheLinesSayWhatWasWrittenAndWhatTheServerHolds:
         assert f"<strong>{B}</strong>" in text
         assert f"<strong>{A}</strong>" not in text
 
-    def test_Summary_WhenTheNewestPushFailed_TheMarkerWrittenIsStillTheLastSuccessfulOne(self):
+    def test_Chain_WhenTheNewestPushFailed_TheMarkerWrittenIsStillTheLastSuccessfulOne(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), push("2026-10-03T01:02:00.000Z", ok=False)
         )
 
         assert f"<strong>{A}</strong>" in text
+        assert 'pill-bad">failed' in step(text, "Push applied")
 
-    def test_Summary_WithAMalformedMarkerField_IsTreatedAsNoMarkerRatherThanBreakingThePage(self):
+    def test_Chain_WithAMalformedMarkerField_IsTreatedAsNoMarkerRatherThanBreakingThePage(self):
         broken: dict[str, object] = {**push("2026-10-02T20:41:09.000Z"), "marker": ["x"]}
         also: dict[str, object] = {
             **push("2026-10-02T20:42:09.000Z"),
             "marker": {"name": 7},
         }
 
-        assert "no marker yet" in summary(broken, also)
+        assert "No sync marker write appears" in summary(broken, also)
 
-    def test_Summary_WithAMarkerNameThatIsMarkup_ShowsItAsTextNotAsMarkup(self):
+    def test_Chain_WithAMarkerNameThatIsMarkup_ShowsItAsTextNotAsMarkup(self):
         text = summary(push("2026-10-02T20:41:09.000Z", marker="<b>x</b> obdi marker"))
 
         assert "&lt;b&gt;x&lt;/b&gt; obdi marker" in text
         assert "<b>x</b>" not in text
 
-    def test_Summary_StatesWhatTheMarkerIsFor_InTheOwnersTerms(self):
+    def test_Chain_StatesWhatTheMarkerIsFor_InTheOwnersTerms(self):
         text = summary(push("2026-10-02T20:41:09.000Z"))
 
         assert PURPOSE in text
         assert "older stamp, or no marker account, has not received the newest changes" in text
 
-    def test_Summary_ShowsNamesAndTimesOnly_NeverAWordThatIntroducesAFigure(self):
+    def test_Chain_ShowsNamesAndTimesOnly_NeverAWordThatIntroducesAFigure(self):
         text = summary(
             push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z", OLDER)
         ).lower()
@@ -213,13 +229,24 @@ class TestTheLinesSayWhatWasWrittenAndWhatTheServerHolds:
         assert "amount" not in text
         assert "balance" not in text
 
-    def test_Summary_SitsBesideThePushAndAuditLines_InsideTheSameLeadBlock(self):
+    def test_Chain_ListsTheFiveStepsInTheOrderTheyHappen(self):
         text = summary(push("2026-10-02T20:41:09.000Z"))
 
-        lead = re.search(r'<div class="leadlines">(.*)</div>', text, flags=re.S)
-        assert lead is not None
-        body = lead.group(1)
-        assert body.index("push applied") < body.index("marker written") < body.index(PURPOSE)
+        names = re.findall(r'<p class="step-head"><strong>(.*?)</strong>', text)
+        assert names == [
+            "Push applied",
+            "Audit",
+            "Marker written",
+            "Server has the marker",
+            "Snapshot refreshed",
+        ]
+        assert text.index("Marker written") < text.index(PURPOSE)
+
+    def test_Chain_SaysTheZoneOnceAndNotOnEveryTime(self):
+        text = summary(push("2026-10-02T20:41:09.000Z"), audit("2026-10-02T20:50:00.000Z", A))
+
+        assert text.count("UTC") == 1
+        assert not re.search(r"\d\d:\d\dZ", text.replace(A, ""))
 
 
 def with_snapshot(
@@ -231,19 +258,20 @@ def with_snapshot(
     return {**result, "snapshot": snapshot}
 
 
-class TestTheSnapshotLineSaysWhetherAFreshDownloadStartsFromNow:
+class TestTheSnapshotStepSaysWhetherAFreshDownloadStartsFromNow:
     """A download is the server's stored file plus every change since it, so a
     stale file means a device replays a growing backlog. The applier says in
     each result whether it refreshed the file (applier/lib.mjs owns why)."""
 
-    def test_Summary_AfterARefresh_SaysTheServerSnapshotWasRefreshedAndWhen(self):
+    def test_Chain_AfterARefresh_SaysTheServerSnapshotWasRefreshedAndWhen(self):
         text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), True))
 
-        assert "snapshot refreshed" in text
-        assert "server snapshot refreshed 2026-10-02 21:30Z" in text
+        snapshot = step(text, "Snapshot refreshed")
+        assert 'pill-ok">done' in snapshot
+        assert "2026-10-02 21:30" in snapshot
         assert "not refreshed" not in text
 
-    def test_Summary_AfterARefusedRefresh_WarnsWithTheReasonAndWhatItMeans(self):
+    def test_Chain_AfterARefusedRefresh_WarnsWithTheReasonAndWhatItMeans(self):
         text = summary(
             with_snapshot(
                 push("2026-10-02T21:30:05.000Z"),
@@ -252,59 +280,60 @@ class TestTheSnapshotLineSaysWhetherAFreshDownloadStartsFromNow:
             )
         )
 
-        assert 'pill pill-warn">snapshot not refreshed' in text
-        assert "the upload was refused (network)" in text
-        assert "replays every change since the old snapshot" in text
-        assert "phones can fail to finish" in text
+        snapshot = step(text, "Snapshot refreshed")
+        assert 'pill-warn">stale' in snapshot
+        assert "the upload was refused (network)" in snapshot
+        assert "replays every change since the old snapshot" in snapshot
+        assert "phones can fail to finish" in snapshot
 
-    def test_Summary_WhenNoResultSaysWhetherItWasRefreshed_SaysItIsUnknown(self):
+    def test_Chain_WhenNoResultSaysWhetherItWasRefreshed_SaysItIsUnknown(self):
         text = summary(push("2026-10-02T21:30:05.000Z"))
 
-        assert "snapshot unknown" in text
-        assert "predate this check" in text
-        assert "snapshot refreshed" not in text
+        snapshot = step(text, "Snapshot refreshed")
+        assert 'pill-quiet">not yet' in snapshot
+        assert "predate this check" in snapshot
         assert "not refreshed" not in text
 
-    def test_Summary_WithNoResultsAtAll_SaysItIsUnknown(self):
-        assert "snapshot unknown" in summary()
+    def test_Chain_WithNoResultsAtAll_SaysItIsUnknown(self):
+        assert "predate this check" in step(summary(), "Snapshot refreshed")
 
-    def test_Summary_ReadsTheNewestResultThatSaysSo_WhateverItsKind(self):
+    def test_Chain_ReadsTheNewestResultThatSaysSo_WhateverItsKind(self):
         older = with_snapshot(push("2026-10-02T20:00:00.000Z"), False, "network")
         newer = with_snapshot(marker_request("2026-10-02T21:30:00.000Z", B), True)
 
         text = summary(older, newer)
 
-        assert "snapshot refreshed" in text
+        assert 'pill-ok">done' in step(text, "Snapshot refreshed")
         assert "not refreshed" not in text
 
-    def test_Summary_ANewerResultThatSaysNothing_DoesNotHideAnOlderOneThatDid(self):
+    def test_Chain_ANewerResultThatSaysNothing_DoesNotHideAnOlderOneThatDid(self):
         older = with_snapshot(push("2026-10-02T20:00:00.000Z"), True)
         newer = push("2026-10-02T21:30:00.000Z")
 
-        assert "snapshot refreshed" in summary(older, newer)
+        assert 'pill-ok">done' in step(summary(older, newer), "Snapshot refreshed")
 
-    def test_Summary_AnAuditIsNeverASnapshotRefresh_EvenIfItCarriesTheField(self):
+    def test_Chain_AnAuditIsNeverASnapshotRefresh_EvenIfItCarriesTheField(self):
         text = summary(with_snapshot(audit("2026-10-02T21:30:00.000Z", A), True))
 
-        assert "snapshot unknown" in text
+        assert "predate this check" in step(text, "Snapshot refreshed")
 
-    def test_Summary_AFailedResultIsNotASnapshotRefresh(self):
+    def test_Chain_AFailedResultIsNotASnapshotRefresh(self):
         failed = {**push("2026-10-02T21:30:00.000Z", ok=False), "snapshot": {"refreshed": True}}
 
-        assert "snapshot unknown" in summary(failed)
+        assert "predate this check" in step(summary(failed), "Snapshot refreshed")
 
     @pytest.mark.parametrize(
         "snapshot",
         ["yes", 1, {"refreshed": "true"}, {"at": "2026-10-02T21:30:00Z"}, {"refreshed": None}],
     )
-    def test_Summary_WithAMalformedSnapshotField_IsUnknownRatherThanBreakingThePage(
+    def test_Chain_WithAMalformedSnapshotField_IsUnknownRatherThanBreakingThePage(
         self, snapshot
     ):
         result = {**push("2026-10-02T21:30:05.000Z"), "snapshot": snapshot}
 
-        assert "snapshot unknown" in summary(result)
+        assert "predate this check" in step(summary(result), "Snapshot refreshed")
 
-    def test_Summary_WithAReasonThatIsMarkup_ShowsItAsText(self):
+    def test_Chain_WithAReasonThatIsMarkup_ShowsItAsText(self):
         text = summary(
             with_snapshot(push("2026-10-02T21:30:05.000Z"), False, "<script>x</script>")
         )
@@ -312,16 +341,21 @@ class TestTheSnapshotLineSaysWhetherAFreshDownloadStartsFromNow:
         assert "&lt;script&gt;x&lt;/script&gt;" in text
         assert "<script>" not in text
 
-    def test_Summary_NamesNoAmountAndNoBalance(self):
+    def test_Chain_NamesNoAmountAndNoBalance(self):
         text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), False, "network")).lower()
 
         assert "amount" not in text
         assert "balance" not in text
 
-    def test_Summary_PutsTheSnapshotLineBesideTheMarkerLines(self):
+    def test_Chain_PutsTheSnapshotStepAfterTheMarkerSteps(self):
         text = summary(with_snapshot(push("2026-10-02T21:30:05.000Z"), True))
 
-        assert text.index("marker written") < text.index("snapshot refreshed") < text.index(PURPOSE)
+        assert (
+            text.index("Marker written")
+            < text.index("Server has the marker")
+            < text.index("Snapshot refreshed")
+            < text.index(PURPOSE)
+        )
 
     def test_Page_SaysTheMarkerButtonIsAlsoTheOnDemandWayToRefreshTheSnapshot(self):
         rendered = web._actual_rows(lambda: [], True, marker_available=True)
@@ -485,7 +519,7 @@ class TestTheButtonAndTheRoute:
 
         assert "/marker-actual" not in page
 
-    def test_Page_PutsTheMarkerLinesAboveTheButtons(self, serve):
+    def test_Page_PutsTheMarkerStepsAfterTheButtonsThatActOnThem(self, serve):
         base = serve(
             [push("2026-10-02T20:41:09.000Z")],
             push_actual=lambda: "q",
@@ -494,8 +528,8 @@ class TestTheButtonAndTheRoute:
 
         page = httpx.get(f"{base}/actual", timeout=20).text
 
-        assert page.index("marker written") < page.index("Push to Actual now")
-        assert page.index("marker written") < page.index("Write a sync marker now")
+        assert page.index("Push to Actual now") < page.index("Marker written")
+        assert page.index("Write a sync marker now") < page.index("Marker written")
 
     def test_Post_RunsTheHookOnceAndSaysItIsQueued(self, serve):
         calls: list[int] = []

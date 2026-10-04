@@ -128,6 +128,17 @@ class TestWhatThePressMayRemove:
         assert plan.confirmed == {"p": 0}
 
 
+#: A push that applied before the audits the tests serve (their audits finish on 1 October at
+#: 13:00), so the audit is the newer and its differences are what the verdict reports.
+EARLIER_PUSH: dict[str, object] = {
+    "ok": True,
+    "request": "push-x.json",
+    "finished_at": "2026-10-01T12:00:00Z",
+    "added": 1,
+    "provisioned": 0,
+}
+
+
 def with_differences(*extra: dict[str, object]) -> dict[str, object]:
     return audit(classed("p-id", "Personal (starling)", history=92, unknown=15), *extra)
 
@@ -162,7 +173,7 @@ class TestThePageOffersOnePress:
     def test_Page_AfterAnAuditThatFoundDifferences_OffersOnePressSayingWhatItDoesInOrder(
         self, serve  # noqa: F811
     ):
-        base = serve([with_differences()], align_actual=AlignCalls())
+        base = serve([EARLIER_PUSH, with_differences()], align_actual=AlignCalls())
 
         form = align_form(page_of(base))
 
@@ -183,7 +194,7 @@ class TestThePageOffersOnePress:
             classed("p-id", "Personal (starling)", history=50, unknown=100),
             classed("q-id", "Joint", history=4, elsewhere=1, present=60),
         )
-        base = serve([audited], align_actual=AlignCalls())
+        base = serve([EARLIER_PUSH, audited], align_actual=AlignCalls())
 
         form = align_form(page_of(base))
 
@@ -193,7 +204,7 @@ class TestThePageOffersOnePress:
 
     def test_Page_WhenAnAccountCannotBeJudged_SaysItIsLeftOut(self, serve):  # noqa: F811
         audited = audit(ordinary("a", "Alpha", present=900, orphaned=150))
-        base = serve([audited], align_actual=AlignCalls())
+        base = serve([EARLIER_PUSH, audited], align_actual=AlignCalls())
 
         form = align_form(page_of(base))
 
@@ -221,12 +232,28 @@ class TestThePageOffersOnePress:
         assert "/align-actual" not in page
 
     def test_Page_ShowsCountsOnlyAndReadsAtPhoneWidth(self, serve):  # noqa: F811
-        page = page_of(serve([with_differences()], align_actual=AlignCalls()))
+        page = page_of(serve([EARLIER_PUSH, with_differences()], align_actual=AlignCalls()))
         form = align_form(page)
 
         assert "£" not in page
         assert "amount" not in form.lower()
-        assert "width:100%" in form
+        assert 'class="button' in form, "a control the stylesheet sizes for a thumb"
+
+    def test_Page_WhenAPushFollowedTheAudit_OffersNoPressUntilTheNextAudit(self, serve):  # noqa: F811
+        later_push = {**EARLIER_PUSH, "finished_at": "2026-10-01T14:00:00Z"}
+
+        page = page_of(serve([with_differences(), later_push], align_actual=AlignCalls()))
+
+        assert "/align-actual" not in page
+
+    def test_Page_WhenTheAuditDiffered_PutsThePressBesideTheVerdictAsTheFilledButton(
+        self, serve  # noqa: F811
+    ):
+        page = page_of(serve([EARLIER_PUSH, with_differences()], align_actual=AlignCalls()))
+
+        form = align_form(page)
+        assert page.index('data-state="differs"') < page.index(form)
+        assert '<button class="button" type="submit">Bring Actual into line' in form
 
 
 class TestThePostThatQueuesTheJob:

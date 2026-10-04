@@ -180,9 +180,7 @@ def counts_from_audit(audit: dict[str, object] | None) -> list[OrphanCount] | No
     return found
 
 
-def removal_split(
-    entry: dict[str, object], orphaned: int
-) -> tuple[int | None, dict[str, int]]:
+def removal_split(entry: dict[str, object], orphaned: int) -> tuple[int | None, dict[str, int]]:
     """The audit's will-go and will-stay counts, or (None, {}) unless both are
     present, whole, and add up to the orphaned count.
 
@@ -228,8 +226,7 @@ def explained_sentence(count: OrphanCount, lead: str = "of") -> str:
     if count.explained is None:
         return ""
     parts = ", ".join(
-        f"{number} {html.escape(EXPLAINED_CLASSES[key])}"
-        for key, number in count.explained.items()
+        f"{number} {html.escape(EXPLAINED_CLASSES[key])}" for key, number in count.explained.items()
     )
     return f"{lead} the {count.orphaned}: {parts}"
 
@@ -263,10 +260,7 @@ def high_reasons(count: OrphanCount) -> list[str]:
             "binding usually leaves"
         )
     imported = count.present + count.orphaned
-    if (
-        unexplained >= DYNAMIC_FLOOR_ROWS
-        and unexplained * DYNAMIC_SHARE_DENOMINATOR >= imported
-    ):
+    if unexplained >= DYNAMIC_FLOOR_ROWS and unexplained * DYNAMIC_SHARE_DENOMINATOR >= imported:
         reasons.append(
             f"it would remove {counted} of the {imported} obdi has "
             f"imported into {count.name}, which is at least a quarter of them"
@@ -471,17 +465,18 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
     )
 
 
-_NEUTRAL_BUTTON = (
-    '<p><button class="button secondary" type="submit" '
-    'style="width:100%;font-size:inherit;cursor:pointer">{label}</button></p>'
-)
+_NEUTRAL_BUTTON = '<button class="button secondary" type="submit">{label}</button>'
+
+_PRIMARY_BUTTON = '<button class="button" type="submit">{label}</button>'
 
 
-def align_section(counts: list[OrphanCount]) -> str:
+def align_section(counts: list[OrphanCount], *, primary: bool = False) -> str:
     """The one press that brings Actual into line, with what it will and will not remove.
 
     Counts and account names only. What it may remove is `align_plan`'s, and the post is
     judged again against the newest audit, so nothing here is read back from the browser.
+    The long account of its steps is behind a disclosure, since the remedy sits beside the
+    verdict; the button is the page's filled one only where the verdict names this press.
     """
     plan = align_plan(counts)
     notes = ""
@@ -502,23 +497,23 @@ def align_section(counts: list[OrphanCount]) -> str:
             "are no longer expected, and there are too many to remove unchecked, so this "
             "press leaves that account out. Run the audit again with the current applier.</p>"
         )
+    button = (_PRIMARY_BUTTON if primary else _NEUTRAL_BUTTON).format(
+        label="Bring Actual into line"
+    )
     return (
-        '<form method="post" action="/align-actual" '
-        'class="box">'
-        "<p><strong>Bring Actual into line</strong></p>"
-        '<p class="muted">One press, run in the applier in this order, that stops at the '
+        '<form method="post" action="/align-actual" class="remedy">'
+        "<details><summary>What bringing Actual into line does</summary>"
+        "<p>One press, run in the applier in this order, that stops at the "
         "first step that fails and says which: push (which re-links transfers whose partner "
         "changed), audit, remove up to "
         f"{_rows(plan.removable)} from among the orphans the audit counted (the ones obdi can "
         "explain, and any it cannot while the count stays under the large-removal check), "
-        "push again if the removal unlinked anything, audit again.</p>"
+        "push again if the removal unlinked anything, audit again.</p></details>"
         + notes
         + '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand rows carrying obdi's imported ids that are no longer expected, and "
-        "that obdi can explain, will be deleted from Actual</label>"
-        + _NEUTRAL_BUTTON.format(label="Bring Actual into line")
-        + "</form>"
+        "that obdi can explain, will be deleted from Actual</label>" + button + "</form>"
     )
 
 
@@ -564,7 +559,7 @@ def _needs_second_tick(reasons: list[str]) -> PruneRefused:
         "Check the count",
         "<p>This is an unexpectedly large removal, so nothing was queued:</p>"
         f"<ul>{items}</ul>"
-        f"<p>Tick \"{SECOND_TICK_LABEL}\" as well as the first box, and press "
+        f'<p>Tick "{SECOND_TICK_LABEL}" as well as the first box, and press '
         "the button again.</p>",
     )
 
@@ -642,9 +637,7 @@ def _check_general(
             )
         posted[account_id] = count
     shown = (
-        {c.account_id: c.orphaned for c in ordinary_orphans(counts)}
-        if counts is not None
-        else {}
+        {c.account_id: c.orphaned for c in ordinary_orphans(counts)} if counts is not None else {}
     )
     if posted != shown:
         raise _stale()

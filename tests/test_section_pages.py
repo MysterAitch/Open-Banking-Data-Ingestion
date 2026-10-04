@@ -200,7 +200,9 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
 
         assert fragment in page
         assert current_section(page) == [section]
-        assert page.index('<p class="lede">') < page.index(fragment)
+        # The Actual page opens with its verdict, which is what the lede is for elsewhere.
+        opening = 'id="verdict"' if path == "/actual" else '<p class="lede">'
+        assert page.index(opening) < page.index(fragment)
 
     def test_CoveragePage_SaysInOneSentenceHowItDiffersFromTheAccountCards(self, serve):
         page = fetch(serve(holdings=coverage_rows), "/coverage")
@@ -476,16 +478,18 @@ class TestActualLeadsWithTheTwoLineSummaryAndPrintsNoAmount:
             "/actual",
         )
 
-        assert "The last push was applied 2026-10-01 12:00Z" in page
+        assert "2026-10-01 12:00</span> - The last push was applied." in page
         assert "found differences in 1 of 2 accounts" in page
-        assert page.index("The last push was applied") < page.index('action="/push-actual"')
-        assert page.index("found differences in 1 of 2 accounts") < page.index("Per-account detail")
+        assert page.index('id="verdict"') < page.index('action="/push-actual"')
+        assert page.index("found differences in 1 of 2 accounts") < page.index(
+            "<summary>1 account agrees</summary>"
+        )
 
-    def test_EachAuditsPerAccountDetail_IsBehindADisclosure(self, serve):
+    def test_AccountsThatAgree_AreBehindADisclosureAndThoseThatDifferAreNot(self, serve):
         page = fetch(serve(push_actual=lambda: "q", actual_status=results), "/actual")
 
         assert inside_details(page, "Alpha Current: agrees")
-        assert inside_details(page, "Beta Savings: differs")
+        assert not inside_details(page, "Beta Savings</h4>")
         assert not inside_details(page, "audit: differences</span>")
 
     def test_Page_PrintsNoAmountNorTheFiguresBehindABalanceVerdict(self, serve):
@@ -505,12 +509,13 @@ class TestActualLeadsWithTheTwoLineSummaryAndPrintsNoAmount:
 
         page = fetch(serve(push_actual=lambda: "q", actual_status=lambda: history), "/actual")
 
-        assert "The newest push failed 2026-10-02 09:00Z" in page
-        assert "The last push that applied was 2026-10-01 12:00Z" in page
+        assert "The newest push failed: boom." in page
+        assert "The last push that applied was 2026-10-01 12:00." in page
 
     def test_Summary_WithNothingRecorded_SaysSoForBoth(self, serve):
         page = fetch(serve(push_actual=lambda: "q", actual_status=lambda: []), "/actual")
 
+        assert "Nothing has been pushed yet" in page
         assert "No push has been recorded." in page
         assert "No audit has been run." in page
 

@@ -166,7 +166,7 @@ class TestAuditBalanceAndPairs:
         )
 
         assert "balance agrees" in rendered
-        assert "transfers linked 3 of 3 pair(s)" in rendered
+        assert "transfers linked 3 of 3 pairs" in rendered
         for figure in ("123456", "1234.56", "654321", "6543.21", "2955", "29.55", "£"):
             assert figure not in rendered, f"{figure} reached the page"
 
@@ -188,7 +188,7 @@ class TestAuditBalanceAndPairs:
 
         rendered = web._actual_rows(lambda: [data], True)
 
-        assert "transfers linked 2 of 3 pair(s)" in rendered
+        assert "transfers linked 2 of 3 pairs" in rendered
         assert "audit: differences" in rendered
 
     def test_AuditRow_WhenEverythingAgreesAndEveryPairIsLinked_ReadsClean(self):
@@ -423,7 +423,7 @@ class TestSyncHistoryCompleteness:
             "/actual-history",
         )
 
-        assert "showing 3 of 205 result(s)" in page
+        assert "showing 3 of 205 results" in page
 
     def test_HistoryPage_WhenAResultFileIsUnreadable_NamesItRatherThanSkippingQuietly(
         self, tmp_path
@@ -440,7 +440,7 @@ class TestSyncHistoryCompleteness:
             "/actual-history",
         )
 
-        assert "1 result file(s) could not be read" in page
+        assert "1 result file could not be read" in page
         assert "push-20260809T090000000000.json" in page
 
     def test_HistoryPage_WhenTheHookCannotCount_DoesNotClaimToBeComplete(
@@ -452,7 +452,7 @@ class TestSyncHistoryCompleteness:
         )
 
         assert "Every recorded outcome" not in page
-        assert "12 result(s)" in page
+        assert "12 results" in page
         assert "reports no total" in page
 
     def test_HistoryPage_WithNothingRecordedAtAll_SaysSo(self, tmp_path):

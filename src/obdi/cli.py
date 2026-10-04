@@ -2744,12 +2744,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return rows
 
     def actual_status() -> list[dict[str, object]]:
-        from .actual_push import latest_results
+        from .actual_push import VERDICT_WINDOW, latest_results
 
         # Read here as well as at the doors: the page that shows an emptied
         # budget's result must already have forgotten its links.
         settle_emptied_budgets_for(db_path)
-        return latest_results(_actual_dir(db_path))
+        return latest_results(_actual_dir(db_path), VERDICT_WINDOW)
 
     def audit_actual_hook() -> str:
         return queue_actual_audit(db_path)

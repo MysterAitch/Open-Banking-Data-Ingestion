@@ -175,12 +175,17 @@ def queued(kind: str = "push", *, minutes: float = 99, running: bool = False) ->
 
 MARKER = "04 Oct 10:31Z obdi marker"
 
+ROSTER: list[dict[str, object]] = [
+    {"ref": f"bank:{n:02d}", "label": name, "state": "syncing", "count": 80 + n * 31}
+    for n, name in enumerate(ACCOUNT_NAMES)
+]
+
 #: What a person sees, as the page's own arguments: results, the queue, the applier's last
 #: heartbeat (None for never), and whether Actual is configured.
 STATES: dict[str, dict[str, object]] = {
     "agrees": {
         "results": [
-            push(92, marker_name=MARKER),
+            push(60, marker_name=MARKER),
             audit(85, marker_names=(MARKER,)),
         ],
     },
@@ -212,3 +217,28 @@ STATES: dict[str, dict[str, object]] = {
     "nothing_pushed": {"results": []},
     "not_configured": {"results": [], "configured": False},
 }
+
+
+def render_state(name: str) -> str:
+    """The whole Actual page for one of the states, every press wired, at the story's end."""
+    from obdi.web_sections import render_actual
+
+    state = STATES[name]
+    results = state["results"]
+    queue = state.get("queue", [])
+    heartbeat = str(state.get("heartbeat", ""))
+    configured = bool(state.get("configured", True))
+    return render_actual(
+        push_actual=lambda: "queued",
+        audit_actual=lambda: "queued",
+        marker_actual=lambda: "queued",
+        align_actual=lambda **_: "queued",
+        prune_actual=lambda *_, **__: "queued",
+        empty_actual=lambda *_, **__: "queued",
+        actual_status=lambda: results,  # type: ignore[arg-type,return-value]
+        actual_roster=lambda: ROSTER,
+        actual_queue=lambda: queue,  # type: ignore[arg-type,return-value]
+        actual_heartbeat=lambda: heartbeat,
+        actual_configured=lambda: configured,
+        now=NOW,
+    ).decode()

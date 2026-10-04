@@ -797,6 +797,14 @@ def expand_align(result: dict[str, object]) -> list[dict[str, object]]:
     return expanded
 
 
+#: How many results the page reads to say whether Actual agrees. The verdict needs the newest
+#: push that applied AND the newest audit, and a handful of audits (or the steps of one
+#: alignment, each its own result) pushes the push out of a window of five, which then
+#: reads as "nothing has been pushed yet". The files are all read either way; this only
+#: decides how many are kept.
+VERDICT_WINDOW = 40
+
+
 def latest_results(actual_dir: Path, limit: int = 5) -> list[dict[str, object]]:
     """Newest first BY FINISH TIME, never by filename: audit- sorts before
     push- alphabetically, and ranking on names buried the first real audit

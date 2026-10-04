@@ -73,7 +73,7 @@ class TestProgressOnThePage:
         page = _page(_applier_dir(tmp_path, beat_age=timedelta(seconds=20), progress=REMOVING))
 
         assert "obdi-applier" not in page
-        assert "warn" not in page
+        assert 'class="warn"' not in page
 
     def test_LinkingInProgress_WithRecentHeartbeat_SaysHowManyPairsAreDone(self, tmp_path):
         page = _page(

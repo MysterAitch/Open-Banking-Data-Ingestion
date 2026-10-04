@@ -12,6 +12,7 @@ Names and times only. This is part of a GET, and a GET shows no monetary value.
 from __future__ import annotations
 
 import html
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 #: Result kinds that write the marker. An audit only reads it, and a prune
@@ -26,6 +27,27 @@ PURPOSE = (
     "received the newest changes."
 )
 
+#: The states a step of the sync can be in, one word each, as the page says them.
+DONE = "done"
+NOT_YET = "not yet"
+STALE = "stale"
+FAILED = "failed"
+DIFFERS = "differs"
+
+
+@dataclass(frozen=True)
+class ChainStep:
+    """One step of the sync as the page shows it: what it is, how it stands, when, and why.
+
+    `detail` is markup, already escaped. `state` is one of the words above, and `when` is
+    the time the step's evidence is from, in the page's one format, or empty.
+    """
+
+    name: str
+    state: str
+    when: str
+    detail: str
+
 
 def _moment(value: object) -> datetime | None:
     if not isinstance(value, str):
@@ -37,8 +59,8 @@ def _moment(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _stamp(result: dict[str, object]) -> str:
-    return html.escape(str(result.get("finished_at", ""))[:16].replace("T", " ")) + "Z"
+def _when(value: object) -> str:
+    return html.escape(str(value or "")[:16].replace("T", " "))
 
 
 def _kind(result: dict[str, object]) -> str:
@@ -87,40 +109,47 @@ def _bold(name: str) -> str:
     return f"<strong>{html.escape(name)}</strong>"
 
 
-def marker_lines(results: list[dict[str, object]]) -> str:
-    """Two status paragraphs and the sentence saying what the marker is for."""
+def marker_steps(results: list[dict[str, object]]) -> tuple[ChainStep, ChainStep, ChainStep]:
+    """The three steps the marker and the snapshot account for: the marker written, the
+    server having it, and the snapshot refreshed."""
     write = _newest_write(results)
     written = _written_name(write) if write is not None else None
     if write is None or written is None:
-        first = (
-            '<p><span class="pill pill-quiet">no marker yet</span> No sync '
-            "marker write appears in the recent results.</p>"
+        first = ChainStep(
+            "Marker written",
+            NOT_YET,
+            "",
+            "No sync marker write appears in the recent results.",
         )
     else:
-        first = (
-            f'<p><span class="pill pill-ok">marker written</span> obdi last wrote '
-            f"the sync marker {_bold(written)} (finished {_stamp(write)}).</p>"
+        first = ChainStep(
+            "Marker written",
+            DONE,
+            _when(write.get("finished_at")),
+            f"obdi last wrote the sync marker {_bold(written)}.",
         )
+    return first, _server_step(results, write, written), snapshot_step(results)
 
+
+def _server_step(
+    results: list[dict[str, object]], write: dict[str, object] | None, written: str | None
+) -> ChainStep:
+    name = "Server has the marker"
     audit = _newest_audit(results)
     if audit is None:
-        second = (
-            '<p><span class="pill pill-quiet">server unchecked</span> No '
-            "successful audit has looked for the marker on the server yet.</p>"
+        return ChainStep(
+            name, NOT_YET, "", "No successful audit has looked for the marker on the server yet."
         )
-    else:
-        found = _found_names(audit)
-        when = _stamp(audit)
-        if found is None:
-            second = (
-                '<p><span class="pill pill-quiet">server unchecked</span> The '
-                f"newest audit ({when}) did not report a marker; the applier "
-                "is older than this page.</p>"
-            )
-        else:
-            second = _found_line(audit, found, when, write, written)
-
-    return f"{first}{second}{snapshot_line(results)}" + f'<p class="muted">{PURPOSE}</p>'
+    found = _found_names(audit)
+    when = _when(audit.get("finished_at"))
+    if found is None:
+        return ChainStep(
+            name,
+            NOT_YET,
+            when,
+            "The newest audit did not report a marker; the applier is older than this page.",
+        )
+    return _found_step(name, audit, found, when, write, written)
 
 
 def _snapshot_of(result: dict[str, object]) -> dict[str, object] | None:
@@ -134,7 +163,7 @@ def _snapshot_of(result: dict[str, object]) -> dict[str, object] | None:
     return snapshot
 
 
-def snapshot_line(results: list[dict[str, object]]) -> str:
+def snapshot_step(results: list[dict[str, object]]) -> ChainStep:
     """Whether the server's stored copy of the budget was refreshed by the
     newest job that says so.
 
@@ -142,69 +171,69 @@ def snapshot_line(results: list[dict[str, object]]) -> str:
     it, applied in one go, and phones are reported to fail on a long backlog
     (applier/lib.mjs, refreshSnapshot, owns the mechanism and the evidence).
     """
+    name = "Snapshot refreshed"
     told = [(r, s) for r in results if (s := _snapshot_of(r)) is not None]
     if not told:
-        return (
-            '<p><span class="pill pill-quiet">snapshot unknown</span> No recent '
-            "result says whether the server snapshot was refreshed (they predate "
-            "this check).</p>"
+        return ChainStep(
+            name,
+            NOT_YET,
+            "",
+            "No recent result says whether the server snapshot was refreshed (they predate "
+            "this check).",
         )
     result, snapshot = max(told, key=lambda pair: str(pair[0].get("finished_at", "")))
     stamp = str(snapshot.get("at") or result.get("finished_at", ""))
-    when = html.escape(stamp[:16].replace("T", " "))
+    when = _when(stamp)
     if snapshot["refreshed"]:
-        return (
-            '<p><span class="pill pill-ok">snapshot refreshed</span> The '
-            f"server snapshot refreshed {when}Z, so a device downloading afresh "
-            "starts from that point.</p>"
-        )
+        return ChainStep(name, DONE, when, "A device downloading afresh starts from that point.")
     reason = html.escape(str(snapshot.get("error") or "no reason was given"))
-    return (
-        '<p><span class="pill pill-warn">snapshot not refreshed</span> The '
-        f"server snapshot was not refreshed ({when}Z): {reason}. A device "
+    return ChainStep(
+        name,
+        STALE,
+        when,
+        f"The server snapshot was not refreshed: {reason}. A device "
         "downloading afresh then replays every change since the old snapshot, "
-        "which phones can fail to finish. Writing a sync marker tries again.</p>"
+        "which phones can fail to finish. Writing a sync marker tries again.",
     )
 
 
-def _found_line(
+def _found_step(
+    name: str,
     audit: dict[str, object],
     found: list[str],
     when: str,
     write: dict[str, object] | None,
     written: str | None,
-) -> str:
+) -> ChainStep:
     seen = _bold(found[0]) if found else "no marker account"
     several = (
-        f" It found {len(found)} marker accounts; obdi renames the first and "
-        "leaves the rest."
+        f" It found {len(found)} marker accounts; obdi renames the first and leaves the rest."
         if len(found) > 1
         else ""
     )
     if write is None or written is None:
         verb = f"found {seen}" if found else "found no marker account"
-        return (
-            '<p><span class="pill pill-quiet">server checked</span> The newest '
-            f"audit ({when}) {verb} on the server.{several}</p>"
-        )
+        return ChainStep(name, NOT_YET, when, f"The newest audit {verb} on the server.{several}")
     audited, wrote = _moment(audit.get("finished_at")), _moment(write.get("finished_at"))
     if audited is None or wrote is None or audited < wrote:
-        return (
-            '<p><span class="pill pill-quiet">audit is older</span> The newest '
-            f"audit ({when}) ran before that marker was written, so it says "
-            "nothing about it. Audit again to see whether the server has it."
-            f"{several}</p>"
+        return ChainStep(
+            name,
+            STALE,
+            when,
+            "The newest audit ran before that marker was written, so it says nothing about "
+            f"it. Audit again to see whether the server has it.{several}",
         )
     if written in found:
-        return (
-            '<p><span class="pill pill-ok">server has it</span> The newest audit '
-            f"({when}) found that marker on the server.{several}</p>"
+        return ChainStep(
+            name, DONE, when, f"The newest audit found that marker on the server.{several}"
         )
     verb = f"found {seen}" if found else "found no marker account"
-    return (
-        '<p><span class="pill pill-bad">server is behind</span> The newest audit '
-        f"({when}) {verb} on the server, older than the one last written: the "
-        f"server itself is behind, not only a device.{several}</p>"
+    return ChainStep(
+        name,
+        FAILED,
+        when,
+        f"The newest audit {verb} on the server, older than the one last written: the "
+        f"server itself is behind, not only a device.{several}",
     )
 
 

@@ -137,7 +137,7 @@ def kind_of(result: Mapping[str, object]) -> str:
     return str(result.get("kind", "")) or "push"
 
 
-def _newest(
+def newest(
     results: Sequence[dict[str, object]], kind: str, *, ok: bool | None = None
 ) -> dict[str, object] | None:
     chosen = [
@@ -227,8 +227,8 @@ def _queue_verdict(
         return Verdict(
             State.REQUEST_RUNNING,
             "The applier is working on a request",
-            f"{kinds} {'is' if len(queue) == 1 else 'are'} queued or running; the applier last "
-            f"checked the queue at {applier_seen}.",
+            f"{_names_of_kinds(running)} {'is' if len(running) == 1 else 'are'} running; the "
+            f"applier last checked the queue at {applier_seen}.",
             Tone.WARN,
         )
     return Verdict(
@@ -275,10 +275,10 @@ def actual_verdict(
     if queued is not None:
         return queued
 
-    push = _newest(results, "push")
-    applied = _newest(results, "push", ok=True)
-    audit = _newest(results, "audit")
-    align = _newest(results, "align")
+    push = newest(results, "push")
+    applied = newest(results, "push", ok=True)
+    audit = newest(results, "audit")
+    align = newest(results, "align")
     applied_note = (
         f" The last push that applied was {when(applied.get('finished_at'))}."
         if applied is not None
@@ -330,7 +330,7 @@ def actual_verdict(
             Tone.BAD,
             Press.AUDIT,
         )
-    checked = _newest(results, "audit", ok=True)
+    checked = newest(results, "audit", ok=True)
     if checked is None or not _after(checked, applied):
         said = (
             f"The newest audit ({when(checked.get('finished_at'))}) ran before it, so it says "
