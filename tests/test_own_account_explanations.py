@@ -227,8 +227,8 @@ class TestWhatThePageAndTheChartShow:
         text = page(make(extra=[GHOST, PARKING], statement=STATEMENT_WITH_PARKING))
 
         assert (
-            "starling-statement-pdf lists a row of the same size and direction, 2 days away, "
-            "sighted on another stored row" in text
+            "starling-statement-pdf lists a row of the same size and direction, to a "
+            "different recipient, 2 days away, sighted on another stored row" in text
         )
 
     def test_Page_WhenNothingIsListedNearby_SaysTheStatementListsNoneWithinThirtyDays(self, make):

@@ -506,6 +506,18 @@ def _days_away(days: int) -> str:
     return "on the same day" if days == 0 else f"{_plural(days, 'day')} away"
 
 
+def _shape(found: Any) -> str:
+    """What the two rows share, said once: size, direction, and the recipient if compared.
+
+    Only whether the recipient agrees is said, never who it is.
+    """
+    if found.recipient == "agrees":
+        return "of the same size, direction, and recipient"
+    if found.recipient == "differs":
+        return "of the same size and direction, to a different recipient"
+    return "of the same size and direction (whose recipient could not be compared)"
+
+
 def _lookalike(found: Any) -> str:
     """The row on the other side of an export comparison that is like this one, or none.
 
@@ -517,7 +529,7 @@ def _lookalike(found: Any) -> str:
         if not found.found:
             return f"; {lister} lists no row of the same size and direction within thirty days"
         away = _days_away(found.days_away)
-        lead = f"; {lister} lists a row of the same size and direction, {away}"
+        lead = f"; {lister} lists a row {_shape(found)}, {away}"
         if found.sighted_on == "nothing":
             return f"{lead}, that no stored row carries"
         if found.sighted_on == "this row":
@@ -535,7 +547,7 @@ def _lookalike(found: Any) -> str:
     )
     other = _row_note(found.other) if found.other is not None else ""
     return (
-        f"; the store counts a row of the same size and direction, "
+        f"; the store counts a row {_shape(found)}, "
         f"{_days_away(found.days_away)}, {listing} ({other})"
     )
 

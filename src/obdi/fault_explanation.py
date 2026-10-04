@@ -88,6 +88,7 @@ from .export_parting import (
     first_parting,
 )
 from .family_anchors import CSV_SOURCE, ExportReading, ExportRow, held_exports
+from .identity import normalise_description
 from .masking import Structural
 from .models import Transaction, TransactionStatus
 from .round_up_accounts import (
@@ -213,6 +214,9 @@ class Lookalike:
     #: The source whose listing is compared, where it is not the export ("" for the export).
     #: A statement or a feed lists rows as an export does, so the comparison is the same.
     source: Structural[str] = ""
+    #: Whether the two rows name the same recipient (`_recipient_agreement`): "agrees",
+    #: "differs", or "unknown". Only that, never the recipient. "" where none was found.
+    recipient: Structural[str] = ""
 
 
 @dataclass(frozen=True)
@@ -752,27 +756,48 @@ def _csv_view(
         """What the export lists that is like a counted row it does not list."""
 
         def build() -> Lookalike:
-            found = _nearest(export_rows_by_figure.get(row.amount_minor, ()), day)
+            found = _nearest(
+                export_rows_by_figure.get(row.amount_minor, ()),
+                day,
+                lambda candidate: _recipient_rank(
+                    _recipient_agreement(row, evidence.by_entity.get(candidate[1] or ""))
+                ),
+            )
             if found is None:
                 return Lookalike("export", False)
             there, entity = found
             away = abs((there - day).days)
+            other = evidence.by_entity.get(entity) if entity is not None else None
+            recipient = _recipient_agreement(row, other)
             if entity is None:
-                return Lookalike("export", True, away, "nothing")
+                return Lookalike("export", True, away, "nothing", recipient=recipient)
             if entity == row.entity_id:
-                return Lookalike("export", True, away, "this row")
-            other = evidence.by_entity.get(entity)
+                return Lookalike("export", True, away, "this row", recipient=recipient)
             if other is None:
-                return Lookalike("export", True, away, "a row of another account")
-            return Lookalike("export", True, away, "another row", evidence.note(other)())
+                return Lookalike(
+                    "export", True, away, "a row of another account", recipient=recipient
+                )
+            return Lookalike(
+                "export", True, away, "another row", evidence.note(other)(), recipient=recipient
+            )
 
         return build
 
-    def store_twin(day: date, minor: int) -> Callable[[], Lookalike]:
-        """What the store counts that is like an export row it does not count."""
+    def store_twin(day: date, minor: int, mine: Transaction | None) -> Callable[[], Lookalike]:
+        """What the store counts that is like an export row it does not count.
+
+        `mine` is the stored row of that export row, where the store holds one, so the
+        recipients of the two can be compared; an export row no stored row carries has none.
+        """
 
         def build() -> Lookalike:
-            found = _nearest(counted_by_figure.get(minor, ()), day)
+            found = _nearest(
+                counted_by_figure.get(minor, ()),
+                day,
+                lambda candidate: _recipient_rank(
+                    _recipient_agreement(mine, evidence.by_entity[candidate[1]])
+                ),
+            )
             if found is None:
                 return Lookalike("store", False)
             there, entity = found
@@ -783,6 +808,7 @@ def _csv_view(
                 abs((there - day).days),
                 "listed" if entity in represented else "unlisted",
                 evidence.note(other)(),
+                recipient=_recipient_agreement(mine, other),
             )
 
         return build
@@ -816,7 +842,7 @@ def _csv_view(
                             row,
                             why=evidence.why_not_counted(row) or status.value,
                             figure_differs=amount != export_row.amount_minor,
-                            lookalike=store_twin(export_row.day, export_row.amount_minor),
+                            lookalike=store_twin(export_row.day, export_row.amount_minor, row),
                         ),
                     )
                 )
@@ -836,7 +862,7 @@ def _csv_view(
                 row.day,
                 row.amount_minor,
                 row.day,
-                _absent_note(source, row, store_twin(row.day, row.amount_minor)),
+                _absent_note(source, row, store_twin(row.day, row.amount_minor, None)),
             )
             for row in match.unheld
         )
@@ -933,14 +959,55 @@ def _parting(
     )
 
 
-def _nearest(candidates: Iterable[tuple[date, _T]], day: date) -> tuple[date, _T] | None:
-    """The candidate dated nearest `day` within `LOOKALIKE_DAYS`, the earlier on a tie."""
+def _nearest(
+    candidates: Iterable[tuple[date, _T]],
+    day: date,
+    rank: Callable[[tuple[date, _T]], int] | None = None,
+) -> tuple[date, _T] | None:
+    """The candidate dated nearest `day` within `LOOKALIKE_DAYS`, the earlier on a tie.
 
-    def distance(candidate: tuple[date, _T]) -> tuple[int, date]:
-        return abs((candidate[0] - day).days), candidate[0]
+    With a `rank`, a lower rank wins whatever the distance: a row whose recipient agrees
+    is preferred to a nearer one whose does not (`_recipient_rank`).
+    """
 
-    within = [candidate for candidate in candidates if distance(candidate)[0] <= LOOKALIKE_DAYS]
+    def distance(candidate: tuple[date, _T]) -> tuple[int, int, date]:
+        return (
+            0 if rank is None else rank(candidate),
+            abs((candidate[0] - day).days),
+            candidate[0],
+        )
+
+    within = [candidate for candidate in candidates if distance(candidate)[1] <= LOOKALIKE_DAYS]
     return min(within, key=distance, default=None)
+
+
+AGREES = "agrees"
+DIFFERS = "differs"
+UNKNOWN = "unknown"
+
+
+def _recipient_agreement(mine: Transaction | None, other: Transaction | None) -> str:
+    """Whether two stored rows name the same recipient: AGREES, DIFFERS, or UNKNOWN.
+
+    Said once, here. The notion of agreement is the one the matcher already has for text:
+    `identity.normalise_description`, which is what a row's content key hashes, so two
+    spellings the matcher would call one are one here. The matcher never compares
+    counterparties, only descriptions, and a description is a payment's reference as often
+    as its payee, so the recipient is the counterparty. It is compared only where BOTH
+    rows carry one: a row with none, and an export row no stored row carries, are UNKNOWN
+    and never DIFFERS, which would claim a comparison that was not made.
+    """
+    if mine is None or other is None:
+        return UNKNOWN
+    ours = normalise_description(mine.counterparty)
+    theirs = normalise_description(other.counterparty)
+    if not ours or not theirs:
+        return UNKNOWN
+    return AGREES if ours == theirs else DIFFERS
+
+
+def _recipient_rank(agreement: str) -> int:
+    return {AGREES: 0, UNKNOWN: 1, DIFFERS: 2}[agreement]
 
 
 def _foreign_note(
@@ -1004,36 +1071,51 @@ def _sighted_twins(
 
     def listed_like(row: Transaction, day: date) -> Callable[[], Lookalike]:
         def build() -> Lookalike:
-            found = _nearest(listed_by_figure.get(row.amount_minor, ()), day)
+            found = _nearest(
+                listed_by_figure.get(row.amount_minor, ()),
+                day,
+                lambda candidate: _recipient_rank(
+                    _recipient_agreement(row, evidence.by_entity.get(candidate[1]))
+                ),
+            )
             if found is None:
                 return Lookalike("export", False, source=source)
             there, entity = found
             other = evidence.by_entity.get(entity)
+            recipient = _recipient_agreement(row, other)
             if other is None:
                 return Lookalike(
                     "export", True, abs((there - day).days), "a row of another account",
-                    source=source,
+                    source=source, recipient=recipient,
                 )
             return Lookalike(
                 "export", True, abs((there - day).days), "another row",
-                evidence.note(other)(), source,
+                evidence.note(other)(), source, recipient,
             )
 
         return build
 
     def counted_like(row: Transaction, day: date) -> Callable[[], Lookalike]:
         def build() -> Lookalike:
-            found = _nearest(counted_by_figure.get(row.amount_minor, ()), day)
+            found = _nearest(
+                counted_by_figure.get(row.amount_minor, ()),
+                day,
+                lambda candidate: _recipient_rank(
+                    _recipient_agreement(row, evidence.by_entity[candidate[1]])
+                ),
+            )
             if found is None:
                 return Lookalike("store", False, source=source)
             there, entity = found
+            other = evidence.by_entity[entity]
             return Lookalike(
                 "store",
                 True,
                 abs((there - day).days),
                 "listed" if entity in sighted else "unlisted",
-                evidence.note(evidence.by_entity[entity])(),
+                evidence.note(other)(),
                 source,
+                _recipient_agreement(row, other),
             )
 
         return build

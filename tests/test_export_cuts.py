@@ -956,7 +956,10 @@ class TestWhatTheOtherSideHoldsThatIsLikeAMissingRow:
         assert mirror.other.sources == ("starling",)
         assert second.counted_not_listed.count == 2
         for ghost in second.counted_not_listed.named:
-            assert lookalike_of(ghost) == Lookalike("export", True, 3, "nothing")
+            # No stored row carries the export's row, so there is no recipient to compare.
+            assert lookalike_of(ghost) == Lookalike(
+                "export", True, 3, "nothing", recipient="unknown"
+            )
 
     def test_Change_WhenTheCountedRowOfThatSizeIsListedAsAnotherRow_SaysSo(self, make):
         store = make([*HEALTHY, Row("Garage Again", GARAGE.minor, 9, 9)])
@@ -982,8 +985,8 @@ class TestWhatTheOtherSideHoldsThatIsLikeAMissingRow:
         page = render(store)
 
         assert (
-            "the export lists a row of the same size and direction, 10 days away, sighted "
-            "on another stored row (out row dated"
+            "the export lists a row of the same size and direction (whose recipient could "
+            "not be compared), 10 days away, sighted on another stored row (out row dated"
         ) in page
         assert "1234" not in page
         assert "12.34" not in page
@@ -1010,8 +1013,8 @@ class TestWhatTheOtherSideHoldsThatIsLikeAMissingRow:
 
         assert "3 days away, that no stored row carries" in page
         assert (
-            "the store counts a row of the same size and direction, 3 days away, which the "
-            "export does not list (out row dated"
+            "the store counts a row of the same size and direction (whose recipient could not "
+            "be compared), 3 days away, which the export does not list (out row dated"
         ) in page
 
     def test_Lookalike_WhenTheNearestRowIsThirtyOneDaysAway_IsNotOffered(self):
