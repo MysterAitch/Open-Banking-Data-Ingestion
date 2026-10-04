@@ -4,27 +4,30 @@ Every scenario varies `round_up_corpus` (a main account and one Space, September
 2026, a Space-blind export that lists the payments at their own amounts and
 omits anything added here), and its answer is decided before the first run.
 
-WHAT THIS DOES NOT SETTLE. Whether a REVERSED feed item is money is a fact about
-the bank that no invented data can prove: the status is counted today, as every
-other non-history row is, and the scenarios below pin that reading so a change of
-it is a deliberate act. What they prove is that the page measures it: the
-arithmetic tests and the whole-account counts are what the next real page is
-read for.
+A REVERSED feed item is history, not money (`TransactionStatus.is_history`).
+The deployed page showed 92 reversed rows counted, none listed by the bank's own
+export and none with a counter-item, and the one that carried an amount was
+exactly the difference ("Leave the 1 reversed row out of the count and nothing
+is left to explain"). Whether the bank agrees is a fact no invented data can
+prove: what these scenarios prove is that the reading is applied everywhere and
+that the page still counts the rows it holds back.
 
 KNOWN ANSWERS (amounts in pence; the export omits each added row):
 
     a reversed 1200 payment, day 6, no counter-item
-        the stated balance exceeds the rows by 1200 from day 8 on, one change
-        1 counted row is reversed, the export lists 0 of them, 0 have a counter-item
+        every stated balance agrees: the row is in no sum and is not sent
+        it is still held, with its status, and the page says 1 is held as history,
+        the export lists 0 of them, 0 have a counter-item
     the same with a booked 1200 refund on day 7
-        the refund and the reversed payment cancel: no difference from them
-        1 counted row is reversed, 0 listed, 1 has a counter-item
+        the refund is money the export does not list: the stated balance is
+        below the rows by 1200 from day 8 on
+        1 reversed row is held as history, 0 listed, 1 has a counter-item
     a reversed 1200 payment with a 30 round-up that stays in the Space
-        the leg is confirmed paired; the difference is the payment alone, 1200
+        the leg is confirmed paired and is money; the payment is not: no difference
     the same, the Space returning the 30 as an OUT item the main account reports IN
-        two more pairs; the difference is still the payment alone, 1200
+        two more pairs; still no difference
     the same, the Space's OUT item with no main-side row
-        the Space's OUT leg is unpaired; the difference is 1200 + 30
+        the Space's OUT leg is unpaired; the difference is 30
     an incoming transfer in the Space with no main-side row, 710, day 9
         the stated balance is below the rows by 710 from day 10 on
         1 incoming Space leg has no partner, dated 2026-09-09
@@ -39,9 +42,17 @@ import pytest
 
 from obdi.balance_anchors import effective_opening
 from obdi.family_anchors import families_of
+from obdi.models import TransactionStatus
 from obdi.rebuild import rebuild_from_raw
+from obdi.replay import (
+    WITHHELD_REVERSED,
+    ActualAccountBinding,
+    build_payload,
+    withheld_reason,
+)
 from round_up_corpus import (
     card_payment,
+    counted,
     household_store,
     main_feed,
     round_up_of,
@@ -136,122 +147,120 @@ EIGHTH, TENTH = date(2026, 9, 8), date(2026, 9, 10)
 
 
 class TestAReversedPaymentTheExportOmits:
-    def test_StatedBalances_WhenAReversedPaymentIsNotInTheExport_DifferByItsAmountFromItsWindow(
-        self, make
-    ):
+    def test_StatedBalances_WhenAReversedPaymentIsNotInTheExport_EveryOneAgrees(self, make):
         store = make([parcel()])
 
-        assert differences(store) == {
-            EIGHTH: 1200,
-            date(2026, 9, 10): 1200,
-            date(2026, 9, 12): 1200,
-        }
-        assert len(walk_of(store).changes) == 1
+        assert differences(store) == {}
+        assert walk_of(store).changes == ()
 
-    def test_Page_WhenAReversedPaymentIsNotInTheExport_SaysTheChangeEqualsMinusTheReversedRows(
-        self, make
-    ):
-        page = render(make([parcel()]))
-
-        assert (
-            "The change equals minus the sum of the 1 reversed row the store counts in the window"
-            in page
+    def test_StatedBalances_WhenTheExportArrivesAfterTheFeeds_EveryOneStillAgrees(self, tmp_path):
+        store = household_store(
+            tmp_path, [*main_feed(), parcel()], space_feed(), export_last=True
         )
+        try:
+            assert rebuild_from_raw(store, account_map=MAP).problems == []
+            assert differences(store) == {}
+        finally:
+            store.close()
 
-    def test_Page_WhenAReversedPaymentIsNotInTheExport_SaysLeavingItOutExplainsTheChange(
-        self, make
-    ):
-        page = render(make([parcel()]))
+    def test_Row_WhenReversed_IsHeldWithItsStatusButIsNotMoney(self, make):
+        store = make([parcel()])
 
-        assert (
-            "Leave the 1 reversed row out of the count and nothing is left to explain"
-            in page
-        )
+        (held,) = [t for t in store.transactions_for_account(MAIN) if t.source_id == "f-parcel"]
+        assert (held.amount_minor, held.status) == (-1200, TransactionStatus.REVERSED)
+        assert held.status.is_history
+        assert held.entity_id not in {t.entity_id for t in counted(store, MAIN)}
+
+    def test_Push_WhenARowIsReversed_ItIsWithheldAndNotSent(self, make):
+        store = make([parcel()])
+        (held,) = [t for t in store.transactions_for_account(MAIN) if t.source_id == "f-parcel"]
+        bindings = [ActualAccountBinding(MAIN, "actual-main")]
+
+        assert withheld_reason(held, bound=True) == WITHHELD_REVERSED
+        sent = build_payload(store.transactions_for_account(MAIN), bindings)
+        assert all(row["amount"] != -1200 for row in sent["actual-main"])
 
     def test_Page_WhenAReversedPaymentHasNoCounterItem_CountsItAcrossTheWholeAccount(self, make):
-        page = render(make([parcel()]))
+        page = render(make([parcel()], [orphan_in_space()]))
 
         assert (
-            "1 counted row is reversed. The export lists 0 of them, and 0 have a "
+            "1 reversed row is held as history. The export lists 0 of them, and 0 have a "
             "counter-item, a row of the opposite direction and equal size within three days."
         ) in page
+        assert "counted row is reversed" not in page
 
-    def test_Page_WhenARowIsNamed_SaysWhichAccountItIsInAndThatItHasNoCounterItem(self, make):
-        page = render(make([parcel()]))
+    def test_Page_WhenAReversedPaymentIsHeld_NamesNoChangeAsItsDoing(self, make):
+        page = render(make([parcel()], [orphan_in_space()]))
 
-        assert "reversed; in the main account; no counter-item within three days" in page
+        assert "Leave the" not in page
+        assert "reversed row the store counts" not in page
 
-    def test_Page_WhenNoRowIsReversed_SaysNoReversedRowAcceptsTheChange(self, make):
+    def test_Page_WhenNoRowIsReversed_SaysNoneIsHeldAsHistory(self, make):
         page = render(make([], [orphan_in_space()]))
 
-        assert "0 counted rows are reversed." in page
-        assert "reversed row" not in page.replace("0 counted rows are reversed", "")
+        assert "0 reversed rows are held as history." in page
+        assert "reversed row" not in page.replace("0 reversed rows are held as history", "")
 
 
 class TestAReversedRowBesideAnotherCause:
-    def test_Page_WhenAReversedPaymentAndASurplusShareAWindow_SaysOnlyTheRemainderIsExplained(
+    def test_StatedBalances_WhenAReversedPaymentAndASurplusShareAWindow_OnlyTheSurplusDiffers(
         self, make
     ):
         store = make([parcel()], [orphan_in_space(day=7)])
 
-        assert differences(store)[EIGHTH] == 1200 - 710
-        page = render(store)
-        assert (
-            "Leave the 1 reversed row out of the count and the unlisted rows still counted "
-            "sum to what is left, exactly."
-        ) in page
-        assert "The change equals minus the sum of the 1 reversed row" not in page
+        assert differences(store)[EIGHTH] == -710
 
-    def test_Page_WhenAReversedRowIsMoneyIn_SaysTheChangeEqualsMinusItsSumToo(self, make):
+    def test_StatedBalances_WhenAReversedRowIsMoneyIn_ItIsNotMoneyEither(self, make):
         incoming = {**refund(), "feedItemUid": "f-incoming", "status": "REVERSED"}
         incoming["transactionTime"] = "2026-09-06T10:00:00.000Z"
         store = make([incoming])
 
-        assert differences(store)[EIGHTH] == -1200
-        page = render(store)
-        assert "The change equals minus the sum of the 1 reversed row the store counts" in page
-        assert "in row dated" in page
+        assert differences(store) == {}
 
 
 class TestAReversedPaymentWithACounterItem:
-    def test_StatedBalances_WhenARefundCancelsTheReversedPayment_TheyStillAgreeThroughIt(
-        self, make
-    ):
+    def test_StatedBalances_WhenARefundFollowsTheReversedPayment_OnlyTheRefundCounts(self, make):
         store = make([parcel(), refund()], [orphan_in_space()])
 
-        assert differences(store) == {TENTH: -710, date(2026, 9, 12): -710}
-        assert len(walk_of(store).changes) == 1
+        assert differences(store) == {
+            EIGHTH: -1200,
+            TENTH: -1910,
+            date(2026, 9, 12): -1910,
+        }
 
-    def test_Page_WhenARefundCancelsTheReversedPayment_CountsTheCounterItem(self, make):
+    def test_Page_WhenARefundFollowsTheReversedPayment_CountsTheCounterItem(self, make):
         page = render(make([parcel(), refund()], [orphan_in_space()]))
 
-        assert "1 counted row is reversed. The export lists 0 of them, and 1 has a " in page
+        assert "1 reversed row is held as history. The export lists 0 of them, and 1 has a " in page
 
 
 class TestARoundUpOnAReversedPayment:
-    def test_Leg_WhenTheSpaceKeepsTheRoundUp_IsPairedAndTheDifferenceIsThePaymentAlone(self, make):
-        store = make([parcel(round_up=round_up_of(30))], [space_arrival("s-parcel", 30, 6)])
+    def test_Leg_WhenTheSpaceKeepsTheRoundUp_IsPairedAndIsMoneyWhileThePaymentIsNot(self, make):
+        store = make(
+            [parcel(round_up=round_up_of(30))],
+            [space_arrival("s-parcel", 30, 6), orphan_in_space()],
+        )
 
-        assert differences(store)[EIGHTH] == 1200
+        assert differences(store) == {TENTH: -710, date(2026, 9, 12): -710}
         assert counted_pairs(store) == 6
         page = render(store)
-        assert "a round-up leg, confirmed paired with the Space starling-space-bills" in page
         assert "No round-up leg is without a pair in a Space." in page
         assert (
-            "1 counted row is reversed. The export lists 0 of them, and 0 have a "
+            "1 reversed row is held as history. The export lists 0 of them, and 0 have a "
             "counter-item"
         ) in page
 
     def test_Legs_WhenTheSpaceReturnsTheRoundUpAndTheMainAccountReportsIt_AllPairUp(self, make):
         store = make(
             [parcel(round_up=round_up_of(30)), main_receipt("f-back", 30, 7)],
-            [space_arrival("s-parcel", 30, 6), space_return("s-back", 30, 7)],
+            [space_arrival("s-parcel", 30, 6), space_return("s-back", 30, 7), orphan_in_space()],
         )
 
-        assert differences(store)[EIGHTH] == 1200
+        assert differences(store) == {TENTH: -710, date(2026, 9, 12): -710}
         assert counted_pairs(store) == 7
         assert (
-            "1 counted row is reversed. The export lists 0 of them, and 0 have a counter-item"
+            "1 reversed row is held as history. The export lists 0 of them, and 0 have a "
+            "counter-item"
         ) in render(store)
 
     def test_Leg_WhenTheSpacesReturnHasNoMainSideRow_IsNamedAsAnUnpairedLegInTheSpace(self, make):
@@ -260,7 +269,7 @@ class TestARoundUpOnAReversedPayment:
             [space_arrival("s-parcel", 30, 6), space_return("s-back", 30, 7)],
         )
 
-        assert differences(store)[EIGHTH] == 1230
+        assert differences(store)[EIGHTH] == 30
         page = render(store)
         assert "a transfer leg with no pair; in the Space starling-space-bills" in page
 

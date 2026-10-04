@@ -279,7 +279,7 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
         '<div class="scroll"><table>'
         + rows
         + _count(
-            "Sum of the store's rows (void and folded excluded)",
+            "Sum of the store's rows (void, folded, and reversed excluded)",
             _signed(
                 _direction_word(summary.store_direction),
                 summary.store_direction,
@@ -563,22 +563,6 @@ def _hold_html(change: Any, hold: str) -> str:
             "a single counted row"
         )
         return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
-    if hold == "reversed-rows":
-        return (
-            f"<p>The change equals {'minus ' if change.reversed_negated else ''}the sum of the "
-            f"{_plural(change.reversed_rows.count, 'reversed row')} the store counts in the "
-            "window:</p>" + _row_list(change.reversed_rows)
-        )
-    if hold == "reversed-left-out":
-        left = (
-            "nothing is left to explain"
-            if change.reversed_left == "nil"
-            else "the unlisted rows still counted sum to what is left, exactly"
-        )
-        return (
-            f"<p>Leave the {_plural(change.reversed_rows.count, 'reversed row')} out of the "
-            f"count and {left}.</p>"
-        )
     if hold == "straddling":
         return (
             "<p>The change equals the sum of the "
@@ -610,17 +594,17 @@ def _hold_html(change: Any, hold: str) -> str:
 
 
 def _reversed_html(found: Any) -> str:
-    """How many counted rows are reversed, and what the export and the rows say of them.
+    """How many reversed rows are held as history, and what the export and the rows say of them.
 
     Said even when there are none: three counts, over the whole account, are
-    what says whether a reversed row is money.
+    what says whether the reading "a reversed row is not money" still holds.
     """
     sentence = (
-        f"{found.counted} counted row is reversed."
-        if found.counted == 1
-        else f"{found.counted} counted rows are reversed."
+        f"{found.held} reversed row is held as history."
+        if found.held == 1
+        else f"{found.held} reversed rows are held as history."
     )
-    if found.counted:
+    if found.held:
         sentence += (
             f" The export lists {found.listed} of them, and {found.counter_item} "
             f"{'has' if found.counter_item == 1 else 'have'} a counter-item, a row of the "
@@ -1193,7 +1177,7 @@ def _position_html(position: Any, *, bound: bool) -> str:
         "<h2>Running position</h2>"
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
-        + _count("Rows counted (void and folded excluded)", position.rows_counted)
+        + _count("Rows counted (void, folded, and reversed excluded)", position.rows_counted)
         + _count(
             "Balance by the store's own rows" + (", plus the opening balance" if included else ""),
             _signed(

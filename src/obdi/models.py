@@ -55,6 +55,12 @@ class SourceTier(StrEnum):
 class TransactionStatus(StrEnum):
     PENDING = "pending"
     BOOKED = "booked"
+    #: A payment the bank reversed, kept as history so it stays visible with its status.
+    #: The bank's own export lists none of them and none has a counter-item:
+    #: "92 counted rows are reversed. The export lists 0 of them, and 0 have a counter-item",
+    #: and the one that carried an amount was exactly the difference between the
+    #: stated balance and the rows. A round-up on a reversed payment is still a
+    #: booked leg of its own (`providers.starling.to_transactions`).
     REVERSED = "reversed"
     #: A pending row that vanished from the provider's complete pending set:
     #: either settled under another identity or released without settling.
@@ -72,7 +78,11 @@ class TransactionStatus(StrEnum):
     @property
     def is_history(self) -> bool:
         """History, not money: in no sum, no balance, and not sent to Actual."""
-        return self in (TransactionStatus.VOID, TransactionStatus.FOLDED)
+        return self in (
+            TransactionStatus.VOID,
+            TransactionStatus.FOLDED,
+            TransactionStatus.REVERSED,
+        )
 
 
 class MatchTier(StrEnum):

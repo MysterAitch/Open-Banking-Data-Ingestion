@@ -68,6 +68,14 @@ READING_THRESHOLD = 0.9
 #: the step is then counted as unexplained rather than guessed at.
 _MAX_UNCERTAIN_LEGS = 12
 
+#: Statuses whose rows are in no booked balance a source states.
+#: Folded rows are not here: a Space copy is still a sighting the source lists.
+_NOT_IN_A_BOOKED_BALANCE = (
+    TransactionStatus.VOID,
+    TransactionStatus.PENDING,
+    TransactionStatus.REVERSED,
+)
+
 WHOLE = "whole"
 MAIN = "main"
 BOTH = "both"
@@ -194,7 +202,7 @@ def _held(store: Store, main: str, sources: Iterable[str]) -> _Held:
     folded: dict[str, list[tuple[date, int]]] = {s: [] for s in wanted}
     legs: dict[str, list[tuple[date, int]]] = {s: [] for s in wanted}
     for entity, (amount, status, value_date, internal, space_folded) in facts.items():
-        if status in (TransactionStatus.VOID, TransactionStatus.PENDING):
+        if status in _NOT_IN_A_BOOKED_BALANCE:
             continue
         for source in wanted:
             if source in sighted[entity]:

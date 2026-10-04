@@ -243,6 +243,7 @@ WITHHELD_FOLDED = (
     "a copy of a payment held under a Space, or the same money a statement itemises"
 )
 WITHHELD_UNBOUND = "no Actual binding"
+WITHHELD_REVERSED = "reversed by the bank"
 
 
 def withheld_reason(transaction: Transaction, *, bound: bool) -> str | None:
@@ -267,6 +268,8 @@ def withheld_reason(transaction: Transaction, *, bound: bool) -> str | None:
     # budget once.
     if transaction.status is TransactionStatus.FOLDED:
         return WITHHELD_FOLDED
+    if transaction.status is TransactionStatus.REVERSED:
+        return WITHHELD_REVERSED
     if not bound:
         return WITHHELD_UNBOUND
     return None

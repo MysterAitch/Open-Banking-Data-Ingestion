@@ -566,7 +566,7 @@ def running_balance(
 ) -> int:
     """The balance by the store's own rows: the opening plus every row that is money.
 
-    A void or folded row is history and is never counted.
+    A void, folded, or reversed row is history and is never counted.
 
     Rows are counted when dated on or before `through` (all of them when None).
     The ledger's running position and the position page both call this, so the

@@ -14,8 +14,8 @@ KNOWN ANSWERS (amounts in pence, the export omits each added row; the household
 alone has five confirmed pairs):
 
     a reversed 1200 card payment, direction IN, a 30 round-up, arriving in the Space, day 6
-        the row is counted as it is today: the stated balances differ from the
-        rows by the reversed row alone, 1200, from day 8 on
+        the row is held as history, not counted: the stated balances agree with
+        the rows, which hold the 30 leg alone
         the main account holds a booked OUT leg of 30, paired with the arrival: six pairs
         no round-up leg is without a pair
     a declined 500 card payment with a 30 round-up, arriving in the Space, day 6
@@ -23,7 +23,7 @@ alone has five confirmed pairs):
         the stated balances agree with the rows at every statement
     a reversed 1200 payment, IN, whose 30 round-up never arrived
         the leg exists and is unpaired, counted as on a reversed or dropped payment
-        the stated balances differ by 1200 - 30 = 1170: the honest state
+        the stated balances differ by the leg alone, 30: the honest state
         the page says no Space arrival of that size lies within three days
     two reversed payments of the same day each with a 30 round-up and ONE arrival
         one leg pairs and one does not
@@ -126,23 +126,19 @@ class TestARoundUpOfAReversedPayment:
         assert leg.source_id == "f-parcel:round-up"
         assert len(store.confirmed_transfer_pairs()) == 6
 
-    def test_StatedBalances_WhenTheReversedPaymentIsMoneyIn_DifferByTheReversedRowAlone(self, make):
+    def test_StatedBalances_WhenTheReversedPaymentIsMoneyIn_TheyAgreeWithTheLegAlone(self, make):
         store = make([parcel()], [space_arrival("s-parcel", 30, 6)])
 
-        assert differences(store) == {
-            EIGHTH: -1200,
-            date(2026, 9, 10): -1200,
-            date(2026, 9, 12): -1200,
-        }
+        assert differences(store) == {}
 
-    def test_ReversedRow_WhenItsRoundUpHasALeg_IsStillCountedAsReversedAtItsOwnAmount(self, make):
-        store = make([parcel()], [space_arrival("s-parcel", 30, 6)])
+    def test_ReversedRow_WhenItsRoundUpHasALeg_IsHeldAsHistoryAtItsOwnAmount(self, make):
+        store = make([parcel()], [space_arrival("s-parcel", 30, 6), space_arrival("s-x", 710, 9)])
 
         rows = [
             t for t in store.transactions_for_account(MAIN) if t.source_id == "f-parcel"
         ]
         assert [(t.amount_minor, t.status) for t in rows] == [(1200, TransactionStatus.REVERSED)]
-        assert "1 counted row is reversed." in render(store)
+        assert "1 reversed row is held as history." in render(store)
 
     def test_Page_WhenTheReversedPaymentsRoundUpArrived_SaysNoLegIsWithoutAPair(self, make):
         page = render(make([parcel()], [space_arrival("s-parcel", 30, 6)]))
@@ -212,7 +208,7 @@ class TestARoundUpThatDidNotArrive:
         gaps = walk_of(store).round_up_gaps
         assert (gaps.unpaired_legs, gaps.unpaired_on_reversed) == (1, 1)
         assert gaps.unpaired_to_unheld_space == gaps.unpaired_other == 0
-        assert differences(store)[EIGHTH] == -1170
+        assert differences(store)[EIGHTH] == 30
 
     def test_Leg_WhenADeclinedPaymentsRoundUpNeverArrived_IsCountedAsOnAReversedPayment(
         self, make

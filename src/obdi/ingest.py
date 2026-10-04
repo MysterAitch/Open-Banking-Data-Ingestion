@@ -288,9 +288,12 @@ def pair_transfers_across_store(store: Store) -> int:
     here, so the number means "pairs found" rather than "flags written".
     """
     # A folded row is a second report of a payment, not a movement, so it must
-    # not be offered as the leg of a transfer.
+    # not be offered as the leg of a transfer, and nor can a reversed one: the
+    # money never moved, so the other side has nothing to pair with.
     pairs = pair_transfer_entities(
-        t for t in store.all_transactions() if t.status is not TransactionStatus.FOLDED
+        t
+        for t in store.all_transactions()
+        if t.status not in (TransactionStatus.FOLDED, TransactionStatus.REVERSED)
     )
     store.replace_transfer_pairs(pairs)
     store.connection.commit()

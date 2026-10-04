@@ -59,7 +59,7 @@ SETTLED_CLASSES: tuple[FlagClass, ...] = (
 ROW_GONE_LABEL = "(row gone)"
 NO_NEIGHBOUR_LABEL = "(none)"
 
-_HISTORY_STATUSES = (TransactionStatus.VOID.value, TransactionStatus.FOLDED.value)
+_HISTORY_STATUSES = tuple(s.value for s in TransactionStatus if s.is_history)
 
 
 @dataclass(frozen=True)

@@ -50,8 +50,9 @@ RUNNING_BALANCE_SOURCE = "truelayer"
 
 #: Statuses whose rows are never part of a booked running balance.
 #: A pending row is not in the bank's booked balance and moves date when it
-#: settles, and a void or folded row is history kept for audit.
-_UNBOOKED = ("pending", "void", "folded")
+#: settles, and a void, folded, or reversed row is history kept for audit
+#: (`TransactionStatus.is_history`).
+_UNBOOKED = ("pending", "void", "folded", "reversed")
 
 
 @dataclass(frozen=True)
