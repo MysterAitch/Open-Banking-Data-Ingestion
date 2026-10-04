@@ -52,12 +52,19 @@ from .matching import EXACT_RULE_DOUBT
 from .models import SourceTier, TransactionStatus
 from .payment_links import AGGREGATORS
 from .review_report import (
+    GAP_AFTER,
+    GAP_BEFORE,
+    BalanceGap,
     FlagClass,
     assess_flags,
     live_neighbours,
     neighbour_proof,
 )
 from .store import Store
+
+#: The `Evidence.verdict` of a line that says what would settle a flag rather than which way the
+#: evidence points.
+VERDICT_SETTLE = "settle"
 
 KIND_TWO = "flag-two-payments"
 KIND_JOINED = "flag-joined"
@@ -105,7 +112,8 @@ class RowView:
 
 @dataclass(frozen=True)
 class Evidence:
-    #: "two" or "one": which answer the sentence points to.
+    #: "two" or "one": which answer the sentence points to. "settle" is no answer: it says what
+    #: evidence not yet held would settle the question (`settle_evidence`).
     verdict: Structural[str]
     sentence: Structural[str]
 
@@ -232,6 +240,22 @@ def evidence_for(
                 )
             )
     return tuple(found)
+
+
+def settle_evidence(gap: BalanceGap | None) -> tuple[Evidence, ...]:
+    """The known balance whose absence stopped the balance proof, as one line of dates and no
+    figure, or nothing where the proof was not tried or was tried and the balances disagreed.
+    What the proof needs is on `review_report.FlagClass.BALANCES_NEED_BOTH`."""
+    if gap is None:
+        return ()
+    day = gap.day.isoformat()
+    if gap.kind == GAP_BEFORE:
+        said = f"No known balance before {day}: a statement covering it would settle this."
+    elif gap.kind == GAP_AFTER:
+        said = f"No known balance after {day} yet: the next statement will settle this."
+    else:
+        said = f"Only one known balance ({day}): an earlier statement would settle this."
+    return (Evidence(VERDICT_SETTLE, said),)
 
 
 _PROOF_SENTENCES = {
@@ -367,7 +391,10 @@ def build_queue(
                     row=row,
                     days_apart=apart,
                     proof="" if proof is None else _PROOF_SENTENCES[proof],
-                    says=evidence_for(f_sources, n_sources, together, f_ids, n_ids, apart),
+                    says=(
+                        *evidence_for(f_sources, n_sources, together, f_ids, n_ids, apart),
+                        *(() if proof is not None else settle_evidence(assessment.balance_gap)),
+                    ),
                 )
             )
         reason = str(flags[entity_id]["reason"])

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from .callback import render_page
 from .logs import say
 from .masking import Disclosed
-from .plural import plural
+from .plural import agree, plural
 from .review_flags import FlagQueue, FlagRefused, Outcome
 from .web_accounts import submit_button
 from .web_answers import AnswerPages
@@ -104,7 +104,10 @@ def _says(neighbour: Any, heading: str) -> str:
     if neighbour.proof:
         lines.append(f"<p><strong>Two payments.</strong> {_esc(neighbour.proof)}</p>")
     for item in neighbour.says:
-        word = "Points to two payments." if item.verdict == "two" else "Points to one payment."
+        word = {
+            "two": "Points to two payments.",
+            "settle": "What is missing.",
+        }.get(item.verdict, "Points to one payment.")
         lines.append(f"<p><strong>{word}</strong> {_esc(item.sentence)}</p>")
     if not lines:
         lines.append("<p>Nothing on file points either way.</p>")
@@ -221,8 +224,9 @@ def render_queue(queue: FlagQueue, *, unmasked: bool) -> bytes:
     )
     settled = (
         f'<p class="flag-settled">{plural(view.settled, "other flag")} '
-        f"{'was' if view.settled == 1 else 'were'} already answered by the evidence and "
-        'is not listed. <a href="/review-report">The review queue report</a> counts them.</p>'
+        f"{agree(view.settled, 'was')} already answered by the evidence and "
+        f'{agree(view.settled, "is")} not listed. '
+        '<a href="/review-report">The review queue report</a> counts them.</p>'
         if view.settled
         else '<p class="sub"><a href="/review-report">The review queue report</a> counts '
         "every flag by what answered it.</p>"
