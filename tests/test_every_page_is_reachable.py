@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urldefrag, urlparse
@@ -59,7 +60,7 @@ HREF = re.compile(r'<a\b[^>]*\bhref="([^"]+)"')
 
 
 @pytest.fixture(scope="module")
-def walked(tmp_path_factory: pytest.TempPathFactory) -> dict[str, set[str]]:
+def world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     root: Path = tmp_path_factory.mktemp("reach")
     db = root / "store.sqlite3"
     build_scale_world(db)
@@ -81,10 +82,15 @@ def walked(tmp_path_factory: pytest.TempPathFactory) -> dict[str, set[str]]:
     config = replace(config, actual_status=lambda: [PUSH_RESULT])
     base, stop = serve_config(config)
     try:
-        yield _walk(base)
+        yield base
     finally:
         stop()
         mp.undo()
+
+
+@pytest.fixture(scope="module")
+def walked(world: str) -> dict[str, set[str]]:
+    return _walk(world)
 
 
 def _walk(base: str) -> dict[str, set[str]]:
@@ -110,6 +116,24 @@ def _walk(base: str) -> dict[str, set[str]]:
             linked_from.setdefault(path, set()).add(url)
             queue.append(target)
     return linked_from
+
+
+class TestTheFieldStatisticsPageIsNotAnEqualOfTheAccountPage:
+    """It was "Shape", linked beside an account's own page as if it were one."""
+
+    def test_AccountsLedgerPage_LinksFieldStatisticsOnlyFromItsFoot(self, world):
+        page = httpx.get(f"{world}/ledger?ref=agree-1", timeout=60).text
+
+        foot = page.split('<div class="foot-links">', 1)[1]
+        assert "Field statistics for this account" in foot
+        assert page.count("Field statistics") == 1
+        assert "Shape of this account" not in page
+
+    def test_HomePage_NamesTheLinkByWhatItIs_NotAsTheAccountPage(self, world):
+        page = httpx.get(f"{world}/", timeout=60).text
+
+        assert ">Account page<" not in page
+        assert ">Field statistics<" in page
 
 
 class TestEveryGetRouteIsLinkedFromSomewhere:

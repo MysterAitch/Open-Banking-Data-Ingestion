@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
+from .navigation import page_name
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -639,7 +640,7 @@ def _facts_html(account: AccountOverview, today: date) -> str:
         + "</dl>"
         f'<p class="account-sources">{_sources_html(account.sources)}</p>'
         f'<p class="account-links"><a class="tap" href="/ledger?ref={target}">Ledger</a> '
-        f'<a class="tap" href="/account?ref={target}">Account page</a></p>'
+        f'<a class="tap" href="/account?ref={target}">{_esc(page_name("/account"))}</a></p>'
     )
 
 

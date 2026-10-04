@@ -41,6 +41,7 @@ from .logs import say
 from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .models import BASIS_ID
+from .navigation import page_name
 from .plural import agree
 from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
@@ -2184,7 +2185,7 @@ def _navigation(view: Any, unmasked: bool) -> str:
     Months are stepped from beside the month's own heading, where the rows they change are.
     """
     shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
-    shape += "Shape of this account's data</a></p>"
+    shape += f"{_esc(page_name('/account'))} for this account</a></p>"
     return f'<div class="foot-links">{shape}{_HOME}</div>'
 
 
