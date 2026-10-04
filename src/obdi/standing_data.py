@@ -10,11 +10,13 @@ rows' last sighting, the pairs, the artefacts) rather than a clock.
 
 from __future__ import annotations
 
+import sys
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from .agreement import Standing, held_sentence, standing_line, standing_of
 from .balance_anchors import effective_opening
@@ -60,22 +62,81 @@ class KeyedMemo(Generic[T]):
 
     Held in the process and keyed by what the value was read from rather than by a clock, so a
     page never shows a state older than the rows beneath it and never pays twice for one.
+
+    SINGLE FLIGHT: callers that arrive for a key while it is being computed wait for that one
+    computation and share its outcome, error included. The first page after a deploy did not answer
+    within 110 seconds when each concurrent request (a tab and two polls, at least) started its own
+    walk of the whole store. An error is not held, so the next call after it computes afresh.
+
+    Each computation says on stderr which memo it was, how long it took, and whatever `detail`
+    names about the value, because where the time goes is the next deploy's question.
     """
 
-    def __init__(self, key: Callable[[Store], tuple[object, ...]]) -> None:
+    def __init__(
+        self,
+        key: Callable[[Store], tuple[object, ...]],
+        *,
+        name: str = "memo",
+        clock: Callable[[], float] = time.perf_counter,
+        detail: Callable[[T], str] | None = None,
+    ) -> None:
         self._key = key
+        self._name = name
+        self._clock = clock
+        self._detail = detail
         self._lock = threading.Lock()
         self._held: tuple[object, T] | None = None
+        self._flights: dict[object, _Flight[T]] = {}
 
     def get(self, store: Store, compute: Callable[[], T]) -> T:
         key = self._key(store)
         with self._lock:
             if self._held is not None and self._held[0] == key:
                 return self._held[1]
-        value = compute()
-        with self._lock:
-            self._held = (key, value)
-        return value
+            flight = self._flights.get(key)
+            leading = flight is None
+            if flight is None:
+                flight = self._flights[key] = _Flight()
+        if not leading:
+            flight.done.wait()
+            if flight.error is not None:
+                raise flight.error
+            return cast(T, flight.value)
+        started = self._clock()
+        try:
+            value = compute()
+        except BaseException as exc:
+            flight.error = exc
+            print(
+                f"{self._name}: failed after {self._clock() - started:.1f} s",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
+        else:
+            flight.value = value
+            more = "" if self._detail is None else f" ({self._detail(value)})"
+            print(
+                f"{self._name}: worked out in {self._clock() - started:.1f} s{more}",
+                file=sys.stderr,
+                flush=True,
+            )
+            with self._lock:
+                self._held = (key, value)
+            return value
+        finally:
+            with self._lock:
+                del self._flights[key]
+            flight.done.set()
+
+
+class _Flight(Generic[T]):
+    """One computation in progress, and what its waiters take from it."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.value: T | None = None
+        self.error: BaseException | None = None
 
 
 @dataclass(frozen=True)

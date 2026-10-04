@@ -667,6 +667,8 @@ class WebConfig:
     typed_withdraw: Callable[[str, str], None] | None = None
     #: Every account's known balances, agreement, and protection, for the Accounts page.
     account_standings: Callable[[], Mapping[str, AccountStanding]] | None = None
+    #: Work out what the first page would otherwise pay for; run once in the background at start.
+    warm: Callable[[], None] | None = None
     #: Protect an account through a date: (ref, through). Raises a DataError whose
     #: text never quotes a figure (`protection`).
     protect: Callable[[str, str], None] | None = None

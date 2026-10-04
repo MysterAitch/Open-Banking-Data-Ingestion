@@ -2847,13 +2847,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return identity_health(store).describe()
 
     def movement_completeness_text() -> str:
-        from .movement_completeness import movement_completeness
-
         with Store(db_path) as store:
-            account_map = _account_map(store)
-            return movement_completeness(
-                store, lambda ref: _canonical_for_ref(account_map, ref)
-            ).describe()
+            return movement_report(store).describe()
 
     def balance_reconciliation_text(masked: bool) -> str:
         from .balance_reconciliation import balance_reconciliation
@@ -2918,8 +2913,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return unarchive_account(store, ref)
 
-    movement_memo: KeyedMemo[MovementCompleteness] = KeyedMemo(movement_key)
-    standings_memo: KeyedMemo[Mapping[str, AccountStanding]] = KeyedMemo(standing_key)
+    movement_memo: KeyedMemo[MovementCompleteness] = KeyedMemo(
+        movement_key, name="movement report", detail=lambda report: report.timing_detail()
+    )
+    standings_memo: KeyedMemo[Mapping[str, AccountStanding]] = KeyedMemo(
+        standing_key, name="account standings"
+    )
 
     def movement_report(store: Store) -> MovementCompleteness:
         """The whole store's movement report, held while the derived layer is unchanged."""
@@ -2955,6 +2954,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return standings_memo.get(store, lambda: compute(store))
         with Store(db_path) as opened:
             return standings_memo.get(opened, lambda: compute(opened))
+
+    def warm_memos() -> None:
+        """Work out both memos, so the first person after a start does not pay for them.
+
+        A request that arrives while this runs waits on the same computation
+        (`standing_data.KeyedMemo`).
+        """
+        account_standings()
 
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
@@ -3892,6 +3899,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
         account_standings=account_standings,
+        warm=warm_memos,
         protect=protect,
         protect_withdraw=protect_withdraw,
         protect_accept=protect_accept,
@@ -3986,8 +3994,20 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             "can begin a bank authorisation.",
             file=sys.stderr,
         )
+    if config.warm is not None:
+        threading.Thread(
+            target=_warm, args=(config.warm,), name="warm-memos", daemon=True
+        ).start()
     serve_web(config, host=host, port=port)
     return 0
+
+
+def _warm(warm: Callable[[], None]) -> None:
+    """Run the warm-up, and say so if it fails: a failed warm-up only costs the first page."""
+    try:
+        warm()
+    except Exception as exc:
+        print(f"warm-up failed: {exc}", file=sys.stderr, flush=True)
 
 
 _MEDIA_EXTENSIONS = {"application/json": ".json", "text/csv": ".csv"}

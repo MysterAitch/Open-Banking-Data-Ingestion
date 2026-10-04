@@ -66,6 +66,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
+from time import perf_counter
 from typing import NamedTuple
 
 from .accounts import AccountMap, AccountRef
@@ -262,6 +263,17 @@ class MovementCompleteness:
     # Check 3.
     chain_days: int = 0
     chain_faults: list[ChainFault] = field(default_factory=list)
+    #: Seconds each of the three checks took, and when the report was worked out; unset on a
+    #: report built by hand.
+    check_seconds: tuple[float, float, float] | None = None
+    worked_out_at: datetime | None = None
+
+    def timing_detail(self) -> str:
+        """The seconds of each check, for the line a computation says on stderr."""
+        if self.check_seconds is None:
+            return ""
+        rows, legs, chains = self.check_seconds
+        return f"rows {rows:.1f} s, legs {legs:.1f} s, chains {chains:.1f} s"
 
     @property
     def faults(self) -> int:
@@ -310,6 +322,9 @@ class MovementCompleteness:
         lines += ["", "The two sides of a chain agree, movement for movement:"]
         lines.append(f"  {_plural(self.chain_days, 'account-pair day')} compared")
         lines += _named([f.says() for f in self.chain_faults], "both sides agree every day")
+        if self.check_seconds is not None and self.worked_out_at is not None:
+            moment = self.worked_out_at.astimezone(UTC).strftime("%H:%MZ")
+            lines += ["", f"Worked out in {sum(self.check_seconds):.1f} s at {moment}."]
         return "\n".join(lines)
 
 
@@ -993,7 +1008,11 @@ def check_chains(
 
 
 def movement_completeness(
-    store: Store, canonical_for_ref: Callable[[str], str] | None = None
+    store: Store,
+    canonical_for_ref: Callable[[str], str] | None = None,
+    *,
+    clock: Callable[[], float] = perf_counter,
+    stamp: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> MovementCompleteness:
     """The three checks over the whole store.
 
@@ -1001,10 +1020,13 @@ def movement_completeness(
     canonical account it lands under (`cli._canonical_for_ref`); without it no
     provider account is bound, so no artefact is attributed to an account and no
     leg names one that can be resolved.
+    `clock` and `stamp` time the checks and say when the report was worked out.
     """
     from .space_attribution import category_resolver
 
+    began = clock()
     report = check_rows(store, canonical_for_ref)
+    after_rows = clock()
     rows = store.all_transactions()
     resolver = (
         category_resolver(store, _CanonicalMap(canonical_for_ref)) if canonical_for_ref else None
@@ -1015,5 +1037,9 @@ def movement_completeness(
     )
     report.legs, report.legs_verified, report.legs_unverifiable = legs, verified, unverifiable
     report.pairs_unverifiable, report.leg_faults = unverifiable_pairs, leg_faults
+    after_legs = clock()
     report.chain_days, report.chain_faults = check_chains(rows, resolver, pairs)
+    ended = clock()
+    report.check_seconds = (after_rows - began, after_legs - after_rows, ended - after_legs)
+    report.worked_out_at = stamp()
     return report
