@@ -607,7 +607,8 @@ class TestEachFaultIsNamedByItsOwnArithmetic:
     ):
         """The export lists the 6th's row and the store holds its sighting on the 7th:
         the 6th lists one row where the store holds none, and the next balance holds
-        the sighting where the export lists nothing."""
+        the sighting where the export lists nothing. The two changes undo each other,
+        so they are one explanation, given at the first, which says where it is undone."""
         store = make(HEALTHY)
         store.connection.execute(
             "UPDATE transaction_sources SET observed_date = '2026-09-07' "
@@ -617,14 +618,14 @@ class TestEachFaultIsNamedByItsOwnArithmetic:
         )
         store.connection.commit()
 
-        first, second = explained(store).changes
+        (first,) = explained(store).changes
 
         assert first.day == date(2026, 9, 6)
+        assert first.undone_on == date(2026, 9, 8)
         assert (first.export_rows, first.store_sightings) == (1, 0)
         assert "row-counts" in first.holds
-        assert second.day == date(2026, 9, 8)
-        assert (second.export_rows, second.store_sightings) == (2, 3)
-        assert "row-counts" in second.holds
+        assert "timing-pair" in first.holds
+        assert first.sides.count == 1
 
     def test_Export_WhenItListsTwoIdenticalLines_TheStoreHoldsBothAsSeparateRows(self, tmp_path):
         """Identical lines do not collapse into one sighting: a fault from that would
@@ -696,7 +697,14 @@ class TestTheExplanationsOnThePage:
         for figure in ("12.34", "1,234", "1234", "43.21", "4,321", "4321", "90.00", "9,000"):
             assert figure not in page
 
-    def test_Page_WhenMoreThanTwentyChanges_ExplainsTwentyAndSaysSo(self, tmp_path):
+    def test_Page_WhenMoreThanTwentyPermanentChanges_ExplainsEveryOneAndSaysNoneWasLeftOut(
+        self, tmp_path
+    ):
+        """Twenty-five unrelated surplus rows on days 3 to 27: the export states a balance
+        on the 3rd, the 6th, and every day from the 8th, so the rows of the 4th and 5th
+        fall into the 6th's window and the 7th's into the 8th's. KNOWN ANSWER: 22
+        changes, all of one sign so none pairs, all permanent, all explained. The page
+        once explained twenty and left the last two bare."""
         ghosts = [pay(MAIN, FEED, f"f-g{d}", -(7 + d), d, f"Ghost{d}") for d in range(3, 28)]
         store = build(tmp_path, [*HEALTHY], feed_only=ghosts)
         try:
@@ -705,8 +713,75 @@ class TestTheExplanationsOnThePage:
         finally:
             store.close()
 
-        assert len(explanation.changes) == 20
-        assert page.count("The change at the end of") == 20
+        assert len(explanation.changes) == 22
+        assert explanation.omitted == 0
+        assert page.count("The change at the end of") == 22
+        assert "22 explanations follow: 22 for permanent changes, and 0 for timing pairs" in page
+        assert "no explanation here" not in page
+
+    def test_Page_WhenTheBoundIsReached_KeepsPermanentChangesAndSaysHowManyWereLeftOut(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("obdi.fault_structure.EXPLAINED_CHANGES", 5)
+        ghosts = [pay(MAIN, FEED, f"f-g{d}", -(7 + d), d, f"Ghost{d}") for d in range(3, 28)]
+        store = build(tmp_path, [*HEALTHY], feed_only=ghosts)
+        try:
+            page = render(store)
+            explanation = explained(store)
+        finally:
+            store.close()
+
+        assert len(explanation.changes) == 5
+        assert (explanation.omitted, explanation.bound) == (17, 5)
+        assert page.count("The change at the end of") == 5
+        assert (
+            "17 changes have no explanation here: the page works out at most 5 explanations "
+            "for one account."
+        ) in page
+
+    def test_Page_WhenTwoChangesUndoEachOther_GivesOneExplanationForThePair(self, tmp_path):
+        """A surplus of 1234 on the 10th and an equal and opposite one on the 15th are
+        one timing fault. A third, unrelated surplus on the 20th is permanent.
+        KNOWN ANSWER: three changes, one pair; two explanations, the pair's at the 10th."""
+        feed_only = [
+            pay(MAIN, FEED, "f-out", -1234, 10, "Ghost out"),
+            pay(MAIN, FEED, "f-back", 1234, 15, "Ghost back"),
+            pay(MAIN, FEED, "f-lone", -77, 20, "Ghost lone"),
+        ]
+        store = build(tmp_path, [*HEALTHY], feed_only=feed_only)
+        try:
+            page = render(store)
+            explanation = explained(store)
+            walk_days = [change.day for change in stated(store)[1].changes]
+        finally:
+            store.close()
+
+        assert walk_days == [date(2026, 9, 10), date(2026, 9, 15), date(2026, 9, 20)]
+        first, lone = explanation.changes
+        assert (first.day, first.undone_on) == (date(2026, 9, 10), date(2026, 9, 15))
+        assert (lone.day, lone.undone_on) == (date(2026, 9, 20), None)
+        assert page.count("The change at the end of") == 2
+        assert "The change at the end of <span class=\"mono nowrap\">2026-09-15" not in page
+        assert "2 explanations follow: 1 for permanent changes, and 1 for timing pairs" in page
+        assert "undone by an opposite change at the end of" in page
+        for figure in ("1234", "12.34", "1,234"):
+            assert figure not in page
+
+    def test_Pair_WhenTwoUnrelatedChangesAreEqualAndOpposite_IsStillExplainedByItsFirstChange(
+        self, tmp_path
+    ):
+        feed_only = [
+            pay(MAIN, FEED, "f-out", -1234, 10, "Ghost out"),
+            pay(MAIN, FEED, "f-back", 1234, 15, "Ghost back"),
+        ]
+        store = build(tmp_path, [*HEALTHY], feed_only=feed_only)
+        try:
+            (first,) = explained(store).changes
+        finally:
+            store.close()
+
+        assert "counted-not-listed" in first.holds
+        assert first.counted_not_listed.count == 1
 
     def test_Page_WhenNothingDiffers_ExplainsNothing(self, make):
         assert "The change at the end of" not in render(make(HEALTHY))

@@ -563,6 +563,13 @@ def _hold_html(change: Any, hold: str) -> str:
             "a single counted row"
         )
         return f"<p>The change equals {shape}:</p><ul><li>{_row_note(change.one_row)}</li></ul>"
+    if hold == "timing-pair":
+        return (
+            f"<p>The change equals {'minus ' if change.sides_negated else ''}the sum of the "
+            f"{_plural(change.sides.count, 'row')} that sit on different sides of the two "
+            "balances, dated inside one change's window by the source and inside the "
+            "other's by the store:</p>" + _row_list(change.sides)
+        )
     if hold == "straddling":
         return (
             "<p>The change equals the sum of the "
@@ -629,11 +636,32 @@ def _explanations_html(explanation: Any) -> str:
             f"{'has' if facts.unsighted == 1 else 'have'} no sighting in the store.</p>"
         )
     body += _reversed_html(explanation.reversed)
+    pairs = sum(1 for change in explanation.changes if change.undone_on)
+    if explanation.changes:
+        body += (
+            f"<p>{_plural(len(explanation.changes), 'explanation')} "
+            f"{'follows' if len(explanation.changes) == 1 else 'follow'}: "
+            f"{len(explanation.changes) - pairs} for permanent changes, and "
+            f"{pairs} for timing pairs. The two changes of a pair undo each other and are "
+            "explained once, at the first.</p>"
+        )
+    if explanation.omitted:
+        body += (
+            f'<p class="warn">{_plural(explanation.omitted, "change")} '
+            f"{'has' if explanation.omitted == 1 else 'have'} no explanation here: the page "
+            f"works out at most {explanation.bound} explanations for one account.</p>"
+        )
     for change in explanation.changes:
         start = _mono(change.after) if change.after else "the start"
+        undone = (
+            f", undone by an opposite change at the end of {_mono(change.undone_on)}, so the "
+            "two are explained here once"
+            if change.undone_on
+            else ""
+        )
         body += (
             f"<div><p><strong>The change at the end of {_mono(change.day)}"
-            f"</strong> (after {start}, stated by {_esc(change.source)}):</p>"
+            f"</strong> (after {start}, stated by {_esc(change.source)}{undone}):</p>"
             + "".join(_hold_html(change, hold) for hold in change.holds)
             + "</div>"
         )

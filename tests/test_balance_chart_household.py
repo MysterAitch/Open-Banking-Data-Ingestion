@@ -10,6 +10,7 @@ become five timing pairs, which is the shape the structure exists to name.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date
 
@@ -178,7 +179,7 @@ class TestTheLedgerPageSummarisesTheStructure:
             store.close()
 
         assert "The structure of the whole account" in page.text
-        assert "25 of the" not in page.text
+        assert not re.search(r"\b25 of the \d+ stated balances", page.text)
         assert "the other 25 are the 25 changes in the difference" in page.text
 
 

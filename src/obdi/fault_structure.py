@@ -46,7 +46,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .family_anchors import OPENED
-from .fault_explanation import NONE, UNHELD_SPACE
+from .fault_explanation import EXPLAINED_CHANGES, NONE, UNHELD_SPACE, Selection
 from .masking import Structural, Total
 
 if TYPE_CHECKING:
@@ -410,9 +410,43 @@ def _explained(walk: FamilyWalk) -> dict[int, bool]:
     if walk.explanation is None:
         return {}
     return {
-        change.index: any(hold not in (NONE, UNHELD_SPACE) for hold in explained.holds)
-        for change, explained in zip(walk.changes, walk.explanation.changes, strict=False)
+        explained.index: any(hold not in (NONE, UNHELD_SPACE) for hold in explained.holds)
+        for explained in walk.explanation.changes
     }
+
+
+def select_explained(walk: FamilyWalk, cap: int | None = None) -> Selection:
+    """Which changes of the walk are worth an explanation: each permanent one, and each pair once.
+
+    A permanent change is explained by itself. A timing pair is one fault, so
+    it is explained once, at its first change, and its later change is not.
+    Past `cap` (`EXPLAINED_CHANGES` unless given) the permanent changes are kept
+    before the pairs, and the rest are counted in `Selection.omitted` so the page
+    can say so.
+    Positions are into `FamilyWalk.changes`, which `structure` reads the same way
+    (a test holds the two together).
+    """
+    cap = EXPLAINED_CHANGES if cap is None else cap
+    shape = structure(
+        walk_points(walk),
+        opened=walk.opened.day if walk.opened else None,
+        unheld_days=walk.unheld.days,
+    )
+    permanent = [number for number, step in enumerate(shape.steps) if step.partner < 0]
+    firsts = {
+        number: step.partner
+        for number, step in enumerate(shape.steps)
+        if step.partner > number
+    }
+    wanted = [*permanent, *firsts]
+    kept = sorted(wanted[:cap])
+    held = set(kept)
+    return Selection(
+        kept,
+        {number: later for number, later in firsts.items() if number in held},
+        omitted=len(wanted) - len(kept),
+        bound=cap,
+    )
 
 
 def walk_points(walk: FamilyWalk) -> list[Point]:

@@ -108,6 +108,7 @@ from .family_anchors import (
     unheld_space_legs,
 )
 from .fault_explanation import WalkExplanation, explain_walk
+from .fault_structure import select_explained
 from .models import SourceTier, Transaction, TransactionStatus
 from .money import parse_amount
 from .namespaces import UNITEMISED_SOURCE
@@ -915,6 +916,7 @@ def effective_opening(
                         space: families.provider_ids.get(space, frozenset())
                         for space in members
                     },
+                    selection=select_explained(walk),
                 ),
             )
     opening = derive_opening(

@@ -33,6 +33,11 @@ THE TESTS, in order, each decided by exact arithmetic in minor units:
   straddling           the rows whose date from the source and stored date fall
                         on different sides of this balance, which would mean the
                         source's dating is not being applied to them
+  timing pair          for a change that a later change of exactly the opposite
+                        size undoes (`fault_structure`): the counted rows dated
+                        inside one change's window by the source and inside the
+                        other's by the store sum to the change, exactly. One
+                        explanation covers the pair, given at its first change
   an unheld Space       a transfer leg to a Space whose rows are not held
   export opening        the export's own balance before its first row is not nil
   row counts           the export lists a different number of rows in the window
@@ -72,10 +77,16 @@ from .sighting_placement import SightingPlacement
 from .store import Store
 
 if TYPE_CHECKING:
-    from .balance_anchors import FamilyWalk
+    from .balance_anchors import FamilyWalk, FaultChange
 
-#: How many changes are explained: the page names no more than this many.
-EXPLAINED_CHANGES = 20
+#: The most explanations worked out for one walk: a safety bound on the page's size
+#: and the work, not the usual count.
+#: Every permanent change is explained, and a timing pair once between its two
+#: changes (`fault_structure.select_explained` chooses which), so a walk reaches
+#: this only where it holds hundreds of independent faults.
+#: Measured before it was a bound: with a limit of twenty, "five of the 25 changes
+#: carry no explanation", and three of those five were permanent.
+EXPLAINED_CHANGES = 200
 
 #: How many rows are named under one test before the rest are only counted.
 NAMED_ROWS = 6
@@ -87,6 +98,7 @@ DIFFERENT_FIGURE = "different-figure"
 COMBINED = "combined"
 ONE_ROW = "one-row"
 STRADDLING = "straddling"
+TIMING_PAIR = "timing-pair"
 UNHELD_SPACE = "unheld-space"
 ROW_COUNTS = "row-counts"
 EXPORT_OPENING = "export-opening"
@@ -168,6 +180,17 @@ class ChangeExplanation:
     rows_before: Structural[int] = 0
     rows_inside: Structural[int] = 0
     rows_after: Structural[int] = 0
+    #: The change's position in `FamilyWalk.readings`, which ties it to the walk.
+    index: Structural[int] = -1
+    #: For the first change of a timing pair: the day of the later change that
+    #: undoes it, where the explanation covers both. None for any other change.
+    undone_on: Structural[date | None] = None
+    #: Rows that sit on different sides of the pair's two balances: dated by the
+    #: source inside one change's window and by the store inside the other's.
+    #: Empty for any change that is not the first of a pair.
+    sides: Structural[RowSet] = field(default_factory=RowSet)
+    #: Whether the change equals minus the sum of `sides` rather than their sum.
+    sides_negated: Structural[bool] = False
 
 
 @dataclass(frozen=True)
@@ -207,6 +230,27 @@ class WalkExplanation:
     changes: Structural[tuple[ChangeExplanation, ...]] = ()
     facts: Structural[ExportFacts | None] = None
     reversed: Structural[ReversedFacts] = field(default_factory=ReversedFacts)
+    #: Changes that were due an explanation and have none because `EXPLAINED_CHANGES`
+    #: was reached; nil means the bound was not met.
+    omitted: Structural[int] = 0
+    #: The bound that applied, so the page names the one that was used.
+    bound: Structural[int] = EXPLAINED_CHANGES
+
+
+@dataclass(frozen=True)
+class Selection:
+    """Which changes of a walk are explained, and which of them are the first of a timing pair.
+
+    Chosen by `fault_structure.select_explained`, which owns what a pair is.
+    Positions are into `FamilyWalk.changes`, earliest first.
+    """
+
+    explain: Sequence[int]
+    #: The first change of each pair -> the later change that undoes it.
+    pairs: Mapping[int, int] = field(default_factory=dict)
+    #: Changes due an explanation that the bound left out.
+    omitted: int = 0
+    bound: int = EXPLAINED_CHANGES
 
 
 @dataclass(frozen=True)
@@ -712,7 +756,14 @@ def _explain_one(
     unheld: bool,
     matches: Sequence[_Matches],
     opening_balance: int | None,
+    index: int = -1,
+    undone: tuple[date | None, date] | None = None,
 ) -> ChangeExplanation:
+    """Which tests hold for one change.
+
+    `undone` is the window (after, day] of the later change that undoes this one,
+    when this is the first change of a timing pair.
+    """
     listed = view.held_back.within(after, day)
     unlisted = view.unlisted.within(after, day)
     figures = view.figures.within(after, day)
@@ -724,6 +775,8 @@ def _explain_one(
     one_row: RowNote | None = None
     negated = False
     straddling: list[_Entry] = []
+    sides: list[_Entry] = []
+    sides_negated = False
     export_rows: int | None = None
     store_sightings: int | None = None
     if delta == 0:
@@ -755,6 +808,21 @@ def _explain_one(
         crossing = view.by_source.total(after, day) - view.by_stored.total(after, day)
         if crossing and delta in (crossing, -crossing):
             holds.append(STRADDLING)
+        if undone is not None:
+            later_after, later_day = undone
+            sides = [
+                e
+                for e in view.by_source.within(after, day)
+                if _inside(e.other, later_after, later_day)
+            ] + [
+                e
+                for e in view.by_source.within(later_after, later_day)
+                if _inside(e.other, after, day)
+            ]
+            across = sum(e.minor for e in sides)
+            if sides and delta in (across, -across):
+                holds.append(TIMING_PAIR)
+                sides_negated = delta != across
         if unheld:
             holds.append(UNHELD_SPACE)
         if matches:
@@ -785,6 +853,10 @@ def _explain_one(
         one_row=one_row,
         one_row_negated=negated,
         straddling=_rowset(straddling),
+        index=index,
+        undone_on=None if undone is None else undone[1],
+        sides=_rowset(sides),
+        sides_negated=sides_negated,
         export_rows=export_rows,
         store_sightings=store_sightings,
         rows_before=0 if after is None else everything.count(None, after),
@@ -800,20 +872,30 @@ def explain_walk(
     members: Mapping[str, Sequence[Transaction]],
     placement: SightingPlacement,
     space_uids: Mapping[str, frozenset[str]] | None = None,
+    selection: Selection | None = None,
 ) -> WalkExplanation:
-    """Explain the first `EXPLAINED_CHANGES` changes of `walk`, and describe the exports.
+    """Explain the changes `selection` names, and describe the exports.
 
     `space_uids` is each Space account's provider ids, which tie a round-up leg's
     named Space to the account whose rows are searched for its arrival.
 
+    Without a `selection` the walk's changes are explained in order, none paired,
+    up to `EXPLAINED_CHANGES`; the ledger always passes one
+    (`fault_structure.select_explained`).
+
     The family's sightings are read once, each export is read from its
     per-process memo, and each source's dating is built once and bisected per
     change, so the cost does not grow with the number of changes beyond the
-    twenty explained.
+    bound.
     """
-    changes = walk.changes[:EXPLAINED_CHANGES]
-    if not changes:
-        return WalkExplanation()
+    all_changes = walk.changes
+    if selection is None:
+        selection = Selection(
+            range(min(len(all_changes), EXPLAINED_CHANGES)),
+            omitted=max(0, len(all_changes) - EXPLAINED_CHANGES),
+        )
+    if not selection.explain:
+        return WalkExplanation(omitted=selection.omitted, bound=selection.bound)
     exports = held_exports(store, main)
     matched = {
         digest: _match(reading, store.artefact_sightings([digest])) for digest, reading in exports
@@ -838,7 +920,26 @@ def explain_walk(
     views: dict[str, _View] = {}
     explained: list[ChangeExplanation] = []
     opened = walk.opened
-    for change in changes:
+
+    def window(change: FaultChange) -> tuple[date | None, int, bool]:
+        """(the day the same source last stated a balance, the change's size, whether it did)."""
+        reading = walk.readings[change.index]
+        size = reading.difference_minor or 0
+        previous = next(
+            (
+                walk.readings[i]
+                for i in range(change.index - 1, -1, -1)
+                if walk.readings[i].sources[0] == change.source
+                and walk.readings[i].difference_minor is not None
+            ),
+            None,
+        )
+        if previous is not None:
+            return previous.day, size - (previous.difference_minor or 0), True
+        return (opened.day if opened is not None else None), size, False
+
+    for position in selection.explain:
+        change = all_changes[position]
         reading = walk.readings[change.index]
         source = change.source
         if source not in views:
@@ -848,28 +949,17 @@ def explain_walk(
                 views[source] = _view(
                     evidence, source, family, listed=None, held_back=[], figures=[]
                 )
-        previous = next(
-            (
-                walk.readings[i]
-                for i in range(change.index - 1, -1, -1)
-                if walk.readings[i].sources[0] == source
-                and walk.readings[i].difference_minor is not None
-            ),
-            None,
-        )
-        if previous is not None:
-            after: date | None = previous.day
-            before = previous.difference_minor or 0
-        elif opened is not None:
-            after, before = opened.day, 0
-        else:
-            after, before = None, 0
-        delta = (reading.difference_minor or 0) - before
+        after, delta, has_previous = window(change)
+        later = selection.pairs.get(position)
+        undone = None
+        if later is not None:
+            later_change = all_changes[later]
+            undone = (window(later_change)[0], later_change.day)
         follows = walk.readings[change.index - 1].sources[0] if change.index else ""
         digest = anchor_digests.get((reading.day, reading.balance_minor), "")
         own = [matched[digest]] if source == CSV_SOURCE and digest in matched else []
         opening_balance = None
-        if source == CSV_SOURCE and digest and previous is None:
+        if source == CSV_SOURCE and digest and not has_previous:
             reading_of = dict(exports)[digest]
             opening_balance = reading_of.rows[0].before_minor if reading_of.rows else None
         explained.append(
@@ -883,10 +973,16 @@ def explain_walk(
                 unheld=change.unheld,
                 matches=own,
                 opening_balance=opening_balance,
+                index=change.index,
+                undone=undone,
             )
         )
     return WalkExplanation(
-        tuple(explained), facts, _reversed_facts(evidence, matched.values())
+        tuple(explained),
+        facts,
+        _reversed_facts(evidence, matched.values()),
+        selection.omitted,
+        selection.bound,
     )
 
 
@@ -932,12 +1028,14 @@ __all__ = [
     "ONE_ROW",
     "ROW_COUNTS",
     "STRADDLING",
+    "TIMING_PAIR",
     "UNHELD_SPACE",
     "ChangeExplanation",
     "ExportFacts",
     "ReversedFacts",
     "RowNote",
     "RowSet",
+    "Selection",
     "WalkExplanation",
     "explain_walk",
 ]
