@@ -158,7 +158,9 @@ class PageName:
 #: question it answers; the account's field statistics were "Shape". A page absent from here
 #: keeps the title its handler gives it.
 PAGE_NAMES: dict[str, PageName] = {
-    "/agreements": PageName("Do my sources agree?", "Cross-source agreement"),
+    # "match", not "agree": rows are in agreement with known balances, and two sources match
+    # each other (`page_words`).
+    "/agreements": PageName("Do my sources match?", "Cross-source agreement"),
     "/identity-health": PageName("Is any payment counted twice?", "Identity health"),
     "/balance-reconciliation": PageName("Do the days add up?", "Balance reconciliation"),
     "/period-reconciliation": PageName("Do the statements add up?", "Statement periods"),

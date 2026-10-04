@@ -22,8 +22,13 @@ from page_walk import invented, served, walked_pages  # noqa: F401
 
 
 def text_of(page: str) -> str:
-    """What a reader sees: no stylesheet, script, tags, or attributes."""
+    """What a reader sees: no stylesheet, script, tags, or attributes.
+
+    The note under a renamed page's heading ("Formerly called X.") is left out: it is the one
+    place an old name is said, so that somebody who learnt it can find the page.
+    """
     page = re.sub(r"<(style|script).*?</\1>", " ", page, flags=re.S)
+    page = re.sub(r'<p class="muted formerly">.*?</p>', " ", page, flags=re.S)
     return re.sub(r"<[^>]*>", " ", page)
 
 
