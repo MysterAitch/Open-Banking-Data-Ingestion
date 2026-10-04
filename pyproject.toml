@@ -90,6 +90,7 @@ ignore = [
 # parameter reads to the linter as redefining the import. That is how pytest
 # shares a fixture without a conftest holding the scenario's helpers.
 "tests/test_overview*.py" = ["F811"]
+"tests/test_scheduler_phone_layout.py" = ["F811"]
 # Scripts are operator tools run by hand, not a library surface.
 "scripts/*" = ["ANN001", "ANN201", "S105", "S106"]
 

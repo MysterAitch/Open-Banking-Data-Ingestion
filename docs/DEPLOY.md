@@ -141,13 +141,22 @@ resolves, then `obdi pair-transfers` and `obdi export-raw`. A failed pull is
 logged and the loop continues rather than halting the schedule, because the
 commonest cause is a single expired consent that should not stop the others.
 
-A pull labelled scheduled (`OBDI_TRIGGER=scheduled`) is spaced from the previous
+The bare all-connections pull is labelled by `OBDI_TRIGGER`; a pull that names a
+connection is labelled `cli`, or `cli-attended` with `--attended-from`, whatever the
+container's environment says, so a pull run by hand in the scheduler's container does
+not move the scheduler's slot. A pull labelled scheduled is spaced from the previous
 scheduled one by 90 per cent of the interval unless
 `OBDI_PULL_MIN_INTERVAL_SECONDS` says otherwise (0 switches it off). A cycle that
 starts early, as after a deploy restarts the container, waits for its slot and
 then pulls, rather than giving up and leaving a whole interval of silence. A
 cycle that meets a rebuild or an attended post-authorisation backfill holding its
 lease waits briefly for it and then skips the pull for that cycle.
+
+The loop's commands record their own progress in `scheduler-status.json` beside the
+store (see `src/obdi/scheduler_status.py` for which commands count as part of a cycle
+and how a cycle killed with its container is recognised). The Overview's System strip,
+its "Needs attention" list, the Scheduler section of the Connections page, and
+`obdi alert` all read it, so a wait for the slot is announced with the time it ends.
 
 `obdi alert` is meant to run last in the cycle (the local `compose.yaml` loop
 does not include it; a deployment adds it). It prints every finding, sends a

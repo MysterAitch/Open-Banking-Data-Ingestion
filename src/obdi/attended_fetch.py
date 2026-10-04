@@ -82,7 +82,7 @@ def write_status(path: Path, connection: str, **fields: object) -> None:
     }
     if presses:
         record["presses"] = presses
-    _write(path, record)
+    write_json_atomic(path, record)
 
 
 def record_press(path: Path, connection: str, result: dict[str, object]) -> None:
@@ -96,7 +96,7 @@ def record_press(path: Path, connection: str, result: dict[str, object]) -> None
     presses = read_presses(path)
     presses[connection] = result
     current["presses"] = presses
-    _write(path, current)
+    write_json_atomic(path, current)
 
 
 def read_presses(path: Path) -> dict[str, object]:
@@ -108,7 +108,12 @@ def read_presses(path: Path) -> dict[str, object]:
     return dict(found) if isinstance(found, dict) else {}
 
 
-def _write(path: Path, record: dict[str, object]) -> None:
+def write_json_atomic(path: Path, record: dict[str, object]) -> None:
+    """Write-temp-then-rename, so a reader never sees a torn file.
+
+    A failed write is swallowed: these files report on work, and the work must not fail for them.
+    Every status file beside the store is written through this one function.
+    """
     with contextlib.suppress(OSError):
         temporary = path.with_name(f".{path.name}.tmp")
         temporary.write_text(json.dumps(record), encoding="utf-8")
@@ -202,7 +207,7 @@ def start_press(
 
     def run() -> None:
         ledger_id = STARLING_CONNECTION if name == STARLING_TARGET else name
-        before = _ledger_tail(db_path, ledger_id)
+        before = ledger_tail(db_path, ledger_id)
         stopped: dict[str, object] | None = None
         new_rows: int | None = None
         # The lease is released only after the result is recorded, so a second
@@ -214,7 +219,7 @@ def start_press(
                 stopped = {
                     "status": getattr(exc, "status", None),
                     "code": str(getattr(exc, "code", "") or ""),
-                    "reason": _short(str(exc)),
+                    "reason": short_reason(str(exc)),
                 }
             result = _result(
                 db_path, name, ledger_id, before, new_rows, stopped, account_map, today()
@@ -262,7 +267,7 @@ def _who_holds_the_lease(status_path: Path) -> str:
     )
 
 
-def _ledger_tail(db_path: Path, connection_id: str) -> int:
+def ledger_tail(db_path: Path, connection_id: str) -> int:
     with Store(db_path) as store:
         row = store.connection.execute(
             "SELECT COALESCE(MAX(rowid), 0) FROM fetch_attempts WHERE connection_id = ?",
@@ -271,7 +276,7 @@ def _ledger_tail(db_path: Path, connection_id: str) -> int:
     return int(row[0])
 
 
-def _short(reason: str) -> str:
+def short_reason(reason: str) -> str:
     cut = reason.split(" | headers:")[0].strip()
     return cut if len(cut) <= REASON_LIMIT else cut[: REASON_LIMIT - 3] + "..."
 
@@ -297,7 +302,7 @@ def _result(
             {
                 "status": row["http_status"],
                 "code": str(row["error_code"] or ""),
-                "reason": _short(str(row["detail"] or "")),
+                "reason": short_reason(str(row["detail"] or "")),
             }
             for row in rows
             if row["outcome"] == "refused"

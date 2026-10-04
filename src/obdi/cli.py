@@ -36,7 +36,13 @@ from .accounts import (
 from .actual_push import ENVELOPE_VERSION
 from .alerts import Finding
 from .asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
-from .attended_fetch import STARLING_TARGET, start_press, write_status
+from .attended_fetch import (
+    STARLING_TARGET,
+    ledger_tail,
+    short_reason,
+    start_press,
+    write_status,
+)
 from .backup import BackupRefused, take_backup, verify_copy
 from .balance_chart import BalanceChart
 from .connections import ConnectionStore
@@ -72,7 +78,7 @@ from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
-from .pull import PullResult, pull_starling, pull_truelayer
+from .pull import STARLING_CONNECTION, PullResult, pull_starling, pull_truelayer
 from .replay import (
     ActualAccountBinding,
     build_opening_entries,
@@ -82,6 +88,7 @@ from .replay import (
 )
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
+from .scheduler_status import StepHandle, run_step
 from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
@@ -494,21 +501,25 @@ def queue_actual_push(db_path: Path) -> str:
 
 
 def pull_trigger_label(explicit: str | None, psu_ip: str | None) -> str:
-    """How an aggregator pull is labelled in the fetch ledger.
+    """How a pull that NAMES a connection is labelled in the fetch ledger.
 
-    A caller's own label wins, then a declared attendance, then the standing
-    label of the process, then the bare command line.
-    Attendance outranks the standing label because the scheduler's container
-    carries `OBDI_TRIGGER=scheduled` for everything run inside it:
-    four pulls a person ran there by hand with `--attended-from` were ledgered
-    as scheduled, which is the one distinction the label exists to keep.
+    A caller's own label wins, then a declared attendance, then the bare command line.
+    The environment's standing label (`OBDI_TRIGGER`) is deliberately absent:
+    it describes the container, and the scheduler's container carries
+    `OBDI_TRIGGER=scheduled` for everything a person runs inside it.
+    A day of hand-run pulls there (`docker exec obdi-pull obdi pull starling`, and four with
+    `--attended-from`) was ledgered as scheduled, and each one pushed the scheduler's slot later
+    until its own bare pull sat asleep for most of a day.
+    The standing label applies only to the bare all-connections pull (`standing_trigger_label`),
+    because the loop never names a connection:
+    a list of names would drift from the connection store.
     """
-    return (
-        explicit
-        or ("cli-attended" if psu_ip else "")
-        or os.getenv("OBDI_TRIGGER", "").strip()
-        or "cli"
-    )
+    return explicit or ("cli-attended" if psu_ip else "") or "cli"
+
+
+def standing_trigger_label() -> str:
+    """The label of the bare all-connections pull: the standing one, else the command line."""
+    return os.getenv("OBDI_TRIGGER", "").strip() or "cli"
 
 
 def rebuild_in_progress_note(db_path: Path) -> str | None:
@@ -946,7 +957,16 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
     volume = disk_finding(Path(db_path).parent)
     if volume is not None:
         findings.append(volume)
+    findings += _guarded("scheduler", lambda: _scheduler_findings(db_path, now))
     return findings
+
+
+def _scheduler_findings(db_path: Path, now: datetime) -> list[Finding]:
+    """What the scheduler's own record says is wrong with the scheduler; see `scheduler_status`."""
+    from . import scheduler_status
+
+    state = scheduler_status.read_scheduler(scheduler_status.read_record(db_path), now)
+    return [Finding(key, message) for key, message in scheduler_status.findings(state)]
 
 
 def _starling_token_present() -> bool:
@@ -1265,11 +1285,65 @@ def queue_actual_audit(db_path: Path) -> str:
     )
 
 
-def _push_actual(db_path: Path) -> int:
+def _alert(db_path: Path) -> int:
+    from .alerts import process, send_heartbeat, send_ntfy
+
+    findings = collect_alert_findings(db_path)
+    state_path = Path(
+        os.getenv("OBDI_ALERT_STATE", "").strip()
+        or Path(db_path).with_name("alert-state.json")
+    )
+    ntfy_url = read_secret("OBDI_NTFY_URL", required=False)
+    if ntfy_url:
+        def deliver(message: str) -> bool:
+            return send_ntfy(ntfy_url, message)
+    else:
+        # No channel configured: the edge protocol still runs so state
+        # stays truthful, and the "send" is the process log itself.
+        def deliver(message: str) -> bool:
+            print(f"alert (no OBDI_NTFY_URL configured): {message}")
+            return True
+    delivered = process(findings, state_path, deliver)
+    for finding in findings:
+        print(finding.message)
+    if not findings:
+        print("no findings")
+    if delivered:
+        print(f"{len(delivered)} notification(s) sent")
+    # The dead-man half: alert runs LAST in the scheduler cycle, so this
+    # ping means the whole cycle completed. Its absence is the one signal
+    # this process cannot send about itself.
+    heartbeat_url = read_secret("OBDI_HEARTBEAT_URL", required=False)
+    if heartbeat_url:
+        send_heartbeat(heartbeat_url)
+    return 0
+
+
+def _pair_transfers(db_path: Path) -> int:
+    with Store(db_path) as store:
+        confirmed = pair_transfers_across_store(store)
+        unconfirmed = unconfirmed_transfers(store)
+    print(f"confirmed {confirmed} internal transfer pair(s)")
+    if unconfirmed:
+        # An unpaired claim means the opposite side is missing, so the
+        # transfer is being excluded from spending on the provider's word
+        # alone. Usually an account or savings space not yet ingested.
+        accounts = sorted({t.account_id for t in unconfirmed})
+        print(
+            f"\n{len(unconfirmed)} marked internal by their provider but never paired, "
+            f"in: {', '.join(accounts)}"
+        )
+        print("The other side is missing - is every account and space ingested and bound?")
+    return 0
+
+
+def _push_actual(db_path: Path, step: StepHandle | None = None) -> int:
     try:
         print(queue_actual_push(db_path))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
+        if step is not None:
+            step.failed_with(exc)
         return 2
     return 0
 
@@ -2856,14 +2930,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return {}
 
     def scheduler_heartbeat() -> dict[str, object]:
-        path = db_path.parent / "scheduler-heartbeat.json"
-        if not path.is_file():
-            return {}
-        with contextlib.suppress(OSError, ValueError):
-            decoded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(decoded, dict):
-                return decoded
-        return {}
+        from .scheduler_status import read_record
+
+        return read_record(db_path)
 
     def rebuild_derived() -> str:
         return start_background_rebuild(db_path)
@@ -3955,8 +4024,12 @@ def _await_scheduled_clearance(
     poll_seconds: int = 15,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], datetime] | None = None,
+    step: StepHandle | None = None,
 ) -> str | None:
     """Wait until a scheduled cycle may pull, or give up with the reason.
+
+    Each wait is also told to `step`, with the time it expects to proceed,
+    so the pages can say what the container's log would.
 
     Two kinds of wait, and they compose.
 
@@ -3981,12 +4054,22 @@ def _await_scheduled_clearance(
     slot_announced = False
     while True:
         now = clock() if clock is not None else None
+        moment = now or datetime.now(UTC)
         reason = scheduled_pull_skip_reason(db_path, now=now)
         if reason is None:
+            if step is not None:
+                step.resume()
             return None
         if "in progress" in reason or "is running" in reason:
             if waited >= wait_seconds:
                 return reason
+            if step is not None:
+                step.wait(
+                    "transient",
+                    reason.split(" - ")[0],
+                    moment + timedelta(seconds=wait_seconds - waited),
+                    budget_seconds=wait_seconds,
+                )
             if not announced:
                 print(
                     f"{reason} - waiting up to {wait_seconds // 60} min "
@@ -4003,6 +4086,14 @@ def _await_scheduled_clearance(
         if spacing.remaining_seconds <= 0:
             # The slot opened between the two readings.
             continue
+        if step is not None:
+            step.wait(
+                "slot",
+                reason,
+                moment + timedelta(seconds=spacing.remaining_seconds),
+                last_scheduled_at=(moment - timedelta(seconds=spacing.age_seconds)).isoformat(),
+                min_spacing_seconds=spacing.min_interval,
+            )
         if not slot_announced:
             # Hours of silence from a container read as a hang.
             print(
@@ -4014,17 +4105,58 @@ def _await_scheduled_clearance(
         sleep(min(spacing.remaining_seconds, SLOT_POLL_SECONDS))
 
 
-def _pull_everything(db_path: Path, since: date | None) -> int:
+def _connection_record(
+    db_path: Path, name: str, before: int, exit_code: int
+) -> dict[str, object]:
+    """What one connection's pull asked, landed, and was refused, from the ledger rows it added.
+
+    The wording of a refusal is the provider's, cut by `short_reason` as the Connections page's
+    fetch-now result cuts it; the ledger holds no description of a payment.
+    """
+    ledger_id = STARLING_CONNECTION if name == STARLING_TARGET else name
+    with Store(db_path) as store:
+        rows = store.connection.execute(
+            "SELECT outcome, http_status, error_code, detail FROM fetch_attempts "
+            "WHERE connection_id = ? AND rowid > ? ORDER BY rowid",
+            (ledger_id, before),
+        ).fetchall()
+    refused = [
+        {
+            "status": row["http_status"],
+            "code": str(row["error_code"] or ""),
+            "reason": short_reason(str(row["detail"] or "")),
+        }
+        for row in rows
+        if row["outcome"] == "refused"
+    ]
+    return {
+        "name": name,
+        "asked": len(rows),
+        "landed": sum(1 for row in rows if row["outcome"] == "landed"),
+        "refused": refused[:3],
+        "refused_total": len(refused),
+        "exit_code": exit_code,
+    }
+
+
+def _pull_everything(
+    db_path: Path, since: date | None, step: StepHandle | None = None
+) -> int:
     """Pull every stored connection, plus Starling if a token is configured.
 
     Keeps going after a failure rather than stopping at the first. One expired
     consent is the commonest cause, and letting it abort the run would mean a
     single stale bank silently stops every other bank being fetched.
+
+    `step` receives each connection's account of itself and the wait for the slot.
     """
-    if (os.getenv("OBDI_TRIGGER", "").strip() or "direct") == "scheduled":
-        reason = _await_scheduled_clearance(db_path)
+    step = step or StepHandle(None)
+    standing = standing_trigger_label()
+    if standing == "scheduled":
+        reason = _await_scheduled_clearance(db_path, step=step)
         if reason:
             print(reason)
+            step.note(f"nothing was pulled this cycle: {reason}")
             return 0
     store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
     names: list[str] = []
@@ -4057,6 +4189,7 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     from . import leases
 
     worst = 0
+    not_pulled: list[str] = []
     # Held for the whole cycle so a stack update never recreates the
     # container mid-fetch - a killed scheduled pull wastes quota that
     # does not come back until tomorrow.
@@ -4065,8 +4198,20 @@ def _pull_everything(db_path: Path, since: date | None) -> int:
     ):
         for name in names:
             print(f"--- {name}")
-            outcome = _pull(name, db_path, since)
+            ledger_id = STARLING_CONNECTION if name == STARLING_TARGET else name
+            before = ledger_tail(db_path, ledger_id) if step.recording else 0
+            outcome = _pull(name, db_path, since, trigger=standing)
+            if step.recording:
+                step.connection(_connection_record(db_path, name, before, outcome))
+            if outcome:
+                not_pulled.append(name)
             worst = max(worst, outcome)
+        if not_pulled:
+            step.failed_because(
+                "PullIncomplete",
+                f"{len(not_pulled)} of {len(names)} connections did not pull: "
+                f"{', '.join(not_pulled)}",
+            )
     return worst
 
 
@@ -4108,7 +4253,7 @@ def _pull(
                 token,
                 account_map=account_map,
                 since=since,
-                trigger=trigger or os.getenv("OBDI_TRIGGER", "").strip() or "direct",
+                trigger=pull_trigger_label(trigger, None),
             )
         print(result.describe())
         if on_result is not None:
@@ -4576,25 +4721,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "pair-transfers":
-        with Store(db_path) as store:
-            confirmed = pair_transfers_across_store(store)
-            unconfirmed = unconfirmed_transfers(store)
-        print(f"confirmed {confirmed} internal transfer pair(s)")
-        if unconfirmed:
-            # An unpaired claim means the opposite side is missing, so the
-            # transfer is being excluded from spending on the provider's word
-            # alone. Usually an account or savings space not yet ingested.
-            accounts = sorted({t.account_id for t in unconfirmed})
-            print(
-                f"\n{len(unconfirmed)} marked internal by their provider but never paired, "
-                f"in: {', '.join(accounts)}"
-            )
-            print("The other side is missing - is every account and space ingested and bound?")
-        return 0
+        return run_step(db_path, "pair-transfers", lambda _step: _pair_transfers(db_path))
 
     if args.command == "pull":
         if not args.target:
-            return _pull_everything(db_path, args.since)
+            return run_step(
+                db_path, "pull", lambda step: _pull_everything(db_path, args.since, step)
+            )
         return _pull(
             args.target,
             db_path,
@@ -4658,7 +4791,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "push-actual":
-        return _push_actual(db_path)
+        return run_step(db_path, "push-actual", lambda step: _push_actual(db_path, step))
     if args.command == "categorise":
         from .categorise import apply_rules, load_rules, uncategorised_summary
 
@@ -4794,37 +4927,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "alert":
-        from .alerts import process, send_heartbeat, send_ntfy
-
-        findings = collect_alert_findings(db_path)
-        state_path = Path(
-            os.getenv("OBDI_ALERT_STATE", "").strip()
-            or Path(db_path).with_name("alert-state.json")
-        )
-        ntfy_url = read_secret("OBDI_NTFY_URL", required=False)
-        if ntfy_url:
-            def deliver(message: str) -> bool:
-                return send_ntfy(ntfy_url, message)
-        else:
-            # No channel configured: the edge protocol still runs so state
-            # stays truthful, and the "send" is the process log itself.
-            def deliver(message: str) -> bool:
-                print(f"alert (no OBDI_NTFY_URL configured): {message}")
-                return True
-        delivered = process(findings, state_path, deliver)
-        for finding in findings:
-            print(finding.message)
-        if not findings:
-            print("no findings")
-        if delivered:
-            print(f"{len(delivered)} notification(s) sent")
-        # The dead-man half: alert runs LAST in the scheduler cycle, so this
-        # ping means the whole cycle completed. Its absence is the one signal
-        # this process cannot send about itself.
-        heartbeat_url = read_secret("OBDI_HEARTBEAT_URL", required=False)
-        if heartbeat_url:
-            send_heartbeat(heartbeat_url)
-        return 0
+        return run_step(db_path, "alert", lambda _step: _alert(db_path))
     if args.command == "review-report":
         from .review_report import review_report
 
@@ -4897,7 +5000,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "attempts":
         return _attempts(db_path)
     if args.command == "export-raw":
-        return _export_raw(db_path, args.export_dir)
+        return run_step(
+            db_path, "export-raw", lambda _step: _export_raw(db_path, args.export_dir)
+        )
 
     if args.command == "bind":
         return _bind(args.source, args.provider_ref, args.canonical, db_path)

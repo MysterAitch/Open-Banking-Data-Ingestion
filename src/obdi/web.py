@@ -105,6 +105,7 @@ from .web_prune import (
     prune_section,
     removal_split,
 )
+from .web_scheduler import scheduler_row
 from .web_sections import (
     HOME_LINK,
     HookTimer,
@@ -2060,45 +2061,13 @@ def _scheduler_row(
     scheduler_heartbeat: Callable[[], dict[str, object]] | None,
     now: datetime | None = None,
 ) -> str:
-    """The pull loop's pulse: "container running" does not prove "loop
-    looping", so the cycle stamp gets the same treatment as the applier's
-    heartbeat - a quiet fact when fresh, a warning naming the container
-    when overdue."""
-    if scheduler_heartbeat is None:
-        return ""
-    beat: dict[str, object] = {}
-    try:
-        beat = scheduler_heartbeat() or {}
-    except Exception:
-        return ""
-    raw_at = str(beat.get("at", ""))
-    if not raw_at:
-        return ""
-    try:
-        seen = datetime.fromisoformat(raw_at.replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    try:
-        interval = int(str(beat.get("interval_seconds", 0)))
-    except ValueError:
-        interval = 0
-    now = now or datetime.now(UTC)
-    age = (now - seen).total_seconds()
-    stamp = seen.strftime("%Y-%m-%d %H:%M")
-    if interval > 0 and age > interval * 1.5:
-        hours = age / 3600
-        return (
-            f'<p class="warn">the scheduler last completed a cycle at {stamp}Z '
-            f"({hours:.1f} h ago, interval {interval // 3600} h) - look at "
-            "the obdi-pull container</p>"
-        )
-    due = ""
-    if interval > 0:
-        due_at = datetime.fromtimestamp(seen.timestamp() + interval, tz=UTC)
-        due = f" - next due by ~{due_at.strftime('%H:%M')}Z"
-    return (
-        f'<p class="muted">scheduler last completed a cycle at {stamp}Z{due}</p>'
-    )
+    """The pull loop's pulse, stated as what the scheduler is doing.
+
+    "Container running" does not prove "loop looping", so the scheduler says
+    for itself whether it completed, is waiting, is running a step, or failed
+    one; see `scheduler_status` for how that is decided.
+    """
+    return scheduler_row(scheduler_heartbeat, now)
 
 
 def _backfill_running_banner(

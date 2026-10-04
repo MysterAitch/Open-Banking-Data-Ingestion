@@ -51,7 +51,7 @@ class TestKeepGoing:
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(store_path))
         pulled: list[str] = []
 
-        def fake_pull(target, db_path, since, deep=False):
+        def fake_pull(target, db_path, since, deep=False, trigger=None):
             pulled.append(target)
             return 1 if target == "a-bank" else 0
 
@@ -68,7 +68,9 @@ class TestKeepGoing:
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(_store_with(tmp_path, ["a-bank"])))
         monkeypatch.setenv("STARLING_PERSONAL_ACCESS_TOKEN", "token")
         pulled: list[str] = []
-        monkeypatch.setattr("obdi.cli._pull", lambda t, d, s, deep=False: pulled.append(t) or 0)
+        monkeypatch.setattr(
+            "obdi.cli._pull", lambda t, d, s, deep=False, trigger=None: pulled.append(t) or 0
+        )
 
         _pull_everything(tmp_path / "db.sqlite3", None)
 
@@ -110,7 +112,9 @@ class TestConfiguredMeansResolvable:
             "STARLING_PERSONAL_ACCESS_TOKEN_FILE", str(tmp_path / "absent-token")
         )
         pulled: list[str] = []
-        monkeypatch.setattr("obdi.cli._pull", lambda t, d, s, deep=False: pulled.append(t) or 0)
+        monkeypatch.setattr(
+            "obdi.cli._pull", lambda t, d, s, deep=False, trigger=None: pulled.append(t) or 0
+        )
 
         outcome = _pull_everything(tmp_path / "db.sqlite3", None)
 

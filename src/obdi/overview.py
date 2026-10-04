@@ -75,8 +75,12 @@ _KIND_ORDER = (
     "rebuild-problems",
     "push-refused",
     "push-stale",
+    "scheduler-overdue",
+    "scheduler-failed",
     "consent",
     "disk",
+    "scheduler-stuck",
+    "scheduler-late-wait",
     "review",
     "spaces",
 )
@@ -124,6 +128,27 @@ _KINDS: dict[str, tuple[int, str]] = {
     ),
     "push-refused": (NOW, "Open Actual sync and fix what the refusal names."),
     "push-stale": (NOW, "Open Actual sync and check that the applier is running."),
+    "scheduler-overdue": (
+        NOW,
+        "Open Connections to see the scheduler's last record; "
+        "if its container is stopped, start it.",
+    ),
+    "scheduler-failed": (
+        NOW,
+        "Open Connections to read the step's recorded error; "
+        "the pull container's log has the full text.",
+    ),
+    "scheduler-stuck": (
+        SOON,
+        "Open Connections to see how long it has run; "
+        "the pull container's log shows what it is doing.",
+    ),
+    "scheduler-late-wait": (
+        HOUSEKEEPING,
+        "Nothing is broken: the pull waits for its slot so that a restart does not overspend the "
+        "bank's allowance. A pull run by hand in that container by an older build was recorded "
+        "as scheduled and still counts toward the slot.",
+    ),
     "consent": (SOON, "Reconnect the bank before consent lapses."),
     "disk": (SOON, "Free space on the data volume or enlarge it."),
     "review": (
@@ -148,12 +173,14 @@ ALERT_CONDITIONS = (
     "consent expiry",
     "disk space",
     "emptied rebuild",
+    "scheduler cycle",
 )
 _ALERT_GUARDS = {
     "silent-feeds": "silent feeds",
     "push-build": "push build",
     "push-stale": "push applied",
     "shared-identity": "shared identities",
+    "scheduler": "scheduler cycle",
 }
 
 #: The checks the Overview itself runs on top of the alert's conditions.
@@ -270,6 +297,8 @@ def _alert_item(finding: Finding, canonical_for_ref: Callable[[str], str]) -> At
         href = CONNECTIONS_HREF
     elif kind in ("push-refused", "push-stale"):
         href = ACTUAL_HREF
+    elif kind.startswith("scheduler-"):
+        href = f"{CONNECTIONS_HREF}#scheduler"
     return AttentionItem(
         kind=kind,
         severity=band,

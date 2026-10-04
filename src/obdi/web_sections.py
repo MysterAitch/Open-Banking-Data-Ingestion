@@ -29,6 +29,7 @@ from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
+from .web_scheduler import scheduler_section
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .accounts import AccountRecord
@@ -262,6 +263,7 @@ def render_connections(
     extendables: Callable[[], list[ExtendableAccount]] | None = None,
     backfill_status: Callable[[], dict[str, object]] | None = None,
     fetch_now_available: bool = False,
+    scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
 ) -> bytes:
     from . import web
 
@@ -276,6 +278,7 @@ def render_connections(
         + "<h2>Banks and their consent</h2>"
         + web._connection_rows(store, rename_available=rename_connection is not None)
         + web._starling_row(starling_status)
+        + scheduler_section(scheduler_heartbeat)
         + web._add_a_bank_section(bank_authorisation)
         + (
             web._fetch_now_rows(store, starling_status, backfill_status)
@@ -456,6 +459,7 @@ class SectionPages:
             extendables=timer.wrap("extendables", config.extendables),
             backfill_status=timer.wrap("backfill_status", config.backfill_status),
             fetch_now_available=config.fetch_now is not None,
+            scheduler_heartbeat=timer.wrap("scheduler_heartbeat", config.scheduler_heartbeat),
         )
         timer.report("/connections")
         self._respond(200, page)
