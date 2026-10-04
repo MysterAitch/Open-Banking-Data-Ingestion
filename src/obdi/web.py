@@ -267,8 +267,27 @@ class UploadSession:
 
     LIFETIME = timedelta(minutes=15)
 
+    #: How many finished uploads are remembered by token, newest kept.
+    REMEMBERED = 200
+
     def __init__(self) -> None:
         self._pending: dict[str, tuple[bytes, str, datetime, bool]] = {}
+        self._landed: dict[str, tuple[str, str, datetime]] = {}
+
+    def mark_landed(self, token: str, filename: str, account: str) -> None:
+        """Remember that the import held under `token` went through.
+
+        Pressing Import consumes the stash, so reloading the answer re-sends a token nothing
+        holds. Without this record the reload said only that the upload had expired, which a
+        person who had just imported cannot tell from an import that never happened.
+        """
+        self._landed[token] = (filename, account, datetime.now(UTC))
+        while len(self._landed) > self.REMEMBERED:
+            del self._landed[next(iter(self._landed))]
+
+    def landed(self, token: str) -> tuple[str, str, datetime] | None:
+        """(file name, account, when) of an import that went through under `token`."""
+        return self._landed.get(token)
 
     def stash(self, payload: bytes, filename: str, *, doubted: bool = False) -> str:
         """`doubted` rides the stash so the CONFIRM can enforce the
@@ -4989,15 +5008,20 @@ class ConnectionHandler(
         )
         if account is None:
             return
+        before = self.answer_standing(account)
         old = hook(artefact_id, account)
         if old is None:
             self._respond(404, error_page("Not found", "<p>No such artefact.</p>"))
             return
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
             render_page(
                 "Refiled",
-                f"<p>Refiled from <strong>{html.escape(old)}</strong> to "
+                self.answer_link(account)
+                + (self.answer_link(old) if old != account else "")
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + f"<p>Refiled from <strong>{html.escape(old)}</strong> to "
                 f"<strong>{html.escape(account)}</strong>. The correction is "
                 "recorded in the artefact's provenance.</p>"
                 "<p>Now run <strong>Rebuild from raw</strong> (danger zone) so "
@@ -5201,6 +5225,18 @@ class ConnectionHandler(
         )
         self._respond(200, render_page("Actual sync history", body))
 
+    def _artefact_account(self, artefact_id: int) -> str:
+        """The account an artefact is filed under, or "" where it has no ledger to open."""
+        detail_hook = self.bound_config.artefact_detail
+        if detail_hook is None:
+            return ""
+        try:
+            detail = detail_hook(artefact_id)
+        except Exception:
+            return ""
+        account = str(detail.get("account_ref", "")) if detail else ""
+        return "" if account == UNASSIGNED_ACCOUNT else account
+
     def _replay_artefact(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.replay_artefact
         if hook is None:
@@ -5211,19 +5247,28 @@ class ConnectionHandler(
         except ValueError:
             self._respond(400, error_page("Bad request", "<p>Artefact id required.</p>"))
             return
+        account = self._artefact_account(artefact_id)
+        before = self.answer_standing(account)
         try:
             summary = hook(artefact_id)
         except Exception as exc:
             self._respond(
-                400, error_page("Could not replay", f"<p>{html.escape(str(exc))}</p>")
+                400,
+                error_page(
+                    "Could not replay",
+                    self.answer_link(account) + f"<p>{html.escape(str(exc))}</p>",
+                ),
             )
             return
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
             render_page(
                 "Artefact replayed",
-                f"<p>{html.escape(summary)}</p>"
-                "<p>Additive and idempotent: replaying again matches "
+                self.answer_link(account)
+                + f"<p>{html.escape(summary)}</p>"
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + "<p>Additive and idempotent: replaying again matches "
                 "instead of duplicating. A full rebuild is only for rows "
                 "that are wrong, not merely absent.</p>"
                 f'<p><a class="button" href="/artefact?id={artefact_id}">'
@@ -5953,6 +5998,7 @@ class ConnectionHandler(
         lines = []
         read_in = 0
         waiting = 0
+        before = self.answer_standing(account)
         review = self.bound_config.review_kept_statement
         for name, ident in sorted(named):
             try:
@@ -5996,13 +6042,16 @@ class ConnectionHandler(
             )
         refused = len(named) - read_in - waiting
         confirming = f", {waiting} needing confirmation" if waiting else ""
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
             render_page(
                 "Statements read in",
-                f"<h2>Statements read in</h2><p>{read_in} read in, {refused} refused"
+                self.answer_link(account)
+                + f"<h2>Statements read in</h2><p>{read_in} read in, {refused} refused"
                 f"{confirming}, each in file-name order.</p>"
-                f'<ul class="accounts">{"".join(lines)}</ul>'
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + f'<ul class="accounts">{"".join(lines)}</ul>'
                 '<p><a class="button" href="/statements">Back to kept statements</a></p>'
                 + HOME_LINK,
             ),
@@ -6058,6 +6107,7 @@ class ConnectionHandler(
         )
         if account is None:
             return
+        before = self.answer_standing(account)
         try:
             outcome = hook(int(artefact), account, doubt_acknowledged=acknowledged)
         except Exception as exc:
@@ -6067,7 +6117,8 @@ class ConnectionHandler(
                 200,
                 render_page(
                     "Not read in",
-                    '<h2>Not read in</h2><p class="alarm">'
+                    self.answer_link(account)
+                    + '<h2>Not read in</h2><p class="alarm">'
                     + html.escape(str(exc))
                     + "</p><p>The file is still kept, so a better parser can "
                     "read it later without it being uploaded again.</p>"
@@ -6080,19 +6131,23 @@ class ConnectionHandler(
                 200,
                 render_page(
                     "Not read in",
-                    '<h2>Not read in</h2><p class="alarm">'
+                    self.answer_link(account)
+                    + '<h2>Not read in</h2><p class="alarm">'
                     + html.escape(outcome)
                     + "</p><p>The file is still kept, waiting for an account.</p>"
                     + HOME_LINK,
                 ),
             )
             return
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
             render_page(
                 "Read in",
-                f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
-                '<p><a class="button" href="/statement-shape">Read another</a>'
+                self.answer_link(account)
+                + f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + '<p><a class="button" href="/statement-shape">Read another</a>'
                 "</p>" + HOME_LINK,
             ),
         )
@@ -6162,6 +6217,7 @@ class ConnectionHandler(
         )
         if account is None:
             return
+        before = self.answer_standing(account)
         try:
             outcome = hook(int(artefact), section, account, doubt_acknowledged=acknowledged)
         except Exception as exc:
@@ -6169,7 +6225,8 @@ class ConnectionHandler(
                 200,
                 render_page(
                     "Not read in",
-                    '<h2>Not read in</h2><p class="alarm">'
+                    self.answer_link(account)
+                    + '<h2>Not read in</h2><p class="alarm">'
                     + html.escape(str(exc))
                     + "</p><p>The statement is still kept and this account of it "
                     "is still waiting, so nothing needs uploading again.</p>"
@@ -6183,7 +6240,8 @@ class ConnectionHandler(
                 200,
                 render_page(
                     "Not read in",
-                    '<h2>Not read in</h2><p class="alarm">'
+                    self.answer_link(account)
+                    + '<h2>Not read in</h2><p class="alarm">'
                     + html.escape(outcome)
                     + "</p><p>The statement is still kept and this account of it "
                     "is still waiting.</p>"
@@ -6192,12 +6250,15 @@ class ConnectionHandler(
                 ),
             )
             return
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
             render_page(
                 "Read in",
-                f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
-                '<p><a class="button" href="/statements">Back to kept '
+                self.answer_link(account)
+                + f'<h2>Read in</h2><p class="ok">{html.escape(outcome)}</p>'
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + '<p><a class="button" href="/statements">Back to kept '
                 "statements</a></p>" + HOME_LINK,
             ),
         )
@@ -7353,6 +7414,36 @@ class ConnectionHandler(
         )
         self._respond(200, render_page("Preview import", body))
 
+    def _upload_gone_page(self, token: str, account: str) -> bytes:
+        """The answer to Import pressed for a token nothing holds, saying whether it landed.
+
+        Two causes look alike from the page: the import went through the first time (this is a
+        reload or a second press), or the file was never held (expired, or the server
+        restarted). The first is recorded when the import lands, so it is said plainly; the
+        second cannot be told from an import this process never saw, so the page says what it
+        does not know and offers the account's ledger to look in.
+        """
+        landed = self.uploads.landed(token)
+        if landed is not None:
+            filename, landed_account, when = landed
+            return render_page(
+                "Already imported",
+                self.answer_link(landed_account)
+                + f"<p><strong>{html.escape(filename)}</strong> was imported into "
+                f"<strong>{html.escape(self.answer_name(landed_account))}</strong> at "
+                f"{when.strftime('%Y-%m-%d %H:%M:%S')} UTC. This press did nothing more: "
+                "nothing was imported twice.</p>" + BACK_TO_IMPORT,
+            )
+        return render_page(
+            "Upload expired",
+            self.answer_link(account)
+            + "<p>No file is held for this press. It was either held for more than "
+            f"{int(UploadSession.LIFETIME.total_seconds() // 60)} minutes, or this server has "
+            "restarted since it was uploaded. If you pressed Import earlier, that press may "
+            "have landed and this page cannot tell: look in the account's ledger above. "
+            "Otherwise upload the file again.</p>" + BACK_TO_IMPORT,
+        )
+
     def _upload_confirm(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.confirm_upload
         if hook is None:
@@ -7376,10 +7467,8 @@ class ConnectionHandler(
             return
         try:
             payload, filename, doubted = self.uploads.claim(token)
-        except KeyError as exc:
-            self._respond(410, error_page(
-                    "Upload expired", f"<p>{html.escape(str(exc))}</p>", BACK_TO_IMPORT
-                ))
+        except KeyError:
+            self._respond(410, self._upload_gone_page(token, account))
             return
         if doubted and form.get("override") != ["yes"]:
             # The claim consumed the stash, so hand back a fresh token with
@@ -7407,6 +7496,7 @@ class ConnectionHandler(
                 ),
             )
             return
+        before = self.answer_standing(account)
         try:
             summary = hook(payload, filename, account)
         except Exception as exc:
@@ -7417,6 +7507,7 @@ class ConnectionHandler(
                 ),
             )
             return
+        self.uploads.mark_landed(token, filename, account)
         print(f"web import: {filename} -> {account}", file=sys.stderr)
         if isinstance(summary, dict):
             summary_html = (
@@ -7442,9 +7533,17 @@ class ConnectionHandler(
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             "Preview import</button></p></form>"
         )
+        verification = self.answer_sentence(account, before)
         self._respond(
             200,
-            render_page("Imported", summary_html + another + BACK_TO_IMPORT),
+            render_page(
+                "Imported",
+                self.answer_link(account)
+                + summary_html
+                + (f"<p>{html.escape(verification)}</p>" if verification else "")
+                + another
+                + BACK_TO_IMPORT,
+            ),
         )
 
     def _starling_probe(self, params: dict[str, list[str]]) -> None:
@@ -7937,7 +8036,7 @@ class ConnectionHandler(
             200,
             render_page(
                 "Account bound",
-                f"<p>{html.escape(summary)}</p>" + back,
+                self.answer_link(canonical) + f"<p>{html.escape(summary)}</p>" + back,
             ),
         )
 

@@ -51,6 +51,7 @@ from .overview import ARCHIVED
 from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .standing_data import AccountStanding, standing_lines
+from .web_answers import UNREAD, AnswerPages, ledger_href, ledger_link
 from .web_sections import back_link, referring_page
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -877,12 +878,10 @@ def archived_page(outcome: ArchiveOutcome, back: str = "") -> bytes:
     )
     return render_page(
         "Account archived",
-        f'<p class="ok"><strong>{name}</strong> is archived as of '
+        ledger_link(str(record.ref), record.label or str(record.ref))
+        + f'<p class="ok"><strong>{name}</strong> is archived as of '
         f"{html.escape(record.closed.isoformat() if record.closed else '')}.</p>"
-        f"<p>{source}</p>{declared}{basis}{undo}"
-        + _ledger_link(str(record.ref))
-        + back
-        + BACK_LINKS,
+        f"<p>{source}</p>{declared}{basis}{undo}" + back + BACK_LINKS,
     )
 
 
@@ -897,21 +896,14 @@ def unarchived_page(outcome: ArchiveOutcome, back: str = "") -> bytes:
     )
     return render_page(
         "Account unarchived",
-        f'<p class="ok"><strong>{name}</strong> is not archived.</p><p>{said}</p>'
-        + _ledger_link(str(record.ref))
+        ledger_link(str(record.ref), record.label or str(record.ref))
+        + f'<p class="ok"><strong>{name}</strong> is not archived.</p><p>{said}</p>'
         + back
         + BACK_LINKS,
     )
 
 
-def _ledger_link(ref: str) -> str:
-    return (
-        f'<p><a class="button" href="/ledger?ref={quote(ref, safe="")}">'
-        "Back to this account's ledger</a></p>"
-    )
-
-
-class AccountPages:
+class AccountPages(AnswerPages):
     """The registry's pages, composed into the request handler.
 
     A mixin rather than a separate service because that is how this
@@ -984,7 +976,8 @@ class AccountPages:
             return
         outcome = hook([ref for ref in form.get("ref", []) if ref.strip()])
         items = "".join(
-            f'<li><strong>{html.escape(a.label)}</strong> - '
+            f'<li><a class="tap" href="{html.escape(ledger_href(a.ref))}">'
+            f"<strong>{html.escape(a.label)}</strong></a> - "
             f'<span class="mono">{html.escape(a.ref)}</span>'
             + (f", kind {html.escape(a.kind)}" if a.kind else "")
             + (f", under {html.escape(a.parent)}" if a.parent else "")
@@ -1021,8 +1014,10 @@ class AccountPages:
             return
         outcome = hook([space for space in form.get("space", []) if space.strip()])
         items = "".join(
-            f'<li><span class="mono">{html.escape(c.space)}</span> now under '
-            f'<span class="mono">{html.escape(c.main)}</span></li>'
+            f'<li><a class="tap" href="{html.escape(ledger_href(c.space))}">'
+            f'<span class="mono">{html.escape(c.space)}</span></a> now under '
+            f'<a class="tap" href="{html.escape(ledger_href(c.main))}">'
+            f'<span class="mono">{html.escape(c.main)}</span></a></li>'
             for c in outcome.set_
         )
         skipped = (
@@ -1146,18 +1141,23 @@ class AccountPages:
         elif str(record.ref) in declared:
             self._respond(409, already_declared(str(record.ref)))
             return
+        before = self.answer_standing(original) if original else UNREAD
         try:
             stored = hook(record)
         except DataError as exc:
             self._respond(409, refusal("Not saved", str(exc)))
             return
+        verb = "is declared as" if not original else "is saved as"
+        sentence = self.answer_sentence(str(stored.ref), before) if original else ""
         self._respond(
             200,
             render_page(
                 "Account declared" if not original else "Account saved",
-                f'<p class="ok"><strong>{html.escape(stored.label or str(stored.ref))}'
-                f"</strong> is declared as "
+                ledger_link(str(stored.ref), stored.label or str(stored.ref))
+                + f'<p class="ok"><strong>{html.escape(stored.label or str(stored.ref))}'
+                f"</strong> {verb} "
                 f'<span class="mono">{html.escape(str(stored.ref))}</span>.</p>'
+                + (f"<p>{html.escape(sentence)}</p>" if sentence else "")
                 + (
                     "<p>It can now be chosen wherever an account is chosen - "
                     "the import door, the refile form and the assign form.</p>"

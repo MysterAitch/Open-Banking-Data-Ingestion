@@ -40,6 +40,7 @@ from .logs import say
 from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .web_accounts import archive_controls, archive_label, submit_button
+from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
 from .web_standing import protection_html, standing_html
 
@@ -1921,7 +1922,7 @@ def _page(title: str, message: str) -> bytes:
     return render_page(title, f"<p>{_esc(message)}</p>{_HOME}")
 
 
-class LedgerPages:
+class LedgerPages(AnswerPages):
     """The ledger's routes, composed into the request handler."""
 
     @property
@@ -1948,8 +1949,13 @@ class LedgerPages:
             unmasked=True,
         )
 
-    def _anchor_refusal(self, status: int, title: str, message: str) -> None:
-        self._respond(status, _page(title, message), no_store=True)
+    def _anchor_refusal(self, status: int, title: str, message: str, *, ref: str = "") -> None:
+        """A refusal that still offers the account's ledger first, where the account is known."""
+        self._respond(
+            status,
+            render_page(title, f"{self.answer_link(ref)}<p>{_esc(message)}</p>{_HOME}"),
+            no_store=True,
+        )
 
     def _anchor_save_post(self, form: dict[str, list[str]]) -> None:
         """State (or restate) a balance, then answer with the MASKED ledger.
@@ -1966,6 +1972,7 @@ class LedgerPages:
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
         day = (form.get("day", [""])[0] or "").strip()
+        before = self.answer_standing(ref)
         try:
             hook(
                 ref,
@@ -1974,21 +1981,28 @@ class LedgerPages:
                 (form.get("currency", ["GBP"])[0] or "GBP").strip(),
             )
         except DataError as exc:
-            self._anchor_refusal(400, "Balance not saved", f"Nothing was saved. {exc}.")
+            self._anchor_refusal(400, "Balance not saved", f"Nothing was saved. {exc}.", ref=ref)
             return
         except Exception as fault:
             # Not str(fault): an unexpected failure's text is not under this
             # module's control and could quote what was typed.
             say("ledger.anchor.save.fault", kind=type(fault).__name__)
             self._anchor_refusal(
-                500, "Balance not saved", "Nothing was saved, because of an unexpected fault."
+                500,
+                "Balance not saved",
+                "Nothing was saved, because of an unexpected fault.",
+                ref=ref,
             )
             return
         self._ledger(
             ref,
             month,
             unmasked=False,
-            notice=f"Saved: a stated balance for the end of {day}. Nothing else changed.",
+            notice=self.answer_notice(
+                f"Saved: a stated balance for the end of {day}. Nothing else changed.",
+                ref,
+                before,
+            ),
             no_store=True,
         )
 
@@ -2000,10 +2014,13 @@ class LedgerPages:
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
         day = (form.get("day", [""])[0] or "").strip()
+        before = self.answer_standing(ref)
         try:
             removed = hook(ref, day)
         except DataError as exc:
-            self._anchor_refusal(400, "Balance not removed", f"Nothing was removed. {exc}.")
+            self._anchor_refusal(
+                400, "Balance not removed", f"Nothing was removed. {exc}.", ref=ref
+            )
             return
         except Exception as fault:
             say("ledger.anchor.remove.fault", kind=type(fault).__name__)
@@ -2011,6 +2028,7 @@ class LedgerPages:
                 500,
                 "Balance not removed",
                 "Nothing was removed, because of an unexpected fault.",
+                ref=ref,
             )
             return
         if not removed:
@@ -2018,13 +2036,16 @@ class LedgerPages:
                 404,
                 "No such stated balance",
                 f"No balance was stated for the end of {day}, so nothing was removed.",
+                ref=ref,
             )
             return
         self._ledger(
             ref,
             month,
             unmasked=False,
-            notice=f"Removed: the stated balance for the end of {day}.",
+            notice=self.answer_notice(
+                f"Removed: the stated balance for the end of {day}.", ref, before
+            ),
             no_store=True,
         )
 
@@ -2080,7 +2101,7 @@ class LedgerPages:
             try:
                 day = parse_calendar_day((form.get("through", [""])[0] or "").strip())
             except DataError as exc:
-                self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.")
+                self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.", ref=ref)
                 return
             through = day.isoformat()
             extra = f'<input type="hidden" name="through" value="{_esc(through)}">'
@@ -2097,12 +2118,15 @@ class LedgerPages:
         try:
             hook(ref, through) if with_through else hook(ref)
         except DataError as exc:
-            self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.")
+            self._anchor_refusal(400, refused_title, f"{refused_lead} {exc}.", ref=ref)
             return
         except Exception as fault:
             say(f"ledger.{hook_name}.fault", kind=type(fault).__name__)
             self._anchor_refusal(
-                500, refused_title, f"{refused_lead} An unexpected fault stopped it."
+                500,
+                refused_title,
+                f"{refused_lead} An unexpected fault stopped it.",
+                ref=ref,
             )
             return
         self._ledger(
@@ -2178,6 +2202,7 @@ class LedgerPages:
             return
         ref = (form.get("ref", [""])[0] or "").strip()
         day = (form.get("day", [""])[0] or "").strip()
+        before = self.answer_standing(ref)
         try:
             hook(
                 ref,
@@ -2187,7 +2212,9 @@ class LedgerPages:
                 form.get("description", [""])[0] or "",
             )
         except DataError as exc:
-            self._anchor_refusal(400, "Transaction not saved", f"Nothing was saved. {exc}.")
+            self._anchor_refusal(
+                400, "Transaction not saved", f"Nothing was saved. {exc}.", ref=ref
+            )
             return
         except Exception as fault:
             say("ledger.typed.save.fault", kind=type(fault).__name__)
@@ -2195,13 +2222,16 @@ class LedgerPages:
                 500,
                 "Transaction not saved",
                 "Nothing was saved, because of an unexpected fault.",
+                ref=ref,
             )
             return
         self._ledger(
             ref,
             day[:7],
             unmasked=False,
-            notice=f"Saved: a typed transaction dated {day}. Nothing else changed.",
+            notice=self.answer_notice(
+                f"Saved: a typed transaction dated {day}. Nothing else changed.", ref, before
+            ),
             no_store=True,
         )
 
@@ -2214,10 +2244,13 @@ class LedgerPages:
             return
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
+        before = self.answer_standing(ref)
         try:
             hook(ref, (form.get("entry", [""])[0] or "").strip())
         except DataError as exc:
-            self._anchor_refusal(400, "Transaction not withdrawn", f"Nothing was withdrawn. {exc}.")
+            self._anchor_refusal(
+                400, "Transaction not withdrawn", f"Nothing was withdrawn. {exc}.", ref=ref
+            )
             return
         except Exception as fault:
             say("ledger.typed.withdraw.fault", kind=type(fault).__name__)
@@ -2225,14 +2258,19 @@ class LedgerPages:
                 500,
                 "Transaction not withdrawn",
                 "Nothing was withdrawn, because of an unexpected fault.",
+                ref=ref,
             )
             return
         self._ledger(
             ref,
             month,
             unmasked=False,
-            notice="Withdrawn: one typed transaction. It stays in the record as evidence "
-            "and counts nowhere.",
+            notice=self.answer_notice(
+                "Withdrawn: one typed transaction. It stays in the record as evidence "
+                "and counts nowhere.",
+                ref,
+                before,
+            ),
             no_store=True,
         )
 
