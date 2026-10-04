@@ -306,9 +306,9 @@ def timeline_svg(
         x = x_of(tick)
         parts.append(
             f'<line x1="{x:.1f}" y1="{top_pad - 4}" x2="{x:.1f}" '
-            f'y2="{height - 20}" stroke="#00000022" stroke-width="1"/>'
+            f'y2="{height - 20}" stroke="currentColor" stroke-opacity=".15" stroke-width="1"/>'
             f'<text x="{x:.1f}" y="{height - 8}" text-anchor="middle" '
-            f'fill="currentColor" opacity="0.7">{tick.date().isoformat()[5:]}</text>'
+            f'fill="var(--ink-2)">{tick.date().isoformat()[5:]}</text>'
         )
 
     previous_day = None
@@ -369,14 +369,14 @@ def timeline_svg(
         day = bar.attempted_at.date()
         if day != previous_day:
             stamp = bar.attempted_at.strftime("%a %d-%b")
-            opacity = "0.85"
+            ink = "var(--ink)"
             previous_day = day
         else:
             stamp = bar.attempted_at.strftime("%H:%M")
-            opacity = "0.55"
+            ink = "var(--ink-2)"
         parts.append(
             f'<text x="{left_pad - 12}" y="{y + row_h - 5}" text-anchor="end" '
-            f'fill="currentColor" opacity="{opacity}">{stamp}</text></g>'
+            f'fill="{ink}">{stamp}</text></g>'
         )
 
     parts.append("</svg>")
@@ -404,13 +404,14 @@ def timeline_svg(
     )
     return (
         f'<p class="muted">{legend} &nbsp; '
-        '<span style="color:#b91c1c">dashed red = refused</span> '
+        '<span class="bad">dashed red = refused</span> '
         "(bar or diamond - hover names the source); "
         "diamond = point-in-time ask (no window); "
         "dotted outline = window recovered from the landed artefact; "
         "hatched = window inferred from the routine default; "
         "left notch = window extends beyond the chart; "
         "hover a bar for the full ask.</p>"
-        f'<div style="overflow-x:auto">{"".join(parts)}</div>'
+        '<div style="overflow-x:auto" tabindex="0" role="region" '
+        f'aria-label="Fetch timeline, scrolls sideways">{"".join(parts)}</div>'
         f"{note_html}"
     )

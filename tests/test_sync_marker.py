@@ -475,8 +475,8 @@ class TestTheButtonAndTheRoute:
         assert 'method="post"' in form
         assert "Write a sync marker now" in form
         push_form = next(f for f in forms(page) if 'action="/push-actual"' in f)
-        assert "background:#8882" in form, "styled as a secondary action, like the audit"
-        assert "background" not in push_form, "the push stays the page's primary action"
+        assert 'class="button secondary"' in form, "styled as a secondary action, like the audit"
+        assert 'class="button"' in push_form, "the push stays the page's primary action"
 
     def test_Page_WithoutTheHook_OffersNoMarkerButton(self, serve):
         base = serve([], push_actual=lambda: "q")

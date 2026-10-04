@@ -38,9 +38,8 @@ _WRAP = "overflow-wrap:anywhere"
 #: A danger control, deliberately unlike the page's primary button: outlined,
 #: not filled, and no `button` class, which is what styles a primary action.
 _DANGER_BUTTON = (
-    '<p><button type="submit" style="width:100%;font-size:inherit;cursor:pointer;'
-    "padding:.7rem .6rem;border:2px solid #b91c1c;border-radius:.4rem;"
-    'background:transparent;color:#b91c1c;font-weight:700">'
+    '<p><button class="button danger" type="submit" '
+    'style="width:100%;font-size:inherit;cursor:pointer">'
     "Empty Actual completely</button></p>"
 )
 
@@ -229,7 +228,7 @@ def _form(plan: EmptyPlan) -> str:
     return (
         '<form method="post" action="/empty-actual">'
         + hidden
-        + '<label style="display:block;margin:.5rem 0">'
+        + '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand every account in Actual, closed ones included, and every "
         "transaction in them, will be deleted</label>"

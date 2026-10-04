@@ -21,6 +21,7 @@ from obdi.connections import Connection, ConnectionStore
 from obdi.coverage import SourceCoverage
 from obdi.probing import elapsed_words, sca_note
 from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
+from stylesheet_support import length_px
 from test_navigation import get_routes
 
 #: Only a first-rung consent gets the heavy Reconnect button.
@@ -576,7 +577,9 @@ class TestControlsAreThumbSized:
             ],
         )
         for path in self.PAGES:
-            page = re.sub(r"<nav .*?</nav>", "", fetch(base, path), flags=re.S)
+            page = re.sub(
+                r'<a class="skip" [^>]*>[^<]*</a>|<nav .*?</nav>', "", fetch(base, path), flags=re.S
+            )
             for tag in re.findall(r"<button[^>]*>", page):
                 assert 'class="button' in tag or "form button" in tag, (path, tag)
             for tag in re.findall(r"<a [^>]*>", page):
@@ -586,7 +589,8 @@ class TestControlsAreThumbSized:
         css = fetch(serve(), "/")
 
         rules = re.findall(r"a\.button, button\.button \{[^}]*\}", css)
-        assert any("min-height: 44px" in rule for rule in rules)
+        floors = [m for rule in rules for m in re.findall(r"min-height: ([^;]+);", rule)]
+        assert any(length_px(css, floor) >= 44 for floor in floors)
 
 
 class TestEveryResultPageOffersTheWayBackToWhereItCameFrom:

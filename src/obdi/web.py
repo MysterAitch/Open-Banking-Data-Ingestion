@@ -794,14 +794,12 @@ def _connection_rows(store: ConnectionStore, rename_available: bool = False) -> 
             '<form method="post" action="/rename-connection" '
             'style="margin:.4rem 0 0">'
             f'<input type="hidden" name="old_name" value="{display}">'
-            '<label style="display:block;font-size:.85rem" class="muted">'
+            '<label class="muted">'
             "The name is obdi's label, not the bank's - it moves everywhere at once"
-            f'<input name="new_name" value="{display}" '
-            'style="width:100%;font-size:1rem;min-height:44px;box-sizing:border-box">'
+            f'<input name="new_name" value="{display}">'
             "</label>"
-            '<button class="button" type="submit" style="border:0;width:100%;'
-            'min-height:44px;font-size:inherit;cursor:pointer;'
-            'background:#8882;color:inherit">Rename</button></form></details>'
+            '<button class="button secondary" type="submit" style="width:100%;'
+            'font-size:inherit;cursor:pointer">Rename</button></form></details>'
             if rename_available
             else ""
         )
@@ -1146,9 +1144,9 @@ def _insight_sections(summary: dict[str, object]) -> str:
             '<div style="display:flex;align-items:center;gap:.5rem;margin:.15rem 0">'
             f'<span class="mono" style="flex:0 0 4.6rem">'
             f"{html.escape(str(m.get('month')))}</span>"
-            '<div style="flex:1;background:#8882;border-radius:.25rem">'
+            '<div style="flex:1;background:var(--rule);border-radius:.25rem">'
             f'<div style="width:{max(2, round(int(str(m.get("count"))) * 100 / peak))}%;'
-            'background:#2563eb;height:.8rem;border-radius:.25rem"></div></div>'
+            'background:var(--act);height:.8rem;border-radius:.25rem"></div></div>'
             f'<span class="muted" style="flex:0 0 2.6rem;text-align:right">'
             f"{m.get('count')}</span></div>"
             for m in by_month
@@ -1411,7 +1409,7 @@ def refusal_html(exc: Exception) -> str:
         parts.append(f"<p>{html.escape(description)}</p>")
     if details:
         parts.append(
-            f'<p style="opacity:.7">Provider detail: {html.escape(details)}</p>'
+            f'<p class="muted">Provider detail: {html.escape(details)}</p>'
         )
     remedy = _REMEDIES.get(code)
     if remedy:
@@ -1423,7 +1421,7 @@ def refusal_html(exc: Exception) -> str:
     ]
     if jargon:
         parts.append(
-            '<p style="opacity:.7;font-size:.9em">'
+            '<p class="muted" style="font-size:.9em">'
             + "<br>".join(
                 f"<strong>{html.escape(term)}</strong>: {html.escape(meaning)}"
                 for term, meaning in jargon
@@ -1548,14 +1546,14 @@ def _credential_banner(bank_authorisation: bool = True) -> str:
 #: stretch), dotted amber is truncated-by-provider (the bank likely holds
 #: more; the API refuses), dashed grey is simply never-asked.
 _TIMELINE_STYLES = {
-    "held": "background:#2563eb",
-    "empty": "background:#2563eb40",
+    "held": "background:var(--act)",
+    "empty": "background:color-mix(in srgb,var(--act) 25%,transparent)",
     "truncated": (
-        "background:repeating-linear-gradient(90deg,#b45309aa 0 3px,"
+        "background:repeating-linear-gradient(90deg,var(--warn) 0 3px,"
         "transparent 3px 7px)"
     ),
     "unknown": (
-        "background:repeating-linear-gradient(90deg,#8888 0 6px,"
+        "background:repeating-linear-gradient(90deg,var(--edge) 0 6px,"
         "transparent 6px 12px)"
     ),
     "future": "background:transparent",
@@ -1642,7 +1640,7 @@ def _timeline_strip(segments: list[tuple[str, float]]) -> str:
     )
     return (
         '<div style="display:flex;height:6px;border-radius:3px;'
-        f'overflow:hidden;background:#8881;margin:.35rem 0">{parts}</div>'
+        f'overflow:hidden;background:var(--rule-2);margin:.35rem 0">{parts}</div>'
     )
 
 
@@ -1783,7 +1781,7 @@ def _holdings_rows(
                 covered=_mark(row.account_id, "covered"),
             )
         )
-        row_style = ' style="opacity:.62"' if dormant else ""
+        row_class = "row dormant" if dormant else "row"
         feeder_note = ""
         if ":" not in row.account_id and feeders_map:
             feeder_note = _feeder_line(row.account_id, feeders_map)
@@ -1809,7 +1807,7 @@ def _holdings_rows(
                 'type="submit">Bind</button></form>'
             )
         items.append(
-            f'<div class="row"{row_style}><div class="row-head"><strong>'
+            f'<div class="{row_class}"><div class="row-head"><strong>'
             f'<a class="tap" href="/account?ref={quote(row.account_id)}">'
             f"{title}</a></strong> "
             f'<a class="tap nowrap" href="/ledger?ref={quote(row.account_id, safe="")}">'
@@ -1878,7 +1876,7 @@ def _holdings_rows(
             )
         feeder_note = _feeder_line(ref, feeders_map) if feeders_map else ""
         items.append(
-            f'<div class="row" style="opacity:.62"><strong>{title}</strong>'
+            f'<div class="row dormant"><strong>{title}</strong>'
             f'{sub}<br><span class="muted">known account, nothing held yet - '
             f"{reach}</span>{feeder_note}{empty_bind}{strip}</div>"
         )
@@ -2574,19 +2572,19 @@ def _add_a_bank_section(available: bool) -> str:
     if not available:
         return (
             "<h2>Add a bank</h2>\n"
-            '<p style="opacity:.8">Bank authorisation is <strong>not configured</strong> '
+            '<p>Bank authorisation is <strong>not configured</strong> '
             "on this instance, so there is no bank to add and no feed to expect. "
             "Statements, imports, categorisation and coverage are unaffected.</p>\n"
-            '<p style="opacity:.7;font-size:.9rem">Set a provider client id, its '
+            '<p class="muted" style="font-size:.9rem">Set a provider client id, its '
             "redirect URI and its secret to enable it.</p>"
         )
     return """<h2>Add a bank</h2>
 <form action="/connect" method="get">
-  <p><input name="name" placeholder="a name you will recognise, e.g. halifax" required></p>
+  <p><input name="name" aria-label="Connection name" placeholder="a name you will recognise, e.g. halifax" required></p>
   <p><button class="button" type="submit"
-     style="border:0;width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
+     style="width:100%;font-size:inherit;cursor:pointer">Connect</button></p>
 </form>
-<p style="opacity:.7;font-size:.9rem">Reconnecting keeps the same name on purpose:
+<p class="muted" style="font-size:.9rem">Reconnecting keeps the same name on purpose:
 a new name would create a second connection to the same bank.</p>"""
 
 
@@ -2678,14 +2676,11 @@ def _danger_zone(
         "confirmation; none touches the raw artefacts in layer 0.</p>",
     ]
     checkbox = (
-        '<label style="display:block;margin:.35rem 0">'
+        '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand</label>"
     )
-    button_style = (
-        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-        'background:#dc262622;color:#b91c1c"'
-    )
+    button_style = 'style="width:100%;font-size:inherit;cursor:pointer"'
     if rebuild_available:
         parts.append(_rebuild_status_line(rebuild_status))
         parts.append(_rebuild_history_html(recent_rebuilds))
@@ -2709,7 +2704,7 @@ def _danger_zone(
             "rather than carried over, so a flag the rules have since learned "
             "to settle does not come back.</p>"
             + checkbox
-            + f'<p><button class="button" type="submit" {button_style}>'
+            + f'<p><button class="button danger" type="submit" {button_style}>'
             "Rebuild from raw</button></p></form>"
         )
     if forget_available:
@@ -2720,7 +2715,7 @@ def _danger_zone(
             "side: the next push re-provisions by name, reusing any "
             "same-named accounts that still exist.</p>"
             + checkbox
-            + f'<p><button class="button" type="submit" {button_style}>'
+            + f'<p><button class="button danger" type="submit" {button_style}>'
             "Forget Actual account links</button></p></form>"
         )
     return "".join(parts)
@@ -3548,18 +3543,16 @@ def _actual_rows(
     )
     audit_button = (
         '<form method="post" action="/audit-actual">'
-        '<p><button class="button" type="submit" '
-        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-        'background:#8882;color:inherit">'
+        '<p><button class="button secondary" type="submit" '
+        'style="width:100%;font-size:inherit;cursor:pointer">'
         "Audit Actual now</button></p></form>"
         if audit_available
         else ""
     )
     marker_button = (
         '<form method="post" action="/marker-actual">'
-        '<p><button class="button" type="submit" '
-        'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-        'background:#8882;color:inherit">'
+        '<p><button class="button secondary" type="submit" '
+        'style="width:100%;font-size:inherit;cursor:pointer">'
         "Write a sync marker now</button></p></form>"
         if marker_available
         else ""
@@ -3878,7 +3871,7 @@ def _extend_rows(
                 f"{buttons}{max_button}</details>"
             )
         note = (
-            f'<br><span style="opacity:.75">{html.escape(account.auth_note)}</span>'
+            f'<br><span class="muted">{html.escape(account.auth_note)}</span>'
             if account.auth_note
             else ""
         )
@@ -4782,7 +4775,7 @@ class ConnectionHandler(
                 )
                 + ' - '
                 f'trigger: {html.escape(str(item.get("trigger", "unrecorded")))}<br>'
-                f'<span style="opacity:.7;word-break:break-all">{origin}</span><br>'
+                f'<span class="muted" style="word-break:break-all">{origin}</span><br>'
                 f'<a class="button" href="/artefact?id={item.get("id")}">Inspect</a></div>'
             )
         body = (
@@ -4848,12 +4841,12 @@ class ConnectionHandler(
             + f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
             f'fetched {html.escape(str(detail.get("fetched_at", "")))}<br>'
-            f'<span style="opacity:.7;word-break:break-all">'
+            f'<span class="muted" style="word-break:break-all">'
             f'{html.escape(str(detail.get("origin", "")))}</span></p>'
             + (
                 "<p>Also seen as:<br>"
                 + "<br>".join(
-                    f'<span style="opacity:.7;word-break:break-all">'
+                    f'<span class="muted" style="word-break:break-all">'
                     f"{html.escape(name)}</span>"
                     for name in also_seen
                 )
@@ -4886,7 +4879,7 @@ class ConnectionHandler(
                     other_placeholder="or type the correct canonical, "
                     "e.g. starling-personal",
                 )
-                + '<label style="display:block;margin:.35rem 0">'
+                + '<label class="tick">'
                 '<input type="checkbox" name="confirm" value="yes" required> '
                 "I understand the filing changes and a rebuild re-derives</label>"
                 '<p><button class="button" type="submit" '
@@ -7345,7 +7338,7 @@ class ConnectionHandler(
             f'<input type="hidden" name="token" value="{token}">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
             + (
-                '<label style="display:block;margin:.35rem 0">'
+                '<label class="tick">'
                 '<input type="checkbox" name="override" value="yes" required> '
                 "Import here anyway - I have checked the destination</label>"
                 if doubt_message
@@ -7401,7 +7394,7 @@ class ConnectionHandler(
                     '<form method="post" action="/upload-confirm">'
                     f'<input type="hidden" name="token" value="{fresh}">'
                     f'<input type="hidden" name="account" value="{html.escape(account)}">'
-                    '<label style="display:block;margin:.35rem 0">'
+                    '<label class="tick">'
                     '<input type="checkbox" name="override" value="yes" required> '
                     "Import here anyway - I have checked the destination</label>"
                     '<p><button class="button" type="submit" '

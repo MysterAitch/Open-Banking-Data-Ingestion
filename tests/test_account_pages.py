@@ -44,7 +44,9 @@ _BUTTON_TAG = re.compile(r"<button[^>]*>")
 _ANCHOR_TAG = re.compile(r"<a [^>]*>")
 
 
-_NAV_BLOCK = re.compile(r"<nav .*?</nav>", re.S)
+#: The skip link is page furniture like the navigation: it is a link to the
+#: content, not a control of the page's own.
+_NAV_BLOCK = re.compile(r'<a class="skip" [^>]*>[^<]*</a>|<nav .*?</nav>', re.S)
 
 
 def assert_tap_targets_are_thumb_sized(markup: str) -> None:

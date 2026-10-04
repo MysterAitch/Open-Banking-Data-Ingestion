@@ -20,6 +20,7 @@ from obdi.connections import ConnectionStore
 from obdi.navigation import DESTINATIONS, SECTION_OF_ROUTE, navigation_html
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_indexes import EVIDENCE, REPORTS
+from stylesheet_support import length_px, stylesheet
 
 NAV = re.compile(r'<nav class="sitenav".*?</nav>', re.S)
 
@@ -192,16 +193,30 @@ class TestNavigationLinksAreThumbSizedButNotButtons:
         assert strip.count("<li>") == len(DESTINATIONS)
 
     def test_Stylesheet_GivesEveryNavLinkAtLeastFortyFourPixelsOfHeight(self):
-        css = render_page("t", "").decode()
+        css = stylesheet()
 
         rule = re.search(r"\.sitenav a \{[^}]*\}", css)
-        assert rule and "min-height: 44px" in rule.group(0)
-        assert "flex-wrap: wrap" in re.search(r"\.sitenav ul \{[^}]*\}", css).group(0)
+        assert rule
+        height = re.search(r"min-height: ([^;]+);", rule.group(0))
+        assert height and length_px(css, height.group(1)) >= 44
+        # Eight text tabs in a grid of four columns: two rows on a phone.
+        grid = re.search(r"\.sitenav ul \{[^}]*\}", css)
+        assert grid and "display: grid" in grid.group(0)
+        assert "repeat(4" in grid.group(0)
 
-    def test_Stylesheet_GivesTapLinksAtLeastFortyFourPixelsOfHeight(self):
-        css = render_page("t", "").decode()
+    def test_Stylesheet_GivesTapLinksAHitAreaOfAtLeastFortyFourPixelsWithoutGrowingTheLine(self):
+        """A pseudo-element carries the hit area, so the link adds nothing to its line:
+        a min-height on the link itself made the last line of a paragraph taller."""
+        css = stylesheet()
 
-        assert "min-height: 44px" in re.search(r"a\.tap \{[^}]*\}", css).group(0)
+        link = re.search(r"a\.tap \{[^}]*\}", css)
+        assert link and "min-height" not in link.group(0)
+        area = re.search(r"a\.tap::after \{[^}]*\}", css)
+        assert area and "position: absolute" in area.group(0)
+        inset = re.search(r"inset: -([\d.]+rem) -([\d.]+rem)", area.group(0))
+        assert inset, area.group(0)
+        # Above and below the link's own line, on top of a line of at least 20px.
+        assert 20 + 2 * length_px(css, inset.group(1)) >= 44
 
 
 class TestAPageOfCardsUsesAWideScreen:
@@ -215,7 +230,7 @@ class TestAPageOfCardsUsesAWideScreen:
         rule = re.search(r"@media \(min-width: 60rem\) \{(.*?)\n \}", css, re.S)
         assert rule, "the widening must sit inside a media query, or a phone gets it too"
         assert "body.wide {" in rule.group(1)
-        assert re.search(r"body\.wide > p[^{]*\{[^}]*max-width: 40rem", rule.group(1))
+        assert re.search(r"body\.wide main > p[^{]*\{[^}]*max-width: 40rem", rule.group(1))
 
     def test_Overview_IsWide(self, base):
         assert '<body class="wide">' in httpx.get(f"{base}/", timeout=20).text

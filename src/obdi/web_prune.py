@@ -66,9 +66,8 @@ RUN_AN_AUDIT_FIRST = (
 )
 
 _BUTTON = (
-    '<p><button class="button" type="submit" '
-    'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-    'background:#dc262622;color:#b91c1c">{label}</button></p>'
+    '<p><button class="button danger" type="submit" '
+    'style="width:100%;font-size:inherit;cursor:pointer">{label}</button></p>'
 )
 
 _FRAME = 'class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem;margin:.5rem 0"'
@@ -361,7 +360,7 @@ def _warning(reasons: list[str]) -> str:
     return (
         f"<div {_FRAME}><strong>Unexpectedly large removal.</strong>"
         f"<ul>{items}</ul>"
-        '<label style="display:block;margin:.35rem 0">'
+        '<label class="tick">'
         '<input type="checkbox" name="checked" value="yes" required> '
         f"{SECOND_TICK_LABEL}</label></div>"
     )
@@ -372,7 +371,7 @@ def _clear_form(count: OrphanCount) -> str:
     ident = html.escape(count.account_id)
     return (
         '<form method="post" action="/prune-actual" '
-        'style="margin:.6rem 0;padding:.6rem;border:1px solid #8884;border-radius:.4rem">'
+        'class="box">'
         f"<p><strong>{label}</strong> <small><code>{ident}</code></small></p>"
         '<p class="muted">Nothing is sent for this account now. This deletes '
         "obdi's own imported rows from it in Actual. A row that is one leg of a "
@@ -387,7 +386,7 @@ def _clear_form(count: OrphanCount) -> str:
         + _warning(high_reasons(count))
         + f'<input type="hidden" name="clear_account" value="{ident}">'
         f'<input type="hidden" name="clear_count" value="{count.orphaned}">'
-        '<label style="display:block;margin:.35rem 0">'
+        '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand</label>" + _BUTTON.format(label=label) + "</form>"
     )
@@ -463,7 +462,7 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
         + listing
         + hidden
         + warning
-        + '<label style="display:block;margin:.35rem 0">'
+        + '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand rows carrying obdi's imported ids that are no longer "
         "expected will be deleted from Actual</label>"
@@ -473,9 +472,8 @@ def _general_form(counts: list[OrphanCount] | None) -> str:
 
 
 _NEUTRAL_BUTTON = (
-    '<p><button class="button" type="submit" '
-    'style="border:0;width:100%;font-size:inherit;cursor:pointer;'
-    'background:#8882;color:inherit">{label}</button></p>'
+    '<p><button class="button secondary" type="submit" '
+    'style="width:100%;font-size:inherit;cursor:pointer">{label}</button></p>'
 )
 
 
@@ -506,7 +504,7 @@ def align_section(counts: list[OrphanCount]) -> str:
         )
     return (
         '<form method="post" action="/align-actual" '
-        'style="margin:.6rem 0;padding:.6rem;border:1px solid #8884;border-radius:.4rem">'
+        'class="box">'
         "<p><strong>Bring Actual into line</strong></p>"
         '<p class="muted">One press, run in the applier in this order, that stops at the '
         "first step that fails and says which: push (which re-links transfers whose partner "
@@ -515,7 +513,7 @@ def align_section(counts: list[OrphanCount]) -> str:
         "explain, and any it cannot while the count stays under the large-removal check), "
         "push again if the removal unlinked anything, audit again.</p>"
         + notes
-        + '<label style="display:block;margin:.35rem 0">'
+        + '<label class="tick">'
         '<input type="checkbox" name="confirm" value="yes" required> '
         "I understand rows carrying obdi's imported ids that are no longer expected, and "
         "that obdi can explain, will be deleted from Actual</label>"

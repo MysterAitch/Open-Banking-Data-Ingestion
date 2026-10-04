@@ -383,32 +383,32 @@ def _chart(
             f'<line x1="{left}" y1="{zero:.1f}" x2="{width - right}" y2="{zero:.1f}" '
             'stroke="currentColor" stroke-opacity=".35" stroke-dasharray="2 3"/>'
             f'<text x="{width - right}" y="{zero - 4:.1f}" text-anchor="end" font-size="11" '
-            'fill="currentColor" fill-opacity=".6">nil</text>'
+            'fill="var(--ink-2)">nil</text>'
         )
     # Dotted with round caps, where the partial months are dashed: the two must
     # not be mistaken for one another.
     if len(dotted) > 1:
         parts.append(
-            line(dotted, 0, len(dotted) - 1, ' stroke-dasharray="1 5"', "provisional", "#d97706")
+            line(dotted, 0, len(dotted) - 1, ' stroke-dasharray="1 5"', "provisional", "var(--warn)")
         )
     if len(known) > 1:
         if complete_index > 0:
             parts.append(
                 line(
                     known, 0, min(complete_index, len(known) - 1),
-                    ' stroke-dasharray="5 5" stroke-opacity=".6"', "known", "#2563eb",
+                    ' stroke-dasharray="5 5" stroke-opacity=".6"', "known", "var(--act)",
                 )
             )
         if complete_index < len(known) - 1:
-            parts.append(line(known, complete_index, len(known) - 1, "", "known", "#2563eb"))
+            parts.append(line(known, complete_index, len(known) - 1, "", "known", "var(--act)"))
     if dotted:
         parts.append(
             f'<circle cx="{x(n - 1):.1f}" cy="{y(dotted[-1][1]):.1f}" r="4" fill="none" '
-            'stroke="#d97706" stroke-width="2"/>'
+            'stroke="var(--warn)" stroke-width="2"/>'
         )
     if known:
         parts.append(
-            f'<circle cx="{x(known[-1][0]):.1f}" cy="{y(known[-1][1]):.1f}" r="4" fill="#2563eb"/>'
+            f'<circle cx="{x(known[-1][0]):.1f}" cy="{y(known[-1][1]):.1f}" r="4" fill="var(--act)"/>'
         )
     label = 'font-size="12" fill="currentColor"'
     if high == low:

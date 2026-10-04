@@ -44,6 +44,7 @@ from obdi.position import Position, chart_series, read_position
 from obdi.store import Store
 from obdi.valuations import Asset, AssetKind, record_observation
 from obdi.web_position import render_position
+from stylesheet_support import length_px
 from test_ledger import land, txn
 from test_position_page import EVIL, serve
 
@@ -387,7 +388,8 @@ class TestTheTicks:
         page = page_of(position, None, unmasked=False)
 
         assert 'class="tick"' in page
-        assert "label.tick" in page and "min-height: 44px" in page.split("label.tick")[1][:200]
+        floor = re.search(r"label\.tick \{[^}]*min-height: ([^;]+);", page)
+        assert floor and length_px(page, floor.group(1)) >= 44
 
 
 class TestTheMaskedPage:

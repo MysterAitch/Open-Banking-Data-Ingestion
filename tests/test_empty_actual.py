@@ -332,8 +332,7 @@ class TestThePageBeforeThePress:
         button = re.search(r"<button.*?</button>", form, re.S)
         assert button
         assert 'class="button"' not in button.group(0)
-        assert "#b91c1c" in button.group(0)
-        assert "background:transparent" in button.group(0)
+        assert 'class="button danger"' in button.group(0)
         assert "Empty Actual completely" in button.group(0)
 
     def test_EmptyForm_RequiresATickAndATypedPhrase(self, serve):

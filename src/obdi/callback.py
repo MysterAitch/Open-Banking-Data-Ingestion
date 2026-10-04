@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .buildinfo import describe
 from .navigation import navigation_html
+from .stylesheet import STYLESHEET
 
 
 class CodeHandler(Protocol):
@@ -64,7 +65,7 @@ def instance_identity() -> tuple[str, str]:
     if role == "production":
         return "", ""
 
-    frame = 'class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem"'
+    frame = 'class="band"'
 
     if not label and not role:
         return (
@@ -105,172 +106,10 @@ def render_page(title: str, body: str, *, wide: bool = False) -> bytes:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
- :root {{ color-scheme: light dark; }}
- body {{ font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto;
-        padding: 0 1rem; line-height: 1.5; overflow-wrap: break-word; }}
- /* A long unbroken identity wraps instead of widening the page. The
-    inherited break-word leaves a table's column sizing alone, so a wide
-    table still scrolls inside its own container; grid items need an
-    explicit zero minimum or their content sets the track's width. */
- .accounts > *, .system > *, .facts > * {{ min-width: 0; }}
- h1 {{ font-size: 1.4rem; }}
- code {{ background: #8883; padding: .1rem .3rem; border-radius: .2rem; }}
- /* Tap targets sized for a thumb: this is used from a phone. */
- a.button, button.button {{ display: block; padding: .9rem 1rem; margin: .5rem 0;
-            border-radius: .5rem;
-            background: #2563eb; color: #fff; text-decoration: none; text-align: center;
-            font-weight: 600; }}
- /* The floor under every control, including the inline ones whose own padding
-    is smaller. */
- a.button, button.button {{ min-height: 44px; box-sizing: border-box; }}
- /* Secondary weight: still thumb-sized, but outlined so the one primary
-    control on a page is the heaviest thing on it. */
- a.button.secondary, button.button.secondary {{ background: transparent; color: #2563eb;
-            border: 2px solid #2563eb; }}
- /* A bare submit is the ACTION of the page it sits on, and it used to
-    render as the browser's default control - a small grey rectangle,
-    directly above a full-width navigation link. Missing it meant leaving
-    the page instead of doing the thing. Sized like the link below it so
-    the two are equally reachable, and outlined rather than filled so the
-    doing and the leaving are still told apart at a glance. */
- form button:not(.button) {{ display: block; width: 100%; box-sizing: border-box;
-            padding: .9rem 1rem; margin: .5rem 0 1rem; border-radius: .5rem;
-            font-size: 1rem; font-weight: 600; cursor: pointer;
-            background: transparent; color: #2563eb;
-            border: 2px solid #2563eb; }}
- .row {{ padding: .8rem 0; border-bottom: 1px solid #8884; }}
- /* A row's name and its onward link: the link moves to a line of its own
-    whole, rather than breaking beside a long name. */
- .row-head {{ display: flex; flex-wrap: wrap; align-items: center; gap: 0 .9rem; }}
- table {{ border-collapse: collapse; width: 100%; font-size: .92rem; }}
- th, td {{ padding: .45rem .5rem; text-align: left; border-bottom: 1px solid #8883;
-          vertical-align: top; }}
- th {{ opacity: .7; font-weight: 600; }}
- .scroll {{ overflow-x: auto; }}
- .pill {{ display: inline-block; padding: .1rem .55rem; border-radius: 1rem;
-         font-size: .85em; font-weight: 600; white-space: nowrap; }}
- .pill-ok {{ background: #16a34a22; color: #15803d; }}
- .pill-bad {{ background: #dc262622; color: #b91c1c; }}
- .pill-quiet {{ background: #8882; }}
- .muted {{ opacity: .65; }}
- .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-         font-size: .85em; word-break: break-all; }}
- /* A date or a sum of money is read whole. The monospace rule above breaks
-    anywhere, which is right for a long identifier and split a date across
-    three lines in a narrow table cell.
-    Worded with care: this text is in every page, and pages that must show
-    no money are tested by searching them for a figure and for the word
-    itself, so neither appears here. */
- .nowrap {{ white-space: nowrap; word-break: normal; }}
- .warn {{ color: #b45309; font-weight: 600; }}
- .bad {{ color: #b91c1c; font-weight: 600; }}
- .ok {{ opacity: .75; }}
- input {{ font-size: 1rem; padding: .7rem; width: 100%; box-sizing: border-box;
-         border-radius: .4rem; border: 1px solid #8886; }}
- /* Navigation: a wrapping row of links, each thumb-tall, none a full-width
-    button, so the page's own action stays the heaviest thing on it. */
- .sitenav ul {{ list-style: none; margin: 0 0 1rem; padding: 0; display: flex;
-               flex-wrap: wrap; gap: .3rem; }}
- /* Each link grows to share its row, and the padding is the least that keeps
-    four links to a row at 360 pixels. */
- .sitenav li {{ flex: 1 1 auto; }}
- .sitenav a {{ display: flex; align-items: center; justify-content: center;
-              min-height: 44px; padding: 0 .35rem; box-sizing: border-box;
-              border-radius: .5rem; border: 1px solid #8886;
-              color: inherit; text-decoration: none; }}
- .sitenav a[aria-current="page"] {{ background: #2563eb; border-color: #2563eb;
-              color: #fff; font-weight: 600; }}
- /* A link that is not a button but is still a thumb-sized target. */
- .linklist {{ list-style: none; margin: 0; padding: 0; }}
- a.tap {{ display: inline-flex; align-items: center; min-height: 44px;
-         padding: 0 .5rem; box-sizing: border-box; }}
- .pill-warn {{ background: #b4530922; color: #b45309; }}
- .overview h2 {{ font-size: 1.2rem; margin: 1.6rem 0 .4rem; }}
- /* The Overview: what needs a person is the heaviest thing on the page, and a
-    healthy answer is one calm line. */
- .attention {{ list-style: none; margin: .5rem 0; padding: 0; }}
- .attention li {{ margin: .6rem 0; padding: .7rem .9rem; border-radius: .5rem;
-                 border: 1px solid #8884; border-left: .4rem solid #b91c1c; }}
- .attention li.soon {{ border-left-color: #b45309; }}
- .attention li.housekeeping {{ border-left-color: #8886; }}
- .attention p {{ margin: .25rem 0; }}
- .allclear {{ margin: .5rem 0; padding: .6rem .9rem; border-radius: .5rem;
-             border: 1px solid #16a34a55; }}
- .legend {{ font-size: .85rem; margin: .5rem 0; padding-left: 1.1rem; }}
- /* Accounts: one card each, so the same markup reads on a phone and sits two
-    abreast where there is room. A table of eight columns did neither. */
- .accounts {{ list-style: none; margin: .5rem 0; padding: 0; display: grid;
-             grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .6rem; }}
- .account {{ padding: .7rem .9rem; border-radius: .5rem; border: 1px solid #8884; }}
- .account p {{ margin: .2rem 0; }}
- .account-name {{ font-size: 1.05rem; }}
- .facts {{ display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .9rem;
-          margin: .5rem 0 .2rem; }}
- .facts dt {{ font-size: .78rem; opacity: .65; }}
- .facts dd {{ margin: 0; }}
- .anchors {{ list-style: none; margin: .5rem 0; padding: 0; }}
- .anchors li {{ padding: .5rem 0; border-bottom: 1px solid #8883; }}
- .anchors p {{ margin: .15rem 0; }}
- /* The headline figure of a position, an account, or an asset. */
- .figure {{ font-size: 1.35rem; font-weight: 700; margin: .3rem 0; }}
- .chart {{ margin: .6rem 0; max-width: 40rem; }}
- /* A step between months: a text link beside the heading it steps, and a
-    button only because stepping while values are shown must be a POST. It is
-    set after the bare-submit rule above so it wins over it. */
- .monthnav {{ display: flex; flex-wrap: wrap; gap: 0 .9rem; margin: 0 0 .5rem; }}
- .monthnav form {{ margin: 0; }}
- form button.tap {{ display: inline-flex; width: auto; margin: 0; padding: 0 .5rem;
-            border: 0; background: none; color: #2563eb; font: inherit;
-            font-weight: 400; text-decoration: underline; }}
- /* One transaction per item, so nothing sits in a sideways-scrolling table. */
- .txns {{ list-style: none; margin: .5rem 0; padding: 0; }}
- .txns li {{ padding: .6rem 0; border-bottom: 1px solid #8883; }}
- .txns p {{ margin: .2rem 0; overflow-wrap: anywhere; }}
- .txn-head {{ display: flex; justify-content: space-between; gap: .75rem; }}
- .txns .pill {{ white-space: normal; }}
- details summary {{ cursor: pointer; min-height: 44px; display: flex;
-                   align-items: center; opacity: .75; }}
- /* The flex layout above removes the browser's own disclosure marker, so a
-    fold would read as plain text without one. */
- details summary::before {{ content: "+"; display: inline-block; width: 1.2rem;
-                           font-weight: 700; color: #2563eb; }}
- details[open] summary::before {{ content: "-"; }}
- input[type="checkbox"] {{ width: auto; margin-right: .4rem; }}
- /* A tick the thumb can hit: the whole row is the target, not the box. */
- label.tick {{ display: flex; align-items: center; gap: .6rem; min-height: 44px;
-              padding: .15rem 0; box-sizing: border-box; }}
- label.tick input {{ flex: none; width: 1.5rem; height: 1.5rem; margin: 0; }}
- label.tick > span {{ min-width: 0; overflow-wrap: anywhere; }}
- /* A fieldset will not shrink below its widest word unless told it may, and an
-    account reference is one long word. */
- fieldset.chart-choice {{ border: 1px solid #8884; border-radius: .5rem; margin: .5rem 0;
-                         padding: .3rem .8rem; min-width: 0; }}
- /* What a page is for, in one or two sentences before anything else. */
- .lede {{ margin: .2rem 0 1rem; }}
- /* The newest push and audit, readable at a glance. */
- .leadlines p {{ margin: .35rem 0; }}
- /* The home page's System strip: five facts, each a link to its page. */
- .system {{ list-style: none; margin: .5rem 0; padding: 0; display: grid;
-           grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }}
- .fact {{ padding: .5rem .9rem; border-radius: .5rem; border: 1px solid #8884; }}
- .fact p {{ margin: .15rem 0; }}
- /* A row of outlined links, thumb-tall, wrapping on a narrow screen. */
- .linkrow {{ list-style: none; margin: .5rem 0; padding: 0; display: flex;
-            flex-wrap: wrap; gap: .3rem; }}
- a.tap.outline {{ border: 1px solid #8886; border-radius: .5rem; padding: 0 .75rem; }}
- /* A one-off experiment sits apart from the repairs above it. */
- details.oneoff {{ margin-top: 1.5rem; padding-top: .5rem; border-top: 1px solid #8884; }}
- /* A page of cards uses a wide screen. Its loose prose and forms keep the
-    narrow page's measure, since a line the full width is too long to read. */
- @media (min-width: 60rem) {{
-  body.wide {{ max-width: 64rem; }}
-  body.wide > p, body.wide > form, body.wide > details, body.wide > section > p,
-  body.wide > section > form, body.wide > section > details {{ max-width: 40rem; }}
- }}
-</style></head>
-<body{' class="wide"' if wide else ""}>{navigation_html()}<h1>{html.escape(title)}</h1>{body}
-<footer style="margin-top:2rem;opacity:.6;font-size:.85rem">
-obdi {html.escape(describe())}</footer></body></html>
+{STYLESHEET}</style></head>
+<body{' class="wide"' if wide else ""}><a class="skip" href="#main">Skip to content</a>{navigation_html()}
+<main id="main"><h1>{html.escape(title)}</h1>{body}</main>
+<footer>obdi {html.escape(describe())}</footer></body></html>
 """.encode()
 
 
