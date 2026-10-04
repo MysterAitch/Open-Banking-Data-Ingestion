@@ -53,6 +53,7 @@ from .pending_lifecycle import resolve_vanished_pending
 from .period_reconciliation import SAME_MONEY_PHASE
 from .protection import recheck as recheck_protections
 from .providers import starling, truelayer
+from .review_flags import replay_joins
 from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
 from .same_money_fold import fold_same_money
@@ -679,6 +680,10 @@ def rebuild_from_raw(
         report.space_ambiguous = folds.ambiguous
         report.space_unmatched = folds.unmatched
         report.space_refusals = folds.refusals
+    # A person's "one payment" answers (`review_flags`), repeated over the rows just derived.
+    # Before the settlement below, so a flag the join answers is gone and not settled by proof.
+    with instrumentation.phase("flag-answers"):
+        replay_joins(store)
     # After the fold, because a row folded into a Space row is history and its
     # flag is one of the questions this closes. It runs with or without an
     # account map: most of what it settles has nothing to do with Spaces.

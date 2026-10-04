@@ -189,6 +189,52 @@ def _ids_kept_for_life(store: Store, entity_id: str, neighbour_id: str) -> bool:
     return False
 
 
+def live_neighbours(store: Store, entity_id: str) -> list[tuple[str, str]]:
+    """(entity id, source) of every live row the matcher weighed the flagged row against.
+
+    Same account, same amount, inside the matcher's own window for the pair, and not history.
+    Empty where the flagged row is gone or is itself history.
+    """
+    row = store.connection.execute(
+        "SELECT account_id, amount_minor, value_date, status, tier "
+        "FROM transactions WHERE entity_id = ?",
+        (entity_id,),
+    ).fetchone()
+    if row is None or str(row["status"]) in _HISTORY_STATUSES:
+        return []
+    when = date.fromisoformat(str(row["value_date"]))
+    widest = timedelta(days=max(FUZZY_WINDOW_DAYS, MANUAL_WINDOW_DAYS))
+    live: list[tuple[str, str]] = []
+    for other in store.connection.execute(
+        "SELECT entity_id, status, source, tier, value_date FROM transactions "
+        "WHERE account_id = ? AND amount_minor = ? AND entity_id != ? "
+        "AND value_date BETWEEN ? AND ? ORDER BY value_date, entity_id",
+        (
+            row["account_id"],
+            row["amount_minor"],
+            entity_id,
+            (when - widest).isoformat(),
+            (when + widest).isoformat(),
+        ),
+    ):
+        gap = abs(date.fromisoformat(str(other["value_date"])) - when)
+        if gap > _window(str(row["tier"]), str(other["tier"])):
+            continue
+        if str(other["status"]) in _HISTORY_STATUSES:
+            continue
+        live.append((str(other["entity_id"]), str(other["source"])))
+    return live
+
+
+def neighbour_proof(store: Store, entity_id: str, neighbour_id: str) -> FlagClass | None:
+    """The proof on file that the two rows are two payments, or None where there is none."""
+    if _listed_together(store, entity_id, neighbour_id):
+        return FlagClass.LISTED_TOGETHER
+    if _ids_kept_for_life(store, entity_id, neighbour_id):
+        return FlagClass.IDS_KEPT_FOR_LIFE
+    return None
+
+
 def assess_flags(store: Store) -> dict[str, FlagAssessment]:
     """Every OPEN flag, assessed. Resolved flags are a person's work and are not read."""
     assessments: dict[str, FlagAssessment] = {}
@@ -219,26 +265,7 @@ def assess_flags(store: Store) -> dict[str, FlagAssessment]:
             assessments[entity_id] = FlagAssessment(FlagClass.OPEN, account, source, when, (), 0)
             continue
 
-        widest = timedelta(days=max(FUZZY_WINDOW_DAYS, MANUAL_WINDOW_DAYS))
-        live: list[tuple[str, str]] = []
-        for other in store.connection.execute(
-            "SELECT entity_id, status, source, tier, value_date FROM transactions "
-            "WHERE account_id = ? AND amount_minor = ? AND entity_id != ? "
-            "AND value_date BETWEEN ? AND ?",
-            (
-                account,
-                row["amount_minor"],
-                entity_id,
-                (when - widest).isoformat(),
-                (when + widest).isoformat(),
-            ),
-        ):
-            gap = abs(date.fromisoformat(str(other["value_date"])) - when)
-            if gap > _window(str(row["tier"]), str(other["tier"])):
-                continue
-            if str(other["status"]) in _HISTORY_STATUSES:
-                continue
-            live.append((str(other["entity_id"]), str(other["source"])))
+        live = live_neighbours(store, entity_id)
         sources = tuple(sorted({source_name for _, source_name in live}))
 
         if not live:
@@ -246,12 +273,10 @@ def assess_flags(store: Store) -> dict[str, FlagAssessment]:
         else:
             proofs: list[FlagClass] = []
             for neighbour_id, _ in live:
-                if _listed_together(store, entity_id, neighbour_id):
-                    proofs.append(FlagClass.LISTED_TOGETHER)
-                elif _ids_kept_for_life(store, entity_id, neighbour_id):
-                    proofs.append(FlagClass.IDS_KEPT_FOR_LIFE)
-                else:
+                proof = neighbour_proof(store, entity_id, neighbour_id)
+                if proof is None:
                     break
+                proofs.append(proof)
             if len(proofs) < len(live):
                 flag_class = FlagClass.OPEN
             elif all(proof is FlagClass.LISTED_TOGETHER for proof in proofs):
