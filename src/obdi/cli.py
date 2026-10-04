@@ -76,6 +76,7 @@ from .known_accounts import (
 from .ledger import Ledger
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
+from .outbound import install_if_requested as install_outbound_refusal_if_requested
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
@@ -4766,6 +4767,9 @@ def _pull(
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    # After the environment is read and before anything can open a connection, so a process
+    # told to stay on this machine (the development harness) does from its first statement.
+    install_outbound_refusal_if_requested()
     parser = argparse.ArgumentParser(prog="obdi", description=__doc__)
     parser.add_argument("--db", help="path to the SQLite store (or set OBDI_DB_PATH)")
     subcommands = parser.add_subparsers(dest="command", required=True)

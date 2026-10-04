@@ -20,21 +20,32 @@ port that moves means granting again every session. 8080 collides with
 everything; 38080 sits below the Windows ephemeral range (49152+) where nothing
 will transiently take it.
 
+TWO RUNS MUST NOT SHARE A DIRECTORY. The store directory used to default to one fixed
+path and to be deleted at the start of every run, so a second run rewrote the store under
+a server that was still up, and a reviewer saw three pages disagree for six seconds. Each run
+now builds in a directory of its own (the port and a random suffix are in its name), and
+a directory that a live server holds is refused before anything in it is deleted
+(`live_server_in` says how that is detected).
+
 Usage:
-    python scripts/dev_corpus_ui.py                 # rebuild and serve
-    python scripts/dev_corpus_ui.py --keep          # keep an existing store
+    python scripts/dev_corpus_ui.py                 # rebuild and serve, in a new directory
+    python scripts/dev_corpus_ui.py --at DIR --keep # serve the store already in DIR
     python scripts/dev_corpus_ui.py --seed 12345    # a different world
 
 Runs in the foreground; Ctrl-C stops it. Nothing here touches a real store: the
-corpus is generated from a seed into the directory given by --at, which defaults
-to a scratch path outside the repository.
+corpus is generated from a seed into a new scratch directory outside the repository,
+or into the directory given by --at.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import secrets
 import shutil
+import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -67,6 +78,84 @@ LANDINGS = [
 #: terms have nothing to display.
 
 
+#: Written beside the store while a server runs from it, and removed when it stops. A directory
+#: holding one whose process is alive, or whose port answers, is not this run's to delete.
+LOCK_NAME = "server.json"
+
+
+def default_root(port: int) -> Path:
+    """A directory no other run shares: the port, and a random suffix for a second run on it."""
+    return Path(tempfile.gettempdir()) / f"obdi-dev-corpus-{port}-{secrets.token_hex(4)}"
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this id is running."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, 0, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and (
+                code.value == 259  # STILL_ACTIVE
+            )
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def port_answers(port: int) -> bool:
+    """Whether something is listening on this port of this machine."""
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+def live_server_in(root: Path) -> str | None:
+    """Why `root` must not be rebuilt or deleted now, or None when nothing holds it.
+
+    Two things are read, because either alone has a way to be wrong. The lock file the running
+    harness wrote says which process serves the directory and on which port: a live process or
+    an answering port means a server is up, and a lock whose process is gone and whose port is
+    silent is stale and ignored. And the store itself is asked for its write lock without
+    waiting: a server in the middle of a write, or any other tool holding the store, makes that
+    fail even where no lock file was ever written.
+    """
+    lock = root / LOCK_NAME
+    if lock.is_file():
+        try:
+            held = json.loads(lock.read_text(encoding="utf-8"))
+            pid, port = int(held["pid"]), int(held["port"])
+        except (ValueError, KeyError, TypeError, OSError):
+            return f"{lock} exists and cannot be read, so whether a server holds it is unknown"
+        if pid_alive(pid):
+            return f"process {pid} is serving it (named in {lock})"
+        if port_answers(port):
+            return f"something answers on port {port}, which {lock} says serves it"
+    store = root / "store.sqlite3"
+    if store.is_file():
+        probe = sqlite3.connect(store, timeout=0.2)
+        try:
+            probe.execute("BEGIN EXCLUSIVE")
+            probe.execute("ROLLBACK")
+        except sqlite3.OperationalError as exc:
+            return f"the store is locked by another process ({exc})"
+        finally:
+            probe.close()
+    return None
+
+
 def isolated(root: Path) -> dict[str, str]:
     """An environment that CANNOT reach a real connection or credential.
 
@@ -79,12 +168,18 @@ def isolated(root: Path) -> dict[str, str]:
     connection nothing in the corpus could explain was sitting at the top of it.
 
     So every path the app reads is pointed at the scratch directory, and the
-    credentials are overwritten with values that cannot work. Nothing here
-    should be able to contact a bank even if a button is pressed by accident.
-    `capture_screens.py` has done this since it was written; this did not.
+    credentials are overwritten with values that cannot work. Overwriting a
+    credential makes a request FAIL, though, not not happen: pressing Connect ran
+    the credentials' pre-flight check, which posted the dummy id and secret to the
+    provider's real token endpoint. So the claim is made true by `obdi.outbound`:
+    `OBDI_REFUSE_OUTBOUND` makes every obdi process started from here refuse any
+    connection or name lookup that is not to this machine
+    (tests/test_dev_harness.py presses Connect and watches the sockets).
+    `capture_screens.py` has done the first part since it was written; this did not.
     """
     return {
         **os.environ,
+        "OBDI_REFUSE_OUTBOUND": "1",
         # This checkout's code, not whichever copy the interpreter's editable
         # install points at: a demo served from a worktree showed the main
         # checkout's pages, and a page under development was a 404.
@@ -187,19 +282,36 @@ def main() -> int:
     parser.add_argument(
         "--at",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "obdi-dev-corpus",
-        help="where to build the corpus and store (never a real store)",
+        default=None,
+        help="where to build the corpus and store (never a real store). Default: a new "
+        "directory for this run alone, named for the port. TWO RUNS MUST NOT SHARE ONE: a "
+        "directory a live server holds is refused, and is never rebuilt under it",
     )
     parser.add_argument(
         "--keep",
         action="store_true",
-        help="serve the existing store rather than rebuilding it, so anything "
-        "answered in the interface survives",
+        help="serve the existing store in --at rather than rebuilding it, so anything "
+        "answered in the interface survives (needs --at: a default directory is new every run)",
     )
     arguments = parser.parse_args()
 
-    root = arguments.at
+    if arguments.at is None:
+        if arguments.keep:
+            raise SystemExit(
+                "--keep needs --at: the default directory is new for every run, so there is "
+                "no store of an earlier run to keep"
+            )
+        root = default_root(arguments.port)
+    else:
+        root = arguments.at
     store = root / "store.sqlite3"
+
+    held = live_server_in(root) if root.exists() else None
+    if held is not None:
+        raise SystemExit(
+            f"refusing to use {root}: {held}. Stop that server, or give this run a directory of "
+            "its own (leave --at out)."
+        )
 
     if not arguments.keep:
         if root.exists():
@@ -236,7 +348,12 @@ def main() -> int:
     print(f"  http://127.0.0.1:{arguments.port}/agreements  cross-source agreement")
     print(f"  http://127.0.0.1:{arguments.port}/position    balances, assets, net worth")
     print("\nCtrl-C to stop.\n")
-    run(store, "serve", "--port", str(arguments.port))
+    lock = root / LOCK_NAME
+    lock.write_text(json.dumps({"pid": os.getpid(), "port": arguments.port}), encoding="utf-8")
+    try:
+        run(store, "serve", "--port", str(arguments.port))
+    finally:
+        lock.unlink(missing_ok=True)
     return 0
 
 
