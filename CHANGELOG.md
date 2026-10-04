@@ -26,6 +26,58 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.312] - 2026-10-04
+
+### Changed
+- **Pages say "known balance", "in agreement", and "protected period".** The
+  account page and the pages behind it said "anchor" some eighty-seven times,
+  with "stated figure", "family balance", and "defines the opening balance"
+  for the same things. Two sources now "match" each other, and "agree" is
+  kept for rows against known balances; the page that compares sources is
+  "Do my sources match?". A walk over every page fails on a retired word, so
+  a page written later is held to the same vocabulary.
+- **The report pages name an account by its label**, with its reference
+  beside it, from one naming function: a declared label first, then the
+  provider's name, then the reference once.
+- **One label reveals values**, "Show values" and "Hide values", and "Show
+  raw payload (unmasked)" for an artefact's bytes. A confirmation box says
+  what it confirms, and a link says where it goes.
+- **Times, ages, and percentages are written one way**, with the zone said
+  once on a page, and no page shows an instant with a "T" and a "Z", seconds,
+  or microseconds outside the diagnostic pages.
+- **No page shouts in capitals**, and four empty states (fetch attempts, the
+  balance walk, settlement lag, the review report) say whether the emptiness
+  is expected and what, if anything, to press.
+- **Internal words are off the pages**: tier, uid, the matcher, the applier,
+  environment variable names, and version numbers in prose.
+- **The position chart marks what is below nil.** Drawn over a loan, a card
+  purchase paid off, and a mortgage, it placed the line correctly and marked
+  nil with a thin rule only; a household owing in every month looked like one
+  in credit. The plot below nil carries a wash in the text's own colour (owing
+  is a position, not a fault), and the key says what it means.
+
+### Fixed
+- **An archived account created in Actual is called by its declared label.**
+  The change in 0.4.311 lent labels from open declared accounts only, so an
+  archived one created afresh would have been named by its reference. Tests
+  now hold what was already true and worth keeping true: an archived account
+  that holds a transfer's other leg is created, its rows are sent, and the
+  pair is listed, exactly as when it is open.
+
+### Not covered
+- Whether "row" means a line a source lists or a transaction obdi holds was
+  not decided sentence by sentence, and "held" and "counted" are not defined
+  where they first matter; the movement and identity sentences still use
+  "folded", "provider", and "feed" loosely.
+- The action names "Withdraw", "Refile", "Bring Actual into line", "Replay",
+  and "Forget" are unchanged: renaming an action is the owner's decision.
+- The sentence under the chart still describes its lines by colour and
+  repeats the key.
+- An archived account whose rows were never recovered, while another account
+  holds a transfer to it, is not created: nothing makes an account for a leg
+  that is not held.
+- The chart has been looked at over invented figures only.
+
 ## [0.4.311] - 2026-10-04
 
 ### Fixed
