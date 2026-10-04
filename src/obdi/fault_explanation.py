@@ -57,6 +57,10 @@ store's running sum part is named as well (`ChangeExplanation.parting`, by
 `export_parting`), which narrows a differing day to a row. It is not one of the
 tests above and changes no verdict or count.
 
+WHERE A CHANGE EQUALS A ROW OR A SUM OF ROWS, every source is asked whether it lists
+those rows in the window (`ChangeExplanation.searched`, by `_SourceSearch`): counts and
+source names, so the reader sees which sources agree with which.
+
 THE IDENTITY. A source's step is the sum of the rows it lists, so the change is
 always (listed, not counted) - (counted, not listed) + (figure differences); a
 residual after that is the finding in itself, and is said.
@@ -268,6 +272,28 @@ class ChangeExplanation:
     #: For a change an export states: the first of its rows after which the export's
     #: balance and the store's running sum part (`export_parting`); None otherwise.
     parting: Structural[RowParting | None] = None
+    #: Where the change equals a single row or a sum of rows: what each source says of
+    #: those rows in this window (`SourceSearch`); empty otherwise.
+    searched: Structural[tuple[SourceSearch, ...]] = ()
+
+
+@dataclass(frozen=True)
+class SourceSearch:
+    """What one source says of the rows a change is explained by, in the change's window.
+
+    Counts and a source's name only: the rows are the ones the explanation names, whose
+    size is never stated.
+    """
+
+    source: Structural[str]
+    #: Of the `of` rows, how many the source sighted on a day inside the window.
+    listed: Structural[int]
+    of: Structural[int]
+    #: Of those it did not list in the window, how many it sighted on another day.
+    elsewhere: Structural[int]
+    #: Whether the source's own sightings of the family reach into the window at all: a
+    #: certified statement covers its own period, and says nothing of days outside it.
+    covers: Structural[bool]
 
 
 @dataclass(frozen=True)
@@ -337,6 +363,8 @@ class _Entry:
     #: The day under the other dating, for rows that have two.
     other: date
     note: Callable[[], RowNote]
+    #: The stored row it stands for, where it is one ("" for a row only an export lists).
+    entity: str = ""
 
 
 class _Dated:
@@ -844,6 +872,7 @@ def _csv_view(
                             figure_differs=amount != export_row.amount_minor,
                             lookalike=store_twin(export_row.day, export_row.amount_minor, row),
                         ),
+                        row.entity_id,
                     )
                 )
                 continue
@@ -1156,7 +1185,9 @@ def _view(
                 continue
             if evidence.counted(row):
                 day = evidence.day(source, row)
-                counted.append(_Entry(day, row.amount_minor, row.value_date, evidence.note(row)))
+                counted.append(
+                    _Entry(day, row.amount_minor, row.value_date, evidence.note(row), row.entity_id)
+                )
                 is_listed = (
                     row.entity_id in listed if listed is not None else row.entity_id in sighted
                 )
@@ -1170,6 +1201,7 @@ def _view(
                                 row,
                                 lookalike=twin_of(row, day) if twin_of is not None else None,
                             ),
+                            row.entity_id,
                         )
                     )
                 if day != row.value_date:
@@ -1198,6 +1230,7 @@ def _view(
                                 else None
                             ),
                         ),
+                        row.entity_id,
                     )
                 )
     return _View(
@@ -1224,11 +1257,15 @@ def _explain_one(
     opening_balance: int | None,
     index: int = -1,
     undone: tuple[date | None, date] | None = None,
+    search: Callable[[Sequence[str], date | None, date], tuple[SourceSearch, ...]] | None = None,
 ) -> ChangeExplanation:
     """Which tests hold for one change.
 
     `undone` is the window (after, day] of the later change that undoes this one,
     when this is the first change of a timing pair.
+
+    `search` asks every source what it says of the rows the change is explained by,
+    where it is explained by a single row or by a sum of them.
     """
     listed = view.held_back.within(after, day)
     unlisted = view.unlisted.within(after, day)
@@ -1245,6 +1282,8 @@ def _explain_one(
     sides_negated = False
     export_rows: int | None = None
     store_sightings: int | None = None
+    chosen: _Entry | None = None
+    shape: list[str] = []
     if delta == 0:
         holds.append(DISAGREEMENT)
     else:
@@ -1306,6 +1345,16 @@ def _explain_one(
             holds.append(EXPORT_OPENING)
         if not holds:
             holds.append(NONE)
+        # The rows that explain the change, which every source is then asked about: the
+        # single row that equals it, else the rows of whichever sum accounts for it.
+        if ONE_ROW in holds and chosen is not None and chosen.entity:
+            shape = [chosen.entity]
+        else:
+            shape = [
+                *(e.entity for e in listed if {LISTED_NOT_COUNTED, COMBINED} & set(holds)),
+                *(e.entity for e in unlisted if {COUNTED_NOT_LISTED, COMBINED} & set(holds)),
+            ]
+    shape = [entity for entity in shape if entity]
     everything = view.counted
     return ChangeExplanation(
         day=day,
@@ -1328,7 +1377,46 @@ def _explain_one(
         rows_before=0 if after is None else everything.count(None, after),
         rows_inside=len(counted),
         rows_after=len(everything) - everything.count(None, day),
+        searched=search(shape, after, day) if search is not None and shape else (),
     )
+
+
+class _SourceSearch:
+    """What each source says of some rows in a window, from the sightings read once.
+
+    Said once, here: a source "lists" a row in a window where it sighted the row on a day
+    inside it, by its own dating, and a source "covers" the window where its sightings of
+    the family reach into it at all.
+    """
+
+    def __init__(self, sightings: Mapping[str, Mapping[str, str]]) -> None:
+        self._sightings = sightings
+        self._spans: dict[str, tuple[date, date]] | None = None
+
+    def _reach(self) -> dict[str, tuple[date, date]]:
+        if self._spans is None:
+            spans: dict[str, tuple[date, date]] = {}
+            for by_source in self._sightings.values():
+                for source, text in by_source.items():
+                    seen = _day(text)
+                    if seen is None:
+                        continue
+                    low, high = spans.get(source, (seen, seen))
+                    spans[source] = (min(low, seen), max(high, seen))
+            self._spans = spans
+        return self._spans
+
+    def __call__(
+        self, entities: Sequence[str], after: date | None, through: date
+    ) -> tuple[SourceSearch, ...]:
+        found: list[SourceSearch] = []
+        for source, (low, high) in sorted(self._reach().items()):
+            days = [_day(self._sightings.get(entity, {}).get(source, "")) for entity in entities]
+            inside = sum(1 for seen in days if seen is not None and _inside(seen, after, through))
+            sighted = sum(1 for seen in days if seen is not None)
+            covers = low <= through and (after is None or high > after)
+            found.append(SourceSearch(source, inside, len(entities), sighted - inside, covers))
+        return tuple(found)
 
 
 def explain_walk(
@@ -1382,6 +1470,7 @@ def explain_walk(
         by_entity,
         _RowFacts(store, main, members, by_entity, space_uids or {}, fold_refusals),
     )
+    searcher = _SourceSearch(evidence.sightings)
     anchor_digests = {
         (day, balance): digest
         for digest, reading in exports
@@ -1452,6 +1541,7 @@ def explain_walk(
             opening_balance=opening_balance,
             index=change.index,
             undone=undone,
+            search=searcher,
         )
         if own and delta != 0:
             found = replace(

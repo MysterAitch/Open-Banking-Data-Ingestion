@@ -715,6 +715,38 @@ def _parting_html(found: Any) -> str:
     )
 
 
+def _search_html(searched: Any) -> str:
+    """What every source says of the rows a change is explained by. Said once, here.
+
+    Source names and counts only, so the sentence reads the same masked or not.
+    """
+    if not searched:
+        return ""
+    one = searched[0].of == 1
+    parts = []
+    for found in searched:
+        name = _esc(found.source)
+        if not found.covers:
+            parts.append(f"{name}'s period does not cover the window")
+        elif found.listed == found.of:
+            parts.append(f"{name} lists {'it' if one else f'all {found.of}'}")
+        elif found.listed == 0:
+            tail = (
+                f", though it lists {'it' if one else _plural(found.elsewhere, 'of them')} "
+                "on another day"
+                if found.elsewhere
+                else ""
+            )
+            parts.append(f"{name} does not list {'it' if one else 'any of them'}{tail}")
+        else:
+            parts.append(f"{name} lists {found.listed} of {found.of}")
+    subject = "the row" if one else f"the {searched[0].of} rows"
+    return (
+        f"<p>Searching this window in each source for {subject} that account"
+        f"{'s' if one else ''} for the change: {'; '.join(parts)}.</p>"
+    )
+
+
 def _reversed_html(found: Any) -> str:
     """How many reversed rows are held as history, and what the export and the rows say of them.
 
@@ -779,6 +811,7 @@ def _explanations_html(explanation: Any) -> str:
             f"</strong> (after {start}, stated by {_esc(change.source)}{undone}):</p>"
             + "".join(_hold_html(change, hold) for hold in change.holds)
             + _parting_html(change.parting)
+            + _search_html(change.searched)
             + "</div>"
         )
     return body
