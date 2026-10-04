@@ -19,6 +19,7 @@ from .scheduler_status import (
     history_lines,
     parse_stamp,
     read_scheduler,
+    risk_words,
     span_words,
     steps_of,
     strip_sentence,
@@ -89,6 +90,9 @@ def _step_row(step: Mapping[str, object], state: Scheduler) -> str:
     detail = ""
     if step.get("outcome") == "failed":
         detail += f'<br><span class="warn">{html.escape(error_words(step))}</span>'
+        risk = risk_words(step)
+        if risk:
+            detail += f'<br><span class="muted">{html.escape(risk)}</span>'
     note = step.get("note")
     if note:
         detail += f'<br><span class="muted">{html.escape(str(note))}</span>'

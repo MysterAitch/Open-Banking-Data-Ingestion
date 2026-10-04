@@ -25,7 +25,15 @@ The next bare pull closes that cycle as interrupted before it begins its own.
 THE FILE IS FIGURE-FREE.
 Errors are recorded by type, and their text only for the kinds whose text is ours, the provider's,
 or the operating system's (see `describe_error`); any text that looks like an amount is withheld.
+Where the text is withheld the record still says where the error arose, in words that cannot
+carry data (see `describe_error` and `StepHandle.working_on`).
 No description, payee, or balance is ever written.
+
+WHAT A FAILURE PUTS AT RISK is declared once per step, in `STEPS`.
+The finding, the Overview's severity, and the page all read that declaration.
+The phone showed "JSONDecodeError (message withheld, as it may quote the data that broke it - see
+the container log)" for a step whose failure risked nothing, because the raw export is a copy for
+browsing, and a person who cannot read the container log could not tell.
 """
 
 from __future__ import annotations
@@ -72,6 +80,53 @@ OVERDUE_FACTOR = 1.5
 _FIGURE = re.compile(r"[£$€]|\d[\d,]*\.\d{2}\b")
 WITHHELD = "message withheld, as it may quote the data that broke it - see the container log"
 
+#: A source's name, which is not private, only where it is plainly a name.
+_SOURCE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+NOW, SOON, HOUSEKEEPING = "now", "soon", "housekeeping"
+
+
+@dataclass(frozen=True)
+class StepDeclaration:
+    """What a step is for and what its failure puts at risk, in a sentence a person can act on."""
+
+    says: str
+    #: How urgent a failure is: NOW where something is being lost or misreported or left
+    #: unwatched, SOON where it will break unless acted on, HOUSEKEEPING where nothing is lost.
+    #: The Overview maps these to its bands.
+    severity: str
+
+
+#: Declared by reading each command, which is the only way to know what its failure leaves undone.
+STEPS: dict[str, StepDeclaration] = {
+    "pull": StepDeclaration(
+        "The pull fetches new transactions from the banks: when it fails, nothing new was fetched "
+        "this cycle and what the store already holds is unaffected, and the next cycle asks again.",
+        SOON,
+    ),
+    "pair-transfers": StepDeclaration(
+        "Pairing confirms the transfers between your own accounts: when it fails, transfers were "
+        "not paired this cycle, so one the bank did not mark may count as spending and income "
+        "until the next pairing, and no row is lost.",
+        SOON,
+    ),
+    "export-raw": StepDeclaration(
+        "The raw export writes what was landed out as files: when it fails, the files are a copy "
+        "for browsing that may be incomplete, and the store is unaffected.",
+        HOUSEKEEPING,
+    ),
+    "push-actual": StepDeclaration(
+        "The push brings Actual into line with the store: when it fails, Actual is behind the "
+        "store until the next push succeeds, and the store is unaffected.",
+        NOW,
+    ),
+    "alert": StepDeclaration(
+        "The alert announces what is wrong: when it fails, no notification was sent this cycle, "
+        "so anything else wrong has not been announced, which is why this is shown here.",
+        NOW,
+    ),
+}
+
 
 def status_path(db_path: Path) -> Path:
     return db_path.parent / STATUS_FILE
@@ -114,14 +169,60 @@ def read_record(db_path: Path) -> dict[str, object]:
     return record
 
 
-def describe_error(error: BaseException) -> dict[str, object]:
-    """An exception as a type and, where its text is safe to keep, the text.
+@dataclass(frozen=True)
+class ItemPosition:
+    """Which item a step was on: its kind, its place in the run, and optionally its source."""
 
+    kind: str
+    position: int
+    source: str | None = None
+    total: int | None = None
+
+    def words(self) -> str:
+        text = f"the {_ordinal(self.position)} {self.kind}"
+        if self.source and _SOURCE_NAME.fullmatch(self.source) and not _FIGURE.search(self.source):
+            text += f", of source {self.source}"
+        if self.total:
+            text += f", out of {self.total}"
+        return text
+
+
+def _ordinal(number: int) -> str:
+    teens = 10 <= number % 100 <= 20
+    suffix = "th" if teens else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
+def _origin(error: BaseException) -> str | None:
+    """The module and function of the innermost frame in obdi's own code, and nothing else.
+
+    A frame's locals and an exception's text are where data lives, so neither is read.
+    The module of this file is skipped: it holds the frame that caught the error, which says where
+    the step was run and not where it broke.
+    """
+    found: str | None = None
+    trace = error.__traceback__
+    while trace is not None:
+        code = trace.tb_frame.f_code
+        module = str(trace.tb_frame.f_globals.get("__name__", ""))
+        if (module == "obdi" or module.startswith("obdi.")) and module != __name__:
+            found = f"{module}.{code.co_qualname}"
+        trace = trace.tb_next
+    return found
+
+
+def describe_error(error: BaseException, *, item: ItemPosition | None = None) -> dict[str, object]:
+    """An exception as a type, where it arose, and, where its text is safe to keep, the text.
+
+    THE ONE RULE FOR MESSAGE TEXT, stated here and nowhere else.
     Kept: provider and operating-system text and our own sentences, which is every RuntimeError,
     OSError, and database error, and the push builder's public refusal.
     Withheld: every other type, because a parser's or a replayer's text can quote the row that
     broke it.
     Withheld too: any kept text that reads as an amount.
+
+    `where` is always given and never carries data: the module and function of the innermost frame
+    in obdi's own code, then the item the step was on where it said (`StepHandle.working_on`).
     """
     from .actual_push import DuplicateImportedIdError
 
@@ -134,19 +235,27 @@ def describe_error(error: BaseException) -> dict[str, object]:
         text = short_reason(text)
         if _FIGURE.search(text):
             text = None
+    origin = _origin(error)
+    where = f"in {origin}" if origin else "outside obdi's own code"
+    if item is not None:
+        where += f", at {item.words()}"
     return {
         "type": type(error).__name__,
         "message": text if text else WITHHELD,
         "withheld": not text,
+        "where": where,
     }
 
 
-def exit_error(code: int) -> dict[str, object]:
-    return {
+def exit_error(code: int, item: ItemPosition | None = None) -> dict[str, object]:
+    error: dict[str, object] = {
         "type": "ExitStatus",
         "message": f"the command exited with status {code}",
         "withheld": False,
     }
+    if item is not None:
+        error["where"] = f"at {item.words()}"
+    return error
 
 
 # ---------------------------------------------------------------------------- writing
@@ -161,6 +270,18 @@ class StepHandle:
     def __init__(self, recorder: _Recorder | None) -> None:
         self._recorder = recorder
         self.failure: dict[str, object] | None = None
+        self.item: ItemPosition | None = None
+
+    def working_on(
+        self, kind: str, position: int, *, source: str | None = None, total: int | None = None
+    ) -> None:
+        """Say which item of a loop the step is on, so a failure can say where it was.
+
+        Kept in memory and never written until a failure, because a step may name thousands of
+        items and the record is rewritten whole each time it changes.
+        Give a kind, a position from one, and a source name only where it is plainly a name.
+        """
+        self.item = ItemPosition(kind, position, source, total)
 
     @property
     def recording(self) -> bool:
@@ -173,7 +294,7 @@ class StepHandle:
 
     def failed_with(self, error: BaseException) -> None:
         """The reason for a non-zero exit the command handles itself; the status alone omits it."""
-        self.failure = describe_error(error)
+        self.failure = describe_error(error, item=self.item)
 
     def failed_because(self, kind: str, message: str) -> None:
         """The same, for a reason that is our own sentence and so needs no vetting."""
@@ -422,13 +543,13 @@ def run_step(
         code = run(handle)
     except BaseException as error:
         stopped.set()
-        recorder.finish_step("failed", describe_error(error))
+        recorder.finish_step("failed", describe_error(error, item=handle.item))
         raise
     stopped.set()
     if code == 0:
         recorder.finish_step("ok", None)
     else:
-        recorder.finish_step("failed", handle.failure or exit_error(code))
+        recorder.finish_step("failed", handle.failure or exit_error(code, handle.item))
     return code
 
 
@@ -614,9 +735,22 @@ def error_words(step: Mapping[str, object]) -> str:
     if not isinstance(error, dict):
         return "no reason was recorded"
     kind = str(error.get("type", "an error"))
+    where = error.get("where")
     if error.get("withheld"):
-        return f"{kind} ({error.get('message')})"
-    return f"{kind}: {error.get('message')}"
+        located = f"{kind} {where}" if where else kind
+        return f"{located} ({error.get('message')})"
+    return f"{kind}: {error.get('message')}" + (f" ({where})" if where else "")
+
+
+def risk_words(step: Mapping[str, object]) -> str:
+    """The step's declared sentence about what its failure risks, or nothing if undeclared."""
+    declared = STEPS.get(str(step.get("name")))
+    return declared.says if declared else ""
+
+
+def _with_risk(text: str, step: Mapping[str, object]) -> str:
+    risk = risk_words(step)
+    return f"{text} {risk}" if risk else text
 
 
 def wait_words(scheduler: Scheduler) -> str:
@@ -696,8 +830,12 @@ def strip_sentence(scheduler: Scheduler) -> tuple[str, bool]:
         step = scheduler.failed[0]
         more = f" (and {len(scheduler.failed) - 1} more)" if len(scheduler.failed) > 1 else ""
         return (
-            f"the last scheduler cycle's {step.get('name')} step failed at "
-            f"{when(parse_stamp(step.get('finished_at')) or now, now)}: {error_words(step)}{more}",
+            _with_risk(
+                f"the last scheduler cycle's {step.get('name')} step failed at "
+                f"{when(parse_stamp(step.get('finished_at')) or now, now)}: "
+                f"{error_words(step)}{more}.",
+                step,
+            ),
             True,
         )
     if last is None:
@@ -717,8 +855,11 @@ def findings(scheduler: Scheduler) -> list[tuple[str, str]]:
         found.append(
             (
                 f"scheduler-failed:{step.get('name')}",
-                f"the scheduler's {step.get('name')} step failed in its last cycle "
-                f"({error_words(step)})",
+                _with_risk(
+                    f"the scheduler's {step.get('name')} step failed in its last cycle "
+                    f"({error_words(step)}).",
+                    step,
+                ),
             )
         )
     if scheduler.stuck and scheduler.running is not None:

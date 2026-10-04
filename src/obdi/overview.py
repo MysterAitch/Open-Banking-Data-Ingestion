@@ -29,10 +29,12 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from . import scheduler_status
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
 from .models import TransactionStatus
+from .scheduler_status import STEPS
 from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -54,6 +56,13 @@ ACCOUNTS_HREF = "/#accounts"
 #:   2  something WILL break soon unless acted on: consent expiring, a full disk.
 #:   3  housekeeping: work waiting for a person that is losing nothing meanwhile.
 NOW, SOON, HOUSEKEEPING = 1, 2, 3
+
+#: How a scheduler step's declared severity (`scheduler_status.STEPS`) maps onto the bands.
+_STEP_BANDS = {
+    scheduler_status.NOW: NOW,
+    scheduler_status.SOON: SOON,
+    scheduler_status.HOUSEKEEPING: HOUSEKEEPING,
+}
 
 SEVERITY_WORDS = {
     NOW: "Data at risk",
@@ -284,6 +293,12 @@ def _alert_item(finding: Finding, canonical_for_ref: Callable[[str], str]) -> At
     prefix, _, rest = finding.key.partition(":")
     kind = finding.key if finding.key in _KINDS else prefix
     band, remedy = _KINDS.get(kind, (NOW, "Open Admin and the web log to see what this is."))
+    if kind == "scheduler-failed":
+        # The step's own declaration of what its failure puts at risk, not the band
+        # of failures in general: a failed browsing copy loses nothing.
+        declared = STEPS.get(rest)
+        if declared is not None:
+            band = _STEP_BANDS[declared.severity]
     accounts: tuple[str, ...] = ()
     href = ADMIN_HREF
     if kind in ("silent-feed", "stale-feed"):

@@ -3919,7 +3919,7 @@ def _attempts(db_path: Path) -> int:
     return 0
 
 
-def _export_raw(db_path: Path, out_dir: Path) -> int:
+def _export_raw(db_path: Path, out_dir: Path, step: StepHandle | None = None) -> int:
     """Project layer 0 onto the filesystem, for eyes and ordinary tools.
 
     The store keeps raw bytes in SQLite for atomicity and one-file backup, but
@@ -3950,8 +3950,10 @@ def _export_raw(db_path: Path, out_dir: Path) -> int:
 
     written = 0
     unreadable: Counter[str] = Counter()
-    for row in rows:
-        stamp = row["fetched_at"][:16].replace(":", "").replace("T", "T")
+    for position, row in enumerate(rows, start=1):
+        if step is not None:
+            step.working_on("artefact", position, source=str(row["source"]), total=len(rows))
+        stamp =row["fetched_at"][:16].replace(":", "").replace("T", "T")
         name = f"{stamp}_{row['digest'][:8]}"
         extension = _MEDIA_EXTENSIONS.get(row["media_type"], ".bin")
         folder = out_dir / row["source"]
@@ -4315,7 +4317,8 @@ def _pull_everything(
     with leases.lease(
         leases.locks_dir(db_path), "pull-cycle", "obdi-pull", ttl_seconds=1800
     ):
-        for name in names:
+        for position, name in enumerate(names, start=1):
+            step.working_on("connection", position, total=len(names))
             print(f"--- {name}")
             ledger_id = STARLING_CONNECTION if name == STARLING_TARGET else name
             before = ledger_tail(db_path, ledger_id) if step.recording else 0
@@ -5120,7 +5123,7 @@ def main(argv: list[str] | None = None) -> int:
         return _attempts(db_path)
     if args.command == "export-raw":
         return run_step(
-            db_path, "export-raw", lambda _step: _export_raw(db_path, args.export_dir)
+            db_path, "export-raw", lambda step: _export_raw(db_path, args.export_dir, step)
         )
 
     if args.command == "bind":
