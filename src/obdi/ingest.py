@@ -12,7 +12,7 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from . import instrumentation
@@ -21,12 +21,21 @@ from .identity import artefact_digest, entity_id_for
 from .matching import (
     EXACT_RULE_DOUBT,
     CandidateIndex,
+    MatchResult,
     pair_transfer_entities,
     plan_partners,
     resolve,
+    second_row_named_by_exact_rules,
     supersede,
 )
-from .models import BASIS_FOUNDED, RawArtefact, SourceTier, Transaction, TransactionStatus
+from .models import (
+    BASIS_FOUNDED,
+    MatchTier,
+    RawArtefact,
+    SourceTier,
+    Transaction,
+    TransactionStatus,
+)
 from .parsers.uk_banks import detect
 from .payment_links import stated_link_of
 from .review_settlement import settle_review_flags
@@ -58,6 +67,9 @@ class ImportSummary:
     matched: int = 0
     superseded: int = 0
     needs_review: int = 0
+    #: Stored rows joined to another that an exact rule proved the same payment
+    #: (`_absorb_second_row`).
+    absorbed: int = 0
     #: Main-account rows newly folded into the Space rows they copy, by the
     #: pass the caller ran after the batch; see `space_attribution`.
     folded: int = 0
@@ -84,10 +96,11 @@ class ImportSummary:
             if self.same_money_folded
             else ""
         )
+        absorbed = f", joined {self.absorbed} stored row(s) held twice" if self.absorbed else ""
         return (
             f"parsed {self.parsed}{offered}, new {self.inserted}, "
             f"matched {self.matched}, superseded {self.superseded}, "
-            f"for review {self.needs_review}{folded}{same_money}"
+            f"for review {self.needs_review}{absorbed}{folded}{same_money}"
         )
 
 
@@ -632,6 +645,8 @@ def _reconcile(
     """
     with instrumentation.phase("resolve"):
         result = resolve(transaction, existing, partner=plan[0], reserved=plan[1])
+    if result.existing is not None and result.tier in (MatchTier.LINKED_ID, MatchTier.SOURCE_ID):
+        result = _absorb_second_row(store, transaction, existing, result, summary)
 
     if (
         result.existing is not None
@@ -736,6 +751,44 @@ def _reconcile(
         summary.needs_review += 1
 
     return fresh, None
+
+
+def _absorb_second_row(
+    store: Store,
+    transaction: Transaction,
+    index: CandidateIndex,
+    result: MatchResult,
+    summary: ImportSummary,
+) -> MatchResult:
+    """Join the second stored row an exact rule names for this record to the first.
+
+    `matching.second_row_named_by_exact_rules` says when two rows are one payment.
+    The row KEPT is the one whose artefact arrived first, with the lower entity id on a tie:
+    it has been annotated, protected, and sent to the budgeting application for longest, and
+    its entity id is what an annotation or a review decision is keyed to.
+    What the push then sees: the record merges into the kept row as any later sighting does,
+    so the row carries the record's own content key from then on (`matching.supersede`), and
+    the content key and occurrence of the absorbed row, which no row produces any longer, is
+    the orphan the existing alignment step removes. Making the kept row's own key survive was
+    rejected: both rows' keys come from the sightings that would not join them, and the
+    record's is the one a later fetch of the same source reproduces.
+    """
+    first = result.existing
+    if first is None:
+        return result
+    other = second_row_named_by_exact_rules(transaction, index, first)
+    if other is None:
+        return result
+    furthest = (datetime.max.replace(tzinfo=UTC), 0)
+
+    def arrived(row: Transaction) -> tuple[tuple[datetime, int], str]:
+        return (store.arrival_of(row.entity_id) or furthest, row.entity_id)
+
+    kept, gone = sorted((first, other), key=arrived)
+    store.note_absorption(kept.entity_id, gone.entity_id)
+    index.absorb(kept.entity_id, gone.entity_id)
+    summary.absorbed += 1
+    return replace(result, existing=kept)
 
 
 def _flag(store: Store, summary: ImportSummary, entity_id: str, reason: str) -> None:

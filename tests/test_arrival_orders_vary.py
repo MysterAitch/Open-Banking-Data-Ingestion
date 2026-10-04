@@ -41,6 +41,8 @@ COVERED = {
     "test_space_blind_rows_and_internal_legs.py": "measured here: corpus",
     "test_review_settlement.py": "pulls only, all stamped in UTC, so text and instant agree",
     "test_space_attribution.py": "lands through reconcile_batch, unstamped; order is call order",
+    "test_consecutive_days_nothing_joined.py": "measured here: household, the harness it lands "
+    "the three sources through",
 }
 
 

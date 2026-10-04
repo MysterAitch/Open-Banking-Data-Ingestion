@@ -45,6 +45,7 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
+from obdi import ingest
 from obdi.exact_rule_measure import NAMED_PAIRS, exact_rule_report
 from obdi.ingest import import_file
 from obdi.matching import (
@@ -81,7 +82,9 @@ def second_export(store: Store, directory: pathlib.Path, payments: list[Payment]
 
 
 @pytest.fixture
-def stores(tmp_path) -> Iterator[Callable[..., Store]]:
+def stores(tmp_path, monkeypatch) -> Iterator[Callable[..., Store]]:
+    """Households built with the join switched off, which is the store the count is read on."""
+    monkeypatch.setattr(ingest, "_absorb_second_row", lambda _s, _t, _i, result, _m: result)
     opened: list[Store] = []
 
     def build(order, payments, *, rebuild=False, again=False, **kwargs) -> Store:

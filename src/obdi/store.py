@@ -889,6 +889,8 @@ class _WriteBatch:
     sightings: list[tuple[object, ...]] = field(default_factory=list)
     times: list[tuple[object, ...]] = field(default_factory=list)
     reviews: list[tuple[object, ...]] = field(default_factory=list)
+    #: (kept, absorbed) pairs, applied last: the rows they name may be written by this batch.
+    absorptions: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _stamp_now() -> str:
@@ -1729,9 +1731,74 @@ class Store:
             self.connection.executemany(_RECORD_TIME_SQL, batch.times)
         if batch.reviews:
             self.connection.executemany(_QUEUE_REVIEW_SQL, batch.reviews)
+        for kept, absorbed in batch.absorptions:
+            self.absorb_entity(kept, absorbed)
 
     def abort_batch(self) -> None:
         self._batch = None
+
+    def note_absorption(self, kept: str, absorbed: str) -> None:
+        """Record that two stored rows are one payment, in the batch's order of writes."""
+        if self._batch is not None:
+            self._batch.absorptions.append((kept, absorbed))
+            return
+        self.absorb_entity(kept, absorbed)
+
+    def absorb_entity(self, kept: str, absorbed: str) -> None:
+        """Make one stored row part of another: all it carries moves, and it is dropped.
+
+        Every table keyed by an entity id (`namespaces.ENTITY_KEYED_TABLES`) is handled from
+        that registry, so a table added later cannot be left holding a key to a row that is
+        gone. A row the kept one already has the same key for stays, and the absorbed one's
+        copy is dropped; annotations are offered under the provenance rank, as they are when
+        a refile drops a duplicate, so a person's categorisation is never displaced by a
+        rule's. `transactions.entity_id` is the row itself and is deleted last, and
+        `transactions.matched_entity_id` is a reference and moves with the rest.
+        """
+        from .namespaces import ENTITY_KEYED_TABLES
+
+        if kept == absorbed:
+            raise ValueError("a row cannot absorb itself")
+        self._offer_annotations(absorbed, kept)
+        for table, columns in ENTITY_KEYED_TABLES.items():
+            for column in columns:
+                if not (table.isidentifier() and column.isidentifier()):
+                    raise ValueError(f"unsafe identifier: {table}.{column}")
+                if table == "transactions" and column == "entity_id":
+                    continue
+                self.connection.execute(
+                    f"UPDATE OR IGNORE {table} SET {column} = ? WHERE {column} = ?",  # noqa: S608
+                    (kept, absorbed),
+                )
+        self.connection.execute("DELETE FROM transactions WHERE entity_id = ?", (absorbed,))
+        for table, columns in ENTITY_KEYED_TABLES.items():
+            for column in columns:
+                if table == "transactions":
+                    continue
+                self.connection.execute(
+                    f"DELETE FROM {table} WHERE {column} = ?",  # noqa: S608
+                    (absorbed,),
+                )
+
+    def arrival_of(self, entity_id: str) -> tuple[datetime, int] | None:
+        """When a stored row was first sighted, as the instant and landing order of its artefact.
+
+        None where no sighting of it is recorded in the store yet. It is read from the artefacts
+        and not from a wall clock stamped at derivation, so a rebuild, which derives everything
+        in one moment, gives the answer a live import did.
+        """
+        from .arrival_order import arrival_instant
+
+        keys = [
+            (arrival_instant(row["fetched_at"]), int(row["rowid"]))
+            for row in self.connection.execute(
+                "SELECT a.rowid AS rowid, a.fetched_at AS fetched_at "
+                "FROM transaction_sources s JOIN raw_artefacts a ON a.digest = s.artefact_digest "
+                "WHERE s.entity_id = ?",
+                (entity_id,),
+            )
+        ]
+        return min(keys) if keys else None
 
     def land_artefact(self, artefact: RawArtefact) -> ArtefactLanding:
         """Store a raw payload, and record the name it arrived under.

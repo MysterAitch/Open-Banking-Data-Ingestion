@@ -36,9 +36,9 @@ KNOWN ANSWERS, decided before the first run:
     summer midnight (settled at 23:30 UTC on 30 June, which is 1 July in London)
         the export's row of the 30th and of 1 July are each the payment; of 2 July is not
 
-THE THREE ORDERS THAT STAY OPEN. When the aggregator and the export both arrive
-BEFORE the feed, neither can pair with the other (the aggregator's row has no
-settlement day, and the export's row is beyond its window), so the feed finds two
+THE THREE ORDERS THAT STAY OPEN FOR AN AGGREGATOR THAT STATES NO ID. When the aggregator and
+the export both arrive BEFORE the feed, neither can pair with the other (the aggregator's row
+has no settlement day, and the export's row is beyond its window), so the feed finds two
 stored rows for one payment and can join only one. And when the aggregator arrives
 AFTER the export has joined the feed's row, the row carries the export's date, months
 from the aggregator's, and the aggregator states no settlement day to reach it by.
@@ -47,8 +47,10 @@ so that the day they are closed they say so.
 The movement count reports nothing in them either: it compares rows listed with rows
 held per source, and each source's rows are all held.
 With an aggregator that states the feed's uid (`TestWhenTheAggregatorStatesTheFeedsUid`, which
-is what a real one does) the third of them passes, by id; the first two stay open, because
-the id joins the feed to the aggregator's row and nothing absorbs the export's second row.
+is what a real one does) all three pass: the third by id, and the first two because the feed
+finds the aggregator's row by id and the export's by settlement day and the two rows are joined.
+Without an id nothing exact names the aggregator's row (only its amount and date window do, which
+is a heuristic), so the join of two rows never has a second row to reach and the three stay open.
 """
 
 from __future__ import annotations
@@ -202,15 +204,12 @@ class TestWhenTheAggregatorStatesTheFeedsUid:
     The id joins the aggregator's item to the feed's row whatever date the row carries
     (`matching._Judgement.named_by_id`), which closes the order the settlement build left open
     (the aggregator arriving after the export had moved the row's date away from its own).
+    The orders where the feed arrives last find two rows, one the id names and one the
+    settlement day names, and join them (`ingest._absorb_second_row`;
+    `test_absorbed_rows.py` says what moves).
     """
 
-    @pytest.mark.parametrize(
-        "order",
-        [
-            pytest.param(o, id=order_id(o), marks=OPEN if o in FEED_LAST_AFTER_BOTH else ())
-            for o in ORDERS
-        ],
-    )
+    @pytest.mark.parametrize("order", ORDERS, ids=order_id)
     def test_Payments_WhenTheAggregatorStatesTheUid_EachIsOneRowSeenByAllThree(self, made, order):
         store = made(order, late_settlement_payments(), linked=True)
 

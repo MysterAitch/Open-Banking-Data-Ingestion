@@ -640,6 +640,38 @@ class CandidateIndex:
             for other in [ids.get(second, {}).get(source, set())]
         )
 
+    def absorb(self, kept: str, gone: str) -> None:
+        """Make row `gone` part of row `kept`: every id, link, and day it was known by is kept's.
+
+        The stored side is `Store.absorb_entity`; this keeps the in-memory index agreeing with it,
+        so a later record of the same batch finds one row where two were. Positions are renumbered,
+        which is linear in the account and so only done where two rows are proven one payment.
+        """
+        index = self._position[gone]
+        self._unfile(self._order[index])
+        del self._order[index]
+        self._position = {t.entity_id: position for position, t in enumerate(self._order)}
+        for held in self._sighted.values():
+            if gone in held:
+                held.remove(gone)
+                if kept not in held:
+                    held.append(kept)
+        for source, source_ids in self._ids_of.pop(gone, {}).items():
+            self._ids_of.setdefault(kept, {}).setdefault(source, set()).update(source_ids)
+        for evidence in (self._seen_pending, self._seen_settled):
+            for _entity, source, source_id in [k for k in evidence if k[0] == gone]:
+                evidence.discard((gone, source, source_id))
+                evidence.add((kept, source, source_id))
+        self._links_of.setdefault(kept, set()).update(self._links_of.pop(gone, set()))
+        for held in self._by_link.values():
+            if gone in held:
+                held.remove(gone)
+                if kept not in held:
+                    held.append(kept)
+        self._settle.setdefault(kept, set()).update(self._settle.pop(gone, set()))
+        for source, source_id in self._claimed.pop(gone, {}).items():
+            self._claimed.setdefault(kept, {}).setdefault(source, source_id)
+
     def _in_arrival_order(self, entity_ids: list[str]) -> list[Transaction]:
         return [
             self._order[self._position[entity_id]]
