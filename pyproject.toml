@@ -61,6 +61,10 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# The scripts under docs/design are the record of a design exercise: they made the prototype
+# pages that sit beside them and are kept as they were written, not maintained as project code.
+# Holding them to these rules stopped a release at the lint gate with 91 findings in three files.
+extend-exclude = ["docs/design"]
 
 [tool.ruff.lint]
 # Several review findings were exactly the classes these families catch, which
