@@ -26,6 +26,56 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.330] - 2026-10-05
+
+### Added
+- **Identity health reads each statement by what it lists, beside what the
+  account says today.** The opening-balance rule placed each opening balance
+  on a calendar day and tested it against transactions chosen by date. Read
+  on the real store it failed fourteen opening balances on three accounts,
+  and every one was the rule's doing: the check that already tests a
+  statement against the transactions it lists ("Do the statements add up?")
+  says every statement on those accounts agrees with its own movement,
+  including the one after a missing statement and an account whose
+  statements are overlapping windows, not consecutive periods. The owner's
+  reading was that the assumption was wrong, not the data: an item pending at
+  one close appears on the next statement, interest can be printed out of
+  order, and what a statement's dates mean varies by bank and by account.
+  So a statement is now measured as what it says - from this opening
+  balance, these transactions, to this closing balance - with no date in the
+  question. Per statement, in counts, dates, and yes or no only: whether it
+  adds up by what it lists, whether each listed transaction is held with the
+  same amount, whether its opening balance meets the previous closing
+  balance (evidence that they are consecutive, never proof), how many
+  transactions beside it no statement lists, and how many it lists dated
+  outside its own period and by how many days at most. Per account: how many
+  statements add up by what they list against how many by date, and today's
+  verdict beside what this check would add (a statement after a gap, or
+  before the first known balance) or report as a fault (a statement that
+  fails its own sum). It is built on the existing check, which gained a test
+  of every statement that states an opening balance, not only one whose
+  opening differs from the previous closing. Nothing here changes a
+  conclusion.
+
+### Changed
+- The earlier opening-balance measurement is labelled as describing a
+  day-placement the rule will not use.
+
+### Not covered
+- No rule uses this yet: connecting a statement's own check to an account's
+  verdict waits on this being read on the real store.
+- The store does not keep the amount a statement stated against each
+  transaction, only that the statement listed it, so "held with the same
+  amount" pairs a statement's lines with transactions by date and amount and
+  can mis-pair two lines on one day with different amounts. The sum does not
+  depend on that pairing.
+- Sections of statements that cover several accounts are not measured.
+- "Do the statements add up?" still says "rows" where the owner's word is
+  "transactions".
+- Disregarding one source's balance for one day, and refusing to start over
+  a store written by a newer version, are built and reviewed on a branch and
+  not in this version.
+
 ## [0.4.329] - 2026-10-05
 
 ### Added
