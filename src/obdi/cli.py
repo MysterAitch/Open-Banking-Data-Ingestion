@@ -121,6 +121,7 @@ from .standing_data import (
     statement_checks_for,
 )
 from .statement_listing_measure import StatementListingReport
+from .statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .store import Store, StoreIsNewer
 from .valuations import Asset, AssetKind, record_observation
@@ -3067,7 +3068,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if (paused := paused_text()) is not None:
             return paused
         with Store(db_path) as store:
-            return exact_rule_report(store, _account_map(store)).describe()
+            account_map = _account_map(store)
+            return exact_rules_memo.get(
+                store,
+                lambda: exact_rule_report(
+                    store, account_map, statement_openings(store, account_map)
+                ).describe(),
+            )
 
     def statement_listing_report() -> StatementListingReport:
         from .statement_listing_measure import statement_listing_report as measure
@@ -3084,6 +3091,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     store,
                     families_of(store, account_map),
                     sibling_accounts=account_map.accounts_by_source(),
+                    openings=statement_openings(store, account_map),
                 ),
             )
 
@@ -3237,6 +3245,23 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     statement_listing_memo: KeyedMemo[StatementListingReport] = KeyedMemo(
         mark_world_key, name="statements by what they list", epoch=rebuild_epoch
     )
+
+    #: The statement-opening figures are the dearest part of two measurements on Identity health
+    #: (the exact rules and the statements by what they list), each of which read them whole: two
+    #: readings of every account's known balances, per account. Held under the same key as the
+    #: measurements that read them, so one visit works them out once and a later one not at all.
+    statement_openings_memo: KeyedMemo[StatementOpeningReport] = KeyedMemo(
+        mark_world_key, name="statement openings", epoch=rebuild_epoch
+    )
+    exact_rules_memo: KeyedMemo[str] = KeyedMemo(
+        mark_world_key, name="exact rules", epoch=rebuild_epoch
+    )
+
+    def statement_openings(store: Store, account_map: AccountMap) -> StatementOpeningReport:
+        return statement_openings_memo.get(
+            store,
+            lambda: statement_opening_report(store, families_of(store, account_map)),
+        )
 
     def mark_world(store: Store) -> MarkWorld:
         return mark_world_memo.get(

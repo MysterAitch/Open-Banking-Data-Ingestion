@@ -59,6 +59,14 @@ from .store import Store
 
 _NIL_BASES = (OPENED, ASSUMED_NIL)
 
+#: Passed as `effective_opening`'s `explain_after` so that no change is explained: the figures
+#: here are read from the known balances and stretches alone, and nothing of this measurement or
+#: of the listing measurement that reads its openings (`_mark_refused`) reads the explanation. It
+#: was the larger share of each reading (measured on an invented store of a main account with
+#: five Spaces and about 5,000 rows: 2.7 of 5.0 profiled seconds in `explain_walk`, over the
+#: two readings it makes of each account).
+_NOT_EXPLAINED = date.max
+
 
 def _spans_of(days: set[date]) -> list[tuple[date, date]]:
     """Days as the `(start, end]` stretches they make, a known balance being for a day's end."""
@@ -451,7 +459,7 @@ def account_figures(
         s.closing for s in spans.statements if Contradiction.BALANCES_BREAK in s.contradictions
     }
     rows = store.transactions_for_account(ref)
-    today = effective_opening(store, ref, rows, families=families)
+    today = effective_opening(store, ref, rows, families=families, explain_after=_NOT_EXPLAINED)
     figures.opening = today
     members = families.spaces_of(ref)
     figures.with_spaces = bool(members)
@@ -510,6 +518,7 @@ def account_figures(
         ref,
         rows,
         families=families,
+        explain_after=_NOT_EXPLAINED,
         extra_anchors=[opening_anchor(p) for p in figures.placed],
     )
     found = stretches(rule)

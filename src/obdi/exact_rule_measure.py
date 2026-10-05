@@ -695,8 +695,14 @@ def pair_figures(store: Store, account_map: AccountMap) -> list[PairFigures]:
     return found
 
 
-def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
-    """How often each exact rule holds, account by account, from the landed artefacts."""
+def exact_rule_report(
+    store: Store, account_map: AccountMap, openings: StatementOpeningReport | None = None
+) -> ExactRuleReport:
+    """How often each exact rule holds, account by account, from the landed artefacts.
+
+    `openings` is the statement-opening figures where the caller already holds them for this
+    store and these Spaces (the statement-listing measurement reads the same ones); without
+    them they are worked out here."""
     landed = _read_artefacts(store, account_map)
     held = _read_held(store)
     parents = space_parents(store, account_map)
@@ -719,7 +725,11 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     report.settlement = settlement_figures(store, account_map, landed)
     report.no_row_status = no_row_status_figures(store)
     report.cash = cash_withdrawal_report(store, store.declared_accounts())
-    report.openings = statement_opening_report(store, families_of(store, account_map))
+    report.openings = (
+        openings
+        if openings is not None
+        else statement_opening_report(store, families_of(store, account_map))
+    )
     return report
 
 
