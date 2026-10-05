@@ -115,6 +115,9 @@ JUSTIFIED = {
     "be produced by it, and they are exactly what the held check exists to catch",
     ("test_statement_listing_measure.py", "transaction_sources"): "the sightings of the "
     "transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_measure.py", "statement_readings"): "a held statement with no "
+    "kept reading: the import door keeps one for every statement it reads, so a document "
+    "whose lines are unavailable can only be made by taking the reading away afterwards",
     ("test_row_parting.py", "transaction_sources"):"the sightings of the removed row, "
     "so the store holds no trace of the payment at all",
     ("test_aggregator_day_anchors.py", "transactions"): "a stored date a day later than the "

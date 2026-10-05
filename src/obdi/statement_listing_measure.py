@@ -23,8 +23,29 @@ those results, and adds only what they do not hold:
     left. A statement's row is paired with a sighted transaction by the date the document gave,
     equal amounts first, and the pairing is a heuristic where two listed lines share a date and
     differ in amount; the sum check is `period_reconciliation`'s and does not depend on it.
+  * a listed transaction that is held as history is told by why: reversed, void, or folded into
+    another transaction. A folded one is still HELD, through the transaction it was folded into
+    (`Store.space_fold_targets`), so the sum is also taken with each counted through its target;
+    dropping it would fail every statement the fold touched.
   * the unlisted transactions beside a statement, and the listed ones dated outside its period.
+  * a day two sources state different balances for, tested as the statement having closed before
+    transactions dated that day: the two differ by exactly the counting transactions that the
+    statement does not list.
   * the standing: which stretches would newly be verified, and which statements would be a fault.
+
+EVERY ANSWER HAS THREE OUTCOMES: yes, no, and cannot say, and "cannot say" carries its reason in
+words. A statement whose lines were not found is never a fault: a fault needs lines that were
+found and do not sum. The first version reported a statement with no found lines as "does not
+add up": a section of an "all accounts" statement was read from the whole document's kept reading,
+which lists none of the section's lines, while `period_reconciliation` held the section's own
+transactions from its assigned section. A line list is therefore taken from the section where the
+statement is one, and only from a reading that is of this statement (its date and closing balance).
+
+A STATEMENT THAT CANNOT SEE AN ACCOUNT'S SPACES (`Families.blind`, the recognition
+`statement_opening_measure` uses) states the whole family's balances. It is judged by the
+transactions it lists with each counted through its fold, and said to be "tested with its Spaces"
+where that reaches the closing balance; where it does not, the answer is cannot say, because the
+transfers between the account and its Spaces are not all identified here.
 
 THE FIGURES NEVER APPEAR. Counts, dates, account names, source names, and yes or no only.
 """
@@ -39,7 +60,8 @@ from datetime import date, timedelta
 from enum import StrEnum
 
 from .family_anchors import Families
-from .models import Transaction
+from .models import Transaction, TransactionStatus
+from .namespaces import UNASSIGNED_ACCOUNT
 from .parsers.statement_reading import StatementReading
 from .period_reconciliation import (
     AccountEvidence,
@@ -56,7 +78,7 @@ from .statement_opening_measure import (
 )
 from .statement_openings import days_in
 from .statement_span import RowEvidence
-from .statement_terms import KeptPdf, kept_pdf_readings
+from .statement_terms import KeptPdf, assigned_sections, kept_pdf_readings
 from .store import Store
 
 
@@ -70,17 +92,47 @@ class Link(StrEnum):
     NO_OPENING = "no-opening"
 
 
+class DayReading(StrEnum):
+    #: The two balances differ by exactly the counting transactions dated that day that the
+    #: statement does not list: it closed before them.
+    SAME_DAY = "same-day"
+    #: The same, for the transactions dated the day after.
+    NEXT_DAY = "next-day"
+    NOT_EXPLAINED = "not-explained"
+    CANNOT_SAY = "cannot-say"
+
+
+@dataclass(frozen=True)
+class SameDay:
+    """A day a statement's closing and another source's balance are different, and whether the
+    statement having closed before some transactions explains it. Equality only: no figure."""
+
+    day: date
+    verdict: DayReading
+    unlisted_that_day: int
+    unlisted_next_day: int
+    #: Why the answer is cannot say, in words.
+    note: str = ""
+
+
 @dataclass(frozen=True)
 class Held:
     """How the transactions a statement lists are held, in counts."""
 
     listed: int
+    #: Counting transactions of this account whose amount is not compared, because the lines the
+    #: statement stated are not available (`amounts_stated`).
+    unamounted: int = 0
     #: Counting transactions of this account with the amount the statement states.
     same: int = 0
     #: Counting transactions of this account carrying another amount (two sources merged).
     different: int = 0
-    #: Held as history: reversed, void, or folded.
-    history: int = 0
+    reversed: int = 0
+    void: int = 0
+    #: Folded into another transaction that counts: held, through that transaction.
+    folded_through: int = 0
+    #: Folded, and where it went is not recorded, so it cannot be counted through anything.
+    folded_unplaced: int = 0
     #: Held under another account.
     elsewhere: int = 0
     #: Not in the store at all.
@@ -89,6 +141,15 @@ class Held:
     repeated: int = 0
     #: Held and counting, and listed by another statement of the account too.
     also_by_another: int = 0
+    amounts_stated: bool = True
+
+    @property
+    def counted(self) -> int:
+        return self.same + self.different + self.unamounted
+
+    @property
+    def history(self) -> int:
+        return self.reversed + self.void + self.folded_through + self.folded_unplaced
 
 
 @dataclass(frozen=True)
@@ -97,38 +158,60 @@ class StatementListing:
     closing: date
     source: str
     #: Whether the opening balance plus the amounts the statement states equals its closing
-    #: balance; None where it states no opening balance or its amounts are not kept.
+    #: balance. None is "cannot say", and `read_note` says why.
     read_whole: bool | None
-    #: Lines the statement lists; None where its reading is not kept.
+    read_note: str
+    #: Lines the statement lists; None where they were not found.
     lines_listed: int | None
-    #: None for a statement that does not read whole: the store holds none of its transactions.
+    #: How the transactions it lists are held, from its reading's lines where found and from the
+    #: transactions its document is recorded as having reported where not.
     held: Held | None
     #: Whether its opening balance plus the transactions it lists, AS HELD, equals its closing
     #: balance (`period_reconciliation.own_periods`); None where it states no opening balance.
     as_held: bool | None
+    #: The same sum with each folded listed transaction counted through the one it was folded
+    #: into; None where none is folded, or where one's destination is not recorded.
+    through_folds: bool | None
+    #: The held check, combined: yes where it reaches the closing balance either way, no only where
+    #: it does not and nothing explains it as cannot-say. None is "cannot say", with `held_note`.
+    held_verdict: bool | None
+    held_note: str
+    #: The statement cannot see the account's Spaces and the check reached its closing balance
+    #: with the listed transactions, each counted through its fold.
+    with_spaces: bool
     #: The period between the previous closing and this one adds up (`between_periods`); None for
     #: the first statement and where the account's periods are withheld.
     between: bool | None
     link: Link
-    unlisted: int
+    #: Counting transactions of other sources in its period that no statement lists; None where
+    #: nothing places the period's first day.
+    unlisted: int | None
     unlisted_first: date | None
     unlisted_last: date | None
+    #: Whether the lines were found, so that what lies outside the period can be counted.
+    outside_known: bool
     outside_before: int
     outside_after: int
     #: The most days any listed transaction lies outside the period, either side.
     outside_furthest: int
     #: Whether the day-placed opening balance is reproduced (`OpeningFigures.by_date`).
     by_date: bool | None
+    #: A day another source states a different closing balance for, and what explains it.
+    day_conflict: SameDay | None
     #: The days it would verify, `(start, end]`, where it passes both checks and they can be placed.
     stretch: tuple[date, date] | None
 
     @property
     def passes(self) -> bool:
-        return self.read_whole is True and self.as_held is True
+        return self.read_whole is True and self.held_verdict is True
 
     @property
     def fails(self) -> bool:
-        return self.read_whole is False or self.as_held is False
+        return self.read_whole is False or self.held_verdict is False
+
+    @property
+    def cannot_say(self) -> bool:
+        return not self.passes and not self.fails
 
 
 @dataclass(frozen=True)
@@ -155,6 +238,10 @@ class AccountListing:
         return [s for s in self.statements if s.fails]
 
     @property
+    def cannot_say(self) -> int:
+        return sum(1 for s in self.statements if s.cannot_say)
+
+    @property
     def by_date_adds_up(self) -> int:
         return sum(1 for s in self.statements if s.by_date is True)
 
@@ -164,13 +251,16 @@ class AccountListing:
 
     @property
     def clean(self) -> bool:
-        """Every statement passes every check this measurement makes."""
+        """Every statement passes every check this measurement makes, with nothing left unsaid."""
         return all(
             s.passes
             and s.between is not False
+            and s.outside_known
             and s.outside_furthest == 0
             and s.unlisted == 0
+            and s.day_conflict is None
             and s.held is not None
+            and s.held.amounts_stated
             and s.held.same == s.held.listed
             for s in self.statements
         )
@@ -195,19 +285,51 @@ class _Stated:
     trusted: bool
 
 
+@dataclass(frozen=True)
+class _Readings:
+    """Where a statement's lines are found: its assigned section, else its document's reading."""
+
+    sections: Mapping[tuple[str, date, int], StatementReading]
+    kept: Mapping[str, KeptPdf]
+    #: Digests of documents whose accounts are assigned by section, which several accounts share.
+    sectioned: frozenset[str]
+
+    def of(
+        self, account: str, digest: str, day: date, closing_minor: int
+    ) -> StatementReading | None:
+        """The reading that is of THIS statement: a document's reading is only taken where its own
+        date and closing balance are this statement's, so another section's is never borrowed."""
+        found = self.sections.get((account, day, closing_minor))
+        if found is not None:
+            return found
+        pdf = self.kept.get(digest)
+        if pdf is None:
+            return None
+        reading = pdf.reading
+        if reading.statement_date == day and reading.closing_balance_minor == closing_minor:
+            return reading
+        return None
+
+    def source_of(self, digest: str) -> str:
+        pdf = self.kept.get(digest)
+        return "" if pdf is None else pdf.source
+
+
 def _pair(
     lines: Sequence[tuple[date, int]],
     sighted: Sequence[tuple[str, str]],
     entities: Mapping[str, Transaction],
     account: str,
     elsewhere_by_another: Collection[str],
-) -> tuple[Held, set[str]]:
+    targets: Mapping[str, str] | None = None,
+) -> tuple[Held, set[str], set[str]]:
     """The listed lines set against the transactions the statement's own document sighted.
 
-    Returns the counts and the entities that count in `account`. Within one date, a line is paired
-    with a sighted transaction of the same amount where there is one, then with any remaining one
-    (a merge left it another amount); a line left over is a repeat when a transaction paired on
-    that date has its amount, and not held otherwise.
+    Returns the counts, the entities that count in `account`, and the targets of the folded ones
+    that are counted through. Within one date, a line is paired with a sighted transaction of the
+    same amount where there is one, then with any remaining one (a merge left it another amount);
+    a line left over is a repeat when a transaction paired on that date has its amount, and not
+    held otherwise.
     """
     by_day: dict[date, list[str]] = defaultdict(list)
     for entity_id, observed in dict.fromkeys(sighted):
@@ -216,18 +338,8 @@ def _pair(
             continue
         day = date.fromisoformat(observed) if observed else held.value_date
         by_day[day].append(entity_id)
-    counts = {"same": 0, "different": 0, "history": 0, "elsewhere": 0, "not_held": 0, "repeated": 0}
-    counting: set[str] = set()
-
-    def place(entity: Transaction, amount: int) -> None:
-        if entity.account_id != account:
-            counts["elsewhere"] += 1
-        elif entity.status.is_history:
-            counts["history"] += 1
-        else:
-            counts["same" if entity.amount_minor == amount else "different"] += 1
-            counting.add(entity.entity_id)
-
+    pairs: list[tuple[Transaction, int]] = []
+    not_held = repeated = 0
     lines_by_day: dict[date, list[int]] = defaultdict(list)
     for day, amount in lines:
         lines_by_day[day].append(amount)
@@ -248,32 +360,90 @@ def _pair(
                 left.append(amount)
                 continue
             free.remove(match)
-            place(entities[match], amount)
+            pairs.append((entities[match], amount))
             paired_amounts.add(amount)
         for amount in left:
             if free:
-                place(entities[free.pop(0)], amount)
+                pairs.append((entities[free.pop(0)], amount))
             elif amount in paired_amounts:
-                counts["repeated"] += 1
+                repeated += 1
             else:
-                counts["not_held"] += 1
+                not_held += 1
+    return _held_of(
+        pairs,
+        len(lines),
+        account,
+        entities,
+        elsewhere_by_another,
+        targets or {},
+        not_held,
+        repeated,
+    )
+
+
+def _held_of(
+    pairs: Sequence[tuple[Transaction, int | None]],
+    listed: int,
+    account: str,
+    entities: Mapping[str, Transaction],
+    elsewhere_by_another: Collection[str],
+    targets: Mapping[str, str],
+    not_held: int = 0,
+    repeated: int = 0,
+) -> tuple[Held, set[str], set[str]]:
+    """Each listed transaction by how it is held. An amount of None is one not compared."""
+    counts = {
+        "same": 0,
+        "different": 0,
+        "unamounted": 0,
+        "reversed": 0,
+        "void": 0,
+        "folded_through": 0,
+        "folded_unplaced": 0,
+        "elsewhere": 0,
+    }
+    counting: set[str] = set()
+    through: set[str] = set()
+    for entity, amount in pairs:
+        if entity.account_id != account:
+            counts["elsewhere"] += 1
+        elif entity.status is TransactionStatus.REVERSED:
+            counts["reversed"] += 1
+        elif entity.status is TransactionStatus.VOID:
+            counts["void"] += 1
+        elif entity.status is TransactionStatus.FOLDED:
+            target = entities.get(targets.get(entity.entity_id, ""))
+            if target is not None and not target.status.is_history:
+                counts["folded_through"] += 1
+                through.add(target.entity_id)
+            else:
+                counts["folded_unplaced"] += 1
+        else:
+            counting.add(entity.entity_id)
+            if amount is None:
+                counts["unamounted"] += 1
+            else:
+                counts["same" if entity.amount_minor == amount else "different"] += 1
     return (
         Held(
-            len(lines),
+            listed,
             **counts,
+            not_held=not_held,
+            repeated=repeated,
             also_by_another=len(counting & set(elsewhere_by_another)),
+            amounts_stated=all(amount is not None for _, amount in pairs),
         ),
         counting,
+        through,
     )
 
 
 def _stated_statements(
-    ev: AccountEvidence, kept: Mapping[str, KeptPdf], untrusted: Sequence[KeptPdf]
+    ev: AccountEvidence, readings: _Readings, untrusted: Sequence[KeptPdf]
 ) -> list[_Stated]:
     found: list[_Stated] = []
     for statement in ev.membership.statements:
         digest = min(statement.digests)
-        pdf = kept.get(digest)
         printed = ev.openings.get((statement.day, statement.balance_minor))
         found.append(
             _Stated(
@@ -281,8 +451,8 @@ def _stated_statements(
                 statement.balance_minor,
                 None if printed is None else printed[0],
                 None if printed is None else printed[1],
-                "" if pdf is None else pdf.source,
-                None if pdf is None else pdf.reading,
+                readings.source_of(digest),
+                readings.of(ev.account, digest, statement.day, statement.balance_minor),
                 digest,
                 True,
             )
@@ -306,14 +476,72 @@ def _stated_statements(
     return sorted(found, key=lambda s: (s.closing, not s.trusted))
 
 
+def _read_whole(item: _Stated, lines: Sequence[tuple[date, int]]) -> tuple[bool | None, str]:
+    """Whether the statement's own amounts carry its opening balance to its closing, or why not
+    said. "No" needs lines that were found: a reading with none, whose balances differ, has most
+    likely not found them."""
+    reading = item.reading
+    if reading is None:
+        return (
+            None,
+            "the lines it lists are not available, because no reading of this statement is kept",
+        )
+    if item.opening_minor is None:
+        return None, "it states no opening balance"
+    if not lines and not reading.reconciles:
+        return None, (
+            "its reading lists no transactions although its two balances differ, so its lines "
+            "were most likely not found"
+        )
+    return reading.reconciles, ""
+
+
+def _same_day(
+    item: _Stated,
+    figures: OpeningFigures | None,
+    ev: AccountEvidence,
+    members: frozenset[str],
+    blind: bool,
+) -> SameDay | None:
+    """Whether another source's different balance for the closing day differs from the
+    statement's by exactly the counting transactions dated that day (and, apart, the next) that
+    the statement does not list. Equal or not only: the size of a difference is never kept."""
+    if figures is None:
+        return None
+    others = figures.stated_by_day.get(item.closing, set()) - {item.closing_minor}
+    if not others:
+        return None
+    unlisted = [t for t in ev.counted if t.entity_id not in members]
+    that = [t for t in unlisted if t.value_date == item.closing]
+    after = [t for t in unlisted if t.value_date == item.closing + timedelta(days=1)]
+    if blind:
+        return SameDay(
+            item.closing,
+            DayReading.CANNOT_SAY,
+            len(that),
+            len(after),
+            "the statement states the whole family's balance, and the other balance is of the "
+            "account alone or of the family by another reading",
+        )
+    sums = (sum(t.amount_minor for t in that), sum(t.amount_minor for t in after))
+    differences = {other - item.closing_minor for other in others}
+    verdict = DayReading.NOT_EXPLAINED
+    if that and differences == {sums[0]}:
+        verdict = DayReading.SAME_DAY
+    elif after and differences == {sums[1]}:
+        verdict = DayReading.NEXT_DAY
+    return SameDay(item.closing, verdict, len(that), len(after))
+
+
 def _listing_of(
     store: Store,
     ev: AccountEvidence,
-    kept: Mapping[str, KeptPdf],
+    readings: _Readings,
     untrusted: Sequence[KeptPdf],
     figures: OpeningFigures | None,
+    families: Families,
 ) -> AccountListing:
-    stated = _stated_statements(ev, kept, untrusted)
+    stated = _stated_statements(ev, readings, untrusted)
     own = own_periods(ev)
     between = between_periods(ev)
     unlisted_days = RowEvidence.from_sightings(ev.sightings).unlisted.get(ev.account, ())
@@ -325,6 +553,16 @@ def _listing_of(
             {e for found in sighted.values() for e, _ in found}
         )
     }
+    targets = store.space_fold_targets(
+        [e for e, t in entities.items() if t.status is TransactionStatus.FOLDED]
+    )
+    entities.update(
+        {
+            t.entity_id: t
+            for t in store.transactions_for_entities(set(targets.values()) - set(entities))
+        }
+    )
+    members_of = {(s.day, s.balance_minor): s.members for s in ev.membership.statements}
     listing = AccountListing(ev.account)
     if figures is not None:
         listing.today_sentence = figures.today_sentence
@@ -342,20 +580,79 @@ def _listing_of(
             if reading is None
             else [(r.value_date, r.amount_minor) for r in reading.transactions]
         )
-        read_whole = None if item.opening_minor is None or reading is None else reading.reconciles
+        read_whole, read_note = _read_whole(item, lines)
+        lines_found = reading is not None and bool(lines or reading.reconciles)
+        blind = bool(
+            item.source
+            and families.spaces_of(ev.account)
+            and families.blind(item.source, ev.account)
+        )
         held: Held | None = None
         as_held: bool | None = None
+        through_folds: bool | None = None
+        held_verdict: bool | None = None
+        held_note = ""
+        with_spaces = False
+        members = members_of.get(key, frozenset())
         if item.trusted:
+            sectioned = item.digest in readings.sectioned
+            seen_by_it = [
+                (e, observed)
+                for e, observed in sighted.get(item.digest, [])
+                if e in entities and (not sectioned or entities[e].account_id == ev.account)
+            ]
             others = {
                 e
                 for other in ev.membership.statements
                 if (other.day, other.balance_minor) != key
                 for e in other.members
             }
-            if reading is not None:
-                held, _ = _pair(lines, sighted.get(item.digest, []), entities, ev.account, others)
+            if lines_found:
+                held, counting, through = _pair(
+                    lines, seen_by_it, entities, ev.account, others, targets
+                )
+            else:
+                held, counting, through = _held_of(
+                    [(entities[e], None) for e in dict.fromkeys(e for e, _ in seen_by_it)],
+                    len({e for e, _ in seen_by_it}),
+                    ev.account,
+                    entities,
+                    others,
+                    targets,
+                )
             period = own.get(key)
             as_held = None if period is None else period.agrees
+            if item.opening_minor is not None and held.folded_through and not held.folded_unplaced:
+                total = sum(entities[e].amount_minor for e in counting | through)
+                through_folds = item.opening_minor + total == item.closing_minor
+            if as_held is True:
+                held_verdict = True
+            elif item.opening_minor is None:
+                held_note = "it states no opening balance"
+            elif as_held is None:
+                held_note = (
+                    "its transactions are not all in pounds, so no sum of them is meaningful"
+                )
+            elif through_folds is True:
+                held_verdict = True
+            elif held.folded_unplaced:
+                held_note = (
+                    f"{held.folded_unplaced} of the transactions it lists "
+                    f"{'was' if held.folded_unplaced == 1 else 'were'} folded into another "
+                    "whose destination is not recorded, so they cannot be counted through it"
+                )
+            else:
+                held_verdict = False
+            if blind:
+                if held_verdict is True:
+                    with_spaces = True
+                elif held_verdict is False:
+                    held_verdict = None
+                    held_note = (
+                        "it cannot see the account's Spaces, so its balances are the whole "
+                        "family's, and the transfers between the account and its Spaces are not "
+                        "all identified here"
+                    )
         if item.opening_minor is None:
             link = Link.NO_OPENING
         elif previous is None:
@@ -373,16 +670,15 @@ def _listing_of(
                 bisect_left(unlisted_days, span_start) : bisect_right(unlisted_days, item.closing)
             ]
         )
-        before = [d for d, _ in lines if below is not None and d < below]
-        after = [d for d, _ in lines if d > item.closing]
+        before = [d for d, _ in lines if below is not None and d < below] if lines_found else []
+        after = [d for d, _ in lines if d > item.closing] if lines_found else []
         furthest = max(
             [(below - d).days for d in before if below is not None]
             + [(d - item.closing).days for d in after],
             default=0,
         )
         stretch: tuple[date, date] | None = None
-        passes = read_whole is True and as_held is True
-        if passes:
+        if read_whole is True and held_verdict is True:
             if link is Link.MEETS and previous is not None:
                 stretch = (previous.closing, item.closing)
             elif start is not None:
@@ -397,18 +693,25 @@ def _listing_of(
                 item.closing,
                 item.source,
                 read_whole,
-                None if reading is None else len(lines),
+                read_note,
+                len(lines) if lines_found else None,
                 held,
                 as_held,
+                through_folds,
+                held_verdict,
+                held_note,
+                with_spaces,
                 None if between_here is None else between_here.agrees,
                 link,
-                len(in_span),
+                None if span_start is None else len(in_span),
                 in_span[0] if in_span else None,
                 in_span[-1] if in_span else None,
+                lines_found,
                 len(before),
                 len(after),
                 furthest,
                 None if figures is None else figures.by_date.get(item.closing),
+                _same_day(item, figures, ev, members, blind) if item.trusted else None,
                 stretch,
             )
         )
@@ -435,7 +738,20 @@ def statement_listing_report(
         f.account: f for f in (openings or statement_opening_report(store, families)).accounts
     }
     pdfs = kept_pdf_readings(store)
-    kept = {p.digest: p for p in pdfs}
+    section_digests = frozenset(a.digest for a in store.statement_section_assignments())
+    sections = {
+        (
+            assignment.account_ref,
+            section.reading.statement_date,
+            section.reading.closing_balance_minor,
+        ): (section.reading)
+        for assignment, section in assigned_sections(store)
+        if section is not None
+        and not section.refusal
+        and section.reading.statement_date is not None
+        and section.reading.closing_balance_minor is not None
+    }
+    readings = _Readings(sections, {p.digest: p for p in pdfs}, section_digests)
     report = StatementListingReport()
     evidence = {e.account: e for e in gather_evidence(store, sibling_accounts=sibling_accounts)}
     trusted = {
@@ -447,7 +763,9 @@ def statement_listing_report(
     for pdf in pdfs:
         reading = pdf.reading
         if (
-            reading.notes
+            pdf.account_ref == UNASSIGNED_ACCOUNT
+            or pdf.digest in section_digests
+            or reading.notes
             or reading.statement_date is None
             or reading.closing_balance_minor is None
             or reading.reconciles
@@ -461,16 +779,20 @@ def statement_listing_report(
             # No statement of this account reads whole, so none is trusted and none is a member.
             found = AccountEvidence(account, Membership((), {}), [], [], [], (), {}, [], "", {})
         report.accounts.append(
-            _listing_of(store, found, kept, unread.get(account, []), standing.get(account))
+            _listing_of(
+                store, found, readings, unread.get(account, []), standing.get(account), families
+            )
         )
     return report
 
 
 __all__ = [
     "AccountListing",
+    "DayReading",
     "Held",
     "Link",
     "NewStretch",
+    "SameDay",
     "StatementListing",
     "StatementListingReport",
     "statement_listing_report",

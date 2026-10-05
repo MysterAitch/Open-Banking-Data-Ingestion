@@ -3878,6 +3878,28 @@ class Store:
             listed[row["artefact_digest"]].append((row["entity_id"], row["observed_date"]))
         return listed
 
+    def space_fold_targets(self, folded: Collection[str]) -> dict[str, str]:
+        """Folded entity id -> the Space row it was folded into, for those `folded` that a Space
+        fold took.
+
+        The Space row carries a copy of each of the folded row's sightings, marked by the folded
+        row's id (`FOLDED_SIGHTING_PREFIX`), and that marker is the only record of where a fold
+        went. A row folded as the same money as a statement's (`replace_statement_folds`) has no
+        copy and so no target here: where it went is not recorded, and the caller must say so.
+        """
+        found: dict[str, str] = {}
+        names = sorted(set(folded))
+        for start in range(0, len(names), 400):
+            chunk = names[start : start + 400]
+            marks = ",".join("?" for _ in chunk)
+            for row in self.connection.execute(
+                "SELECT DISTINCT source_id, entity_id FROM transaction_sources "  # noqa: S608
+                f"WHERE source_id IN ({marks})",
+                [FOLDED_SIGHTING_PREFIX + name for name in chunk],
+            ):
+                found[str(row["source_id"])[len(FOLDED_SIGHTING_PREFIX) :]] = str(row["entity_id"])
+        return found
+
     def replace_space_folds(
         self, folds: Mapping[str, str], by_id: Collection[str] = ()
     ) -> None:

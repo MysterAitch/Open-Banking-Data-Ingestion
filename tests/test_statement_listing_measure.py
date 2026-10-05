@@ -47,16 +47,21 @@ from pathlib import Path
 import httpx
 import pytest
 
+from credit_union_documents import nine_accounts, pdf
 from obdi.account_names import AccountsShown
+from obdi.balance_anchors import record_stated_anchor
 from obdi.connections import ConnectionStore
 from obdi.family_anchors import Families
 from obdi.identity import artefact_digest, content_key
 from obdi.ingest import import_file, media_type_of, reconcile_batch
 from obdi.models import RawArtefact, SourceTier, Transaction, TransactionStatus
+from obdi.parsers.credit_union_pdf import section_key
 from obdi.statement_listing_measure import (
+    DayReading,
     Held,
     Link,
     StatementListing,
+    StatementListingReport,
     _pair,
     statement_listing_report,
 )
@@ -65,12 +70,31 @@ from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+from section_harness import config, environment, keep
 from statement_span_world import MONTHS, Spend, _ordinal, _pounds, feed, statement
 from test_starling_statement import build_starling_pdf
 
 D = date
 NO_SPACES = Families({}, {}, {})
 OPENING = 10000
+
+
+#: One Space, `blind-pocket`, of `blind-main`, and likewise `blind2-pocket`. The Starling
+#: statement's source is bound to neither Space, so it cannot see them (`Families.blind`).
+FAMILIES = Families(
+    {"blind-pocket": "blind-main", "blind2-pocket": "blind2-main"},
+    {"truelayer-booked": frozenset({"blind-pocket", "blind2-pocket"})},
+    {},
+)
+
+
+def _entity(store: Store, account: str, description_ends: str) -> str:
+    (found,) = [
+        t.entity_id
+        for t in store.transactions_for_account(account)
+        if t.description.endswith(description_ends)
+    ]
+    return found
 
 
 def starling_statement(
@@ -486,9 +510,135 @@ def world(tmp_path_factory):
             ),
             D(2026, 1, 10),
         )
+        # a listed transaction folded into another that counts, in a plain account
+        statement(
+            store,
+            root,
+            "folded",
+            D(2026, 2, 10),
+            OPENING,
+            [
+                Spend(D(2026, 1, 20), "Fold Shop", 717),
+                Spend(D(2026, 1, 25), "Keep Shop", 331),
+                Spend(D(2026, 2, 5), "Other Shop", 457),
+            ],
+            received=D(2026, 2, 10),
+            previous_close=D(2026, 1, 10),
+        )
+        feed(store, "folded-pocket", [Spend(D(2026, 1, 20), "Pocket Fold", 717)], digest="fp")
+        # a listed transaction folded into another whose destination is not recorded
+        statement(
+            store,
+            root,
+            "folded-lost",
+            D(2026, 2, 10),
+            OPENING,
+            [Spend(D(2026, 1, 20), "Lost Shop", 717), Spend(D(2026, 2, 5), "Kept Shop", 331)],
+            received=D(2026, 2, 10),
+            previous_close=D(2026, 1, 10),
+        )
+        # history by its reason: one listed transaction reversed, one void
+        statement(
+            store,
+            root,
+            "history",
+            D(2026, 2, 10),
+            OPENING,
+            [
+                Spend(D(2026, 1, 12), "Rev Shop", 111),
+                Spend(D(2026, 1, 20), "Void Shop", 222),
+                Spend(D(2026, 1, 25), "Live Shop", 333),
+                Spend(D(2026, 2, 5), "Alive Shop", 444),
+            ],
+            received=D(2026, 2, 10),
+            previous_close=D(2026, 1, 10),
+        )
+        for name, status in (("Rev Shop", "reversed"), ("Void Shop", "void")):
+            store.connection.execute(
+                "UPDATE transactions SET status = ? WHERE account_id = 'history' "
+                "AND description = ?",
+                (status, name),
+            )
+        # a statement blind to the Space, one line of it folded into the Space's row
+        starling_statement(
+            store,
+            root,
+            "blind-main",
+            D(2026, 1, 1),
+            D(2026, 1, 31),
+            500000,
+            [
+                (D(2026, 1, 5), "SHOP A", 4001),
+                (D(2026, 1, 9), "SHOP B", 2503),
+                (D(2026, 1, 12), "POCKET SHOP", 1507),
+            ],
+        )
+        feed(store, "blind-pocket", [Spend(D(2026, 1, 12), "Pocket Row", 1507)], digest="bp")
+        # a blind statement whose held amounts do not reach its closing balance
+        starling_statement(
+            store,
+            root,
+            "blind2-main",
+            D(2026, 1, 1),
+            D(2026, 1, 31),
+            500000,
+            [(D(2026, 1, 5), "SHOP C", 4001), (D(2026, 1, 9), "SHOP D", 2503)],
+        )
+        store.connection.execute(
+            "UPDATE transactions SET amount_minor = amount_minor - 100 "
+            "WHERE account_id = 'blind2-main' AND description LIKE '%SHOP D'"
+        )
+        # a day another source states a different closing balance for
+        for ref, other_day, other_minor in (
+            ("sameday-explained", D(2026, 2, 10), 777),
+            ("sameday-unexplained", D(2026, 2, 10), 777),
+            ("sameday-nextday", D(2026, 2, 11), 777),
+        ):
+            closing = statement(
+                store,
+                root,
+                ref,
+                D(2026, 2, 10),
+                OPENING,
+                [Spend(D(2026, 1, 20), "Quiet Shop", 717), Spend(D(2026, 2, 5), "Calm Shop", 331)],
+                received=D(2026, 2, 10),
+                previous_close=D(2026, 1, 10),
+            )
+            feed(store, ref, [Spend(other_day, "Late Shop", other_minor)], digest=f"late-{ref}")
+            stated = -closing - (other_minor if ref != "sameday-unexplained" else 500)
+            record_stated_anchor(
+                store, ref, "2026-02-10", f"{stated / 100:.2f}", today=D(2026, 9, 1)
+            )
+        store.connection.commit()
+        store.replace_space_folds(
+            {
+                _entity(store, "folded", "Fold Shop"): _entity(
+                    store, "folded-pocket", "Pocket Fold"
+                ),
+                _entity(store, "blind-main", "POCKET SHOP"): _entity(
+                    store, "blind-pocket", "Pocket Row"
+                ),
+            }
+        )
         keep_statement_readings(store)
         store.connection.commit()
-        report = statement_listing_report(store, NO_SPACES, sibling_accounts={})
+        # a statement whose reading was never kept
+        statement(
+            store,
+            root,
+            "unkept",
+            D(2026, 2, 10),
+            OPENING,
+            [Spend(D(2026, 1, 20), "Hazel Shop", 717), Spend(D(2026, 2, 5), "Holly Shop", 331)],
+            received=D(2026, 2, 10),
+            previous_close=D(2026, 1, 10),
+        )
+        store.connection.execute(
+            "DELETE FROM statement_readings WHERE digest IN "
+            "(SELECT digest FROM raw_artefacts WHERE account_ref = 'unkept')"
+        )
+        store.replace_statement_folds([_entity(store, "folded-lost", "Lost Shop")])
+        report = statement_listing_report(store, FAMILIES, sibling_accounts={})
         yield store, {a.account: a for a in report.accounts}, report
 
 
@@ -711,7 +861,7 @@ class TestTwoIdenticalLinesAndDuplicateFiles:
             content_key="k",
         )
 
-        counts, counting = _pair(
+        counts, counting, through = _pair(
             [(day, -241), (day, -241)],
             [(held.entity_id, day.isoformat())],
             {held.entity_id: held},
@@ -720,7 +870,7 @@ class TestTwoIdenticalLinesAndDuplicateFiles:
         )
 
         assert counts == Held(2, same=1, repeated=1)
-        assert counting == {held.entity_id}
+        assert (counting, through) == ({held.entity_id}, set())
 
 
 class TestOverlappingStatements:
@@ -743,6 +893,232 @@ class TestAStatementWithNoOpeningStated:
         assert (only.read_whole, only.as_held, only.link) == (None, None, Link.NO_OPENING)
         assert (only.passes, only.fails) == (False, False)
         assert account.failing == []
+
+
+@pytest.fixture(scope="module")
+def sectioned(tmp_path_factory):
+    """Two accounts of one "all accounts" statement, each assigned its own section."""
+    root = tmp_path_factory.mktemp("sectioned")
+    with pytest.MonkeyPatch.context() as patch:
+        environment(patch, root)
+        db = root / "store.sqlite3"
+        with Store(db):
+            pass
+        with Store(db) as store:
+            artefact = keep(store, pdf(nine_accounts(), step=5.5), "all accounts.pdf")
+        wired = config(db)
+        wired.assign_statement_section(artefact, section_key("Regular Saver"), "credit-union-saver")
+        wired.assign_statement_section(
+            artefact, section_key("Personal -9.50%"), "credit-union-personal-loan"
+        )
+        with Store(db) as store:
+            report = statement_listing_report(store, NO_SPACES, sibling_accounts={})
+            yield {a.account: a for a in report.accounts}
+
+
+class TestASectionOfAnAllAccountsStatement:
+    """The nine-account document: the saver's section lists 3 transactions and the loan's 2.
+    Read from the whole document's reading, which lists none of them, the saver was reported as
+    not adding up with 0 transactions listed while its own 3 were held."""
+
+    def test_Saver_WhenItsSectionIsAssigned_ReadsWholeFromItsOwnLines(self, sectioned):
+        (only,) = sectioned["credit-union-saver"].statements
+
+        assert (only.read_whole, only.lines_listed) == (True, 3)
+        assert only.held == Held(3, same=3)
+        assert (only.passes, only.fails) == (True, False)
+
+    def test_Loan_WhenItsSectionIsAssigned_ReadsWholeFromItsOwnLines(self, sectioned):
+        (only,) = sectioned["credit-union-personal-loan"].statements
+
+        assert (only.read_whole, only.lines_listed) == (True, 2)
+        assert only.held == Held(2, same=2)
+        assert sectioned["credit-union-personal-loan"].failing == []
+
+    def test_Readings_WhenTheDocumentsOwnReadingIsAnotherStatements_IsNeverBorrowed(self):
+        from obdi.parsers.statement_reading import StatementReading
+        from obdi.statement_listing_measure import _Readings
+        from obdi.statement_terms import KeptPdf
+
+        whole = StatementReading(
+            statement_date=D(2026, 3, 1), closing_balance_minor=5, opening_balance_minor=5
+        )
+        readings = _Readings({}, {"d": KeptPdf("a", "d", "s", whole)}, frozenset())
+
+        assert readings.of("a", "d", D(2026, 3, 1), 5) is whole
+        assert readings.of("a", "d", D(2026, 3, 1), 6) is None
+        assert readings.of("a", "d", D(2026, 4, 1), 5) is None
+        assert readings.of("a", "other", D(2026, 3, 1), 5) is None
+
+
+class TestAStatementWhoseReadingWasNeverKept:
+    def test_Statement_WhenNoReadingIsKept_CannotBeSaidToReadWholeAndIsNoFault(self, world):
+        account = world[1]["unkept"]
+        (only,) = account.statements
+
+        assert only.read_whole is None
+        assert "no reading of this statement is kept" in only.read_note
+        assert (only.lines_listed, only.outside_known) == (None, False)
+        assert (only.passes, only.fails, only.cannot_say) == (False, False, True)
+        assert account.failing == []
+
+    def test_Statement_WhenNoReadingIsKept_StillHasItsHeldCheckFromWhatItsDocumentReported(
+        self, world
+    ):
+        (only,) = world[1]["unkept"].statements
+
+        assert only.held == Held(2, unamounted=2, amounts_stated=False)
+        assert (only.as_held, only.held_verdict) == (True, True)
+
+
+class TestAListedTransactionFoldedIntoAnother:
+    def test_Statement_WhenALineIsFoldedIntoAnotherThatCounts_IsHeldThroughIt(self, world):
+        (only,) = world[1]["folded"].statements
+
+        assert only.held == Held(3, same=2, folded_through=1)
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, True, True)
+        assert only.passes is True
+        assert world[1]["folded"].failing == []
+
+    def test_Statement_WhenAFoldedLinesDestinationIsNotRecorded_IsCannotSayAndNoFault(self, world):
+        account = world[1]["folded-lost"]
+        (only,) = account.statements
+
+        assert only.held == Held(2, same=1, folded_unplaced=1)
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, None)
+        assert "destination is not recorded" in only.held_note
+        assert (only.fails, only.cannot_say) == (False, True)
+        assert account.failing == []
+
+
+class TestHistoryByItsReason:
+    def test_Statement_WhenItListsAReversedAndAVoidTransaction_SplitsThemAndIsAFault(self, world):
+        account = world[1]["history"]
+        (only,) = account.statements
+
+        assert only.held == Held(4, same=2, reversed=1, void=1)
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, False)
+        assert [s.closing for s in account.failing] == [D(2026, 2, 10)]
+
+
+class TestAStatementThatCannotSeeTheAccountsSpaces:
+    def test_Statement_WhenItsLinesReachTheClosingThroughTheSpace_IsTestedWithItsSpaces(
+        self, world
+    ):
+        (only,) = world[1]["blind-main"].statements
+
+        assert only.held == Held(3, same=2, folded_through=1)
+        assert (only.as_held, only.through_folds) == (False, True)
+        assert (only.with_spaces, only.held_verdict, only.passes) == (True, True, True)
+
+    def test_Statement_WhenItsLinesDoNotReachTheClosing_IsCannotSayAndNeverAFault(self, world):
+        account = world[1]["blind2-main"]
+        (only,) = account.statements
+
+        assert only.held == Held(2, same=1, different=1)
+        assert (only.as_held, only.held_verdict, only.with_spaces) == (False, None, False)
+        assert "Spaces" in only.held_note
+        assert (only.fails, only.cannot_say) == (False, True)
+        assert account.failing == []
+
+    def test_Statement_WhenTheSameShapeIsNotBlind_ThatFailureIsAFault(self, world):
+        assert world[1]["merged"].statements[0].fails is True
+
+
+class TestADayTwoSourcesStateDifferentBalancesFor:
+    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedThatDay_IsExplained(
+        self, world
+    ):
+        (only,) = world[1]["sameday-explained"].statements
+
+        found = only.day_conflict
+        assert found is not None
+        assert (found.day, found.verdict) == (D(2026, 2, 10), DayReading.SAME_DAY)
+        assert (found.unlisted_that_day, found.unlisted_next_day) == (1, 0)
+
+    def test_Closing_WhenTheOtherBalanceDiffersByAnotherAmount_IsNotExplained(self, world):
+        (only,) = world[1]["sameday-unexplained"].statements
+
+        found = only.day_conflict
+        assert found is not None
+        assert found.verdict is DayReading.NOT_EXPLAINED
+        assert found.unlisted_that_day == 1
+
+    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedTheNextDay_SaysSoApart(
+        self, world
+    ):
+        (only,) = world[1]["sameday-nextday"].statements
+
+        found = only.day_conflict
+        assert found is not None
+        assert found.verdict is DayReading.NEXT_DAY
+        assert (found.unlisted_that_day, found.unlisted_next_day) == (0, 1)
+
+    def test_Closing_WhenNoOtherSourceDisagrees_HasNoConflictToExplain(self, world):
+        assert column(world, "complete", "day_conflict") == [None] * 4
+
+    def test_Page_WhenTheConflictIsExplained_SaysTheTwoBalancesAreForDifferentMoments(self, world):
+        page = statement_listing_html(
+            StatementListingReport([world[1]["sameday-explained"]]), AccountsShown()
+        )
+        text = " ".join(_text_of(page))
+
+        assert "The statement closed before 1 transaction dated that day" in text
+        assert "do not contradict each other" in text
+
+    def test_Page_WhenTheConflictIsNotExplained_DoesNotSayThat(self, world):
+        page = statement_listing_html(
+            StatementListingReport([world[1]["sameday-unexplained"]]), AccountsShown()
+        )
+
+        assert "do not contradict each other" not in " ".join(_text_of(page))
+
+
+class TestCannotSayIsNeverAFaultOnThePage:
+    def test_Page_WhenAStatementCannotBeSaid_GivesItsReasonAndNamesNoFault(self, world):
+        page = statement_listing_html(
+            StatementListingReport([world[1]["folded-lost"]]), AccountsShown()
+        )
+        text = " ".join(_text_of(page))
+
+        assert "No statement would be reported as a fault." in text
+        assert "cannot say - 1 of the transactions it lists was folded" in text
+        assert "(1 cannot say)" in text
+
+    def test_Page_WhenAStatementReallyFails_NamesItAsAFault(self, world):
+        page = statement_listing_html(
+            StatementListingReport([world[1]["history"]]), AccountsShown()
+        )
+
+        assert "Would be reported as a real fault" in " ".join(_text_of(page))
+
+    def test_Page_WhenAReadingIsUnavailable_SaysSoRatherThanThatEverythingIsInside(self, world):
+        page = statement_listing_html(StatementListingReport([world[1]["unkept"]]), AccountsShown())
+        text = " ".join(_text_of(page))
+
+        assert "Every transaction it lists is dated inside its period" not in text
+        assert "cannot say - its lines are not available" in text
+
+
+class TestTheSmallThingsOnThePage:
+    def test_Score_WhenOneStatementIsHeld_AgreesTheVerbAndThePronoun(self, world):
+        page = statement_listing_html(StatementListingReport([world[1]["first"]]), AccountsShown())
+
+        assert "1 of 1 statement adds up by what it lists" in " ".join(_text_of(page))
+
+    def test_Score_WhenSeveralStatementsAreHeld_UsesThePlural(self, world):
+        page = statement_listing_html(
+            StatementListingReport([world[1]["complete"]]), AccountsShown()
+        )
+
+        assert "4 of 4 statements add up by what they list" in " ".join(_text_of(page))
+
+    def test_Summary_OfEachFoldedDetail_HoldsNoLink(self, world):
+        parsed = _Parsed()
+        parsed.feed(statement_listing_html(world[2], AccountsShown()))
+
+        assert parsed.details > 0
+        assert parsed.links_in_summary == 0
 
 
 class TestTheSectionShowsNoFigure:
@@ -833,13 +1209,19 @@ class _Parsed(HTMLParser):
         self.code: list[str] = []
         self.links: list[str] = []
         self.details = 0
+        self.links_in_summary = 0
         self._in_code = False
+        self._in_summary = False
 
     def handle_starttag(self, tag, attrs):
         if tag == "code":
             self._in_code = True
+        if tag == "summary":
+            self._in_summary = True
         if tag == "details":
             self.details += 1
+        if tag == "a" and self._in_summary:
+            self.links_in_summary += 1
         for name, value in attrs:
             self.attributes.append(f"{name}={value}")
             if tag == "a" and name == "href" and value:
@@ -848,6 +1230,8 @@ class _Parsed(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "code":
             self._in_code = False
+        if tag == "summary":
+            self._in_summary = False
 
     def handle_data(self, data):
         self.text.append(data)

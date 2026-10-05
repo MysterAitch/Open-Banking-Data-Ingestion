@@ -245,6 +245,9 @@ class OpeningFigures:
     #: transactions held since the known balance before it. A statement with no entry is one the
     #: day-placement cannot say anything about (no opening stated, none placed, nothing before it).
     by_date: dict[date, bool] = field(default_factory=dict)
+    #: Each day the known balances state a figure for (a nil premise and a balance stated for a
+    #: moment are left out), with every figure stated, closings of statements among them.
+    stated_by_day: dict[date, set[int]] = field(default_factory=dict)
     rule_sentence: str = ""
     newly_agreeing: list[tuple[date, date]] = field(default_factory=list)
     newly_not_agreeing: list[tuple[date, date]] = field(default_factory=list)
@@ -477,6 +480,7 @@ def account_figures(
     for reading in today.readings:
         if reading.anchor.basis not in _NIL_BASES and reading.anchor.at is None:
             stated[reading.anchor.day].add(reading.anchor.balance_minor)
+    figures.stated_by_day = {day: set(figs) for day, figs in stated.items()}
     before = {p.closing: previous[p.closing] for p in figures.placed}
     for placement in figures.placed:
         known = stated.get(placement.day, set())

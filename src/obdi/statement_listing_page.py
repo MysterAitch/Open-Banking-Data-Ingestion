@@ -3,6 +3,7 @@
 Counts, dates, account names, source names, and yes or no only: `statement_listing_measure` holds
 no figure, so there is none to leave out here. Identifiers go through `code_html` and account names
 through `AccountsShown`; a good result is ordinary text and only what needs attention is set apart.
+Every answer says yes, no, or cannot say, and cannot say gives its reason.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from .plural import agree, plural
 from .standing_data import ADDS_UP, DOES_NOT_ADD_UP
 from .statement_listing_measure import (
     AccountListing,
+    DayReading,
     Held,
     Link,
     StatementListing,
@@ -26,8 +28,8 @@ from .statement_openings import spans_text
 PERIOD_PAGE = "/period-reconciliation"
 
 
-def _yes(flag: bool | None, unsaid: str = "cannot say") -> str:
-    return unsaid if flag is None else ("yes" if flag else "no")
+def _yes(flag: bool | None) -> str:
+    return "cannot say" if flag is None else ("yes" if flag else "no")
 
 
 def _dates(first: date | None, last: date | None) -> str:
@@ -36,27 +38,40 @@ def _dates(first: date | None, last: date | None) -> str:
     return first.isoformat() if first == last else f"from {first.isoformat()} to {last.isoformat()}"
 
 
+def _serial(parts: list[str]) -> str:
+    if len(parts) <= 1:
+        return "".join(parts)
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return ", ".join(parts[:-1]) + f", and {parts[-1]}"
+
+
 def _held_sentence(held: Held) -> str:
     if held.listed == 0:
         return "It lists no transactions."
-    parts = [
-        f"{held.same} of {held.listed} {agree(held.listed, 'is')} held as counting "
-        "transactions of this account with the same amount"
-    ]
+    if held.amounts_stated:
+        parts = [
+            f"{held.same} of {held.listed} {agree(held.listed, 'is')} held as counting "
+            "transactions of this account with the same amount"
+        ]
+    else:
+        parts = [
+            f"{held.counted} of {held.listed} {agree(held.listed, 'is')} held as counting "
+            "transactions of this account (the amounts it stated are not available to compare)"
+        ]
     for count, words in (
         (held.different, "held with a different amount, because two sources merged"),
-        (held.history, "held as history (reversed, void, or folded)"),
+        (held.reversed, "held as history, reversed"),
+        (held.void, "held as history, void"),
+        (held.folded_through, "held as history, folded into another transaction that counts"),
+        (held.folded_unplaced, "held as history, folded into another that is not recorded"),
         (held.elsewhere, "held under another account"),
         (held.not_held, "not held at all"),
         (held.repeated, "listed more than once and held once"),
     ):
         if count:
             parts.append(f"{count} {words}")
-    text = parts[0]
-    if len(parts) == 2:
-        text = f"{parts[0]} and {parts[1]}"
-    elif len(parts) > 2:
-        text = ", ".join(parts[:-1]) + f", and {parts[-1]}"
+    text = _serial(parts)
     if held.also_by_another:
         text += f"; {held.also_by_another} also listed by another statement"
     return text + "."
@@ -79,44 +94,93 @@ def _link_sentence(item: StatementListing) -> str:
     )
 
 
+def _conflict_sentence(item: StatementListing) -> str:
+    found = item.day_conflict
+    if found is None:
+        return ""
+    on = found.day.isoformat()
+    head = f"Another source states a different balance for {on}. "
+    if found.verdict is DayReading.SAME_DAY:
+        return (
+            head + "The two differ by exactly the counting transactions dated that day that the "
+            f"statement does not list: yes. The statement closed before "
+            f"{plural(found.unlisted_that_day, 'transaction')} dated that day, so the two "
+            "balances are for different moments and do not contradict each other."
+        )
+    if found.verdict is DayReading.NEXT_DAY:
+        return (
+            head
+            + "The two differ by exactly the counting transactions dated the next day that the "
+            "statement does not list: yes. "
+            f"The statement closed before {plural(found.unlisted_next_day, 'transaction')} dated "
+            "the next day, so the two balances are for different moments and do not "
+            "contradict each other."
+        )
+    if found.verdict is DayReading.NOT_EXPLAINED:
+        return (
+            head + "The two differ by exactly the counting transactions dated that day that the "
+            f"statement does not list: no ({plural(found.unlisted_that_day, 'such transaction')} "
+            "that day and "
+            f"{found.unlisted_next_day} the next)."
+        )
+    return (
+        head + f"Whether the statement closing before some transactions explains it: cannot say - "
+        f"{found.note}."
+    )
+
+
 def _statement_html(item: StatementListing) -> str:
     source = f" ({code_html(item.source)})" if item.source else ""
     lines = [f"<strong>Statement closing {item.closing.isoformat()}</strong>{source}"]
-    if item.read_whole is False:
+    listed = (
+        f" It lists {plural(item.lines_listed, 'transaction')}."
+        if item.lines_listed is not None
+        else ""
+    )
+    if item.read_whole is None:
+        lines.append(f"Read whole: cannot say - {item.read_note}.")
+    elif item.read_whole:
+        lines.append(f"Read whole: yes.{listed}")
+    else:
         lines.append(
             "Read whole: no - its opening balance and the transactions it lists, as the "
-            "statement states them, do not reach its closing balance"
-            + (
-                f" ({plural(item.lines_listed or 0, 'transaction')} listed)."
-                if item.lines_listed is not None
-                else "."
-            )
+            f"statement states them, do not reach its closing balance.{listed}"
         )
-        lines.append("The store holds none of its transactions, so nothing further is checked.")
+    if item.held is not None:
+        lines.append(_held_sentence(item.held))
+    if item.held_verdict is None:
+        lines.append(
+            "Its opening balance and the transactions it lists, as held, reach its closing "
+            f"balance: cannot say - {item.held_note}."
+        )
     else:
-        listed = (
-            ""
-            if item.lines_listed is None
-            else f" It lists {plural(item.lines_listed, 'transaction')}."
+        how = (
+            " (tested with its Spaces)"
+            if item.with_spaces
+            else (" (counting each folded transaction through the one it was folded into)")
+            if item.as_held is False and item.through_folds
+            else ""
         )
         lines.append(
-            f"Read whole: {_yes(item.read_whole)}.{listed}"
-            if item.read_whole is not None
-            else "Read whole: cannot say - it states no opening balance, or its amounts are "
-            "not kept."
+            "Its opening balance and the transactions it lists, as held, reach its closing "
+            f"balance: {_yes(item.held_verdict)}{how}."
         )
-        if item.held is not None:
-            lines.append(_held_sentence(item.held))
+    if item.through_folds is not None and item.as_held is False:
         lines.append(
-            f"Its opening balance and the transactions it lists, as held, reach its closing "
-            f"balance: {_yes(item.as_held)}."
+            "Counting each folded transaction through the one it was folded into, they reach "
+            f"its closing balance: {_yes(item.through_folds)}."
         )
-        if item.between is not None:
-            verdict = ADDS_UP if item.between else DOES_NOT_ADD_UP
-            same = " is the same test and" if item.link is Link.MEETS else ""
-            lines.append(f"The period between the two closings{same} {verdict}.")
+    if item.between is not None:
+        verdict = ADDS_UP if item.between else DOES_NOT_ADD_UP
+        same = " is the same test and" if item.link is Link.MEETS else ""
+        lines.append(f"The period between the two closings{same} {verdict}.")
     lines.append(_link_sentence(item))
-    if item.unlisted:
+    if item.unlisted is None:
+        lines.append(
+            "Counting transactions of other sources left unlisted in its period: cannot say - "
+            "nothing places the first day of its period."
+        )
+    elif item.unlisted:
         lines.append(
             f"Other sources hold {plural(item.unlisted, 'counting transaction')} in its period "
             f"that no statement lists, dated {_dates(item.unlisted_first, item.unlisted_last)}."
@@ -124,7 +188,12 @@ def _statement_html(item: StatementListing) -> str:
     else:
         lines.append("No counting transaction in its period is left unlisted by every statement.")
     outside = item.outside_before + item.outside_after
-    if outside:
+    if not item.outside_known:
+        lines.append(
+            "Whether the transactions it lists are dated inside its period: cannot say - its "
+            "lines are not available."
+        )
+    elif outside:
         lines.append(
             f"{plural(outside, 'transaction')} it lists {agree(outside, 'is')} dated outside its "
             f"period ({item.outside_before} before the previous closing day, {item.outside_after} "
@@ -133,15 +202,20 @@ def _statement_html(item: StatementListing) -> str:
     else:
         lines.append("Every transaction it lists is dated inside its period.")
     lines.append(f"Its opening balance placed on a day is reproduced: {_yes(item.by_date)}.")
+    if item.day_conflict is not None:
+        lines.append(_conflict_sentence(item))
     return "<li>" + "<br>".join(lines) + "</li>"
 
 
 def _score(listing: AccountListing) -> str:
     total = len(listing.statements)
     said = (
-        f"{listing.passing} of {plural(total, 'statement')} add up by what they list; "
-        f"{listing.by_date_adds_up} of {total} by date"
+        f"{listing.passing} of {plural(total, 'statement')} "
+        f"{agree(listing.passing, 'adds')} up by what {agree(total, 'it')} {agree(total, 'lists')}"
     )
+    if listing.cannot_say:
+        said += f" ({listing.cannot_say} cannot say)"
+    said += f"; {listing.by_date_adds_up} of {total} by date"
     if listing.by_date_unsaid:
         said += f" ({listing.by_date_unsaid} cannot say)"
     return said + "."
@@ -150,14 +224,15 @@ def _score(listing: AccountListing) -> str:
 def _fault_html(item: StatementListing) -> str:
     what = []
     if item.read_whole is False:
-        what.append("it does not read whole")
-    if item.as_held is False:
+        what.append("its own amounts do not reach its closing balance")
+    if item.held_verdict is False:
         held = item.held
         counts = (
             ""
             if held is None
-            else f" ({held.same} of {held.listed} held with the same amount, "
-            f"{held.different} with a different amount, {held.history} as history, "
+            else f" ({held.counted} of {held.listed} held as counting transactions, "
+            f"{held.different} with a different amount, {held.reversed} reversed, "
+            f"{held.void} void, {held.folded_through} folded into another that counts, "
             f"{held.elsewhere} under another account, {held.not_held} not held, "
             f"{held.repeated} listed more than once)"
         )
@@ -208,9 +283,9 @@ def _account_html(listing: AccountListing, shown: AccountShown) -> str:
         out.append("<li>No statement would be reported as a fault.</li>")
     out.append("</ul>")
     out.append(
-        f"<details><summary>Each statement ({len(listing.statements)}) - "
-        f'<a href="{PERIOD_PAGE}?ref={html.escape(shown.ref, quote=True)}">'
-        "the period-by-period page</a> shows its periods</summary><ul>"
+        f'<p><a href="{PERIOD_PAGE}?ref={html.escape(shown.ref, quote=True)}">'
+        "The period-by-period page</a> shows this account's periods.</p>"
+        f"<details><summary>Each statement ({len(listing.statements)})</summary><ul>"
         + "".join(_statement_html(s) for s in listing.statements)
         + "</ul></details>"
     )
@@ -227,7 +302,8 @@ def statement_listing_html(report: StatementListingReport, accounts: AccountsSho
         "balance. This section tests each statement by what it lists, with no date in the "
         "question, and reads what that would change. Under it no account that adds up today can "
         "stop adding up, except where a statement fails its own checks, and each such statement "
-        "is named. Nothing here changes any conclusion.</p>"
+        "is named. A statement whose lines cannot be found is never named as a fault: it is "
+        "cannot say, with its reason. Nothing here changes any conclusion.</p>"
         '<p class="muted">Counts, dates, and yes or no only - no balance, amount, or payee '
         "appears here.</p>"
     )
