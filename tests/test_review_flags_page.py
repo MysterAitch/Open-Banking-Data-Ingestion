@@ -38,6 +38,22 @@ from section_harness import environment, serve_config
 
 TOKENS = [*PAYEES.values(), *FIGURES.values(), *(f.replace(".", "") for f in FIGURES.values())]
 
+#: A flag's id and a card's fingerprint: digests the page carries in its forms.
+_DIGEST = re.compile(r"[0-9a-f]{16,}")
+
+
+def leaked(page: str) -> list[str]:
+    """The planted payees and figures found in `page`, digests aside.
+
+    A figure is also searched for without its point ("2137" for 21.37), which is four digits,
+    and the page's forms carry a digest for every flag and every card. Four given digits fall
+    inside a few hundred hex characters about once in two hundred pages, and the digests move
+    with the moment a flag was raised: this check failed once that way with nothing leaked. A
+    digest is not where an amount could appear, so the digests are taken out before looking.
+    """
+    searched = _DIGEST.sub(" ", page.casefold())
+    return [token for token in TOKENS if token.casefold() in searched]
+
 
 class _Forms(HTMLParser):
     """Every form on a page: its action and its hidden fields, as a browser would submit them."""
@@ -144,18 +160,14 @@ class TestTheQueuePage:
     def test_Queue_WhenFetched_HoldsNoAmountAndNoDescription(self, world):
         base, _ = world
 
-        page = queue(base).casefold()
-
-        assert [t for t in TOKENS if t.casefold() in page] == []
+        assert leaked(queue(base)) == []
 
     def test_Queue_WhenFetchedWithValuesInTheAddress_StillHoldsNone(self, world):
         base, _ = world
 
-        page = httpx.get(
-            f"{base}/review-flags?values=1&show=1&unmask=true", timeout=30
-        ).text.casefold()
+        page = httpx.get(f"{base}/review-flags?values=1&show=1&unmask=true", timeout=30).text
 
-        assert [t for t in TOKENS if t.casefold() in page] == []
+        assert leaked(page) == []
 
     def test_Queue_WhenValuesArePostedFor_ShowsThemAndIsNotKept(self, world):
         base, _ = world
@@ -292,7 +304,7 @@ class TestAnAnswerOverHttp:
         response = httpx.post(f"{base}/review-flags-two", data=fields, timeout=30)
 
         assert "Kept as two payments" in response.text
-        assert [t for t in TOKENS if t.casefold() in response.text.casefold()] == []
+        assert leaked(response.text) == []
 
 
 class TestAnswersThatMustNotLand:
