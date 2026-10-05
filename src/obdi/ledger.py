@@ -80,6 +80,7 @@ from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
 from .standing_data import statement_checks_for
+from .statement_checks import StatementChecks
 from .store import Store
 from .typed_transactions import TypedEntry, typed_entries
 
@@ -114,6 +115,11 @@ STATEMENT_CHECK_QUERIES = 7
 #: What reading one held statement's sightings and transactions adds to `STATEMENT_CHECK_QUERIES`,
 #: measured on a main account holding one statement.
 HELD_STATEMENT_CHECK_QUERIES = 13
+
+#: What the page's count of statements a calendar-day test would have reproduced adds for an
+#: account that holds a statement (`statement_listing_measure.statement_checks`, `by_date`): it
+#: reads every statement period and every sighting of the store. Measured on the same account.
+BY_DATE_SCORE_QUERIES = 68
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -584,6 +590,10 @@ class Ledger:
     clearing: Structural[ClearingView | None] = None
     #: How far the account is in agreement, and for a family the whole account too (`agreement`).
     standing: Structural[Standing | None] = None
+    #: What each of the account's statements concludes by what it lists, and how many a
+    #: calendar-day test would have reproduced (`statement_listing_measure.statement_checks`);
+    #: None where the account holds no statement.
+    statements: Structural[StatementChecks | None] = None
     #: The account's protection (`protection`), set by the caller that reads the declared state
     #: so that the ledger proper costs the statements it always did.
     protection: Structural[ProtectionView | None] = None
@@ -1221,9 +1231,8 @@ def _ledger_for(
             ),
         )
 
-    final_standing = standing_of(
-        opening, members, movement, statement_checks_for(store, ref, opening, families)
-    )
+    checks = statement_checks_for(store, ref, opening, families, by_date=True)
+    final_standing = standing_of(opening, members, movement, checks)
     return Ledger(
         ref=ref,
         label=label,
@@ -1251,6 +1260,7 @@ def _ledger_for(
             if not t.status.is_history and row.origin != ORIGIN_UNITEMISED
         ),
         standing=final_standing,
+        statements=checks,
         protection=(
             protection_view(store, ref, opening, held, final_standing, check=check)
             if with_protection

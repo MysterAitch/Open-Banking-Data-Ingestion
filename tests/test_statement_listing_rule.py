@@ -23,12 +23,14 @@ from obdi.agreement import (
     AGREES,
     DEFINES,
     HELD_CONFLICT,
+    HELD_MOVEMENT,
     HELD_STATEMENT,
     HELD_UNMET,
     MET,
     NONE,
     UNMET,
     UNTESTED,
+    Fault,
     Known,
     Standing,
     derive_agreement,
@@ -156,6 +158,43 @@ class TestALoneStatement:
 
         assert after.state == HELD_STATEMENT
         assert standing_of_agreement(after) == DOES_NOT_ADD_UP
+
+
+class TestAMovementFaultInsideAStatementThatAddsUp:
+    def test_Account_WhenAMovementCheckFaultsADayInsideIt_NothingIsVerifiedThroughItsClosing(
+        self,
+    ):
+        known = [closing(FEB28, 1300, 0, defines=True)]
+        inside = Fault(D(2026, 2, 10), "a payment lists a row the store does not hold")
+
+        after = derive(known, [check(FEB28, 1300)], [inside])
+
+        assert (after.state, after.through) == (HELD_MOVEMENT, None)
+        assert after.held is not None and after.held.day == D(2026, 2, 10)
+        assert standing_of_agreement(after) == DOES_NOT_ADD_UP
+
+    def test_Account_WhenTheMovementFaultIsDatedAfterTheClosing_TheStatementStillAddsUp(self):
+        known = [closing(FEB28, 1300, 0, defines=True)]
+        later = Fault(D(2026, 3, 5), "a payment lists a row the store does not hold")
+
+        after = derive(known, [check(FEB28, 1300)], [later])
+
+        assert (after.state, after.through, after.held) == (AGREES, FEB28, None)
+
+
+class TestAStatementThatIsAFaultAmongOthers:
+    def test_Account_WhenALaterStatementIsAFault_AddsUpOnlyThroughTheOnesBeforeIt(self):
+        known = [
+            closing(JAN31, 1000, 0, defines=True),
+            closing(FEB28, 1300, 0),
+            closing(MAR31, 1500, 0),
+        ]
+        wrong = check(MAR31, 1500, adds_up=False, days_tested=False, fault=NOT_HELD)
+
+        after = derive(known, [check(JAN31, 1000), check(FEB28, 1300), wrong])
+
+        assert (after.state, after.through) == (HELD_STATEMENT, FEB28)
+        assert after.held is not None and after.held.day == MAR31
 
 
 class TestAStatementClosedBeforeTheDaysLastTransaction:

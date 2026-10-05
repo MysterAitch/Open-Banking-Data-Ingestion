@@ -247,7 +247,10 @@ class TestTheCardAShape:
 
         text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
 
-        assert text.count("1 feed row was folded as the same money as 3 statement rows") == 2
+        assert (
+            text.count("1 feed transaction was folded as the same money as 3 statement transactions")
+            == 2
+        )
         assert "withheld from the push" in text
         assert "differ from" not in text
         assert MONEY_FIGURE.search(text) is None, MONEY_FIGURE.search(text)
@@ -257,8 +260,8 @@ class TestTheCardAShape:
         fold_same_money(store)
         report = period_reconciliation(store, sibling_accounts={})
 
-        assert "The folded rows sum to -£7.77." in report.describe(masked=False)
-        assert "The folded rows sum" not in report.describe(masked=True)
+        assert "The folded transactions sum to -£7.77." in report.describe(masked=False)
+        assert "The folded transactions sum" not in report.describe(masked=True)
 
     def test_Fold_RunTwice_ChangesNothingTheSecondTime(self, store, tmp_path):
         card_a(store, tmp_path)

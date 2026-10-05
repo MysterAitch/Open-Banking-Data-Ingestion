@@ -176,15 +176,21 @@ class AccountStanding:
 
 
 def statement_checks_for(
-    store: Store, ref: str, opening: EffectiveOpening, families: Families | None
+    store: Store,
+    ref: str,
+    opening: EffectiveOpening,
+    families: Families | None,
+    *,
+    by_date: bool = False,
 ) -> StatementChecks | None:
     """What one account's statements conclude by what they list, read by the account page and
     every other reading of one account, so that all of them lay on the agreement rule the same
-    checks `standings_for` does."""
+    checks `standings_for` does. `by_date` also counts the statements a calendar-day test would
+    have reproduced, which only the account page shows."""
     from .statement_listing_measure import statement_checks
 
     return statement_checks(
-        store, families if families is not None else NO_FAMILIES, {ref: opening}
+        store, families if families is not None else NO_FAMILIES, {ref: opening}, by_date=by_date
     ).get(ref)
 
 

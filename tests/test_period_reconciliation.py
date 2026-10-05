@@ -194,9 +194,10 @@ class TestEverythingAgrees:
             assert period.loci == ()
         text = report.describe(masked=True)
         for span in (P1, P2, P3):
-            assert "agree with the statement's movement" in block(text, span)
+            assert "add up to the statement's movement" in block(text, span)
             assert (
-                "0 rows only in the statements, 0 rows only in the feed" in block(text, span)
+                "0 transactions only in the statements, 0 transactions only in the feed"
+                in block(text, span)
             )
         assert "differ" not in text
 
@@ -294,10 +295,10 @@ class TestOneTotalAgainstThreeItemisedRows:
         text = report_for(store, tmp_path, self._world()).describe(masked=True)
 
         second = block(text, P2)
-        assert "differ from the statement's movement" in second
-        assert "1 row only in the statements, 3 rows only in the feed" in second
+        assert "do not add up to the statement's movement" in second
+        assert "1 transaction only in the statements, 3 transactions only in the feed" in second
         assert "sum to the same figure: the leftovers are the same money" in second
-        assert "equals the sum of the statement-only rows" in second
+        assert "equals the sum of the statement-only transactions" in second
         assert "holds the statement's leftovers on top of the feed's" in second
         assert "None of the above" not in second
         assert MONEY_FIGURE.search(text) is None, MONEY_FIGURE.search(text)
@@ -403,7 +404,7 @@ class TestARowOnlyTheFeedHolds:
         assert second.statement_only == () and len(second.feed_only) == 1
         assert second.loci == (Locus.FEED_ONLY_SUM, Locus.SINGLE_ROW)
         text = block(report.describe(masked=True), P2)
-        assert "0 rows only in the statements, 1 row only in the feed" in text
+        assert "0 transactions only in the statements, 1 transaction only in the feed" in text
         assert "dated 2026-02-20, held by truelayer" in text
         assert "same figure" not in text
 
@@ -531,8 +532,8 @@ class TestWhatCannotBeTested:
         report = report_for(store, tmp_path, World(feed=None))
 
         text = report.describe(masked=True)
-        assert "No source other than the statements holds rows" in text
-        assert "tested against the statement's own rows only" in block(text, P2)
+        assert "No source other than the statements holds transactions" in text
+        assert "tested against the statement's own transactions only" in block(text, P2)
         assert all(p.agrees and p.feed == "" for p in periods_of(report).values())
 
     def test_Store_WithNoStatement_SaysThereIsNothingToTest(self, store):
@@ -744,7 +745,7 @@ class TestThePageIsMaskedUnlessPostedFor:
 
         assert "masked rendering" in page
         assert "Period 2026-02-12 to 2026-03-11" in page
-        assert "1 row only in the statements, 3 rows only in the feed" in page
+        assert "1 transaction only in the statements, 3 transactions only in the feed" in page
         assert "holds the statement's leftovers on top of the feed's" in page
 
     def test_Page_Fetched_BeforeAPassHasSeenTheFeed_SaysThePassPredatesIt(self, lab):

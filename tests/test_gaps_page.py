@@ -3,8 +3,8 @@
 The household and every gap in it are decided in `fetch_gaps_world`'s docstring; the page's
 verdict for it is decided here before the first run: 12 things to fetch for 10 accounts, 3 accounts
 needing nothing (13 and 11 and 2 while a lone statement counted as a known balance that tested
-nothing; `agreement`, R1). The page is drawn from the data (`render_gaps`), and once over HTTP to show
-the route, the hook, and the shared navigation are joined up.
+nothing; `agreement`, R1). The page is drawn from the data (`render_gaps`), and once over HTTP to
+show the route, the hook, and the shared navigation are joined up.
 """
 
 from __future__ import annotations

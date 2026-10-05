@@ -26,7 +26,9 @@ from .agreement import (
     HELD_MOVEMENT,
     NONE,
     STRETCH_MEANINGS,
+    closed_before_sentence,
     held_sentence,
+    listing_tested_sentence,
     standing_line,
     stretch_sentences,
 )
@@ -57,7 +59,7 @@ from .page_words import (
     REMOVE_TYPED_TRANSACTION,
     TYPED_TRANSACTION_REMOVED,
 )
-from .plural import agree
+from .plural import agree, word
 from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
 from .protection import protection_line
@@ -680,17 +682,59 @@ def _entry_html(entry: Any, ref: str, month: str) -> str:
     return f"<li>{pill}{code_html(entry.stating)}: {_esc(basis)}{form}</li>"
 
 
+def _listing_html(own: Any) -> str:
+    """Where a known balance is tested by its own statement's listing, and where a statement is
+    taken to have closed before a day's last transactions. Plain quiet lines: both are said in
+    `agreement`'s words, which carry how it is known. The verdict line already says it where the
+    tested balance is the only one the account adds up through."""
+    return "".join(
+        f'<p class="sub">{_esc(listing_tested_sentence(tested))}</p>'
+        for tested in own.listing_tested
+        if own.through != own.known_from
+    ) + "".join(
+        f'<p class="sub">{_esc(closed_before_sentence(claim))}</p>' for claim in own.closed_before
+    )
+
+
+def _statements_score_html(view: Any) -> str:
+    """How many of the account's statements add up by what they list, and how many a calendar-day
+    test would have reproduced: the evidence for testing this account's statements by what they
+    list. Counts only, in ordinary text."""
+    checks = view.statements
+    if checks is None or not checks.statements:
+        return ""
+    total = len(checks.statements)
+    adding = sum(1 for s in checks.statements if s.adds_up is True)
+    verb, them = ("adds", "it lists") if total == 1 else ("add", "they list")
+    said = f"{adding} of {total} {word(total, 'statement')} {verb} up by what {them}"
+    if checks.by_date_adds_up is not None:
+        said += f"; {checks.by_date_adds_up} of {total} by date"
+    return (
+        f'<p class="muted">{_esc(said)}. A statement lists a purchase by the day it was made, '
+        "which can fall either side of its closing day, so it is tested by what it lists and "
+        "not by date.</p>"
+    )
+
+
 def _shared_days_html(view: Any) -> str:
     """The balances several sources state for one day, side by side, with the way to disregard one.
 
     Whether the figures are equal is said and never what they are. Disregarding keeps the balance
     on the page, marked, and takes it out of every stretch and every conflict; a balance used
-    again is read as before.
+    again is read as before. A day on which a statement is taken to have closed before some
+    transactions says why the figures differ, in `agreement`'s words, and is not offered as a
+    conflict.
     """
     opening = view.opening
     if not opening.shared_days and not opening.disregarded:
         return ""
     ref, month = view.ref, view.month
+    standing = view.standing
+    explained = (
+        {claim.day.isoformat(): claim for claim in standing.own.closed_before}
+        if standing is not None
+        else {}
+    )
     body = ""
     if opening.shared_days:
         body += (
@@ -701,9 +745,15 @@ def _shared_days_html(view: Any) -> str:
         routine = ""
         for day in opening.shared_days:
             items = "".join(_entry_html(entry, ref, month) for entry in day.entries)
+            figures = _FIGURES_SAID.get(day.figures, "")
+            if day.figures == "differ" and day.day in explained:
+                figures = (
+                    "The figures differ, and the statement is taken to have closed before "
+                    "some transactions."
+                )
             said = (
                 f'<p>End of <span class="mono nowrap">{_esc(day.day)}</span>: '
-                f"{_esc(_FIGURES_SAID.get(day.figures, ''))}</p><ul>{items}</ul>"
+                f"{_esc(figures)}</p><ul>{items}</ul>"
             )
             if day.figures == "equal" and not any(e.disregarded or e.stale for e in day.entries):
                 routine += said
@@ -1937,6 +1987,7 @@ def _state_html(view: Any, today: date) -> str:
         + f'<p class="{verdict_css}">{_esc(_verdict_text(own, view.protection))}</p>'
         + _held_html(own, boxed=True)
         + _stretches_html(own)
+        + _listing_html(own)
     )
     if not own.movement_checked:
         body += (
@@ -2198,6 +2249,7 @@ def _opening_html(
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
                 f"{_esc(opening.withheld)}.</p>"
             )
+    body += _statements_score_html(view)
     body += _shared_days_html(view)
     if opening.unusable_statements:
         body += (

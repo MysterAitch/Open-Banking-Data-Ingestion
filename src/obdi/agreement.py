@@ -69,7 +69,8 @@ here as `StatementCheck`s, and the arithmetic is its one implementation:
       up through it, and the days from a first statement's start to its closing are tested. That
       is claimed only for days where no counting transaction is listed by no statement
       (`StatementCheck.days_tested`): where another source holds unlisted transactions in the
-      span, the statement is verified and its days are not. A statement that "cannot say" verifies and faults nothing.
+      span, the statement is verified and its days are not. A statement that "cannot say"
+      verifies and faults nothing.
   R2  A statement's closing balance is the balance AFTER THE TRANSACTIONS IT LISTS, not the balance
       at the end of a calendar day. Where it and another source's balance for the same day differ
       by exactly the counting transactions dated that day (or, apart, the next) that it does not
@@ -119,6 +120,7 @@ from .statement_checks import (
     DOES_NOT_REACH,
     HELD_TWICE,
     LISTED_TWICE,
+    NO_LONGER_COUNTS,
     NOT_HELD,
     NOT_READ_WHOLE,
     OTHER_AMOUNT,
@@ -632,6 +634,7 @@ _FAULT_REASONS = {
     OTHER_AMOUNT: "a transaction it lists is held with a different amount",
     HELD_TWICE: "a transaction it lists is held twice",
     LISTED_TWICE: "it lists a transaction twice that is held once",
+    NO_LONGER_COUNTS: "a transaction it lists is held as reversed or void, so it no longer counts",
     DOES_NOT_REACH: (
         "the transactions it lists, as held, do not reach its closing balance from its opening "
         "balance"

@@ -92,10 +92,9 @@ def generate(rng: random.Random) -> tuple[list[Known], list[StatementCheck]]:
         elif roll < 0.9:
             others = [o for o in known if o.day == k.day and o.figure != k.figure and not o.instant]
             honest = bool(others) and rng.random() < 0.6
-            if honest:
-                difference = others[0].figure - k.figure
-            else:
-                difference = rng.choice([-500, 500, 17])
+            difference = (
+                others[0].figure - k.figure if honest else rng.choice([-500, 500, 17])
+            )
             counted = rng.choice([difference, 0])
             checks.append(
                 StatementCheck(
@@ -165,9 +164,9 @@ def reference(known: list[Known], checks: list[StatementCheck]) -> dict[str, obj
         if d in conflict_days:
             continue
         here = [(i, k) for i, k in enumerate(view) if k.day == d]
-        if any(i in tested_by_listing for i, _ in here):
-            tested_days.append(d)
-        elif d != earliest and any(k.verdict == MET for _, k in here):
+        by_listing = any(i in tested_by_listing for i, _ in here)
+        by_chain = d != earliest and any(k.verdict == MET for _, k in here)
+        if by_listing or by_chain:
             tested_days.append(d)
     holds = [*conflict_days[:1], *unmet_days[:1], *([fault] if fault else [])]
     blocked = min(holds, default=None)
@@ -183,7 +182,7 @@ def run(known: list[Known], checks: list[StatementCheck]) -> Agreement:
 
 
 def test_Rule_OverRandomAccounts_AgreesWithAPlainRestatementAndNeverTestsNothing():
-    rng = random.Random(20260713)
+    rng = random.Random(20260713)  # noqa: S311 - invented figures, not security material
     counters = {
         "accounts": 0, "adds_up_before": 0, "kept": 0, "lost_to_fault": 0, "gained": 0,
         "claims_applied": 0, "claims_ignored": 0, "through_untested": 0, "mismatch": 0,
@@ -223,7 +222,7 @@ def test_Rule_OverRandomAccounts_AgreesWithAPlainRestatementAndNeverTestsNothing
 
 
 def test_Rule_WhenEveryCheckCannotSay_IsExactlyToday():
-    rng = random.Random(7)
+    rng = random.Random(7)  # noqa: S311 - invented figures, not security material
     for _ in range(2000):
         known, _ = generate(rng)
         silent = [
@@ -235,7 +234,7 @@ def test_Rule_WhenEveryCheckCannotSay_IsExactlyToday():
 
 
 def test_Rule_WhenAClaimIsNotBornOutByTheFigures_ChangesNothingAtAll():
-    rng = random.Random(11)
+    rng = random.Random(11)  # noqa: S311 - invented figures, not security material
     for _ in range(2000):
         known, _ = generate(rng)
         for k in known:

@@ -88,9 +88,15 @@ def _link_sentence(item: StatementListing) -> str:
             "two are taken to be consecutive because the balances meet. That is evidence, not "
             "proof: a missing statement whose transactions net to nothing would leave the same."
         )
+    if item.link is Link.OVERLAPS:
+        return (
+            f"It shares {plural(item.shared, 'transaction')} with the statement before it, or "
+            "starts inside it, so the two overlap and nothing is concluded from their balances."
+        )
     return (
-        "Its opening balance differs from the closing balance of the statement before it, so "
-        "money moved that neither statement lists."
+        "Its opening balance differs from the closing balance of the statement before it, and "
+        "the two do not overlap, so money moved that neither statement lists: a gap proven by "
+        "arithmetic."
     )
 
 
@@ -264,6 +270,7 @@ def _account_html(listing: AccountListing, shown: AccountShown) -> str:
                 Link.FIRST: "(the first statement held, before the first known balance)",
                 Link.DIFFERS: "(it follows a gap: its opening balance differs from the closing "
                 "balance before it)",
+                Link.OVERLAPS: "(it overlaps the statement before it)",
                 Link.MEETS: "(not verified today)",
                 Link.NO_OPENING: "(not verified today)",
             }[n.link]

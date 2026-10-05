@@ -343,7 +343,7 @@ class TestTheRealCardsExcusedChargeRow:
             "internal transfer]), and the period 2025-10-11 to 2025-11-12 then agrees."
         ) in text
         assert (
-            "Statement-only rows are dated: 2025-10-30 (santander-cc-pdf), 2025-11-12 "
+            "Statement-only transactions are dated: 2025-10-30 (santander-cc-pdf), 2025-11-12 "
             "(santander-cc-pdf), 2025-11-12 (santander-cc-pdf), 2025-11-12 "
             "(santander-cc-pdf, excused: a proven internal transfer)."
         ) in text

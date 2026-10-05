@@ -59,6 +59,7 @@ from obdi.family_anchors import OPENED, Families, families_of, family_anchors
 from obdi.ingest import import_file, reconcile_batch
 from obdi.ledger import (
     ANCHOR_QUERIES,
+    BY_DATE_SCORE_QUERIES,
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,
     FEED_TIME_QUERIES,
@@ -1059,6 +1060,7 @@ class TestWhatTheFamilyReadingCosts:
             + ANCHOR_QUERIES
             + STATEMENT_CHECK_QUERIES
             + HELD_STATEMENT_CHECK_QUERIES
+            + BY_DATE_SCORE_QUERIES
             + FAMILY_QUERIES
             + len(found.spaces_of(MAIN))
             + FEED_TIME_QUERIES

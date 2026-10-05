@@ -23,6 +23,7 @@ NOT_HELD = "not-held"
 OTHER_AMOUNT = "other-amount"
 HELD_TWICE = "held-twice"
 LISTED_TWICE = "listed-twice"
+NO_LONGER_COUNTS = "no-longer-counts"
 DOES_NOT_REACH = "does-not-reach"
 
 

@@ -574,7 +574,9 @@ def test_StatementPeriodsPage_WithADifferingPeriodAndVeryLongReference_DoesNotSc
     )
     try:
         page.goto(f"{periods_base}/period-reconciliation", wait_until="load")
-        assert "differ from the statement" in page.content(), "no differing period was measured"
+        assert "do not add up to the statement" in page.content(), (
+            "no differing period was measured"
+        )
     finally:
         page.close()
 

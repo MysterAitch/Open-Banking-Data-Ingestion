@@ -70,14 +70,15 @@ CHECKS: tuple[CheckSpec, ...] = (
         f"than {STALE_AGREEMENT_DAYS} days without its transactions adding up to a known "
         "balance.",
     ),
-    # No check on Today adds up a statement's own period, so this row borrows no other
-    # check's finding: a chip must not speak for a sum nobody ran.
+    # The home page runs the sum this page shows for each statement's own lines
+    # (`agreement`, R3), so a statement that does not add up by what it lists is this report's
+    # finding. The page's other readings (the periods between statements) are not run there, and
+    # the row says nothing about them.
     CheckSpec(
         "/period-reconciliation",
-        frozenset(),
-        (),
-        "",
-        unwatched="The home page does not run this one. Open it to read each statement's period.",
+        frozenset({"statement-fault"}),
+        ("known balances and agreement",),
+        "No statement fails to add up by the transactions it lists.",
     ),
     CheckSpec(
         "/balance-walk",

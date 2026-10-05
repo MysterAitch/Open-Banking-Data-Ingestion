@@ -74,6 +74,7 @@ from .statement_checks import (
     DOES_NOT_REACH,
     HELD_TWICE,
     LISTED_TWICE,
+    NO_LONGER_COUNTS,
     NOT_HELD,
     NOT_READ_WHOLE,
     OTHER_AMOUNT,
@@ -86,11 +87,18 @@ from .statement_opening_measure import (
     OpeningFigures,
     StatementOpeningReport,
     _spans_of,
+    account_figures,
     statement_opening_report,
 )
 from .statement_openings import days_in
 from .statement_span import RowEvidence
-from .statement_terms import KeptPdf, assigned_sections, kept_pdf_readings
+from .statement_terms import (
+    KeptPdf,
+    StatementPeriod,
+    assigned_sections,
+    kept_pdf_readings,
+    statement_periods,
+)
 from .store import Store
 
 
@@ -620,6 +628,8 @@ def _fault_of(
         return LISTED_TWICE
     if held_twice:
         return HELD_TWICE
+    if held.reversed or held.void:
+        return NO_LONGER_COUNTS
     return DOES_NOT_REACH
 
 
@@ -1003,6 +1013,8 @@ def statement_checks(
     families: Families,
     openings: Mapping[str, EffectiveOpening],
     accounts: Collection[str] | None = None,
+    *,
+    by_date: bool = False,
 ) -> dict[str, StatementChecks]:
     """What each account's statements conclude by what they list, for the accounts in `openings`
     that hold a statement, from the opening already built for each.
@@ -1027,6 +1039,23 @@ def statement_checks(
         return found
 
     report = _listings(store, families, figures, wanted, None)
+    if by_date and report.accounts:
+        # How many statements a calendar-day test would have reproduced reads every row of the
+        # store (`RowEvidence`), which the verdict never needs, so it is worked out only for an
+        # account that holds a statement and only where asked.
+        held = {a.account for a in report.accounts}
+        dated: dict[str, list[StatementPeriod]] = defaultdict(list)
+        for item in statement_periods(store):
+            if item.account_ref in held:
+                dated[item.account_ref].append(item)
+        sighted = RowEvidence.from_sightings(store.transactions_by_sighting())
+
+        def with_dates(ref: str) -> OpeningFigures | None:
+            if dated.get(ref):
+                return account_figures(store, ref, dated[ref], families, sighted)
+            return figures(ref)
+
+        report = _listings(store, families, with_dates, held, None)
     return {
         a.account: checks_of(
             a,
