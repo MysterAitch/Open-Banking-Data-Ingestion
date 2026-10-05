@@ -303,7 +303,9 @@ class TestAPageOfCardsUsesAWideScreen:
     def test_Stylesheet_WidensOnlyOnAWideScreen_AndKeepsProseToAReadableMeasure(self):
         css = render_page("t", "").decode()
 
-        rule = re.search(r"@media \(min-width: 60rem\) \{(.*?)\n \}", css, re.S)
+        # A page carries the rules without their indentation (`stylesheet.SERVED_STYLESHEET`), so
+        # the block's closing brace is found on a line of its own, however far it is indented.
+        rule = re.search(r"@media \(min-width: 60rem\) \{(.*?)\n\s*\}", css, re.S)
         assert rule, "the widening must sit inside a media query, or a phone gets it too"
         assert "body.wide {" in rule.group(1)
         assert re.search(r"body\.wide main > p[^{]*\{[^}]*max-width: 40rem", rule.group(1))

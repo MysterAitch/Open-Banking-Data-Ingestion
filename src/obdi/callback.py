@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlparse
 from .buildinfo import describe
 from .navigation import navigation_html, with_way_out
 from .page_structure import structure_tables
-from .stylesheet import STYLESHEET
+from .stylesheet import SERVED_STYLESHEET
 
 
 class CodeHandler(Protocol):
@@ -121,7 +121,7 @@ def render_page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>
-{STYLESHEET}</style></head>
+{SERVED_STYLESHEET}</style></head>
 <body{f' class="{classes}"' if classes else ""}><a class="skip" href="#main">Skip to content</a>
 {navigation_html()}
 <main id="main"><h1>{html.escape(title if heading is None else heading)}</h1>{body}</main>
