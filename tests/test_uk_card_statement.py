@@ -557,6 +557,25 @@ class TestAnInCreditStatementAndOthers:
         assert read(costa_rica).reconciles
 
 
+class TestNoStartIsPrinted:
+    """The cover states a statement date and a previous balance with no date beside it; the
+    "Total payments between <day> and <day>" line is the annual page's year, not a period."""
+
+    def test_Statement_StatesNoStartAndNoProductionDate(self):
+        reading = read(STATEMENT)
+
+        assert reading.period_start is None
+        assert reading.produced is None
+
+    def test_Statement_WithTheAnnualTotalsLine_DoesNotTakeTheYearAsItsPeriod(self):
+        assert any("between 1 July 2025 and 30 June 2026" in line for line in _all_text())
+        assert read(STATEMENT).period_start is None
+
+
+def _all_text() -> list[str]:
+    return [cell[2] for page in layout(STATEMENT) for cell in page]
+
+
 class TestThePageBreak:
     def test_PageFurnitureBetweenRows_ProducesNeitherARowNorALostRow(self):
         rows = rows_of(STATEMENT)

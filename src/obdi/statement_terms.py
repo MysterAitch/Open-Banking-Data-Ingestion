@@ -25,7 +25,13 @@ from .parsers.pdf_statements import (
     _lines,
     pdf_parser_for,
 )
-from .parsers.statement_reading import StatementReading, reading_from_json, reading_to_json
+from .parsers.statement_reading import (
+    READING_FORMAT,
+    StatementReading,
+    kept_format,
+    reading_from_json,
+    reading_to_json,
+)
 from .plural import plural
 from .store import SectionAssignment, Store
 
@@ -149,13 +155,20 @@ def _kept_reading(store: Store, digest: str) -> tuple[str, StatementReading] | N
 
 
 def _keeps_period(store: Store, digest: str) -> bool:
-    """Whether the kept reading was written by a version that kept a statement's own period.
+    """Whether the kept reading was written by a version that reads everything now read.
 
-    A reading kept before then says nothing about the period start, which is not the same as
-    saying the document states none: only reading the document again tells the two apart.
+    A reading kept before a parser learnt to read a field says nothing about it, which is not
+    the same as saying the document states none: only reading the document again tells the two
+    apart (`READING_FORMAT`). Until then `statement_spans` gives the weaker answer its evidence
+    supports and never a wrong one.
     """
     stored = store.stored_statement_reading(digest)
-    return stored is not None and '"period_start"' in stored[1]
+    if stored is None:
+        return False
+    try:
+        return kept_format(stored[1]) >= READING_FORMAT
+    except (ValueError, TypeError):
+        return False
 
 
 @dataclass(frozen=True)

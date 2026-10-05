@@ -61,6 +61,10 @@ class StatementReading:
     #: that states only the closing date, whose period is then known only from the statement
     #: before it. Never the first row's date: that is a fact about the rows, not the document.
     period_start: date | None = None
+    #: The day the document says it was produced (a credit union's "Date of Issue"), where its
+    #: format prints one. Never the closing day: `statement_span` uses it, and only it, to tell
+    #: a statement that was produced before its period ended from one that was not.
+    produced: date | None = None
 
     @property
     def discrepancy_minor(self) -> int:
@@ -85,6 +89,20 @@ class StatementReading:
             and self.closing_balance_minor is not None
             and self.discrepancy_minor == 0
         )
+
+
+#: The version of what a reading holds. Raised whenever a parser starts reading a field it
+#: previously ignored, so that a reading kept by an older version is recognised as possibly
+#: lacking it (`kept_format`) and read again from the document, rather than being taken to say
+#: the document states nothing. 2: every layout that prints a start day or a day beside its
+#: opening balance keeps it as `period_start`, and `produced` is kept.
+READING_FORMAT = 2
+
+
+def kept_format(text: str) -> int:
+    """The format a kept reading was written in; 1 for one written before formats were named."""
+    found = json.loads(text)
+    return int(found.get("format", 1))
 
 
 def _day(value: date | None) -> str | None:
@@ -122,6 +140,8 @@ def reading_to_json(reading: StatementReading) -> str:
             ],
             "notes": reading.notes,
             "period_start": _day(reading.period_start),
+            "produced": _day(reading.produced),
+            "format": READING_FORMAT,
         }
     )
 
@@ -166,4 +186,5 @@ def reading_from_json(text: str) -> StatementReading:
         # A reading kept before periods were kept has no such key and reads as stating none;
         # `statement_terms.keep_statement_readings` reads those documents again.
         period_start=_maybe_day(found.get("period_start")),
+        produced=_maybe_day(found.get("produced")),
     )

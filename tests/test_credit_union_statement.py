@@ -462,6 +462,25 @@ class TestDatingTheRows:
         assert "31/02/2025" in " ".join(reading.notes)
 
 
+class TestWhenTheDocumentWasProduced:
+    def test_TheDateOfIssue_IsKeptAsTheDayItWasProduced_NotAsTheClosingDay(self):
+        reading = read_statement(grid(SAVINGS))
+
+        assert reading.produced == date(2025, 6, 2)
+        assert reading.statement_date == date(2025, 5, 31)
+
+    def test_WithNoDateOfIssue_NoProductionDayIsInvented(self):
+        reading = read_statement(grid(without(SAVINGS, "Date of Issue")))
+
+        assert reading.produced is None
+
+    def test_TheOpeningBalanceCarriesNoDate_SoTheStartIsTheStatedPeriodAlone(self):
+        reading = read_statement(grid(without(SAVINGS, "Period 01/05/2025")))
+
+        assert reading.opening_balance_minor == 80000
+        assert reading.period_start is None
+
+
 class TestTheArithmeticGate:
     def test_AMissedSavingsRow_IsCaught(self):
         reading = read_statement(grid(without(SAVINGS, "Div - Regular Saver")))

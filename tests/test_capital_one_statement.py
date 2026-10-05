@@ -381,6 +381,27 @@ class TestTheBalancesAndTheGate:
         assert reading.notes
 
 
+class TestNoStartIsPrinted:
+    """The cover states a statement date and a previous balance with no date beside it, so no
+    start is read. The annual summary's "Statement period" spans a year and is not this
+    statement's period."""
+
+    def test_Statement_StatesNoStartAndNoProductionDate(self):
+        reading = read(pages_of())
+
+        assert reading.period_start is None
+        assert reading.produced is None
+        assert reading.opening_balance_minor == -100000
+
+    def test_Statement_WithAnAnnualSummaryPage_DoesNotTakeTheYearAsItsPeriod(self):
+        annual = [
+            *pages_of(),
+            [f"{'':<80}Statement period{'':<14}2 July 2025 - 2 July 2026{'':<20}Page 3 of 3"],
+        ]
+
+        assert read(annual).period_start is None
+
+
 class TestTheTotalsLine:
     def test_CapitalOneStatement_WhenThePaidInTotalDisagreesWithTheRows_IsRefused(self):
         message = refused(edited(pages_of(), "265.00", "266.00"))

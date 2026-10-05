@@ -253,7 +253,7 @@ class TestWhatAStatementStatesOfItsOwnPeriod:
         with Store(world.db) as store:
             digest, source, text = _virgin_reading(store)
             older = json.loads(text)
-            del older["period_start"]
+            del older["period_start"], older["produced"], older["format"]
             store.keep_statement_reading(digest, source, json.dumps(older))
             store.connection.commit()
 
@@ -261,6 +261,21 @@ class TestWhatAStatementStatesOfItsOwnPeriod:
 
             assert read >= 1
             assert '"period_start": "2026-' in store.stored_statement_reading(digest)[1]
+
+    def test_KeptReading_WhenItHoldsAPeriodButWasWrittenBeforeFormatsWereNamed_IsReadAgain(
+        self, world
+    ):
+        # A Santander reading kept by the version that kept periods for four layouts holds a
+        # "period_start" of null, which must not be taken to say the document states none.
+        with Store(world.db) as store:
+            digest, source, text = _virgin_reading(store)
+            older = json.loads(text)
+            del older["format"]
+            store.keep_statement_reading(digest, source, json.dumps(older))
+            store.connection.commit()
+
+            assert keep_statement_readings(store) >= 1
+            assert json.loads(store.stored_statement_reading(digest)[1])["format"] == 2
 
     def test_KeptReading_WhenAlreadyHoldingAPeriod_IsNotReadAgain(self, world):
         with Store(world.db) as store:

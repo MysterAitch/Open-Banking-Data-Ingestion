@@ -128,6 +128,44 @@ class TestDatesWithoutAYear:
         assert by_month == {12: 2026, 1: 2027}
 
 
+class TestWhereTheStatementBegins:
+    """The summary's "Previous balance as at <day>" is the day the previous statement closed,
+    so the statement covers from the day after it (the first row in each fixture is the day
+    after). Hand working: 11 June -> 12 June; 13 October -> 14 October; 11 September ->
+    12 September."""
+
+    def test_Statement_BeginsTheDayAfterThePreviousBalanceIsDated(self):
+        assert read_statement(STATEMENT).period_start == date(2026, 6, 12)
+        assert read_statement(WITH_A_CREDIT_LINE).period_start == date(2025, 10, 14)
+        assert read_statement(FIRST_STATEMENT).period_start == date(2025, 9, 12)
+
+    def test_Statement_WithNoDatedPreviousBalance_StatesNoStart(self):
+        undated = [line for line in STATEMENT if "Previous balance as at" not in line]
+
+        assert read_statement(undated).period_start is None
+
+    def test_Statement_WhenTheLabelIsFusedByTheWordGrid_StillStatesItsStart(self):
+        fused = [
+            line.replace("Previous balance as at 11th June 2026:", "Previousbalanceasat11thJune2026:")
+            for line in STATEMENT
+        ]
+
+        assert read_statement(fused).period_start == date(2026, 6, 12)
+
+    def test_Statement_WhenThePreviousBalanceIsDatedANonExistentDay_IsNotTrustedAndStatesNoStart(
+        self,
+    ):
+        impossible = [line.replace("11th June 2026:", "31st June 2026:") for line in STATEMENT]
+
+        reading = read_statement(impossible)
+
+        assert reading.period_start is None
+        assert reading.notes
+
+    def test_Statement_PrintsNoProductionDate_SoNoneIsRead(self):
+        assert read_statement(STATEMENT).produced is None
+
+
 class TestTheArithmeticGate:
     def test_AStatementThatBalances_Reconciles(self):
         reading = read_statement(STATEMENT)
