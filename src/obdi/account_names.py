@@ -45,12 +45,28 @@ def name_html(ref: str, names: Mapping[str, str]) -> str:
     )
 
 
+#: A reference that is one plain word. It may be an ordinary word of the sentences around it.
+_ORDINARY_WORD = re.compile(r"[a-z]+")
+#: Where such a reference is set off as an account's name and not used as a word: at the head
+#: of a line, or after the " / " that follows a class in a count by account.
+_SET_OFF_AS_A_NAME = re.compile(r"(?:^|\n)[ \t]*$|/ $")
+
+
 def name_text(text: str, names: Mapping[str, str]) -> str:
     """`text` with each whole-word reference that has a label written as "label (reference)".
 
     Longest references first, and only where the reference is not part of a longer name, so
     `starling-personal` is never rewritten inside `starling-personal-joint`. A label that is the
     reference changes nothing, so an unlabelled account reads once.
+
+    A colon after a reference ends a heading (`starling-personal:`) and is rewritten; a colon
+    that joins a provider to its own id (`starling:abc123`) is not the account and is left.
+
+    A REFERENCE THAT IS AN ORDINARY WORD is rewritten only where it is set off as a name. An
+    account was given the reference `cash`, and a report about cash withdrawals then read
+    "Cash (cash) withdrawals ... the word a bank uses for a Cash (cash) machine". A reference
+    with a hyphen or a digit in it is no word of any sentence and is rewritten wherever it
+    stands whole.
     """
     renamed = {ref: label for ref, label in names.items() if label and label != ref}
     if not renamed:
@@ -58,6 +74,15 @@ def name_text(text: str, names: Mapping[str, str]) -> str:
     pattern = re.compile(
         r"(?<![\w:.-])("
         + "|".join(re.escape(ref) for ref in sorted(renamed, key=len, reverse=True))
-        + r")(?![\w:-])"
+        + r")(?![\w-]|:\S)"
     )
-    return pattern.sub(lambda found: f"{renamed[found.group(1)]} ({found.group(1)})", text)
+
+    def written(found: re.Match[str]) -> str:
+        ref = found.group(1)
+        if _ORDINARY_WORD.fullmatch(ref) and not _SET_OFF_AS_A_NAME.search(
+            text, 0, found.start()
+        ):
+            return ref
+        return f"{renamed[ref]} ({ref})"
+
+    return pattern.sub(written, text)

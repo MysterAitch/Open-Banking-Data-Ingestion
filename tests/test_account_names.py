@@ -66,6 +66,44 @@ class TestAReportsPlainText:
     def test_NameText_WhenNoAccountHasALabel_ChangesNothing(self):
         assert name_text("anything at all", {}) == "anything at all"
 
+    def test_NameText_WhenAReferenceIsAnOrdinaryWord_LeavesThatWordAloneInASentence(self):
+        """An account's reference was the word "cash", and a report then read "Cash (cash)
+        withdrawals ... the word a bank uses for a Cash (cash) machine"."""
+        names = {"cash": "Cash", **NAMES}
+        said = name_text(
+            "19 stored transactions are cash withdrawals. The word for a cash machine is here.",
+            names,
+        )
+
+        assert said == (
+            "19 stored transactions are cash withdrawals. The word for a cash machine is here."
+        )
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cash:", "Cash (cash):"),
+            ("  cash:", "  Cash (cash):"),
+            ("cash via truelayer: 4 reported", "Cash (cash) via truelayer: 4 reported"),
+            ("    nil-amount / cash: 1", "    nil-amount / Cash (cash): 1"),
+        ],
+    )
+    def test_NameText_WhenAnOrdinaryWordReferenceHeadsALine_StillNamesTheAccount(
+        self, line, expected
+    ):
+        assert name_text(line, {"cash": "Cash"}) == expected
+
+    def test_NameText_WhenAReferenceHeadsASectionWithAColon_NamesTheAccount(self):
+        said = name_text("starling-personal:\n19 rows", NAMES)
+
+        assert said == "Joint current (starling-personal):\n19 rows"
+
+    def test_NameText_WhenAColonJoinsAProviderToItsOwnId_LeavesItAlone(self):
+        """`starling:abc123` is a provider's own account id, not the account called starling."""
+        said = name_text("starling:abc123 holds 2 rows", {"starling": "Starling main"})
+
+        assert said == "starling:abc123 holds 2 rows"
+
 
 class TestThePagesUseIt:
     def test_IdentityHealth_WhenAnAccountIsDeclaredWithALabel_NamesItByLabelFirst(
