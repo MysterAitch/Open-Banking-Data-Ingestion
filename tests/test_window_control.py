@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.date_window import Anchor, Unit
+import pytest
+
+from obdi.date_window import Anchor, Period, Unit
 from obdi.stylesheet_position import POSITION_STYLES
 from obdi.stylesheet_window import WINDOW_STYLES
 from obdi.window_control import WINDOW_FIELDS, window_choice, window_controls
@@ -42,6 +44,27 @@ class TestReadingTheChoice:
         assert choice.spec is not None
         assert (choice.spec.count, choice.spec.unit) == (12, Unit.MONTHS)
         assert choice.spec.anchor is Anchor.ENDING_TODAY
+
+    @pytest.mark.parametrize(
+        ("key", "period"),
+        [
+            ("this-week", Period.THIS_WEEK),
+            ("last-week", Period.LAST_WEEK),
+            ("last-4-weeks", Period.LAST_4_WEEKS),
+        ],
+    )
+    def test_AWeekPeriod_IsReadAsThatNamedPeriod(self, key, period):
+        choice = read(window=key)
+
+        assert choice.spec is not None and choice.spec.period is period
+
+    def test_TheWeekPeriods_AreInTheFoldAndNotAmongTheOneTapChips(self):
+        page = window_controls(read(), today=TODAY.isoformat())
+        before_fold, fold = page.split('<details class="position-more"')
+
+        for key in ("this-week", "last-week", "last-4-weeks"):
+            assert f'value="{key}"' in fold
+            assert f'value="{key}"' not in before_fold
 
     def test_TwoDaysTheWrongWayRound_AreRefusedInASentenceNamingBoth(self):
         choice = read(window="between", window_from="2026-02-01", window_to="2026-01-31")

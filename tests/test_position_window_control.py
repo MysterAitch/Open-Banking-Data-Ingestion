@@ -84,7 +84,7 @@ class TestTheControl:
         chips = re.findall(
             r'<button type="submit" name="window" value="([^"]+)" class="position-chip"', form
         )
-        assert len(chips) == 17 and len(set(chips)) == 17
+        assert len(chips) == 20 and len(set(chips)) == 20
 
     def test_TheFirstButtonInTheForm_KeepsTheWindowSoABareEnterNeverPicksAnother(self, held):
         form = form_of(render_position(held, unmasked=True).decode())
@@ -93,6 +93,22 @@ class TestTheControl:
         assert first_button is not None
         assert 'value="keep"' in first_button.group(0)
         assert 'tabindex="-1"' in first_button.group(0)
+
+    @pytest.mark.parametrize(
+        ("key", "words"),
+        [
+            ("this-week", "This week: 2026-09-28 to 2026-10-04, one figure per day."),
+            ("last-week", "Last week: 2026-09-21 to 2026-09-27, one figure per day."),
+            ("last-4-weeks", "Last 4 whole weeks: 2026-08-31 to 2026-09-27, one figure per day."),
+        ],
+    )
+    def test_Page_ForAWeekPeriodOnASunday_NamesItsMondayToSundayDays(self, held, key, words):
+        page = asked(held, window=key)
+
+        assert words in page
+        assert re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page) == [
+            key
+        ]
 
     def test_Page_SetsTheControlsToTheWindowInForceAndMarksItsChip(self, held):
         page = asked(held, window="m12")

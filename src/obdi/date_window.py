@@ -22,12 +22,21 @@ THE CONVENTIONS, stated once, here, and tested against hand-worked answers in
   makes the lengths of such windows irregular, and counting a month as 30 days,
   which is not a month on any calendar.
 * A length of weeks is seven days each, and of days is days.
-* A named period is a calendar month, a calendar QUARTER (January to March and
-  so on, not a fiscal quarter), a calendar year, or the tax year. The tax year
-  is the UK's, `TAX_YEAR_STARTS`; a different fiscal year is that one edit.
-  "This" period is the whole of it and, where it ends in the future, is cut at
-  today and the window says so (`Window.ended_in_future`). "To date" is the
-  period's first day to today and is never cut.
+* A WEEK begins on a MONDAY and ends on a SUNDAY, which is how ISO 8601 and a UK
+  calendar run it. This is the one place the convention is stated; the
+  resolution below ends its weekly points on the same day.
+* A named period is a week, a calendar month, a calendar QUARTER (January to
+  March and so on, not a fiscal quarter), a calendar year, or the tax year. The
+  tax year is the UK's, `TAX_YEAR_STARTS`; the owner confirmed it is also the
+  fiscal year, so a different one is that one edit. "This" period is the whole
+  of it and, where it ends in the future, is cut at today and the window says so
+  (`Window.ended_in_future`). "To date" is the period's first day to today and
+  is never cut. "Last" is the whole of the one before: last week is the last
+  whole Monday-to-Sunday, and "last 4 weeks" is four whole weeks ending on that
+  Sunday, so it never holds today, as last month never does. Four weeks ENDING
+  TODAY is the length, 4 weeks, and stays available beside it. Rejected: making
+  "last 4 weeks" the 28 days to today, which would make the same word mean a
+  whole period in "last week" and a rolling one here.
 * A window that ends after today is cut at today. One that begins before
   anything is held is cut at the first day held (`held_from`). Each says so, so
   nobody mistakes a clipped window for the one they asked for. A window left
@@ -41,9 +50,8 @@ THE CONVENTIONS, stated once, here, and tested against hand-worked answers in
 THE RESOLUTION follows the window's length, since a mark nearer than about three
 units to its neighbour is a smear on a chart 376 units wide: a point per day up
 to `DAILY_UP_TO_DAYS` days, per week up to `WEEKLY_UP_TO_DAYS`, per month-end
-beyond. A week ends on a SUNDAY, which is how ISO 8601 and a UK calendar close
-a week that starts on Monday. The last point is always the window's last day,
-so a window ending today ends on the figure held now.
+beyond. A weekly point is a week's last day, its Sunday. The last point is always
+the window's last day, so a window ending today ends on the figure held now.
 """
 
 from __future__ import annotations
@@ -67,6 +75,7 @@ DAILY_UP_TO_DAYS = 120
 #: Up to this many days (two years and a leap day) a chart has a point per week.
 WEEKLY_UP_TO_DAYS = 731
 
+#: `date.weekday()` of the day a week ends on (see the conventions).
 _SUNDAY = 6
 
 
@@ -86,6 +95,9 @@ class Anchor(Enum):
 class Period(Enum):
     """A named stretch aligned to a calendar or tax boundary."""
 
+    THIS_WEEK = "This week"
+    LAST_WEEK = "Last week"
+    LAST_4_WEEKS = "Last 4 whole weeks"
     THIS_MONTH = "This month"
     LAST_MONTH = "Last month"
     THIS_QUARTER = "This quarter"
@@ -225,7 +237,11 @@ def _named_span(period: Period, today: date) -> tuple[date, date]:
     def day_before(day: date) -> date:
         return day - timedelta(days=1)
 
+    week_first = today - timedelta(days=today.weekday())
     spans = {
+        Period.THIS_WEEK: (week_first, week_first + timedelta(days=6)),
+        Period.LAST_WEEK: (week_first - timedelta(days=7), day_before(week_first)),
+        Period.LAST_4_WEEKS: (week_first - timedelta(days=28), day_before(week_first)),
         Period.THIS_MONTH: (month_first, day_before(_add_months(month_first, 1))),
         Period.LAST_MONTH: (_add_months(month_first, -1), day_before(month_first)),
         Period.THIS_QUARTER: (quarter_first, day_before(_add_months(quarter_first, 3))),
