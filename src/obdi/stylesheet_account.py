@@ -108,6 +108,13 @@ ACCOUNT_STYLES = """
  details[open] > summary.t-row .t-when::before { transform: rotate(45deg); }
  .txns li.txn > .t-note { margin: 0 0 var(--s2); }
  .txns li.txn > .t-more > p { margin: var(--s1) 0 var(--s1) var(--s4); }
+ /* A copy of money counted elsewhere is history: the same size and shape as any row, but in the
+    muted ink with a lighter figure and no rail, so a month's copies read as a closed drawer and
+    not as seven faults. They are listed after the counted rows, inside their own disclosure. */
+ .acct-txns details.folded-rows { margin: var(--s3) 0 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .acct-txns details.folded-rows > summary { min-height: var(--hit); color: var(--ink-2); }
+ .txns li.txn.folded { color: var(--ink-2); }
+ .txns li.txn.folded .t-fig, .txns li.txn.folded .t-desc strong { font-weight: 400; }
  .txn.flagged { border-left: var(--rail) solid var(--bad); padding-left: var(--s3); }
  .txn.doubtful { border-left: var(--rail) solid var(--warn); padding-left: var(--s3); }
 

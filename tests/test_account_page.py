@@ -333,11 +333,13 @@ class TestTheDangerZone:
 
 
 class TestTheRailOnARow:
-    def test_RowSeenByOneFeedWhereTwoFeedTheAccount_CarriesTheRedRailAndOthersDoNot(self, base):
+    def test_RowSeenByOneFeedWhereTwoFeedTheAccount_CarriesTheAmberRailAndOthersDoNot(self, base):
         page = get(base, AGREEING)
 
-        # Six in seven rows are seen by both feeds; the seventh by the feed alone.
-        flagged = page.count('class="txn flagged"')
-        assert 0 < flagged < NEWEST_MONTH_ROWS
-        assert page.count(">one source<") == flagged
-        assert page.count('<li class="txn"') == NEWEST_MONTH_ROWS - flagged
+        # Six in seven rows are seen by both feeds; the seventh by the feed alone. A row one
+        # source lists is unproven, which is amber; red is kept for rows that disagree.
+        doubtful = page.count('class="txn doubtful"')
+        assert 0 < doubtful < NEWEST_MONTH_ROWS
+        assert page.count(">one source<") == doubtful
+        assert page.count('class="txn flagged"') == 0
+        assert page.count('<li class="txn"') == NEWEST_MONTH_ROWS - doubtful

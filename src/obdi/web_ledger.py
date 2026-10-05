@@ -134,8 +134,27 @@ def _words(items: list[str]) -> str:
     return ", ".join(items[:-1]) + ", and " + items[-1]
 
 
+#: What a folded row is called wherever the page describes one: on the row, in the month's
+#: line, and over the closed list at the foot of the month. A folded row is a copy of money
+#: counted elsewhere, withheld from Actual so it is not counted twice (`replay.WITHHELD_FOLDED`
+#: gives the two cases), so it is history and not a fault.
+_COPY_CHIP = "copy, not counted"
+_COPIES_NOUN = "copy not counted"
+_COPIES_PLURAL = "copies not counted"
+_COPIES_WHY = "held under a Space, or itemised by a statement"
+
+
+def _is_copy(row: Any) -> bool:
+    """True for a row folded into another, which no sum counts."""
+    return str(row.status) == "folded"
+
+
 def _row_flags(row: Any) -> str:
-    """The pills for what is unusual about a row, or nothing when nothing is."""
+    """The pills for what is unusual about a row, or nothing when nothing is.
+
+    A copy is quiet: it is neither unverified nor in disagreement, so the warnings that ask a
+    person to look at a counted row are left off it, and its one chip is the status pill.
+    """
     flags = ""
     if row.cleared_by:
         flags += _flag(
@@ -157,12 +176,12 @@ def _row_flags(row: Any) -> str:
             "of them that no row explains. It is never stored, so restating a "
             "balance changes it.",
         )
-    if row.one_source:
+    if row.one_source and not _is_copy(row):
         flags += _flag(
             "one source",
             "More than one source feeds this account and only one of them has "
-            "reported this row.",
-            "pill-bad",
+            "reported this row, so nothing else confirms it yet.",
+            "pill-warn",
         )
     if row.transfer == "confirmed":
         flags += _flag(
@@ -183,7 +202,7 @@ def _row_flags(row: Any) -> str:
             "pill-bad",
         )
         flags += f'<span class="muted">{_esc(row.review_reason)}</span> '
-    if row.withheld:
+    if row.withheld and not _is_copy(row):
         flags += _flag(
             f"withheld from Actual: {row.withheld}",
             "Actual is not sent this row, for the reason given.",
@@ -221,6 +240,11 @@ def _status_pill(row: Any) -> str:
     left off the screen, which is what lets a row's date and chips share one line on a phone.
     """
     status = row.status
+    if _is_copy(row):
+        return (
+            f'<span class="pill pill-quiet" title="Actual is not sent this row, and no sum counts '
+            f'it: it is a copy of a payment {_esc(_COPIES_WHY)}.">{_COPY_CHIP}</span>'
+        )
     css = {"booked": "pill-ok", "void": "pill-bad"}.get(status, "pill-quiet")
     implied = " visually-hidden" if status == "booked" and row.cleared_by else ""
     return f'<span class="pill {css}{implied}">{_esc(status)}</span>'
@@ -293,18 +317,23 @@ def _joined_gist(counts: dict[str, int]) -> str:
 
 
 def _row_rail(row: Any) -> str:
-    """The class that gives a row a red rail where it is flagged and an amber one where its
-    sources disagree about its date; most rows are neither, and carry none."""
+    """The class that gives a row its rail: red where it is flagged as a fault, amber where it
+    is unproven (one source lists it, or the sources date it differently), none otherwise.
+
+    A copy is quiet and carries no rail for being listed by one source, which is all a copy of
+    another row's money ever is; it keeps a red one only for a fault that is its own.
+    """
     if (
-        row.one_source
-        or row.unsendable
+        row.unsendable
         or row.shares_identity
         or row.absorbed_ids
         or row.review_open
         or row.transfer == "claimed"
     ):
         return " flagged"
-    return " doubtful" if row.dates_differ else ""
+    if _is_copy(row):
+        return ""
+    return " doubtful" if row.one_source or row.dates_differ else ""
 
 
 def _row_html(row: Any, unmasked: bool = True) -> str:
@@ -358,8 +387,10 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
         f'<span class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</span>'
         "</span>"
     )
+    kind = " folded" if _is_copy(row) else ""
     return (
-        f'<li class="txn{_row_rail(row)}"{ident}>{_line_html(row, line)}{dates}{annotation}</li>'
+        f'<li class="txn{kind}{_row_rail(row)}"{ident}>'
+        f"{_line_html(row, line)}{dates}{annotation}</li>"
     )
 
 
@@ -2283,7 +2314,33 @@ def _month_line(view: Any) -> str:
     rows = summary.rows
     noun = "row" if str(rows) == "1" else "rows"
     sources = _esc(_pairs(summary.per_source))
-    return f'<p class="sub">{_esc(str(rows))} {noun}. Sources {sources}.</p>'
+    copies = int(str(summary.folded))
+    if not copies:
+        return f'<p class="sub">{_esc(str(rows))} {noun}. Sources {sources}.</p>'
+    counted = int(str(rows)) - copies - int(str(summary.void))
+    void = f", {summary.void} void" if int(str(summary.void)) else ""
+    return (
+        f'<p class="sub">{_esc(str(rows))} {noun}: {counted} counted, '
+        f"{copies} {_COPIES_PLURAL if copies != 1 else _COPIES_NOUN}{void}. "
+        f"Sources {sources}.</p>"
+    )
+
+
+def _copies_html(rows: list[str]) -> str:
+    """The month's copies as one closed line at the foot of the list, and the rows beneath it.
+
+    At the foot and not where each would fall: the counted rows then read as one run a person
+    can lay beside their bank's app, which a copy between two of them would break.
+    """
+    if not rows:
+        return ""
+    count = len(rows)
+    noun = _COPIES_NOUN if count == 1 else _COPIES_PLURAL
+    return (
+        '<details class="folded-rows">'
+        f"<summary>{count} {noun} ({_COPIES_WHY})</summary>"
+        f'<ul class="txns">{"".join(rows)}</ul></details>'
+    )
 
 
 def _statement_cost() -> str:
@@ -2417,11 +2474,14 @@ def render_ledger(
     )
     txns = ""
     if view.state == "ok":
+        counted = [row for row in view.rows if not _is_copy(row)]
+        copies = [row for row in view.rows if _is_copy(row)]
         txns = (
             "<h2>Transactions, newest first</h2>"
             '<ul class="txns">'
-            + "".join(_row_html(row, unmasked) for row in view.rows)
+            + "".join(_row_html(row, unmasked) for row in counted)
             + "</ul>"
+            + _copies_html([_row_html(row, unmasked) for row in copies])
         )
     limits = _disclosure(
         f"What this page does not check ({_LIMITS.count('<li>')})",
