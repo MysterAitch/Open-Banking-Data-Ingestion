@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joint current</title>
+<style>
+
+ :root {
+  color-scheme: light dark;
+  --paper: #f1f4f2; --card: #fafcfb; --ink: #16202a; --ink-2: #4a5762;
+  --rule: #c9d2ce; --rule-2: #dfe6e3; --edge: #7a8a84;
+  --act: #1d3a86; --act-ink: #ffffff; --focus: #1d3a86;
+  --ok: #0a6a56; --ok-bg: #d9eee7;
+  --bad: #a5211b; --bad-bg: #f7dfdc;
+  --warn: #7c4f00; --warn-bg: #f5e9cd;
+  --serif: "Iowan Old Style", "Charter", "Palatino Linotype", Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: .75rem; --text-sm: .875rem; --text-md: .9375rem; --text-base: 1.0625rem;
+  --text-lg: 1.1875rem; --text-xl: 1.375rem; --text-2xl: 1.625rem;
+  --leading-prose: 150%; --leading-tight: 130%;
+  --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s5: 1.5rem; --s6: 2.5rem;
+  --radius: .375rem; --rule-weight: 1px; --rail: .25rem; --edge-weight: 2px;
+  --focus-width: 3px; --focus-gap: 2px;
+  --tap: 48px; --hit: 44px; --measure: 40rem;
+ }
+ @media (prefers-color-scheme: dark) {
+  :root {
+   --paper: #0e1412; --card: #151d1a; --ink: #e4ebe8; --ink-2: #9eaba5;
+   --rule: #2e3a35; --rule-2: #232d29; --edge: #6a7b74;
+   --act: #9db5ff; --act-ink: #0b1431; --focus: #9db5ff;
+   --ok: #62d1b4; --ok-bg: #12332b;
+   --bad: #ff958c; --bad-bg: #3b1a17;
+   --warn: #e6b74a; --warn-bg: #33270c;
+  }
+ }
+ html { -webkit-text-size-adjust: 100%; }
+ * { box-sizing: border-box; }
+ body { font-family: var(--serif); font-size: var(--text-base); line-height: var(--leading-prose);
+        background: var(--paper); color: var(--ink); max-width: var(--measure);
+        margin: 0 auto; padding: 0 var(--s4) var(--s5); overflow-wrap: break-word; }
+ /* A long unbroken identity wraps instead of widening the page. The
+    inherited break-word leaves a table's column sizing alone, so a wide
+    table still scrolls inside its own container; grid items need an
+    explicit zero minimum or their content sets the track's width. */
+ .accounts > *, .system > *, .facts > * { min-width: 0; }
+ h1, h2, h3, h4 { line-height: var(--leading-tight); }
+ h1 { font-size: var(--text-2xl); font-weight: 600; margin: var(--s4) 0 var(--s3); }
+ h2 { font-size: var(--text-xl); font-weight: 600; margin: var(--s5) 0 var(--s2); }
+ h3 { font-family: var(--sans); font-size: var(--text-md); font-weight: 600;
+      margin: var(--s5) 0 var(--s1); }
+ h4 { font-family: var(--sans); font-size: var(--text-md); font-weight: 600; margin: var(--s4) 0 var(--s1); }
+ p { margin: var(--s2) 0; }
+ a { color: var(--act); text-decoration-thickness: var(--rule-weight); text-underline-offset: .2em; }
+ code { font-family: var(--mono); font-size: .9em; background: var(--card);
+        border: var(--rule-weight) solid var(--rule); padding: 0 var(--s1); border-radius: var(--s1);
+        overflow-wrap: anywhere; }
+ /* The ring is a token, on every control; nothing removes it without a
+    replacement, and a test holds that. */
+ :focus-visible { outline: var(--focus-width) solid var(--focus); outline-offset: var(--focus-gap); }
+ /* Hidden until focused, so a keyboard user can jump past the navigation. */
+ .skip:not(:focus), .visually-hidden:not(:focus) { position: absolute; width: 1px; height: 1px;
+        padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+ .skip { position: absolute; left: var(--s2); top: var(--s2); z-index: 10; padding: var(--s3) var(--s4);
+         background: var(--act); color: var(--act-ink); font: 700 var(--text-md) var(--sans);
+         border-radius: var(--radius); }
+ .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; }
+ /* Controls: the primary action is the one filled thing on a page; the
+    rest are outlined, and a destructive one is outlined in red. */
+ a.button, button.button { display: flex; align-items: center; justify-content: center;
+            padding: 0 var(--s4); margin: var(--s2) 0; border-radius: var(--radius);
+            background: var(--act); color: var(--act-ink); text-decoration: none; text-align: center;
+            border: var(--edge-weight) solid var(--act); font: 700 1rem/130% var(--sans); cursor: pointer; }
+ /* The floor under every control, including the inline ones whose own padding
+    is smaller. */
+ a.button, button.button { min-height: var(--tap); }
+ /* Secondary weight: still thumb-sized, but outlined so the one primary
+    control on a page is the heaviest thing on it. */
+ a.button.secondary, button.button.secondary { background: transparent; color: var(--act);
+            border: var(--edge-weight) solid var(--act); }
+ a.button.danger, button.button.danger, button.danger { background: transparent; color: var(--bad);
+            border: var(--edge-weight) solid var(--bad); }
+ /* A bare submit is the ACTION of the page it sits on, and it used to
+    render as the browser's default control, directly above a full-width
+    navigation link. Sized like the link below it, and outlined rather than
+    filled so the doing and the leaving are still told apart. */
+ form button:not(.button) { display: flex; align-items: center; justify-content: center; width: 100%;
+            min-height: var(--tap); padding: 0 var(--s4); margin: var(--s2) 0 var(--s4);
+            border-radius: var(--radius); font: 700 1rem/130% var(--sans); cursor: pointer;
+            background: transparent; color: var(--act); border: var(--edge-weight) solid var(--act); }
+ form button.danger:not(.button) { color: var(--bad); border-color: var(--bad); }
+ .row { padding: var(--s3) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ /* A row's name and its onward link: the link moves to a line of its own
+    whole, rather than breaking beside a long name. */
+ .row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s4); }
+ table { border-collapse: collapse; width: 100%; font: var(--text-sm)/140% var(--sans); }
+ th, td { padding: var(--s2); text-align: left; border-bottom: var(--rule-weight) solid var(--rule-2);
+          vertical-align: top; }
+ th { color: var(--ink-2); font-weight: 600; border-bottom-color: var(--edge); }
+ caption { text-align: left; font: 600 var(--text-md) var(--sans); padding: var(--s2) 0; }
+ .scroll { overflow-x: auto; }
+ /* Chips: one shape, a meaning each, and a glyph so colour is not alone.
+    The glyph is decoration - the chip's own word says the same thing - so a
+    screen reader is given an empty alternative where the browser supports one. */
+ .pill { display: inline-block; max-width: 100%; padding: 0 .45rem; border-radius: var(--s1);
+         border: var(--rule-weight) solid var(--edge); color: var(--ink-2); background: transparent;
+         font: 600 var(--text-xs)/150% var(--sans); }
+ /* In a chip the identifier keeps the chip's face: monospace made a row's chips wrap. */
+ .pill code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
+ .pill-ok { color: var(--ok); border-color: var(--ok); }
+ .pill-bad { color: var(--bad); border-color: var(--bad); }
+ .pill-warn { color: var(--warn); border-color: var(--warn); }
+ .pill-ok::before { content: "\2713\00a0"; content: "\2713\00a0" / ""; }
+ .pill-bad::before { content: "\2715\00a0"; content: "\2715\00a0" / ""; }
+ .pill-warn::before { content: "\25CB\00a0"; content: "\25CB\00a0" / ""; }
+ .muted { color: var(--ink-2); }
+ .mono { font-family: var(--mono); font-size: .85em; font-variant-numeric: tabular-nums;
+         overflow-wrap: anywhere; }
+ /* A date or a figure is read whole. The monospace rule above breaks
+    anywhere, which is right for a long identifier and split a date across
+    three lines in a narrow table cell. Only the date or figure itself is
+    wrapped in this, never a sentence. */
+ .nowrap { white-space: nowrap; word-break: normal; }
+ .warn { color: var(--warn); font-weight: 600; }
+ .bad, .alarm { color: var(--bad); font-weight: 600; }
+ /* A good result is said quietly: ordinary size and weight, a small --ok tick, no coloured
+    sentence. The one rule for every page; a test reads each stylesheet for any that shouts. */
+ .ok, .quiet-ok { color: var(--ink); font-weight: 400; }
+ .ok strong, .quiet-ok strong { font-weight: inherit; }
+ .ok::before, .quiet-ok::before { content: "\2713\00a0"; content: "\2713\00a0" / ""; color: var(--ok); }
+ .dormant { color: var(--ink-2); }
+ .box { margin: var(--s3) 0; padding: var(--s3); border: var(--rule-weight) solid var(--rule);
+        border-radius: var(--radius); }
+ /* The instance band: one calm line that says which deployment this is.
+    Amber, because red is for a fault and a scratch copy is not one. */
+ .band { margin: var(--s3) 0; padding: var(--s2) var(--s3); background: var(--warn-bg);
+         color: var(--warn); font: var(--text-sm)/140% var(--sans); border-radius: var(--radius); }
+ input, select, textarea { display: block; width: 100%; min-height: var(--tap); padding: var(--s2) var(--s3);
+          font: 1rem/130% var(--sans); color: var(--ink); background: var(--card);
+          border: var(--rule-weight) solid var(--edge); border-radius: var(--radius); }
+ select { padding-right: var(--s2); }
+ label { font-family: var(--sans); font-size: var(--text-sm); }
+ /* Navigation: quiet text tabs in a grid, the current one told by weight and
+    an underline. None is a button, so the page's own action stays the
+    heaviest thing on it. */
+ .sitenav ul { list-style: none; margin: 0 0 var(--s3); padding: 0; display: grid;
+               grid-template-columns: repeat(4, minmax(0, 1fr));
+               border-bottom: var(--rule-weight) solid var(--rule); }
+ .sitenav li { min-width: 0; }
+ .sitenav a { display: flex; align-items: center; justify-content: center; text-align: center;
+              min-height: var(--hit); padding: 0 var(--s1); overflow-wrap: anywhere;
+              border-bottom: 3px solid transparent; color: var(--ink-2); text-decoration: none;
+              font: 500 var(--text-sm)/130% var(--sans); }
+ .sitenav li:nth-child(n+5) a { border-top: var(--rule-weight) solid var(--rule-2); }
+ .sitenav a[aria-current="page"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--act); }
+ /* A link that is not a button but is still a thumb-sized target. The hit
+    area is a pseudo-element, so the link adds nothing to its line's height
+    and a paragraph ending in one is no taller than the lines above it. */
+ .linklist { list-style: none; margin: 0; padding: 0; }
+ a.tap { position: relative; font-family: var(--sans); font-size: var(--text-md); font-weight: 600; }
+ a.tap::after { content: ""; position: absolute; inset: -.75rem -.5rem; }
+ /* Every other link in the page gets the same reach, for the same reason. */
+ main a:not(.button):not(.tap) { position: relative; }
+ main a:not(.button):not(.tap)::after { content: ""; position: absolute; inset: -.75rem -.5rem; }
+ a.tap.nowrap { white-space: normal; }
+ .overview h2 { margin: var(--s5) 0 var(--s2); }
+ /* The Overview: what needs a person is the heaviest thing on the page, and a
+    healthy answer is one calm line. Severity is a rail, not a box. */
+ .attention { list-style: none; margin: var(--s2) 0; padding: 0; }
+ .attention li { margin: var(--s4) 0; padding: var(--s1) 0 var(--s1) var(--s3);
+                 border-left: var(--rail) solid var(--bad); }
+ .attention li.soon { border-left-color: var(--warn); }
+ .attention li.housekeeping { border-left-color: var(--rule); }
+ .attention p { margin: var(--s1) 0; }
+ .allclear { margin: var(--s2) 0; padding: var(--s1) 0 var(--s1) var(--s3);
+             border-left: var(--rail) solid var(--ok); }
+ .legend { font: var(--text-sm)/150% var(--sans); margin: var(--s2) 0; padding-left: var(--s4); }
+ /* Accounts: one card each, so the same markup reads on a phone and sits two
+    abreast where there is room. */
+ .accounts { list-style: none; margin: var(--s3) 0; padding: 0; display: grid;
+             grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr)); gap: var(--s3); }
+ .account { padding: var(--s3) var(--s4); background: var(--card);
+            border: var(--rule-weight) solid var(--rule); border-radius: var(--radius); }
+ .account p { margin: var(--s1) 0; }
+ .account-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2);
+                 font-size: var(--text-lg); }
+ .account-name > * { min-width: 0; overflow-wrap: anywhere; }
+ .account-sources { display: flex; flex-wrap: wrap; gap: var(--s1); }
+ .account-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5);
+                  border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); margin-top: var(--s3); }
+ .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+          gap: var(--s2) var(--s4); margin: var(--s2) 0; }
+ .facts dt { font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ .facts dd { margin: 0; font-size: var(--text-md); overflow-wrap: anywhere; }
+ .anchors { list-style: none; margin: var(--s2) 0; padding: 0; }
+ .anchors li { padding: var(--s2) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .anchors p { margin: var(--s1) 0; }
+ /* The headline figure of a position, an account, or an asset. */
+ .figure { font: 700 var(--text-xl)/130% var(--serif); font-variant-numeric: tabular-nums lining-nums;
+           margin: var(--s2) 0; }
+ .chart { margin: var(--s3) 0; max-width: var(--measure); color: var(--ink); }
+ /* A step between months: a text link beside the heading it steps, and a
+    button only because stepping while values are shown must be a POST. It is
+    set after the bare-submit rule above so it wins over it. */
+ .monthnav { display: flex; flex-wrap: wrap; gap: 0 var(--s4); margin: 0 0 var(--s2); }
+ .monthnav form { margin: 0; }
+ form button.tap { display: inline-flex; align-items: center; width: auto; min-height: var(--hit);
+            margin: 0; padding: 0 var(--s2); border: 0; background: none; color: var(--act);
+            font: 600 var(--text-md) var(--sans); text-decoration: underline; }
+ /* One transaction per item, so nothing sits in a sideways-scrolling table. */
+ .txns { list-style: none; margin: var(--s2) 0; padding: 0; }
+ .txns li { padding: var(--s3) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .txns p { margin: var(--s1) 0; overflow-wrap: anywhere; }
+ .txn-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--s3); }
+ .pills { display: flex; flex-wrap: wrap; gap: var(--s1); align-items: baseline; }
+ /* A disclosure: a chevron, and a summary a thumb can hit. The flex layout
+    removes the browser's own marker, so the chevron stands in for it. */
+ details summary { cursor: pointer; min-height: var(--tap); display: flex; align-items: center;
+                   gap: var(--s2); color: var(--ink-2); font: var(--text-md)/140% var(--sans); list-style: none; }
+ details summary::-webkit-details-marker { display: none; }
+ details summary::before { content: ""; flex: none; width: .5rem; height: .5rem; margin: 0 .25rem;
+                           border-right: var(--edge-weight) solid var(--act);
+                           border-bottom: var(--edge-weight) solid var(--act); transform: rotate(-45deg); }
+ details[open] > summary::before { transform: rotate(45deg); }
+ pre { font: var(--text-sm)/150% var(--mono); margin: var(--s3) 0; padding: var(--s3);
+       background: var(--card); border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
+       overflow-x: auto; tab-size: 2; }
+ /* A report that is sentences in a fixed block wraps in a proportional face;
+    a block that is aligned columns keeps its fixed face and scrolls. */
+ pre[style*="pre-wrap"] { font: var(--text-md)/150% var(--sans); overflow-wrap: anywhere; }
+ input[type="checkbox"] { flex: none; width: 1.5rem; min-height: 0; height: 1.5rem; margin: 0 var(--s2) 0 0;
+                          accent-color: var(--act); }
+ /* A tick the thumb can hit: the whole row is the target, not the box. */
+ label.tick { display: flex; align-items: center; gap: var(--s3); min-height: var(--hit);
+              padding: var(--s1) 0; font-size: var(--text-md); }
+ label.tick input { flex: none; width: 1.5rem; height: 1.5rem; margin: 0; }
+ label.tick > span { min-width: 0; overflow-wrap: anywhere; }
+ /* A fieldset will not shrink below its widest word unless told it may, and an
+    account reference is one long word. */
+ fieldset.chart-choice { border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
+                         margin: var(--s2) 0; padding: var(--s1) var(--s3); min-width: 0; }
+ /* What a page is for, in one or two sentences before anything else. */
+ .lede { margin: var(--s1) 0 var(--s4); }
+ /* The newest push and audit, readable at a glance. */
+ .leadlines p { margin: var(--s2) 0; }
+ /* The home page's System strip: five facts, each a link to its page. */
+ .system { list-style: none; margin: var(--s2) 0; padding: 0; display: grid;
+           grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr)); gap: 0 var(--s5); }
+ .fact { padding: var(--s2) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .fact p { margin: var(--s1) 0; }
+ /* A row of outlined links, thumb-tall, wrapping on a narrow screen. */
+ .linkrow { list-style: none; margin: var(--s2) 0; padding: 0; display: flex;
+            flex-wrap: wrap; gap: var(--s2); }
+ a.tap.outline { display: inline-flex; align-items: center; min-height: var(--hit);
+                 border: var(--rule-weight) solid var(--edge); border-radius: var(--radius); padding: 0 var(--s3); }
+ /* A one-off experiment sits apart from the repairs above it. */
+ details.oneoff { margin-top: var(--s5); padding-top: var(--s2); border-top: var(--rule-weight) solid var(--rule); }
+ footer { margin-top: var(--s5); color: var(--ink-2); font: var(--text-sm) var(--sans); }
+ /* A page of cards uses a wide screen. Its loose prose and forms keep the
+    narrow page's measure, since a line the full width is too long to read. */
+ @media (min-width: 60rem) {
+  body.wide { max-width: 64rem; }
+  body.wide main > p, body.wide main > form, body.wide main > details, body.wide main > section > p,
+  body.wide main > section > form, body.wide main > section > details { max-width: 40rem; }
+ }
+ @media (prefers-reduced-motion: no-preference) {
+  details summary::before { transition: transform .15s; }
+ }
+
+ /* The verdict is the page's heading; the h1 stays for a screen reader and for the title, and
+    costs the first screen nothing. */
+ main:has(.home) > h1 { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap; margin: 0; }
+ .home .verdict { display: flex; align-items: flex-start; gap: var(--s3); margin: var(--s4) 0 var(--s2);
+        font: 600 var(--text-2xl)/130% var(--serif); color: var(--ink); }
+ .home .verdict span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
+ .home .verdict.long { font-size: var(--text-lg); }
+ .home .verdict::before { flex: none; width: 1.75rem; height: 1.75rem; margin-top: .1rem; border-radius: 50%;
+        border: var(--edge-weight) solid currentColor; display: grid; place-items: center;
+        font: 700 var(--text-md)/1 var(--sans); }
+ .home .verdict.ok { font: 400 var(--text-md)/150% var(--sans); margin: var(--s3) 0 var(--s2); }
+ .home .verdict.ok::before { content: "\2713"; content: "\2713" / ""; color: var(--ok);
+        width: 1.25rem; height: 1.25rem; margin-top: 0; font: 700 var(--text-xs)/1 var(--sans); }
+ .home .verdict.warn::before { content: "!"; content: "!" / ""; color: var(--warn); }
+ .home .verdict.bad::before { content: "\2715"; content: "\2715" / ""; color: var(--bad); }
+ .home .verdict-lede { margin: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
+
+ /* Four status lines: a label and a chip on one line, the sentence beneath, the whole row a link. */
+ .status { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
+ .status li { border-bottom: var(--rule-weight) solid var(--rule-2); }
+ a.tap.status-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        gap: var(--s1) var(--s2); align-items: center; min-height: var(--tap);
+        padding: var(--s2) 1.75rem var(--s2) 0; color: var(--ink); text-decoration: none; }
+ a.tap.status-row::after { content: none; }
+ a.tap.status-row::before { content: ""; position: absolute; right: .5rem; top: 50%; width: .5rem; height: .5rem;
+        margin-top: -.25rem; border-right: var(--edge-weight) solid var(--act);
+        border-top: var(--edge-weight) solid var(--act); transform: rotate(45deg); }
+ .status-label { font: 700 var(--text-md)/130% var(--sans); }
+ .status-row .pill { justify-self: end; max-width: 8rem; text-align: center; }
+ .status-sentence { grid-column: 1 / -1; font: var(--text-sm)/132% var(--sans); color: var(--ink-2); }
+ .tz { margin: var(--s1) 0 0; font: var(--text-xs)/140% var(--sans); text-align: right; }
+
+ /* What needs attention, by tier (the shared `.band` is the instance banner, so this is not
+    called that). The tier's heading carries the glyph; each item carries the rail. */
+ .tier { margin: var(--s3) 0; }
+ .tier-title, .tier > summary { margin: 0; font: 700 var(--text-md)/130% var(--sans); color: var(--ink); }
+ .tier-title { display: flex; align-items: baseline; gap: var(--s2); }
+ .tier-title::before { flex: none; }
+ .tier-now .tier-title::before { content: "\2715"; content: "\2715" / ""; color: var(--bad); }
+ .tier-soon .tier-title::before { content: "\25CB"; content: "\25CB" / ""; color: var(--warn); }
+ .tier-housekeeping .tier-title::before { content: "\2022"; content: "\2022" / ""; color: var(--ink-2); }
+ details.tier { border-left: var(--rail) solid var(--rule); padding-left: var(--s3); }
+ details.tier-now { border-left-color: var(--bad); }
+ details.tier-soon { border-left-color: var(--warn); }
+ .tier .attention { margin: var(--s1) 0 0; }
+ .tier .attention li { margin: var(--s2) 0; }
+ .item-message { font: var(--text-base)/140% var(--serif); }
+ .item-do { font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .notes { list-style: none; margin: var(--s3) 0 0; padding: 0; font: var(--text-sm)/140% var(--sans); }
+ .notes li { margin: var(--s2) 0; }
+
+ /* One row per account: name and chip, the rail, then the clause. The row is the link. */
+ .accounts-list, .spaces { list-style: none; margin: 0; padding: 0; }
+ .acct { position: relative; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .spaces { margin-left: var(--s3); padding-left: var(--s2); border-left: var(--edge-weight) solid var(--rule); }
+ .spaces .acct:last-child { border-bottom: 0; }
+ a.tap.acct-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s1) var(--s2);
+        align-items: center; min-height: var(--tap); padding: var(--s2) calc(var(--hit) + var(--s1)) var(--s2) 0;
+        color: var(--ink); text-decoration: none; }
+ a.tap.acct-row::after { content: none; }
+ .acct-name { font: 600 var(--text-base)/130% var(--serif); overflow-wrap: anywhere; }
+ .acct-space > a .acct-name { font-size: var(--text-md); }
+ .acct-row .pill { justify-self: end; max-width: 8rem; text-align: center; }
+ .acct-rail { grid-column: 1 / -1; display: block; }
+ .acct-sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0 var(--s2);
+        font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .acct-ref { font-size: var(--text-xs); }
+ .acct-more > summary { position: absolute; top: 0; right: 0; width: var(--hit); height: var(--hit);
+        min-height: var(--hit); padding: 0; justify-content: center; }
+ .acct-more > summary::before { margin: 0; }
+ .acct-more .facts, .acct-more > p { margin-left: 0; }
+ .spaces-archived { margin: var(--s1) 0 0 var(--s3); }
+ .spaces-archived > summary { font-size: var(--text-sm); }
+
+ /* Beside the accounts where there is room; the rest of the page spans both. */
+ .home-rest { margin-top: var(--s5); }
+ @media (min-width: 60rem) {
+  .home { display: grid; grid-template-columns: minmax(0, 26rem) minmax(0, 1fr); gap: 0 var(--s6); align-items: start; }
+  .home-rest { grid-column: 1 / -1; }
+  .home-accounts h2 { margin-top: var(--s4); }
+ }
+
+ /* THE PROOF RAIL'S RULES, SHARED: `proof_rail.rail_svg` names no colour and gives each part one
+    of these classes, so every page that draws a rail uses this block as it stands. They belong
+    in the shared rules once a second page carries one. */
+ svg.rail { display: block; width: 100%; overflow: visible; }
+ .rail-agree { fill: var(--ok); }
+ .rail-break { fill: var(--bad); }
+ .rail-hatch { stroke-width: 1.5px; fill: none; }
+ .rail-hatch-unproven { stroke: var(--warn); }
+ .rail-hatch-unknown { stroke: var(--edge); }
+ .rail-mark { fill: var(--ink); }
+ .rail-mark-broken { fill: var(--bad); }
+
+ /* Where the account page begins: its four places stack on a phone. */
+ .acct-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+ .acct-grid > * { min-width: 0; }
+ .ledger-page h1 { margin: var(--s3) 0 var(--s1); }
+ .ledger-page h2 { font-size: var(--text-lg); margin: var(--s3) 0 var(--s1); }
+ .ledger-page .sub { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
+ .ledger-page .ref { margin: 0; font-size: var(--text-sm); color: var(--ink-2); }
+
+ /* The rail, and the two dates it runs between. */
+ .proof { margin: var(--s2) 0 var(--s1); }
+ .rail-ends { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--ink-2); }
+
+ /* The verdict is the page's display sentence only where something needs the reader: held
+    back, or not verifiable. Agreement with nothing held back is said in ordinary text beside
+    a small teal tick. It was a display-size teal sentence, and the owner's answer was that
+    shouting to say all is well is not required: weight is how the page says where to look. */
+ .verdict { font: 600 var(--text-xl)/130% var(--serif); margin: var(--s2) 0; }
+ .verdict.clear { font: 400 var(--text-md)/150% var(--sans); color: var(--ink-2); }
+ .verdict.clear::before { content: "\2713\00a0"; content: "\2713\00a0" / ""; color: var(--ok); }
+ .verdict.warn::before { content: "\25CB\00a0"; content: "\25CB\00a0" / ""; }
+
+ /* The one tinted box: what holds the account back, and the way to the explanation. */
+ .held { margin: var(--s2) 0; padding: var(--s3) var(--s4); background: var(--bad-bg); border-radius: var(--radius); }
+ .held p { margin: var(--s1) 0; }
+ .held strong { font: 600 var(--text-lg)/130% var(--serif); color: var(--bad); }
+ .held strong::before { content: "\2715\00a0"; content: "\2715\00a0" / ""; }
+
+ /* Protection: a quiet line, and the control for the state it describes. */
+ .protect { margin: var(--s3) 0; }
+ .protect-line { font: var(--text-xs)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
+ .protect-line strong { font-weight: 500; }
+ .protect .button { margin: var(--s1) 0; }
+ .acct-state p:has(> .button) { margin: 0; }
+ .shown { border: var(--edge-weight) solid currentColor; padding: var(--s3); border-radius: var(--radius); }
+
+ /* Months. */
+ .acct-month .monthnav { margin: 0 0 var(--s1); }
+ details.months > summary { min-height: var(--hit); }
+ .year { display: grid; grid-template-columns: 3rem minmax(0, 1fr); align-items: center; gap: var(--s2); margin: var(--s1) 0; }
+ .year-label { color: var(--ink-2); }
+ .monthgrid { list-style: none; margin: 0; padding: 0; display: grid;
+              grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s1); }
+ .monthgrid li { min-width: 0; }
+ .monthgrid li > a.tap::after { content: none; }
+ .monthgrid li > a.tap, .monthgrid li > button.tap, .absent {
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                min-height: var(--hit); padding: 0 var(--s1); border-radius: var(--radius);
+                font: 600 var(--text-sm)/120% var(--sans); text-decoration: none; }
+ .monthgrid li > a.tap, .monthgrid li > button.tap { width: 100%; margin: 0; cursor: pointer;
+                color: var(--act); border: var(--rule-weight) solid var(--rule); background: var(--card); }
+ .monthgrid li > [aria-current="true"] { border: var(--edge-weight) solid var(--act); color: var(--ink); }
+ .absent { color: var(--ink-2); border: var(--rule-weight) dashed var(--rule); font-weight: 400; }
+ .count { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); }
+
+ /* A transaction is one line to read and, where sources sighted it, one line to tap: the line is
+    the summary of the row's own disclosure, so its hit area is the whole row and no control takes
+    a line of its own. On a phone the description and figure are the first line and the date and
+    chips the second; from 60rem the same four parts are columns. */
+ .txns li.txn { padding: 0; }
+ .t-row, .txns li.txn summary.t-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-areas: "desc fig" "meta meta"; gap: 2px var(--s2);
+                align-items: start; padding: calc(var(--s2) - 2px) 0; min-height: var(--hit);
+                color: inherit; font: inherit; }
+ .txns li.txn summary.t-row::before { display: none; }
+ .t-desc { grid-area: desc; overflow-wrap: anywhere; line-height: 130%; }
+ .t-fig { grid-area: fig; font-weight: 600; text-align: right; line-height: 130%; }
+ /* The date keeps its width and the chips take the rest of the line and wrap inside it, so no
+    size of text pushes the line wider than the page. */
+ .t-meta { grid-area: meta; display: flex; align-items: baseline; gap: 2px var(--s2); min-width: 0; }
+ .t-when.mono { flex: none; color: var(--ink-2); line-height: 150%; font-size: var(--text-xs); }
+ .t-chips { flex: 1 1 0; min-width: 0; }
+ /* The chevron belongs to the date, so a row that opens is told from one that does not. */
+ summary.t-row .t-when::before { content: ""; display: inline-block; width: .45rem; height: .45rem;
+                margin-right: .4rem; border-right: var(--edge-weight) solid var(--act);
+                border-bottom: var(--edge-weight) solid var(--act); transform: rotate(-45deg); }
+ details[open] > summary.t-row .t-when::before { transform: rotate(45deg); }
+ .txns li.txn > .t-note { margin: 0 0 var(--s2); }
+ .txns li.txn > .t-more > p { margin: var(--s1) 0 var(--s1) var(--s4); }
+ /* A copy of money counted elsewhere is history: the same size and shape as any row, but in the
+    muted ink with a lighter figure and no rail, so a month's copies read as a closed drawer and
+    not as seven faults. They are listed after the counted rows, inside their own disclosure. */
+ .acct-txns details.folded-rows { margin: var(--s3) 0 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .acct-txns details.folded-rows > summary { min-height: var(--hit); color: var(--ink-2); }
+ .txns li.txn.folded { color: var(--ink-2); }
+ .txns li.txn.folded .t-fig, .txns li.txn.folded .t-desc strong { font-weight: 400; }
+ .txn.flagged { border-left: var(--rail) solid var(--bad); padding-left: var(--s3); }
+ .txn.doubtful { border-left: var(--rail) solid var(--warn); padding-left: var(--s3); }
+
+ /* A masked figure or text is a sealed slot; a shown one is plain. */
+ .sealed { background: repeating-linear-gradient(135deg, var(--rule) 0 3px, transparent 3px 6px);
+           border-radius: var(--s1); padding: 0 var(--s1); }
+ /* Masked text is a pattern of letters, not a word; the fixed face says so, and the hatch is
+    kept for figures so a page of descriptions does not read as a page of noise. */
+ .txt.sealed { background: none; padding: 0; font-family: var(--mono); font-size: .9em;
+               font-weight: 500; border-bottom: var(--rule-weight) dashed var(--edge); }
+
+ /* The folded sections, and the one bordered place for what removes something. */
+ .ledger-more { margin-top: var(--s2); }
+ .ledger-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
+ .foot-links { display: flex; flex-wrap: wrap; gap: 0 var(--s5); border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); }
+ .ledger-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
+ details.ledger-danger { margin: var(--s5) 0 0; padding: 0 var(--s4); border: var(--rule-weight) solid var(--bad); border-radius: var(--radius); }
+ details.ledger-danger button.button.secondary { color: var(--bad); border-color: var(--bad); }
+ details.ledger-danger > summary { color: var(--bad); font-weight: 600; }
+ details.ledger-danger > summary::before { border-color: var(--bad); }
+
+ @media (min-width: 60rem) {
+  body.ledger-page { max-width: 80rem; }
+  .acct-grid { grid-template-columns: 28rem minmax(0, 1fr); column-gap: var(--s5); align-items: start;
+               grid-template-areas: "head head" "state txns" "month txns" "more txns"; }
+  .acct-head { grid-area: head; }
+  .acct-state { grid-area: state; }
+  .acct-month { grid-area: month; }
+  .acct-txns { grid-area: txns; }
+  .ledger-more { grid-area: more; }
+  .acct-txns h2 { margin-top: var(--s4); }
+  .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; }
+  .year { grid-template-columns: 3rem minmax(0, 1fr); }
+  .monthgrid li > a.tap, .monthgrid li > button.tap, .absent { padding: 0; font-size: var(--text-xs); }
+  .t-row, .txns li.txn summary.t-row { grid-template-columns: 8.5rem minmax(0, 1fr) auto 13rem;
+                 grid-template-areas: "when desc fig chips"; column-gap: var(--s4); align-items: baseline; }
+  .t-meta { display: contents; }
+  .t-when.mono { grid-area: when; }
+  .t-chips { grid-area: chips; justify-content: flex-end; }
+  .t-fig { align-self: baseline; }
+ }
+
+ /* The verdict: a serif sentence, a rail in the colour of its meaning, and a glyph, so it
+    reads in greyscale. Teal verified, red disagreement or failure, amber unproven or held. */
+ .actual-main .verdict { margin: var(--s4) 0 var(--s3); padding: var(--s1) 0 var(--s1) var(--s4);
+            border-left: var(--rail) solid var(--rule); }
+ .actual-main .verdict h2 { margin: 0 0 var(--s2); font: 600 var(--text-2xl)/var(--leading-tight) var(--serif); }
+ .actual-main .verdict h2::before { margin-right: var(--s2); font-family: var(--sans); }
+ .actual-main .verdict > p { margin: var(--s1) 0; }
+ /* Agreement is said in ordinary type beside a teal tick, not at display size: a loud "all
+    is well" competes with the states that need the reader (see the account page's verdict). */
+ .actual-main .verdict-ok { border-left-color: var(--ok); }
+ .actual-main .verdict-ok h2 { font: 400 var(--text-md)/var(--leading-tight) var(--sans); color: var(--ink); }
+ .actual-main .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; color: var(--ok); }
+ .actual-main .verdict-bad { border-left-color: var(--bad); }
+ .actual-main .verdict-bad h2 { color: var(--bad); }
+ .actual-main .verdict-bad h2::before { content: "\2715"; content: "\2715" / ""; }
+ .actual-main .verdict-warn { border-left-color: var(--warn); }
+ .actual-main .verdict-warn h2 { color: var(--warn); }
+ .actual-main .verdict-warn h2::before { content: "\25CB"; content: "\25CB" / ""; }
+ .actual-main .verdict-quiet h2::before { content: "\2022"; content: "\2022" / ""; color: var(--ink-2); }
+ /* The remedy sits inside the verdict that calls for it: not a box of its own. */
+ .remedy { margin: var(--s3) 0 0; }
+ .remedy details summary { min-height: var(--hit); }
+ /* The presses: what a push is about to do, then the three buttons, the named one filled. */
+ .presses { margin: var(--s4) 0; }
+ .precheck { margin: 0 0 var(--s1); color: var(--ink-2); font: var(--text-sm)/150% var(--sans); }
+ .presses form { margin: 0; }
+ .presses form > p { margin: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
+ /* The steps: a rail with a node for each, filled where the step is done. The word beside
+    each node carries the state, so the node is only the picture of it. */
+ .chain-block h2 { margin-top: var(--s4); }
+ .chain-block > p { margin: 0; }
+ .chain { list-style: none; margin: var(--s2) 0; padding: 0; }
+ .step { position: relative; margin: 0; padding: 0 0 var(--s3) var(--s5); }
+ .step::before { content: ""; position: absolute; left: 0; top: .3rem; width: 1rem; height: 1rem;
+                 border-radius: 50%; border: var(--edge-weight) solid var(--edge); background: var(--paper); }
+ .step::after { content: ""; position: absolute; left: .4375rem; top: 1.5rem; bottom: .25rem; width: var(--edge-weight);
+                background: var(--rule); }
+ .step:last-child { padding-bottom: 0; }
+ .step:last-child::after { content: none; }
+ .step-ok::before { border-color: var(--ok); background: var(--ok); }
+ .step-bad::before { border-color: var(--bad); background: var(--bad); }
+ .step-warn::before { border-color: var(--warn); background: var(--warn-bg); }
+ .step-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); margin: 0;
+              font: var(--text-md)/140% var(--sans); }
+ .step-detail { margin: var(--s1) 0 0; color: var(--ink-2); font-size: var(--text-md); }
+ /* Results: the audit as a sentence, the accounts that differ open, the rest behind a fold. */
+ .newest-audit h2, .earlier h2 { margin-top: var(--s5); }
+ .audit-head { margin: 0; font: var(--text-md)/140% var(--sans); }
+ .audit-summary { margin: var(--s1) 0 var(--s3); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .differ { margin: var(--s3) 0; padding: var(--s1) 0 var(--s1) var(--s3); border-left: var(--rail) solid var(--bad); }
+ .differ h4 { margin: 0 0 var(--s1); font-size: var(--text-base); }
+ .differ ul { margin: var(--s1) 0; padding-left: var(--s4); }
+ .differ li { margin: var(--s1) 0; }
+ .differ details { margin-top: var(--s1); }
+ .agree-list { list-style: none; margin: 0; padding: 0; font: var(--text-sm)/150% var(--sans); }
+ .agree-list li { padding: var(--s1) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .recent { list-style: none; margin: 0; padding: 0; }
+ .recent > li { border-top: var(--rule-weight) solid var(--rule-2); }
+ .recent summary { flex-wrap: wrap; gap: var(--s1) var(--s2); }
+ /* The foot: the two controls that delete from Actual, together, bordered, and nothing else
+    beside them. */
+ .danger-zone { margin: var(--s6) 0 var(--s4); padding: 0 var(--s4) var(--s3); border: var(--edge-weight) solid var(--bad);
+                border-radius: var(--radius); }
+ .danger-zone > h2 { color: var(--bad); }
+ .danger-item { margin-top: var(--s3); padding-top: var(--s2); border-top: var(--rule-weight) solid var(--rule); }
+ .danger-what { margin: 0 0 var(--s1); }
+ /* The emptying's summary is a bold name and a parenthesis, which a flex row cannot shrink
+    below the sum of its longest words at large text. */
+ .danger-zone summary { flex-wrap: wrap; gap: 0 var(--s2); }
+ /* A text link in the results is a full thumb-height target, not only the reach of its pseudo-element. */
+ .actual-side a.tap { display: inline-flex; align-items: center; min-height: var(--hit); }
+ /* The page's two columns, where there is room: the verdict and what to press on the left,
+    what the audit found on the right. */
+ @media (min-width: 64rem) {
+  .actual-layout { display: grid; grid-template-columns: minmax(0, 26rem) minmax(0, 1fr);
+                   gap: 0 var(--s6); align-items: start; }
+  .actual-main, .actual-side { min-width: 0; }
+  .actual-side .newest-audit h2:first-child { margin-top: var(--s4); }
+ }
+
+ .flag-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); margin: var(--s3) 0; }
+ .flag-queue > * { min-width: 0; }
+ .flag-lead { font: 600 var(--text-lg)/130% var(--serif); margin: var(--s3) 0 var(--s1); }
+ .flag-card { background: var(--card); border: var(--rule-weight) solid var(--rule);
+              border-left: var(--rail) solid var(--warn); border-radius: var(--radius);
+              padding: var(--s3) var(--s4); }
+ .flag-title { font: 600 var(--text-lg)/130% var(--serif); margin: 0; }
+ .flag-n { display: block; font: 500 var(--text-xs)/150% var(--mono); color: var(--ink-2); }
+ .flag-rows { list-style: none; margin: 0; padding: 0; }
+ .flag-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s2);
+             padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .flag-row.flag-this { border-top: 0; padding-top: 0; }
+ .flag-tag { font: 600 var(--text-sm)/150% var(--sans); min-width: 4rem; }
+ .flag-this .flag-tag { color: var(--ink); }
+ .flag-day { font-weight: 600; }
+ .flag-gap { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .flag-how { flex: 1 0 100%; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .flag-values { flex: 1 0 100%; display: flex; justify-content: space-between; gap: var(--s3); }
+ .flag-fig { font-weight: 600; }
+ .flag-desc { overflow-wrap: anywhere; text-align: right; }
+ .flag-says { margin: var(--s2) 0 0; padding-left: var(--s3); border-left: var(--rule-weight) solid var(--rule); }
+ .flag-sub { font: 600 var(--text-sm)/130% var(--sans); color: var(--ink-2); margin: 0 0 var(--s1); }
+ .flag-says p { margin: var(--s1) 0; font-size: var(--text-md); line-height: 140%; }
+ .flag-doubt { margin: var(--s2) 0; font-size: var(--text-md); }
+ .flag-answers { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--s3); margin-top: var(--s3);
+                 border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); }
+ .flag-answers form p { margin: var(--s1) 0; }
+ .flag-settled { margin: var(--s4) 0 var(--s2); }
+ .flag-answered { list-style: none; margin: 0; padding: 0; }
+ .flag-done { display: grid; grid-template-columns: minmax(0, 1fr) 6rem; align-items: center; gap: var(--s3);
+              padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); font-size: var(--text-md); }
+ .flag-done form p { margin: 0; }
+ .flag-done button { min-height: var(--hit); }
+ @media (min-width: 60rem) {
+  body.flag-page { max-width: 64rem; }
+  .flag-answers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flag-answers form:only-child { grid-column: 1 / -1; max-width: 24rem; }
+ }
+
+ .hub-rows { list-style: none; margin: var(--s3) 0; padding: 0; }
+ .hub-row { padding: var(--s3) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .hub-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+             gap: var(--s1) var(--s3); }
+ .hub-head .hub-name { font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ /* A row that needs a person carries a rail in the colour of what it says; a row in order is
+    left calm, so the eye is taken to the rows that are not. */
+ .hub-row-bad { padding-left: var(--s3); border-left: var(--rail) solid var(--bad); }
+ .hub-row-warn { padding-left: var(--s3); border-left: var(--rail) solid var(--warn); }
+ .hub-line { margin: var(--s1) 0 0; }
+ .hub-more { margin: var(--s2) 0 0; }
+ .hub-age { margin-top: var(--s4); }
+ .hub-list { list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-md)/150% var(--sans); }
+ .hub-list li { padding: var(--s1) 0; }
+ .formerly { margin: 0 0 var(--s3); font: var(--text-sm)/150% var(--sans); }
+ /* The way out sits under the heading, so a page deep in a flow can leave without scrolling. */
+ .wayout { margin: 0 0 var(--s3); }
+ .wayout a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ /* The fetch timeline's choices: stacked on a phone, one row where there is width. */
+ .timeline-choices { display: grid; gap: var(--s2) var(--s4); margin: var(--s3) 0; }
+ .timeline-choices button:not(.button) { margin: 0; }
+ .diag-accounts { margin: var(--s3) 0; }
+ .diag-danger { margin: var(--s6) 0 var(--s4); padding: 0 var(--s4) var(--s3); border: var(--edge-weight) solid var(--bad);
+                border-radius: var(--radius); }
+ .diag-danger > h2 { color: var(--bad); }
+ .diag-repair { margin-top: var(--s3); padding-top: var(--s2); border-top: var(--rule-weight) solid var(--rule); }
+ .diag-repair h3 { margin: 0 0 var(--s1); }
+ .diag-repair p { margin: var(--s1) 0 var(--s2); }
+ @media (min-width: 60rem) {
+  /* Seven destinations fit one row where there is width, so the strip is one line. */
+  .sitenav ul { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .sitenav li:nth-child(n+5) a { border-top: 0; }
+  .hub-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s6); }
+  .timeline-choices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
+  .timeline-choices button:not(.button) { width: auto; padding: 0 var(--s5); }
+  .diag-accounts .hub-list { columns: 3; column-gap: var(--s5); }
+  .diag-danger { max-width: 40rem; }
+ }
+
+ .window-control { border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
+                    margin: var(--s2) 0; padding: var(--s1) var(--s3) var(--s3); min-width: 0; }
+ .window-control > legend { font: 600 var(--text-md) var(--sans); padding: 0 var(--s1); }
+ .window-now { margin: 0 0 var(--s1); font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .window-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0; }
+ .window-chips button.window-chip { flex: 1 1 calc(50% - var(--s2)); width: auto; margin: 0;
+            min-height: var(--hit); padding: 0 var(--s3); font: 600 var(--text-md)/130% var(--sans); }
+ .window-chips button.window-chip[aria-pressed="true"] { background: var(--act); color: var(--act-ink); }
+ .window-more { margin: var(--s2) 0 0; }
+ .window-more .window-chips button.window-chip { flex: 1 1 calc(33% - var(--s2)); padding: 0 var(--s2);
+            font-size: var(--text-sm); }
+ .window-other, .window-between { border: var(--rule-weight) solid var(--rule-2); border-radius: var(--radius);
+            margin: var(--s3) 0 0; padding: var(--s1) var(--s3) var(--s2); min-width: 0; }
+ .window-other > legend, .window-between > legend { font: 600 var(--text-sm) var(--sans);
+            color: var(--ink-2); padding: 0 var(--s1); }
+ .window-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s3); }
+ .window-cell { min-width: 0; margin: var(--s1) 0; }
+ .window-cell > label { display: block; margin: 0 0 var(--s1); color: var(--ink-2); }
+ .window-refused { margin: var(--s2) 0; }
+ @media (min-width: 40rem) {
+  .window-chips button.window-chip { flex: 0 1 auto; min-width: 8rem; }
+ }
+
+ .position-ticks { margin: var(--s2) 0; }
+
+ .gaps-verdict { font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .gaps-verdict.quiet-ok { font: 400 var(--text-md)/150% var(--sans); }
+ .gaps-account { margin: var(--s5) 0; }
+ .gaps-name { margin: 0 0 var(--s2); font: 600 var(--text-xl)/var(--leading-tight) var(--serif); }
+ .gaps-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+ .gaps-item { background: var(--card); border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
+              padding: var(--s3) var(--s4); border-left-width: var(--rail); border-left-color: var(--warn); }
+ .gaps-item.gaps-inferred { border-left-style: dashed; }
+ .gaps-item p { margin: var(--s1) 0; }
+ .gaps-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); }
+ .gaps-kind { font: 600 var(--text-sm)/150% var(--sans); }
+ .gaps-source { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .gaps-item .gaps-range { font-size: var(--text-xl); font-weight: 600; line-height: var(--leading-tight); margin: var(--s2) 0 var(--s1); overflow-wrap: anywhere; }
+ .gaps-do { font-size: var(--text-base); line-height: var(--leading-prose); }
+ .gaps-why { font: var(--text-md)/150% var(--sans); color: var(--ink-2); }
+ .gaps-actions, .gaps-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
+ .gaps-item .gaps-links { margin: var(--s1) 0 0; }
+ .gaps-quiet-head { margin: var(--s5) 0 var(--s2); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .gaps-quiet { list-style: none; margin: 0; padding: 0; font: var(--text-md)/150% var(--sans); }
+ .gaps-quiet-item { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .gaps-notes { margin-top: var(--s5); font-size: var(--text-sm); }
+ @media (min-width: 60rem) {
+  body.gaps-page { max-width: 56rem; }
+ }
+
+ .cov-verdict { font-size: var(--text-lg); margin: var(--s2) 0 var(--s3); }
+ .cov-frame { display: flex; align-items: flex-start; margin: var(--s3) 0; border: var(--rule-weight) solid var(--rule); border-radius: var(--radius); background: var(--card); }
+ .cov-labels { flex: 0 0 auto; width: 7rem; font: var(--text-xs)/120% var(--sans); border-right: var(--rule-weight) solid var(--rule); }
+ .cov-label { display: flex; flex-direction: column; justify-content: center; padding: 0 var(--s2); border-bottom: var(--rule-weight) solid var(--rule-2); overflow: hidden; }
+ .cov-label small { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+ .cov-label code { background: none; border: 0; padding: 0; font-size: inherit; }
+ .cov-label a { color: inherit; }
+ .cov-scroll { flex: 1 1 0; min-width: 0; overflow-x: auto; direction: rtl; }
+ .cov-inner { direction: ltr; min-width: 100%; }
+ .cov-scroll svg { display: block; max-width: none; }
+ .cov-break-fill { fill: var(--rule); }
+ .cov-break-cut { stroke: var(--ink-2); stroke-width: 1.5; }
+ .cov-svg text.cov-break-label { fill: var(--ink-2); paint-order: stroke; stroke: var(--card); stroke-width: 3; text-anchor: middle; }
+ .cov-quiet-list { margin: var(--s1) 0 var(--s2); padding-left: var(--s5); font: var(--text-sm)/140% var(--sans); }
+ .cov-quiet-list a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ .cov-fit { flex: 1 1 0; min-width: 0; }
+ .cov-fit svg { display: block; width: 100%; height: auto; }
+ .cov-svg text { font: var(--text-xs) var(--sans); fill: var(--ink); }
+ .cov-svg .cov-dim { fill: var(--ink-2); }
+ .cov-rule { stroke: var(--rule-2); stroke-width: 1; }
+ .cov-rule-year { stroke: var(--edge); stroke-width: 1; }
+ .cov-today { stroke: var(--act); stroke-width: 2; }
+ .cov-hatch-line { stroke: var(--rule); stroke-width: 1; }
+ .cov-band-held { fill: var(--warn); }
+ .cov-band-conflict { fill: var(--bad); }
+ .cov-band-protected { fill: var(--ink-2); }
+ .cov-ver-agrees { fill: var(--ok); }
+ .cov-ver-held { fill: var(--warn); }
+ .cov-ver-none { fill: var(--rule); }
+ .cov-bar { fill: var(--act); }
+ .cov-bar-possible { fill: var(--act); stroke: var(--act); stroke-width: 1; stroke-dasharray: 3 2; }
+ .cov-listed { fill: var(--act); }
+ .cov-edge-stated { stroke: var(--act); stroke-width: 3; }
+ .cov-edge-asked { stroke: var(--act); stroke-width: 2; }
+ .cov-edge-meets { stroke: var(--act); stroke-width: 2; stroke-dasharray: 1 3; }
+ .cov-edge-inferred { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 1 5; }
+ .cov-gap-firm { stroke: var(--warn); stroke-width: 4; }
+ .cov-edge-observed { stroke: var(--act); stroke-width: 2; stroke-dasharray: 3 3; }
+ .cov-next { margin: var(--s1) 0 var(--s2); padding-left: var(--s5); font: var(--text-md)/140% var(--sans); }
+ .cov-next a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ .cov-keybox { margin: var(--s2) 0; }
+ .cov-keybox summary { min-height: var(--hit); display: flex; align-items: center; }
+ .cov-notch { stroke: var(--ink); stroke-width: 1; }
+ .cov-gap { fill: none; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 3; }
+ .cov-unavailable-line { stroke: var(--rule); stroke-width: 1; }
+ .cov-expected-mark { fill: var(--card); stroke: var(--ink-2); stroke-width: 1; }
+ .cov-seam-red { fill: var(--bad); stroke: var(--bad); stroke-width: 1; }
+ .cov-seam-amber { fill: var(--card); stroke: var(--warn); stroke-width: 2; }
+ .cov-known-ok { stroke: var(--ok); stroke-width: 2; }
+ .cov-known-bad { stroke: var(--bad); stroke-width: 2; }
+ .cov-known-conflict { stroke: var(--warn); stroke-width: 2; }
+ .cov-mark-red { fill: var(--bad); stroke: var(--bad); stroke-width: 1; }
+ .cov-mark-amber { fill: var(--warn); stroke: var(--warn); stroke-width: 1; }
+ .cov-mark-amber-hollow { fill: var(--card); stroke: var(--warn); stroke-width: 2; }
+ .cov-svg a:target .cov-focus, .cov-svg a:focus .cov-focus { stroke-width: 4; }
+ .cov-svg a { cursor: pointer; }
+ .cov-key { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-sm)/130% var(--sans); }
+ .cov-key li { display: flex; align-items: center; gap: var(--s2); }
+ .cov-key svg { flex: none; }
+ .cov-key-edge { margin: var(--s2) 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .cov-entries h3 { margin-top: var(--s4); }
+ .cov-entry { padding: var(--s2) var(--s2); margin: 0; border-left: var(--edge-weight) solid var(--rule); font: var(--text-md)/140% var(--sans); }
+ .cov-entry:target { background: var(--warn-bg); border-left-color: var(--warn); }
+ .cov-entry p { margin: var(--s1) 0; }
+ .cov-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); margin: var(--s1) 0 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+ .cov-links a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ .cov-household { list-style: none; margin: var(--s3) 0; padding: 0; }
+ .cov-household li { margin: var(--s2) 0; }
+ .cov-lane-name { font: 600 var(--text-sm) var(--sans); margin: 0 0 var(--s1); }
+ .cov-compact { margin: var(--s2) 0; }
+ .cov-compact summary { min-height: var(--hit); display: flex; align-items: center; }
+ .cov-compact-svg { display: block; max-width: 100%; margin: var(--s1) 0; }
+ .cov-month { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+ @media (min-width: 40rem) {
+  .cov-labels { width: 9rem; }
+ }
+
+/* ---- the prototype's own rules: new components only ---- */
+
+ /* The page uses the width it is given: one column to 60rem, two from there, and from 76rem the
+    lists inside the columns become single lines. */
+ @media (min-width: 60rem) { body.proto { max-width: 64rem; } }
+ @media (min-width: 76rem) { body.proto { max-width: 76rem; } }
+ body.proto h2 { font-size: var(--text-lg); margin: var(--s5) 0 var(--s2); }
+ body.proto h1 { margin: var(--s3) 0 var(--s1); }
+ .wayout { margin: var(--s2) 0 0; }
+
+ /* 1. NEW: five destinations in one row. */
+ body.proto .sitenav ul { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+ body.proto .sitenav li:nth-child(n+5) a { border-top: 0; }
+
+ /* An old date is the one thing in a quiet line that is not quiet. */
+ .age { color: var(--warn); font-weight: 600; }
+ .meta { margin: 0 0 var(--s2); font: var(--text-xs)/150% var(--sans); color: var(--ink-2); }
+ .next { margin: var(--s1) 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .label { margin: var(--s4) 0 0; font: 700 var(--text-sm)/130% var(--sans); color: var(--ink-2); }
+
+ /* 2. NEW: the to-do row. A rail says how pressing (red now, amber soon, grey when convenient;
+    dashed where the need is inferred), then what to do, then one quiet line of which account, why,
+    and how old. The control sits beside it on a list and beneath it where it leads a page. */
+ .todos { list-style: none; margin: var(--s3) 0; padding: 0; display: grid; gap: var(--s3); }
+ .todo { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--s3); align-items: center;
+         padding: 2px 0 2px var(--s3); border-left: var(--rail) solid var(--edge); }
+ .todo.now { border-left-color: var(--bad); }
+ .todo.soon { border-left-color: var(--warn); }
+ .todo.guess { border-left-style: dashed; }
+ /* An offer, not a demand: locking in what is already checked. Thinner rail, lighter title. */
+ .todo.offer { border-left-color: var(--rule); }
+ .todo.offer .todo-what { font-weight: 400; }
+ .todo-text { min-width: 0; }
+ .todo-what { margin: 0; font: 600 var(--text-base)/130% var(--serif); }
+ .todo.now .todo-what { color: var(--bad); }
+ .todo-why { margin: 2px 0 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .todo-why b { color: var(--ink); font-weight: 600; }
+ .todo a.button, .todo button.button { margin: 0; min-height: var(--hit); padding: 0 var(--s3);
+         font-size: var(--text-sm); white-space: nowrap; }
+ .todo.lead { grid-template-columns: minmax(0, 1fr); row-gap: var(--s2); }
+ .todo.lead a.button, .todo.lead button.button { min-height: var(--tap); font-size: 1rem; white-space: normal; }
+ .todo-alt { grid-column: 1 / -1; margin: 0; display: flex; flex-wrap: wrap; gap: 0 var(--s4);
+         font: var(--text-sm)/140% var(--sans); }
+ .todo-alt a { display: inline-flex; align-items: center; min-height: var(--hit); }
+ .todo details { grid-column: 1 / -1; }
+ .todo details > summary { min-height: var(--hit); font-size: var(--text-sm); }
+ .todo details p { margin: var(--s1) 0; font: var(--text-sm)/140% var(--sans); }
+ .todo-form { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+         gap: var(--s2) var(--s3); margin: 0; }
+ .todo-form.one { grid-template-columns: minmax(0, 1fr); }
+ .todo-form label { display: block; }
+ .todo-form button.button { grid-column: 1 / -1; }
+ .pair { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2); }
+
+ /* 3. NEW: THE TRUST BAR. How far an account can be trusted, drawn: four fills on ONE scale (the
+    last twelve months, months named once), each a rung more solid than the one before it, so the
+    ladder reads without colour: a bare line (nothing held), a hatch (held, not checked), an
+    outline (checked), a solid (locked in). Two marks sit on it: red where the transactions do not
+    add up or a locked stretch has changed, and a dashed amber block where a file is wanted. */
+ .axis { position: relative; display: block; height: 1.25rem; font: var(--text-xs)/1 var(--sans); color: var(--ink-2); }
+ .axis > span { position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
+         padding-left: 3px; border-left: var(--rule-weight) solid var(--rule); }
+ .bar { position: relative; display: block; height: .75rem; }
+ .bar::before { content: ""; position: absolute; left: 0; right: 0; top: 50%;
+         border-top: var(--rule-weight) solid var(--edge); }
+ .bar > i { position: absolute; top: 0; bottom: 0; }
+ .b-locked { background: var(--ok); }
+ .b-checked { background: var(--ok-bg); box-shadow: inset 0 0 0 1.5px var(--ok); }
+ .b-held { background: repeating-linear-gradient(135deg, var(--edge) 0 1.5px, var(--paper) 1.5px 5px); }
+ .b-bad { background: var(--bad); min-width: 5px; }
+ .b-src { background: var(--ink-2); }
+ .b-want { background: var(--paper); border: 1.5px dashed var(--warn); }
+ .alist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
+ .alist li { border-bottom: var(--rule-weight) solid var(--rule-2); }
+ main a.arow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+         grid-template-areas: "name flag" "bar bar" "trust trust"; gap: 3px var(--s2); align-items: baseline;
+         min-height: var(--tap); padding: var(--s2) 0; color: var(--ink); text-decoration: none; }
+ main a.arow::after { content: none; }
+ .a-name { grid-area: name; font: 600 var(--text-base)/130% var(--serif); }
+ /* The one slot that is empty when the account asks nothing. */
+ .a-flag { grid-area: flag; text-align: right; font: 600 var(--text-sm)/130% var(--sans); color: var(--warn); }
+ .a-flag.bad { color: var(--bad); font-weight: 700; }
+ .a-flag.bad::before { content: "\2715\00a0"; content: "\2715\00a0" / ""; }
+ main a.arow > .bar { grid-area: bar; }
+ .a-trust { grid-area: trust; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .alist li.space { padding-left: var(--s4); }
+ .alist li.space .a-name { font-size: var(--text-md); font-weight: 500; }
+ .axis-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+ .key { display: inline-block; position: relative; width: 1.75rem; height: .6rem; vertical-align: baseline;
+         margin-right: var(--s2); }
+ .key.k-line { height: 0; border-top: var(--rule-weight) solid var(--edge); vertical-align: middle; }
+ .keylist { list-style: none; margin: 0 0 var(--s2); padding: 0; font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .keylist b { color: var(--ink); font-weight: 600; }
+
+ /* The trust sentence: the one answer for an account. The part that needs him is the part in amber. */
+ .trust { margin: var(--s2) 0 var(--s1); font: var(--text-base)/140% var(--serif); }
+ .trust.bad { font: 600 var(--text-xl)/130% var(--serif); color: var(--bad); }
+ .trust.bad::before { content: "\2715\00a0"; content: "\2715\00a0" / ""; }
+ .trust.none { font: 600 var(--text-xl)/130% var(--serif); }
+ .trust.none::before { content: "\25CB\00a0"; content: "\25CB\00a0" / ""; color: var(--warn); }
+ .trust .sub { display: block; margin-top: var(--s1); font: 400 var(--text-md)/140% var(--sans); color: var(--ink); }
+
+ /* The quiet line of evidence: it was looked at, and when. One muted line that opens to the detail. */
+ details.evidence > summary { min-height: var(--hit); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ details.evidence > summary::before { width: .4rem; height: .4rem; border-color: var(--edge); }
+ details.evidence p, details.evidence li { margin: 0 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ details.evidence ul { list-style: none; margin: 0; padding: 0; }
+
+ /* 4. NEW: the source strip, the small version of the coverage timeline. The first lane is the
+    trust bar; each lane after it is one source and the days it holds, on the same twelve months. */
+ .strip { display: grid; grid-template-columns: 5.25rem minmax(0, 1fr); gap: var(--s2) var(--s2);
+         align-items: center; margin: var(--s2) 0 0; }
+ .strip .lane { font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .strip .lane.first { color: var(--ink); font-weight: 600; }
+ .strip.mini { margin: var(--s1) 0 var(--s2); }
+
+ /* 5. NEW: the upload target, and what is wanted, by bank. */
+ .drop { margin: var(--s3) 0; padding: var(--s4); text-align: center; background: var(--card);
+         border: var(--edge-weight) dashed var(--edge); border-radius: var(--radius); }
+ .drop a.button, .drop button.button { margin: 0; }
+ .drop p { margin: var(--s2) 0 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .drop.small { padding: var(--s3); }
+ .bank { margin: var(--s4) 0 0; }
+ .bank-name { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); margin: 0;
+         padding-bottom: var(--s1); border-bottom: var(--rule-weight) solid var(--rule);
+         font: 600 var(--text-lg)/130% var(--serif); }
+ .bank-count { font: 400 var(--text-sm)/130% var(--sans); color: var(--ink-2); white-space: nowrap; }
+ .wants { list-style: none; margin: 0; padding: 0; }
+ .want { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+         grid-template-areas: "period aside" "out out"; gap: 0 var(--s3); align-items: baseline;
+         margin: var(--s2) 0 var(--s3); padding: 2px 0 2px var(--s3); border-left: var(--rail) solid var(--edge); }
+ .want.guess { border-left-style: dashed; }
+ .want-period { grid-area: period; font-size: var(--text-base); font-weight: 600; line-height: var(--leading-tight); }
+ .want-out { grid-area: out; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .want-aside { grid-area: aside; font: var(--text-sm)/140% var(--sans); white-space: nowrap; }
+ .quietlist { list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .quietlist li { padding: var(--s1) 0; }
+ .quietlist b { color: var(--ink); font-weight: 600; }
+ .files { list-style: none; margin: var(--s2) 0; padding: 0; }
+ .files li { padding: var(--s2) 0; border-bottom: var(--rule-weight) solid var(--rule-2);
+         font: var(--text-sm)/145% var(--sans); }
+ .files li > span { display: block; color: var(--ink-2); }
+ .settled { margin: var(--s3) 0; }
+
+ /* 6. NEW: one transaction, one line: the day, the description, the figure, and one mark for
+    whether a statement or the bank's own record has cleared it. Everything else is a tap away. */
+ .ptx { list-style: none; margin: var(--s2) 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
+ .ptx li { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) auto 1rem; gap: 0 var(--s2);
+         align-items: center; min-height: var(--hit); padding: var(--s1) 0;
+         border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .ptx .when { font-size: var(--text-xs); color: var(--ink-2); }
+ .ptx .fig { font-weight: 600; font-size: var(--text-sm); }
+ .ptx .desc { overflow: hidden; white-space: nowrap; text-overflow: clip; }
+ .ptx .src { display: none; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .ptx .mk { font: 700 var(--text-sm)/1 var(--sans); text-align: center; }
+ .ptx .mk.c { color: var(--ok); }
+ .ptx .mk.u { color: var(--warn); }
+ .ptx li.missing { grid-template-columns: minmax(0, 1fr); padding-left: var(--s3);
+         border-left: var(--rail) solid var(--bad); font: var(--text-sm)/140% var(--sans); }
+ .ptx li.missing b { color: var(--bad); }
+ .txhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--s4); }
+ .txhead h2 { margin-bottom: 0; }
+ .txcount { margin: 0 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .p-acct .sub { margin: 0 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .acct-wants { margin: var(--s3) 0 0; }
+ .acct-wants > .who { margin: 0; font: 600 var(--text-base)/130% var(--serif); }
+ .acct-wants > .who span { font: 400 var(--text-sm)/130% var(--sans); color: var(--ink-2); }
+ .p-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
+ .p-more > details:last-child { border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .p-more > details p { margin: var(--s1) 0 var(--s3); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .p-more { margin-top: var(--s5); }
+ .morelist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
+ .morelist li { padding: var(--s3) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .morelist a { font: 600 var(--text-base)/130% var(--serif); }
+ .morelist p { margin: 2px 0 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ /* The key page: one rung to a row, its name, how it is drawn, what it means, what raises it. */
+ .rungs { list-style: none; margin: 0; padding: 0; }
+ .rung { padding: var(--s3) 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .rung-name { margin: 0 0 var(--s2); font: 600 var(--text-base)/130% var(--serif); }
+ .rung-means { margin: var(--s2) 0 0; font: var(--text-sm)/145% var(--sans); }
+ .rung-next { margin: 2px 0 0; font: var(--text-sm)/145% var(--sans); color: var(--ink-2); }
+
+ @media (min-width: 60rem) {
+  .p-acct, .p-bring { display: grid; grid-template-columns: minmax(0, 24rem) minmax(0, 1fr); gap: 0 var(--s6);
+         align-items: start; }
+  .p-acct { grid-template-areas: "head head" "state txns" "more txns"; }
+  .p-acct > .p-head { grid-area: head; }
+  .p-acct > .p-state { grid-area: state; }
+  .p-acct > .p-txns { grid-area: txns; }
+  .p-acct > .p-more { grid-area: more; }
+  .p-acct > .p-txns h2, .p-bring > .p-wanted > h2:first-child { margin-top: var(--s3); }
+  body.proto .home { grid-template-columns: minmax(0, 24rem) minmax(0, 1fr); }
+ }
+ @media (min-width: 76rem) {
+  main a.arow, .axis-row { grid-template-columns: 11rem minmax(0, 1fr) 10.5rem; gap: 2px var(--s4); align-items: center; }
+  main a.arow { grid-template-areas: "name bar flag" ". trust trust"; }
+  .axis-row > .axis { grid-column: 2; }
+  .alist li.space { padding-left: 0; }
+  .alist li.space .a-name { padding-left: var(--s4); }
+  .want { grid-template-columns: 15rem minmax(0, 1fr) auto; grid-template-areas: "period out aside"; }
+  .ptx li { grid-template-columns: 4rem minmax(0, 1fr) 11rem auto 1rem; gap: 0 var(--s4); }
+  .ptx .src { display: block; }
+ }
+</style></head>
+<body class="proto"><a class="skip" href="#main">Skip to content</a>
+<nav class="sitenav" aria-label="Sections"><ul><li><a href="today-ordinary.html" aria-current=page>Today</a></li><li><a href="bring-in-wanted.html">Bring in</a></li><li><a href="#">Position</a></li><li><a href="#">Actual</a></li><li><a href="more.html">More</a></li></ul></nav>
+<main id="main"><h1>Joint current</h1><div class="p-acct"><div class="p-head"><p class="sub">Brook Bank &middot; <code>joint-current</code> &middot; sent to Actual</p></div><section class="p-state" aria-label="How far it can be trusted, and what to do"><p class="trust bad">Does not add up after 18 August.<span class="sub">Locked in to 18 June. Checked to 18 August.</span></p><div class="strip"><span></span><span class="axis" aria-hidden="true"><span style="left:0.00%">Oct</span><span style="left:15.34%">Dec</span><span style="left:32.33%">Feb</span><span style="left:48.49%">Apr</span><span style="left:65.21%">Jun</span><span style="left:81.92%">Aug</span></span><span class="lane first">Trust</span><span class="bar" aria-hidden="true"><i class="b-locked" style="left:0.00%;width:70.14%"></i><i class="b-checked" style="left:70.14%;width:16.71%"></i><i class="b-held" style="left:95.34%;width:4.66%"></i><i class="b-bad" style="left:86.85%;width:8.49%"></i></span><span class="lane">Statements</span><span class="bar" aria-hidden="true"><i class="b-src" style="left:0.00%;width:3.29%"></i><i class="b-src" style="left:3.56%;width:8.22%"></i><i class="b-src" style="left:12.05%;width:7.95%"></i><i class="b-src" style="left:20.27%;width:8.22%"></i><i class="b-src" style="left:28.77%;width:8.22%"></i><i class="b-src" style="left:37.26%;width:7.40%"></i><i class="b-src" style="left:44.93%;width:8.22%"></i><i class="b-src" style="left:53.42%;width:7.95%"></i><i class="b-src" style="left:61.64%;width:8.22%"></i><i class="b-src" style="left:70.14%;width:7.95%"></i><i class="b-src" style="left:78.36%;width:8.22%"></i><i class="b-src" style="left:86.85%;width:8.22%"></i></span><span class="lane">Bank feed</span><span class="bar" aria-hidden="true"><i class="b-src" style="left:0.00%;width:100.00%"></i></span></div><ul class="todos"><li class="todo now lead"><div class="todo-text"><p class="todo-what">Find the transaction missing on 2 September</p><p class="todo-why">The September statement lists 1 transaction dated 2 September that no source holds, so the transactions from 19 Aug to 18 Sep stop short of its closing balance.</p></div><a class="button" href="#">Compare the statement with what is held</a><details><summary>Other ways to settle it</summary><p><a href="#">Type the transaction in</a>, reading it off the statement.</p><p><a href="#">Upload an export</a> that covers 2 September.</p><p><a href="#">Disregard the September statement&rsquo;s balance</a>, if the statement is the wrong thing.</p></details></li><li class="todo soon"><div class="todo-text"><p class="todo-what">Renew Brook Bank&rsquo;s consent</p><p class="todo-why">It runs out on 8 Oct (in 3 days). After that this account stops updating.</p></div><a class="button secondary" href="#">Reconnect</a></li></ul></section><section class="p-txns" aria-label="Transactions"><div class="txhead"><h2>September 2026</h2><p class="monthnav"><a class="tap" href="#">Previous month</a><a class="tap" href="#">Choose a month</a></p></div><p class="txcount">47 transactions, 46 cleared by the September statement.</p><a class="button secondary" href="#">Show values</a><ul class="ptx"><li class="missing"><span><b>2 Sep: the statement lists 1 transaction here that is not held.</b> <a href="#">Type it in</a></span></li><li><span class="when mono">18 Sep</span><span class="desc"><span class="txt sealed">Xx Xx 9999</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;99.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li><li><span class="when mono">17 Sep</span><span class="desc"><span class="txt sealed">Xx</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;99.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li><li><span class="when mono">17 Sep</span><span class="desc"><span class="txt sealed">Xxxxx</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;999.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li><li><span class="when mono">15 Sep</span><span class="desc"><span class="txt sealed">Xxxxxxxx Xxxx XXX</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;99.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li><li><span class="when mono">14 Sep</span><span class="desc"><span class="txt sealed">Xxxxxx Xx 9999</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;99.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li><li><span class="when mono">12 Sep</span><span class="desc"><span class="txt sealed">Xxxxx XXX Xxxxxxx 9999</span></span><span class="src">bank feed, statement</span><span class="fig mono sealed">out &pound;9.99</span><span class="mk c" title="cleared">&#10003;<span class="visually-hidden">cleared</span></span></li></ul><p class="next"><a href="#">Add a transaction by hand</a></p></section><section class="p-more" aria-label="How it was checked, and rarely used controls"><details><summary>What the bars show, and the full timeline</summary><ul class="keylist"><li><span class="key b-locked"></span><b>Locked in</b>: checked, and accepted by you. A later change here is reported loudly.</li><li><span class="key b-checked"></span><b>Checked</b>: the transactions add up to the balances the sources state.</li><li><span class="key b-held"></span><b>Held, not checked</b>: transactions are held and nothing has tested them yet.</li><li><span class="key k-line"></span><b>Nothing held</b>: before the account existed, or after its sources stopped.</li><li><span class="key b-bad"></span>The transactions do not add up here, or a locked stretch has changed.</li><li><span class="key b-want"></span>A file is wanted for these days.</li></ul><p>Every bar runs over the same twelve months and ends today. <a href="trust-key.html">How trust is worked out</a></p></details><details><summary>Known balances (12 held, 11 add up, 1 does not)</summary><p>Every statement&rsquo;s closing balance and every balance you stated, each with whether the transactions add up to it. State a balance, or disregard one that is wrong.</p></details><details><summary>Locking in (to 18 June)</summary><p>Locked in to 18 June, on 21 June: 1,204 transactions. Nothing in it has changed.</p></details><details><summary>How this was checked</summary><p>How transactions from different sources were joined, what is cleared month by month, this month&rsquo;s counts, and what this page does not check. Field statistics and fetch attempts are in Diagnostics.</p></details><details><summary>Rename or archive</summary><p>Change the name shown for this account, or archive it from a closing date.</p></details></section></div></main>
+<footer>obdi prototype - invented data, nothing is wired</footer></body></html>
