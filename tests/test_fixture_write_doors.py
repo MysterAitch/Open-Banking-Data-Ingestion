@@ -127,6 +127,16 @@ JUSTIFIED = {
     ("test_statement_listing_rule_accounts.py", "statement_readings"): "a held statement with "
     "no kept reading: the import door keeps one for every statement it reads, so a document "
     "whose lines are unavailable can only be made by taking the reading away afterwards",
+    ("test_statement_listing_rule_review.py", "transactions"): "two errors that cancel: a "
+    "listed transaction the store does not hold, and another held larger by the same amount, "
+    "so that what is held still sums to the statement's closing balance. The importer derives "
+    "the rows and the sightings from the same bytes and cannot produce either, and their "
+    "cancelling is exactly what a check that only sums cannot see",
+    ("test_statement_listing_rule_review.py", "transaction_sources"): "the sightings of the "
+    "transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_rule_review.py", "statement_readings"): "a held statement with "
+    "no kept reading: the import door keeps one for every statement it reads, so a document "
+    "whose lines are unavailable can only be made by taking the reading away afterwards",
     ("test_row_parting.py", "transaction_sources"):"the sightings of the removed row, "
     "so the store holds no trace of the payment at all",
     ("test_aggregator_day_anchors.py", "transactions"): "a stored date a day later than the "
