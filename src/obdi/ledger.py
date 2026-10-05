@@ -51,17 +51,22 @@ from typing import TYPE_CHECKING
 from .accounts import AccountRef
 from .agreement import Standing, standing_of
 from .balance_anchors import (
+    ASSUMED_NIL,
     CURRENCY,
     STATED,
+    Anchor,
     EffectiveOpening,
     FamilyWalk,
+    anchor_key,
+    can_be_disregarded,
     effective_opening,
+    place_among,
     removed_stated_anchors,
 )
 from .bank_balances import BANK_SOURCE
 from .bank_balances import describe as describe_bank
 from .clearing import ClearingView, cleared_by, clearing_counts
-from .family_anchors import Families
+from .family_anchors import OPENED, Families
 from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
 from .feed_statuses import FeedStatuses
@@ -93,11 +98,11 @@ QUERIES_PER_PAGE = 11
 #: bank-record reconciliation (cards, rows, pending, sightings), the held
 #: statement listing, the sections of "all accounts" statements assigned to
 #: accounts, the declared kind that says whether the stated balances are
-#: followed or checked, and the record of stated balances removed. Each TrueLayer
-#: artefact a row's balance has to be found in, and each held statement not yet
-#: read, adds statements beyond this, so a page for such an account costs more and
-#: the fixed figure is a floor.
-ANCHOR_QUERIES = 9
+#: followed or checked, the record of stated balances removed, and the balances a person has
+#: disregarded. Each TrueLayer artefact a row's balance has to be found in, and each held
+#: statement not yet read, adds statements beyond this, so a page for such an account costs more
+#: and the fixed figure is a floor.
+ANCHOR_QUERIES = 10
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -355,6 +360,40 @@ class AnchorLine:
 
 
 @dataclass(frozen=True)
+class SharedDayEntry:
+    """One source's balance for a day on which several are stated."""
+
+    day: Structural[str]
+    stating: Structural[str]
+    basis: Structural[str]
+    disregarded: Structural[bool]
+    #: The disregard names a balance that is no longer held, so it changes nothing.
+    stale: Structural[bool] = False
+    #: A button to disregard it is offered: only the kinds a disregard reaches
+    #: (`balance_anchors.DISREGARDABLE_BASES`), and not one already disregarded.
+    can_disregard: Structural[bool] = False
+    #: Which of the balances under one key (day, whoever states it, basis) this is, so that two
+    #: statements of one layout closing on one day can be told apart without the page holding a
+    #: figure. The order is `balance_anchors.place_among`'s, which does not follow the figures'
+    #: size (a page must not say which is lower) and does not move when one is disregarded.
+    which: Structural[int] = 0
+
+
+@dataclass(frozen=True)
+class SharedDay:
+    """The balances stated for one day by several sources, and whether the figures are equal.
+
+    Equality is said and the figures are not: a GET page holds no balance. "equal" and "differ"
+    compare the day-end balances still in use; "one" means only one of them still is, the rest
+    having been disregarded.
+    """
+
+    day: Structural[str]
+    entries: Structural[tuple[SharedDayEntry, ...]]
+    figures: Structural[str]
+
+
+@dataclass(frozen=True)
 class RemovedBalance:
     """A stated balance a person removed: when it applied, when it went, and what it was."""
 
@@ -490,6 +529,13 @@ class OpeningView:
     #: names; empty where none was landed.
     bank_lines: Structural[tuple[str, ...]]
     bank_sayings: Structural[tuple[str, ...]]
+    #: The days on which several sources state a balance, or a balance differs from the rows,
+    #: with each source and whether the figures are equal (`SharedDay`). Capped at
+    #: `SHARED_DAYS_LISTED`, days needing a look first; `shared_more` is the count not listed.
+    shared_days: Structural[tuple[SharedDay, ...]]
+    shared_more: Structural[int]
+    #: The balances a person has disregarded, still shown and marked.
+    disregarded: Structural[tuple[SharedDayEntry, ...]]
 
     opening: Total[Money]
 
@@ -608,7 +654,113 @@ def _verdict(agrees: bool | None) -> str:
     return "" if agrees is None else "agrees" if agrees else "differs"
 
 
+#: How many days on which sources state a balance are listed on the account page.
+SHARED_DAYS_LISTED = 12
+
+_NIL_BASES = (OPENED, ASSUMED_NIL)
+
+
+def _ranks(opening: EffectiveOpening) -> dict[tuple[object, ...], int]:
+    """Each balance's place among those under its key (day, whoever states it, basis): the ones
+    still read that a disregard reaches, the ones disregarded, and the disregards no longer
+    applying, all in ONE order (`place_among`), so a place does not move when one is disregarded."""
+    anchors = [
+        *(r.anchor for r in opening.readings if can_be_disregarded(r.anchor)),
+        *opening.disregarded,
+        *opening.stale_disregards,
+    ]
+    figures: dict[tuple[date, str, str], list[int]] = {}
+    for a in anchors:
+        figures.setdefault(anchor_key(a), []).append(a.balance_minor)
+    ranks: dict[tuple[object, ...], int] = {}
+    for key, found in figures.items():
+        for place, figure in enumerate(place_among(found, key)):
+            ranks[(*key, figure)] = place
+    return ranks
+
+
+def _disregards(opening: EffectiveOpening) -> tuple[SharedDayEntry, ...]:
+    """Every balance disregarded, and every disregard whose balance is no longer held."""
+    ranks = _ranks(opening)
+    found = [
+        SharedDayEntry(
+            a.day.isoformat(),
+            a.stating,
+            a.basis,
+            stale is False,
+            stale,
+            False,
+            ranks[(*anchor_key(a), a.balance_minor)],
+        )
+        for stale, group in ((False, opening.disregarded), (True, opening.stale_disregards))
+        for a in group
+    ]
+    return tuple(sorted(found, key=lambda e: (e.day, e.stating, e.basis, e.which)))
+
+
+def _shared_days(opening: EffectiveOpening) -> tuple[tuple[SharedDay, ...], int]:
+    """The days worth laying the sources side by side: several state a balance, or one differs
+    from what the rows predict. Days needing a look come first, then newest first, and only the
+    first `SHARED_DAYS_LISTED` are returned."""
+    #: state of each balance: "read", "disregarded", or "stale" (no longer held).
+    by_day: dict[date, list[tuple[Anchor, str]]] = {}
+    for reading in opening.readings:
+        if reading.anchor.basis not in _NIL_BASES:
+            by_day.setdefault(reading.anchor.day, []).append((reading.anchor, "read"))
+    differing = {r.anchor.day for r in opening.readings if r.agrees is False}
+    for anchor in opening.disregarded:
+        by_day.setdefault(anchor.day, []).append((anchor, "disregarded"))
+    for anchor in opening.stale_disregards:
+        by_day.setdefault(anchor.day, []).append((anchor, "stale"))
+
+    def figures_of(day: date) -> str:
+        in_use = [a for a, state in by_day[day] if state == "read" and a.at is None]
+        figures = {a.balance_minor for a in in_use}
+        return "one" if len(in_use) <= 1 else "equal" if len(figures) == 1 else "differ"
+
+    def needs_a_look(day: date) -> bool:
+        return figures_of(day) != "equal" or any(s != "read" for _, s in by_day[day])
+
+    ranks = _ranks(opening)
+
+    # Days that need a look come before the routine ones, where sources state one figure, so a
+    # cap never hides a conflict behind them.
+    chosen = sorted(
+        (
+            day
+            for day, held in by_day.items()
+            if len(held) > 1 or day in differing or any(s == "stale" for _, s in held)
+        ),
+        key=lambda day: (not needs_a_look(day), -day.toordinal()),
+    )
+    found = []
+    for day in chosen[:SHARED_DAYS_LISTED]:
+        held = by_day[day]
+        found.append(
+            SharedDay(
+                day.isoformat(),
+                tuple(
+                    SharedDayEntry(
+                        day.isoformat(),
+                        a.stating,
+                        a.basis,
+                        state == "disregarded",
+                        state == "stale",
+                        state == "read" and can_be_disregarded(a),
+                        ranks.get((*anchor_key(a), a.balance_minor), 0),
+                    )
+                    for a, state in sorted(
+                        held, key=lambda h: (h[1], h[0].stating, h[0].basis, h[0].balance_minor)
+                    )
+                ),
+                figures_of(day),
+            )
+        )
+    return tuple(found), max(len(chosen) - SHARED_DAYS_LISTED, 0)
+
+
 def opening_view(opening: EffectiveOpening) -> OpeningView:
+    shared, shared_more = _shared_days(opening)
     lines = []
     walked = {
         (r.day, r.sources[0]): _verdict(r.agrees)
@@ -658,6 +810,9 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
         own_explanation=opening.explanation,
         bank_lines=describe_bank(opening.bank) if opening.bank is not None else (),
         bank_sayings=opening.bank.sayings if opening.bank is not None else (),
+        shared_days=shared,
+        shared_more=shared_more,
+        disregarded=_disregards(opening),
         opening=Money(opening.opening_minor or 0, CURRENCY),
     )
 

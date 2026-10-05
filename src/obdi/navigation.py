@@ -70,6 +70,8 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/review": "accounts",
     "/ledger-anchor": "accounts",
     "/ledger-anchor-remove": "accounts",
+    "/ledger-balance-disregard": "accounts",
+    "/ledger-balance-use-again": "accounts",
     "/ledger-typed": "accounts",
     "/ledger-typed-withdraw": "accounts",
     "/protect": "accounts",

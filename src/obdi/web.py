@@ -761,6 +761,12 @@ class WebConfig:
     anchor_save: Callable[[str, str, str, str], None] | None = None
     #: Remove the balance stated for (ref, day); whether there was one.
     anchor_remove: Callable[[str, str], bool] | None = None
+    #: Disregard one source's known balance for one day: (ref, day, source, basis, which);
+    #: whether it newly was. Raises a DataError for a balance the account does not hold.
+    balance_disregard: Callable[[str, str, str, str, int], bool] | None = None
+    #: Read a disregarded balance again: (ref, day, source, basis, which); whether it was
+    #: disregarded. `which` is the balance's place among those under one key.
+    balance_use_again: Callable[[str, str, str, str, int], bool] | None = None
     #: Type a transaction into an account: (ref, day, direction, amount,
     #: description), all as typed. Raises a DataError that never quotes any of them.
     typed_save: Callable[[str, str, str, str, str], None] | None = None
@@ -6700,6 +6706,12 @@ class ConnectionHandler(
             return
         if route == "/ledger-anchor-remove":
             self._anchor_remove_post(self._read_form())
+            return
+        if route == "/ledger-balance-disregard":
+            self._balance_disregard_post(self._read_form())
+            return
+        if route == "/ledger-balance-use-again":
+            self._balance_use_again_post(self._read_form())
             return
         if route == "/ledger-typed":
             self._typed_save_post(self._read_form())

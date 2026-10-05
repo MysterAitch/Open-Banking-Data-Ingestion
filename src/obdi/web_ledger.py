@@ -588,6 +588,117 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
     )
 
 
+#: What each way of comparing the balances stated for one day says (`ledger.SharedDay.figures`).
+_FIGURES_SAID = {
+    "equal": "The figures are equal.",
+    "differ": "The figures differ.",
+    "one": "Only one of them is in use.",
+}
+
+
+def _balance_form(
+    action: str, ref: str, month: str, entry: Any, label: str, *, secondary: bool = True
+) -> str:
+    """The form that disregards one source's balance for one day, or reads it again.
+
+    It names the balance by day, whoever states it, basis, and which of those under that key (a
+    place by figure, `ledger.SharedDayEntry.which`), never by figure: the page is a GET.
+    """
+    return (
+        f'<form method="post" action="{action}">'
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<input type="hidden" name="month" value="{_esc(month)}">'
+        f'<input type="hidden" name="day" value="{_esc(entry.day)}">'
+        f'<input type="hidden" name="source" value="{_esc(entry.stating)}">'
+        f'<input type="hidden" name="basis" value="{_esc(entry.basis)}">'
+        f'<input type="hidden" name="which" value="{_esc(str(entry.which))}">'
+        + submit_button(label, secondary=secondary)
+        + "</form>"
+    )
+
+
+def _entry_html(entry: Any, ref: str, month: str) -> str:
+    basis = _BASIS_WORDS.get(entry.basis, entry.basis)
+    if entry.stale:
+        pill = '<span class="pill pill-quiet">no longer applies</span> '
+        form = _balance_form(
+            "/ledger-balance-use-again",
+            ref,
+            month,
+            entry,
+            f"Remove the disregard of the {entry.stating} balance for the end of {entry.day}",
+        )
+        basis = f"{basis}; the balance it named is no longer held"
+    elif entry.disregarded:
+        pill = '<span class="pill pill-quiet">disregarded</span> '
+        form = _balance_form(
+            "/ledger-balance-use-again",
+            ref,
+            month,
+            entry,
+            f"Use the {entry.stating} balance for the end of {entry.day} again",
+        )
+    elif entry.can_disregard:
+        pill = ""
+        form = _balance_form(
+            "/ledger-balance-disregard",
+            ref,
+            month,
+            entry,
+            f"Disregard the {entry.stating} balance for the end of {entry.day}",
+        )
+    else:
+        pill = ""
+        form = ""
+    return f"<li>{pill}{code_html(entry.stating)}: {_esc(basis)}{form}</li>"
+
+
+def _shared_days_html(view: Any) -> str:
+    """The balances several sources state for one day, side by side, with the way to disregard one.
+
+    Whether the figures are equal is said and never what they are. Disregarding keeps the balance
+    on the page, marked, and takes it out of every stretch and every conflict; a balance used
+    again is read as before.
+    """
+    opening = view.opening
+    if not opening.shared_days and not opening.disregarded:
+        return ""
+    ref, month = view.ref, view.month
+    body = ""
+    if opening.shared_days:
+        body += (
+            '<p class="muted">Where several sources state a balance for one day, each is listed '
+            "with whether their figures are equal. Disregarding one leaves the others, and it "
+            "stays here, marked, so it can be used again.</p>"
+        )
+        routine = ""
+        for day in opening.shared_days:
+            items = "".join(_entry_html(entry, ref, month) for entry in day.entries)
+            said = (
+                f'<p>End of <span class="mono nowrap">{_esc(day.day)}</span>: '
+                f"{_esc(_FIGURES_SAID.get(day.figures, ''))}</p><ul>{items}</ul>"
+            )
+            if day.figures == "equal" and not any(e.disregarded or e.stale for e in day.entries):
+                routine += said
+            else:
+                body += said
+        if routine:
+            body += _disclosure("Days on which the sources state equal figures", routine)
+        if opening.shared_more:
+            body += (
+                f'<p class="muted">and {_plural(opening.shared_more, "older day")} not listed.</p>'
+            )
+    listed = {entry.day for day in opening.shared_days for entry in day.entries}
+    elsewhere = [entry for entry in opening.disregarded if entry.day not in listed]
+    if elsewhere:
+        body += (
+            "<p>Disregarded:</p><ul>"
+            + "".join(_entry_html(entry, ref, month) for entry in elsewhere)
+            + "</ul>"
+        )
+    return body
+
+
 def _listed_anchors(
     anchors: tuple[Any, ...], *, everything: bool
 ) -> tuple[tuple[Any, ...], int]:
@@ -2059,6 +2170,7 @@ def _opening_html(
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
                 f"{_esc(opening.withheld)}.</p>"
             )
+    body += _shared_days_html(view)
     if opening.unusable_statements:
         body += (
             f'<p class="muted">{_plural(opening.unusable_statements, "held statement")} '
@@ -2831,6 +2943,110 @@ class LedgerPages(AnswerPages):
                 f"Removed: the known balance for the end of {day}.", ref, before
             ),
             no_store=True,
+        )
+
+    def _balance_choice_post(
+        self,
+        form: dict[str, list[str]],
+        *,
+        hook_name: str,
+        confirm_route: str,
+        question: str,
+        label: str,
+        done: str,
+        refused_title: str,
+        nothing: str,
+        asks: bool,
+    ) -> None:
+        """The shared shape of disregarding a known balance and using it again.
+
+        Disregarding asks first (a tap on the ledger's button changes nothing); using again is
+        undone as easily as it is done, so it acts at once. The balance is named by day, source,
+        basis, and place, and no figure is on any page the route answers.
+        """
+        hook = getattr(self.bound_config, hook_name)
+        if hook is None:
+            self._respond(404, _page("Not available", "This is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        day = (form.get("day", [""])[0] or "").strip()
+        source = (form.get("source", [""])[0] or "").strip()
+        basis = (form.get("basis", [""])[0] or "").strip()
+        try:
+            asked = parse_calendar_day(day).isoformat()
+            which = int((form.get("which", ["0"])[0] or "0").strip())
+        except (DataError, ValueError) as exc:
+            reason = exc if isinstance(exc, DataError) else "the balance asked for is not one"
+            self._anchor_refusal(400, refused_title, f"Nothing was changed. {reason}.", ref=ref)
+            return
+        if asks and (form.get("confirmed", [""])[0] or "") != "yes":
+            self._confirm_page(
+                confirm_route,
+                ref,
+                month,
+                question.format(day=asked, source=source),
+                label,
+                f'<input type="hidden" name="day" value="{_esc(asked)}">'
+                f'<input type="hidden" name="source" value="{_esc(source)}">'
+                f'<input type="hidden" name="basis" value="{_esc(basis)}">'
+                f'<input type="hidden" name="which" value="{which}">',
+            )
+            return
+        before = self.answer_standing(ref)
+        try:
+            changed = hook(ref, asked, source, basis, which)
+        except DataError as exc:
+            self._anchor_refusal(400, refused_title, f"Nothing was changed. {exc}.", ref=ref)
+            return
+        except Exception as fault:
+            say(f"ledger.{hook_name}.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                refused_title,
+                "Nothing was changed, because of an unexpected fault.",
+                ref=ref,
+            )
+            return
+        if not changed:
+            self._anchor_refusal(404, refused_title, nothing.format(day=asked), ref=ref)
+            return
+        self._ledger(
+            ref,
+            month,
+            unmasked=False,
+            notice=self.answer_notice(done.format(day=asked, source=source), ref, before),
+            no_store=True,
+        )
+
+    def _balance_disregard_post(self, form: dict[str, list[str]]) -> None:
+        self._balance_choice_post(
+            form,
+            hook_name="balance_disregard",
+            confirm_route="/ledger-balance-disregard",
+            question=(
+                "Disregard the balance {source} states for the end of {day}? It takes no part in "
+                "any check or any conflict, and every other balance for that day is kept. It "
+                "stays on the account page, marked, and can be used again."
+            ),
+            label="Disregard the balance",
+            done="Disregarded: the balance {source} states for the end of {day}.",
+            refused_title="Balance not disregarded",
+            nothing="Nothing was disregarded: no such known balance is held for the end of {day}.",
+            asks=True,
+        )
+
+    def _balance_use_again_post(self, form: dict[str, list[str]]) -> None:
+        self._balance_choice_post(
+            form,
+            hook_name="balance_use_again",
+            confirm_route="/ledger-balance-use-again",
+            question="",
+            label="Use the balance again",
+            done="Used again: the balance {source} states for the end of {day}.",
+            refused_title="Balance not used again",
+            nothing="Nothing changed: no balance was disregarded for the end of {day}.",
+            asks=False,
         )
 
     def _confirm_page(

@@ -448,6 +448,12 @@ class EffectiveOpening:
     #: arithmetic (`fault_explanation`). Set where some anchor differs and no whole-account
     #: walk speaks for the account (`FamilyWalk.explanation` does); None otherwise.
     explanation: WalkExplanation | None = None
+    #: The account's own balances a person has disregarded (`disregard_balance`). They take no
+    #: part in `readings`, in any stretch, or in a conflict, and are carried only to be shown.
+    disregarded: tuple[Anchor, ...] = ()
+    #: Disregards whose balance is no longer held: the typed balance was removed, or a rebuild no
+    #: longer finds the statement. They change nothing and are carried so the page can say so.
+    stale_disregards: tuple[Anchor, ...] = ()
 
     @property
     def defining(self) -> Anchor | None:
@@ -673,9 +679,21 @@ def unitemised_for_store(store: Store) -> list[Transaction]:
         if not is_balance_only(record.kind):
             continue
         ref = str(record.ref)
+        # The balances still in use: the account's own reading leaves a disregarded one out
+        # (`_gather`), and the push must derive the same movements from the same balances.
+        disregarded = {
+            (day, basis, balance)
+            for day, _, basis, balance in store.disregarded_balance_rows(ref)
+        }
         derived.extend(
             derive_unitemised(
-                ref, stated_anchors(store, ref), store.transactions_for_account(ref)
+                ref,
+                [
+                    a
+                    for a in stated_anchors(store, ref)
+                    if (a.day, a.basis, a.balance_minor) not in disregarded
+                ],
+                store.transactions_for_account(ref),
             )
         )
     return derived
@@ -714,6 +732,11 @@ class _Gathered:
     #: The balances the bank itself stated, landed with each pull. Whether they become
     #: anchors waits for the rows, which say what their figures mean (`bank_balances`).
     bank: BankBalances = field(default_factory=BankBalances)
+    #: The account's own balances a person has disregarded: found, and left out of everything
+    #: above, so that a page can still show them.
+    disregarded: tuple[Anchor, ...] = ()
+    #: Disregards whose balance is no longer held (`_gather`).
+    stale: tuple[Anchor, ...] = ()
 
 
 def _bank_balances(store: Store, ref: str, families: Families | None) -> BankBalances:
@@ -741,7 +764,63 @@ def _own_basis(source: str) -> str:
     return EXPORT if source == CSV_SOURCE else STATEMENT
 
 
+def anchor_key(anchor: Anchor) -> tuple[date, str, str]:
+    """What a person points at to disregard one known balance: its day, whoever states it, and
+    its basis. The aggregator's balance and a statement's differ by source, and a statement's
+    closing and a stated balance by basis."""
+    return (anchor.day, anchor.stating, anchor.basis)
+
+
+#: The bases of the account's own balances that can be disregarded: the ones `_gather_all` reads
+#: as the account's own and day-end. A whole-account balance and a bank balance stated for a
+#: moment are read in other ways (`walk_family`, `bank_balances`) that a disregard does not
+#: reach, and the nil opening of an account is a premise and not a balance, so each is refused
+#: loudly (`disregard_balance`) and offers no button. A disregard that reached none of them
+#: once said it was done and changed nothing.
+DISREGARDABLE_BASES = (STATED, STATEMENT, BANK, EXPORT)
+
+
+def can_be_disregarded(anchor: Anchor) -> bool:
+    return anchor.basis in DISREGARDABLE_BASES and anchor.at is None
+
+
 def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
+    """The account's balances as `_gather_all` finds them, less any a person has disregarded.
+
+    A disregard names one balance by day, whoever states it, basis, AND its figure, so it ends
+    with the balance: a typed balance removed and typed again with another figure is read, and
+    two statements of one layout closing on one day are told apart. A disregard whose balance is
+    no longer held is returned in `stale` for the page to say so.
+
+    A disregarded balance is left out before anything reads it, so it takes part in no stretch,
+    no agreement, and no conflict; it is still found, by `_gather_all`, so a page can show it.
+    """
+    gathered = _gather_all(store, ref, families)
+    rows = store.disregarded_balance_rows(ref)
+    if not rows:
+        return gathered
+    held = {(*anchor_key(a), a.balance_minor) for a in gathered.own if can_be_disregarded(a)}
+    matched = {row for row in rows if row in held}
+    return replace(
+        gathered,
+        own=[a for a in gathered.own if (*anchor_key(a), a.balance_minor) not in matched],
+        # One entry per balance: a statement held as two files of one figure is one balance.
+        disregarded=tuple(
+            {
+                (*anchor_key(a), a.balance_minor): a
+                for a in gathered.own
+                if (*anchor_key(a), a.balance_minor) in matched
+            }.values()
+        ),
+        stale=tuple(
+            Anchor(day, balance, basis, stated_by=source)
+            for day, source, basis, balance in rows
+            if (day, source, basis, balance) not in held
+        ),
+    )
+
+
+def _gather_all(store: Store, ref: str, families: Families | None) -> _Gathered:
     anchors = stated_anchors(store, ref)
     spaces = families.spaces_of(ref) if families is not None else ()
     blind_bank = (
@@ -1171,6 +1250,8 @@ def effective_opening(
         balance_only=balance_only,
         unitemised=unitemised,
         meanings=gathered.meanings,
+        disregarded=gathered.disregarded,
+        stale_disregards=gathered.stale,
         bank=report,
         explanation=explanation,
     )
@@ -1427,6 +1508,93 @@ def remove_stated_anchor(store: Store, ref: str, day_text: str) -> bool:
         observed_at=_parse_day(day_text),
         source=STATED,
     )
+
+
+def disregard_balance(
+    store: Store,
+    ref: str,
+    day_text: str,
+    source: str,
+    basis: str,
+    *,
+    families: Families | None = None,
+    which: int = 0,
+) -> bool:
+    """Disregard ONE known balance: the `which`th, by place, of those `source` states for `day`
+    on `basis` that are still read. Every other balance, for that day or another, is as it was.
+
+    This is what removing "the balance for a date" could not do. A removal deletes a stated
+    balance and never touches the ones a statement or the aggregator derive; a conflict between
+    a statement and the aggregator on one day needs one of the two set aside and the other kept.
+    Two statements of one layout closing on one day with different figures are two balances under
+    one key, told apart by `which` (the page offers one button each). The record keeps the
+    balance's figure so that it ends with the balance (`_gather`); it is never shown.
+
+    Refused, before anything is written, for an account the store has not heard of, for a balance
+    the account does not hold, and for a kind a disregard does not reach (`DISREGARDABLE_BASES`),
+    the nil opening of an account among them. The decision survives a rebuild from raw, which
+    derives the same balance again and finds it disregarded.
+    """
+    ref = ref.strip()
+    if not ref or not _known_account(store, ref):
+        raise AnchorRefused("no account is declared or holds rows under that reference")
+    key = (_parse_day(day_text), source.strip(), basis.strip())
+    reading = effective_opening(store, ref, families=families)
+    in_reading = [r.anchor for r in reading.readings if anchor_key(r.anchor) == key]
+    if in_reading and not any(can_be_disregarded(a) for a in in_reading):
+        raise AnchorRefused(
+            "that kind of known balance cannot be disregarded: only the balances of the account's "
+            "own statements, the aggregator, an export, and ones you stated can be"
+        )
+    held = {a.balance_minor for a in in_reading if can_be_disregarded(a)}
+    off = {a.balance_minor for a in reading.disregarded if anchor_key(a) == key}
+    rows = store.disregarded_balance_rows(ref)
+    stale = {f for day, who, how, f in rows if (day, who, how) == key}
+    candidates = place_among(held | off | stale, key)
+    if not 0 <= which < len(candidates):
+        raise AnchorRefused("the account holds no such known balance for that day")
+    figure = candidates[which]
+    if figure in off or figure in stale:
+        raise AnchorRefused("that balance is already disregarded, so nothing was changed")
+    return store.disregard_balance(ref, *key, figure)
+
+
+def place_among(figures: Iterable[int], key: tuple[date, str, str]) -> list[int]:
+    """The figures held under one key in the one order a page and a request agree on.
+
+    A place is named by this order and never by the figures' size, which would tell a page's
+    reader which of two balances is lower, and it counts the balances disregarded and the
+    disregards no longer applying as well as those still read, so it does not move when one is
+    disregarded: the same request sent twice names the same balance both times.
+    """
+    return sorted(
+        set(figures),
+        key=lambda figure: hashlib.sha256(f"{key}|{figure}".encode()).hexdigest(),
+    )
+
+
+def use_balance_again(
+    store: Store,
+    ref: str,
+    day_text: str,
+    source: str,
+    basis: str,
+    *,
+    which: int = 0,
+    families: Families | None = None,
+) -> bool:
+    """Read a disregarded known balance again: the one at place `which` (`place_among`) among
+    those held for that day, whoever states it, and basis. A disregard whose balance is gone is
+    removed the same way. False where that place holds no disregard."""
+    ref = ref.strip()
+    key = (_parse_day(day_text), source.strip(), basis.strip())
+    rows = {f for day, who, how, f in store.disregarded_balance_rows(ref) if (day, who, how) == key}
+    gathered = _gather_all(store, ref, families)
+    held = {a.balance_minor for a in gathered.own if anchor_key(a) == key}
+    candidates = place_among(held | rows, key)
+    if not 0 <= which < len(candidates) or candidates[which] not in rows:
+        return False
+    return store.use_balance_again(ref, *key, candidates[which])
 
 
 @dataclass(frozen=True)

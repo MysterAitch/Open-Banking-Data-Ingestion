@@ -3482,6 +3482,34 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return remove_stated_anchor(store, ref, day)
 
+    def balance_disregard(ref: str, day: str, source: str, basis: str, which: int) -> bool:
+        from .balance_anchors import disregard_balance
+
+        with Store(db_path) as store:
+            return disregard_balance(
+                store,
+                ref,
+                day,
+                source,
+                basis,
+                families=families_of(store, _account_map(store)),
+                which=which,
+            )
+
+    def balance_use_again(ref: str, day: str, source: str, basis: str, which: int) -> bool:
+        from .balance_anchors import use_balance_again
+
+        with Store(db_path) as store:
+            return use_balance_again(
+                store,
+                ref,
+                day,
+                source,
+                basis,
+                which=which,
+                families=families_of(store, _account_map(store)),
+            )
+
     def typed_save(ref: str, day: str, direction: str, amount: str, description: str) -> None:
         from .typed_transactions import TypedRefused, record_typed_transaction
 
@@ -4364,6 +4392,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         home_position=home_position,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,
+        balance_disregard=balance_disregard,
+        balance_use_again=balance_use_again,
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
         account_standings=account_standings,

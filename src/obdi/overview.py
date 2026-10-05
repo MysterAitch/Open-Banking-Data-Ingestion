@@ -210,8 +210,8 @@ _KINDS: dict[str, tuple[int, str]] = {
     "spaces": (HOUSEKEEPING, "Open the recovered Spaces and declare the ones that are real."),
     "known-balances-disagree": (
         SOON,
-        "Open the account's ledger and decide which source is right; remove a known balance "
-        "that is wrong, or look at the statement.",
+        "Open the account's ledger and decide which source is right; disregard the known "
+        "balance that is wrong, or look at the statement.",
     ),
     "agreement-lapsed": (
         NOW,
