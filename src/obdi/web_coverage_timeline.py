@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
 from typing import TYPE_CHECKING
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .account_names import name_html
 from .callback import render_page
@@ -654,9 +654,9 @@ def chart_svg(view: AccountTimeline, scale: Scale, *, fit: bool) -> tuple[str, _
     height = _height(rows)
     width = scale.width
     desc = (
-        f"Coverage of {len(view.lanes)} sources from {scale.start.isoformat()} to "
-        f"{scale.end.isoformat()}, with {len(view.gaps)} gaps and "
-        f"{len(drawn.entries)} marked places."
+        f"Coverage of {plural(len(view.lanes), 'source')} from {scale.start.isoformat()} to "
+        f"{scale.end.isoformat()}, with {plural(len(view.gaps), 'gap')} and "
+        f"{plural(len(drawn.entries), 'marked place')}."
     )
     axis = _axis(scale, month_y=[14]) + _axis(scale, month_y=[height - AXIS_H + 14])
     size = (
@@ -926,6 +926,106 @@ def render_account_timeline(
     return render_page("Coverage timeline", body, wide=True, heading="Coverage timeline")
 
 
+#: The household lane is drawn in months, in this many units at most across.
+HOUSEHOLD_WIDTH = 320
+_MONTH_WORDS = {"full": "every day covered", "part": "part covered", "none": "not covered"}
+
+
+def month_cells(view: AccountTimeline) -> list[tuple[date, str]]:
+    """Each month from the account's first to today's: "full" only if EVERY day of it is
+    covered by some source, "part" if some day is, "none" otherwise. The union of the lanes'
+    runs is what is covered; typed entries cover nothing (`coverage_timeline`)."""
+    runs = sorted((r.first, r.last) for lane in view.lanes for r in lane.runs)
+    merged: list[list[date]] = []
+    for first, last in runs:
+        if merged and first <= merged[-1][1] + timedelta(days=1):
+            merged[-1][1] = max(merged[-1][1], last)
+        else:
+            merged.append([first, last])
+    cells: list[tuple[date, str]] = []
+    month = view.first_day.replace(day=1)
+    while month <= view.today:
+        following = (month + timedelta(days=32)).replace(day=1)
+        last = min(following - timedelta(days=1), view.today)
+        total = (last - month).days + 1
+        covered = sum(
+            max(0, (min(b, last) - max(a, month)).days + 1) for a, b in merged
+        )
+        cells.append((month, "full" if covered == total else "part" if covered else "none"))
+        month = following
+    return cells
+
+
+def _household_lane(view: AccountTimeline) -> str:
+    cells = month_cells(view)
+    size = max(3.0, min(14.0, HOUSEHOLD_WIDTH / max(len(cells), 1)))
+    body = []
+    for index, (month, state) in enumerate(cells):
+        cls = {"full": "cov-bar", "part": "cov-bar-possible", "none": "cov-ver-none"}[state]
+        faint = {"full": "bar", "part": "possible", "none": ""}[state]
+        body.append(
+            f"<g><title>{month:%Y-%m}: {_MONTH_WORDS[state]}</title>"
+            f"{_rect(cls, index * size, 2, size - 1, 16, faint)}</g>"
+        )
+    width = len(cells) * size
+    return (
+        f'<svg class="cov-svg" role="img" width="{width:.0f}" height="20" '
+        f'viewBox="0 0 {width:.0f} 20" aria-label="Months covered, by month">{"".join(body)}</svg>'
+    )
+
+
+def _household_sentence(view: AccountTimeline) -> str:
+    gaps = len(view.gaps)
+    seams = len(view.seams_to_check)
+    looks = len(view.markers)
+    bands = view.verification.bands
+    agrees = next((b for b in reversed(bands) if b.state == "agrees"), None)
+    standing = (
+        f"in agreement through {agrees.last.isoformat()}"
+        if agrees is not None
+        else "not verified by any known balance"
+    )
+    todo = (
+        f"{plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
+        f"{plural(looks, 'thing')} to look at"
+        if gaps or seams or looks
+        else "nothing to fetch and nothing to look at"
+    )
+    return f"{standing.capitalize()}; {todo}."
+
+
+def render_household(views: Sequence[AccountTimeline]) -> bytes:
+    """One compact lane per account, each label a link to that account's full timeline.
+
+    The lane is drawn by the month: a month is covered only if every day of it is, and one
+    covered in part looks different. The one axis is the months themselves, so each lane has
+    the same cell width only where the accounts' lives are the same length; a lane begins at
+    its account's own first month and says so in its label.
+    """
+    if not views:
+        return render_page(
+            "Coverage timeline",
+            "<p>No account holds rows yet, so there is no coverage to draw.</p>",
+            heading="Coverage timeline",
+        )
+    items = []
+    for view in views:
+        first = view.first_day
+        items.append(
+            f'<li><p class="cov-lane-name"><a href="/coverage-timeline?ref='
+            f'{_esc(quote(view.ref, safe=""))}">{name_html(view.ref, {view.ref: view.label})}'
+            f"</a></p>{_household_lane(view)}"
+            f'<p class="muted">From {_esc(first.isoformat())}. '
+            f"{_esc(_household_sentence(view))}</p></li>"
+        )
+    body = (
+        f"<p>{plural(len(views), 'account')}, each drawn by the month: a filled month is "
+        "covered on every day by some source, a dashed one only in part.</p>"
+        f'<ul class="cov-household">{"".join(items)}</ul>'
+    )
+    return render_page("Coverage timeline", body, wide=True, heading="Coverage timeline")
+
+
 def _window_of(fields: Mapping[str, list[str]]) -> dict[str, str] | None:
     found = {name: fields[name][0] for name in WINDOW_FIELDS if fields.get(name)}
     return found or None
@@ -956,7 +1056,11 @@ class CoverageTimelinePages:
         mode = (params.get(SCALE_FIELD, [""])[0] or "").strip()
         mode = mode if mode in (FIT, WIDE) else ""
         if not ref:
-            self._respond(404, render_page("Not available", "<p>Say which account.</p>"))
+            household = self.bound_config.coverage_timeline_household
+            if household is None:
+                self._respond(404, render_page("Not available", "<p>Say which account.</p>"))
+                return
+            self._respond(200, render_household(household(_today())))
             return
         try:
             view = hook(ref, _today())
@@ -983,8 +1087,25 @@ class CoverageTimelinePages:
 
 
 __all__ = [
-    "AXIS_H", "FIT", "GAP_LABEL_PX", "KNOWN_TICK_MIN_PX", "LISTED_DAY_MIN_PX", "MARKS",
-    "MAX_PIXELS_PER_DAY", "MERGE_PX", "NOTCH_MIN_PX", "SCALE_FIELD", "TARGET_RANGE_WIDTH", "WIDE",
-    "CoverageTimelinePages", "chart_svg", "known_ticks", "listed_marks", "notch_xs",
-    "render_account_timeline", "verdict",
+    "AXIS_H",
+    "FIT",
+    "GAP_LABEL_PX",
+    "KNOWN_TICK_MIN_PX",
+    "LISTED_DAY_MIN_PX",
+    "MARKS",
+    "MAX_PIXELS_PER_DAY",
+    "MERGE_PX",
+    "NOTCH_MIN_PX",
+    "SCALE_FIELD",
+    "TARGET_RANGE_WIDTH",
+    "WIDE",
+    "CoverageTimelinePages",
+    "chart_svg",
+    "known_ticks",
+    "listed_marks",
+    "month_cells",
+    "notch_xs",
+    "render_account_timeline",
+    "render_household",
+    "verdict",
 ]

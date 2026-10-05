@@ -369,6 +369,10 @@ def render_coverage(
         "per account, however many sources feed it; this page is where a source is "
         "named, bound to an account, or archived."
     ) + FETCH_NEXT_LINE + (section or _nothing_wired("Coverage"))
+    body += (
+        '<p class="muted"><a href="/coverage-timeline">'
+        "The same history, by day, as a chart</a></p>"
+    )
     return render_page("Coverage by source", body)
 
 

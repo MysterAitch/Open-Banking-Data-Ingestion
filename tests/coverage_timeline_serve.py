@@ -34,6 +34,16 @@ def timeline_of(db: Path, ref: str, today: date) -> AccountTimeline | None:
         )
 
 
+def _refs(db: Path) -> list[str]:
+    with Store(db) as store:
+        return [
+            str(row[0])
+            for row in store.connection.execute(
+                "SELECT DISTINCT account_id FROM transactions ORDER BY account_id"
+            )
+        ]
+
+
 @contextmanager
 def served(db: Path, today: date) -> Iterator[str]:
     """The base address of a server over `db`, with the page's clock fixed at `today`."""
@@ -45,6 +55,11 @@ def served(db: Path, today: date) -> Iterator[str]:
         redirect_uri="https://obdi.example.com/callback",
         connection_store=ConnectionStore(db.parent / "c.json"),
         coverage_timeline_data=lambda ref, day: timeline_of(db, ref, day),
+        coverage_timeline_household=lambda day: [
+            view
+            for ref in _refs(db)
+            if (view := timeline_of(db, ref, day)) is not None
+        ],
     )
     handler = type("H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()})
     httpd = HTTPServer(("127.0.0.1", 0), handler)

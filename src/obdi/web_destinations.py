@@ -394,6 +394,11 @@ def render_bring_in(
             "masked, then you say whose it is.",
         ),
         _statements_row(kept_statements),
+        _row(
+            "/coverage-timeline",
+            page_name("/coverage-timeline"),
+            "Where each source reaches, day by day, and where to fetch next.",
+        ),
     ]
     shows_instant = bool(answered) or (feed is not None and feed.answered is not None)
     body = (
@@ -547,6 +552,7 @@ def render_diagnostics(
 ACCOUNT_LINKS: tuple[tuple[str, str, str], ...] = (
     ("/coverage", "Coverage by source", "what history each source holds for each account"),
     ("/gaps", "What to fetch next", "the statements and exports still to fetch, with dates"),
+    ("/coverage-timeline", "Coverage timeline", "where each source reaches, by day, as a chart"),
     ("/spaces", "Spaces", "pots recovered from the bank's feed, to declare or leave"),
     ("/review", "Categorise", "payments that have no category yet"),
 )

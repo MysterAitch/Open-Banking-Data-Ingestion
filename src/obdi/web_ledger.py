@@ -2342,6 +2342,10 @@ def _navigation(view: Any, unmasked: bool) -> str:
     """
     shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
     shape += f"{_esc(page_name('/account'))} for this account</a></p>"
+    shape += (
+        f'<p><a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}">'
+        f"{_esc(page_name('/coverage-timeline'))} for this account</a></p>"
+    )
     return f'<div class="foot-links">{shape}{_HOME}</div>'
 
 

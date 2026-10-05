@@ -3312,6 +3312,36 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
             )
 
+    def coverage_timeline_household(today: date) -> list[AccountTimeline]:
+        from .account_names import merged_names  # deferred like the other data hooks
+        from .coverage_timeline import build_account_timeline
+
+        try:
+            provider_labels = display_labels()
+        except Exception:
+            provider_labels = {}
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            names = merged_names(provider_labels, store.declared_accounts())
+            standings = account_standings(store)
+            refs = [
+                str(row[0])
+                for row in store.connection.execute(
+                    "SELECT DISTINCT account_id FROM transactions ORDER BY account_id"
+                )
+            ]
+            return [
+                build_account_timeline(
+                    store,
+                    ref,
+                    today=today,
+                    label=names.get(ref, ""),
+                    agreement=standings[ref].standing.own if ref in standings else None,
+                    canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+                )
+                for ref in refs
+            ]
+
     def position_data() -> Position:
         from .position import read_position  # deferred like the other data hooks
 
@@ -4244,6 +4274,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
         coverage_timeline_data=coverage_timeline_data,
+        coverage_timeline_household=coverage_timeline_household,
         position_data=position_data,
         home_position=home_position,
         anchor_save=anchor_save,

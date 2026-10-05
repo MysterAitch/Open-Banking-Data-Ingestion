@@ -24,8 +24,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from coverage_timeline_serve import served
+from coverage_timeline_serve import served, timeline_of
 from coverage_timeline_world import AGGREGATOR, EXPORTS, TODAY, build_household
+from obdi.web_coverage_timeline import month_cells
 
 PER_DAY = 14.0
 LEFT = 24.0
@@ -43,8 +44,12 @@ def x_of(day: str) -> float:
 
 
 @pytest.fixture(scope="module")
-def base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    db = build_household(tmp_path_factory.mktemp("page"))
+def db(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return build_household(tmp_path_factory.mktemp("page"))
+
+
+@pytest.fixture(scope="module")
+def base(db: Path) -> Iterator[str]:
     with served(db, TODAY) as address:
         yield address
 
@@ -75,8 +80,10 @@ class TestPage:
     def test_Page_ForAnUnknownAccount_IsNotFound(self, base):
         assert httpx.get(f"{base}/coverage-timeline?ref=nobody", timeout=60).status_code == 404
 
-    def test_Page_WithNoAccount_IsNotFound(self, base):
-        assert httpx.get(f"{base}/coverage-timeline", timeout=60).status_code == 404
+    def test_Page_WithNoAccount_IsTheHouseholdView(self, base):
+        response = httpx.get(f"{base}/coverage-timeline", timeout=60)
+        assert response.status_code == 200
+        assert "2 accounts, each drawn by the month" in response.text
 
     def test_Page_HoldsNoAmountAndNoDescription_EvenInTitles(self, page):
         for private in PRIVATE:
@@ -189,6 +196,43 @@ class TestWindow:
         ).text
         assert 'class="cov-frame"' not in text
         assert "starts on 2026-08-12, which is after it ends" in text
+
+
+class TestHousehold:
+    """Main's union of coverage runs from 07-01 to 09-10, then 09-12 to 09-28 (09-11 is in no
+    source): July and August are covered on every day, September is covered in part, and
+    October (to the 5th) not at all. Card's statements reach 05-15 to 07-11 and 08-14 to 09-11,
+    so May (from the 15th) is full; June full; July part; August part; September part (to the
+    5th of October nothing follows 09-11); October none."""
+
+    @pytest.fixture(scope="class")
+    def household(self, base: str) -> str:
+        return httpx.get(f"{base}/coverage-timeline", timeout=60).text
+
+    def test_Household_HasOneLaneForEachAccountLinkedToItsFullTimeline(self, household):
+        assert household.count('class="cov-lane-name"') == 2
+        assert 'href="/coverage-timeline?ref=main"' in household
+        assert 'href="/coverage-timeline?ref=card"' in household
+
+    def test_MonthCells_AreFullOnlyWhereEveryDayIsCovered(self, db):
+        main = timeline_of(db, "main", TODAY)
+        card = timeline_of(db, "card", TODAY)
+        assert main is not None and card is not None
+        assert [state for _, state in month_cells(main)] == ["full", "full", "part", "none"]
+        assert [state for _, state in month_cells(card)] == [
+            "part", "full", "part", "part", "part", "none"
+        ]
+
+    def test_Household_WhenAMonthIsCoveredInPart_LooksDifferent(self, household):
+        assert "2026-07: every day covered" in household
+        assert "2026-09: part covered" in household
+        assert "2026-10: not covered" in household
+        assert 'class="cov-bar"' in household and 'class="cov-bar-possible"' in household
+
+    def test_Household_HoldsNoAmountAndNoDescription(self, household):
+        body = household.split("</style>", 1)[1]
+        for private in PRIVATE:
+            assert private not in body, private
 
 
 class TestOppositeScenarios:

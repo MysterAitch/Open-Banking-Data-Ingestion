@@ -736,6 +736,8 @@ class WebConfig:
     #: One account's coverage timeline for a day, as DATA with no value in it, or None where the
     #: account is unknown (`coverage_timeline`).
     coverage_timeline_data: Callable[[str, date], AccountTimeline | None] | None = None
+    #: The same for every account that holds rows, not archived first (the household view).
+    coverage_timeline_household: Callable[[date], list[AccountTimeline]] | None = None
     #: Everything held and what it comes to, as DATA with real values, for the
     #: same reason `ledger_data` is data: the page decides in one place whether
     #: a reader may see them.
@@ -4286,6 +4288,8 @@ class ConnectionHandler(
             f"{pan}"
             + timeline_svg(hook(), days=days, clamp_days=span, now=until)
             + '<p><a class="button" href="/attempts">Fetch attempts ledger</a></p>'
+            + '<p class="muted"><a href="/coverage-timeline">The same history, by day, as a '
+            "chart</a></p>"
             + HOME_LINK
         )
         self._respond(200, render_page("Fetch timeline", body))
