@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.332] - 2026-10-05
+
+### Fixed
+- **The measurement of statements by what they list no longer calls a
+  statement a fault because it could not find its lines.** Read on the real
+  store at 0.4.330 it named three statements as real faults, and all three
+  looked like its own doing. Two were reported as not reading whole with no
+  transactions listed, while the statements page counts 16 and 33
+  transactions for them and says they agree: reproduced on invented data, a
+  statement that is one account's section of a document covering several
+  accounts had its lines looked up under the whole document. Lines now come
+  from the section. More generally "cannot say" is an answer of its own,
+  with its reason, and is never listed as a fault: a fault needs lines that
+  were found and do not sum.
+- A statement that cannot see an account's Spaces states the whole family's
+  balances, and was tested against the account alone. It is tested with its
+  Spaces, or is "cannot say".
+- A listed transaction held as history is said to be reversed, void, or
+  folded into another transaction, and a folded one is counted through the
+  transaction it was folded into; a fold with no record of where it went is
+  "cannot say".
+
+### Added
+- **A day two sources disagree about is tested as the statement having
+  closed early.** Where a statement's closing balance and another source's
+  balance for the same day differ, the measurement says whether they differ
+  by exactly the transactions dated that day, or the next, that the
+  statement does not list - yes, no, or cannot say, never the difference. A
+  yes means the two balances are for different moments and do not contradict
+  each other: the owner's case of something pending when a statement was
+  produced. On the real store one account is blocked by such a day, with one
+  transaction dated on it that the statement does not list.
+
+### Not covered
+- The cause of the two unfound statements is reproduced on invented data and
+  not confirmed on the real store; the Spaces handling and the same-day test
+  are likewise proven only on invented statements.
+- A statement section whose source cannot be told is never treated as unable
+  to see Spaces. Pairing a statement's line with a transaction is still by
+  date and amount.
+- No rule uses the measurement.
+
 ## [0.4.331] - 2026-10-05
 
 ### Added
