@@ -47,6 +47,7 @@ below into the one `STYLESHEET` every page carries, so the guards on the stylesh
 from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
 from .stylesheet_flags import FLAGS_STYLES
+from .stylesheet_gaps import GAPS_STYLES
 from .stylesheet_home import HOME_STYLES
 from .stylesheet_position import POSITION_STYLES
 from .stylesheet_sections import SECTION_STYLES
@@ -313,5 +314,5 @@ SHARED_STYLES = """
 #: The one stylesheet a page carries: the shared rules, then each page's own.
 STYLESHEET = (
     SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
-    + WINDOW_STYLES + POSITION_STYLES
+    + WINDOW_STYLES + POSITION_STYLES + GAPS_STYLES
 )

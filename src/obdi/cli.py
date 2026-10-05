@@ -63,6 +63,7 @@ from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
+from .fetch_gaps import FetchEvidence, FetchReport, fetch_report, gather_evidence
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .known_accounts import (
     DeclareOutcome,
@@ -3185,6 +3186,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as opened:
             return standings_memo.get(opened, lambda: compute(opened))
 
+    def fetch_evidence_key(store: Store) -> tuple[object, ...]:
+        """What the files to fetch are read from beyond the standings: the review queue (a flag
+        a person answers changes the gaps) and the registry's kinds and closing dates."""
+        queue = store.connection.execute(
+            "SELECT COUNT(*), COALESCE(MAX(resolved_at), '') FROM review_queue"
+        ).fetchone()
+        registry = tuple((str(r.ref), r.kind, r.closed) for r in store.declared_accounts())
+        return (*standings_memo_key(store), *tuple(queue), registry)
+
+    fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
+        fetch_evidence_key, name="fetch evidence", epoch=rebuild_epoch
+    )
+
+    def fetch_gaps_report(today: date) -> FetchReport:
+        """The files still to fetch. The walk of the store is held with the standings' own key,
+        so a page view works out nothing but the gaps from it.
+
+        Raises `RebuildInProgress` while a rebuild holds the layer."""
+        standings = account_standings()
+        with Store(db_path) as store:
+            evidence = fetch_evidence_memo.get(store, lambda: gather_evidence(store))
+        return fetch_report(evidence, standings, today)
+
     def warm_memos() -> None:
         """Work out both memos, so the first person after a start does not pay for them.
 
@@ -4190,6 +4214,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
         account_standings=account_standings,
+        fetch_gaps=fetch_gaps_report,
         warm=warm_memos,
         protect=protect,
         protect_withdraw=protect_withdraw,

@@ -30,6 +30,7 @@ IRREGULARS: dict[str, tuple[str, str]] = {
     "agrees": ("agrees", "agree"),
     "disagrees": ("disagrees", "disagree"),
     "matches": ("matches", "match"),
+    "needs": ("needs", "need"),
 }
 
 

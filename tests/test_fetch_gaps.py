@@ -13,19 +13,16 @@ from datetime import date
 
 import pytest
 
-from fetch_gaps_world import TODAY, build_household
+from fetch_gaps_world import TODAY, load_household
 from obdi.fetch_gaps import (
     Basis,
     GapKind,
     add_months,
     cadence_of,
     closings_after,
-    fetch_report,
     gaps_for_account,
-    gather_evidence,
 )
 from obdi.overview import standing_items_from, statement_awaited
-from obdi.standing_data import standings_for
 from obdi.statement_terms import keep_statement_readings, statement_periods
 from obdi.store import Store
 
@@ -34,35 +31,12 @@ D = date
 
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
-    return _load(tmp_path_factory.mktemp("gaps-original"), repaired=False)
+    return load_household(tmp_path_factory.mktemp("gaps-original"), repaired=False)
 
 
 @pytest.fixture(scope="module")
 def repaired(tmp_path_factory):
-    return _load(tmp_path_factory.mktemp("gaps-repaired"), repaired=True)
-
-
-class Loaded:
-    def __init__(self, db, house, standings, evidence) -> None:
-        self.db, self.house, self.standings, self.evidence = db, house, standings, evidence
-        self.report = fetch_report(evidence, standings, TODAY)
-
-    def gaps(self, ref):
-        return [g for o in self.report.accounts if o.account == ref for g in o.gaps]
-
-    def outlook(self, ref):
-        return next((o for o in self.report.accounts if o.account == ref), None)
-
-
-def _load(root, *, repaired):
-    db, house = build_household(root, repaired=repaired)
-    with Store(db) as store:
-        refs = [
-            str(row[0])
-            for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
-        ]
-        standings = standings_for(store, refs, families=None, movement=None)
-        return Loaded(db, house, standings, gather_evidence(store))
+    return load_household(tmp_path_factory.mktemp("gaps-repaired"), repaired=True)
 
 
 def shape(gap):

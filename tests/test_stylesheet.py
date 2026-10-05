@@ -222,6 +222,7 @@ def _page_styles() -> dict[str, str]:
     from obdi.stylesheet_account import ACCOUNT_STYLES
     from obdi.stylesheet_actual import ACTUAL_STYLES
     from obdi.stylesheet_flags import FLAGS_STYLES
+    from obdi.stylesheet_gaps import GAPS_STYLES
     from obdi.stylesheet_home import HOME_STYLES
     from obdi.stylesheet_position import POSITION_STYLES
     from obdi.stylesheet_sections import SECTION_STYLES
@@ -235,6 +236,7 @@ def _page_styles() -> dict[str, str]:
         "sections": SECTION_STYLES,
         "position": POSITION_STYLES,
         "window": WINDOW_STYLES,
+        "gaps": GAPS_STYLES,
     }
 
 
@@ -260,6 +262,13 @@ PAGE_PAIRS = [
     ("flags", "window"),
     ("sections", "window"),
     ("position", "window"),
+    ("home", "gaps"),
+    ("account", "gaps"),
+    ("actual", "gaps"),
+    ("flags", "gaps"),
+    ("sections", "gaps"),
+    ("position", "gaps"),
+    ("window", "gaps"),
 ]
 
 
@@ -276,7 +285,7 @@ def test_PageStyles_OfTwoPages_NeverLeadWithTheSameClass(one: str, other: str) -
 
 
 @pytest.mark.parametrize(
-    "page", ["home", "account", "actual", "flags", "sections", "position", "window"]
+    "page", ["home", "account", "actual", "flags", "sections", "position", "window", "gaps"]
 )
 def test_PageStyles_NeverRestyleAClassTheSharedRulesStyleByItself(page: str) -> None:
     from obdi.stylesheet import SHARED_STYLES

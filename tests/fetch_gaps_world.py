@@ -63,6 +63,7 @@ card-virgin on 2026-11-04.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -70,9 +71,17 @@ from pathlib import Path
 from flag_balance_world import build_balance_world
 from obdi.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
+from obdi.fetch_gaps import (
+    AccountOutlook,
+    FetchEvidence,
+    FetchGap,
+    fetch_report,
+    gather_evidence,
+)
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
 from obdi.models import SourceTier, Transaction
+from obdi.standing_data import AccountStanding, standings_for
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
 
@@ -350,3 +359,34 @@ def build_household(root: Path, *, repaired: bool = False) -> tuple[Path, Househ
     house.payees += [payee for _, _, payee in [*MAIN_EXPORT, *MAIN_FEED]]
     house.figures += ["11.11", "22.22", "33.33", "44.44", "55.55", "66.66", "77.77", "88.88"]
     return db, house
+
+
+class Loaded:
+    """The household, its standings and evidence, and the report for `TODAY`."""
+
+    def __init__(
+        self,
+        db: Path,
+        house: Household,
+        standings: Mapping[str, AccountStanding],
+        evidence: FetchEvidence,
+    ) -> None:
+        self.db, self.house, self.standings, self.evidence = db, house, standings, evidence
+        self.report = fetch_report(evidence, standings, TODAY)
+
+    def gaps(self, ref: str) -> list[FetchGap]:
+        return [g for o in self.report.accounts if o.account == ref for g in o.gaps]
+
+    def outlook(self, ref: str) -> AccountOutlook | None:
+        return next((o for o in self.report.accounts if o.account == ref), None)
+
+
+def load_household(root: Path, *, repaired: bool = False) -> Loaded:
+    db, house = build_household(root, repaired=repaired)
+    with Store(db) as store:
+        refs = [
+            str(row[0])
+            for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
+        ]
+        standings = standings_for(store, refs, families=None, movement=None)
+        return Loaded(db, house, standings, gather_evidence(store))

@@ -96,6 +96,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/empty-actual": "actual",
     # Bring in: every way data enters.
     "/bring-in": "bring-in",
+    "/gaps": "bring-in",
     "/connect": "bring-in",
     "/callback": "bring-in",
     "/connections": "bring-in",
@@ -171,6 +172,7 @@ PAGE_NAMES: dict[str, PageName] = {
     "/checks": PageName("Checks", "Reports"),
     "/diagnostics": PageName("Diagnostics", "Evidence and Admin"),
     "/bring-in": PageName("Bring in"),
+    "/gaps": PageName("What to fetch next"),
 }
 
 

@@ -67,6 +67,7 @@ from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import DoubtReport, SourceCoverage
 from .doctor import shape_problems
+from .fetch_gaps import FetchReport
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import Ledger
 from .logs import say
@@ -111,6 +112,7 @@ from .web_empty import (
     plan_from_audit,
 )
 from .web_flags import FlagPages
+from .web_gaps import GapPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
 from .web_overview import overview_html
@@ -749,6 +751,9 @@ class WebConfig:
     typed_withdraw: Callable[[str, str], None] | None = None
     #: Every account's known balances, agreement, and protection, for the Accounts page.
     account_standings: Callable[[], Mapping[str, AccountStanding]] | None = None
+    #: The files still to fetch, as of the day given (`fetch_gaps`), held while nothing it reads
+    #: has changed.
+    fetch_gaps: Callable[[date], FetchReport] | None = None
     #: Work out what the first page would otherwise pay for; run once in the background at start.
     warm: Callable[[], None] | None = None
     #: Protect an account through a date: (ref, through). Raises a DataError whose
@@ -3866,6 +3871,7 @@ class ConnectionHandler(
     BalanceChartPages,
     PositionPages,
     DestinationPages,
+    GapPages,
     SectionPages,
     BaseHTTPRequestHandler,
 ):
@@ -4009,6 +4015,9 @@ class ConnectionHandler(
             return
         if route == "/bring-in":
             self._bring_in_page()
+            return
+        if route == "/gaps":
+            self._gaps_page()
             return
         if route == "/checks":
             self._checks_page(params.get("fresh", [""])[0] == "1")

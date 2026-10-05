@@ -456,13 +456,12 @@ def _outlook(
             and own.known_from is not None
             and not awaiting
         ):
-            later = newest_row > own.known_from
             found.append(
                 FetchGap(
                     ref,
                     GapKind.ONE_BALANCE,
-                    own.known_from + timedelta(days=1) if later else first_row,
-                    newest_row if later else own.known_from,
+                    first_row,
+                    max(newest_row, own.known_from),
                     Basis.STATED,
                     source,
                     "Only one known balance is held, so it sets the opening and nothing "
