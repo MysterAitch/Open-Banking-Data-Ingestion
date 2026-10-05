@@ -109,7 +109,9 @@ class TestAnImportEndsOnTheAccountItLandedIn:
     def test_ImportResult_WhenTheAccountHadNothingBefore_SaysWhereItStandsNow(self, served):
         _, result = import_csv(served, "second-acct")
 
-        assert "Second Account now has no known balance, so its rows cannot be verified." in (
+        assert (
+            "Second Account now has no known balance, so its transactions cannot be checked."
+        ) in (
             text_of(result.text)
         )
 
@@ -121,8 +123,8 @@ class TestAnImportEndsOnTheAccountItLandedIn:
         _, result = import_csv(served, ACCOUNT)
 
         assert (
-            "Everyday is now in agreement through 2026-03-10; before, it was through 2026-03-20."
-            in text_of(result.text)
+            "Everyday now adds up to every known balance up to 2026-03-10; "
+            "before, it was up to 2026-03-20." in text_of(result.text)
         )
         assert LEDGER_OF_EVERYDAY in result.text
 
@@ -163,8 +165,8 @@ class TestEditingAnAccountEndsOnItsLedger:
         assert "is declared as" not in said
         assert LEDGER_OF_EVERYDAY in edited.text
         assert (
-            "Everyday is now in agreement through 2026-03-25; before, it was through 2026-03-20."
-            in said
+            "Everyday now adds up to every known balance up to 2026-03-25; "
+            "before, it was up to 2026-03-20." in said
         )
 
     def test_DeclareAnswer_StillSaysDeclaredAndLinksToTheNewLedger(self, served):
@@ -189,7 +191,9 @@ class TestStatedBalancesEndOnTheLedger:
         )
 
         assert saved.status_code == 200
-        assert "Everyday is in agreement through 2026-03-20, as before." in text_of(saved.text)
+        assert "Everyday adds up to every known balance up to 2026-03-20, as before." in text_of(
+            saved.text
+        )
 
     def test_StateABalance_WhenRefused_StillOffersTheLedger(self, served):
         refused = post(
@@ -221,7 +225,9 @@ class TestStatedBalancesEndOnTheLedger:
             confirmed="yes",
         )
 
-        assert "Everyday is in agreement through 2026-03-20, as before." in text_of(removed.text)
+        assert "Everyday adds up to every known balance up to 2026-03-20, as before." in text_of(
+            removed.text
+        )
 
 
 def _truelayer_artefact(store: Store, account_ref: str) -> int:

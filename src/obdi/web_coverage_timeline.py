@@ -37,7 +37,7 @@ from math import ceil
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode
 
-from .account_names import AccountShown
+from .account_names import AccountShown, code_html
 from .callback import render_page
 from .coverage_timeline import (
     ASK_HOLE,
@@ -251,15 +251,16 @@ MARKS: dict[str, MarkStyle] = {
         lambda x, y: _diamond("cov-seam-amber", x, y),
     ),
     UNREPRODUCED: MarkStyle(
-        "A known balance the rows do not reproduce", lambda x, y: _square("cov-mark-red", x, y)
+        "A known balance the transactions do not add up to",
+        lambda x, y: _square("cov-mark-red", x, y),
     ),
     CONFLICT: MarkStyle(
         "Two sources state different balances for a day (a conflict between sources, not a "
-        "fault in the rows)",
+        "fault in the transactions)",
         lambda x, y: _triangle("cov-mark-amber", x, y),
     ),
     HELD_BACK: MarkStyle(
-        "Where agreement with the known balances is held back",
+        "Where the transactions stop adding up to the known balances",
         lambda x, y: _bar_mark("cov-mark-amber", x, y),
     ),
     UNMATCHED: MarkStyle(
@@ -522,14 +523,14 @@ def _seam_sentence(view: AccountTimeline, seam: Seam) -> str:
 def _marker_sentence(view: AccountTimeline, marker: Marker) -> str:
     day = marker.day.isoformat()
     if marker.kind == UNREPRODUCED:
-        return f"The known balance on {day} is not reproduced by the rows held."
+        return f"The transactions do not add up to the known balance for {day}."
     if marker.kind == CONFLICT:
         return (
             f"Two sources state different balances for {day}: a conflict between sources, "
-            "not a fault in the rows."
+            "not a fault in the transactions."
         )
     if marker.kind == HELD_BACK:
-        return f"Agreement with the known balances is held back from {day}."
+        return f"The transactions stop adding up to the known balances at {day}."
     who = _lane_name(view, marker.source).lower()
     return (
         f"{plural(marker.count, 'row')} on {day} {'is' if marker.count == 1 else 'are'} listed by "
@@ -1042,11 +1043,14 @@ def _labels(view: AccountTimeline, rows: Sequence[_Row], height: float) -> str:
     out = [f'<div class="cov-label" style="height:{AXIS_H}px"></div>']
     for row in rows:
         if row.kind == "verification":
-            out.append(cell("Verified", "", row.height))
+            out.append(cell("Adds up", "", row.height))
         elif row.lane is not None:
             out.append(
-                cell(_esc(KIND_NAMES[row.lane.kind]), f"<small>{_esc(row.lane.source)}</small>",
-                     row.height)
+                cell(
+                    _esc(KIND_NAMES[row.lane.kind]),
+                    f"<small>{code_html(row.lane.source)}</small>",
+                    row.height,
+                )
             )
         else:
             out.append(cell("To look at", "", row.height))
@@ -1497,9 +1501,9 @@ def _household_sentence(view: AccountTimeline) -> str:
     bands = view.verification.bands
     agrees = next((b for b in reversed(bands) if b.state == "agrees"), None)
     standing = (
-        f"in agreement through {agrees.last.isoformat()}"
+        f"Adds up to every known balance up to {agrees.last.isoformat()}"
         if agrees is not None
-        else "not verified by any known balance"
+        else "Not checked against any known balance"
     )
     todo = (
         f"{plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
@@ -1507,7 +1511,7 @@ def _household_sentence(view: AccountTimeline) -> str:
         if gaps or seams or looks
         else "nothing to fetch and nothing to look at"
     )
-    return f"{standing.capitalize()}; {todo}."
+    return f"{standing}; {todo}."
 
 
 def render_household(views: Sequence[AccountTimeline]) -> bytes:

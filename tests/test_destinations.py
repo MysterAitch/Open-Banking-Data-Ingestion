@@ -211,7 +211,10 @@ class TestBringInTheBanksOwnFeed:
         assert "The bank&#x27;s own feed" in page
         assert "Read directly from the bank, not through the aggregator." in page
         assert "Last answered 2026-10-04 15:57." in page
-        assert "Feeds 2 accounts: starling-joint, Main account (starling-personal)." in page
+        assert (
+            "Feeds 2 accounts: <code>starling-joint</code>, "
+            "<strong>Main account</strong> <code>starling-personal</code>." in page
+        )
         assert "halifax-current" not in page, "an account only the aggregator feeds is not its"
         assert "no answer yet" not in page
 
@@ -255,7 +258,7 @@ class TestBringInTheBanksOwnFeed:
 
         assert "Not configured here" in page
         assert "It last answered 2026-09-01 08:00." in page
-        assert "Feeds 1 account: starling-personal." in page
+        assert "Feeds 1 account: <code>starling-personal</code>." in page
 
     def test_FeedFeedingMoreThanThreeAccounts_SaysTheCountAlone(self, serve, tmp_path):
         spaces = tuple(f"starling-space-{n}" for n in range(1, 5))
@@ -336,7 +339,7 @@ class TestDiagnostics:
         page = httpx.get(f"{base}/diagnostics", timeout=20).text
 
         assert page.index('href="/account?ref=acct-a"') < page.index('href="/account?ref=acct-b"')
-        assert ">Current</a>" in page and ">acct-b</a>" in page
+        assert ">Current</a>" in page and "><code>acct-b</code></a>" in page
         assert "Field statistics for each of 2 accounts" in page
 
     def test_DiagnosticsPage_WhenNoAccountIsHeld_OffersNoStatisticsList(self, serve):

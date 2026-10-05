@@ -27,7 +27,9 @@ HOME_STYLES = """
  .home .verdict::before { flex: none; width: 1.75rem; height: 1.75rem; margin-top: .1rem; border-radius: 50%;
         border: var(--edge-weight) solid currentColor; display: grid; place-items: center;
         font: 700 var(--text-md)/1 var(--sans); }
- .home .verdict.ok::before { content: "\\2713"; content: "\\2713" / ""; color: var(--ok); }
+ .home .verdict.ok { font: 400 var(--text-md)/150% var(--sans); margin: var(--s3) 0 var(--s2); }
+ .home .verdict.ok::before { content: "\\2713"; content: "\\2713" / ""; color: var(--ok);
+        width: 1.25rem; height: 1.25rem; margin-top: 0; font: 700 var(--text-xs)/1 var(--sans); }
  .home .verdict.warn::before { content: "!"; content: "!" / ""; color: var(--warn); }
  .home .verdict.bad::before { content: "\\2715"; content: "\\2715" / ""; color: var(--bad); }
  .home .verdict-lede { margin: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
@@ -43,8 +45,8 @@ HOME_STYLES = """
         margin-top: -.25rem; border-right: var(--edge-weight) solid var(--act);
         border-top: var(--edge-weight) solid var(--act); transform: rotate(45deg); }
  .status-label { font: 700 var(--text-md)/130% var(--sans); }
- .status-row .pill { justify-self: end; white-space: nowrap; }
- .status-sentence { grid-column: 1 / -1; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .status-row .pill { justify-self: end; max-width: 8rem; text-align: center; }
+ .status-sentence { grid-column: 1 / -1; font: var(--text-sm)/132% var(--sans); color: var(--ink-2); }
  .tz { margin: var(--s1) 0 0; font: var(--text-xs)/140% var(--sans); text-align: right; }
 
  /* What needs attention, by tier (the shared `.band` is the instance banner, so this is not
@@ -77,7 +79,7 @@ HOME_STYLES = """
  a.tap.acct-row::after { content: none; }
  .acct-name { font: 600 var(--text-base)/130% var(--serif); overflow-wrap: anywhere; }
  .acct-space > a .acct-name { font-size: var(--text-md); }
- .acct-row .pill { justify-self: end; white-space: nowrap; }
+ .acct-row .pill { justify-self: end; max-width: 8rem; text-align: center; }
  .acct-rail { grid-column: 1 / -1; display: block; }
  .acct-sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0 var(--s2);
         font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }

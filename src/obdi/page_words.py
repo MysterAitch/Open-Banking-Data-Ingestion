@@ -1,11 +1,14 @@
 """The words the pages use for the three things the owner named, and the words they retired.
 
-A KNOWN BALANCE is what a source says an account's balance was on a date. An account's rows are
-IN AGREEMENT with it when they reproduce it: worked out, never declared. Two SOURCES, by contrast,
-MATCH or DO NOT MATCH each other; "agree" is never said of two sources. A period is PROTECTED when
-a person has decided it must not change silently; the page says "protected period", never "span",
-and "not protected", never "protected through nowhere". "Reconciled" is kept for Actual's own
-sense. A person STATES a balance (the verb), and a known balance came "from you" when they did.
+A KNOWN BALANCE is what a source says an account's balance was on a date. An account's
+TRANSACTIONS ADD UP to it when they reproduce it: worked out, never declared. The words are
+`standing_data.ADDS_UP`, `DOES_NOT_ADD_UP`, and `NOTHING_TO_CHECK_AGAINST`, and `agreement` is the
+rule's name inside the code only. Two SOURCES, by contrast, MATCH or DO NOT MATCH each other;
+"agree" is said of two sources never, and "agrees with obdi" of Actual alone.
+A period is PROTECTED when a person has decided it must not change silently; the page says
+"protected period", never "span", and "not protected", never "protected through nowhere".
+"Reconciled" is kept for Actual's own sense. A person STATES a balance (the verb), and a known
+balance came "from you" when they did.
 
 One word per thing, adopted from a review of the interface's words:
 
@@ -65,6 +68,14 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     "protected span",
     "family balance",
     "cross-source agreement",
+    # The verdict on an account's transactions was "in agreement" and "held back": each left out
+    # the two things being compared, or needed explaining. The words now are
+    # `standing_data.ADDS_UP`, `DOES_NOT_ADD_UP`, and `NOTHING_TO_CHECK_AGAINST`. "Agrees" is
+    # kept for Actual against obdi, where the sentence names both sides. ("Cannot be verified"
+    # is not retired: the movement checks still say it of a transfer leg whose partner account
+    # cannot be read, which is another thing.)
+    "in agreement",
+    "held back",
     # One label reveals values (`Show values` / `Hide values`; `Show raw payload (unmasked)` for
     # an artefact's bytes), so these older labels for the same press may not come back.
     "show the figures",

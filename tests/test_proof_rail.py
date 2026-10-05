@@ -166,9 +166,9 @@ def test_RailSvg_HasATextAlternativeThatSaysWhatTheBarShows() -> None:
     assert 'role="img"' in svg
     assert "<title" in svg
     text = rail_text(built)
-    assert "Held back from 2024-05-30." in text
+    assert "Stops adding up at 2024-05-30." in text
     assert "Not protected." in text
-    assert "In agreement with the known balances from 2024-01-31 to 2024-04-30." in text
+    assert "The transactions add up to the known balances from 2024-01-31 to 2024-04-30." in text
 
 
 def test_RailSvg_WithTwoRailsOnOnePage_GivesEachItsOwnPatternIds() -> None:

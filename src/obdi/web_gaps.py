@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import AccountsShown
+from .account_names import AccountsShown, code_html
 from .callback import render_page
 from .fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from .fetch_marks import (
@@ -242,14 +242,14 @@ def _lines(gap: FetchGap) -> tuple[str, str, str]:
         return (
             span,
             f"Fetch a statement covering {span}, or state a balance.",
-            "No known balance: these rows cannot be verified.",
+            "No known balance, so there is nothing to check the transactions against.",
         )
     if kind is GapKind.AUTOMATIC_ONLY:
         return (
             span,
             f"Fetch a statement covering {span}, or state a balance.",
             "Only the bank's feed and the aggregator supply this account and no known balance "
-            "is held: these rows cannot be verified.",
+            "is held, so there is nothing to check the transactions against.",
         )
     if kind is GapKind.ONE_BALANCE:
         return (
@@ -281,7 +281,7 @@ def _gap_html(ref: str, gap: FetchGap, today: date) -> str:
     else:
         basis_note = f'<span class="pill">{basis}</span>'
     source = (
-        f'<span class="gaps-source">read as <span class="mono">{_esc(gap.source)}</span></span>'
+        f'<span class="gaps-source">read as {code_html(gap.source)}</span>'
         if gap.source
         else ""
     )
@@ -368,7 +368,11 @@ def render_gaps(
     title = page_name("/gaps")
     if rebuilding:
         return render_page(title, f'<p class="lede">{_esc(rebuilding)}</p>')
-    body = MARKS_STYLE_TAG + f'<p class="lede gaps-verdict">{_esc(verdict_sentence(report))}</p>'
+    good = " quiet-ok" if report.accounts and not report.gaps else ""
+    body = (
+        MARKS_STYLE_TAG
+        + f'<p class="lede gaps-verdict{good}">{_esc(verdict_sentence(report))}</p>'
+    )
     body += contradicted_html(report.marks, names, report.today)
     body += scope_lines_html(report.marks, names, report.today, report.first_known_balance)
     body += "".join(_account_html(outlook, names, report.today) for outlook in report.needing)

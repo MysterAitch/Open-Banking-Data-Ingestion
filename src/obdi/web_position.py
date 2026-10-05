@@ -34,6 +34,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .account_names import AccountShown
 from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
 from .date_window import (
@@ -121,9 +122,8 @@ def _fact(name: str, value: str) -> str:
 
 def _ref_line(view: Any) -> str:
     """The reference beneath a label, unless the label is the reference."""
-    if view.label == view.ref:
-        return ""
-    return f'<span class="mono muted">{_esc(view.ref)}</span>'
+    shown = AccountShown.named(view.ref, view.label)
+    return f'<span class="muted">{shown.code()}</span>' if shown.labelled else ""
 
 
 def _account_card(view: Any) -> str:
@@ -144,16 +144,19 @@ def _account_card(view: Any) -> str:
     elif view.checks_agree:
         checks = (
             f"{_plural(view.checks_agree, 'later check')} "
-            f"{'is' if view.checks_agree == 1 else 'are'} in agreement"
+            f"{'adds' if view.checks_agree == 1 else 'add'} up"
         )
     else:
-        checks = '<span class="muted">none: one known balance, so nothing tests it</span>'
+        checks = (
+            '<span class="muted">none: one known balance, so the transactions cannot '
+            "be checked</span>"
+        )
     if view.family_anchors:
         # The known balances are the whole account's (main plus its Spaces), so
         # a difference is located against the family's rows, not main's alone.
         if view.family_first_differing:
             checks += (
-                '<br><span class="warn">The rows first stop being in agreement with the whole '
+                '<br><span class="warn">The transactions first stop adding up to the whole '
                 f"account's known balances ({_esc(str(view.family_anchors))}) on "
                 f"{_esc(view.family_first_differing)}; the difference is "
                 f"{_esc(view.family_pattern)} after that.</span>"
@@ -162,7 +165,7 @@ def _account_card(view: Any) -> str:
             checks += (
                 '<br><span class="muted">Checked against the whole account '
                 f"(main plus its Spaces): {_esc(str(view.family_anchors))} known "
-                "balances, all reproduced.</span>"
+                "balances, and the transactions add up to all of them.</span>"
             )
         checks += f'<br><span class="muted">{_esc(view.family_opening_note)}</span>'
     flag = (
@@ -175,7 +178,8 @@ def _account_card(view: Any) -> str:
     )
     return (
         '<li class="account">'
-        f'<p class="account-name">{archived}<strong>{_esc(view.label)}</strong></p>'
+        f'<p class="account-name">{archived}'
+        f"<strong>{AccountShown.named(view.ref, view.label).as_name()}</strong></p>"
         f"{kind}{_ref_line(view)}"
         f'<p class="figure">{_figure(_balance_word(view.direction), view.balance)}</p>'
         '<dl class="facts">'
@@ -270,7 +274,7 @@ def _uncounted_card(view: Any) -> str:
     return (
         '<li class="account">'
         f'<p class="account-name"><span class="pill pill-bad">not counted</span> '
-        f"<strong>{_esc(view.label)}</strong></p>"
+        f"<strong>{AccountShown.named(view.ref, view.label).as_name()}</strong></p>"
         f"{_ref_line(view)}"
         f"<p>{reason}</p>"
         f"{moved}"
@@ -922,7 +926,7 @@ def _legend(
 
 
 def _label_and_ref(item: Any) -> str:
-    return _esc(item.label) if item.label == item.ref else f"{_esc(item.label)} ({_esc(item.ref)})"
+    return AccountShown.named(item.ref, item.label).inline()
 
 
 def _serial(names: list[str]) -> str:

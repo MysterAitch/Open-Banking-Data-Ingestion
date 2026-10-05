@@ -189,7 +189,7 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
 
         for expected in (
             "<th>Rows in the month</th><td>8</td>",
-            "<th>Rows per source</th><td>src-a: 7, src-b: 2</td>",
+            "<th>Rows per source</th><td><code>src-a</code>: 7, <code>src-b</code>: 2</td>",
             "<th>Seen by more than one source</th><td>1</td>",
             "<th>Pending</th><td>1</td>",
             "<th>Void</th><td>1</td>",
@@ -329,7 +329,7 @@ class TestTheMonthSummaryShowsOnlyWhatIsNotZero:
 
         for expected in (
             "<th>Rows in the month</th><td>2</td>",
-            "<th>Rows per source</th><td>src-a: 2</td>",
+            "<th>Rows per source</th><td><code>src-a</code>: 2</td>",
             "<th>Would be sent to Actual</th><td>2</td>",
             "<th>Withheld from Actual</th><td>0 (none)</td>",
         ):

@@ -100,7 +100,7 @@ class TestOfferingAProtection:
 
         assert "Protect through 2026-03-20" in page
         assert 'action="/protect"' in page
-        assert "in agreement through 2026-03-20; not protected." in page
+        assert "known balance from 2026-03-05 to 2026-03-20; not protected." in page
         assert "protected through nowhere" not in page, "nothing protects it, so no place"
 
     def test_Ledger_WhenNoBalanceIsKnown_OffersNothingAndSaysWhy(self, tmp_path, lab):
@@ -113,7 +113,7 @@ class TestOfferingAProtection:
         page = lab.get().text
 
         assert 'action="/protect"' not in page
-        assert "No known balance: these rows cannot be verified." in page
+        assert "No known balance, so there is nothing to check the transactions against." in page
 
     def test_Ledger_OffersEarlierKnownBalancesToo(self, lab):
         page = lab.get().text
@@ -151,7 +151,9 @@ class TestPressingAndConfirming:
 
         assert response.status_code == 400
         assert "Nothing was protected." in response.text
-        assert "not in agreement through that date" in response.text
+        assert "have not been shown to add up to the known balances up to that date" in (
+            response.text
+        )
         assert lab.record() is None
 
     def test_Post_WithADateThatIsNotADate_IsRefusedAndTheTextIsNotEchoed(self, lab):

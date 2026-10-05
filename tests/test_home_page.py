@@ -252,14 +252,14 @@ class TestAccountRows:
             reading = row_reading(account(troubled, ref))
             return reading.word, reading.clause
 
-        assert said(world.AGREE[1]) == ("in agreement", "in agreement through 2026-03-20")
+        assert said(world.AGREE[1]) == ("adds up", "every known balance up to 2026-03-20")
         assert said(world.PROTECTED) == (
             "protected",
-            "in agreement through 2026-03-20; protected through 2026-03-20",
+            "every known balance up to 2026-03-20; protected through 2026-03-20",
         )
-        assert said(world.LATER_ROWS[0]) == ("in agreement", "in agreement through 2026-03-10")
-        assert said(world.HELD[0]) == ("held back", "held back since 2026-03-15")
-        assert said(world.UNPROVEN[0]) == ("unproven", "no known balance")
+        assert said(world.LATER_ROWS[0]) == ("adds up", "every known balance up to 2026-03-10")
+        assert said(world.HELD[0]) == ("does not add up", "stops adding up at 2026-03-15")
+        assert said(world.UNPROVEN[0]) == ("nothing to check against", "no known balance")
 
     def test_Row_WhenProtectionHasBroken_SaysSoInsteadOfProtected(self, tmp_path):
         db = tmp_path / "broken.sqlite3"
@@ -352,8 +352,8 @@ class TestAccountRows:
             assert f'<a class="tap acct-row" href="/ledger?ref={ref}">' not in folded
 
     def test_Counts_OnTheTroubledWorld_AreTheKnownAnswer(self, troubled):
-        # Twenty accounts, four of them archived Spaces: sixteen are live. Two are held back,
-        # two have no balance, and the other twelve are in agreement.
+        # Twenty accounts, four of them archived Spaces: sixteen are live. Two do not add up,
+        # two have no balance, and the other twelve add up.
         assert verification_counts(troubled.accounts) == (16, 12, 2, 2)
 
     def test_Counts_WhenEveryAccountIsArchivedOrEmpty_AreNone(self, troubled):
@@ -372,11 +372,14 @@ class TestAccountRows:
             opening = f'<a class="tap acct-row" href="/ledger?ref={ref}">'
             return page.split(opening)[1].split("</a>")[0]
 
-        assert "Held back from 2026-03-15." in row("held-1")
+        assert "Stops adding up at 2026-03-15." in row("held-1")
         assert "No known balance from 2026-03-02 to 2026-10-01." in row("no-balance-1")
         protected = row(world.PROTECTED)
         assert "Protected through 2026-03-20." in protected
-        assert "In agreement with the known balances from 2026-03-05 to 2026-03-20." in protected
+        assert (
+            "The transactions add up to the known balances from 2026-03-05 to 2026-03-20."
+            in protected
+        )
 
 
 def with_more_items(base):
@@ -406,18 +409,18 @@ class TestTheFirstScreenIsInOrder:
         for target in ("/connections", "/accounts#needs-a-look", "/actual", "/position"):
             assert f'class="tap status-row" href="{target}"' in status
 
-    def test_Verification_OnTheTroubledWorld_SaysHowManyAreInAgreementHeldBackAndUnprovable(
+    def test_Verification_OnTheTroubledWorld_SaysHowManyAddUpDoNotAndCannotBeChecked(
         self, troubled
     ):
         assert (
-            "12 of 16 accounts in agreement through their latest known balance; "
-            "2 held back; 2 cannot be verified."
+            "12 of 16 accounts add up to their latest known balance; "
+            "2 do not add up; 2 have nothing to check against."
         ) in page_of(troubled)
 
-    def test_Verification_OnTheClearWorld_SaysOnlyWhatIsStillUnproven(self, clear):
+    def test_Verification_OnTheClearWorld_SaysOnlyWhatStillHasNothingToCheckAgainst(self, clear):
         assert (
-            "14 of 16 accounts in agreement through their latest known balance; "
-            "2 cannot be verified."
+            "14 of 16 accounts add up to their latest known balance; "
+            "2 have nothing to check against."
         ) in page_of(clear)
 
     def test_Attention_WithMoreThanFiveItems_OpensOnlyTheFirstBandAndFoldsTheRestBehindACount(
@@ -490,7 +493,7 @@ class TestTheActualLine:
             ),
             (
                 [push(PUSHED), audit(AFTER)],
-                "in agreement",
+                "agrees with obdi",
                 "pill-ok",
                 "Actual agrees with obdi. The audit of 2026-10-01 09:45, after the push applied "
                 "2026-10-01 09:30, found no differences in 3 accounts.",
@@ -516,7 +519,7 @@ class TestTheActualLine:
 
         line = actual_line(lambda: [push(BEFORE), push(PUSHED, ok=False), audit(AFTER)], NOW_TIME)
 
-        assert line.word == "in agreement"
+        assert line.word == "agrees with obdi"
 
     def test_Line_WhenAPushFailedAfterTheNewestAudit_SaysThePushFailed(self):
         from obdi.web_overview import actual_line

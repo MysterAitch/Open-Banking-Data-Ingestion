@@ -67,7 +67,8 @@ CHECKS: tuple[CheckSpec, ...] = (
         frozenset({"balance", "agreement-lapsed"}),
         ("balance reconciliation", "known balances and agreement"),
         "Every day's rows add up to the bank's own figures, and no account has gone more "
-        f"than {STALE_AGREEMENT_DAYS} days reproducing no known balance.",
+        f"than {STALE_AGREEMENT_DAYS} days without its transactions adding up to a known "
+        "balance.",
     ),
     # No check on Today adds up a statement's own period, so this row borrows no other
     # check's finding: a chip must not speak for a sum nobody ran.

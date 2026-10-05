@@ -1,23 +1,23 @@
 """The Accounts page shows which accounts need a look, and says the same as Today.
 
-The owner followed Today's Verification line ("9 of 12 accounts in agreement through their
+The owner followed Today's Verification line (then "9 of 12 accounts in agreement through their
 latest known balance; 1 held back; 2 cannot be verified.") to the Accounts page and found
-every account at one weight under a green tick that said "declared": the one held back and
-the two that could not be verified were sentences in the body text of rows that looked like
-all the others.
+every account at one weight under a green tick that said "declared": the one that did not add
+up and the two that could not be checked were sentences in the body text of rows that looked
+like all the others.
 
 The invented household, with what each account must read as, decided before the first run:
 
     agreeing    100.00 known on 2026-09-10, 10.00 out on 09-14, 90.00 known on 09-20
-                the rows reproduce the second balance              in agreement
+                the transactions reproduce the second balance      adds up
     held        100.00 known on 2026-09-10, 10.00 out on 09-14, 70.00 known on 09-20
-                the rows say 90.00                                 held back
-    unproven    one row, no known balance                          cannot be verified
-    single      one row, one known balance: nothing tests it       cannot be verified
+                the transactions say 90.00                         does not add up
+    unproven    one row, no known balance                          nothing to check against
+    single      one row, one known balance: nothing tests it       nothing to check against
     empty       declared, no rows                                  not counted
     old         one row, archived on 2026-09-30                    not counted
 
-so four accounts are counted: 1 in agreement, 1 held back, 2 cannot be verified.
+so four accounts are counted: 1 adds up, 1 does not, 2 have nothing to check against.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ from test_ledger import land, txn
 D = date
 TODAY = D(2026, 10, 5)
 SUMMARY = (
-    "1 of 4 accounts in agreement through their latest known balance; 1 held back; "
-    "2 cannot be verified."
+    "1 of 4 accounts adds up to their latest known balance; 1 does not add up; "
+    "2 have nothing to check against."
 )
 
 
@@ -164,12 +164,12 @@ class TestTheSummary:
         section = accounts.split('id="needs-a-look"')[1].split("</p>")[0]
 
         assert re.findall(r'href="#account-([a-z]+)"', section) == ["held", "single", "unproven"]
-        assert "Held back: " in text_of(section)
-        assert "Cannot be verified: " in text_of(section)
+        assert "Does not add up: " in text_of(section)
+        assert "Nothing to check against: " in text_of(section)
 
-    def test_Accounts_WhenEveryAccountIsInAgreement_SaysSoAndNamesNothing(self, all_agree):
+    def test_Accounts_WhenEveryAccountAddsUp_SaysSoAndNamesNothing(self, all_agree):
         accounts, today = all_agree
-        said = "All 1 account in agreement through their latest known balance."
+        said = "The account adds up to its latest known balance."
 
         assert said in text_of(today)
         assert said in text_of(accounts)
@@ -180,7 +180,7 @@ class TestTheSummary:
 
         assert 'href="/accounts#needs-a-look"' in today
 
-    def test_Today_WhenEveryAccountIsInAgreement_LinksToTheList(self, all_agree):
+    def test_Today_WhenEveryAccountAddsUp_LinksToTheList(self, all_agree):
         _, today = all_agree
 
         assert 'href="/accounts"' in today
@@ -188,29 +188,29 @@ class TestTheSummary:
 
 
 class TestEachAccountsChip:
-    def test_AnAccountInAgreement_CarriesTheGreenChip(self, pages):
+    def test_AnAccountThatAddsUp_CarriesTheGreenChip(self, pages):
         row = row_of(pages[0], "agreeing")
 
-        assert '<span class="pill pill-ok">in agreement</span>' in row
+        assert '<span class="pill pill-ok">adds up</span>' in row
 
-    def test_AnAccountHeldBack_CarriesTheAmberChip(self, pages):
+    def test_AnAccountThatDoesNotAddUp_CarriesTheAmberChip(self, pages):
         row = row_of(pages[0], "held")
 
-        assert '<span class="pill pill-warn">held back</span>' in row
+        assert '<span class="pill pill-warn">does not add up</span>' in row
         assert "pill-ok" not in row
 
     @pytest.mark.parametrize("ref", ["unproven", "single"])
     def test_AnAccountNothingTests_CarriesTheAmberChip(self, pages, ref):
         row = row_of(pages[0], ref)
 
-        assert '<span class="pill pill-warn">cannot be verified</span>' in row
+        assert '<span class="pill pill-warn">nothing to check against</span>' in row
         assert "pill-ok" not in row
 
     @pytest.mark.parametrize("ref", ["empty", "old"])
     def test_AnAccountThatIsNotCounted_CarriesNoVerificationChip(self, pages, ref):
         row = row_of(pages[0], ref)
 
-        for word in ("in agreement</span>", "held back</span>", "cannot be verified</span>"):
+        for word in ("adds up</span>", "does not add up</span>", "nothing to check against</span>"):
             assert word not in row
 
     def test_BeingDeclared_IsNotAGreenTick(self, pages):
@@ -222,9 +222,9 @@ class TestWhatStandsOut:
     @pytest.mark.parametrize(
         ("ref", "reason"),
         [
-            ("held", "which the rows do not reproduce"),
+            ("held", "The transactions do not add up to the known balance for 2026-09-20"),
             ("unproven", "No known balance"),
-            ("single", "nothing tests the rows yet"),
+            ("single", "a second is needed before the transactions can be checked"),
         ],
     )
     def test_ARowThatNeedsALook_IsMarkedAndSaysWhyInBold(self, pages, ref, reason):
@@ -245,9 +245,13 @@ class TestWhatStandsOut:
         assert "State a known balance on its page, or upload a statement" in text_of(
             row_of(pages[0], "unproven")
         )
-        assert "Open its page to see what holds it back" in text_of(row_of(pages[0], "held"))
+        assert "Open its page to see where it stops adding up and why" in text_of(
+            row_of(pages[0], "held")
+        )
 
-    def test_Rows_AreOrderedHeldBackThenUnverifiedThenTheRest_WithArchivedLast(self, pages):
+    def test_Rows_AreOrderedNotAddingUpThenNothingToCheckThenTheRest_WithArchivedLast(
+        self, pages
+    ):
         order = re.findall(r'<div class="row"[^>]*id="account-([a-z]+)"', pages[0])
 
         assert order == ["held", "single", "unproven", "agreeing", "empty", "old"]

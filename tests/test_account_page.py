@@ -121,10 +121,11 @@ class TestTheVerdictAndTheBox:
         page = html.unescape(get(base))
 
         assert (
-            "Known balances from 2023-10-31 to 2026-09-30; in agreement through 2025-02-28; "
+            "The transactions add up to every known balance from 2023-10-31 to 2025-02-28; "
+            "the latest known balance is for 2026-09-30; "
             f"protected through {PROTECTED_THROUGH}." in page
         )
-        assert f"Held back by the known balance for {FAULT_DAY}" in page
+        assert f"The transactions do not add up to the known balance for {FAULT_DAY}" in page
         assert 'href="#opening"' in page, "the box links into the same page"
 
     def test_HeldAccount_OpensTheKnownBalancesBecauseTheBoxLinksIntoThem(self, base):
@@ -133,15 +134,18 @@ class TestTheVerdictAndTheBox:
     def test_AgreeingAccount_SaysNotProtectedAndLeavesTheKnownBalancesFolded(self, base):
         page = html.unescape(get(base, AGREEING))
 
-        assert "in agreement through 2026-09-30; not protected." in page
+        assert (
+            "The transactions add up to every known balance from 2023-10-31 to 2026-09-30; "
+            "not protected." in page
+        )
         assert "protected through nowhere" not in page
         assert '<details id="opening">' in page
-        assert "(35 in agreement, none differ)" in page, "36 month ends, the first sets the opening"
+        assert "(35 add up, none differ)" in page, "36 month ends, the first sets the opening"
 
     def test_AccountWithNoKnownBalance_SaysSoAndOffersNoProtection(self, base):
         page = get(base, UNKNOWN)
 
-        assert "No known balance: these rows cannot be verified." in page
+        assert "No known balance, so there is nothing to check the transactions against." in page
         assert 'action="/protect"' not in page
         assert "Known balances and the opening (none stated)" in page
 
@@ -293,7 +297,8 @@ class TestRowAnchors:
 
         assert '<span class="pill pill-ok visually-hidden">booked</span>' in page
         assert re.search(
-            r'<span class="pill pill-ok" title="[^"]*">cleared by starling</span>', page
+            r'<span class="pill pill-ok" title="[^"]*">cleared by <code>starling</code></span>',
+            page,
         )
         # The opposite: it is hidden only where "cleared by" stands in for it, never otherwise.
         assert page.count('visually-hidden">booked</span>') == page.count(">cleared by ")

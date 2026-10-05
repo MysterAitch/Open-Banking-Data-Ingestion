@@ -156,16 +156,24 @@ class TestAnAccountHeldBack:
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
         assert found[0].accounts == ("c",)
-        assert "in agreement through 2026-03-10" in found[0].message
+        assert "its transactions last added up to a known balance on 2026-03-10" in (
+            found[0].message
+        )
         assert f"more than {STALE_AGREEMENT_DAYS} days ago" in found[0].message
-        assert "Held back by the known balance for 2026-03-15" in found[0].message
+        assert "The transactions do not add up to the known balance for 2026-03-15" in (
+            found[0].message
+        )
 
     def test_Items_WhenAMovementFaultHoldsItBack_IsOneItemNamingTheFault(self, household):
         found = items_for(household("d", SETTLED, fault_on=D(2026, 3, 12)))
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
-        assert "in agreement through 2026-03-10" in found[0].message
-        assert "Held back by a movement fault dated 2026-03-12" in found[0].message
+        assert "its transactions last added up to a known balance on 2026-03-10" in (
+            found[0].message
+        )
+        assert "The transactions stop adding up at 2026-03-12, because of a movement fault" in (
+            found[0].message
+        )
 
     def test_Items_WhenHeldBackButWithinTheLimit_SaysNothing(self, household):
         assert items_for(household("c", UNMET), today=D(2026, 4, 24)) == []
@@ -178,8 +186,13 @@ class TestAnAccountHeldBack:
         )
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
-        assert "never in agreement since its first known balance, 2026-03-05" in found[0].message
-        assert "Held back by the known balance for 2026-03-10" in found[0].message
+        assert (
+            "its transactions have never added up to a known balance since its first, 2026-03-05"
+            in found[0].message
+        )
+        assert "The transactions do not add up to the known balance for 2026-03-10" in (
+            found[0].message
+        )
 
 
 class TestAccountsInSeveralSituations:

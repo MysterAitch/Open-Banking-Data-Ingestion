@@ -203,7 +203,7 @@ class TestADailyChart:
         html = page(held, length(90, Unit.DAYS), chart_in=rest)
 
         assert "data-below-nil" not in html
-        assert "The chart leaves out: card" in html
+        assert "The chart leaves out: <code>card</code>" in html
         assert "chosen accounts only, not the net worth" in html
         assert "window highest" in html
 

@@ -92,7 +92,10 @@ class TestAnAccountWithKnownBalances:
         assert found.state == HELD_UNMET
         assert found.through == D(2026, 3, 10)
         assert found.held is not None and found.held.day == D(2026, 3, 15)
-        assert "Held back by the known balance for 2026-03-15" in held_sentence(found)
+        assert held_sentence(found) == (
+            "The transactions do not add up to the known balance for 2026-03-15 "
+            "(a balance you stated)."
+        )
 
     def test_Agreement_WhenAMovementFaultSitsBetweenTwoMetBalances_StopsBeforeTheFault(
         self, store
@@ -109,7 +112,9 @@ class TestAnAccountWithKnownBalances:
         assert found.state == HELD_MOVEMENT
         assert found.through == D(2026, 3, 10)
         assert found.held is not None and found.held.day == D(2026, 3, 12)
-        assert "movement fault dated 2026-03-12" in held_sentence(found)
+        assert "The transactions stop adding up at 2026-03-12, because of a movement fault" in (
+            held_sentence(found)
+        )
 
     def test_Agreement_WhenTheMovementFaultBelongsToAnotherAccount_IsNotHeldBackByIt(self, store):
         everyday(store)
@@ -133,14 +138,16 @@ class TestAnAccountWithKnownBalances:
 
         assert found.state == AGREES and found.through == D(2026, 3, 10) and found.held is None
 
-    def test_Agreement_WhenNoKnownBalanceIsStated_SaysTheRowsCannotBeVerified(self, store):
+    def test_Agreement_WhenNoKnownBalanceIsStated_SaysThereIsNothingToCheckAgainst(self, store):
         everyday(store)
 
         found = state(store, MovementCompleteness())
 
         assert found.state == NONE
         assert found.through is None and found.known_count == 0
-        assert standing_line(found, None) == "No known balance: these rows cannot be verified."
+        assert standing_line(found, None) == (
+            "No known balance, so there is nothing to check the transactions against."
+        )
 
     def test_Agreement_WhenOnlyOneKnownBalanceExists_IsUntestedAndVerifiesNothing(self, store):
         everyday(store)
@@ -150,7 +157,10 @@ class TestAnAccountWithKnownBalances:
 
         assert found.state == UNTESTED
         assert found.through is None
-        assert "sets the opening balance" in held_sentence(found)
+        assert held_sentence(found) == (
+            "Only one known balance (2026-03-10); a second is needed before the transactions "
+            "can be checked."
+        )
 
     def test_Agreement_WhenMovementWasNotRead_SaysSo(self, store):
         everyday(store)
@@ -168,7 +178,7 @@ class TestAnAccountWithKnownBalances:
         found = state(store, MovementCompleteness())
 
         assert standing_line(found, None) == (
-            "Known balances from 2026-03-05 to 2026-03-10; in agreement through 2026-03-10; "
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10; "
             "not protected."
         )
         assert standing_line(found, D(2026, 3, 10)).endswith("protected through 2026-03-10.")
@@ -198,8 +208,9 @@ class TestKnownBalancesThatDisagreeWithEachOther:
         assert found.through is None
         assert [c.day for c in found.conflicts] == [D(2026, 3, 5)]
         sentence = held_sentence(found)
-        assert "do not match on 2026-03-05" in sentence
-        assert "not a fault in the rows" in sentence
+        assert "Two sources state different balances for 2026-03-05" in sentence
+        assert "so nothing after that day can be checked" in sentence
+        assert "not a fault in the transactions" in sentence
         assert "halifax-statement-pdf" in sentence
 
     def test_Agreement_WhenTwoSourcesStateTheSameFigureForOneDay_IsNotAConflict(self):
@@ -264,14 +275,17 @@ class TestThePage:
         page = self.page(store)
 
         assert (
-            "Known balances from 2026-03-05 to 2026-03-10; in agreement through 2026-03-10"
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10"
             in page
         )
 
-    def test_Page_WhenNoBalanceIsKnown_SaysTheRowsCannotBeVerified(self, store):
+    def test_Page_WhenNoBalanceIsKnown_SaysThereIsNothingToCheckAgainst(self, store):
         everyday(store)
 
-        assert "No known balance: these rows cannot be verified." in self.page(store)
+        assert (
+            "No known balance, so there is nothing to check the transactions against."
+            in self.page(store)
+        )
 
     def test_Page_WhenABalanceIsUnmet_NamesWhatHoldsBackAndLinksItsExplanation(self, store):
         everyday(store)
@@ -281,9 +295,9 @@ class TestThePage:
 
         page = self.page(store)
 
-        assert "Held back by the known balance for 2026-03-15" in page
+        assert "The transactions do not add up to the known balance for 2026-03-15" in page
         assert 'href="#opening"' in page, "the explanation is on this page"
-        assert '<details id="opening" open>' in page, "held back, so it is open to be read"
+        assert '<details id="opening" open>' in page, "it does not add up, so it is open to read"
 
     def test_Page_WhenAMovementFaultHoldsAgreementBack_LinksTheMovementChecks(self, store):
         everyday(store)
@@ -294,7 +308,7 @@ class TestThePage:
 
         page = self.page(store, movement=report)
 
-        assert "Held back by a movement fault dated 2026-03-08" in page
+        assert "The transactions stop adding up at 2026-03-08, because of a movement fault" in page
         assert 'href="/identity-health"' in page
 
     def test_Page_ShowsWhichSourceClearedARowAndTheCounts(self, store):
@@ -303,7 +317,7 @@ class TestThePage:
 
         page = self.page(store)
 
-        assert "cleared by starling-csv" in page
+        assert "cleared by <code>starling-csv</code>" in page
         assert page.count(">cleared by ") == 1, "the aggregator-only row carries no mark"
         assert "1 row is cleared and 1 is not" in page
 

@@ -61,6 +61,7 @@ from math import floor, log10
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
+from .account_names import AccountShown
 from .balance_chart import OWN, WHOLE, BalanceChart, SourceLine
 from .balance_chart_bins import (
     DAY,
@@ -668,7 +669,7 @@ def _range_summary(
     if not changes:
         return (
             f"<p><strong>No change falls in this {noun}</strong>, {_mono(start)} to "
-            f"{_mono(end)}: the rows are in agreement with the known balances throughout it.</p>"
+            f"{_mono(end)}: the transactions add up to the known balances throughout it.</p>"
         )
     counts = count_by_kind(changes)
     held = [_kind_phrase(kind, counts[kind]) for kind in KINDS if counts[kind]]
@@ -1432,8 +1433,7 @@ def render_balance_chart(
     `window_fields` ask for (see the module docstring), as at `today`; neither means
     everything held. A window is drawn fitted to the screen unless `wide`."""
     view = Disclosed(chart, unmasked=unmasked)
-    name = view.label or view.ref
-    body = f"<p><strong>{_esc(name)}</strong></p>"
+    body = f"<p><strong>{AccountShown.named(view.ref, view.label).as_name()}</strong></p>"
     if view.state == "unknown":
         return render_page(
             "Balance differences",

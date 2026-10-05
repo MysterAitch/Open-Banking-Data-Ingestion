@@ -103,7 +103,8 @@ SHARED_STYLES = """
  p { margin: var(--s2) 0; }
  a { color: var(--act); text-decoration-thickness: var(--rule-weight); text-underline-offset: .2em; }
  code { font-family: var(--mono); font-size: .9em; background: var(--card);
-        border: var(--rule-weight) solid var(--rule); padding: 0 var(--s1); border-radius: var(--s1); }
+        border: var(--rule-weight) solid var(--rule); padding: 0 var(--s1); border-radius: var(--s1);
+        overflow-wrap: anywhere; }
  /* The ring is a token, on every control; nothing removes it without a
     replacement, and a test holds that. */
  :focus-visible { outline: var(--focus-width) solid var(--focus); outline-offset: var(--focus-gap); }
@@ -155,6 +156,8 @@ SHARED_STYLES = """
  .pill { display: inline-block; max-width: 100%; padding: 0 .45rem; border-radius: var(--s1);
          border: var(--rule-weight) solid var(--edge); color: var(--ink-2); background: transparent;
          font: 600 var(--text-xs)/150% var(--sans); }
+ /* In a chip the identifier keeps the chip's face: monospace made a row's chips wrap. */
+ .pill code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
  .pill-ok { color: var(--ok); border-color: var(--ok); }
  .pill-bad { color: var(--bad); border-color: var(--bad); }
  .pill-warn { color: var(--warn); border-color: var(--warn); }
@@ -171,7 +174,11 @@ SHARED_STYLES = """
  .nowrap { white-space: nowrap; word-break: normal; }
  .warn { color: var(--warn); font-weight: 600; }
  .bad, .alarm { color: var(--bad); font-weight: 600; }
- .ok { color: var(--ok); }
+ /* A good result is said quietly: ordinary size and weight, a small --ok tick, no coloured
+    sentence. The one rule for every page; a test reads each stylesheet for any that shouts. */
+ .ok, .quiet-ok { color: var(--ink); font-weight: 400; }
+ .ok strong, .quiet-ok strong { font-weight: inherit; }
+ .ok::before, .quiet-ok::before { content: "\\2713\\00a0"; content: "\\2713\\00a0" / ""; color: var(--ok); }
  .dormant { color: var(--ink-2); }
  .box { margin: var(--s3) 0; padding: var(--s3); border: var(--rule-weight) solid var(--rule);
         border-radius: var(--radius); }

@@ -1,4 +1,4 @@
-"""The pages say "known balance", "in agreement", and "protected period", and nothing older.
+"""The pages say "known balance", "adds up", and "protected period", and nothing older.
 
 A review of the interface's words found "anchor" about eighty-seven times on the account page and
 "stated figure", "checkpoint", "defines the opening balance", and "protected through nowhere" for
@@ -96,7 +96,7 @@ class TestAnAccountNothingProtects:
 
         assert said.endswith("; protected through 2026-05-31.")
 
-    def test_StandingLine_WhenNoKnownBalance_SaysTheRowsCannotBeVerified(self):
+    def test_StandingLine_WhenNoKnownBalance_SaysThereIsNothingToCheckAgainst(self):
         said = standing_line(an_agreement(NONE, known=0), None)
 
-        assert said == "No known balance: these rows cannot be verified."
+        assert said == "No known balance, so there is nothing to check the transactions against."

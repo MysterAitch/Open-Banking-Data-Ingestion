@@ -32,7 +32,7 @@ from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .account_names import AccountShown, AccountsShown
+from .account_names import AccountShown, AccountsShown, code_html
 from .accounts import (
     BALANCE_ONLY_KIND,
     CASH_ACCOUNT_KIND,
@@ -55,9 +55,9 @@ from .plural import agree, plural
 from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
 from .standing_data import (
-    HELD_BACK,
-    UNVERIFIED,
-    VERIFIED,
+    ADDS_UP,
+    DOES_NOT_ADD_UP,
+    NOTHING_TO_CHECK_AGAINST,
     AccountStanding,
     standing_lines,
     verification_of,
@@ -375,17 +375,16 @@ def edit_link(ref: str, label: str) -> str:
 
 
 def _account_row(record: AccountRecord, today: date) -> str:
-    ref = html.escape(str(record.ref))
-    detail = [f'<span class="mono">{ref}</span>']
+    detail = [code_html(str(record.ref))]
     if record.kind:
         detail.append(html.escape(record.kind))
     if record.parent:
-        detail.append(f"under {html.escape(str(record.parent))}")
+        detail.append(f"under {code_html(str(record.parent))}")
     if record.opened:
         detail.append(f"opened {record.opened.isoformat()}")
     return (
         '<div class="row"><strong>'
-        f"{html.escape(record.label or str(record.ref))}</strong> "
+        f"{AccountShown.named(str(record.ref), record.label).as_name()}</strong> "
         + _state(record, today)
         + "<br>"
         + " - ".join(detail)
@@ -440,12 +439,17 @@ def _verdict(
 
 #: What a row that needs a look says would settle it, by its verdict.
 _REMEDIES = {
-    HELD_BACK: "Open its page to see what holds it back.",
-    UNVERIFIED: (
-        "State a known balance on its page, or upload a statement, and its rows can be tested."
+    DOES_NOT_ADD_UP: "Open its page to see where it stops adding up and why.",
+    NOTHING_TO_CHECK_AGAINST: (
+        "State a known balance on its page, or upload a statement, and its transactions "
+        "can be checked."
     ),
 }
-_VERDICT_CHIPS = {VERIFIED: "pill-ok", HELD_BACK: "pill-warn", UNVERIFIED: "pill-warn"}
+_VERDICT_CHIPS = {
+    ADDS_UP: "pill-ok",
+    DOES_NOT_ADD_UP: "pill-warn",
+    NOTHING_TO_CHECK_AGAINST: "pill-warn",
+}
 
 
 def _anchor(ref: str) -> str:
@@ -488,10 +492,10 @@ def _known_row(
     tick that said "declared" on every row read as "verified" on rows that were not.
     """
     ref = quote(account.ref, safe="")
-    detail = [f'<span class="mono">{html.escape(account.ref)}</span>']
+    detail = [code_html(account.ref)]
     detail.append(html.escape(account.kind) if account.kind else "no kind")
     if account.parent and show_parent:
-        detail.append(f"under {html.escape(account.parent)}")
+        detail.append(f"under {code_html(account.parent)}")
     detail.append(plural(account.rows, "row"))
     if spaces:
         detail.append(_spaces_phrase(spaces, today))
@@ -515,7 +519,7 @@ def _known_row(
     remedy = f'<br><span class="muted">{_REMEDIES[verdict]}</span>' if look else ""
     return (
         f'<div class="row" id="{_anchor(account.ref)}"{" data-look" if look else ""}{style}>'
-        f"<strong>{html.escape(account.label)}</strong>{chips}<br>"
+        f"<strong>{AccountShown.named(account.ref, account.label).as_name()}</strong>{chips}<br>"
         + " - ".join(detail)
         + f"{_verification_html(standing, verdict)}{remedy}<br>{links}</div>"
     )
@@ -528,9 +532,10 @@ def _listing(
 ) -> str:
     """The accounts that need a look first, then the rest, archived last.
 
-    Held back comes before cannot be verified, and an account takes the worst of its own
-    verdict and its Spaces', so a main account is not filed under "fine" with a troubled
-    Space folded beneath it. Each Space stays beneath its parent, in the same order.
+    An account that does not add up comes before one with nothing to check against, and an
+    account takes the worst of its own verdict and its Spaces', so a main account is not filed
+    under "fine" with a troubled Space folded beneath it. Each Space stays beneath its parent,
+    in the same order.
 
     A Space whose parent is not among the accounts listed stays at the top level and names its
     parent, as it did before the list was nested.
@@ -543,7 +548,7 @@ def _listing(
             children.setdefault(account.parent, []).append(account)
         else:
             top.append(account)
-    rank = {HELD_BACK: 0, UNVERIFIED: 1}
+    rank = {DOES_NOT_ADD_UP: 0, NOTHING_TO_CHECK_AGAINST: 1}
 
     def urgency(account: KnownAccount) -> int:
         family = [account, *children.get(account.ref, [])]
@@ -600,18 +605,25 @@ def _verification_summary(
     verdicts = {account.ref: _verdict(account, today, standings) for account in listed}
     counts = {
         word: sum(1 for verdict in verdicts.values() if verdict == word)
-        for word in (VERIFIED, HELD_BACK, UNVERIFIED)
+        for word in (ADDS_UP, DOES_NOT_ADD_UP, NOTHING_TO_CHECK_AGAINST)
     }
     sentence = verification_sentence(
-        sum(counts.values()), counts[VERIFIED], counts[HELD_BACK], counts[UNVERIFIED]
+        sum(counts.values()),
+        counts[ADDS_UP],
+        counts[DOES_NOT_ADD_UP],
+        counts[NOTHING_TO_CHECK_AGAINST],
     )
     if not sentence:
         return ""
-    body = f"<p><strong>{html.escape(sentence)}</strong></p>"
+    if counts[ADDS_UP] == sum(counts.values()):
+        body = f'<p class="ok">{html.escape(sentence)}</p>'
+    else:
+        body = f"<p><strong>{html.escape(sentence)}</strong></p>"
     named = []
-    for word in (HELD_BACK, UNVERIFIED):
+    for word in (DOES_NOT_ADD_UP, NOTHING_TO_CHECK_AGAINST):
         links = ", ".join(
-            f'<a class="tap" href="#{_anchor(account.ref)}">{html.escape(account.label)}</a>'
+            f'<a class="tap" href="#{_anchor(account.ref)}">'
+            f"{AccountShown.named(account.ref, account.label).as_name()}</a>"
             for account in listed
             if verdicts[account.ref] == word
         )
@@ -636,8 +648,8 @@ def _declare_known_section(known: KnownAccounts) -> str:
         return unnamed
     items = "".join(
         "<li>"
-        f"<strong>{html.escape(a.label)}</strong> - "
-        f'<span class="mono">{html.escape(a.ref)}</span>, '
+        f"<strong>{AccountShown.named(a.ref, a.label).as_name()}</strong> - "
+        f"{code_html(a.ref)}, "
         + (
             f"kind {html.escape(a.kind)} ({html.escape(a.kind_reason)})"
             if a.kind
@@ -669,8 +681,7 @@ def _parents_section(plan: ParentPlan) -> str:
     body = ""
     if plan.settable:
         items = "".join(
-            f'<li><span class="mono">{html.escape(c.space)}</span> under '
-            f'<span class="mono">{html.escape(c.main)}</span></li>'
+            f"<li>{code_html(c.space)} under {code_html(c.main)}</li>"
             for c in plan.settable
         )
         hidden = "".join(
@@ -689,8 +700,8 @@ def _parents_section(plan: ParentPlan) -> str:
         )
     if plan.waiting:
         items = "".join(
-            f'<li><span class="mono">{html.escape(c.space)}</span> belongs under '
-            f'<span class="mono">{html.escape(c.main)}</span>, which is not declared</li>'
+            f"<li>{code_html(c.space)} belongs under {code_html(c.main)}, "
+            "which is not declared</li>"
             for c in plan.waiting
         )
         body += (
@@ -700,9 +711,8 @@ def _parents_section(plan: ParentPlan) -> str:
         )
     if plan.disagreeing:
         items = "".join(
-            f'<li><span class="mono">{html.escape(d.space)}</span>: the registry says '
-            f'<span class="mono">{html.escape(d.registry)}</span>, the provider\'s '
-            f'structure says <span class="mono">{html.escape(d.provider)}</span></li>'
+            f"<li>{code_html(d.space)}: the registry says {code_html(d.registry)}, "
+            f"the provider's structure says {code_html(d.provider)}</li>"
             for d in plan.disagreeing
         )
         body += (
@@ -1199,17 +1209,17 @@ class AccountPages(AnswerPages):
         outcome = hook([ref for ref in form.get("ref", []) if ref.strip()])
         items = "".join(
             f'<li><a class="tap" href="{html.escape(ledger_href(a.ref))}">'
-            f"<strong>{html.escape(a.label)}</strong></a> - "
-            f'<span class="mono">{html.escape(a.ref)}</span>'
+            f"<strong>{AccountShown.named(a.ref, a.label).as_name()}</strong></a> - "
+            f"{code_html(a.ref)}"
             + (f", kind {html.escape(a.kind)}" if a.kind else "")
-            + (f", under {html.escape(a.parent)}" if a.parent else "")
+            + (f", under {code_html(a.parent)}" if a.parent else "")
             + "</li>"
             for a in outcome.declared
         )
         skipped = (
             "<p>Not declared, because each is already declared or is not an account "
             "obdi holds: "
-            + ", ".join(f'<span class="mono">{html.escape(r)}</span>' for r in outcome.skipped)
+            + ", ".join(code_html(r) for r in outcome.skipped)
             + ".</p>"
             if outcome.skipped
             else ""
@@ -1237,15 +1247,15 @@ class AccountPages(AnswerPages):
         outcome = hook([space for space in form.get("space", []) if space.strip()])
         items = "".join(
             f'<li><a class="tap" href="{html.escape(ledger_href(c.space))}">'
-            f'<span class="mono">{html.escape(c.space)}</span></a> now under '
+            f"{code_html(c.space)}</a> now under "
             f'<a class="tap" href="{html.escape(ledger_href(c.main))}">'
-            f'<span class="mono">{html.escape(c.main)}</span></a></li>'
+            f"{code_html(c.main)}</a></li>"
             for c in outcome.set_
         )
         skipped = (
             "<p>Left alone, because each is no longer settable (already set, "
             "disagreeing, or its main account is not declared): "
-            + ", ".join(f'<span class="mono">{html.escape(r)}</span>' for r in outcome.skipped)
+            + ", ".join(code_html(r) for r in outcome.skipped)
             + ".</p>"
             if outcome.skipped
             else ""
@@ -1378,7 +1388,7 @@ class AccountPages(AnswerPages):
                 ledger_link(str(stored.ref), stored.label or str(stored.ref))
                 + f'<p class="ok"><strong>{html.escape(stored.label or str(stored.ref))}'
                 f"</strong> {verb} "
-                f'<span class="mono">{html.escape(str(stored.ref))}</span>.</p>'
+                f"{code_html(str(stored.ref))}.</p>"
                 + (f"<p>{html.escape(sentence)}</p>" if sentence else "")
                 + (
                     "<p>It can now be chosen wherever an account is chosen - "

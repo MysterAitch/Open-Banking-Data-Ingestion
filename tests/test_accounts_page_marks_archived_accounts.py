@@ -30,6 +30,7 @@ from datetime import date
 
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.accounts import ARCHIVE_BASIS_PREFIX, AccountMap, AccountRecord, AccountRef
 from obdi.known_accounts import KnownAccount, KnownAccounts, read_known_accounts
 from obdi.overview import ARCHIVED
@@ -102,7 +103,7 @@ def store(tmp_path):
 
 
 def known_of(store: Store) -> KnownAccounts:
-    return read_known_accounts(store, AccountMap(), {})
+    return read_known_accounts(store, AccountMap(), accounts_shown({}, store.declared_accounts()))
 
 
 def rendered(known: KnownAccounts) -> str:
@@ -113,7 +114,7 @@ def rows_of(page: str) -> dict[str, str]:
     """Each account's row, in the order the page lists them."""
     found: dict[str, str] = {}
     for block in re.split(r'(?=<div class="row")', page):
-        match = re.search(r'<span class="mono">([^<]+)</span>', block)
+        match = re.search(r"<code>([^<]+)</code>", block)
         if block.startswith('<div class="row"') and match:
             found[html.unescape(match.group(1))] = block.split("</div>")[0]
     return found
@@ -240,7 +241,7 @@ class TestTheListIsOrderedAndNested:
 
         rows = rows_of(rendered(KnownAccounts((*known.accounts, orphan), 0)))
 
-        assert "under missing-main" in rows["orphan-space"]
+        assert "under <code>missing-main</code>" in rows["orphan-space"]
         assert "margin-left" not in rows["orphan-space"]
 
 

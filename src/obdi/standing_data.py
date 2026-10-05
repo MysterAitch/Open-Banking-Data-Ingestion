@@ -204,49 +204,54 @@ def standings_for(
     return found
 
 
-#: What an account's verification comes to, in the words its chip says. Today's Verification
-#: line counts accounts by these and the Accounts page marks each account with one, from the
-#: one function below, so a count on one page is the number of chips on the other.
-VERIFIED = "in agreement"
-HELD_BACK = "held back"
-UNVERIFIED = "cannot be verified"
+#: What an account's verification comes to, in the words its chip says. The question is whether
+#: an account's TRANSACTIONS add up to the balances its sources state, so the words name both
+#: things. Today's Verification line counts accounts by these and the Accounts page marks each
+#: account with one, from the one function below, so a count on one page is the number of chips
+#: on the other. Every page reads these words from here and none writes its own. The rule itself
+#: is called `agreement` inside the code; that is its name there and not a word of any page, and
+#: "match" is not used for it because two sources match each other and transfers are matched.
+ADDS_UP = "adds up"
+DOES_NOT_ADD_UP = "does not add up"
+NOTHING_TO_CHECK_AGAINST = "nothing to check against"
 
 
 def verification_of(item: AccountStanding | None) -> str:
-    """Which of the three an account is: in agreement, held back, or not verifiable.
+    """Which of the three an account is: it adds up, it does not, or there is nothing to check.
 
     An account with no standing, no known balance, or one known balance that only sets the
-    opening has nothing testing its rows. One whose agreement stops short of its latest
-    known balance is held back, whatever its state up to there.
+    opening has nothing testing its transactions. One whose transactions stop adding up short of
+    its latest known balance does not add up, whatever its state up to there.
     """
     from .agreement import AGREES, NONE, UNTESTED
 
     if item is None or item.standing.own.state in (NONE, UNTESTED):
-        return UNVERIFIED
+        return NOTHING_TO_CHECK_AGAINST
     if item.standing.own.held is not None:
-        return HELD_BACK
-    return VERIFIED if item.standing.own.state == AGREES else UNVERIFIED
+        return DOES_NOT_ADD_UP
+    return ADDS_UP if item.standing.own.state == AGREES else NOTHING_TO_CHECK_AGAINST
 
 
-def verification_sentence(counted: int, agreeing: int, held: int, unverified: int) -> str:
-    """The one sentence that says how many accounts are in agreement and how many are not.
+def verification_sentence(counted: int, adding_up: int, not_adding_up: int, nothing: int) -> str:
+    """The one sentence that says how many accounts add up to their known balances and how many
+    do not, or cannot be checked.
 
     Empty where no account is counted: the caller says what an empty household says.
     """
-    from .plural import plural
+    from .plural import agree, plural
 
     if counted == 0:
         return ""
-    if agreeing == counted:
-        return (
-            f"All {plural(counted, 'account')} in agreement through their latest known balance."
-        )
-    said = [f"{agreeing} of {plural(counted, 'account')} in agreement through their latest "
-            "known balance"]
-    if held:
-        said.append(f"{held} {HELD_BACK}")
-    if unverified:
-        said.append(f"{unverified} {UNVERIFIED}")
+    if adding_up == counted:
+        if counted == 1:
+            return "The account adds up to its latest known balance."
+        return f"All {plural(counted, 'account')} add up to their latest known balance."
+    verb = "adds up" if adding_up == 1 else "add up"
+    said = [f"{adding_up} of {plural(counted, 'account')} {verb} to their latest known balance"]
+    if not_adding_up:
+        said.append(f"{not_adding_up} {agree(not_adding_up, 'does')} not add up")
+    if nothing:
+        said.append(f"{nothing} {agree(nothing, 'has')} nothing to check against")
     return "; ".join(said) + "."
 
 

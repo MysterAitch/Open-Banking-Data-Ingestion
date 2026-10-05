@@ -115,7 +115,7 @@ def shown(base: str, ref: str, *, everything: bool = False) -> httpx.Response:
 
 
 def agreeing_listed(page: str) -> int:
-    return page.count('<span class="pill pill-ok">in agreement</span>')
+    return page.count('<span class="pill pill-ok">adds up</span>')
 
 
 def differing_listed(page: str) -> int:
@@ -133,14 +133,14 @@ class TestTheDefaultPage:
         page = get(base, BULK)
 
         earlier = 1999 - SHOWN_AGREEING
-        assert f"and {earlier:,} earlier known balances, all in agreement" in page
-        assert "(1,999 in agreement, none differ)" in page
+        assert f"and {earlier:,} earlier known balances, all add up" in page
+        assert "(1,999 add up, none differ)" in page
 
     def test_TheEarlierLine_LinksToTheFullListAndOnlyThere(self, base):
         page = get(base, BULK)
 
         link = re.search(
-            r'<a class="tap" href="([^"]*)">and 1,989 earlier known balances, all in agreement</a>',
+            r'<a class="tap" href="([^"]*)">and 1,989 earlier known balances, all add up</a>',
             page,
         )
         assert link is not None
@@ -181,12 +181,12 @@ class TestABalanceThatDiffersIsAlwaysShown:
         assert differing_listed(page) == 1
         assert agreeing_listed(page) == SHOWN_AGREEING
         assert f"End of <span class=\"mono nowrap\">{FAULT_DAY.isoformat()}</span>" in page
-        assert "(198 in agreement, 1 differ)" in page
+        assert "(198 add up, 1 differ)" in page
 
     def test_TheEarlierLine_CountsOnlyTheAgreeingOnesLeftOut(self, base):
         page = get(base, FAULTY)
 
-        assert "and 188 earlier known balances, all in agreement" in page
+        assert "and 188 earlier known balances, all add up" in page
 
     def test_TheDifferingBalance_IsShownMaskedAndWithValuesAlike(self, base):
         page = shown(base, FAULTY).text
@@ -217,7 +217,7 @@ class TestTheFullList:
         assert "balances=all" not in page, "no address that opens a page of values"
         assert re.search(
             r'<form method="post" action="/ledger">(?:(?!</form>).)*name="balances" value="all"'
-            r'(?:(?!</form>).)*and 1,989 earlier known balances, all in agreement',
+            r'(?:(?!</form>).)*and 1,989 earlier known balances, all add up',
             page,
             flags=re.S,
         )

@@ -60,6 +60,11 @@ class AccountShown:
         """The name alone, escaped, for the content of a heading."""
         return html.escape(self.name)
 
+    def as_name(self) -> str:
+        """The name alone as a phrase or link text: the label as text, and where nothing names
+        the account but its reference, that reference as code (it is an identifier, not a word)."""
+        return html.escape(self.label) if self.label else code_html(self.ref)
+
     def inline(self) -> str:
         """A mention in a sentence: the name, then the reference as code where the two differ."""
         if not self.label:

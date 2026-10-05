@@ -72,14 +72,14 @@ class TestWhatEachSourceStated:
         page = page_of(made(REAL_ORDER, late_settlement_payments()))
 
         assert (
-            "<strong>starling</strong> - founded this row: "
+            "<code>starling</code> - founded this row: "
             "transactionTime 2026-09-14 11:20, settlementTime 2026-09-15 04:00"
         ) in page
         assert (
-            "<strong>truelayer</strong> - joined to the row by id: timestamp 2026-09-14 11:00"
+            "<code>truelayer</code> - joined to the row by id: timestamp 2026-09-14 11:00"
         ) in page
         assert (
-            "<strong>starling-csv</strong> - joined by settlement date: Date 2026-09-15"
+            "<code>starling-csv</code> - joined by settlement date: Date 2026-09-15"
         ) in page
 
     def test_Row_WhenSettledMonthsLaterInWinter_ShowsTheWinterClockForTheSettlement(self, made):
@@ -154,6 +154,6 @@ class TestASpacesCopy:
         page = page_of(made(REAL_ORDER, payments), BILLS)
 
         assert (
-            "<strong>truelayer</strong> - copied from the main account&#x27;s row, "
+            "<code>truelayer</code> - copied from the main account&#x27;s row, "
             "joined to the row by id"
         ) in page

@@ -511,7 +511,7 @@ class TestTheAccountsPage:
         assert lab.declared() == HELD_UNDECLARED | {"tin"}
         assert "Declared 6 accounts." in result.text
         for ref in HELD_UNDECLARED:
-            assert f'<span class="mono">{ref}</span>' in result.text, ref
+            assert f"<code>{ref}</code>" in result.text, ref
 
     def test_SecondPress_DeclaresNothingAndSaysSo(self, lab):
         listed = shown_refs(lab.get("/accounts").text)

@@ -17,6 +17,7 @@ TIMELINE_STYLES = """
  .cov-labels { flex: 0 0 auto; width: 7rem; font: var(--text-xs)/120% var(--sans); border-right: var(--rule-weight) solid var(--rule); }
  .cov-label { display: flex; flex-direction: column; justify-content: center; padding: 0 var(--s2); border-bottom: var(--rule-weight) solid var(--rule-2); overflow: hidden; }
  .cov-label small { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+ .cov-label code { background: none; border: 0; padding: 0; font-size: inherit; }
  .cov-label a { color: inherit; }
  .cov-scroll { flex: 1 1 0; min-width: 0; overflow-x: auto; direction: rtl; }
  .cov-inner { direction: ltr; min-width: 100%; }

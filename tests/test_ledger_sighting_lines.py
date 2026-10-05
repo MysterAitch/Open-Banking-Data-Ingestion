@@ -82,7 +82,7 @@ def page_of(store: Store) -> str:
 
 def lines_of(page: str, source: str) -> list[str]:
     """The sighting lines of the payment's row for one source, without markup."""
-    found = re.findall(rf'<p class="muted"><strong>{source}</strong> - (.*?)</p>', page)
+    found = re.findall(rf'<p class="muted"><code>{source}</code> - (.*?)</p>', page)
     return [html.unescape(line) for line in found if "2026-09-14 11:00" in html.unescape(line)]
 
 

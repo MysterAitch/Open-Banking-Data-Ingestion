@@ -197,7 +197,7 @@ class TestTwoAnchors:
 
         page = lab.get().text
 
-        assert '<span class="pill pill-ok">in agreement</span>' in page
+        assert '<span class="pill pill-ok">adds up</span>' in page
         assert "later known balance differs" not in page
         assert "later known balances differ" not in page
         assert "A second known balance turns it into a test." not in page
@@ -226,7 +226,7 @@ AGREEING_LATER_DAYS = tuple(f"03-{day}" for day in range(20, 32))
 #: of them (`web_ledger._SHOWN_AGREEING_ANCHORS`, which `test_account_page_known_balances` holds).
 LISTED = 10
 
-IN_AGREEMENT = '<span class="pill pill-ok">in agreement</span>'
+IN_AGREEMENT = '<span class="pill pill-ok">adds up</span>'
 DIFFERS = '<span class="pill pill-bad">differs</span>'
 
 
@@ -239,7 +239,7 @@ class TestALongRunOfAgreeingAnchorsIsCutToTheNewest:
         page = lab.get().text
 
         assert page.count(IN_AGREEMENT) == LISTED
-        assert "and 2 earlier known balances, all in agreement" in page
+        assert "and 2 earlier known balances, all add up" in page
         assert "balances=all#opening" in page
         assert "End of <span class=\"mono nowrap\">2026-03-31</span>" in page
         assert "End of <span class=\"mono nowrap\">2026-03-21</span>" not in page
@@ -264,7 +264,7 @@ class TestALongRunOfAgreeingAnchorsIsCutToTheNewest:
         page = lab.get().text
 
         assert page.count(IN_AGREEMENT) == LISTED
-        assert "and 1 earlier known balance, in agreement" in page
+        assert "and 1 earlier known balance, which adds up" in page
 
     def test_ADifferingAnchorAmongManyAgreeing_IsListedAlongsideTheNewestAgreeingOnes(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
@@ -277,7 +277,7 @@ class TestALongRunOfAgreeingAnchorsIsCutToTheNewest:
 
         assert page.count(DIFFERS) == 1
         assert page.count(IN_AGREEMENT) == LISTED
-        assert "and 2 earlier known balances, all in agreement" in page
+        assert "and 2 earlier known balances, all add up" in page
         assert "1 later known balance differs" in page
         assert "overdrawn or owed £489.89" in shown
         assert_no_secret(page)

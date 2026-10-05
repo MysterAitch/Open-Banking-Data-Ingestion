@@ -505,7 +505,8 @@ def press(
         )
     if through not in tested_days(opening, standing):
         raise ProtectionRefused(
-            "the account is not in agreement through that date, so nothing has verified it"
+            "the account's transactions have not been shown to add up to the known balances up "
+            "to that date, so nothing has verified it"
         )
     if opening.opening_minor is None:
         raise ProtectionRefused("no opening balance could be derived for the account")
@@ -688,7 +689,7 @@ def protection_view(
     elif standing is not None and standing.own.known_count == 0:
         not_offered = "there is no known balance to verify the account against"
     elif standing is None or not allowed:
-        not_offered = "the account is not in agreement through any known balance yet"
+        not_offered = "the account's transactions do not yet add up to any known balance"
     elif opening.opening_minor is None:
         not_offered = "no opening balance could be derived"
     else:
@@ -705,7 +706,10 @@ def protection_view(
     else:
         offer = tuple(d for d in offer if d > through)
         if not offer and not not_offered:
-            not_offered = "the account is protected through its latest known balance in agreement"
+            not_offered = (
+                "the account is already protected up to the latest known balance its "
+                "transactions add up to"
+            )
     start = date.fromisoformat(str(record["span_start"]))
     before = [t for t in rows if not t.status.is_history and t.value_date < start]
     fits, said = True, ""

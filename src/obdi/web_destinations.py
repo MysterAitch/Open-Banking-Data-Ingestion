@@ -461,7 +461,7 @@ def _statistics_rows(
         return ""
     items = "".join(
         f'<li><a class="tap" href="/account?ref={quote(ref, safe="")}">'
-        f"{named.of(ref).inline()}</a></li>"
+        f"{named.of(ref).as_name()}</a></li>"
         for ref in refs
     )
     return (

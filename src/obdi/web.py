@@ -42,7 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
-from .account_names import AccountsShown, accounts_shown, code_html
+from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
@@ -1060,8 +1060,10 @@ def _shape_detail(field: dict[str, object]) -> str:
             + warning
         )
     if isinstance(values, list) and values:
+        # The values of the `source` field are the names of sources, which are identifiers.
+        shown_value = code_html if field.get("path") == "source" else html.escape
         listed = ", ".join(
-            f"{html.escape(str(v.get('value')))} x{v.get('count')}"
+            f"{shown_value(str(v.get('value')))} x{v.get('count')}"
             for v in values
             if isinstance(v, dict)
         )
@@ -1118,7 +1120,7 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
         rows, key=lambda e: -int(str(e.get("transactions", 0) or 0))
     ):
         label = html.escape(str(entry.get("label") or entry.get("feeder") or ""))
-        source = html.escape(str(entry.get("source", "")))
+        source = code_html(str(entry.get("source", "")))
         count = int(str(entry.get("transactions", 0) or 0))
         raw_connections = entry.get("connections")
         connections = (
@@ -1132,7 +1134,7 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
             else ""
         )
         lines.append(
-            f'<span class="muted">{source}</span> {label}: '
+            f"{source} {label}: "
             f"<strong>{count:,}</strong> {word(count, 'transaction')}{via}<br>"
         )
     lines.append("</div>")
@@ -1206,9 +1208,14 @@ def _insight_sections(summary: dict[str, object]) -> str:
     parts: list[str] = []
     sign_by = summary.get("sign_by")
     if isinstance(sign_by, list) and sign_by:
+        def shown_cell(r: dict[str, object]) -> str:
+            # The values of the `source` field are the names of sources, which are identifiers.
+            value = str(r.get("value"))
+            return code_html(value) if r.get("field") == "source" else html.escape(value)
+
         rows = "".join(
             f'<tr><td>{html.escape(str(r.get("field")))}</td>'
-            f'<td>{html.escape(str(r.get("value")))}</td>'
+            f"<td>{shown_cell(r)}</td>"
             f'<td>{r.get("positive")}</td><td>{r.get("negative")}</td>'
             f'<td>{r.get("zero")}</td></tr>'
             for r in sign_by
@@ -1764,10 +1771,10 @@ def _feeder_line(
     refs = feeders.get(account_id, [])
     if not refs:
         return ""
-    shown = ", ".join(html.escape(_short_ref(ref)) for ref in refs)
+    shown = ", ".join(code_html(_short_ref(ref)) for ref in refs)
     css = "warn" if len(refs) > 1 else "muted"
     note = " - several sources feed this one account" if len(refs) > 1 else ""
-    return f'<br><span class="{css} mono">bound from: {shown}{note}</span>'
+    return f'<br><span class="{css}">bound from: {shown}{note}</span>'
 
 
 def _holdings_rows(
@@ -1855,7 +1862,7 @@ def _holdings_rows(
     # eye finds what changed this week without wading through 2022 first.
     for row in sorted(rows, key=lambda r: r.latest, reverse=True):
         shown = names.of(row.account_id)
-        title = shown.heading()
+        title = shown.as_name()
         sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
         note = notes.get(row.account_id)
         quiet = ""
@@ -1914,7 +1921,7 @@ def _holdings_rows(
             f'<a class="tap nowrap" href="/ledger?ref={quote(row.account_id, safe="")}">'
             "Ledger (transactions)</a></div>"
             "via "
-            + html.escape(
+            + code_html(
                 _via_label(
                     row.source,
                     (source_connections or {}).get((row.account_id, row.source)),
@@ -1934,7 +1941,7 @@ def _holdings_rows(
         if ref in held_refs:
             continue
         shown = names.of(ref)
-        title = shown.heading()
+        title = shown.as_name()
         sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
         probed = _mark(ref, "probed")
         covered = _mark(ref, "covered")
@@ -2089,8 +2096,8 @@ def _reference_tag(ref: str) -> str:
 
 
 def _roster_row(entry: dict[str, object], show_ref: bool = False) -> str:
-    label = html.escape(str(entry.get("label", "")))
     ref = str(entry.get("ref", ""))
+    label = AccountShown.named(ref, str(entry.get("label", ""))).as_name()
     if show_ref:
         label += _reference_tag(ref)
     state = str(entry.get("state", ""))
@@ -4464,8 +4471,8 @@ class ConnectionHandler(
                 f'{html.escape(str(r.get("outcome", "")))}</span>'
             )
             + f'<br><span class="muted">'
-            f'{html.escape(_short_ref(str(r.get("account_ref", ""))))} - '
-            f'{html.escape(str(r.get("source", "")).removeprefix("truelayer-"))} - '
+            f'{code_html(_short_ref(str(r.get("account_ref", ""))))} - '
+            f'{code_html(str(r.get("source", "")).removeprefix("truelayer-"))} - '
             f"{html.escape(_trigger_of(r.get('request_meta')))}</span>"
             f'<br><span class="mono">{html.escape(str(r.get("asked", "")))}</span>'
             + (
@@ -4820,12 +4827,11 @@ class ConnectionHandler(
                 f'({html.escape(str(details.get("account_type", "")))}) '
                 f'via {html.escape(str(details.get("connection", "")))}</span>'
             )
-        heading = shown.heading()
         id_line = f"<br>{shown.code()}" if shown.labelled else ""
         raw_breakdown = shape.get("breakdown")
         breakdown = raw_breakdown if isinstance(raw_breakdown, dict) else {}
         body = (
-            f"<p><strong>{heading}</strong>{id_line}{details_html}<br>"
+            f"<p><strong>{shown.as_name()}</strong>{id_line}{details_html}<br>"
             f"{plural(int(str(shape.get('count', 0) or 0)), 'merged transaction')} "
             f"from {source_list or 'unknown sources'}</p>"
             "<p>This is the merged layer - what the store believes after "

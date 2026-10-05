@@ -39,6 +39,7 @@ from coverage_timeline_world import (
 )
 from fetch_gaps_world import load_household
 from obdi import coverage_timeline as ct
+from obdi.account_names import AccountsShown
 from obdi.fetch_gaps import GapKind, gaps_for_account
 from obdi.statement_span import Known as SpanKnown
 from obdi.statement_span import Span
@@ -286,7 +287,7 @@ class TestOnePlaceForGaps:
             ).decode()
             outlook = world.outlook(ref)
             assert outlook is not None
-            fetch_page = render_gaps(world.report, {}).decode()
+            fetch_page = render_gaps(world.report, AccountsShown()).decode()
             for gap in outlook.gaps:
                 span = (
                     gap.first_day.isoformat()

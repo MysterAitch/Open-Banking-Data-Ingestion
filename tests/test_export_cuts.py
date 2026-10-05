@@ -671,7 +671,7 @@ class TestTheExplanationsOnThePage:
         assert "The change at the end of" in page
         assert "the store counts in the window that starling-csv does not list" in page
         assert "out row dated" in page
-        assert "seen by starling; booked" in page
+        assert "seen by <code>starling</code>; booked" in page
         assert "the negative of a single counted row" in page
 
     def test_Page_WhenARowIsVoid_SaysItIsListedButNotCountedAndWhy(self, make):

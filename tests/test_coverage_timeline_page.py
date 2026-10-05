@@ -164,7 +164,7 @@ class TestMarksAndTheList:
         for label in (
             "A seam where another source holds rows this capture lacks",
             "A seam with no other source to compare it with",
-            "A known balance the rows do not reproduce",
+            "A known balance the transactions do not add up to",
             "Days to fill",
         ):
             assert label in key

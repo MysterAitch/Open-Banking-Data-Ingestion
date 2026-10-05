@@ -254,7 +254,7 @@ class TestThePageWhenTheMortgageIsLeftOut:
     def test_Page_NamesWhatTheChartLeavesOut(self, position):
         page = page_of(position, every_key(position) - {MORTGAGE})
 
-        assert "The chart leaves out: Mortgage (hsbc-mortgage)." in page
+        assert "The chart leaves out: <strong>Mortgage</strong> <code>hsbc-mortgage</code>." in page
 
     def test_Page_WhenNothingIsLeftOut_DoesNotSayTheChartLeavesAnythingOut(self, position):
         page = page_of(position, None)
@@ -327,12 +327,18 @@ class TestThePageWhenTheMortgageIsLeftOut:
     def test_Caption_WhenSeveralAreLeftOut_ListsThemWithTheSerialComma(self, position):
         page = page_of(position, {SAVER})
 
-        assert "The chart leaves out: everyday, Mortgage (hsbc-mortgage), and mystery." in page
+        assert (
+            "The chart leaves out: <code>everyday</code>, <strong>Mortgage</strong> "
+            "<code>hsbc-mortgage</code>, and <code>mystery</code>." in page
+        )
 
     def test_Caption_WhenTwoAreLeftOut_JoinsThemWithAnd(self, position):
         page = page_of(position, {SAVER, EVERYDAY})
 
-        assert "The chart leaves out: Mortgage (hsbc-mortgage) and mystery." in page
+        assert (
+            "The chart leaves out: <strong>Mortgage</strong> <code>hsbc-mortgage</code> and "
+            "<code>mystery</code>." in page
+        )
 
 
 class TestTheTicks:
@@ -475,7 +481,10 @@ class TestTheRoutes:
         )
 
         assert response.status_code == 200
-        assert "The chart leaves out: Mortgage (hsbc-mortgage)." in response.text
+        assert (
+            "The chart leaves out: <strong>Mortgage</strong> <code>hsbc-mortgage</code>."
+            in response.text
+        )
         assert "<svg" in response.text
         assert "Chosen accounts only" in response.text
 

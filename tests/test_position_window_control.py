@@ -267,7 +267,7 @@ class TestWhatEachTapAsks:
 
         assert "data-below-nil" in with_dip
         assert "data-below-nil" not in without
-        assert "The chart leaves out: card" in without
+        assert "The chart leaves out: <code>card</code>" in without
         assert "One figure per day." in without
 
     def test_AWindowOverTheDip_AndOneThatEndsBeforeIt_DifferInWhatIsBelowNil(self, held):

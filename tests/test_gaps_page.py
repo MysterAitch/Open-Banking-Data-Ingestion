@@ -16,6 +16,7 @@ from datetime import date
 import pytest
 
 from fetch_gaps_world import TODAY, Loaded, load_household
+from obdi.account_names import AccountsShown, accounts_shown
 from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from obdi.store import Store
 from obdi.web_gaps import render_gaps, verdict_sentence
@@ -34,9 +35,9 @@ def repaired(tmp_path_factory):
     return load_household(tmp_path_factory.mktemp("gaps-page-repaired"), repaired=True)
 
 
-def names_of(loaded: Loaded) -> dict[str, str]:
+def names_of(loaded: Loaded) -> AccountsShown:
     with Store(loaded.db) as store:
-        return {str(r.ref): r.label for r in store.declared_accounts() if r.label}
+        return accounts_shown({}, store.declared_accounts())
 
 
 def page_of(loaded: Loaded) -> str:
@@ -152,7 +153,7 @@ class TestTheSentences:
 
     def test_Accounts_WhenNothingIsKnown_UseTheAccountsPagesWords(self, world):
         said = text(block(page_of(world), "Qif card"))
-        assert "No known balance: these rows cannot be verified." in said
+        assert "No known balance, so there is nothing to check the transactions against." in said
         assert "Fetch a statement covering 2026-08-03 to 2026-08-20, or state a balance." in said
         automatic = text(block(page_of(world), "Feed-only card"))
         assert "Only the bank's feed and the aggregator supply this account" in automatic

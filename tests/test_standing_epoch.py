@@ -35,8 +35,8 @@ from test_balance_anchors import ACCOUNT, everyday
 
 D = date
 
-AGREED_THROUGH_MARCH_20 = "in agreement through 2026-03-20"
-AGREED_THROUGH_MARCH_25 = "in agreement through 2026-03-25"
+AGREED_THROUGH_MARCH_20 = "every known balance from 2026-03-05 to 2026-03-20"
+AGREED_THROUGH_MARCH_25 = "every known balance from 2026-03-05 to 2026-03-25"
 
 
 def declare(store: Store, ref: str = ACCOUNT, kind: str = "current") -> None:
@@ -97,8 +97,12 @@ def edit_kind(served: str, kind: str) -> None:
 def card(page: str) -> str:
     """The agreement sentence a page gives for the account, so a stale one names its date."""
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
-    found = re.search(r"in agreement through (\d{4}-\d\d-\d\d|no date yet)", text)
-    return found.group(0) if found else "no agreement sentence"
+    found = re.search(
+        r"every known balance from \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d"
+        r"|do not yet add up to any known balance",
+        text,
+    )
+    return found.group(0) if found else "no sentence saying whether it adds up"
 
 
 class TestEditingAnAccountMovesItsStanding:
@@ -309,7 +313,9 @@ class TestTheAccountMapFileIsPartOfTheKey:
 def known_through(page: str) -> str:
     """The last date of the account's known balances, as the Overview card states it."""
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
-    found = re.search(r"Known balances from \S+ to (\d{4}-\d\d-\d\d)", text)
+    latest = re.search(r"the latest known balance is for (\d{4}-\d\d-\d\d)", text)
+    through = re.search(r"every known balance from \S+ to (\d{4}-\d\d-\d\d)", text)
+    found = latest or through
     return found.group(1) if found else "no known-balances sentence"
 
 
@@ -410,20 +416,22 @@ def filed(tmp_path, monkeypatch):
 
 def agreements(page: str) -> list[str]:
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
-    return re.findall(r"in agreement through (?:\d{4}-\d\d-\d\d|no date yet)", text)
+    return re.findall(
+        r"add up to every known balance from \d{4}-\d\d-\d\d to (\d{4}-\d\d-\d\d)", text
+    )
 
 
 class TestRefilingAnArtefactMovesTheStandingsOfBothAccounts:
     def test_AccountsPage_WhenAnArtefactIsRefiled_StopsSayingTheOldAccountAgrees(self, filed):
         served, artefact, _ = filed
-        assert "in agreement through 2026-07-01" in agreements(get(served, "/accounts"))
+        assert "2026-07-01" in agreements(get(served, "/accounts"))
 
         response = post(
             served, "/refile-artefact", id=str(artefact), account="held-b", confirm="yes"
         )
         assert response.status_code == 200, response.text
 
-        assert "in agreement through 2026-07-01" not in agreements(get(served, "/accounts"))
+        assert "2026-07-01" not in agreements(get(served, "/accounts"))
 
     def test_AccountsPage_WhenTheRefileIsRefusedBecauseNothingWasChosen_StillAgrees(self, filed):
         served, artefact, _ = filed
@@ -431,7 +439,7 @@ class TestRefilingAnArtefactMovesTheStandingsOfBothAccounts:
 
         post(served, "/refile-artefact", id=str(artefact), account="", confirm="")
 
-        assert "in agreement through 2026-07-01" in agreements(get(served, "/accounts"))
+        assert "2026-07-01" in agreements(get(served, "/accounts"))
 
 
 class TestAssigningAStatementSectionMovesTheEpoch:

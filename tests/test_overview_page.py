@@ -241,7 +241,7 @@ class TestAccounts:
 
         head = head_of_row(page, "acct-empty")
         assert ">empty</span>" in head and "declared, no rows held" in head
-        assert "Label of acct-empty" in head and ">acct-empty</span>" in head, "name, then ref"
+        assert "Label of acct-empty" in head and "<code>acct-empty</code>" in head, "name, then ref"
 
     def test_Home_ArchivedAccount_IsLabelledWithItsDateAndListedLast(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))

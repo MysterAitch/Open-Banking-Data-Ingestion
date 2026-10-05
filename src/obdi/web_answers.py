@@ -58,10 +58,10 @@ def agreement_word(standing: AccountStanding | None) -> str:
 
 def _describe(word: str) -> str:
     if word == NO_KNOWN_BALANCE:
-        return "has no known balance, so its rows cannot be verified"
+        return "has no known balance, so its transactions cannot be checked"
     if word == NO_DATE_YET:
-        return "is not yet in agreement with any known balance"
-    return f"is in agreement through {word}"
+        return "does not yet add up to any known balance"
+    return f"adds up to every known balance up to {word}"
 
 
 def verification_sentence(name: str, before: str, after: str) -> str:
@@ -74,7 +74,10 @@ def verification_sentence(name: str, before: str, after: str) -> str:
         return f"{name} now {_describe(after)}."
     if after in (NO_KNOWN_BALANCE, NO_DATE_YET) or before in (NO_KNOWN_BALANCE, NO_DATE_YET):
         return f"{name} now {_describe(after)}; before, it {_describe(before)}."
-    return f"{name} is now in agreement through {after}; before, it was through {before}."
+    return (
+        f"{name} now adds up to every known balance up to {after}; "
+        f"before, it was up to {before}."
+    )
 
 
 class AnswerPages:

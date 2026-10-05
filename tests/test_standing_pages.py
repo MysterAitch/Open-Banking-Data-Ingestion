@@ -78,9 +78,13 @@ class TestAccountsNotInAgreementForLong:
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
         assert found[0].severity == 1, "a fault: the rows do not reproduce a stated balance"
-        assert "in agreement through 2026-03-20" in found[0].message
+        assert "its transactions last added up to a known balance on 2026-03-20" in (
+            found[0].message
+        )
         assert f"more than {STALE_AGREEMENT_DAYS} days ago" in found[0].message
-        assert "Held back by the known balance for 2026-03-25" in found[0].message
+        assert "The transactions do not add up to the known balance for 2026-03-25" in (
+            found[0].message
+        )
         assert found[0].accounts == (ACCOUNT,)
 
     def test_Items_WhenTheAccountIsClosed_SaysNothing(self, store):
@@ -107,7 +111,10 @@ class TestAccountsNotInAgreementForLong:
             )
 
         assert [i.kind for i in found] == ["agreement-lapsed"]
-        assert "never in agreement since its first known balance, 2026-03-05" in found[0].message
+        assert (
+            "its transactions have never added up to a known balance since its first, 2026-03-05"
+            in found[0].message
+        )
 
 
 class TestKnownBalancesThatDisagree:
@@ -158,7 +165,7 @@ class TestTheCards:
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
         assert (
-            "Known balances from 2026-03-05 to 2026-03-20; in agreement through 2026-03-20; "
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20; "
             "not protected." in page
         )
 
@@ -173,7 +180,7 @@ class TestTheCards:
 
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
-        assert "in agreement through 2026-03-20; protected through 2026-03-10." in page
+        assert "known balance from 2026-03-05 to 2026-03-20; protected through 2026-03-10." in page
 
     def test_Card_WhenTheProtectionIsBroken_SaysSo(self, store):
         from obdi.balance_anchors import effective_opening
@@ -199,7 +206,7 @@ class TestTheCards:
                 now=self.NOW,
             )
 
-        assert "No known balance: these rows cannot be verified." in page
+        assert "No known balance, so there is nothing to check the transactions against." in page
 
 
 @pytest.fixture
@@ -230,13 +237,16 @@ class TestOverTheWire:
     def test_AccountsPage_ShowsTheThreeDatesAndNoFigure(self, served):
         page = httpx.get(f"{served}/accounts", timeout=30).text
 
-        assert "in agreement through 2026-03-20" in page
+        assert "add up to every known balance from 2026-03-05 to 2026-03-20" in page
         for figure in ("952.00", "95200", "912.50", "91250"):
             assert figure not in page
 
     def test_Home_ShowsTheThreeDatesOnTheAccountCard(self, served):
         page = httpx.get(f"{served}/", timeout=30).text
 
-        assert "Known balances from 2026-03-05 to 2026-03-20; in agreement through" in page
+        assert (
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20"
+            in page
+        )
         for figure in ("952.00", "95200", "912.50", "91250"):
             assert figure not in page

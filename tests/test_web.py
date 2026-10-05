@@ -2142,8 +2142,10 @@ class TestAccountLevelShape:
             httpd.shutdown()
 
         assert "merged layer" in page
-        assert "halifax-csv, truelayer" in page
-        assert "2 distinct: halifax-csv x1, truelayer x1" in page
+        assert "<code>halifax-csv</code>, <code>truelayer</code>" in page
+        assert (
+            "2 distinct: <code>halifax-csv</code> x1, <code>truelayer</code> x1" in page
+        )
         assert "Items per month" in page
 
     def test_AccountPage_WhenNothingHeld_SaysSo(self, tmp_path):

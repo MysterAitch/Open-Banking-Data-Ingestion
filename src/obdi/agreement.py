@@ -276,16 +276,16 @@ def held_sentence(agreement: Agreement) -> str:
     if held is None:
         if agreement.state == UNTESTED and agreement.known_count:
             return (
-                f"Only the known balance for {_day(agreement.known_from)} sets the opening "
-                "balance, so nothing tests the rows yet."
+                f"Only one known balance ({_day(agreement.known_from)}); a second is needed "
+                "before the transactions can be checked."
             )
         return ""
     day = _day(held.day)
     if held.kind == HELD_CONFLICT:
         return (
-            f"Known balances do not match on {day}: {' and '.join(held.sources)} state different "
-            "balances for the same day. That is a conflict between sources, not a fault in "
-            "the rows."
+            f"Two sources state different balances for {day} ({' and '.join(held.sources)}), "
+            "so nothing after that day can be checked. That is a conflict between sources, "
+            "not a fault in the transactions."
         )
     if held.kind == HELD_UNMET:
         named = [s for s in held.sources if s and s != "stated"]
@@ -295,8 +295,8 @@ def held_sentence(agreement: Agreement) -> str:
             by = " (a balance you stated)"
         else:
             by = ""
-        return f"Held back by the known balance for {day}{by}, which the rows do not reproduce."
-    return f"Held back by a movement fault dated {day}: {held.says}."
+        return f"The transactions do not add up to the known balance for {day}{by}."
+    return f"The transactions stop adding up at {day}, because of a movement fault: {held.says}."
 
 
 def standing_line(
@@ -308,12 +308,16 @@ def standing_line(
     protects an account, and the clause would say "not protected" of a thing that cannot be.
     """
     if agreement.state == NONE:
-        return "No known balance: these rows cannot be verified."
-    through = _day(agreement.through) if agreement.through else "no date yet"
-    line = (
-        f"Known balances from {_day(agreement.known_from)} to {_day(agreement.known_to)}; "
-        f"in agreement through {through}"
-    )
+        return "No known balance, so there is nothing to check the transactions against."
+    if not agreement.through:
+        line = "The transactions do not yet add up to any known balance"
+    else:
+        line = (
+            "The transactions add up to every known balance from "
+            f"{_day(agreement.known_from)} to {_day(agreement.through)}"
+        )
+        if agreement.known_to and agreement.known_to != agreement.through:
+            line += f"; the latest known balance is for {_day(agreement.known_to)}"
     if not with_protection:
         return line + "."
     if not protected_through:

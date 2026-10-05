@@ -213,11 +213,12 @@ class OpeningFigures:
         lines.append(f"Today: {self.today_sentence}")
         lines.append(f"With opening balances: {self.rule_sentence}")
         lines.append(
-            f"Days not in agreement today that would be in agreement: "
+            f"Days whose transactions do not add up to the known balances today but would: "
             f"{_days(self.newly_agreeing)}."
         )
         lines.append(
-            f"Days in agreement today that would not be: {_days(self.newly_not_agreeing)}."
+            f"Days whose transactions add up to the known balances today but would not: "
+            f"{_days(self.newly_not_agreeing)}."
         )
         lines.append(
             f"Rows before the first known balance, untested today, that the first statement's "
@@ -261,16 +262,24 @@ def _standing_rule(opening: EffectiveOpening) -> tuple[str, set[date], list[tupl
     first = first_known_day(opening)
     found = runs(stretches(opening), first)
     if first is None:
-        return "No known balance: these rows cannot be verified.", set(), []
+        return (
+            "No known balance, so there is nothing to check the transactions against.",
+            set(),
+            [],
+        )
     if not found:
-        return "No stretch between two known balances, so nothing tests the rows yet.", set(), []
+        return (
+            "No stretch between two known balances, so nothing checks the transactions yet.",
+            set(),
+            [],
+        )
     good = [(r.start, r.end) for r in found if r.reproduced]
     bad = [(r.start, r.end) for r in found if not r.reproduced]
     said = []
     if good:
-        said.append(f"In agreement {spans_text(good)}.")
+        said.append(f"The transactions add up {spans_text(good)}.")
     if bad:
-        said.append(f"Not proven {spans_text(bad)}.")
+        said.append(f"The transactions do not add up {spans_text(bad)}.")
     return " ".join(said), days_in(good), bad
 
 

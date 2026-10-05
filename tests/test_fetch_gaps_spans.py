@@ -30,6 +30,7 @@ from datetime import date
 
 import pytest
 
+from obdi.account_names import AccountsShown
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.fetch_gaps import Basis, GapKind, fetch_report, gather_evidence
@@ -312,7 +313,7 @@ class TestSpacesAreNotAskedForStatements:
 
     def test_ThePage_SaysHowAFamilyIsTestedAndNeverAsksForAStatement(self, household):
         report, _ = household
-        page = render_gaps(report, {}).decode()
+        page = render_gaps(report, AccountsShown()).decode()
 
         assert "a Space of" in page
         assert "no statement exists for a Space" in page

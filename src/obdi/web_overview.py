@@ -47,8 +47,9 @@ from .overview import (
 from .plural import plural
 from .proof_rail import build_rail, rail_svg
 from .standing_data import (
-    HELD_BACK,
-    VERIFIED,
+    ADDS_UP,
+    DOES_NOT_ADD_UP,
+    NOTHING_TO_CHECK_AGAINST,
     standing_lines,
     verification_of,
     verification_sentence,
@@ -238,24 +239,24 @@ def _is_counted(account: AccountOverview) -> bool:
 
 
 def verification_counts(accounts: Iterable[AccountOverview]) -> tuple[int, int, int, int]:
-    """(counted, in agreement, held back, cannot be verified) over the live accounts.
+    """(counted, adding up, not adding up, nothing to check against) over the live accounts.
 
     An archived account and one holding no rows are not counted: nothing is expected of them.
-    Agreement is the standing's own state, so this and each row say one thing.
+    The count is the standing's own state, so this and each row say one thing.
     """
-    counted = agree = held = unproven = 0
+    counted = adding = failing = nothing = 0
     for account in accounts:
         if not _is_counted(account):
             continue
         counted += 1
         verdict = verification_of(account.standing)
-        if verdict == VERIFIED:
-            agree += 1
-        elif verdict == HELD_BACK:
-            held += 1
+        if verdict == ADDS_UP:
+            adding += 1
+        elif verdict == DOES_NOT_ADD_UP:
+            failing += 1
         else:
-            unproven += 1
-    return counted, agree, held, unproven
+            nothing += 1
+    return counted, adding, failing, nothing
 
 
 def verification_line(overview: Overview | None) -> StatusLine:
@@ -264,15 +265,15 @@ def verification_line(overview: Overview | None) -> StatusLine:
         return StatusLine("Verification", href, "unchecked", "pill-warn", "Nothing was checked.")
     if overview.rebuilding is not None:
         return _paused("Verification", href)
-    counted, agree, held, unproven = verification_counts(overview.accounts)
+    counted, adding, failing, nothing = verification_counts(overview.accounts)
     if counted == 0:
         return StatusLine(
             "Verification", href, "nothing held", "pill-quiet", "No account holds rows yet."
         )
-    sentence = verification_sentence(counted, agree, held, unproven)
-    if agree == counted:
-        return StatusLine("Verification", href, VERIFIED, "pill-ok", sentence)
-    word = HELD_BACK if held else "unproven"
+    sentence = verification_sentence(counted, adding, failing, nothing)
+    if adding == counted:
+        return StatusLine("Verification", href, ADDS_UP, "pill-ok", sentence)
+    word = DOES_NOT_ADD_UP if failing else NOTHING_TO_CHECK_AGAINST
     return StatusLine("Verification", f"{href}#{NEEDS_A_LOOK}", word, "pill-warn", sentence)
 
 
@@ -306,7 +307,7 @@ def actual_line(
 #: word and the meaning of its colour. A state missing here reads "unknown", which a test
 #: forbids for every state the verdict can be in.
 _ACTUAL_CHIPS = {
-    "agrees": ("in agreement", "pill-ok"),
+    "agrees": ("agrees with obdi", "pill-ok"),
     "differs": ("differs", "pill-bad"),
     "unchecked": ("not checked", "pill-warn"),
     "nothing-pushed": ("no push", "pill-warn"),
@@ -486,7 +487,7 @@ class RowReading:
     word: str
     css: str
     clause: str
-    #: 0 held back, 1 unproven, 2 in agreement, 3 quiet or empty, 4 archived.
+    #: 0 does not add up, 1 nothing to check against, 2 adds up, 3 quiet or empty, 4 archived.
     group: int
 
 
@@ -504,28 +505,37 @@ def row_reading(account: AccountOverview) -> RowReading:
         return RowReading("empty", "pill-quiet", "declared, no rows held", 3)
     feed = {SILENT: "; feed silent", NEVER_ASKED: "; provider never asked"}.get(account.state, "")
     if standing is None:
-        return RowReading("unproven", "pill-warn", f"verification not read{feed}", 1)
+        return RowReading(
+            NOTHING_TO_CHECK_AGAINST, "pill-warn", f"verification not read{feed}", 1
+        )
     own = standing.standing.own
     if standing.protection_broken:
         return RowReading("protection broken", "pill-bad", f"protected period has changed{feed}", 0)
     if own.held is not None:
         since = own.held.day.isoformat()
-        return RowReading("held back", "pill-warn", f"held back since {since}{feed}", 0)
+        return RowReading(
+            DOES_NOT_ADD_UP, "pill-warn", f"stops adding up at {since}{feed}", 0
+        )
     if own.state == NONE:
-        return RowReading("unproven", "pill-warn", f"no known balance{feed}", 1)
+        return RowReading(NOTHING_TO_CHECK_AGAINST, "pill-warn", f"no known balance{feed}", 1)
     if own.state == UNTESTED or own.through is None:
-        return RowReading("unproven", "pill-warn", f"known balance not yet tested{feed}", 1)
+        return RowReading(
+            NOTHING_TO_CHECK_AGAINST,
+            "pill-warn",
+            f"only one known balance, so the transactions cannot be checked yet{feed}",
+            1,
+        )
     quiet = 3 if account.state == QUIET else 2
+    through = own.through.isoformat()
+    adds_up = f"every known balance up to {through}"
     if own.state == AGREES and standing.protected_through is not None:
         return RowReading(
             "protected",
             "pill-ok",
-            f"in agreement through {own.through.isoformat()}; protected through "
-            f"{standing.protected_through.isoformat()}{feed}",
+            f"{adds_up}; protected through {standing.protected_through.isoformat()}{feed}",
             quiet,
         )
-    through = own.through.isoformat()
-    return RowReading("in agreement", "pill-ok", f"in agreement through {through}{feed}", quiet)
+    return RowReading(ADDS_UP, "pill-ok", f"{adds_up}{feed}", quiet)
 
 
 def arrange(

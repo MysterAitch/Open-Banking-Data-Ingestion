@@ -45,7 +45,7 @@ RAIL_HEIGHT = 12
 TICK_OVERHANG = 3
 
 _NAMES = {
-    AGREE: "in agreement with the known balances",
+    AGREE: "the transactions add up to the known balances",
     UNPROVEN: "not yet proven",
     UNKNOWN: "no known balance",
 }
@@ -142,7 +142,7 @@ def rail_text(rail: Rail) -> str:
     parts = [f"History from {rail.start.isoformat()} to {rail.end.isoformat()}."]
     for segment in rail.segments:
         if segment.kind == BREAK:
-            parts.append(f"Held back from {segment.start.isoformat()}.")
+            parts.append(f"Stops adding up at {segment.start.isoformat()}.")
         else:
             parts.append(
                 f"{_NAMES[segment.kind][0].upper()}{_NAMES[segment.kind][1:]} from "

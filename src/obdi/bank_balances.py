@@ -619,7 +619,7 @@ def say(
         if bank_difference == 0:
             return ""
         return (
-            f"{stated}, differs from the rows although the rows are in agreement with "
+            f"{stated}, differs from the rows although the rows add up to "
             "every other known balance."
         )
     named = ", ".join(sorted(differing))
@@ -630,7 +630,7 @@ def say(
     )
     if bank_difference == 0:
         return (
-            f"{stated}, is in agreement with the rows, so the "
+            f"{stated}, is the one the rows add up to, so the "
             f"{_plural(count, 'difference')} against "
             f"{named} {'is' if count == 1 else 'are'} {named}'s and not the rows'."
         )

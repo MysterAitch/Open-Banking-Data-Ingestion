@@ -103,7 +103,7 @@ class TestTheMeasurementReadsLikeThePage:
                 ]
             )
 
-        assert "opening balance" in text and "In agreement from" in text
+        assert "opening balance" in text and "The transactions add up from" in text
         assert offences(text) == []
         assert not re.search(r"anchor|segment|frontier", text, re.I)
 

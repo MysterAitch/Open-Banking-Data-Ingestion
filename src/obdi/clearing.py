@@ -1,12 +1,16 @@
 """Which rows are CLEARED, and which of the three words a stretch of an account earns.
 
-THE VOCABULARY, used on every page and defined here once:
+THE VOCABULARY. The pages' words for the second are defined once, in `standing_data`
+(`ADDS_UP`, `DOES_NOT_ADD_UP`, `NOTHING_TO_CHECK_AGAINST`), and no page writes its own:
 
   known balance   what a source states the balance was on a date: a claim, a target, and a
-                  warning while the rows do not reproduce it. (`balance_anchors`)
-  in agreement    the rows up to a date reproduce every known balance up to it, and the movement
-                  checks hold as well. Worked out on demand and never declared, so it can change
-                  after any rebuild. (`agreement`)
+                  warning while the transactions do not add up to it. (`balance_anchors`)
+  adds up         the transactions up to a date reproduce every known balance up to it, and the
+                  movement checks hold as well. Worked out on demand and never declared, so it
+                  can change after any rebuild. `agreement` is the name of this rule inside the
+                  code (`agreement`); it is not a word of any page, because it left out the two
+                  things being compared, and "match" is already taken for two sources that
+                  state the same thing.
   protected       a person decided that a span is verified and must not change silently. Declared,
                   survives a rebuild, and is an alarm on change and never a freeze. (`protection`)
 

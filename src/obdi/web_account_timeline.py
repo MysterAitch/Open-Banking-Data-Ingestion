@@ -309,7 +309,7 @@ def compact_svg(
         y = TOP + index * ROW_H
         if lane is not None:
             row_y[lane.source] = y
-        label = "Verified" if lane is None else SHORT_NAMES.get(lane.kind, KIND_NAMES[lane.kind])
+        label = "Adds up" if lane is None else SHORT_NAMES.get(lane.kind, KIND_NAMES[lane.kind])
         body.append(
             f'<text class="cov-dim" x="{LABEL_W - 4:.1f}" y="{y + ROW_H / 2 + 3:.1f}" '
             f'text-anchor="end">{_esc(label)}</text>'

@@ -215,8 +215,8 @@ _KINDS: dict[str, tuple[int, str]] = {
     ),
     "agreement-lapsed": (
         NOW,
-        "Open the account's ledger to see which known balance the rows stopped reproducing, "
-        "or which movement fault holds it back.",
+        "Open the account's ledger to see which known balance its transactions stopped adding "
+        "up to, or which movement fault is behind it.",
     ),
     "statement-due": (HOUSEKEEPING, "Upload the next statement for each."),
 }
@@ -713,16 +713,17 @@ def standing_items_from(
         if own.held is None:
             continue
         said = (
-            f"in agreement through {own.through.isoformat()}"
+            f"its transactions last added up to a known balance on {own.through.isoformat()}"
             if own.through
-            else f"never in agreement since its first known balance, {since.isoformat()}"
+            else "its transactions have never added up to a known balance since its first, "
+            f"{since.isoformat()}"
         )
         items.append(
             AttentionItem(
                 kind="agreement-lapsed",
                 severity=_KINDS["agreement-lapsed"][0],
                 message=(
-                    f"{label_of(ref)} has known balances but is {said}, more than "
+                    f"{label_of(ref)} has known balances, but {said}, more than "
                     f"{STALE_AGREEMENT_DAYS} days ago. {held_sentence(own)}"
                 ),
                 remedy=_KINDS["agreement-lapsed"][1],

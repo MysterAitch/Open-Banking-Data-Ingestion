@@ -14,6 +14,7 @@ is inferred from how regularly the statements arrive, so the two differ without 
 
 GAPS_STYLES = """
  .gaps-verdict { font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .gaps-verdict.quiet-ok { font: 400 var(--text-md)/150% var(--sans); }
  .gaps-account { margin: var(--s5) 0; }
  .gaps-name { margin: 0 0 var(--s2); font: 600 var(--text-xl)/var(--leading-tight) var(--serif); }
  .gaps-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }

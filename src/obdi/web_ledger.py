@@ -16,7 +16,7 @@ to show unmasked is shown unmasked because the VIEW was built with
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -54,6 +54,7 @@ from .plural import agree
 from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
 from .protection import protection_line
+from .standing_data import ADDS_UP
 from .web_account_timeline import block_for
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_answers import AnswerPages
@@ -121,12 +122,27 @@ def _count(label: str, value: object) -> str:
     return f"<tr><th>{_esc(label)}</th><td>{_esc(str(value))}</td></tr>"
 
 
+def _count_html(label: str, value_html: str) -> str:
+    """A row of the counts table whose value is markup already (sources set as code)."""
+    return f"<tr><th>{_esc(label)}</th><td>{value_html}</td></tr>"
+
+
 def _pairs(items: tuple[tuple[str, int], ...]) -> str:
     return ", ".join(f"{name}: {number}" for name, number in items) or "none"
 
 
-def _flag(text: str, title: str, css: str = "pill-quiet") -> str:
-    return f'<span class="pill {css}" title="{_esc(title)}">{_esc(text)}</span> '
+def _source_pairs(items: tuple[tuple[str, int], ...]) -> str:
+    """`_pairs` for counts by source, whose names are identifiers: markup, set as code."""
+    return ", ".join(f"{code_html(name)}: {number}" for name, number in items) or "none"
+
+
+def _sources_html(sources: Iterable[str]) -> str:
+    return ", ".join(code_html(source) for source in sources)
+
+
+def _flag(text: str, title: str, css: str = "pill-quiet", *, text_is_html: bool = False) -> str:
+    shown = text if text_is_html else _esc(text)
+    return f'<span class="pill {css}" title="{_esc(title)}">{shown}</span> '
 
 
 def _differ(differs: bool) -> str:
@@ -182,10 +198,11 @@ def _row_flags(row: Any) -> str:
     flags = ""
     if row.cleared_by:
         flags += _flag(
-            f"cleared by {', '.join(row.cleared_by)}",
+            f"cleared by {_sources_html(row.cleared_by)}",
             "An authoritative listing of the account lists this row: a statement, an export, "
             "or the bank's own feed. The aggregator alone does not clear a row.",
             "pill-ok",
+            text_is_html=True,
         )
     if row.origin == "typed":
         flags += _flag(
@@ -283,7 +300,7 @@ def _sighting_line(sighting: Any) -> str:
     tail = f": {stated}" if stated else ""
     if sighting.words:
         tail += f"{'; ' if stated else ': '}says {_esc(word_text(sighting.words))}"
-    return f'<p class="muted"><strong>{_esc(sighting.source)}</strong> - {_esc(how)}{tail}</p>'
+    return f'<p class="muted">{code_html(sighting.source)} - {_esc(how)}{tail}</p>'
 
 
 def _line_html(row: Any, line: str) -> str:
@@ -400,7 +417,7 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
         else ""
     )
     sources = "".join(
-        f'<span class="pill pill-quiet">{_esc(source)}</span> ' for source in row.sources
+        f'<span class="pill pill-quiet">{code_html(source)}</span> ' for source in row.sources
     )
     at = f" {_esc(_clock(row.feed_at))}" if row.feed_at is not None else ""
     ident = f' id="row-{_esc(row.anchor)}"' if row.anchor else ""
@@ -449,8 +466,8 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
     reader can tell "nothing of that kind" from "not looked for".
     """
     reasons = _pairs(summary.withheld_by_reason)
-    rows = _count("Rows in the month", summary.rows) + _count(
-        "Rows per source", _pairs(summary.per_source)
+    rows = _count("Rows in the month", summary.rows) + _count_html(
+        "Rows per source", _source_pairs(summary.per_source)
     )
     zero: list[str] = []
     for field, label, phrase in _FLAG_COUNTS:
@@ -543,8 +560,8 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
             "follows this one"
         )
     elif line.verdict == "agrees":
-        role = '<span class="pill pill-ok">in agreement</span>'
-        detail = ": the rows reproduce it"
+        role = f'<span class="pill pill-ok">{ADDS_UP}</span>'
+        detail = ": the transactions add up to it"
     else:
         role = '<span class="pill pill-bad">differs</span>'
         difference = _signed(
@@ -686,10 +703,10 @@ def _row_note(note: Any) -> str:
     """
     at = f" {_clock_html(note.feed_at)}" if note.feed_at is not None else ""
     dated = ", ".join(
-        f"{_esc(source)} {_mono(day)}{at if source == BANK_SOURCE else ''}"
+        f"{code_html(source)} {_mono(day)}{at if source == BANK_SOURCE else ''}"
         for source, day in note.dates
     )
-    seen = ", ".join(_esc(source) for source in note.sources) or "no source"
+    seen = _sources_html(note.sources) or "no source"
     kind = "a round-up leg" if note.round_up_leg else "a transfer leg" if note.transfer else ""
     pairing = (
         f", confirmed paired with {_esc(note.partner_account)}{_partner_of(note)}"
@@ -1369,10 +1386,10 @@ def _family_html(family: Any, ref: str = "") -> str:
     body += (
         '<div class="scroll"><table>'
         + _count("Spaces", ", ".join(family.spaces))
-        + _count("Stated by", ", ".join(family.sources))
+        + _count_html("Stated by", _sources_html(family.sources))
         + _count("Whole-account known balances", family.anchors)
-        + _count(f"{which} the rows reproduce", family.agreeing)
-        + _count(f"{which} the rows do not reproduce", family.differing)
+        + _count(f"{which} the transactions add up to", family.agreeing)
+        + _count(f"{which} the transactions do not add up to", family.differing)
         + (
             _count("Opened, with a nil balance at the end of", family.nil_day)
             if family.nil_day
@@ -1413,7 +1430,7 @@ def _family_html(family: Any, ref: str = "") -> str:
             )
         if family.unheld_legs and not (family.unheld_refused or family.unheld_empty):
             body += (
-                " Declare it with the <span class=\"mono\">recover-spaces</span> command or "
+                f" Declare it with the {code_html('recover-spaces')} command or "
                 'the <a class="tap" href="/spaces">Spaces page</a> and bind its category in '
                 "the account map, and the next pull fetches its history."
             )
@@ -1430,8 +1447,8 @@ def _family_html(family: Any, ref: str = "") -> str:
         return body
     if not family.differing:
         return body + (
-            '<p><span class="pill pill-ok">in agreement</span> The rows of the account and '
-            f"its Spaces reproduce every {'' if family.nil_day else 'later '}whole-account "
+            f'<p><span class="pill pill-ok">{ADDS_UP}</span> The transactions of the account '
+            f"and its Spaces add up to every {'' if family.nil_day else 'later '}whole-account "
             "known balance.</p>"
         )
     pattern = (
@@ -1442,9 +1459,9 @@ def _family_html(family: Any, ref: str = "") -> str:
         "movement is missing or surplus."
     )
     body += (
-        '<p class="warn"><strong>The rows first stop reproducing the known balance at the '
-        f'end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they were '
-        f'last in agreement at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
+        '<p class="warn"><strong>The transactions first stop adding up to the known balance '
+        f'at the end of <span class="mono nowrap">{_esc(family.first_differing)}</span>; they '
+        f'last added up at the end of <span class="mono nowrap">{_esc(family.last_agreeing)}'
         f"</span>.</strong> {_esc(pattern)}</p>"
         + _changes_html(family)
         + (structure_summary_html(family.structure, ref) if family.structure and ref else "")
@@ -1458,7 +1475,7 @@ def _family_html(family: Any, ref: str = "") -> str:
             f'<span class="mono nowrap">{_esc(line.day)}</span>: the known balance is '
             f'{side} than the rows predict by '
             f'<span class="mono nowrap">{_esc(line.difference)}</span></p>'
-            f'<p class="muted">{_esc(", ".join(line.sources))}</p></li>'
+            f'<p class="muted">{_sources_html(line.sources)}</p></li>'
         )
     return body + "</ul>"
 
@@ -1586,7 +1603,7 @@ def _own_first_difference(anchors: tuple[Any, ...]) -> str:
                 else f"It is a {_esc(line.basis)} balance"
             )
             walk = {
-                "agrees": "the whole-account walk is in agreement at that balance from the same "
+                "agrees": "the whole-account walk adds up at that balance from the same "
                 "source, "
                 "so the difference arises in the step from the whole account to this one's "
                 "own (the Spaces' rows taken off)",
@@ -1596,9 +1613,9 @@ def _own_first_difference(anchors: tuple[Any, ...]) -> str:
                 "tested against this account's rows alone",
             }[line.walk]
             return (
-                '<p class="warn">The rows first stop being in agreement with the account\'s own '
+                '<p class="warn">The transactions first stop adding up to the account\'s own '
                 f'known balances at the end of <span class="mono nowrap">{_esc(line.day)}</span>; '
-                'they were last in agreement at the end of '
+                'they last added up at the end of '
                 f'<span class="mono nowrap">{_esc(anchors[at - 1].day)}</span>.</p>'
                 f"<p>{stated}, and {walk}.</p>"
             )
@@ -1621,7 +1638,7 @@ def _meaning_html(meanings: tuple[Any, ...]) -> str:
         f"and a reading is adopted when it explains at least {percent}% of them.</p>"
     )
     for item in meanings:
-        name = f'<span class="mono">{_esc(item.source)}</span>'
+        name = code_html(item.source)
         if item.verdict == "undecided":
             body += (
                 f'<p class="warn">{name}: no step between its balances tells the two readings '
@@ -1784,8 +1801,8 @@ def _state_html(view: Any, today: date) -> str:
     )
     if not own.movement_checked:
         body += (
-            '<p class="sub">The movement checks were not read for this view, so agreement here '
-            "is from the known balances alone.</p>"
+            '<p class="sub">The movement checks were not read for this view, so this is from '
+            "the known balances alone.</p>"
         )
     whole = standing.whole
     if whole is not None:
@@ -1902,7 +1919,7 @@ def _opening_gist(opening: Any) -> str:
     family = opening.family
     if not agree and not differ and family is not None and family.anchors:
         agree, differ = family.agreeing, family.differing
-    return f"{agree:,} in agreement, {'none' if not differ else f'{differ:,}'} differ"
+    return f"{agree:,} add up, {'none' if not differ else f'{differ:,}'} differ"
 
 
 def _balances_control(
@@ -1929,8 +1946,11 @@ def _balances_control(
 
 def _earlier_balances(view: Any, count: int, *, unmasked: bool, balance_only: bool) -> str:
     """The one line for the agreeing known balances that are not listed, linking to all of them."""
-    state = "followed" if balance_only else "in agreement"
-    label = f"and {_plural(count, 'earlier known balance')}, {'all ' if count != 1 else ''}{state}"
+    if balance_only:
+        state = f"{'all ' if count != 1 else ''}followed"
+    else:
+        state = f"which {ADDS_UP}" if count == 1 else "all add up"
+    label = f"and {_plural(count, 'earlier known balance')}, {state}"
     return _balances_control(
         view, label, unmasked=unmasked, everything=True, fragment=f"#{OPENING_ANCHOR}"
     )
@@ -2448,7 +2468,7 @@ def _month_line(view: Any) -> str:
     summary = view.summary
     rows = summary.rows
     noun = "row" if str(rows) == "1" else "rows"
-    sources = _esc(_pairs(summary.per_source))
+    sources = _source_pairs(summary.per_source)
     copies = int(str(summary.folded))
     if not copies:
         return f'<p class="sub">{_esc(str(rows))} {noun}. Sources {sources}.</p>'

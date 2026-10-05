@@ -21,7 +21,7 @@ ACTUAL_STYLES = r"""
  /* Agreement is said in ordinary type beside a teal tick, not at display size: a loud "all
     is well" competes with the states that need the reader (see the account page's verdict). */
  .actual-main .verdict-ok { border-left-color: var(--ok); }
- .actual-main .verdict-ok h2 { font: 600 var(--text-md)/var(--leading-tight) var(--sans); color: var(--ink); }
+ .actual-main .verdict-ok h2 { font: 400 var(--text-md)/var(--leading-tight) var(--sans); color: var(--ink); }
  .actual-main .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; color: var(--ok); }
  .actual-main .verdict-bad { border-left-color: var(--bad); }
  .actual-main .verdict-bad h2 { color: var(--bad); }

@@ -200,8 +200,9 @@ class TestFiveMonthlyStatementsThatAllMeet:
         self, measured
     ):
         five = measured[0]["five"]
-        assert "in agreement through 2026-05-10" in five.today_sentence
-        assert five.rule_sentence == "In agreement from 2025-12-10 to 2026-05-10."
+        assert "add up to every known balance from" in five.today_sentence
+        assert "to 2026-05-10" in five.today_sentence
+        assert five.rule_sentence == "The transactions add up from 2025-12-10 to 2026-05-10."
         assert days(five.newly_agreeing) == [("2025-12-10", "2026-01-10")]
         assert five.newly_not_agreeing == []
         assert five.rows_now_tested == 1
@@ -222,11 +223,12 @@ class TestACardWithAprilMissing:
 
     def test_Standing_WhenAprilIsMissing_AgreementResumesFromTheMayOpening(self, measured):
         april = measured[0]["april"]
-        assert "in agreement through 2026-03-10" in april.today_sentence
+        assert "add up to every known balance from" in april.today_sentence
+        assert "to 2026-03-10" in april.today_sentence
         assert "2026-05-10" in april.today_sentence
         assert april.rule_sentence == (
-            "In agreement from 2025-12-10 to 2026-03-10 and from 2026-04-10 to 2026-06-10. "
-            "Not proven from 2026-03-10 to 2026-04-10."
+            "The transactions add up from 2025-12-10 to 2026-03-10 and from 2026-04-10 to "
+            "2026-06-10. The transactions do not add up from 2026-03-10 to 2026-04-10."
         )
         assert days(april.newly_agreeing) == [
             ("2025-12-10", "2026-01-10"),
@@ -244,8 +246,9 @@ class TestARowMissingFromTheMiddleOfMay:
         if measured[2] != "rebuilt":
             pytest.skip("the row is missing only before a rebuild")
         may = measured[0]["may-row"]
-        assert "in agreement through 2026-06-10" in may.today_sentence
-        assert may.rule_sentence == "In agreement from 2025-12-10 to 2026-06-10."
+        assert "add up to every known balance from" in may.today_sentence
+        assert "to 2026-06-10" in may.today_sentence
+        assert may.rule_sentence == "The transactions add up from 2025-12-10 to 2026-06-10."
         assert may.newly_not_agreeing == []
 
     def test_Standing_WhenARowIsMissingInsideMay_TheFailureIsPinnedToMay(self, measured):
@@ -254,10 +257,11 @@ class TestARowMissingFromTheMiddleOfMay:
         may = measured[0]["may-row"]
         assert (may.statements, len(may.placed)) == (6, 6)
         assert (len(may.redundant), len(may.new), len(may.conflicting)) == (5, 1, 0)
-        assert "in agreement through 2026-04-10" in may.today_sentence
+        assert "add up to every known balance from" in may.today_sentence
+        assert "to 2026-04-10" in may.today_sentence
         assert may.rule_sentence == (
-            "In agreement from 2025-12-10 to 2026-04-10 and from 2026-05-10 to 2026-06-10. "
-            "Not proven from 2026-04-10 to 2026-05-10."
+            "The transactions add up from 2025-12-10 to 2026-04-10 and from 2026-05-10 to "
+            "2026-06-10. The transactions do not add up from 2026-04-10 to 2026-05-10."
         )
         assert days(may.newly_agreeing) == [
             ("2025-12-10", "2026-01-10"),
@@ -273,8 +277,8 @@ class TestAnAccountWithOneStatementOnly:
         single = measured[0]["single"]
         assert (single.statements, len(single.placed), len(single.new)) == (1, 1, 1)
         assert len(single.first) == 1
-        assert "no date yet" in single.today_sentence
-        assert single.rule_sentence == "In agreement from 2026-08-10 to 2026-09-10."
+        assert "do not yet add up to any known balance" in single.today_sentence
+        assert single.rule_sentence == "The transactions add up from 2026-08-10 to 2026-09-10."
         assert days(single.newly_agreeing) == [("2026-08-10", "2026-09-10")]
         assert single.rows_now_tested == 1
 
@@ -288,7 +292,7 @@ class TestStatementsThatPrintNoStart:
         ]
         assert (len(undated.redundant), len(undated.new), undated.repeating) == (0, 3, 2)
         assert (len(undated.first), len(undated.reproduced), len(undated.unreproduced)) == (1, 2, 0)
-        assert undated.rule_sentence == "In agreement from 2026-07-04 to 2026-09-10."
+        assert undated.rule_sentence == "The transactions add up from 2026-07-04 to 2026-09-10."
         assert days(undated.newly_agreeing) == [("2026-07-04", "2026-07-10")]
 
 

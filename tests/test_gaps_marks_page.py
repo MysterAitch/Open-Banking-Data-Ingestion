@@ -34,6 +34,7 @@ from fetch_marks_world import (
     report_with,
     scope,
 )
+from obdi.account_names import accounts_shown
 from obdi.cli import build_web_config
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
@@ -41,7 +42,9 @@ from obdi.web_gaps import render_gaps, verdict_sentence
 from obdi.web_marks import evidence_text
 
 VIRGIN = (D(2026, 6, 5), D(2026, 7, 4))
-NAMES = {"card-virgin": "Virgin card", "main": "Main account", "card-hole": "Hole card"}
+NAMES = accounts_shown(
+    {"card-virgin": "Virgin card", "main": "Main account", "card-hole": "Hole card"}, []
+)
 
 
 @pytest.fixture

@@ -254,8 +254,8 @@ class TestTheMainAccountsLedger:
     def test_Section_WhenEveryRowIsRight_SaysTheRowsReproduceEveryBalance(self, healthy):
         page = healthy.ledger().text
 
-        assert "reproduce every later whole-account known balance" in page
-        assert "first stop reproducing" not in page
+        assert "add up to every later whole-account known balance" in page
+        assert "first stop adding up" not in page
         assert "starling-statement-pdf" in page
 
     def test_Section_WhenARowIsMissing_NamesTheTwoDatesAndSaysTheDifferenceIsConstant(
@@ -263,9 +263,9 @@ class TestTheMainAccountsLedger:
     ):
         page = faulted.ledger().text
 
-        assert "first stop reproducing the known balance at the end of" in page
+        assert "first stop adding up to the known balance at the end of" in page
         assert "2026-09-22" in page
-        assert "they were last in agreement at the end of" in page
+        assert "they last added up at the end of" in page
         assert "2026-09-20" in page
         assert "same at every later known balance, so one movement is missing or surplus" in page
 
@@ -307,17 +307,15 @@ class TestThePositionPage:
     def test_LaterBalanceChecks_WhenARowIsMissing_NamesTheFirstDifferingDay(self, faulted):
         page = faulted.position().text.replace("&#x27;", "'")
 
-        assert "first stop being in agreement with the whole account's known balances" in page
+        assert "first stop adding up to the whole account's known balances" in page
         assert "on 2026-09-22" in page
         assert "the difference is constant after that" in page
 
-    def test_LaterBalanceChecks_WhenEveryRowIsRight_SaysTheWholeAccountWasReproduced(
-        self, healthy
-    ):
+    def test_LaterBalanceChecks_WhenEveryRowIsRight_SaysTheWholeAccountAddsUp(self, healthy):
         page = healthy.position().text
 
-        assert "7 known balances, all reproduced" in page
-        assert "first stop being in agreement" not in page
+        assert "7 known balances, and the transactions add up to all of them" in page
+        assert "first stop adding up" not in page
 
     def test_MaskedPage_ShowsNoFigureOfTheFamilyOrTheDifference(self, faulted):
         assert_no_secret(faulted.position().text)
@@ -392,9 +390,9 @@ class TestWhetherTheOpeningIsKnownToBeNil:
     ):
         page = ledger_text(opened_with_an_early_fault)
 
-        assert "first stop reproducing the known balance at the end of" in page
+        assert "first stop adding up to the known balance at the end of" in page
         assert "2026-09-11" in page
-        assert "they were last in agreement at the end of" in page
+        assert "they last added up at the end of" in page
         assert "2026-08-31" in page
         assert ABSORBED not in page
 
@@ -437,7 +435,7 @@ class TestWhetherTheOpeningIsKnownToBeNil:
         page = position_text(opened)
 
         assert NIL_SENTENCE in page
-        assert "7 known balances, all reproduced" in page
+        assert "7 known balances, and the transactions add up to all of them" in page
         assert ABSORBED not in page
 
     def test_Position_WithoutTheAnchor_SaysAFaultBeforeTheFirstBalanceIsAbsorbed(self, healthy):
@@ -515,7 +513,7 @@ class TestSpaceTransfersWithNoHeldOtherLeg:
     ):
         page = ledger_text(unheld_space)
 
-        assert "first stop reproducing the known balance at the end of" in page
+        assert "first stop adding up to the known balance at the end of" in page
         assert "2026-09-11" in page
 
     def test_Ledger_WhenEveryLegIsHeld_SaysNothingOfUnheldSpaces(self, opened):

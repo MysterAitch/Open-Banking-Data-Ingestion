@@ -143,8 +143,8 @@ def standing_html(standing: Any, ref: str, protected_through: Any = None) -> str
     body = line_html(own, protected_through) + held_html(own, ref)
     if not own.movement_checked:
         body += (
-            '<p class="muted">The movement checks were not read for this view, so agreement here '
-            "is from the known balances alone.</p>"
+            '<p class="muted">The movement checks were not read for this view, so this is from '
+            "the known balances alone.</p>"
         )
     whole = standing.whole
     if whole is not None:

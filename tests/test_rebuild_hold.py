@@ -231,7 +231,7 @@ class TestThePagesWhileARebuildRuns:
         assert page.count("Paused while the rebuild runs.") == 3, "data, verification, position"
         assert "Movement completeness" not in page
         assert "Look at now" not in page
-        assert "in agreement through" not in page, "no account is given a verdict"
+        assert "add up to every known balance" not in page, "no account is given a verdict"
 
     def test_Overview_OnTheHomePageAfterTheRebuild_SaysTheVerdictAgain(
         self, served, household, monkeypatch
