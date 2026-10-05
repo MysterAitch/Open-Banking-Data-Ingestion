@@ -81,6 +81,23 @@ class TestTheTransactions:
         assert "LONDON" in reading.transactions[1].description
 
 
+class TestThePeriodItPrints:
+    def test_Statement_StatesBothEndsOfItsPeriod(self):
+        reading = read_statement(STATEMENT)
+
+        assert reading.period_start == date(2026, 7, 5)
+        assert reading.statement_date == date(2026, 8, 4)
+
+    def test_Statement_WithNoPeriodHeading_StatesNeitherEnd(self):
+        reading = read_statement([line for line in STATEMENT if "period:" not in line])
+
+        assert reading.period_start is None
+        assert reading.statement_date is None
+
+    def test_Statement_PrintsNoProductionDate_SoNoneIsRead(self):
+        assert read_statement(STATEMENT).produced is None
+
+
 class TestTheArithmeticGate:
     def test_AStatementThatBalances_Reconciles(self):
         reading = read_statement(STATEMENT)

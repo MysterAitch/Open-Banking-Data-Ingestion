@@ -73,7 +73,7 @@ class TestEveryKindOfGap:
         """03-10 to 05-10 is 61 days against a usual 31, so one is missing, closing 04-10."""
         (gap,) = world.gaps("card-hole")
         assert shape(gap) == (
-            GapKind.HOLE_BETWEEN, D(2026, 3, 11), D(2026, 5, 9), Basis.INFERRED,
+            GapKind.HOLE_BETWEEN, D(2026, 3, 11), D(2026, 4, 10), Basis.INFERRED,
             "santander-cc-pdf",
         )
         assert gap.probably == 1 and gap.closings == (D(2026, 4, 10),)
@@ -253,7 +253,7 @@ class TestWhatAStatementStatesOfItsOwnPeriod:
         with Store(world.db) as store:
             digest, source, text = _virgin_reading(store)
             older = json.loads(text)
-            del older["period_start"]
+            del older["period_start"], older["produced"], older["format"]
             store.keep_statement_reading(digest, source, json.dumps(older))
             store.connection.commit()
 
@@ -261,6 +261,21 @@ class TestWhatAStatementStatesOfItsOwnPeriod:
 
             assert read >= 1
             assert '"period_start": "2026-' in store.stored_statement_reading(digest)[1]
+
+    def test_KeptReading_WhenItHoldsAPeriodButWasWrittenBeforeFormatsWereNamed_IsReadAgain(
+        self, world
+    ):
+        # A Santander reading kept by the version that kept periods for four layouts holds a
+        # "period_start" of null, which must not be taken to say the document states none.
+        with Store(world.db) as store:
+            digest, source, text = _virgin_reading(store)
+            older = json.loads(text)
+            del older["format"]
+            store.keep_statement_reading(digest, source, json.dumps(older))
+            store.connection.commit()
+
+            assert keep_statement_readings(store) >= 1
+            assert json.loads(store.stored_statement_reading(digest)[1])["format"] == 2
 
     def test_KeptReading_WhenAlreadyHoldingAPeriod_IsNotReadAgain(self, world):
         with Store(world.db) as store:

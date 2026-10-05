@@ -115,7 +115,11 @@ class TestTheSentences:
         assert "gaps-inferred" in section and "gaps-stated" not in section
         said = text(section)
         assert "Fetch the statement closing between 2026-03-10 and 2026-05-10." in said
-        assert "Those two statements close 61 days apart" in said
+        # The two statements' balances meet, so this is a probable hole whose movements net to
+        # nil, and the sentence says what the balances do and do not prove.
+        assert "close 61 days apart" in said
+        assert "would have to net to nil" in said
+        assert "cannot be ruled out from the balances" in said
         assert "Probably 1 statement is missing here, closing about 2026-04-10." in said
 
     def test_Card_WhenAHoleIsStatedByTheStatement_IsDrawnSolidAndSaysWhatTheStatementSays(

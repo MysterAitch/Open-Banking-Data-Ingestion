@@ -17,7 +17,9 @@ KIND first..last, basis, source, probably):
                   is no cadence.
   card-hole       Santander statements closing 01-10, 02-10, 03-10, 05-10, 06-10, 07-10, 08-10,
                   09-10: April's is missing (and held no money, so the chain still joins).
-                  HOLE_BETWEEN 2026-03-11..2026-05-09, INFERRED, probably 1 closing 2026-04-10.
+                  HOLE_BETWEEN 2026-03-11..2026-04-10, INFERRED, probably 1 closing 2026-04-10.
+                  (First decided as ending 05-09, the day before the later statement closed;
+                  the missing statement's own period ends at its expected closing, 04-10.)
   card-virgin     Virgin Money statements stating their periods: 04-05..05-04, 05-05..06-04,
                   07-05..08-04, 08-05..09-04. The third says it begins on 07-05, a month after
                   the second closed.

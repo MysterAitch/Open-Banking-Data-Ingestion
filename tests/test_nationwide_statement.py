@@ -451,6 +451,34 @@ class TestATwoPageStatement:
         assert rows[0].booking_date == date(2026, 6, 2)
 
 
+class TestWhereTheStatementBegins:
+    """The opening row is "Balance from statement NN dated <day>", the day the previous
+    statement closed, so the statement covers from the day after it. Hand working: 30/05/2026
+    -> 31 May; 28/12/2025 -> 29 December; 31/07/2026 -> 1 August."""
+
+    def test_Statement_BeginsTheDayAfterTheOpeningRowIsDated(self):
+        assert read(STATEMENT).period_start == date(2026, 5, 31)
+        assert read(DECEMBER_TO_JANUARY).period_start == date(2025, 12, 29)
+        assert read(QUIET).period_start == date(2026, 8, 1)
+
+    def test_Statement_WhenTheLabelsAreFusedByTheWordGrid_StillStatesItsStart(self):
+        assert read(STATEMENT, fused=True).period_start == date(2026, 5, 31)
+
+    def test_Statement_WhenTheOpeningRowCarriesNoDate_StatesNoStart(self):
+        undated = [
+            line.replace("OPENING|2026|-100.00|6|30/05/2026", "OPENING|2026|-100.00|6|")
+            for line in STATEMENT
+        ]
+
+        reading = read(undated)
+
+        assert reading.period_start is None
+        assert reading.opening_balance_minor == -10000
+
+    def test_Statement_PrintsNoProductionDate_SoNoneIsRead(self):
+        assert read(STATEMENT).produced is None
+
+
 class TestTheSidePanel:
     def test_NationwideStatement_SidePanelFigures_AreNeverReadAsTransactions(self):
         # Every table row on page one shares its baseline with a figure in the

@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from ..statement_columns import Cell, Row
 from .statement_figures import is_figure, minor, tidy
@@ -96,6 +96,10 @@ _YEAR = re.compile(r"\d{4}")
 _STATEMENT_DATE = re.compile(
     r"statement\s*date:?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", re.IGNORECASE
 )
+#: The opening row, "Balance from statement NN dated DD/MM/YYYY", with its spaces optional for
+#: the same reason. The date is the day the PREVIOUS statement closed, so this statement covers
+#: from the day after it.
+_OPENING_ROW = re.compile(r"balancefromstatement\d*(?:dated(\d{2})/(\d{2})/(\d{4}))?")
 _PANEL_FIGURE = re.compile(r"^(start|end)\s*balance\s+(.+)$", re.IGNORECASE)
 _PANEL_LABELS = {"startbalance": "start", "endbalance": "end"}
 #: A figure inside running text: a wrapped line that carries one may be a
@@ -259,6 +263,8 @@ class _Reader:
         self.pending: _Entry | None = None
         self.entries: list[_Entry] = []
         self.table_opening: int | None = None
+        #: The day the opening row says the balance stood (the previous statement's date).
+        self.table_opening_day: date | None = None
         self.running: int | None = None
         self.walk_failed = False
         self.heading_seen = False
@@ -453,8 +459,9 @@ class _Reader:
         self, words: list[Cell], money: list[Cell], columns: _Columns
     ) -> None:
         text = tidy(" ".join(cell.text for cell in words))
-        if text.casefold().startswith("balance from statement"):
-            self._opening(money, columns)
+        opening = _OPENING_ROW.match("".join(text.split()).casefold())
+        if opening:
+            self._opening(money, columns, opening)
             return
         if not money:
             self._wrapped(words, text)
@@ -504,7 +511,7 @@ class _Reader:
             return
         self.pending = None
 
-    def _opening(self, money: list[Cell], columns: _Columns) -> None:
+    def _opening(self, money: list[Cell], columns: _Columns, found: re.Match[str]) -> None:
         self.pending = None
         placed = self._figures(money, columns, "Balance from statement")
         if placed is None:
@@ -523,6 +530,15 @@ class _Reader:
             return
         self.table_opening = placed["balance"]
         self.running = placed["balance"]
+        if found.group(1):
+            try:
+                self.table_opening_day = date(
+                    int(found.group(3)), int(found.group(2)), int(found.group(1))
+                )
+            except ValueError:
+                self.notes.append(
+                    "the Balance from statement row is dated a day that does not exist"
+                )
 
     def _record(
         self,
@@ -619,6 +635,8 @@ def read_statement(table: list[Row]) -> StatementReading:
             f"{reader.table_opening} - two accounts of one fact, and no way to "
             "say which is right"
         )
+    if reader.table_opening_day is not None:
+        reading.period_start = reader.table_opening_day + timedelta(days=1)
     reading.opening_balance_minor = balances.get("start")
     reading.closing_balance_minor = balances.get("end")
     return reading

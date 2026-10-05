@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .account_observations import Observation
+from .london_clock import london
 from .parsers.base import ParseError
 from .parsers.pdf_statements import (
     PdfStatementParser,
@@ -25,7 +26,13 @@ from .parsers.pdf_statements import (
     _lines,
     pdf_parser_for,
 )
-from .parsers.statement_reading import StatementReading, reading_from_json, reading_to_json
+from .parsers.statement_reading import (
+    READING_FORMAT,
+    StatementReading,
+    kept_format,
+    reading_from_json,
+    reading_to_json,
+)
 from .plural import plural
 from .store import SectionAssignment, Store
 
@@ -149,13 +156,20 @@ def _kept_reading(store: Store, digest: str) -> tuple[str, StatementReading] | N
 
 
 def _keeps_period(store: Store, digest: str) -> bool:
-    """Whether the kept reading was written by a version that kept a statement's own period.
+    """Whether the kept reading was written by a version that reads everything now read.
 
-    A reading kept before then says nothing about the period start, which is not the same as
-    saying the document states none: only reading the document again tells the two apart.
+    A reading kept before a parser learnt to read a field says nothing about it, which is not
+    the same as saying the document states none: only reading the document again tells the two
+    apart (`READING_FORMAT`). Until then `statement_spans` gives the weaker answer its evidence
+    supports and never a wrong one.
     """
     stored = store.stored_statement_reading(digest)
-    return stored is not None and '"period_start"' in stored[1]
+    if stored is None:
+        return False
+    try:
+        return kept_format(stored[1]) >= READING_FORMAT
+    except (ValueError, TypeError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -172,6 +186,17 @@ class StatementPeriod:
     #: The date of the earliest row the statement lists, from the kept reading; None where there
     #: is no kept reading or the statement lists nothing.
     first_row: date | None = None
+    #: The date of the latest row the statement lists; None as for `first_row`.
+    last_row: date | None = None
+    #: The balances the statement prints at its start and its end, in the store's sign
+    #: convention. The opening is None where there is no kept reading or the format prints none.
+    opening_minor: int | None = None
+    closing_minor: int | None = None
+    #: The day the document says it was produced, where its format prints one.
+    produced: date | None = None
+    #: The day obdi received the document (London's calendar day of the earliest time any copy
+    #: of it was kept); None where unknown. Weaker than `produced`, which is the document's own.
+    received: date | None = None
 
     @property
     def covers_from(self) -> date | None:
@@ -180,28 +205,55 @@ class StatementPeriod:
         return self.opens or self.first_row
 
 
+def received_days(store: Store) -> dict[str, date]:
+    """Digest -> the day the earliest kept copy of that PDF was received, on London's calendar.
+
+    A moment with no zone is taken at its own calendar day: the clock the host kept it by is
+    not knowable here, and reading the machine's would make the answer depend on where it ran.
+    """
+    found: dict[str, date] = {}
+    for row in store.connection.execute(
+        "SELECT digest, MIN(fetched_at) AS at FROM raw_artefacts "
+        "WHERE media_type = 'application/pdf' GROUP BY digest"
+    ):
+        try:
+            moment = datetime.fromisoformat(str(row["at"]))
+        except ValueError:
+            continue
+        found[str(row["digest"])] = (
+            moment.date() if moment.tzinfo is None else london(moment).date()
+        )
+    return found
+
+
 def statement_periods(store: Store) -> list[StatementPeriod]:
     """Each trusted statement's closing day with the period it states, from kept readings.
 
     The statements are the ones `statement_balances` trusts, so a period is never offered for a
     document whose closing balance is not. The period is read from the reading the store kept
     and never from the document: a view must not extract text, so a statement with no kept
-    reading is listed with no stated start.
+    reading is listed with no stated start. `statement_span.statement_spans` is what says what
+    a period means.
     """
     found: list[StatementPeriod] = []
     balances, _ = statement_balances(store)
+    received = received_days(store)
     for balance in balances:
         kept = _kept_reading(store, balance.digest) if balance.source else None
         reading = None if kept is None else kept[1]
+        dates = [] if reading is None else [row.value_date for row in reading.transactions]
         found.append(
             StatementPeriod(
                 balance.account_ref,
                 balance.day,
                 None if reading is None else reading.period_start,
                 balance.source,
-                None
-                if reading is None
-                else min((row.value_date for row in reading.transactions), default=None),
+                min(dates, default=None),
+                max(dates, default=None),
+                None if reading is None else reading.opening_balance_minor,
+                balance.balance_minor,
+                None if reading is None else reading.produced,
+                received.get(balance.digest),
             )
         )
     return found

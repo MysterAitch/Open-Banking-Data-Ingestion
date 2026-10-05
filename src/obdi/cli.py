@@ -3193,7 +3193,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         queue = store.connection.execute(
             "SELECT COUNT(*), COALESCE(MAX(resolved_at), '') FROM review_queue"
         ).fetchone()
-        registry = tuple((str(r.ref), r.kind, r.closed) for r in store.declared_accounts())
+        registry = tuple(
+            (str(r.ref), r.kind, r.closed, str(r.parent)) for r in store.declared_accounts()
+        )
         return (*standings_memo_key(store), *tuple(queue), registry)
 
     fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
@@ -3207,7 +3209,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Raises `RebuildInProgress` while a rebuild holds the layer."""
         standings = account_standings()
         with Store(db_path) as store:
-            evidence = fetch_evidence_memo.get(store, lambda: gather_evidence(store))
+            evidence = fetch_evidence_memo.get(
+                store,
+                lambda: gather_evidence(
+                    store, space_parents=families_of(store, _account_map(store)).parents
+                ),
+            )
         return fetch_report(evidence, standings, today)
 
     def warm_memos() -> None:
