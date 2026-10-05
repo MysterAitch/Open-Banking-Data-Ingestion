@@ -3736,6 +3736,32 @@ class Store:
             listed[row["digest"]].add(row["entity_id"])
         return listed
 
+    def sightings_of_artefacts(
+        self, digests: Collection[str]
+    ) -> dict[str, list[tuple[str, str]]]:
+        """Artefact digest -> `(entity id, the date that artefact gave it)` for every
+        transaction it reported, whichever account now holds the transaction.
+
+        `entities_sighted_by` answers what an account's statement lists and drops what moved
+        elsewhere; this keeps those, so a statement's listing can be told from the account that
+        holds it. The date is empty where the sighting predates the column. A sighting records
+        no amount: the amount a document stated is in its kept reading, and the transaction's own
+        is what a merge left, so the two are never one column here. Sightings copied onto a Space
+        row are not a document's own listing.
+        """
+        listed: dict[str, list[tuple[str, str]]] = {digest: [] for digest in digests}
+        if not listed:
+            return listed
+        marks = ",".join("?" for _ in listed)
+        for row in self.connection.execute(
+            "SELECT artefact_digest, entity_id, observed_date "  # noqa: S608
+            f"FROM transaction_sources WHERE artefact_digest IN ({marks}) "
+            "AND (source_id IS NULL OR source_id NOT LIKE ?) ORDER BY entity_id",
+            (*listed, _COPY_PATTERN),
+        ):
+            listed[row["artefact_digest"]].append((row["entity_id"], row["observed_date"]))
+        return listed
+
     def replace_space_folds(
         self, folds: Mapping[str, str], by_id: Collection[str] = ()
     ) -> None:

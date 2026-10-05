@@ -472,7 +472,9 @@ class ExactRuleReport:
         if self.openings is not None:
             lines.append("")
             lines.append(
-                "Statements' opening balances, if each were a known balance of its own, against "
+                "Statements' opening balances placed on a calendar day, a day-placement the rule "
+                "will not use (see the statements section above, which tests what each "
+                "statement lists): if each were a known balance of its own, against "
                 "the known balances the account has now, read without changing anything:"
             )
             lines.extend(f"  {sentence}" for sentence in self.openings.sentences())

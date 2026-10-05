@@ -67,7 +67,7 @@ and the leftover rows themselves appear only in the unmasked rendering.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from enum import StrEnum
 from itertools import pairwise
@@ -719,10 +719,54 @@ class AccountEvidence:
     folded: list[Transaction]
     #: Why nothing could be tested, or "".
     withheld: str = ""
+    #: Per statement as `(closing day, closing balance)`: the opening balance it states and the
+    #: day of the first transaction it lists. Absent where it states no opening balance.
+    openings: Mapping[tuple[date, int], tuple[int, date | None]] = field(default_factory=dict)
 
     @property
     def statements(self) -> int:
         return len(self.membership.statements)
+
+
+def between_periods(item: AccountEvidence) -> dict[tuple[date, int], Period]:
+    """Each statement's period between the previous closing and its own, judged without a feed's
+    leftovers: the same test the page makes, whose answer (`Period.agrees`) does not depend on
+    them. Empty where the account's periods are withheld."""
+    built = _periods_against("", item.windows, item.counted, item.sightings, None, item.membership)
+    return {
+        (w.statement.day, w.statement.balance_minor): p
+        for w, p in zip(item.windows, built, strict=True)
+        if w.kind is PeriodKind.BETWEEN
+    }
+
+
+def own_periods(item: AccountEvidence) -> dict[tuple[date, int], Period]:
+    """For EVERY statement that states an opening balance, the period from that opening to its
+    closing, holding the transactions THAT statement lists.
+
+    `_movement_periods` gives this period only to a statement whose opening is not the previous
+    closing, since for any other the period between the closings is the same test. A rule that
+    judges a statement by what it lists needs the answer for each one, and for the first, and for
+    an account holding one statement, which `withheld` leaves with no period at all.
+    """
+    windows = [
+        _Window(
+            PeriodKind.INSIDE,
+            printed[1] or statement.day,
+            statement.day,
+            statement.balance_minor - printed[0],
+            statement,
+        )
+        for statement in item.membership.statements
+        if (printed := item.openings.get((statement.day, statement.balance_minor))) is not None
+    ]
+    if any(t.currency != "GBP" for t in item.counted):
+        return {}
+    built = _periods_against("", windows, item.counted, item.sightings, None, item.membership)
+    return {
+        (w.statement.day, w.statement.balance_minor): p
+        for w, p in zip(windows, built, strict=True)
+    }
 
 
 def gather_evidence(
@@ -809,6 +853,7 @@ def gather_evidence(
                 paired,
                 folded,
                 withheld,
+                openings.get(ref, {}),
             )
         )
     return evidence

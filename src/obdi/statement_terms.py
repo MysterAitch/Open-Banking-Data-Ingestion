@@ -259,6 +259,32 @@ def statement_periods(store: Store) -> list[StatementPeriod]:
     return found
 
 
+@dataclass(frozen=True)
+class KeptPdf:
+    """One held PDF and the reading the store kept of it."""
+
+    account_ref: str
+    digest: str
+    source: str
+    reading: StatementReading
+
+
+def kept_pdf_readings(store: Store) -> list[KeptPdf]:
+    """Every held PDF that has a kept reading, trusted or not, filed under its account.
+
+    `statement_balances` leaves out a statement whose own transactions do not carry its opening
+    balance to its closing balance, which is the right thing for a known balance and the wrong
+    thing for a measurement of which statements fail that test. A view never extracts text, so a
+    document with no kept reading is not here.
+    """
+    found: list[KeptPdf] = []
+    for digest, account in _held_pdfs(store, None):
+        kept = _kept_reading(store, digest)
+        if kept is not None:
+            found.append(KeptPdf(account, digest, kept[0], kept[1]))
+    return found
+
+
 def keep_statement_readings(store: Store) -> int:
     """Read every held PDF that has no usable kept reading, keep what it says,
     and commit; returns how many documents were read.

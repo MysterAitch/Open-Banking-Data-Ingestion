@@ -113,6 +113,7 @@ from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
 from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
+from .statement_listing_measure import StatementListingReport
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
@@ -3061,6 +3062,24 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return exact_rule_report(store, _account_map(store)).describe()
 
+    def statement_listing_report() -> StatementListingReport:
+        from .statement_listing_measure import statement_listing_report as measure
+
+        if paused_text() is not None:
+            return StatementListingReport()
+        with Store(db_path) as store:
+            account_map = _account_map(store)
+            # Walks every statement and every transaction of every account (about 0.4 s over
+            # 3,000 transactions), so it is held while the store has not moved.
+            return statement_listing_memo.get(
+                store,
+                lambda: measure(
+                    store,
+                    families_of(store, account_map),
+                    sibling_accounts=account_map.accounts_by_source(),
+                ),
+            )
+
     def balance_reconciliation_text(masked: bool) -> str:
         from .balance_reconciliation import balance_reconciliation
 
@@ -3206,6 +3225,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     mark_world_memo: KeyedMemo[MarkWorld] = KeyedMemo(
         mark_world_key, name="mark world", epoch=rebuild_epoch
+    )
+
+    statement_listing_memo: KeyedMemo[StatementListingReport] = KeyedMemo(
+        mark_world_key, name="statements by what they list", epoch=rebuild_epoch
     )
 
     def mark_world(store: Store) -> MarkWorld:
@@ -4329,6 +4352,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         identity_health_text=identity_health_text,
         movement_completeness_text=movement_completeness_text,
         exact_rules_text=exact_rules_text,
+        statement_listing_report=statement_listing_report,
         balance_reconciliation_text=balance_reconciliation_text,
         period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,

@@ -93,6 +93,8 @@ from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesP
 from .space_windows import RANGE_REFUSAL_MARK
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .standing_data import AccountStanding
+from .statement_listing_measure import StatementListingReport
+from .statement_listing_page import statement_listing_html
 from .statement_shape import ShapeReport
 from .store import Store
 from .timings import Timings
@@ -719,6 +721,9 @@ class WebConfig:
     #: counted from the landed artefacts; counts and account names only.
     #: Shown on the identity health page beside the movement checks.
     exact_rules_text: Callable[[], str] | None = None
+    #: Each statement tested by what it lists, set beside the account's standing
+    #: (`statement_listing_measure`). Shown on the identity health page above the exact rules.
+    statement_listing_report: Callable[[], StatementListingReport] | None = None
     #: The store's rows against the bank's end-of-day balances. The argument
     #: is whether to MASK the figures, and the page only passes False when
     #: the viewer asked for them.
@@ -6332,10 +6337,12 @@ class ConnectionHandler(
             return
         movement_hook = self.bound_config.movement_completeness_text
         exact_hook = self.bound_config.exact_rules_text
+        listing_hook = self.bound_config.statement_listing_report
         try:
             text = hook()
             movement = "" if movement_hook is None else movement_hook()
             exact = "" if exact_hook is None else exact_hook()
+            listing = None if listing_hook is None else listing_hook()
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
@@ -6352,6 +6359,12 @@ class ConnectionHandler(
                 f'<pre class="scroll" style="white-space:pre-wrap">'
                 f"{self._named(movement)}</pre>"
             )
+        )
+        listing_section = (
+            ""
+            if listing is None
+            else "<h3>Statements by what they list</h3>"
+            + statement_listing_html(listing, self._account_names())
         )
         exact_section = (
             ""
@@ -6375,7 +6388,11 @@ class ConnectionHandler(
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{self._named(text)}</pre>" + movement_section + exact_section + HOME_LINK
+            f"{self._named(text)}</pre>"
+            + movement_section
+            + listing_section
+            + exact_section
+            + HOME_LINK
         )
         self._respond(200, render_page(page_name("/identity-health"), body))
 

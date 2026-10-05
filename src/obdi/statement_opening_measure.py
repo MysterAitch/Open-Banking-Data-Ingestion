@@ -238,6 +238,13 @@ class OpeningFigures:
     #: How the statement holes the balances prove (`BALANCES_DIFFER`) relate to the placements.
     holes_proven: int = 0
     today_sentence: str = ""
+    #: The days today's standing says add up, as `statement_listing_measure` sets them against
+    #: the stretches a statement would newly verify.
+    today_days: set[date] = field(default_factory=set)
+    #: By statement closing day, whether the day-placed opening balance is reproduced by the
+    #: transactions held since the known balance before it. A statement with no entry is one the
+    #: day-placement cannot say anything about (no opening stated, none placed, nothing before it).
+    by_date: dict[date, bool] = field(default_factory=dict)
     rule_sentence: str = ""
     newly_agreeing: list[tuple[date, date]] = field(default_factory=list)
     newly_not_agreeing: list[tuple[date, date]] = field(default_factory=list)
@@ -526,7 +533,13 @@ def account_figures(
                     follows,
                 )
             )
+    figures.by_date = {
+        **{p.closing: True for p in (*figures.redundant, *figures.reproduced)},
+        **{p.closing: False for p, _ in figures.unreproduced},
+        **{p.closing: False for p, _ in figures.conflicting},
+    }
     figures.today_sentence, now_days = _standing_today(today)
+    figures.today_days = now_days
     figures.rule_sentence, rule_days, _ = _standing_rule(rule)
     figures.newly_agreeing = _spans_of(rule_days - now_days)
     figures.newly_not_agreeing = _spans_of(now_days - rule_days)
