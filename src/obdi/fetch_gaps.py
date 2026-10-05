@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from enum import StrEnum
 from itertools import pairwise
@@ -155,6 +155,8 @@ class FetchReport:
     marks: MarkSet = MarkSet()
     set_aside: tuple[SetAside, ...] = ()
     out_of_scope: tuple[OutOfScope, ...] = ()
+    #: Each account's first known balance, for the page to say a scope leaves it standing.
+    first_known_balance: Mapping[str, date] = field(default_factory=dict)
 
     @property
     def gaps(self) -> tuple[FetchGap, ...]:
@@ -556,6 +558,11 @@ def fetch_report(
         marks or MarkSet(),
         tuple(aside),
         tuple(outside),
+        {
+            ref: item.standing.own.known_from
+            for ref, item in standings.items()
+            if item.standing.own.known_from is not None
+        },
     )
 
 

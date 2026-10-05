@@ -31,7 +31,7 @@ from fetch_gaps_world import (
     santander_statements,
 )
 from obdi.fetch_gaps import STATEMENT_SOURCES, fetch_report, gather_evidence
-from obdi.fetch_marks import MarkSet, MarkWorld, gather_world, make_mark, read_marks
+from obdi.fetch_marks import MarkSet, MarkWorld, gather_world, make_mark, read_marks, set_scope
 from obdi.providers.truelayer import artefact_for
 from obdi.standing_data import standings_for
 from obdi.store import Store
@@ -80,14 +80,35 @@ def marks_read(db: Path) -> MarkSet:
         return read_marks(store, gather_world(store), TODAY, statement_sources=STATEMENT_SOURCES)
 
 
-def report_with(db: Path, marks: MarkSet | None):
+def standings_of(db: Path):
+    with Store(db) as store:
+        refs = [
+            str(row[0])
+            for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
+        ]
+        return standings_for(store, refs, families=None, movement=None)
+
+
+def report_with(db: Path, marks: MarkSet | None, today: date = TODAY):
     with Store(db) as store:
         refs = [
             str(row[0])
             for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
         ]
         standings = standings_for(store, refs, families=None, movement=None)
-        return fetch_report(gather_evidence(store), standings, TODAY, marks)
+        return fetch_report(gather_evidence(store), standings, today, marks)
+
+
+def read_at(db: Path, today: date) -> MarkSet:
+    with Store(db) as store:
+        return read_marks(store, gather_world(store), today, statement_sources=STATEMENT_SOURCES)
+
+
+def scope(db: Path, *, months: int | None = None, first_day: date | None = None,
+          account: str = "main") -> None:
+    with Store(db) as store:
+        set_scope(store, gather_world(store), account=account, first_day=first_day,
+                  months=months, now=NOW)
 
 
 def household(root: Path, *, with_reach: bool = True) -> Path:

@@ -25,7 +25,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -34,6 +34,7 @@ from .agreement import held_sentence
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
+from .fetch_marks import awaited_set_aside_for
 from .models import TransactionStatus
 from .namespaces import CASH_LEG_SOURCE
 from .plural import plural as _plural
@@ -641,8 +642,14 @@ def standing_items_from(
     label_of: Callable[[str], str],
     closed_by_today: Callable[[str], bool],
     today: date,
+    awaited_set_aside: Callable[[str, date, date], bool] | None = None,
 ) -> list[AttentionItem]:
     """Items from each account's standing: reminders, and faults where agreement is held back.
+
+    `awaited_set_aside(account, first, last)` says whether the owner has set aside the days an
+    account is waiting for a statement over (`fetch_marks.period_is_set_aside`, which the
+    fetch-gaps page asks as well), so Today does not tell him to upload a statement the other page
+    has stopped asking for. It changes only that one item: no standing is read differently.
 
     Known balances that disagree with each other are one item per account.
     An account whose agreement is HELD BACK (an unmet known balance or a movement fault) and has
@@ -685,6 +692,15 @@ def standing_items_from(
             continue
         waiting_since = statement_awaited(standings[ref], today)
         if waiting_since is not None:
+            first_waiting = standing.own.known_to
+            last_waiting = standings[ref].newest_row
+            if (
+                awaited_set_aside is not None
+                and first_waiting is not None
+                and last_waiting is not None
+                and awaited_set_aside(ref, first_waiting + timedelta(days=1), last_waiting)
+            ):
+                continue
             awaiting.append((ref, waiting_since))
             continue
         own = standing.own
@@ -1018,7 +1034,13 @@ def build_overview(
             standing_by_account.update(
                 standings_for(store, sorted(held), families=None, movement=None)
             )
-        return standing_items_from(standing_by_account, label_of, closed_by_today, now.date())
+        return standing_items_from(
+            standing_by_account,
+            label_of,
+            closed_by_today,
+            now.date(),
+            awaited_set_aside_for(store, now.date()),
+        )
 
     own_checks: list[tuple[str, Callable[[], list[AttentionItem]]]] = [
         (

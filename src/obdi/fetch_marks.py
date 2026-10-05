@@ -293,8 +293,6 @@ class MarkWorld:
     #: Per account, the declared opening and closing days.
     declared: Mapping[str, tuple[date | None, date | None]] = field(default_factory=dict)
     reach: Mapping[str, Reach] = field(default_factory=dict)
-    #: Per account, the first day a known balance is held for.
-    first_balance: Mapping[str, date] = field(default_factory=dict)
 
 
 def gather_world(
@@ -799,7 +797,6 @@ class MarkSet:
     declared_opened: Mapping[str, date] = field(default_factory=dict)
     offers: tuple[ReachOffer, ...] = ()
     not_asked: tuple[NotAsked, ...] = ()
-    first_balance: Mapping[str, date] = field(default_factory=dict)
 
     def scope_for(self, account: str) -> Scope | None:
         return self.scopes.get(account) or self.scopes.get(HOUSEHOLD)
@@ -989,6 +986,26 @@ def period_is_set_aside(
     return not partition(
         account, [probe], marks, today, statement_sources=statement_sources
     ).remaining
+
+
+def awaited_set_aside_for(
+    store: Store, today: date
+) -> Callable[[str, date, date], bool] | None:
+    """The question Today asks about a statement an account is waiting for, from the store's own
+    marks and scopes; None where there are none, so a household that has decided nothing pays
+    for no walk of its rows."""
+    from .fetch_gaps import STATEMENT_SOURCES
+
+    if not marks_in(store) and not scopes_in(store):
+        return None
+    found = read_marks(store, gather_world(store), today, statement_sources=STATEMENT_SOURCES)
+
+    def settled(account: str, first_day: date, last_day: date) -> bool:
+        return period_is_set_aside(
+            found, account, first_day, last_day, today, statement_sources=STATEMENT_SOURCES
+        )
+
+    return settled
 
 
 # ---------------------------------------------------------------------------------------------
