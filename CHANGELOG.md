@@ -26,6 +26,31 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.317] - 2026-10-05
+
+### Changed
+- **The Accounts page shows which accounts need a look.** The owner followed
+  Today's Verification line ("9 of 12 accounts in agreement ...; 1 held back;
+  2 cannot be verified.") to the Accounts page and found every row at one
+  weight under a green tick reading "declared", with what held an account
+  back in the same body text as everything else. The chip beside an account
+  is now its verification: in agreement, held back, or cannot be verified.
+  The page opens with the sentence Today says and names the accounts that
+  need a look as links to their rows; those rows come first, with an amber
+  rail, the reason in bold, and what would settle it. Today's line links
+  straight to them.
+- **Being declared carries no chip.** It is the ordinary state of an account,
+  and a green tick for it read as "verified" on accounts that were not. "Not
+  declared" is still marked.
+- One function gives an account's verdict to Today's count and to the chip,
+  and one gives both pages their sentence, so the two cannot disagree.
+
+### Not covered
+- Looked at over an invented household of six at phone width; not seen on
+  the real nineteen accounts.
+- An account holding no rows carries no chip at all, and an archived account
+  still prints its verification sentence in plain text.
+
 ## [0.4.316] - 2026-10-05
 
 ### Fixed
