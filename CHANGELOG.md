@@ -26,6 +26,61 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.320] - 2026-10-05
+
+### Added
+- **The balance chart takes a window of time**, with the control the
+  Position page uses, from one module both pages read. A count, a "first
+  on", and the strip are of the window and say so; a difference that began
+  before the window is drawn from its first day and said to have begun
+  earlier, with its real date. A window is cut at the account's last known
+  balance, where its days stop, and says so. On the masked page the window
+  may travel in the address, since that page draws no figure; with values
+  shown it travels in the form only.
+- **Week-aligned periods**, in the fold of both pages: "This week", "Last
+  week", and "Last 4 whole weeks". Weeks run Monday to Sunday, and a period
+  named "last" never holds today.
+- **Bring in lists the bank's own feed.** The page said "6 banks connected",
+  which were the aggregator's consents, and did not mention the feed read
+  directly from the main bank. It is now the first row: that it is read
+  directly, when it last answered, and which accounts it feeds.
+
+### Changed
+- **Copies that are not counted read as quiet history on an account's
+  page.** A third of a month on the real main account was drawn with a red
+  rail and a red "one source" chip: rows held under a Space or itemised by a
+  statement, deliberately withheld so they are not counted twice. Red means
+  a disagreement. They now collapse into one line at the foot of the month
+  ("7 copies not counted ..."), each under a muted chip, and the month's
+  header says how many rows are counted. A counted row only one source lists
+  is amber; red is kept for a row that cannot be sent, shares an identity,
+  awaits a review, or is an unconfirmed transfer.
+- **An account's page no longer grows with its history.** The fold of known
+  balances rendered every one on every load: 1,906 on the real main account,
+  about nine tenths of the page. It shows the opening, every balance that
+  differs or is untested, and the newest ten in agreement, with a link to
+  the rest. An invented account of 2,000 balances went from 1.4 MB to 95 KB.
+  The danger zone's removal forms and the protection's date list, which grew
+  the same way, are cut to what is listed with a link to the rest.
+- **The Position chart's key names its dashed line in the chart's own
+  unit**: "on a day", "in a week", or "in a month that leaves something
+  out", from the one function the title and the sentence beneath also read.
+- **Three actions are named for what they do**: "Remove protection" and
+  "Remove typed transaction" (both were "Withdraw"), "Move to another
+  account" (was "Refile"), and "Rebuild this artefact's transactions" (was
+  "Replay into store"). A result page uses its button's verb.
+
+### Not covered
+- With values shown, the balance chart is still about 10,000 units wide at
+  any window, so a window raises the scale per day and removes no sideways
+  scrolling. Making the width follow a chosen window is being built.
+- "Dates differ" on a row stays amber, with no threshold at which it would
+  be red.
+- The full list of known balances is one page, not paged.
+- Bring in cannot tell whether the bank still accepts its access token, only
+  whether an ask has landed.
+- All of this was looked at over invented data.
+
 ## [0.4.319] - 2026-10-05
 
 ### Fixed
