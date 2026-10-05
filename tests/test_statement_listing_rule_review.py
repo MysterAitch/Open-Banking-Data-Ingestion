@@ -67,6 +67,17 @@ no two documents share their bytes.
                       statement's opening balance to its closing, so its own reading does not say
                       "adds up". Got: adds up, "tested by the 3 transactions its statement lists",
                       10 Feb offered to protection.
+
+Two sentences that say something untrue of an account the rule reads correctly:
+
+  v-pending-next      A purchase made on 10 Feb, pending when February's statement closed and
+                      listed by March's; the balance typed for 10 Feb includes it. The rule is
+                      right (no conflict, adds up through 10 Mar).
+                      Expected: the sentence does not say that no statement lists the transaction.
+                      Got: "differ by exactly the 1 transaction dated that day that no statement
+                      lists".
+  v-no-lines          A statement that lists nothing and whose two balances are equal.
+                      Expected: not "tested by the 0 transactions its statement lists".
 """
 
 from __future__ import annotations
@@ -76,7 +87,13 @@ from pathlib import Path
 
 import pytest
 
-from obdi.agreement import HELD_CONFLICT, Standing, standing_of
+from obdi.agreement import (
+    HELD_CONFLICT,
+    Standing,
+    closed_before_sentence,
+    standing_line,
+    standing_of,
+)
 from obdi.balance_anchors import (
     STATEMENT,
     AnchorRefused,
@@ -246,6 +263,17 @@ def build(store: Store, root: Path) -> None:
     disregard_balance(
         store, "v-disregarded-first", JAN.isoformat(), source, STATEMENT, families=FAMILIES
     )
+
+    february = chain(
+        store, root, "v-pending-next", [FEB, D(2026, 3, 10)],
+        [
+            [Spend(D(2026, 1, 20), "Quiet Next", 717)],
+            [Spend(FEB, "Pending Next", 777), Spend(D(2026, 2, 20), "Later Next", 331)],
+        ],
+    )[0]
+    _typed_balance(store, "v-pending-next", FEB, -february - 777)
+
+    statement(store, root, "v-no-lines", JAN, OPENING + 1, [], received=JAN, previous_close=MID)
     store.connection.commit()
     keep_statement_readings(store)
     store.connection.commit()
@@ -385,8 +413,10 @@ class TestAStatementFaultBehindAnotherHold:
 
         # The statement's lines were found and do not sum: the measurement says so.
         assert "not-read-whole" in [s.fault for s in checks_of(store, ref).statements]
-        assert [i.accounts for i in items if i.kind == "statement-fault"] == [(ref,)]
-        assert row.state != IN_ORDER
+        assert (
+            [i.accounts for i in items if i.kind == "statement-fault"],
+            row.state != IN_ORDER,
+        ) == ([(ref,)], True)
 
 
 class TestTheEarliestKnownBalanceIsNotTheFirstStatementHeld:
@@ -404,6 +434,22 @@ class TestTheEarliestKnownBalanceIsNotTheFirstStatementHeld:
         assert first_held == D(2025, 11, 20)
         assert offered(store, "v-disregarded-first", today) == ()
         assert offered(store, "v-disregarded-first", now) == ()
+
+
+class TestTheSentencesSayOnlyWhatIsSo:
+    def test_Sentence_WhenTheNextStatementListsTheTransactionClosedBefore_DoesNotSayNoneListsIt(
+        self, world
+    ):
+        now, verdict = read(*world, "v-pending-next", rule=True)
+
+        assert (verdict, now.own.through) == (ADDS_UP, D(2026, 3, 10))
+        (claim,) = now.own.closed_before
+        assert "no statement lists" not in closed_before_sentence(claim)
+
+    def test_Line_WhenTheStatementListsNothing_DoesNotSayItIsTestedByNoTransactions(self, world):
+        now, _ = read(*world, "v-no-lines", rule=True)
+
+        assert "0 transactions" not in standing_line(now.own, None, with_protection=False)
 
 
 class TestAListedTransactionFoldedIntoAnotherAccounts:
