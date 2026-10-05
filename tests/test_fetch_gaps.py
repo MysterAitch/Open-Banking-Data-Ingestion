@@ -73,7 +73,7 @@ class TestEveryKindOfGap:
         """03-10 to 05-10 is 61 days against a usual 31, so one is missing, closing 04-10."""
         (gap,) = world.gaps("card-hole")
         assert shape(gap) == (
-            GapKind.HOLE_BETWEEN, D(2026, 3, 11), D(2026, 5, 9), Basis.INFERRED,
+            GapKind.HOLE_BETWEEN, D(2026, 3, 11), D(2026, 4, 10), Basis.INFERRED,
             "santander-cc-pdf",
         )
         assert gap.probably == 1 and gap.closings == (D(2026, 4, 10),)

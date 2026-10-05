@@ -31,6 +31,12 @@ two statements that no statement lists turns an inferred hole, or a presumed mee
 stated one (`HoleReason.UNLISTED_ROWS`). A count of none is support only where another source
 actually covers those days (`OtherSources`), and never proof.
 
+WHERE A HOLE ENDS (`_reach`). The day after the earlier close is a fact. Where the later
+statement prints no start, the missing statement's own close is not known, so the hole is taken
+to end at the closing day the cadence expects (`Hole.closings`) and the later statement to
+cover from the day after (INFERRED), unless its first listed row is earlier, when the row wins.
+`Hole.known` says whether the hole exists; `Hole.last_known` says how its end is known.
+
 A STATEMENT IS WHOLE unless it is partial. Its closing day is a whole day (the closing balance
 is the balance at that day's end) and being a file does not make it partial. It is PARTIAL
 only where its closing day is later than the day it was produced - the day the document prints
@@ -43,10 +49,11 @@ WHEN A STATEMENT IS DUE, stated here once (`next_statement`): the cadence is tha
 statements held (`cadence_of`, three or more, about monthly) and the statements close on
 calendar-month steps from the newest held, so a month of 28 or 31 days does not drift. One is
 due once its closing day plus the lag has passed. The lag is the shortest time any held
-statement took to be received after its closing day, from the kept times: a statement received
-N days after it closed proves one can be available by then, and a later receipt may be only the
-owner's own delay, so the shortest is the best evidence and later receipts are not averaged in.
-Where no kept time says, the lag is nil and the available day is the closing day.
+statement took to be received after its closing day (within `MAX_PLAUSIBLE_LAG_DAYS`), from the
+kept times: a statement received N days after it closed proves one can be available by then,
+and a later receipt may be only the owner's own delay, so the shortest is the best evidence and
+later receipts are not averaged in. Where no kept time says, the lag is nil and the available
+day is the closing day.
 """
 
 from __future__ import annotations
@@ -86,6 +93,13 @@ CADENCE_NEEDS = 3
 #: one and a half. The number of statements missing is the nearest whole number of calendar
 #: months between the two closings, less one.
 HOLE_CADENCES = 1.5
+
+
+#: How long after its closing day a statement may be received and still say how soon one can be
+#: available. A statement uploaded months later (a back-catalogue in one sitting) says only when
+#: the owner got round to it, and counting it would make the newest statement look unavailable
+#: for as long as the owner took to upload it.
+MAX_PLAUSIBLE_LAG_DAYS = 14
 
 
 class Known(StrEnum):
@@ -197,6 +211,12 @@ class Hole:
     closings: tuple[date, ...] = ()
     #: Rows other sources hold in the hole that no statement lists.
     unlisted_rows: int = 0
+    #: How `last_day` is known, apart from `known`, which is about the hole's existence and its
+    #: first day. A hole proven by balances that do not meet starts on the day after the earlier
+    #: close (a fact); where it ends is INFERRED when placed at the closing day the missing
+    #: statement is expected to have had (`closings[-1]`), or OBSERVED when it is the day before
+    #: the later statement's first listed row, which is as far as nothing is known to cover.
+    last_known: Known = Known.OBSERVED
 
 
 @dataclass(frozen=True)
@@ -327,7 +347,8 @@ def _lag_days(statements: Sequence[StatementPeriod]) -> int | None:
     lags = [
         (item.received - item.closing).days
         for item in statements
-        if item.received is not None and item.received >= item.closing
+        if item.received is not None
+        and item.closing <= item.received <= item.closing + timedelta(days=MAX_PLAUSIBLE_LAG_DAYS)
     ]
     return min(lags) if lags else None
 
@@ -429,6 +450,51 @@ def describe_account(
     return AccountSpans(account, tuple(spans), tuple(holes), cadence, next_statement(held, today))
 
 
+@dataclass(frozen=True)
+class _Reach:
+    """Where a hole before a statement ends, and from when that statement covers."""
+
+    last: date
+    last_known: Known
+    first: date | None
+    first_known: Known
+    probably: int | None
+    closings: tuple[date, ...]
+
+
+def _reach(
+    item: StatementPeriod,
+    previous: StatementPeriod,
+    cadence: int | None,
+    one_period: bool,
+) -> _Reach:
+    """The hole between `previous` and `item`, which prints no start of its own.
+
+    Where the closing days are far apart the missing statement's period runs from the day after
+    the earlier close to ITS OWN close, which is not known: it is placed by the calendar-month
+    steps of the cadence (`closings`), and `item` is taken to cover from the day after. Where
+    `item`'s first listed row is earlier than that, the row wins and the hole ends the day
+    before it: nothing is known to cover only the days before the first row. Where the closing
+    days are one period apart (or no cadence is held) the hole is the days up to the first
+    row. Whichever, the day the hole starts is a fact and the day it ends is not, and
+    `last_known` says so.
+    """
+    ceiling = item.first_row - timedelta(days=1) if item.first_row else None
+    if cadence is not None and not one_period:
+        count, closings = _missing(previous.closing, item.closing)
+        guess = closings[-1]
+        if ceiling is not None and guess >= ceiling:
+            return _Reach(ceiling, Known.OBSERVED, item.first_row, Known.OBSERVED, count, closings)
+        return _Reach(
+            guess, Known.INFERRED, guess + timedelta(days=1), Known.INFERRED, count, closings
+        )
+    last = ceiling if ceiling is not None else item.closing
+    first = item.first_row
+    return _Reach(
+        last, Known.OBSERVED, first, Known.OBSERVED if first else Known.INFERRED, None, ()
+    )
+
+
 def _start_of(
     item: StatementPeriod,
     previous: StatementPeriod | None,
@@ -448,6 +514,7 @@ def _start_of(
         known: Known,
         reason: HoleReason,
         *,
+        last_known: Known = Known.OBSERVED,
         probably: int | None = None,
         closings: tuple[date, ...] = (),
         unlisted_rows: int = 0,
@@ -464,6 +531,7 @@ def _start_of(
             probably,
             closings,
             unlisted_rows,
+            last_known,
         )
 
     observed = (item.first_row, Known.OBSERVED) if item.first_row else (None, Known.INFERRED)
@@ -506,15 +574,27 @@ def _start_of(
     one_period = cadence is not None and interval <= cadence * HOLE_CADENCES
 
     if differ:
-        if item.first_row is None or item.first_row > after:
-            return (
-                observed[0],
-                observed[1],
-                None,
-                (),
-                [hole(after, window_end, Known.STATED, HoleReason.BALANCES_DIFFER)],
-            )
-        return observed[0], observed[1], None, (Contradiction.BALANCES_BREAK,), []
+        if item.first_row is not None and item.first_row <= after:
+            return observed[0], observed[1], None, (Contradiction.BALANCES_BREAK,), []
+        reach = _reach(item, previous, cadence, one_period)
+        return (
+            reach.first,
+            reach.first_known,
+            None,
+            (),
+            [
+                hole(
+                    after,
+                    reach.last,
+                    Known.STATED,
+                    HoleReason.BALANCES_DIFFER,
+                    last_known=reach.last_known,
+                    probably=reach.probably,
+                    closings=reach.closings,
+                    unlisted_rows=rows.unlisted_between(account, after, reach.last),
+                )
+            ],
+        )
 
     if cadence is None:
         return observed[0], observed[1], None, (), []
@@ -546,26 +626,54 @@ def _start_of(
         )
         return after, Known.BALANCES_MEET if equal else Known.INFERRED, others, (), []
 
-    count, closings = _missing(previous.closing, item.closing)
-    unlisted = rows.unlisted_between(account, after, item.closing - timedelta(days=1))
+    if item.first_row is not None and item.first_row <= after:
+        return observed[0], observed[1], None, (), []
+    reach = _reach(item, previous, cadence, one_period)
+    unlisted = rows.unlisted_between(account, after, reach.last)
     reason = HoleReason.BALANCES_MEET_NET_NIL if equal else HoleReason.SPACING
     return (
-        observed[0],
-        observed[1],
+        reach.first,
+        reach.first_known,
         None,
         (),
         [
             hole(
                 after,
-                item.closing - timedelta(days=1),
+                reach.last,
                 Known.STATED if unlisted else Known.INFERRED,
                 HoleReason.UNLISTED_ROWS if unlisted else reason,
-                probably=count,
-                closings=closings,
+                last_known=reach.last_known,
+                probably=reach.probably,
+                closings=reach.closings,
                 unlisted_rows=unlisted,
             )
         ],
     )
+
+
+def describe_start(span: Span) -> str:
+    """How a statement's first day is known, as a sentence a person can check, never naming
+    the internal basis and never saying that nothing is missing."""
+    if span.first is None:
+        return "Nothing says which day this statement begins on."
+    day = span.first.isoformat()
+    if span.first_known is Known.STATED:
+        return f"The statement says it covers the period from {day}."
+    if span.first_known is Known.BALANCES_MEET:
+        covered = (
+            " Another source holds rows across those days and none is missing from the "
+            "statements, which supports that without proving it."
+            if span.others is OtherSources.COVERED_NONE_UNLISTED
+            else " No other source covers those days, so nothing else checks it."
+        )
+        return (
+            f"Its opening balance is the closing balance of the statement before, and the two "
+            f"close about a month apart, so it is taken to begin on {day}. That does not rule "
+            f"out a short statement between them whose movements net to nil.{covered}"
+        )
+    if span.first_known is Known.OBSERVED:
+        return f"Its first listed payment is on {day}, so it covers at least from then."
+    return f"It is taken to begin about {day}, from how regularly statements close."
 
 
 def statement_spans(

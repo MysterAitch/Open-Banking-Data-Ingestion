@@ -17,9 +17,11 @@ interval over 31 x 1.5 = 46.5 days.
 
   S1  first 01-04 OBSERVED (its own first row)   last 01-10 STATED   whole
   S2  opening equals S1's closing, 31 days on, so it begins 01-11, BALANCES_MEET (an inference)
-  S4  opening 160 is not S2's closing 150: STATED hole from S2's close + 1 (02-11) to the day
-      before S4's first row (04-02, no start being printed): 02-11 to 04-01; S4 first 04-02
-      OBSERVED
+  S4  opening 160 is not S2's closing 150: the hole is STATED, and starts the day after S2's
+      close, 02-11 (a fact). S4 prints no start, so where the hole ends is not known: the
+      closings are 59 days apart (over 46.5, which agrees), so one statement is probably
+      missing, closing 02-10 + one month = 03-10 (INFERRED), and S4 is taken to cover from
+      03-11, before its first row 04-02, so the hole is 02-11 to 03-10, probably 1.
   S5  opening equals S4's closing, 30 days on: first 04-11 BALANCES_MEET
   S6  opening equals S5's closing, 31 days on: first 05-11 BALANCES_MEET. Received 06-02, before
       its closing 06-10, so PARTIAL: last 06-02, bounded by RECEIVED, INFERRED.
@@ -42,9 +44,11 @@ from obdi.statement_span import (
     HoleReason,
     Known,
     OtherSources,
+    Span,
     add_months,
     cadence_of,
     describe_account,
+    describe_start,
     due_closings,
     months_between,
     statement_spans,
@@ -141,12 +145,16 @@ class TestTheHandWorkedAccount:
         assert (second.first, second.first_known) == (D(2026, 1, 11), Known.BALANCES_MEET)
         assert second.others is OtherSources.NOT_COVERED
 
-    def test_FourthStatement_OpeningNotTheSecondsClosing_IsAStatedHoleToItsFirstRow(self, account):
+    def test_FourthStatement_OpeningNotTheSecondsClosing_IsAStatedHoleWhoseEndIsInferred(
+        self, account
+    ):
         (hole,) = account.holes
-        assert (hole.first_day, hole.last_day) == (D(2026, 2, 11), D(2026, 4, 1))
-        assert (hole.known, hole.reason) == (Known.STATED, HoleReason.BALANCES_DIFFER)
+        assert (hole.first_day, hole.last_day) == (D(2026, 2, 11), D(2026, 3, 10))
+        assert (hole.known, hole.last_known) == (Known.STATED, Known.INFERRED)
+        assert hole.reason is HoleReason.BALANCES_DIFFER
+        assert (hole.probably, hole.closings) == (1, (D(2026, 3, 10),))
         fourth = account.statements[2]
-        assert (fourth.first, fourth.first_known) == (D(2026, 4, 2), Known.OBSERVED)
+        assert (fourth.first, fourth.first_known) == (D(2026, 3, 11), Known.INFERRED)
 
     def test_FifthStatement_ChainsToTheFourth(self, account):
         fifth = account.statements[3]
@@ -233,11 +241,11 @@ class TestWhenTheBalanceReturnsToTheSameFigure:
         spans = _spans(tmp_path, lambda s: self._build(s, tmp_path, hold_february=False))["ret"]
 
         (hole,) = spans.holes
-        assert (hole.first_day, hole.last_day) == (D(2026, 1, 11), D(2026, 3, 9))
+        assert (hole.first_day, hole.last_day) == (D(2026, 1, 11), D(2026, 2, 10))
         assert (hole.known, hole.reason) == (Known.INFERRED, HoleReason.BALANCES_MEET_NET_NIL)
         assert (hole.probably, hole.closings) == (1, (D(2026, 2, 10),))
         march = spans.statements[-1]
-        assert march.first_known is Known.OBSERVED
+        assert (march.first, march.first_known) == (D(2026, 2, 11), Known.INFERRED)
 
 
 class TestAMissingStatementThatNetsToNil:
@@ -313,7 +321,7 @@ class TestAMissingStatementThatNetsToNil:
             HoleReason.BALANCES_MEET_NET_NIL,
             1,
         )
-        assert (hole.first_day, hole.last_day) == (D(2026, 1, 11), D(2026, 3, 9))
+        assert (hole.first_day, hole.last_day) == (D(2026, 1, 11), D(2026, 2, 10))
         assert hole.unlisted_rows == 0
 
     def test_FarApart_WhenTheFeedHoldsTheTwoRowsNoStatementLists_IsAStatedHoleWithTheirCount(
@@ -644,6 +652,44 @@ class TestWhenAStatementIsDue:
         assert following is not None
         assert following.lag_days is None
         assert following.expected_available == following.expected_close
+
+
+class TestTheWordsForHowAStartIsKnown:
+    def _span(self, known, others=None):
+        return Span(
+            "acc",
+            D(2026, 2, 10),
+            "x",
+            D(2026, 1, 11),
+            known,
+            D(2026, 2, 10),
+            Known.STATED,
+            others=others,
+        )
+
+    def test_AStartThatBalancesMeet_IsDescribedInPlainWords_AndNeverAsProofNothingIsMissing(self):
+        said = describe_start(self._span(Known.BALANCES_MEET, OtherSources.NOT_COVERED))
+
+        assert "opening balance is the closing balance of the statement before" in said
+        assert "net to nil" in said
+        assert "No other source covers those days" in said
+        for internal in ("balances-meet", "BALANCES_MEET", "chained", "CHAINED"):
+            assert internal not in said
+        assert "nothing is missing" not in said.lower()
+
+    def test_AStartThatBalancesMeet_WithAnotherSourceCoveringIt_SaysThatSupportsWithoutProving(
+        self,
+    ):
+        said = describe_start(self._span(Known.BALANCES_MEET, OtherSources.COVERED_NONE_UNLISTED))
+
+        assert "supports that without proving it" in said
+
+    @pytest.mark.parametrize("known", [Known.STATED, Known.OBSERVED, Known.INFERRED])
+    def test_EveryOtherBasis_NamesTheDay_WithoutTheInternalWord(self, known):
+        said = describe_start(self._span(known))
+
+        assert "2026-01-11" in said
+        assert known.value not in said.lower().replace("stated", "") or known is Known.STATED
 
 
 class TestMonthsBetween:

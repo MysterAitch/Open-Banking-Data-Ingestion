@@ -10,22 +10,19 @@ account, a kind, the first and last day, whether the gap is a stated fact or an 
 source expected to read the file, and why it matters.
 
 FACT AGAINST INFERENCE is carried in every gap, not left to wording. A gap is STATED where the
-store holds the evidence for it: rows after the newest known balance, a statement whose own
-period opens after the day the previous one closed, rows before the first known balance, a month
-an export lacks while another source holds rows for it. It is INFERRED where the evidence is
-the rhythm of the statements held: a hole between two statements that state only a closing day,
-and the closing days of the statements probably waiting. A cadence is inferred only from three
-or more statements whose usual gap is a month (`cadence_of`); below that nothing is inferred.
+store holds the evidence for it: rows after the newest known balance, a hole between statements
+that `statement_span` proves (a printed start after the earlier close, an opening balance that
+is not the earlier closing balance, or rows another source holds that no statement lists), rows
+before the first known balance, a month an export lacks while another source holds rows for it.
+It is INFERRED where the evidence is the rhythm of the statements held: a hole between two
+statements whose closing days are far apart, and the closing days of the statements probably
+waiting. What each way of knowing proves, the cadence, and the hole's threshold are
+`statement_span`'s to state, not restated here.
 
 ONE RULE, ONE PLACE. "A statement is overdue" is `overview.statement_awaited`, which Today's
 "rows after their last known balance" item reads too, so the two cannot name different accounts.
 Unreadable months, the standing of an account, and the review flags' gaps are likewise called, not
 restated.
-
-THE HOLE'S THRESHOLD is one and a half cadences, not two. Two statements a month apart close
-about 30 days apart, and with one between them missing the interval is 59 to 62 days; "twice the
-cadence" read as 62 days would miss a hole of 61, the commonest case. The number of statements
-missing is the interval over the cadence, rounded, less one.
 
 WHAT IS NOT A GAP: an account archived by its closing date, an account that holds no rows, a
 balance-only account (its balances are stated by hand, so there is no file to fetch), and a
@@ -35,42 +32,42 @@ report says when it is expected).
 
 from __future__ import annotations
 
-import calendar
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from enum import StrEnum
-from itertools import pairwise
 
 from .accounts import is_balance_only
 from .agreement import NONE, UNTESTED
 from .coverage import coverage, gaps
 from .namespaces import FILE_SOURCES
 from .overview import first_row_dates, held_by_account, statement_awaited
-from .parsers.pdf_statements import PDF_PARSERS
 from .review_flags import settle_evidence
 from .review_report import BalanceGap, assess_flags
 from .standing_data import AccountStanding
+from .statement_span import (
+    STATEMENT_SOURCES,
+    Hole,
+    HoleReason,
+    Known,
+    RowEvidence,
+    add_months,
+    cadence_of,
+    describe_account,
+    due_closings,
+)
 from .statement_terms import StatementPeriod, statement_periods
 from .store import Store
 
-#: The sources whose rows are a statement's own.
-STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS) | {"statement"}
+__all__ = ["add_months", "cadence_of", "closings_after"]
 
 #: The sources a person exports by hand from a bank's site: the file sources that are not
 #: statements.
 EXPORT_SOURCES = FILE_SOURCES - STATEMENT_SOURCES
 
-#: The days between statements that make a cadence "monthly": a statement closes on about the
-#: same day each month, and a month is 28 to 31 days with a day of slack.
-MONTHLY_DAYS = (27, 32)
-
-#: The fewest statements a cadence is inferred from. Two give one interval, which is a
-#: coincidence as easily as a rhythm.
-CADENCE_NEEDS = 3
-
-#: How many cadences between two closing days make a hole. See the module's account.
-HOLE_CADENCES = 1.5
+#: What a cadence is and when a hole or a due statement is declared live in `statement_span`;
+#: `closings_after` is its `due_closings` under the name this module's callers know.
+closings_after = due_closings
 
 #: How long an export may trail the other sources before it is called stopped. An export is
 #: fetched alongside a monthly statement, so a shorter stretch is not yet worth a trip.
@@ -122,6 +119,16 @@ class FetchGap:
     rows_to: date | None = None
     #: The review flag's gap kind ("before", "after", "single"), for a flag a statement settles.
     flag: str = ""
+    #: For a hole between statements, why it is one (`statement_span.HoleReason`), and for an
+    #: unlisted-rows hole how many rows other sources hold in it that no statement lists.
+    reason: HoleReason | None = None
+    unlisted_rows: int = 0
+    #: For a hole, the closing days of the statements either side, and whether `last_day` is
+    #: an inference (the closing day the missing statement is expected to have had) rather than
+    #: a day the held statements show. `first_day` is a fact whenever the hole is.
+    earlier_closing: date | None = None
+    later_closing: date | None = None
+    last_day_inferred: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +145,9 @@ class AccountOutlook:
     next_expected: date | None = None
     #: The source that read the newest statement held, "" where none has.
     source: str = ""
+    #: The main account this is a Space of, "" for an account that is not one. A Space has no
+    #: statement or export of its own to fetch: it is tested with its main account as a whole.
+    space_of: str = ""
 
 
 @dataclass(frozen=True)
@@ -190,10 +200,22 @@ class FetchEvidence:
     flags: tuple[FlagNeed, ...]
     closed: Mapping[str, date | None]
     balance_only: frozenset[str]
+    #: What other sources hold that no statement lists, to set against the statements.
+    unlisted: RowEvidence = field(default_factory=RowEvidence)
+    #: Each known Space's main account, as `family_anchors.Families.parents` says.
+    space_parents: Mapping[str, str] = field(default_factory=dict)
 
 
-def gather_evidence(store: Store) -> FetchEvidence:
-    """Read everything the gaps need, once. Costs a walk of the store: keep the result."""
+def gather_evidence(
+    store: Store, *, space_parents: Mapping[str, str] | None = None
+) -> FetchEvidence:
+    """Read everything the gaps need, once. Costs a walk of the store: keep the result.
+
+    `space_parents` is the family relation the rest of the store reads
+    (`family_anchors.Families.parents`, which also knows the provider's own structure); without
+    it only the registry's declared parents are known, and a Space the registry does not tie to
+    a parent is not recognised as one.
+    """
     statements: dict[str, dict[date, StatementPeriod]] = {}
     for period in statement_periods(store):
         slot = statements.setdefault(period.account_ref, {})
@@ -232,42 +254,13 @@ def gather_evidence(store: Store) -> FetchEvidence:
         flags=tuple(sorted(set(need), key=lambda n: (n.account, n.day, n.kind))),
         closed={str(r.ref): r.closed for r in records},
         balance_only=frozenset(str(r.ref) for r in records if is_balance_only(r.kind)),
+        unlisted=RowEvidence.from_sightings(held_sightings),
+        space_parents=(
+            dict(space_parents)
+            if space_parents is not None
+            else {str(r.ref): str(r.parent) for r in records if r.parent is not None}
+        ),
     )
-
-
-def cadence_of(closings: Sequence[date]) -> int | None:
-    """The usual days between statements, where there are enough to say and it is monthly.
-
-    The lower median of the intervals, so one missing statement (a double interval) does not
-    lift it. None for fewer than `CADENCE_NEEDS` statements and for any rhythm that is not a
-    month: a quarterly or irregular account is left without an inference.
-    """
-    ordered = sorted(set(closings))
-    if len(ordered) < CADENCE_NEEDS:
-        return None
-    intervals = sorted((later - earlier).days for earlier, later in pairwise(ordered))
-    usual = intervals[(len(intervals) - 1) // 2]
-    low, high = MONTHLY_DAYS
-    return usual if low <= usual <= high else None
-
-
-def add_months(day: date, months: int) -> date:
-    """`day` that many months on, kept to the month's end where the day does not exist."""
-    index = day.year * 12 + day.month - 1 + months
-    year, month = divmod(index, 12)
-    month += 1
-    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
-
-
-def closings_after(last: date, today: date, *, limit: int = 24) -> list[date]:
-    """The monthly closing days after `last` that have already passed by `today`."""
-    found = []
-    for step in range(1, limit + 1):
-        day = add_months(last, step)
-        if day > today:
-            break
-        found.append(day)
-    return found
 
 
 def _next_after(last: date, today: date) -> date:
@@ -277,45 +270,27 @@ def _next_after(last: date, today: date) -> date:
     return add_months(last, step)
 
 
-def _holes(statements: Sequence[StatementPeriod], cadence: int | None) -> list[FetchGap]:
-    found: list[FetchGap] = []
-    for earlier, later in pairwise(statements):
-        if later.opens is not None:
-            if later.opens > earlier.closing + timedelta(days=1):
-                found.append(
-                    FetchGap(
-                        earlier.account_ref,
-                        GapKind.HOLE_BETWEEN,
-                        earlier.closing + timedelta(days=1),
-                        later.opens - timedelta(days=1),
-                        Basis.STATED,
-                        later.source or earlier.source,
-                        "The later statement says its period begins after the earlier one "
-                        "closed, so nothing known covers the days between.",
-                    )
-                )
-            continue
-        if cadence is None:
-            continue
-        interval = (later.closing - earlier.closing).days
-        if interval <= cadence * HOLE_CADENCES:
-            continue
-        missing = max(round(interval / cadence) - 1, 1)
-        found.append(
-            FetchGap(
-                earlier.account_ref,
-                GapKind.HOLE_BETWEEN,
-                earlier.closing + timedelta(days=1),
-                later.closing - timedelta(days=1),
-                Basis.INFERRED,
-                later.source or earlier.source,
-                "Two statements close further apart than the statements held usually do, so "
-                "one is probably missing between them.",
-                probably=missing,
-                closings=tuple(add_months(earlier.closing, step) for step in range(1, missing + 1)),
-            )
-        )
-    return found
+def _hole_gap(hole: Hole) -> FetchGap:
+    stated = hole.known is Known.STATED
+    return FetchGap(
+        hole.account,
+        GapKind.HOLE_BETWEEN,
+        hole.first_day,
+        hole.last_day,
+        Basis.STATED if stated else Basis.INFERRED,
+        hole.source,
+        "Statements held prove that nothing known covers the days between them."
+        if stated
+        else "Two statements close further apart than the statements held usually do, so one "
+        "is probably missing between them.",
+        probably=hole.probably,
+        closings=hole.closings,
+        reason=hole.reason,
+        unlisted_rows=hole.unlisted_rows,
+        earlier_closing=hole.earlier_closing,
+        later_closing=hole.later_closing,
+        last_day_inferred=hole.last_known is Known.INFERRED,
+    )
 
 
 def _month_ranges(months: Sequence[str]) -> list[tuple[date, date]]:
@@ -342,16 +317,24 @@ def _outlook(
         return AccountOutlook(ref, (), balance_only=True)
     found: list[FetchGap] = []
     closings = [s.closing for s in statements]
-    cadence = cadence_of(closings)
+    described = describe_account(statements, today, evidence.unlisted)
     newest_row = None if standing is None else standing.newest_row
     first_row = evidence.first_row.get(ref)
     own = None if standing is None else standing.standing.own
+    if (
+        standing is not None
+        and standing.standing.whole is not None
+        and ref in evidence.space_parents.values()
+    ):
+        # The statements and exports of a main account cannot see its Spaces, so what they are
+        # tested against is the whole family: the family's gap is the main account's, once.
+        own = standing.standing.whole
     awaiting = standing is not None and statement_awaited(standing, today) is not None
 
     if awaiting and standing is not None and own is not None and own.known_to is not None:
         waiting = [
             day
-            for day in (closings_after(closings[-1], today) if cadence and closings else [])
+            for day in (described.next.due if described.next is not None else ())
             if day > own.known_to
         ]
         found.append(
@@ -369,7 +352,7 @@ def _outlook(
                 rows_to=newest_row,
             )
         )
-    found.extend(_holes(statements, cadence))
+    found.extend(_hole_gap(hole) for hole in described.holes)
 
     for export, (_first, last) in sorted(evidence.export_spans.get(ref, {}).items()):
         others = [
@@ -428,10 +411,12 @@ def _outlook(
             # A statement is a closing balance, but it also accounts for the rows it lists, so
             # the rows of the first statement itself are not "before" it: only rows before the
             # day it says its period begins (or its first row) are.
-            first_statement = statements[0] if statements else None
+            first_span = described.statements[0] if described.statements else None
             covered = (
-                first_statement.covers_from
-                if first_statement is not None and first_statement.closing == own.known_from
+                first_span.first
+                if first_span is not None
+                and first_span.closing == own.known_from
+                and first_span.first_known in (Known.STATED, Known.OBSERVED)
                 else None
             )
             untested_to = (
@@ -486,7 +471,7 @@ def _outlook(
 
     found.sort(key=lambda g: (_URGENCY[g.kind], g.first_day))
     next_expected = None
-    if not found and cadence is not None and closings:
+    if not found and described.cadence is not None and closings:
         next_expected = _next_after(closings[-1], today)
     return AccountOutlook(
         ref,
@@ -512,6 +497,9 @@ def fetch_report(
     for ref in sorted(refs):
         closed = evidence.closed.get(ref)
         if closed is not None and closed <= today:
+            continue
+        if ref in evidence.space_parents:
+            outlooks.append(AccountOutlook(ref, (), space_of=evidence.space_parents[ref]))
             continue
         outlooks.append(_outlook(ref, standings.get(ref), evidence, today))
 
