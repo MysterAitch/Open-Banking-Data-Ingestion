@@ -26,6 +26,42 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.319] - 2026-10-05
+
+### Fixed
+- **An account whose reference is an ordinary word no longer rewrites that
+  word in a sentence.** The real cash account's reference is "cash", and the
+  cash withdrawal measurement read "Cash (cash) withdrawals" and "the word a
+  bank uses for a Cash (cash) machine". A one-word reference is now named
+  only where it is set off as a name, at the head of a line or in a count by
+  account. Beside it, a section headed by a reference and a colon now carries
+  the account's label, which it never did: the colon was always taken for a
+  provider's own id.
+
+### Added
+- **Identity health says which of the settlement rule's moves are safe**, and
+  changes nothing. 0.4.316 recorded why the rule stays out: on the real main
+  account it would leave four days holding a different total. The moves are
+  now grouped into the chains they form, and each group is counted as safe
+  (no day's total changes, and no known balance is tested against different
+  rows) or not, with the days an unsafe group would change and why its chain
+  is open. A rule that applies only the safe groups is written and held back
+  until this has been read on the real store.
+- **And where the export's rows with no feed sighting fall.** 711 of the
+  export's 4,821 rows sit on transactions the bank's feed never sighted. One
+  sentence now says how many are dated before the feed's first item, after
+  its last, and inside the span it covers, which is the number that would
+  mean a payment the export lists and the feed does not.
+
+### Read on the real store in 0.4.318, and what it settles
+- The bank's feed states a cash machine as `sourceSubType` ATM: 19
+  withdrawals on the main account, 2019-02-26 to 2026-02-20, all out, all
+  booked, none in another currency. The aggregator's word is
+  `transaction_category` CASH (16), and it calls 16 of the feed's ATM
+  withdrawals PURCHASE, which is a coarser statement and not a contradiction.
+  The feed also states `source` CASH_DEPOSIT (5): cash paid in. The rule is
+  being built on those words, with a table for a sighting's stated words.
+
 ## [0.4.318] - 2026-10-05
 
 ### Added
