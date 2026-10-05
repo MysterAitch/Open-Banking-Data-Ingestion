@@ -136,6 +136,122 @@ class TestAChainThatIsBrokenAtItsEnd:
         assert figures.unreproduced == 0
 
 
+def bakery_week(*, broken: bool) -> list[Payment]:
+    """A second payee at a second size, on the same days, in a chain of its own."""
+    payments = [
+        Payment(
+            f"f-bread-{day}",
+            "Bakery Co",
+            770,
+            f"2026-09-{day:02}T10:00:00.000Z",
+            f"2026-09-{day + 1:02}T03:00:00.000Z",
+            date(2026, 9, day + 1),
+            day,
+        )
+        for day in range(15, 22)
+    ]
+    return [*payments[:-1], replace(payments[-1], listed=None)] if broken else payments
+
+
+@pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
+class TestWhichMovesAreSafe:
+    """A group of moves is safe when no day would hold a different total afterwards.
+
+    KNOWN ANSWERS, worked by hand before the first run:
+      a closed chain (the week: every export row on the next payment, the last on the first)
+        one group of seven moves, safe, re-dating seven transactions, no day changing
+      a broken chain (the last payment's export row missing)
+        one group of six, unsafe, the 15th and the 21st changing, an open chain no export row
+        would close
+      the two together, in two payees of two sizes
+        two groups of more than five, one safe (seven moves, seven re-dated) and one not
+        (six moves, two days)
+    """
+
+    def test_Groups_WhenTheChainIsClosed_AreOneSafeGroupThatChangesNoDay(
+        self, stores, rebuild, again
+    ):
+        figures = figures_of(stores(consecutive_payments(7), rebuild=rebuild, again=again))
+
+        assert figures.group_count == 1
+        assert figures.groups_of_more == 1
+        assert figures.groups_safe == 1
+        assert figures.groups_safe_balance_changed == 0
+        assert (figures.moves_safe, figures.redated_safe, figures.moves_unsafe) == (7, 7, 0)
+        assert figures.unsafe_days == []
+
+    def test_Groups_WhenTheChainIsBroken_AreOneUnsafeGroupAndNameItsDays(
+        self, stores, rebuild, again
+    ):
+        figures = figures_of(
+            stores(week_without_its_last_export_row(), rebuild=rebuild, again=again)
+        )
+
+        assert (figures.group_count, figures.groups_safe) == (1, 0)
+        assert (figures.moves_safe, figures.moves_unsafe) == (0, 6)
+        assert figures.unsafe_days == [date(2026, 9, 15), date(2026, 9, 21)]
+        assert figures.unsafe_open_unclosed == 1
+        assert figures.unsafe_open_refused == 0
+        assert figures.unsafe_other == 0
+
+    def test_Groups_WhenOneChainIsClosedAndOneBroken_AreSplitAndEachJudgedAlone(
+        self, stores, rebuild, again
+    ):
+        figures = figures_of(
+            stores(
+                [*consecutive_payments(7), *bakery_week(broken=True)],
+                rebuild=rebuild,
+                again=again,
+            )
+        )
+
+        assert (figures.group_count, figures.groups_of_more) == (2, 2)
+        assert figures.groups_safe == 1
+        assert (figures.moves_safe, figures.redated_safe, figures.moves_unsafe) == (7, 7, 6)
+        assert figures.unsafe_days == [date(2026, 9, 15), date(2026, 9, 21)]
+
+
+class TestAChainWhoseClosingRowThePlanRefuses:
+    """The week, plus a second export row of the last row's size and date.
+
+    Two export rows then name the one transaction settled that day, so the plan refuses both
+    (`sharing_one_candidate`) and the last link of the chain is never made. KNOWN ANSWER, by
+    hand: six planned moves in one unsafe group, open, and the plan's refused rows are named as
+    what would have closed it.
+    """
+
+    def test_Groups_WhenTheLastLinkIsRefused_SaysARefusedRowWouldHaveClosedIt(self, stores):
+        twin = (("Coffee Co", -450, date(2026, 9, 22)),)
+
+        figures = figures_of(stores(consecutive_payments(7), extra_listed=twin))
+
+        assert figures.sharing_one_candidate == 2
+        assert figures.groups_safe == 0
+        assert figures.unsafe_open_refused == 1
+        assert figures.unsafe_open_unclosed == 0
+
+
+class TestRowsOnATransactionWithNoFeedSighting:
+    """PREDICTED, before the first run: the household's row inside the feed's span, and the two
+    rows added here, one a month before the feed's first item and one a month after its last,
+    so three rows dated 2026-08-15 to 2026-10-05, one before, one after, and one inside."""
+
+    def test_Sentence_WhenRowsSitOutsideAndInsideTheFeedsSpan_CountsEachByDate(self, stores):
+        extra = (("Old", -999, date(2026, 8, 15)), ("Late", -888, date(2026, 10, 5)))
+
+        figures = figures_of(stores(consecutive_payments(7), extra_listed=extra))
+        text = "\n".join(figures.sentences())
+
+        assert sorted(figures.none_no_feed_days) == [
+            date(2026, 8, 15),
+            date(2026, 9, 10),
+            date(2026, 10, 5),
+        ]
+        assert "dated from 2026-08-15 to 2026-10-05" in text
+        assert "the feed's items run from 2026-09-01 to 2026-09-21" in text
+        assert "and 1 is dated before it, 1 after it, and 1 inside it." in text
+
+
 class TestEveryExportRowIsAccountedFor:
     @pytest.mark.parametrize(
         "payments",

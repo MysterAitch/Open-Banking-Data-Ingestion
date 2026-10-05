@@ -1179,6 +1179,90 @@ def plan_settlement(batch: Sequence[Transaction], index: CandidateIndex) -> dict
     return {position: row for position, row in planned.items() if claims[row] == 1}
 
 
+#: One row's part in a group of moves: its size, the day it is counted on now, and the day it
+#: would be counted on after (None for a row that does not exist on that side).
+Effect = tuple[int, date | None, date | None]
+
+
+@dataclass(frozen=True)
+class SettlementGroup:
+    """Moves of the plan that chain together, and what making them all would do to the days.
+
+    A group is the records whose moves share a stored row: record r1 leaves T1 for T2, so the
+    record on T2 has to go somewhere, and so on. Moves between rows of one size are always
+    between equal sizes, so a group changes no day's total only if the rows end on the same
+    days they started on, in some other order.
+    """
+
+    #: The positions of the records whose moves make up the group, in batch order.
+    positions: tuple[int, ...]
+    rows: frozenset[str]
+    #: The days whose total of counted transactions would differ, by the change in it.
+    day_changes: Mapping[date, int]
+    #: How many existing rows would be counted on another day.
+    redated: int
+
+    @property
+    def safe(self) -> bool:
+        return not self.day_changes
+
+
+def settlement_groups(
+    planned: Mapping[int, str],
+    hosts: Callable[[int], frozenset[str]],
+    effect: Callable[[Sequence[int]], Sequence[Effect]],
+) -> list[SettlementGroup]:
+    """The plan's moves, grouped by the rows they chain, each with what it does to the days.
+
+    `hosts(position)` is the rows the record sits on now (the existing order's answer), a move
+    being a record whose planned row is not among them.
+    `effect(positions)` is what making just those moves does to each row they touch, as
+    (size, day counted on now, day counted on after): the caller owns how a row's day is read,
+    which differs between a store that has already placed the rows and a batch not yet placed.
+    SAFE is a property of a whole group (`SettlementGroup.safe`), so it is decided here, over
+    everything the group touches, before any record is resolved.
+    """
+    moved = [p for p, target in sorted(planned.items()) if target not in hosts(p)]
+    parent: dict[str, str] = {}
+
+    def find(row: str) -> str:
+        while parent.setdefault(row, row) != row:
+            parent[row] = parent[parent[row]]
+            row = parent[row]
+        return row
+
+    for position in moved:
+        for row in hosts(position):
+            parent[find(row)] = find(planned[position])
+    by_root: dict[str, list[int]] = {}
+    for position in moved:
+        by_root.setdefault(find(planned[position]), []).append(position)
+
+    groups: list[SettlementGroup] = []
+    for positions in by_root.values():
+        totals: dict[date, int] = {}
+        redated = 0
+        for size, was, now in effect(positions):
+            if was is not None:
+                totals[was] = totals.get(was, 0) - size
+            if now is not None:
+                totals[now] = totals.get(now, 0) + size
+            if was is not None and now is not None and was != now:
+                redated += 1
+        rows = frozenset(
+            {planned[p] for p in positions} | {row for p in positions for row in hosts(p)}
+        )
+        groups.append(
+            SettlementGroup(
+                tuple(positions),
+                rows,
+                {day: change for day, change in sorted(totals.items()) if change},
+                redated,
+            )
+        )
+    return groups
+
+
 @dataclass(frozen=True)
 class PartnerPlan:
     """What `plan_partners` decided for one batch.

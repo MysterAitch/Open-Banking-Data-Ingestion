@@ -19,6 +19,7 @@ IRREGULARS: dict[str, tuple[str, str]] = {
     "has": ("has", "have"),
     "does": ("does", "do"),
     "moves": ("moves", "move"),
+    "changes": ("changes", "change"),
     "shares": ("shares", "share"),
     "holds": ("holds", "hold"),
     "this": ("this", "these"),

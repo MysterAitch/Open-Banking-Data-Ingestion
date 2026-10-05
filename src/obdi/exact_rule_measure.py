@@ -28,10 +28,11 @@ from __future__ import annotations
 import contextlib
 import itertools
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
+from . import matching
 from .accounts import AccountMap
 from .cash_withdrawal_measure import CashWithdrawalReport, cash_withdrawal_report
 from .feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
@@ -225,6 +226,22 @@ class SettlementFigures:
     in_protected: int = 0
     #: Stored transactions whose date this reading of their sightings does not reproduce.
     unreproduced: int = 0
+    group_count: int = 0
+    groups_of_one: int = 0
+    groups_of_two: int = 0
+    groups_of_three_to_five: int = 0
+    groups_of_more: int = 0
+    groups_safe: int = 0
+    groups_safe_balance_changed: int = 0
+    moves_safe: int = 0
+    redated_safe: int = 0
+    moves_unsafe: int = 0
+    unsafe_days: list[date] = field(default_factory=list)
+    unsafe_open_refused: int = 0
+    unsafe_open_unclosed: int = 0
+    unsafe_other: int = 0
+    none_no_feed_days: list[date] = field(default_factory=list)
+    feed_span: tuple[date, date] | None = None
 
     def sentences(self) -> list[str]:
         sets_refused = (
@@ -276,6 +293,60 @@ class SettlementFigures:
             "inside a protected period.",
             f"{_transactions(self.unreproduced)} carry a date that this reading of their "
             "sightings does not reproduce, and the counts above are exact only where it does.",
+            *self._group_sentences(),
+            *self._no_feed_sentences(),
+        ]
+
+    def _group_sentences(self) -> list[str]:
+        unsafe_groups = self.group_count - self.groups_safe
+        named = [d.isoformat() for d in self.unsafe_days[:NAMED_DATES]]
+        more = len(self.unsafe_days) - NAMED_DATES
+        days = (
+            "No day would hold a different total."
+            if not self.unsafe_days
+            else f"The days whose total would differ: {', '.join(named)}"
+            + (f" and {more} more." if more > 0 else ".")
+        )
+        return [
+            f"Those {plural(self.moved, 'move')} chain together into "
+            f"{plural(self.group_count, 'group')} of transactions: {self.groups_of_one} of one "
+            f"move, {self.groups_of_two} of two, {self.groups_of_three_to_five} of three to "
+            f"five, and {self.groups_of_more} of more.",
+            f"{plural(self.groups_safe, 'group')} {agree(self.groups_safe, 'changes')} no "
+            f"day's total; of those, {self.groups_safe_balance_changed} would still change the "
+            "rows a known balance is tested against.",
+            f"{plural(self.moves_safe, 'move')} {agree(self.moves_safe, 'is')} in groups that "
+            f"change no day's total, and would re-date {plural(self.redated_safe, 'transaction')}"
+            f"; {plural(self.moves_unsafe, 'move')} {agree(self.moves_unsafe, 'is')} in groups "
+            "that do.",
+            days,
+            f"Of the {plural(unsafe_groups, 'group')} that {agree(unsafe_groups, 'changes')} a "
+            "day's total, "
+            f"{self.unsafe_open_refused} {agree(self.unsafe_open_refused, 'is')} an open chain "
+            "that an export row the plan refuses would have closed, "
+            f"{self.unsafe_open_unclosed} {agree(self.unsafe_open_unclosed, 'is')} an open chain "
+            f"that no export row would close, and {self.unsafe_other} "
+            f"{agree(self.unsafe_other, 'is')} of another kind.",
+        ]
+
+    def _no_feed_sentences(self) -> list[str]:
+        days = sorted(self.none_no_feed_days)
+        if not days:
+            return ["No export row that names no transaction sits on one with no feed sighting."]
+        if self.feed_span is None:
+            before, after, inside = len(days), 0, 0
+            span = "the feed holds no item for this account"
+        else:
+            first, last = self.feed_span
+            before = sum(1 for d in days if d < first)
+            after = sum(1 for d in days if d > last)
+            inside = len(days) - before - after
+            span = f"the feed's items run from {first.isoformat()} to {last.isoformat()}"
+        return [
+            f"The {plural(len(days), 'row')} on a transaction with no feed sighting "
+            f"{agree(len(days), 'is')} dated from {days[0].isoformat()} to "
+            f"{days[-1].isoformat()}; {span}, and {before} {agree(before, 'is')} dated before "
+            f"it, {after} after it, and {inside} inside it."
         ]
 
 
@@ -708,7 +779,7 @@ def settlement_figures(
             elif len(named) > 1:
                 _count_several(figures, index, batch[position], named, made_on)
             else:
-                _place_none(figures, index, sits_on(position))
+                _place_none(figures, index, sits_on(position), batch[position].value_date)
         for positions in sizes.values():
             named = candidates[positions[0]]
             if len(named) < 2:
@@ -721,7 +792,17 @@ def settlement_figures(
                 figures.sets_assignable += 1
             else:
                 figures.sets_of_another_payee += 1
-        _count_moves(figures, store, index, batch, planned, sits_on)
+        made = [date.fromisoformat(day[:10]) for day in made_on.values()]
+        figures.feed_span = (min(made), max(made)) if made else None
+        known_days = frozenset(
+            row.value_date
+            for row in batch
+            if any(
+                key.startswith("Balance (") and str(value).strip()
+                for key, value in row.raw.items()
+            )
+        )
+        _count_moves(figures, store, index, batch, planned, sits_on, candidates, known_days)
         found.append(figures)
     return found
 
@@ -787,7 +868,7 @@ def _count_several(
 
 
 def _place_none(
-    figures: SettlementFigures, index: CandidateIndex, sits: set[str]
+    figures: SettlementFigures, index: CandidateIndex, sits: set[str], listed: date
 ) -> None:
     """Say where a row that no stored transaction's settlement day names is held."""
     figures.none_named += 1
@@ -806,6 +887,7 @@ def _place_none(
         figures.none_on_no_time += 1
     elif "no feed" in kinds:
         figures.none_on_no_feed += 1
+        figures.none_no_feed_days.append(listed)
     else:
         figures.none_on_other += 1
 
@@ -860,6 +942,102 @@ def _carried(sightings: list[_Sighting]) -> date | None:
     return max(sightings, key=lambda s: (s.arrived, s.day)).day if sightings else None
 
 
+def _counted_by(counted_on: date | None, day: date) -> int:
+    """1 where a row counted on `counted_on` is in the total a balance at the end of `day` tests."""
+    return 0 if counted_on is None else int(counted_on <= day)
+
+
+def _count_groups(
+    figures: SettlementFigures,
+    index: CandidateIndex,
+    batch: list[Transaction],
+    planned: Mapping[int, str],
+    sits_on: Callable[[int], set[str]],
+    sightings: Mapping[str, list[_Sighting]],
+    candidates: Mapping[int, list[Transaction]],
+    known_days: frozenset[date],
+) -> None:
+    """Split the plan's moves into the groups that chain together, and say which are safe.
+
+    A group is SAFE when, after all of its moves, no day holds a different total of counted
+    transactions (`matching.settlement_groups`). Each group's moves are made alone over the
+    stored sightings, so what one group would do never leaks into another.
+    """
+    #: Per group: what each touched transaction gains and loses, and the effect on each.
+    detail: dict[tuple[int, ...], tuple[dict[str, int], list[matching.Effect]]] = {}
+
+    def effect(positions: Sequence[int]) -> list[matching.Effect]:
+        after: dict[str, list[_Sighting]] = {}
+        net: dict[str, int] = defaultdict(int)
+        for position in positions:
+            listed = batch[position]
+            target = planned[position]
+            for entity in sits_on(position):
+                held = after.setdefault(entity, list(sightings.get(entity, [])))
+                kept = [
+                    s
+                    for s in held
+                    if not (s.source == listed.source and s.day == listed.value_date)
+                ]
+                taken = [s for s in held if s not in kept]
+                after[entity] = kept
+                after.setdefault(target, list(sightings.get(target, []))).extend(taken)
+                net[entity] -= len(taken)
+                net[target] += len(taken)
+        found: list[matching.Effect] = []
+        for entity, held in after.items():
+            row = index.row(entity)
+            if row is None or row.status.is_history:
+                continue
+            found.append((row.amount_minor, row.value_date, _carried(held) or row.value_date))
+        detail[tuple(positions)] = (dict(net), found)
+        return found
+
+    groups = matching.settlement_groups(
+        planned, lambda p: frozenset(sits_on(p)), effect
+    )
+    unplanned = [p for p in candidates if p not in planned]
+    figures.group_count = len(groups)
+    unsafe_days: set[date] = set()
+    for group in groups:
+        moves = len(group.positions)
+        if moves == 1:
+            figures.groups_of_one += 1
+        elif moves == 2:
+            figures.groups_of_two += 1
+        elif moves <= 5:
+            figures.groups_of_three_to_five += 1
+        else:
+            figures.groups_of_more += 1
+        net, effects = detail[group.positions]
+        if group.safe:
+            figures.groups_safe += 1
+            figures.moves_safe += moves
+            figures.redated_safe += group.redated
+            if any(
+                sum(
+                    size * (_counted_by(now, day) - _counted_by(was, day))
+                    for size, was, now in effects
+                )
+                for day in known_days
+            ):
+                figures.groups_safe_balance_changed += 1
+            continue
+        figures.moves_unsafe += moves
+        unsafe_days.update(group.day_changes)
+        if any(net.values()):
+            closers = any(
+                {t.entity_id for t in candidates[p]} & group.rows for p in unplanned
+            )
+            if closers:
+                figures.unsafe_open_refused += 1
+            else:
+                figures.unsafe_open_unclosed += 1
+        else:
+            figures.unsafe_other += 1
+    figures.unsafe_days = sorted(unsafe_days)
+
+
 def _count_moves(
     figures: SettlementFigures,
     store: Store,
@@ -867,6 +1045,8 @@ def _count_moves(
     batch: list[Transaction],
     planned: Mapping[int, str],
     sits_on: Callable[[int], set[str]],
+    candidates: Mapping[int, list[Transaction]],
+    known_days: frozenset[date],
 ) -> None:
     """What the plan would do, done over the stored sightings without writing anything.
 
@@ -878,6 +1058,7 @@ def _count_moves(
     """
     account = batch[0].account_id if batch else ""
     sightings = _sightings_by_entity(store, account)
+    _count_groups(figures, index, batch, planned, sits_on, sightings, candidates, known_days)
     figures.unreproduced = sum(
         1
         for entity, held in sightings.items()
