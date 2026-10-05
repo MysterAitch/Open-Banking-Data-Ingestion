@@ -3203,9 +3203,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
         fetch_evidence_key, name="fetch evidence", epoch=rebuild_epoch
     )
-    # Held on the same key: every write a decision reads moves the standing epoch inside it.
+    def mark_world_key(store: Store) -> tuple[object, ...]:
+        """The standing epoch (every table a mark's evidence reads moves it) and the account map,
+        which is one statement where the evidence key's own walk of the registry is several."""
+        return (store.standing_epoch(), *account_map_stamp())
+
     mark_world_memo: KeyedMemo[MarkWorld] = KeyedMemo(
-        fetch_evidence_key, name="mark world", epoch=rebuild_epoch
+        mark_world_key, name="mark world", epoch=rebuild_epoch
     )
 
     def mark_world(store: Store) -> MarkWorld:

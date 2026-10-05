@@ -37,8 +37,12 @@ from .fetch_marks import (
     Standing,
 )
 from .plural import agree, plural
+from .stylesheet_gaps import MARKS_STYLES
 
 _esc = html.escape
+
+#: The rules for what is set aside, carried by the pages that use them (see `MARKS_STYLES`).
+MARKS_STYLE_TAG = f"<style>{MARKS_STYLES}</style>"
 
 #: The kinds in the order they are offered: those that make a claim the store can weigh first.
 FORM_KINDS = (

@@ -44,6 +44,7 @@ from .rebuild_hold import RebuildInProgress
 from .statement_span import STATEMENT_SOURCES, HoleReason
 from .store import Store
 from .web_marks import (
+    MARKS_STYLE_TAG,
     contradicted_html,
     folded_html,
     form_html,
@@ -364,7 +365,7 @@ def render_gaps(
     title = page_name("/gaps")
     if rebuilding:
         return render_page(title, f'<p class="lede">{_esc(rebuilding)}</p>')
-    body = f'<p class="lede gaps-verdict">{_esc(verdict_sentence(report))}</p>'
+    body = MARKS_STYLE_TAG + f'<p class="lede gaps-verdict">{_esc(verdict_sentence(report))}</p>'
     body += contradicted_html(report.marks, names, report.today)
     body += scope_lines_html(report.marks, names, report.today, report.first_known_balance)
     body += "".join(_account_html(outlook, names, report.today) for outlook in report.needing)
@@ -441,7 +442,11 @@ class GapPages:
     # -- the owner's decisions about what is still to fetch ---------------------------------
 
     def _marks_page(self, status: int, title: str, body: str) -> None:
-        self._respond(status, render_page(title, body, body_class="gaps-page"), no_store=True)
+        self._respond(
+            status,
+            render_page(title, MARKS_STYLE_TAG + body, body_class="gaps-page"),
+            no_store=True,
+        )
 
     def _marks_refused(self, why: str, values: Mapping[str, str]) -> None:
         again = mark_query(

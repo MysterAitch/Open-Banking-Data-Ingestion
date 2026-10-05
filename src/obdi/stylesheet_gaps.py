@@ -33,9 +33,18 @@ GAPS_STYLES = """
  .gaps-quiet { list-style: none; margin: 0; padding: 0; font: var(--text-md)/150% var(--sans); }
  .gaps-quiet-item { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
  .gaps-notes { margin-top: var(--s5); font-size: var(--text-sm); }
- /* What the owner has set aside. A contradicted mark is the one amber block on the page that is
-    not a gap: it sits above the accounts because it is the one thing here that says an earlier
-    decision of his is wrong, and it does not shout, for it is his own mark and one tap removes it. */
+ @media (min-width: 60rem) {
+  body.gaps-page { max-width: 56rem; }
+ }
+"""
+
+# What the owner has set aside. These rules are NOT in the stylesheet every page carries: they
+# are written into the two pages that use them (`web_marks.MARKS_STYLE_TAG`), because the
+# balance chart's page-size bound sits within a few hundred bytes of the limit and a rule that
+# only two pages need has no business in every page. A contradicted mark is the one amber block
+# on the page that is not a gap: it sits above the accounts because it says an earlier decision
+# of the owner's is wrong, and it does not shout, for it is his own mark and one tap removes it.
+MARKS_STYLES = """
  .gaps-decide { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
  .gaps-ack, .gaps-undo { margin: 0; }
  .gaps-contradictions { list-style: none; margin: var(--s3) 0; padding: 0; display: grid; gap: var(--s3); }
@@ -74,13 +83,10 @@ GAPS_STYLES = """
  .gaps-evidence.gaps-supported { border-left-color: var(--ok); color: var(--ink); }
  .gaps-evidence.gaps-contradicted { border-left-color: var(--warn); background: var(--warn-bg); color: var(--ink); }
  .gaps-evidence.gaps-untested { border-left-style: dashed; color: var(--ink-2); }
- .gaps-short { display: inline-block; width: 5rem; margin: 0 var(--s1); }
+ .gaps-choice input.gaps-short { display: inline-block; width: 5rem; margin: 0 var(--s1); }
  /* The two decisions that sit beside a thumb-sized link are aligned to its text, not its padding. */
  .gaps-ack button.tap, .gaps-undo button.tap { padding-left: 0; }
  .gaps-choice input[type="number"], .gaps-choice input[type="date"] { min-height: var(--hit); padding: 0 var(--s2);
      background: var(--card); color: var(--ink); border: var(--rule-weight) solid var(--edge); border-radius: var(--radius); font: inherit; }
  .gaps-choice input[type="date"] { display: block; width: 100%; margin-top: var(--s1); }
- @media (min-width: 60rem) {
-  body.gaps-page { max-width: 56rem; }
- }
 """
