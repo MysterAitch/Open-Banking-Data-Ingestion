@@ -26,6 +26,46 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.329] - 2026-10-05
+
+### Added
+- **The opening-balance measurement says why an opening balance would not be
+  reproduced.** Read on the real store at 0.4.327, the measurement said the
+  rule as first built would stop three accounts adding up that add up today
+  (two cards and a savings account), and could not say whether the opening
+  balances were placed on the wrong day or the accounts hold gaps. For each
+  such opening balance Identity health now says, in counts and yes or no
+  only: how it was placed, how many transactions lie between the known
+  balance before it and its day, whether the difference is the size of what
+  its own statement lists before its day, of what the previous statement
+  lists after it, or of what is dated on the day or the day after, whether
+  it follows the previous statement directly, and whether it would be
+  reproduced as a second statement of the previous closing balance. A yes is
+  the same size, not proof of the same transactions, and the page says so.
+  Nothing here changes a conclusion.
+
+### Fixed
+- **Today's headline no longer says all is in order above a line saying an
+  account does not add up.** The headline counts attention items, and an
+  account that stops adding up becomes one only after 45 days; until then
+  the page was headed "Everything checked is in order." over a Verification
+  line reading "1 does not add up". It now says "No faults. 1 account does
+  not add up." in amber. Raising an item at once was not done: silence
+  inside the 45 days is recorded as deliberate, and how often a newly stated
+  balance is briefly ahead of its transactions has not been measured.
+- The Accounts page offered "Declare these 1 account"; for one account it
+  says "Declare this account".
+
+### Not covered
+- The opening-balance rule is still not released. Its second round answers
+  an independent review's findings (a day read as verified on which no
+  transaction was tested, a disregarded balance that vanished from the page,
+  a doubted balance hiding a transaction on the wrong side of a statement)
+  and waits on this measurement being read on the real store.
+- That second round refuses to open a store written by a newer version,
+  which changes what rolling back a deployment does; it is the owner's to
+  accept before it ships.
+
 ## [0.4.328] - 2026-10-05
 
 ### Changed
