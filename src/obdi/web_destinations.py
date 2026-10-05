@@ -16,17 +16,22 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .alerts import consent_rung
+from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .checks_index import CHECKS, CheckResult, result_of
 from .namespaces import UNASSIGNED_ACCOUNT
 from .navigation import PAGE_NAMES, page_name
 from .overview import OVERVIEW_CACHE_SECONDS, Overview
+from .page_times import UTC_NOTE, instant_of
+from .plural import plural
+from .pull import STARLING_CONNECTION
 from .web_sections import HookTimer
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -100,7 +105,8 @@ def _unread(what: str) -> str:
 
 
 def _stamp(moment: str) -> str:
-    return _esc(moment[:16].replace("T", " ")) + "Z"
+    """A recorded instant in the house form (`page_times`); the page says its zone once."""
+    return _esc(instant_of(moment))
 
 
 # ------------------------------------------------------------------------------------ Checks
@@ -160,9 +166,86 @@ def _connection_line(
     return f"<li><strong>{_esc(name)}</strong> - {heard}; {consent}</li>"
 
 
+@dataclass(frozen=True)
+class BankFeed:
+    """What this process can say of the household's own bank's feed, read with its own API.
+
+    `configured` is whether the bank's access token resolved when the process started; a token
+    supplied later is not seen until it restarts. `answered` is the instant the feed last had an
+    ask land, or None when none has. `accounts` are the names of the accounts its rows are held
+    under, which is every account the feed has ever delivered a row for.
+    """
+
+    configured: bool
+    answered: str | None
+    accounts: tuple[str, ...]
+
+
+#: How many account names are listed before the line says a count alone.
+_NAMED_ACCOUNTS = 3
+
+
+def bank_feed_of(
+    *,
+    configured: bool,
+    answered: str | None,
+    held: dict[tuple[str, str], list[str]],
+    labels: dict[str, str],
+) -> BankFeed:
+    """The feed's state from what the page's hooks give: who fed which account, and the names."""
+    refs = sorted({account for account, source in held if source == BANK_SOURCE})
+    named = tuple(
+        f"{labels[ref]} ({ref})" if labels.get(ref) and labels[ref] != ref else ref for ref in refs
+    )
+    return BankFeed(configured=configured, answered=answered, accounts=named)
+
+
+def _feed_row(feed: BankFeed | None) -> str:
+    """The bank's own feed as a connection in its own right, quiet where it is not set up.
+
+    It is the way data most reliably comes in, and is reached with a token the owner holds
+    rather than a bank sign-in, so it is neither among the aggregator's connections nor a
+    fault when absent: a deployment without it says so and carries on.
+    """
+    name = "The bank's own feed"
+    if feed is None:
+        return _row("/attempts", name, "Not available on this instance.")
+    if feed.configured:
+        heard = (
+            f"Last answered {_stamp(feed.answered)}." if feed.answered else "Has never answered."
+        )
+        said = [f"Read directly from the bank, not through the aggregator. {heard}"]
+    else:
+        said = ["Not configured here: the bank's access token is not set, so nothing is read."]
+        if feed.answered:
+            said.append(f"It last answered {_stamp(feed.answered)}.")
+    if feed.accounts:
+        if len(feed.accounts) <= _NAMED_ACCOUNTS:
+            shown = ", ".join(feed.accounts)
+            said.append(f"Feeds {plural(len(feed.accounts), 'account')}: {shown}.")
+        else:
+            said.append(f"Feeds {plural(len(feed.accounts), 'account')}.")
+    elif feed.configured:
+        said.append("No account is fed yet.")
+    chip = "" if not feed.configured or feed.answered else _chip("no answer yet", "warn")
+    return _row("/attempts", name, _esc(" ".join(said)), chip=chip)
+
+
+def _connected_line(feed: BankFeed | None, aggregator: int) -> str:
+    """What is connected, in two terms: the bank's own feed, and the aggregator's banks."""
+    parts = []
+    if feed is not None and feed.configured:
+        parts.append("1 bank's own feed")
+    if aggregator:
+        parts.append(f"{plural(aggregator, 'bank')} through the aggregator")
+    if not parts:
+        return ""
+    return f'<p class="hub-age">Connected: {_esc(" and ".join(parts))}.</p>'
+
+
 def _connections_row(
     store: ConnectionStore | None,
-    last_answered: Callable[[], dict[str, str]] | None,
+    answered: dict[str, str],
     *,
     now: datetime,
 ) -> str:
@@ -170,12 +253,6 @@ def _connections_row(
         connections = sorted(store, key=lambda c: c.connection_id) if store is not None else []
     except Exception:
         return _row("/connections", "Connect a bank", _esc("The connections could not be read."))
-    answered: dict[str, str] = {}
-    if last_answered is not None:
-        try:
-            answered = last_answered()
-        except Exception:
-            answered = {}
     if not connections:
         return _row(
             "/connections",
@@ -188,7 +265,7 @@ def _connections_row(
         if (expiry := connection.consent_expires_on()) is not None
         and (days := connection.consent_days_remaining(now=now)) is not None
     ]
-    count = f"{len(connections)} bank{'' if len(connections) == 1 else 's'} connected"
+    count = f"{plural(len(connections), 'bank')} connected through the aggregator"
     chip = ""
     sentence = count + "."
     if dated:
@@ -237,17 +314,49 @@ def _statements_row(kept: Callable[[], list[dict[str, object]]] | None) -> str:
     )
 
 
+def _count_connections(store: ConnectionStore | None) -> int:
+    try:
+        return len(list(store)) if store is not None else 0
+    except Exception:
+        return 0
+
+
 def render_bring_in(
     store: ConnectionStore | None,
     *,
     last_answered: Callable[[], dict[str, str]] | None = None,
     kept_statements: Callable[[], list[dict[str, object]]] | None = None,
+    bank_feed: Callable[[dict[str, str]], BankFeed] | None = None,
     now: datetime | None = None,
 ) -> bytes:
-    """Every way data enters, each with its state, each linking to the page that does it."""
+    """Every way data enters, each with its state, each linking to the page that does it.
+
+    `bank_feed` is given what each connection last answered, since the feed's own answer is among
+    them, and returns what is known of the feed; a hook that fails leaves the row saying the feed
+    could not be read and not the whole page.
+    """
     moment = now or datetime.now(UTC)
+    answered: dict[str, str] = {}
+    if last_answered is not None:
+        try:
+            answered = last_answered()
+        except Exception:
+            answered = {}
+    feed: BankFeed | None = None
+    unread_feed = False
+    if bank_feed is not None:
+        try:
+            feed = bank_feed(answered)
+        except Exception:
+            unread_feed = True
+    # The bank's own feed leads: it is the most direct way in, and the line above names it first.
     rows = [
-        _connections_row(store, last_answered, now=moment),
+        _row(
+            "/attempts", "The bank's own feed", _esc("The bank's feed could not be read just now.")
+        )
+        if unread_feed
+        else _feed_row(feed),
+        _connections_row(store, answered, now=moment),
         _row(
             "/import",
             "Import an export file",
@@ -262,8 +371,12 @@ def render_bring_in(
         ),
         _statements_row(kept_statements),
     ]
+    shows_instant = bool(answered) or (feed is not None and feed.answered is not None)
     body = (
-        '<p class="lede">Every way data reaches obdi, and where each stands.</p>' + _rows(rows)
+        '<p class="lede">Every way data reaches obdi, and where each stands.</p>'
+        + _connected_line(feed, _count_connections(store))
+        + _rows(rows)
+        + (f'<p class="muted hub-age">{_esc(UTC_NOTE)}</p>' if shows_instant else "")
     )
     return render_page(page_name("/bring-in"), body, wide=True, body_class="hub-page")
 
@@ -455,10 +568,23 @@ class DestinationPages:
 
     def _bring_in_page(self) -> None:
         config, timer = self.bound_config, HookTimer()
+        sources = timer.wrap("source_connections", config.source_connections)
+        labels = timer.wrap("display_labels", config.display_labels)
+        configured = config.starling_probe is not None
+
+        def feed(answered: dict[str, str]) -> BankFeed:
+            return bank_feed_of(
+                configured=configured,
+                answered=answered.get(STARLING_CONNECTION),
+                held=sources() if sources is not None else {},
+                labels=labels() if labels is not None else {},
+            )
+
         page = render_bring_in(
             config.connection_store,
             last_answered=timer.wrap("connection_last_answered", config.connection_last_answered),
             kept_statements=timer.wrap("kept_statements", config.kept_statements),
+            bank_feed=feed,
         )
         timer.report("/bring-in")
         self._respond(200, page)

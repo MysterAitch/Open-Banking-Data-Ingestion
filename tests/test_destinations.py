@@ -74,17 +74,20 @@ class TestBringIn:
         base = serve(store, connection_last_answered=lambda: answered)
         page = httpx.get(f"{base}/bring-in", timeout=20).text
 
-        assert "2 banks connected." in page
+        assert "2 banks connected through the aggregator." in page
         assert "The soonest consent expires 2099-02-03" in page
-        assert "<strong>halifax</strong> - last answered 2026-10-01 09:15Z" in page
+        assert "<strong>halifax</strong> - last answered 2026-10-01 09:15;" in page
         assert "<strong>monzo</strong> - has never answered" in page
+        assert page.count("Times are UTC.") == 1, "the zone is said once, never as a trailing Z"
+        assert "09:15Z" not in page
 
     def test_BringInPage_WithOneBank_SaysBankNotBanks(self, serve, tmp_path):
         base = serve(banks(tmp_path, bank("halifax")))
 
         page = httpx.get(f"{base}/bring-in", timeout=20).text
 
-        assert "1 bank connected." in page
+        assert "1 bank connected through the aggregator." in page
+        assert "Times are UTC." not in page, "no instant is shown, so no zone is said"
 
     def test_BringInPage_StatementsKept_CountsUnassignedAndUnread(self, serve):
         kept = [
@@ -169,6 +172,143 @@ class TestWhenEachConnectionLastAnswered:
                 )
 
             assert set(store.last_landed_by_connection()) == {"halifax", "monzo"}
+
+
+FEED_ANSWER = "2026-10-04T15:57:12.345678+00:00"
+
+
+def held_by(source: str, *accounts: str) -> dict[tuple[str, str], list[str]]:
+    return {(account, source): ["connection"] for account in accounts}
+
+
+class TestBringInTheBanksOwnFeed:
+    """The household's main bank is also read directly, with a token the owner holds.
+
+    The answers are decided by what the hooks give: the feed's last landed ask, which accounts
+    hold rows it delivered, and whether its token resolved when the process started.
+    """
+
+    def page(self, serve, tmp_path, *, aggregator=("halifax", "monzo"), **hooks) -> str:
+        store = banks(tmp_path, *(bank(name) for name in aggregator))
+        return httpx.get(f"{serve(store, **hooks)}/bring-in", timeout=20).text
+
+    def test_FeedConfiguredAndAnswered_IsAConnectionOfItsOwnWithItsLastAnswerAndAccounts(
+        self, serve, tmp_path
+    ):
+        page = self.page(
+            serve,
+            tmp_path,
+            starling_probe=lambda cutoff: None,
+            connection_last_answered=lambda: {"starling-api": FEED_ANSWER},
+            source_connections=lambda: {
+                **held_by("starling", "starling-personal", "starling-joint"),
+                **held_by("truelayer", "halifax-current"),
+            },
+            display_labels=lambda: {"starling-personal": "Main account"},
+        )
+
+        assert "The bank&#x27;s own feed" in page
+        assert "Read directly from the bank, not through the aggregator." in page
+        assert "Last answered 2026-10-04 15:57." in page
+        assert "Feeds 2 accounts: starling-joint, Main account (starling-personal)." in page
+        assert "halifax-current" not in page, "an account only the aggregator feeds is not its"
+        assert "no answer yet" not in page
+
+    def test_HeaderCount_NamesBothKindsOfConnectionInThePagesOwnTerms(self, serve, tmp_path):
+        page = self.page(serve, tmp_path, starling_probe=lambda cutoff: None)
+
+        assert "Connected: 1 bank&#x27;s own feed and 2 banks through the aggregator." in page
+
+    def test_HeaderCount_WithOneAggregatorBank_UsesTheSingular(self, serve, tmp_path):
+        page = self.page(
+            serve, tmp_path, aggregator=("halifax",), starling_probe=lambda cutoff: None
+        )
+
+        assert "Connected: 1 bank&#x27;s own feed and 1 bank through the aggregator." in page
+
+    def test_FeedConfiguredButNeverAnswered_SaysSoWithAChipAndNoAccounts(self, serve, tmp_path):
+        page = self.page(serve, tmp_path, starling_probe=lambda cutoff: None)
+
+        assert "Has never answered." in page
+        assert 'class="pill pill-warn">no answer yet<' in page
+        assert "No account is fed yet." in page
+
+    def test_FeedNotConfigured_SaysSoQuietlyAndIsNotCountedAsConnected(self, serve, tmp_path):
+        page = self.page(serve, tmp_path)
+
+        assert "Not configured here: the bank&#x27;s access token is not set" in page
+        assert "Connected: 2 banks through the aggregator." in page
+        assert "own feed and" not in page
+        assert "no answer yet" not in page
+        assert 'pill-bad' not in page.split("The bank&#x27;s own feed")[1].split("</li>")[0]
+
+    def test_FeedNotConfiguredNowButAnsweredBefore_SaysWhenItLastAnsweredAndWhatItFed(
+        self, serve, tmp_path
+    ):
+        page = self.page(
+            serve,
+            tmp_path,
+            connection_last_answered=lambda: {"starling-api": "2026-09-01T08:00:00+00:00"},
+            source_connections=lambda: held_by("starling", "starling-personal"),
+        )
+
+        assert "Not configured here" in page
+        assert "It last answered 2026-09-01 08:00." in page
+        assert "Feeds 1 account: starling-personal." in page
+
+    def test_FeedFeedingMoreThanThreeAccounts_SaysTheCountAlone(self, serve, tmp_path):
+        spaces = tuple(f"starling-space-{n}" for n in range(1, 5))
+        page = self.page(
+            serve,
+            tmp_path,
+            starling_probe=lambda cutoff: None,
+            connection_last_answered=lambda: {"starling-api": FEED_ANSWER},
+            source_connections=lambda: held_by("starling", *spaces),
+        )
+
+        assert "Feeds 4 accounts." in page
+        assert "starling-space-1" not in page
+
+    def test_FeedsInstant_IsInTheHouseFormWithTheZoneSaidOnceOnThePage(self, serve, tmp_path):
+        page = self.page(
+            serve,
+            tmp_path,
+            starling_probe=lambda cutoff: None,
+            connection_last_answered=lambda: {
+                "starling-api": FEED_ANSWER,
+                "halifax": "2026-10-01T09:15:00+00:00",
+            },
+        )
+
+        assert page.count("Times are UTC.") == 1
+        assert not re.search(r"\d{2}:\d{2}Z|\d{2}:\d{2}:\d{2}", page.split("<body")[1])
+
+    def test_PageWithAFeed_NamesNoVariableAndShowsNoPartOfAToken(self, serve, tmp_path):
+        page = self.page(serve, tmp_path, starling_probe=lambda cutoff: None)
+
+        assert "OBDI_" not in page and "STARLING_PERSONAL" not in page
+        assert "TRUELAYER_" not in page
+
+    def test_FeedsHookThatFails_LeavesTheRowSayingSoAndTheRestOfThePage(self, serve, tmp_path):
+        def boom() -> dict[tuple[str, str], list[str]]:
+            raise OSError("locked")
+
+        response = httpx.get(
+            f"{serve(banks(tmp_path, bank('halifax')), source_connections=boom)}/bring-in",
+            timeout=20,
+        )
+
+        assert response.status_code == 200
+        assert "The bank&#x27;s feed could not be read just now." in response.text
+        assert "1 bank connected through the aggregator." in response.text
+        assert "locked" not in response.text
+
+    def test_FeedHookNotWired_PageStillAnswersWithAQuietRow(self, serve, tmp_path):
+        from obdi.web_destinations import render_bring_in
+
+        page = render_bring_in(banks(tmp_path, bank("halifax"))).decode()
+
+        assert "Not available on this instance." in page
 
 
 class TestDiagnostics:
