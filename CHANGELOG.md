@@ -26,6 +26,64 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.331] - 2026-10-05
+
+### Added
+- **One source's known balance for one day can be disregarded, and used
+  again.** The owner asked what happens when several sources state a balance
+  for one day and only one of them is wrong: a balance could be removed only
+  by date, and in practice only one he had typed, so a statement's or the
+  aggregator's could not be removed at all and one account has been blocked
+  by two sources differing on one day. The account page now lists the
+  balances stated for a day together, each with its source and what kind it
+  is, and says whether they are equal without showing them. Disregarding one
+  leaves the others in use; it stays on the page, marked, takes no part in
+  the check or in a conflict, survives the rebuild from raw, and can be used
+  again. A disregard names exactly one balance and the same request sent
+  twice changes nothing; one whose balance is no longer held is shown as no
+  longer applying, with a way to remove it. A whole-account balance, a
+  balance the bank's feed states for a moment, and the nil an account was
+  created with cannot be disregarded yet, and no button is offered for them.
+  Store schema 20.
+- **The account page says which stretch does not add up, and what that can
+  mean.** "The transactions held between D1 and D2 do not add up to the
+  change between the two known balances", with the possibilities folded
+  beneath: a transaction missing, counted twice, with the wrong amount or
+  sign, dated on the wrong side of either day, or either balance mis-stated
+  or misread. The arithmetic cannot say which, so the page no longer names
+  one.
+
+### Changed
+- **No known balance is tested by agreeing with another for the same day.**
+  Two sources stating the same figure for one day test no transaction, and an
+  independent review showed an account could read as checked up to a day on
+  which nothing had been. A balance is tested only by the transactions since
+  a known balance on an earlier day; the nil an account was created with
+  counts as that earlier balance. A stretch that begins on a day two sources
+  disagree about is said to be untested. Read on the real store beforehand,
+  every account that adds up today does so across more than one day, so no
+  verdict there is expected to change: 9 of 13 before, 9 of 13 after.
+- **A store written by a newer version is refused, loudly, and the web
+  process will not start over one.** An older build used to open such a
+  store, relabel it with its own version, and ignore what the newer one had
+  recorded. The owner rolls forward only, and his rule is that breaking
+  silently or risking the data is what must not happen: an older image over
+  a newer store now stops with a message naming both versions, and the
+  remedy is to run the newer image or restore a backup. Nothing is
+  relabelled or migrated.
+
+### Not covered
+- Verification still stops at the first stretch that does not add up: the
+  stretches after it are judged and shown, but an account's verdict is not
+  restarted from the next known balance. That was built on the abandoned
+  opening-balance branch, tangled with it, and left behind.
+- The page does not warn, before a disregard, that an account may lose a day
+  it added up through.
+- The measurement of statements by what they list (0.4.330) names three
+  statements on the real store as faults that look like its own (two whose
+  lines it did not find, one that cannot see the account's Spaces); it is
+  being corrected and no rule uses it.
+
 ## [0.4.330] - 2026-10-05
 
 ### Added

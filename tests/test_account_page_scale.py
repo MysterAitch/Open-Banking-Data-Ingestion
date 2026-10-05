@@ -38,7 +38,10 @@ REFLOW = 320
 #: The page's own compact coverage timeline, folded under the verdict, adds a summary line (its
 #: one sentence) and a link row, measured at 390 px as 86 px (the page was 4907 px with it, 27 px
 #: past 6.1 screens): 6.2 screens is that and nothing more.
-WHOLE_PAGE_SCREENS = 6.2
+#: An account that does not add up says which stretch fails, in one sentence, with what that can
+#: mean folded beneath it (measured at 390 px: the page was 5034 px with them, 74 px past 6.2
+#: screens). An account that adds up shows neither, so only the failing page uses the allowance.
+WHOLE_PAGE_SCREENS = 6.35
 
 
 @pytest.fixture(scope="module")

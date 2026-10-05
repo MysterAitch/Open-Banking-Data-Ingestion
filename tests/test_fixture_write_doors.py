@@ -184,6 +184,15 @@ JUSTIFIED = {
     ("test_fetch_marks.py", "obdi_meta"): "stamps a store with the version BEFORE the "
     "fetch_marks and record_scopes tables existed, for the same reason as the entries above: "
     "only a rewound marker shows that opening an old store grows the tables the first mark needs",
+    ("test_store_schema_twenty.py", "obdi_meta"): "stamps a store with the version BEFORE the "
+    "disregarded_balances table existed, and with a version NEWER than the code knows: the "
+    "application stamps only the current version, so neither an old store growing the table "
+    "nor a newer store being refused can be reached through it",
+    ("test_disregarded_balances.py", "obdi_meta"): "stamps a store with the version BEFORE "
+    "the disregarded_balances table existed, for the same reason as the entry above",
+    ("test_serving_over_a_newer_store.py", "obdi_meta"): "stamps a store with a version NEWER "
+    "than the code knows, which only a later release can write: it is the state the web "
+    "process must refuse to start over",
     ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
     "upgrade path to run",
     ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "
