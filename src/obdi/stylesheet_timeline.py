@@ -46,6 +46,8 @@ TIMELINE_STYLES = """
  .cov-edge-stated { stroke: var(--act); stroke-width: 3; }
  .cov-edge-asked { stroke: var(--act); stroke-width: 2; }
  .cov-edge-meets { stroke: var(--act); stroke-width: 2; stroke-dasharray: 1 3; }
+ .cov-edge-inferred { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 1 5; }
+ .cov-gap-firm { stroke: var(--warn); stroke-width: 4; }
  .cov-edge-observed { stroke: var(--act); stroke-width: 2; stroke-dasharray: 3 3; }
  .cov-next { margin: var(--s1) 0 var(--s2); padding-left: var(--s5); font: var(--text-md)/140% var(--sans); }
  .cov-next a { display: inline-flex; align-items: center; min-height: var(--hit); }

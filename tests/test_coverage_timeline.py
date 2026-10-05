@@ -231,7 +231,7 @@ class TestStatements:
         runs = lane(card, "santander-cc-pdf").runs
         assert [(r.first, r.last) for r in runs] == [
             (d("05-15"), d("07-11")),
-            (d("08-14"), d("09-11")),
+            (d("08-12"), d("09-11")),
         ]
         assert runs[0].last_basis == ct.STATED
 
@@ -241,15 +241,16 @@ class TestStatements:
         second = lane(card, "santander-cc-pdf").captures[1]
         assert (second.first, second.first_basis) == (d("06-12"), ct.MEETS)
 
-    def test_Statement_WhenTheChainIsBroken_StartsAtItsFirstRowAndIsOnlyObserved(self, card):
+    def test_Statement_WhenTheChainIsBroken_StartsWhereTheMissingOneIsExpectedToEnd(self, card):
         fourth = lane(card, "santander-cc-pdf").captures[2]
-        assert (fourth.first, fourth.first_basis) == (d("08-14"), ct.OBSERVED)
+        assert (fourth.first, fourth.first_basis) == (d("08-12"), ct.INFERRED)
 
     def test_MissingStatement_IsTheGapTheFetchPageNamesWithItsDates(self, card):
-        # What to fetch next puts the hole between the closings 07-11 and 09-11 (one statement
-        # probably missing, closing about 08-11), not between the first row of the next one.
+        # What to fetch next puts the hole from the day after the closing 07-11 to the closing
+        # the missing statement is expected to have had, 08-11. The balances differ, so the hole
+        # is a fact, stated; where it ends is the guess.
         assert [(g.kind, g.first, g.last, g.stated, g.probably) for g in card.gaps] == [
-            ("hole-between", d("07-12"), d("09-10"), False, 1)
+            ("hole-between", d("07-12"), d("08-11"), True, 1)
         ]
 
     def test_NextStatement_WhenNotYetDue_IsQuietExpectedOnItsDayAndNotAGap(self, card):
@@ -268,5 +269,5 @@ class TestStatements:
 
 
 class TestCost:
-    def test_Build_UsesAFixedFourStatements(self, main):
-        assert main.queries == 4
+    def test_Build_UsesAFixedThreeStatements_TheStatementsComingFromTheCaller(self, main):
+        assert main.queries == 3

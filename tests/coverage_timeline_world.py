@@ -54,14 +54,19 @@ ACCOUNT `main`
   Known balances (end of day): 07-01 1000.00, 08-04 925.00, 09-02 792.00, 09-20 745.00, and
   09-28 700.00 where the rows say 694.00. In agreement through 09-20, held back from 09-28.
 
-ACCOUNT `card`: statements only (Santander layout; closing dates are the stated dates)
+ACCOUNT `card`: statements only (Santander layout; closing dates are the stated dates). What each
+statement covers is `statement_span`'s to say; the answers below are worked out from its rules.
     S1 closes 06-11, rows 05-15 and 06-11                       first statement: start observed
-    S2 closes 07-11, opens on S1's closing                      chain proven: covers 06-12 to 07-11
+    S2 closes 07-11, rows 06-14 and 07-09, opens on S1's closing
+                                                                balances meet a period on: starts
+                                                                06-12, known only as "balances meet"
     S3 closes 08-11: not held
-    S4 closes 09-11, rows 08-14 and 09-05, opens on S3's closing, not S2's: chain broken, start
-       observed at its first row 08-14
-  Covered: 05-15 to 06-11, 06-12 to 07-11, 08-14 to 09-11. Gap, inferred: 07-12 to 08-13.
-  Cadence 30 days, the last closing 09-11, so the next is not due on 10-05 but is due on 10-20.
+    S4 closes 09-11, rows 08-14 and 09-05, opens on S3's closing, not S2's: unequal balances prove
+       a statement is missing; the hole is 07-12 to 08-11 (the closing day it would have had,
+       inferred) and S4 is taken to begin 08-12, inferred
+  Covered: 05-15 to 06-11, 06-12 to 07-11, 08-12 to 09-11. Hole: 07-12 to 08-11.
+  Cadence 30 days (three statements, the lower median of 30 and 62), the last closing 09-11, so the
+  next is expected to close 10-11: nothing is due on 10-05.
 """
 
 from __future__ import annotations
@@ -240,7 +245,7 @@ def build_main(
 
 CARD_STATEMENTS = (
     ("11th Jun 2026", [("15th May", "Alpha Grocer", 1200), ("11th Jun", "Bravo Fuel", 800)], True),
-    ("11th Jul 2026", [("12th Jun", "Charlie Cafe", 500), ("9th Jul", "Delta Books", 700)], True),
+    ("11th Jul 2026", [("14th Jun", "Charlie Cafe", 500), ("9th Jul", "Delta Books", 700)], True),
     ("11th Aug 2026", [("15th Jul", "Echo Rail", 300)], False),
     ("11th Sep 2026", [("14th Aug", "Foxtrot Gym", 400), ("5th Sep", "Golf Shop", 600)], True),
 )

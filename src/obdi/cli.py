@@ -111,6 +111,7 @@ from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
 from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
+from .statement_span import AccountSpans, describe_account
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -3202,6 +3203,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         fetch_evidence_key, name="fetch evidence", epoch=rebuild_epoch
     )
 
+    def fetch_evidence(store: Store) -> FetchEvidence:
+        """What the gaps and the statements' spans are read from, held with the standings' key."""
+        return fetch_evidence_memo.get(
+            store,
+            lambda: gather_evidence(
+                store, space_parents=families_of(store, _account_map(store)).parents
+            ),
+        )
+
     def fetch_gaps_report(today: date) -> FetchReport:
         """The files still to fetch. The walk of the store is held with the standings' own key,
         so a page view works out nothing but the gaps from it.
@@ -3209,12 +3219,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Raises `RebuildInProgress` while a rebuild holds the layer."""
         standings = account_standings()
         with Store(db_path) as store:
-            evidence = fetch_evidence_memo.get(
-                store,
-                lambda: gather_evidence(
-                    store, space_parents=families_of(store, _account_map(store)).parents
-                ),
-            )
+            evidence = fetch_evidence(store)
         return fetch_report(evidence, standings, today)
 
     def warm_memos() -> None:
@@ -3288,6 +3293,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """What to fetch next, by account: the one list the timeline joins (never re-derived)."""
         return {outlook.account: outlook.gaps for outlook in fetch_gaps_report(today).accounts}
 
+    def spans_of(store: Store, ref: str, today: date) -> AccountSpans:
+        """One account's statements as `statement_span` describes them, over the held evidence."""
+        evidence = fetch_evidence(store)
+        return describe_account(evidence.statements.get(ref, ()), today, evidence.unlisted)
+
     def space_refs(store: Store) -> set[str]:
         return {str(r.ref) for r in store.declared_accounts() if r.kind == "starling-space"}
 
@@ -3349,6 +3359,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
                 fetch_gaps=gaps_by_account(today).get(ref, ()),
                 is_space=ref in space_refs(store),
+                spans=spans_of(store, ref, today),
             )
             held[key] = built
             return built
@@ -3389,6 +3400,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
                     fetch_gaps=by_account.get(ref, ()),
                     is_space=ref in spaces,
+                    spans=spans_of(store, ref, today),
                 )
                 for ref in refs
             ]

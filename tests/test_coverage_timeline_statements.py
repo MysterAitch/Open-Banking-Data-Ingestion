@@ -1,20 +1,29 @@
 """How the coverage timeline treats statements, and where its gaps come from.
 
 Known answers are worked out from `coverage_timeline_world`'s docstring and from the owner's own
-account of statements before the first run:
+account of statements. What a statement covers is `statement_span`'s to say (its own tests hold
+the rules); what is held here is that the lanes draw exactly that:
 
   - a statement covers its period whole, and its closing day is a complete day;
-  - it is partial only where its stated end is later than the day it was received;
-  - an opening balance equal to the previous closing is "balances meet" and proves nothing more,
-    because a missing statement whose movements net to nil leaves them equal;
+  - an opening balance equal to the previous closing is "balances meet" only where the closings
+    are a period apart, and never closes a hole: with the closings two periods apart it is a
+    probable hole whose movements net to nil;
+  - unequal balances prove a hole, whose end is inferred;
   - after the newest closing the next statement does not exist yet, which is not a gap.
+
+THE CARD, by hand, with three statements closing 06-11, 07-11 and 09-11 (so a monthly cadence of
+30 days, the lower median of 30 and 62): the first has nothing before it; the second opens on the
+first's closing balance a period on, so it begins 06-12 as "balances meet"; the third opens on a
+different balance, which proves a statement is missing: a hole from 07-12 whose end is inferred as
+the closing day the missing statement is expected to have had, 08-11, and the third is taken to
+begin the day after, 08-12, as inferred. The next closes 10-11.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -31,6 +40,8 @@ from coverage_timeline_world import (
 from fetch_gaps_world import load_household
 from obdi import coverage_timeline as ct
 from obdi.fetch_gaps import GapKind, gaps_for_account
+from obdi.statement_span import Known as SpanKnown
+from obdi.statement_span import Span
 from obdi.store import Store
 from obdi.web_coverage_timeline import render_account_timeline
 from obdi.web_gaps import render_gaps
@@ -40,68 +51,66 @@ def d(text: str) -> date:
     return date.fromisoformat("2026-" + text)
 
 
-def statement(
+def span(
     closing: str,
     *,
-    opening: int | None = 1000,
-    closed: int | None = 2000,
-    opens: str | None = None,
-    received: datetime | None = None,
-    first_row: str | None = None,
-) -> ct._Statement:
-    return ct._Statement(
-        "digest", d(closing), opening, closed,
-        opens=d(opens) if opens else None, received=received,
-        first_row=d(first_row) if first_row else None,
+    first: str | None = "06-12",
+    first_known: SpanKnown = SpanKnown.STATED,
+    last: str | None = None,
+    last_known: SpanKnown = SpanKnown.STATED,
+    complete: bool = True,
+) -> Span:
+    return Span(
+        "card", d(closing), "santander-cc-pdf", d(first) if first else None, first_known,
+        d(last or closing), last_known, complete,
     )
 
 
-class TestStatementCover:
-    def test_Closing_WhenReceivedAfterItsClose_IsACompleteDay(self):
-        received = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
-        cover = ct.statement_cover(statement("07-11", received=received), None)
-        assert (cover.last, cover.last_state, cover.fraction) == (d("07-11"), ct.COMPLETE, None)
-        assert cover.last_basis == ct.STATED
+class TestCaptureOf:
+    """The lane makes no statement rule of its own: it draws what `statement_span` says."""
 
-    def test_Closing_WhenReceivedOnItsCloseDay_IsStillACompleteDay(self):
-        received = datetime(2026, 7, 11, 8, 0, tzinfo=UTC)
-        assert ct.statement_cover(statement("07-11", received=received), None).last_state == (
-            ct.COMPLETE
+    def test_WholeStatement_IsACompleteLastDayWhateverKindOfFileItIs(self):
+        capture = ct.capture_of(span("07-11"))
+        assert (capture.first, capture.last, capture.last_state) == (
+            d("06-12"), d("07-11"), ct.COMPLETE
+        )
+        assert capture.last_basis == ct.STATED
+
+    def test_PartialStatement_IsDrawnWithALastDayThatMayBeCutAndAnInferredEnd(self):
+        capture = ct.capture_of(
+            span("07-11", last="07-08", last_known=SpanKnown.INFERRED, complete=False)
+        )
+        assert (capture.last, capture.last_state, capture.last_basis) == (
+            d("07-08"), ct.POSSIBLY, ct.INFERRED
         )
 
-    def test_Closing_WhenItsStatedEndIsLaterThanTheDayItWasReceived_IsPartialToThatDay(self):
-        # Received at 10:30 UTC on 07-08, which is 11:30 London time: 11.5 of 24 hours.
-        received = datetime(2026, 7, 8, 10, 30, tzinfo=UTC)
-        cover = ct.statement_cover(statement("07-11", first_row="07-01", received=received), None)
-        assert (cover.first, cover.last, cover.last_state) == (d("07-01"), d("07-08"), ct.PARTIAL)
-        assert cover.fraction == pytest.approx(11.5 / 24)
+    @pytest.mark.parametrize(
+        ("known", "basis"),
+        [
+            (SpanKnown.STATED, ct.STATED),
+            (SpanKnown.BALANCES_MEET, ct.MEETS),
+            (SpanKnown.OBSERVED, ct.OBSERVED),
+            (SpanKnown.INFERRED, ct.INFERRED),
+        ],
+    )
+    def test_EachWayAStartIsKnown_IsItsOwnEdge(self, known, basis):
+        assert ct.capture_of(span("07-11", first_known=known)).first_basis == basis
 
-    def test_Closing_WhenNoReceiptIsKnown_IsACompleteDay(self):
-        assert ct.statement_cover(statement("07-11"), None).last_state == ct.COMPLETE
-
-    def test_Start_WhenTheFormatStatesAPeriod_IsStatedWhateverTheBalances(self):
-        previous = statement("06-11", closed=5)
-        cover = ct.statement_cover(
-            statement("07-11", opening=5, opens="06-20", first_row="06-25"), previous
+    def test_StatementNothingPlaces_IsDrawnOnItsClosingDayAloneAsInferred(self):
+        capture = ct.capture_of(span("07-11", first=None))
+        assert (capture.first, capture.last, capture.first_basis) == (
+            d("07-11"), d("07-11"), ct.INFERRED
         )
-        assert (cover.first, cover.first_basis) == (d("06-20"), ct.STATED)
 
-    def test_Start_WhenBalancesMeet_IsTheDayAfterButOnlyBalancesMeet(self):
-        previous = statement("06-11", closed=5)
-        cover = ct.statement_cover(statement("07-11", opening=5, first_row="06-25"), previous)
-        assert (cover.first, cover.first_basis) == (d("06-12"), ct.MEETS)
+    def test_Sections_OfAnAllAccountsStatement_ShareOneLaneNoParserNames(self):
+        nameless = Span("card", d("07-11"), "", d("06-12"), SpanKnown.STATED, d("07-11"),
+                        SpanKnown.STATED)
+        assert ct.span_source(nameless) == "statement-pdf"
+        assert ct.kind_of_source("statement-pdf") == ct.STATEMENT
 
-    def test_Start_WhenBalancesDiffer_IsTheFirstRowAndOnlyObserved(self):
-        previous = statement("06-11", closed=5)
-        cover = ct.statement_cover(statement("07-11", opening=6, first_row="06-25"), previous)
-        assert (cover.first, cover.first_basis) == (d("06-25"), ct.OBSERVED)
-
-    def test_Start_WhenThereIsNoPreviousStatement_IsTheFirstRowObserved(self):
-        cover = ct.statement_cover(statement("07-11", first_row="06-20"), None)
-        assert (cover.first, cover.first_basis) == (d("06-20"), ct.OBSERVED)
-
-    def test_Basis_BalancesMeetIsWeakerThanAskedAndStrongerThanObserved(self):
-        assert ct.WEAKNESS[ct.OBSERVED] < ct.WEAKNESS[ct.MEETS] < ct.WEAKNESS[ct.ASKED]
+    def test_Basis_FromStrongestToWeakest_IsStatedAskedMeetsObservedInferred(self):
+        order = sorted(ct.WEAKNESS, key=ct.WEAKNESS.__getitem__, reverse=True)
+        assert order == [ct.STATED, ct.ASKED, ct.MEETS, ct.OBSERVED, ct.INFERRED]
 
 
 @pytest.fixture(scope="module")
@@ -142,23 +151,26 @@ class TestBalancesMeet:
         card = timeline_of(net_nil, CARD, TODAY)
         assert card is not None
         lane = statements_lane(card)
-        assert [(c.first, c.first_basis) for c in lane.captures] == [
-            (d("05-15"), ct.OBSERVED),
+        # Closings 07-11 and 09-11 are two periods apart, so equal balances are not a meeting: the
+        # third statement begins the day after the closing the missing one would have had.
+        assert [(c.first, c.first_basis) for c in lane.captures][1:] == [
             (d("06-12"), ct.MEETS),
-            (d("07-12"), ct.MEETS),
+            (d("08-12"), ct.INFERRED),
         ]
-        # The three join into one run, and the gap the fetch page names is not closed by it.
-        assert [(r.first, r.last) for r in lane.runs] == [(d("05-15"), d("09-11"))]
-        assert [(g.kind, g.first, g.last) for g in card.gaps] == [
-            ("hole-between", d("07-12"), d("09-10"))
+        assert [(g.kind, g.first, g.last, g.reason, g.last_inferred) for g in card.gaps] == [
+            ("hole-between", d("07-12"), d("08-11"), "balances-meet-net-nil", True)
         ]
 
-    def test_Statement_WhenBalancesDiffer_StartsAtItsFirstRowAndTheGapIsNamed(self, household):
+    def test_Statement_WhenBalancesDiffer_StartsWhereTheMissingOneEndsAndTheHoleIsStated(
+        self, household
+    ):
         card = timeline_of(household, CARD, TODAY)
         assert card is not None
-        fourth = statements_lane(card).captures[2]
-        assert (fourth.first, fourth.first_basis) == (d("08-14"), ct.OBSERVED)
-        assert [g.kind for g in card.gaps] == ["hole-between"]
+        third = statements_lane(card).captures[2]
+        assert (third.first, third.first_basis) == (d("08-12"), ct.INFERRED)
+        assert [(g.kind, g.stated, g.reason) for g in card.gaps] == [
+            ("hole-between", True, "balances-differ")
+        ]
 
     def test_Page_NamesBalancesMeetInItsKeyAndDrawsItsEdge(self, net_nil):
         view = timeline_of(net_nil, CARD, TODAY)
@@ -169,6 +181,7 @@ class TestBalancesMeet:
         assert "Balances meet edge" in page
         assert "does not prove it" in page
         assert "cov-edge-meets" in page
+        assert "Inferred edge" in page and "from how regularly statements arrive" in page
 
     def test_Page_WhenNoStatementStartIsOnlyBalancesMeet_DoesNotMentionIt(self, household):
         view = timeline_of(household, MAIN, TODAY)
@@ -209,15 +222,21 @@ class TestNotYetAvailable:
         assert "Where the missing statement ends is inferred" in page
         assert "This is inferred from how regularly the statements held arrive." not in page
 
-    def test_HoleSentence_WhenTheBalancesAreEqual_StaysAnInference(self, net_nil):
+    def test_HoleSentence_WhenTheBalancesAreEqual_SaysProbableAndNeverThatNothingIsMissing(
+        self, net_nil
+    ):
         view = timeline_of(net_nil, CARD, TODAY)
         assert view is not None
-        assert [g.balances_differ for g in view.gaps] == [False]
         text = render_account_timeline(
             view, fields={"window": "all", "window_held": "all"}
         ).decode()
         assert "do not meet" not in text
-        assert "This is inferred from how regularly the statements held arrive." in text
+        assert "a missing statement whose movements net to nil is probable" in text
+        assert "nothing is missing" not in text.lower()
+
+    def test_Hole_WhoseEndIsAGuess_IsDrawnWithAFirmStartAndAnOpenEnd(self, page):
+        assert '<polyline class="cov-gap cov-focus"' in page
+        assert 'class="cov-gap-firm"' in page
 
     def test_Key_ExplainsTheQuietStretchAndTheExpectedMark(self, page):
         assert "Not available yet: the next statement does not exist until its period ends" in page

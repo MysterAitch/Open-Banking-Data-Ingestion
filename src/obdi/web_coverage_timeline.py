@@ -44,6 +44,7 @@ from .coverage_timeline import (
     COMPLETE,
     CONFLICT,
     HELD_BACK,
+    INFERRED,
     KIND_NAMES,
     MEETS,
     MISSING,
@@ -122,25 +123,48 @@ FAINT = {
 #: What each way of knowing an edge is called, said once for the key and the titles. "Balances
 #: meet" is deliberately the weakest claim a statement's start can make short of a first row.
 CERTAINTY_WORDS = {
-    STATED: "printed by the source itself",
+    STATED: "stated by the statement or file itself",
     "asked": "the window that was asked for",
-    MEETS: "an opening balance equal to the previous statement's closing balance: it fits the "
-    "two meeting but does not prove it, because a missing statement can net to nil",
+    MEETS: "an opening balance equal to the previous statement's closing balance, which fits "
+    "the two meeting but does not prove it, because a missing statement can net to nil",
     OBSERVED: "the first or last row seen, so the source may reach further (at least)",
+    INFERRED: "inferred from how regularly statements arrive, or from the day one was received",
 }
 EDGE_CLASS = {
     STATED: "cov-edge-stated",
     "asked": "cov-edge-asked",
     MEETS: "cov-edge-meets",
     OBSERVED: "cov-edge-observed",
+    INFERRED: "cov-edge-inferred",
 }
-EDGE_NAMES = {STATED: "stated", "asked": "asked", MEETS: "balances meet", OBSERVED: "observed"}
+EDGE_NAMES = {
+    STATED: "stated",
+    "asked": "asked",
+    MEETS: "balances meet",
+    OBSERVED: "observed",
+    INFERRED: "inferred",
+}
 
 #: The gaps that are about verification, not about a source's days: drawn on the verification
 #: lane. Every other kind is drawn on the lane of the source expected to supply the file.
 VERIFICATION_GAPS = frozenset(
     {"no-balance", "automatic-only", "one-balance", "nothing-before", "flag-settle"}
 )
+
+#: What each reason for a hole between statements says, as a fact or as a probability.
+HOLE_FACTS = {
+    "starts-after": "The later statement says its period begins after the earlier one closed.",
+    "balances-differ": (
+        "The statements either side do not meet: the later one does not open on the balance "
+        "the earlier one closed on."
+    ),
+    "unlisted-rows": "Rows are held for these days that no statement lists.",
+    "balances-meet-net-nil": (
+        "The balances meet, but the statements close two or more periods apart, so a missing "
+        "statement whose movements net to nil is probable."
+    ),
+    "spacing": "The statements close further apart than they usually do.",
+}
 
 #: What each kind of gap is called in its sentence.
 GAP_LABELS = {
@@ -449,12 +473,18 @@ def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
         if gap.stated
         else "This is inferred from how regularly the statements held arrive."
     )
-    if gap.balances_differ and not gap.stated:
-        # Unequal balances prove a statement is missing; only where it ends is a guess.
-        basis = (
-            "The statements either side do not meet: the later one does not open on the "
-            "balance the earlier one closed on. Where the missing statement ends is inferred "
-            "from how regularly they arrive."
+    why = f" {gap.why}"
+    ends = (
+        " Where the missing statement ends is inferred from how regularly they arrive."
+        if gap.last_inferred
+        else ""
+    )
+    if gap.reason in HOLE_FACTS:
+        # What the held statements prove is told apart from what is guessed about the hole.
+        why = f" {HOLE_FACTS[gap.reason]}"
+        basis = ends.strip() if gap.reason != "unlisted-rows" else (
+            f"{plural(gap.unlisted_rows, 'row')} other sources hold in these days "
+            f"{'is' if gap.unlisted_rows == 1 else 'are'} listed by no statement.{ends}"
         )
     probably = ""
     if gap.probably:
@@ -464,8 +494,7 @@ def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
             f"{'is' if gap.probably == 1 else 'are'} missing"
             + (f", closing about {closing}." if closing else ".")
         )
-    why = "" if gap.balances_differ and not gap.stated else f" {gap.why}"
-    return f"{label} for {span} ({days}).{why}{probably} {basis}"
+    return f"{label} for {span} ({days}).{why}{probably} {basis}".replace("  ", " ")
 
 
 def _seam_sentence(view: AccountTimeline, seam: Seam) -> str:
@@ -732,10 +761,14 @@ def _draw(
         for capture in lane.captures:
             # A run joins its captures and shows only its weakest outer edges, but where a
             # statement begins on "balances meet" the join itself is the claim, so it is drawn.
-            if capture.first_basis == MEETS and scale.start <= capture.first <= scale.end:
+            if capture.first_basis in (MEETS, INFERRED) and (
+                scale.start <= capture.first <= scale.end
+            ):
                 x = scale.x(capture.first)
-                layers["bars"].append(_line(EDGE_CLASS[MEETS], x, bar_y - 2, x, bar_y + bar_h + 2))
-                used.add(MEETS)
+                layers["bars"].append(
+                    _line(EDGE_CLASS[capture.first_basis], x, bar_y - 2, x, bar_y + bar_h + 2)
+                )
+                used.add(capture.first_basis)
         for x, width, share in listed_marks(lane, scale):
             opacity = "" if share >= 1.0 else f' fill-opacity="{min(1.0, 0.3 + 0.7 * share):.1f}"'
             layers["bars"].append(
@@ -804,7 +837,22 @@ def _draw(
         seen_anchors.add(ident)
         x0, x1 = _clamp(scale, scale.x(gap.first)), _clamp(scale, scale.x(gap.last) + px)
         sentence = _gap_sentence(view, gap)
-        inner = _rect("cov-gap cov-focus", x0, at.y + 5, x1 - x0, at_h - 10)
+        if gap.last_inferred:
+            # A hole whose existence is a fact but whose end is a guess: a firm start and an
+            # outline that stays open at the soft end.
+            top_y, bottom_y = at.y + 5, at.y + at_h - 5
+            inner = (
+                _el("polyline", "cov-gap cov-focus",
+                    ("points", f"{x1:.1f},{top_y:.1f} {x0:.1f},{top_y:.1f} "
+                               f"{x0:.1f},{bottom_y:.1f} {x1:.1f},{bottom_y:.1f}"),
+                    ("fill", "none"))
+                + _el("rect", "cov-gap-hit", ("x", f"{x0:.1f}"), ("y", f"{top_y:.1f}"),
+                      ("width", f"{max(x1 - x0, 0):.1f}"), ("height", f"{bottom_y - top_y:.1f}"),
+                      ("fill", "transparent"))
+            )
+        else:
+            inner = _rect("cov-gap cov-focus", x0, at.y + 5, x1 - x0, at_h - 10)
+        inner += _line("cov-gap-firm", x0, at.y + 5, x0, at.y + at_h - 5)
         if x1 - x0 >= GAP_LABEL_PX:
             label = f"gap {_span(gap.first, gap.last)}"
             inner += f'<text x="{x0 + 5:.1f}" y="{at.y + at_h / 2 + 4:.1f}">{_esc(label)}</text>'
@@ -1049,7 +1097,7 @@ def _key(used: set[str]) -> str:
             swatch(style.draw(15, 9), style.label)
     edges = [
         (STATED, "thick edge"), ("asked", "thin edge"), (MEETS, "dotted edge"),
-        (OBSERVED, "dashed edge"),
+        (OBSERVED, "dashed edge"), (INFERRED, "faint dotted edge"),
     ]
     edge_words = "; ".join(
         f"a {name} is {EDGE_NAMES[basis]}, which is {CERTAINTY_WORDS[basis]}"
@@ -1139,7 +1187,9 @@ def expected_sentence(view: AccountTimeline) -> str:
     needed, "expected" would be the wrong word for them.
     """
     days = [lane.next_expected for lane in view.lanes if lane.next_expected is not None]
-    waiting = any(gap.kind == "newer-statement" for gap in view.gaps)
+    waiting = any(gap.kind == "newer-statement" for gap in view.gaps) or any(
+        lane.due for lane in view.lanes
+    )
     if not days or waiting:
         return ""
     return f" Next statement expected about {min(days).isoformat()}."
