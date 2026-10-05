@@ -269,7 +269,7 @@ def actual_verdict(
             State.NOT_CONFIGURED,
             "Actual is not configured on this instance",
             "It has not been told which budget to sync with, so nothing can be sent to it, "
-            "read back from it, or marked in it. The presses below are off until it is.",
+            "read back from it, or marked in it. The buttons below are off until it is.",
             Tone.WARN,
         )
     queued = _queue_verdict(queue, applier_seen, applier_age_seconds)

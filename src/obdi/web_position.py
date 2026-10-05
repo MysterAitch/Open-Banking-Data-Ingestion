@@ -1231,10 +1231,10 @@ _LIMIT_PROVISIONAL = (
 )
 
 _LIMITS = (
-    "<li>An account's balance rests on its opening balance, which is derived from the "
+    "<li>An account's balance rests on its opening balance, which is worked out from the "
     "earliest known balance. With only one known balance, the opening balance is simply "
-    "whatever makes that balance true, so rows missing before it cannot be detected. A "
-    "second known balance makes the first a test, and a later known balance that differs "
+    "whatever makes that balance true, so transactions missing before it cannot be detected. "
+    "A second known balance makes the first a test, and a later known balance that differs "
     "is flagged.</li>"
     "<li>Pending rows are included, as the ledger's running position includes them; "
     "void rows and folded copies of Space payments never are.</li>"

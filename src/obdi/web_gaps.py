@@ -256,8 +256,8 @@ def _lines(gap: FetchGap) -> tuple[str, str, str]:
             span,
             f"Fetch the statement before these rows, closing on or before {before}, "
             "or the one after them.",
-            "Only one known balance is held, so it sets the opening balance and nothing tests "
-            "the rows yet.",
+            "Only one known balance is held, so there is nothing yet to check the "
+            "transactions against.",
         )
     if kind is GapKind.NOTHING_BEFORE:
         return (

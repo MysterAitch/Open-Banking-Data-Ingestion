@@ -605,7 +605,7 @@ class TestBalanceReconciliationPage:
 
         assert response.status_code == 200
         assert "example masked=False" in response.text
-        assert "unmasked rendering" in response.text
+        assert "Showing the real values" in response.text
 
     def test_Page_WhenTheFiguresAreShown_TellsTheBrowserNotToKeepThem(self, tmp_path):
         config = _config(

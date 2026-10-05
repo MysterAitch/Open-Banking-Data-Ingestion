@@ -112,7 +112,7 @@ def abandoned_for(db_path: Path, now: datetime | None = None) -> str | None:
     started = str(status.get("started_at") or "an unrecorded time")
     return (
         f"a rebuild started at {started} never finished and its lease has expired, so the "
-        "derived layer may be half-built and every check is reading it as it stands - run "
+        "transactions may be half-rebuilt and every check is reading them as they stand - run "
         "'Rebuild from raw' again"
     )
 

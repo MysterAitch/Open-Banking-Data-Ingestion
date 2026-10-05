@@ -443,8 +443,8 @@ def _outlook(
                         untested_to,
                         Basis.STATED,
                         source,
-                        "These rows come before the first known balance, so they are worked "
-                        "backwards from it and nothing tests them.",
+                        "These transactions come before the first known balance, which is what "
+                        "the opening balance is worked out from, so nothing tests them.",
                     )
                 )
         if (
@@ -461,8 +461,8 @@ def _outlook(
                     max(newest_row, own.known_from),
                     Basis.STATED,
                     source,
-                    "Only one known balance is held, so it sets the opening and nothing "
-                    "tests the rows yet.",
+                    "Only one known balance is held, so there is nothing yet to check the "
+                    "transactions against.",
                 )
             )
 

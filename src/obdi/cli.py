@@ -2315,7 +2315,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # also strictly more work on a page that once took 45 seconds.
             merged = store.all_transactions()
             sighted = store.transactions_by_sighting()
-        mark = _timed_phase("sightings", mark)
+        mark = _timed_phase("reports", mark)
         rows = [t for t in merged if t.account_id == ref]
         contributing = sorted({t.source for t in sighted if t.account_id == ref})
         if not rows:

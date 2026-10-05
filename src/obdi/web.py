@@ -1122,9 +1122,9 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
 
     lines = [
         "<h2>Where these transactions came from</h2>",
-        f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'sighting')}, "
+        f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'report')} from "
         f"{plural(source_count, 'source')}. A transaction that two sources report is one "
-        "transaction and two sightings.</p>",
+        "transaction and two reports.</p>",
         '<div class="row">',
     ]
     for entry in sorted(
@@ -4340,7 +4340,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: net totals, '
+            else '<p class="warn">Showing the real values: net totals, '
             "amounts, and payee descriptions are visible.</p>"
             '<p><a class="button" href="/agreements">'
             "Back to the masked rendering</a></p>"
@@ -4689,7 +4689,7 @@ class ConnectionHandler(
             f'<input type="hidden" name="id" value="{artefact_id}">'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            "Show raw payload (unmasked)</button></p></form>" + HOME_LINK
+            "Show raw payload (real values)</button></p></form>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
 
@@ -4801,7 +4801,7 @@ class ConnectionHandler(
                 f"<strong>{html.escape(account)}</strong>. The correction is "
                 "recorded in the artefact's provenance.</p>"
                 "<p>Now run <strong>Rebuild from raw</strong> (danger zone) so "
-                "the derived rows follow the corrected filing.</p>" + HOME_LINK,
+                "the transactions follow the corrected filing.</p>" + HOME_LINK,
             ),
         )
 
@@ -6267,7 +6267,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: the '
+            else '<p class="warn">Showing the real values: the '
             "descriptions of the largest flagged clusters are visible.</p>"
             '<p><a class="button" href="/review-report">'
             "Back to the masked rendering</a></p>"
@@ -6386,10 +6386,10 @@ class ConnectionHandler(
             )
         )
         body = (
-            "<p>Two faults the merged layer cannot show from inside: rows "
-            "that share one identity, and payments folded into another "
-            "payment's row. Each source's own count of an account's "
-            "payments is set against the rows that hold them.</p>"
+            "<p>Two faults that are easy to miss: two payments that look identical and "
+            "are held as one transaction, and one payment held as two. Each source's own "
+            "count of an account's payments is set against the transactions that hold "
+            "them.</p>"
             '<p class="muted">Counts and account names only - no amount, '
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
@@ -6428,7 +6428,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: balances and '
+            else '<p class="warn">Showing the real values: balances and '
             "differences are visible.</p>"
             '<p><a class="button" href="/balance-reconciliation">'
             "Back to the masked rendering</a></p>"
@@ -6483,7 +6483,7 @@ class ConnectionHandler(
             + '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: figures and the '
+            else '<p class="warn">Showing the real values: figures and the '
             "unmatched rows are visible.</p>"
             f'<p><a class="button" href="{html.escape(back, quote=True)}">'
             "Back to the masked rendering</a></p>"
@@ -6527,7 +6527,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: balances are visible.</p>'
+            else '<p class="warn">Showing the real values: balances are visible.</p>'
             '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
         )
         body = (

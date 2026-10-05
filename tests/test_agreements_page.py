@@ -200,7 +200,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
         page = response.text
-        assert "unmasked rendering" in page
+        assert "Showing the real values" in page
         assert NETFLIX in page and "-£487.31" in page
         assert f"-£1234.57 &quot;{ACME}&quot; dated 2026-03-02 by starling" in page
         assert "; net " in page
