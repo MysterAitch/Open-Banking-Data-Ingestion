@@ -376,7 +376,12 @@ class CandidateIndex:
         space_blind: Callable[[str], bool] | None = None,
         settlements: Mapping[str, Iterable[date]] | None = None,
         links: Iterable[tuple[str, str]] = (),
+        listings: Iterable[tuple[str, str, str]] = (),
     ) -> None:
+        # The days each row has been listed under by a source that lists a payment on its
+        # settlement day, by (account, source, day): which only grows, and is what tells a
+        # file listing the same row again from one listing another. See `listed_rows`.
+        self._listed: dict[tuple[str, str, str], list[str]] = {}
         # Every first-party id any sighting of a row stated, which only grows like the ids above.
         self._links_of: dict[str, set[str]] = {}
         self._by_link: dict[tuple[str, str], list[str]] = {}
@@ -431,7 +436,63 @@ class CandidateIndex:
             position = self._position.get(entity_id)
             if position is not None:
                 self.note_link(entity_id, self._order[position].account_id, link)
+        for entity_id, source, day in listings:
+            position = self._position.get(entity_id)
+            if position is not None:
+                self._note_listing(entity_id, self._order[position].account_id, source, day)
         self._recording_evidence = True
+
+    def copy(self) -> CandidateIndex:
+        """An index that can be changed without changing this one.
+
+        The rows are shared, since a row is never altered in place (`replace` swaps one in), and
+        every container is copied, so a batch can be tried against it and thrown away.
+        """
+        other = CandidateIndex.__new__(CandidateIndex)
+        other.space_blind = self.space_blind
+        other._order = list(self._order)
+        other._position = dict(self._position)
+        other._batch_pending = self._batch_pending
+        other._recording_evidence = self._recording_evidence
+        other._seen_pending = set(self._seen_pending)
+        other._seen_settled = set(self._seen_settled)
+        other._links_of = {k: set(v) for k, v in self._links_of.items()}
+        other._settle = {k: set(v) for k, v in self._settle.items()}
+        other._ids_of = {k: {s: set(v) for s, v in d.items()} for k, d in self._ids_of.items()}
+        other._claimed = {k: dict(v) for k, v in self._claimed.items()}
+        for name in (
+            "_by_link",
+            "_by_source_id",
+            "_by_content",
+            "_by_amount",
+            "_sighted",
+            "_listed",
+        ):
+            setattr(other, name, {k: list(v) for k, v in getattr(self, name).items()})
+        return other
+
+    def _note_listing(self, entity_id: str, account_id: str, source: str, day: str) -> None:
+        held = self._listed.setdefault((account_id, source, day), [])
+        if entity_id not in held:
+            held.append(entity_id)
+
+    def listed_rows(self, incoming: Transaction) -> list[Transaction]:
+        """The rows of the record's size that its own source has already listed on its day.
+
+        A row is listed by a source on the day that source dated it, whatever date the row
+        carries now (a later sighting by another source may have moved it).
+        Read by `plan_settlement`, which leaves a record alone when its source has already
+        placed a row of its size on its day: a file listed again must find the row the first
+        listing joined, and not the one its settlement day now names.
+        """
+        held = self._listed.get(
+            (incoming.account_id, incoming.source, incoming.value_date.isoformat()), []
+        )
+        return [
+            row
+            for row in self._in_arrival_order(held)
+            if row.amount_minor == incoming.amount_minor
+        ]
 
     def note_link(self, entity_id: str, account_id: str, link: str) -> None:
         """Record that a sighting of this row stated this first-party id. Never undone."""
@@ -583,6 +644,13 @@ class CandidateIndex:
         self.note_link(
             transaction.entity_id, transaction.account_id, stated_link_of(transaction)
         )
+        if lists_on_settlement_day(transaction.source):
+            self._note_listing(
+                transaction.entity_id,
+                transaction.account_id,
+                transaction.source,
+                transaction.value_date.isoformat(),
+            )
         if transaction.source_id:
             key = (transaction.account_id, transaction.source, transaction.source_id)
             self._by_source_id.setdefault(key, []).append(transaction.entity_id)
@@ -675,6 +743,11 @@ class CandidateIndex:
                 if kept not in held:
                     held.append(kept)
         self._settle.setdefault(kept, set()).update(self._settle.pop(gone, set()))
+        for held in self._listed.values():
+            if gone in held:
+                held.remove(gone)
+                if kept not in held:
+                    held.append(kept)
         for source, source_id in self._claimed.pop(gone, {}).items():
             self._claimed.setdefault(kept, {}).setdefault(source, source_id)
 
@@ -858,13 +931,16 @@ class _Judgement:
             return could_be_reissue(incoming, candidate)
         return could_be_one_payment(incoming, candidate, same_content=same_content)
 
-    def exact(self) -> MatchResult | None:
-        """The row this record names by an id, or by the content key.
+    def exact(self, *, settled: str | None = None) -> MatchResult | None:
+        """The row this record names by an id, by its settlement day, or by the content key.
 
         The source's own id and the id-link are each exact.
         Where they name DIFFERENT rows the evidence disagrees with itself, so the join already
         made stands (the sighting is on that row, and moving it would rewrite what a source
         said) and nothing new is merged on the other id: the row is flagged for a person.
+        `settled` is the row `plan_settlement` named for a record listed on its settlement day,
+        which comes before the content key: that key finds the payment MADE on the record's
+        date, and this finds the one SETTLED on it.
         """
         incoming, index = self.incoming, self.index
         own: Transaction | None = None
@@ -887,6 +963,11 @@ class _Judgement:
             return MatchResult(MatchTier.SOURCE_ID, own, basis=BASIS_OWN_ID, review=review)
         if named is not None:
             return MatchResult(MatchTier.LINKED_ID, named, basis=BASIS_ID)
+        if settled is not None:
+            planned = [*settlement_candidates(incoming, index), *index.listed_rows(incoming)]
+            for candidate in planned:
+                if candidate.entity_id == settled:
+                    return MatchResult(MatchTier.FUZZY, candidate, basis=BASIS_SETTLEMENT)
         if incoming.content_key:
             for candidate in index.by_content_key(self.account, incoming.content_key):
                 if self.one_payment(candidate, same_content=True):
@@ -968,7 +1049,7 @@ def resolve(
     )
     judge = _Judgement(incoming, index)
 
-    found = judge.exact()
+    found = judge.exact(settled=partner)
     if found is not None:
         return found
     conflict = judge.size_conflict
@@ -1128,10 +1209,14 @@ def settlement_candidates(incoming: Transaction, index: CandidateIndex) -> list[
     ]
 
 
-def plan_settlement(batch: Sequence[Transaction], index: CandidateIndex) -> dict[int, str]:
+def plan_settlement(
+    batch: Sequence[Transaction], index: CandidateIndex, *, first_listing: bool = False
+) -> dict[int, str]:
     """The stored row each record of a batch is, where its settlement day names one, by position.
 
-    THE RULE, read by `exact_rule_measure.settlement_figures` and not yet applied by `resolve`.
+    THE RULE, applied through `guarded_settlement_plan` (which says which of these moves it
+    keeps), `plan_partners` and `_Judgement.exact`, and read by
+    `exact_rule_measure.settlement_figures`, which says what it changes before it is trusted.
     A record listed on its settlement day (`settlement_candidates`) is the payment
     its day names, and is that row before its own content key is tried against rows made on
     that date.
@@ -1146,16 +1231,32 @@ def plan_settlement(batch: Sequence[Transaction], index: CandidateIndex) -> dict
     Nothing is planned where the day names no row, where more records than rows (or more rows
     than records) share a day, where a payee differs inside a set, or where two groups name
     the same row: those records keep the existing order of tiers (`resolve`).
+    A record that is a file LISTING A ROW AGAIN (`CandidateIndex.listed_rows`) is that row,
+    wherever the first listing found it, and is not planned by the day: a second export that
+    went to the row its day now names stored every payment the first had placed elsewhere a
+    second time (a second export of an overlapping span after the feed arrived last: seven
+    surplus rows in the week of `consecutive_days_corpus`).
+    That holds only for a record the settlement day names a row for; any other record keeps
+    the existing order, as it always did.
+    `first_listing` plans as if no file had listed anything yet, for the measurement of
+    where each distinct row would go the first time it is listed.
     """
     named: dict[int, list[Transaction]] = {}
     groups: dict[tuple[int, date], list[int]] = {}
+    planned: dict[int, str] = {}
     for position, incoming in enumerate(batch):
         found = settlement_candidates(incoming, index)
-        if found:
-            named[position] = found
-            groups.setdefault((incoming.amount_minor, incoming.value_date), []).append(position)
+        if not found:
+            continue
+        listed = [] if first_listing else index.listed_rows(incoming)
+        if incoming.occurrence < len(listed):
+            again = listed[incoming.occurrence]
+            if not again.status.is_history:
+                planned[position] = again.entity_id
+            continue
+        named[position] = found
+        groups.setdefault((incoming.amount_minor, incoming.value_date), []).append(position)
 
-    planned: dict[int, str] = {}
     for positions in groups.values():
         rows = named[positions[0]]
         ids = {row.entity_id for row in rows}
@@ -1263,6 +1364,124 @@ def settlement_groups(
     return groups
 
 
+def guarded_settlement_plan(batch: Sequence[Transaction], index: CandidateIndex) -> dict[int, str]:
+    """`plan_settlement`, keeping only the moves of groups that change no day's total.
+
+    THE GUARD. Measured on the deployed account: the plan would move 36 rows, re-date 38
+    transactions, and leave four days holding a different total, on an account whose rows
+    reproduce all 1,906 of its known balances as they are dated today. What is wrong there is
+    only which of several equal payments carries which export row, so a group of moves that
+    would change a day's total (a chain broken because an export row is missing, or one whose
+    last link the plan refuses) is left exactly as the existing order of tiers leaves it.
+    SAFE is a property of a whole group (`settlement_groups`), and a group is decided here, over
+    the incoming batch and the rows held before it, before any record is resolved. A batch is
+    all or none of a group: a group that spans two files is two groups, each judged on the rows
+    held when its file arrives, and a half that is safe alone is safe because it changes no
+    day's total by itself, never because the other half will arrive.
+    Where the existing order sends a record is read with the exact tiers (`_Judgement.exact`),
+    and a row is counted on the day of the record it holds, the batch being the latest sighting.
+    A record that lists a row again keeps the row its first listing joined, whatever the groups say.
+    """
+    planned = plan_settlement(batch, index)
+    again = {p: row for p, row in planned.items() if _lists_again(batch[p], index)}
+    fresh = {p: row for p, row in planned.items() if p not in again}
+    if not fresh:
+        return again
+    tried = _existing_order(batch, index)
+
+    def hosts(position: int) -> frozenset[str]:
+        held = tried.hosts[position]
+        return frozenset() if held is None else frozenset({held})
+
+    def effect(positions: Sequence[int]) -> list[Effect]:
+        now: dict[str, date] = {}
+        phantoms: list[Effect] = []
+        for position in positions:
+            record = batch[position]
+            now[fresh[position]] = record.value_date
+            if tried.hosts[position] is None:
+                phantoms.append((record.amount_minor, record.value_date, None))
+        found: list[Effect] = []
+        for entity in sorted({*now, *(h for p in positions for h in hosts(p))}):
+            row = index.row(entity)
+            if row is None or row.status.is_history:
+                continue
+            found.append(
+                (row.amount_minor, tried.dates[entity], now.get(entity, row.value_date))
+            )
+        return [*found, *phantoms]
+
+    unsafe = {
+        position
+        for group in settlement_groups(fresh, hosts, effect)
+        if not group.safe
+        for position in group.positions
+    }
+    return {
+        **{position: row for position, row in fresh.items() if position not in unsafe},
+        **again,
+    }
+
+
+def _lists_again(record: Transaction, index: CandidateIndex) -> bool:
+    """Whether the record's own source has listed this row before (`CandidateIndex.listed_rows`)."""
+    return record.occurrence < len(index.listed_rows(record))
+
+
+@dataclass(frozen=True)
+class _ExistingOrder:
+    """Where a batch goes when no record is planned by its settlement day."""
+
+    #: Each record's stored row, or None where the existing order makes it a row of its own.
+    hosts: dict[int, str | None]
+    #: The day every stored row is counted on once the batch is resolved that way.
+    dates: dict[str, date]
+
+
+def _existing_order(batch: Sequence[Transaction], index: CandidateIndex) -> _ExistingOrder:
+    """Resolve the batch against a copy of the index, as `ingest._reconcile_all` would, unplanned.
+
+    The same loop `ingest.preview_reconcile` runs, kept here because `matching` cannot import
+    `ingest`: the batch's own partner plan without the settlement rule, `resolve`, a row claimed
+    once it has answered, a merged row replacing its candidate, a new row joining the candidates.
+    Nothing is written, and the index passed in is untouched.
+    """
+    sim = index.copy()
+    plan = plan_partners(batch, sim, settlement=False)
+    hosts: dict[int, str | None] = {}
+    for position, record in enumerate(batch):
+        partner, reserved = plan.for_position(position)
+        found = resolve(record, sim, partner=partner, reserved=reserved)
+        if found.existing is None:
+            occurrence = sim.free_occurrence(
+                record.account_id, record.content_key, wanted=record.occurrence
+            )
+            stand_in = replace(record, occurrence=occurrence, entity_id=f"simulated-{position}")
+            sim.claim(stand_in.entity_id, record.source, record.source_id)
+            sim.append(stand_in)
+            hosts[position] = None
+            continue
+        held = found.existing
+        sim.claim(held.entity_id, record.source, record.source_id)
+        merged = supersede(held, record)
+        if merged.content_key != held.content_key:
+            merged = replace(
+                merged,
+                occurrence=sim.free_occurrence(
+                    merged.account_id,
+                    merged.content_key,
+                    wanted=merged.occurrence,
+                    excluding=held.entity_id,
+                ),
+            )
+        else:
+            merged = replace(merged, occurrence=held.occurrence)
+        sim.replace(merged)
+        hosts[position] = held.entity_id
+    dates = {row.entity_id: row.value_date for row in sim}
+    return _ExistingOrder(hosts, dates)
+
+
 @dataclass(frozen=True)
 class PartnerPlan:
     """What `plan_partners` decided for one batch.
@@ -1278,7 +1497,9 @@ class PartnerPlan:
         return self.partner.get(position), self.reserved
 
 
-def plan_partners(batch: Sequence[Transaction], index: CandidateIndex) -> PartnerPlan:
+def plan_partners(
+    batch: Sequence[Transaction], index: CandidateIndex, *, settlement: bool = True
+) -> PartnerPlan:
     """Decide which stored row each record of a batch takes, as a SET.
 
     THE RULE. When several records of one batch have no exact match and several
@@ -1310,9 +1531,12 @@ def plan_partners(batch: Sequence[Transaction], index: CandidateIndex) -> Partne
     Exact solving is exponential in the rows, which is why it is bounded and not
     measured: a month of one standing amount stays well inside it.
     """
+    settled = guarded_settlement_plan(batch, index) if settlement else {}
     pool: dict[int, list[Transaction]] = {}
-    consumed: set[str] = set()
+    consumed: set[str] = set(settled.values())
     for position, incoming in enumerate(batch):
+        if position in settled:
+            continue
         judge = _Judgement(incoming, index)
         found = judge.exact()
         if found is not None and found.existing is not None:
@@ -1333,6 +1557,7 @@ def plan_partners(batch: Sequence[Transaction], index: CandidateIndex) -> Partne
         if len(group) < 2:
             continue
         partner.update(_assign_group(batch, options, group, index))
+    partner.update(settled)
     return PartnerPlan(partner, frozenset(partner.values()))
 
 

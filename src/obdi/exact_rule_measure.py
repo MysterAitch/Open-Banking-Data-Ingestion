@@ -765,7 +765,7 @@ def settlement_figures(
         candidates = {
             position: settlement_candidates(row, index) for position, row in enumerate(batch)
         }
-        planned = plan_settlement(batch, index)
+        planned = plan_settlement(batch, index, first_listing=True)
         sizes: dict[tuple[int, date], list[int]] = defaultdict(list)
         for position, row in enumerate(batch):
             if candidates[position]:

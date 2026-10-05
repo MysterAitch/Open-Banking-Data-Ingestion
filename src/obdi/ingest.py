@@ -448,6 +448,7 @@ def preview_reconcile(
                 space_blind=_blind_in(space_blind, transaction.account_id),
                 settlements=store.settlement_days_for_account(transaction.account_id),
                 links=store.linked_ids_for_account(transaction.account_id),
+                listings=store.listed_sightings_for_account(transaction.account_id),
             )
             loaded.begin_batch()
             by_account[transaction.account_id] = loaded
@@ -590,6 +591,7 @@ def _reconcile_all(
                     space_blind=_blind_in(space_blind, transaction.account_id),
                     settlements=store.settlement_days_for_account(transaction.account_id),
                     links=store.linked_ids_for_account(transaction.account_id),
+                    listings=store.listed_sightings_for_account(transaction.account_id),
                 )
             loaded.begin_batch(pending_snapshot=pending_snapshot)
             by_account[transaction.account_id] = loaded

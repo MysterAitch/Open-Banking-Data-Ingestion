@@ -3286,6 +3286,27 @@ class Store:
             )
         return found
 
+    def listed_sightings_for_account(self, account_id: str) -> list[tuple[str, str, str]]:
+        """(entity id, source, day) for each day a settlement-listing source dated a row.
+
+        Of the account's rows. The day is the one that source gave the row
+        (`transaction_sources.observed_date`), which a later sighting by another source does
+        not move. A sighting that gave no date is left out.
+        """
+        from .stated_times import listing_sources
+
+        sources = sorted(listing_sources())
+        marks = ",".join("?" for _ in sources)
+        return [
+            (str(row[0]), str(row[1]), str(row[2]))
+            for row in self.connection.execute(
+                "SELECT DISTINCT s.entity_id, s.source, s.observed_date "  # noqa: S608
+                "FROM transaction_sources s JOIN transactions t ON t.entity_id = s.entity_id "
+                f"WHERE t.account_id = ? AND s.observed_date != '' AND s.source IN ({marks})",
+                (account_id, *sources),
+            )
+        ]
+
     def accounts_for_connection(self, connection_id: str) -> list[dict[str, str]]:
         """The provider's own account list, from the landed accounts artefact.
 

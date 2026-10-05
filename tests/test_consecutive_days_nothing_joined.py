@@ -19,13 +19,17 @@ feed fetched again and a second overlapping export:
     each payment's feed uid on its own row, and the aggregator's item for it on that row
     nothing lost: seven feed uids, seven aggregator ids, seven export rows sighted
     rows listed equal rows held, and every stated balance agrees
-THE EXPORT'S ROW ON ITS OWN PAYMENT is not the answer in every order, and the failure is not the
-join's: an export row dated D reaches the payment MADE on D by content key (`matching.exact`)
-before the payment SETTLED on D is looked for, whenever the feed is already stored, so each export
-row sits on the next payment's row. A second overlapping export then sights another payment's row
-than the first did, which the row count reports as a surplus per day. Both are pinned as strict
-expected failures (`EXPORT_ON_ITS_OWN_PAYMENT`, measured) so the day they are fixed says so, and
-both occur with the join switched off: they are the matcher's, not the join's.
+THE EXPORT'S ROW ON ITS OWN PAYMENT is the answer in every order but one. An export row dated D
+used to reach the payment MADE on D by content key before the payment SETTLED on D was looked for,
+whenever the feed was already stored, so each export row sat on the next payment's row, and a
+second overlapping export sighted another payment's row than the first did. A record listed on its
+settlement day is now planned onto the row its day names (`matching.plan_settlement`), and a file
+listing a row again finds the row its first listing joined.
+THE ORDER STILL PINNED (`STILL_ON_THE_NEXT_PAYMENT`, measured): the aggregator, then the export,
+then the feed, with an aggregator that states the feed's uids. The export arrives when no stored
+row has a settlement day, so nothing can name its payment, and it joins the aggregator's row of
+its own date by content key; the feed then finds each aggregator row by id and the export's
+sighting stays where it was put. Nothing later moves a sighting.
 """
 
 from __future__ import annotations
@@ -52,21 +56,13 @@ from test_space_attribution import MAIN, MAP
 from test_space_blind_rows_and_internal_legs import order_id, sources, walk_differences
 
 ORDERS = list(itertools.permutations(("feed", "export", "aggregator")))
-#: The orders in which the export arrives before the feed AND before the aggregator, so the
-#: export's rows are made first and the feed joins them by settlement day.
-EXPORT_FIRST = {("export", "feed", "aggregator"), ("export", "aggregator", "feed")}
-#: Measured, not reasoned (see the module docstring): where an export row sits on its own
-#: payment's row, as (aggregator states uids, order). With the second export it never does.
-EXPORT_ON_ITS_OWN_PAYMENT = {
-    (linked, order) for linked in (True, False) for order in EXPORT_FIRST
-} | {(False, ("aggregator", "export", "feed"))}
+#: Measured, not reasoned (see the module docstring): where an export row still sits on the next
+#: payment's row, as (aggregator states uids, order), in every shape.
+STILL_ON_THE_NEXT_PAYMENT = {(True, ("aggregator", "export", "feed"))}
 EXPORT_ON_THE_NEXT_PAYMENT = (
-    "an export row reaches the payment made on its date by content key before the payment "
-    "settled on it, or (after a second export) lands on another row than the first did"
-)
-SECOND_EXPORT_SURPLUS = (
-    "a second export of an overlapping span sights a different payment's row for each day than "
-    "the first did, so each day holds two rows sighted by the export and lists one"
+    "the export arrived before any stored row had a settlement day, so it joined the "
+    "aggregator's row of its own date by content key, and the feed's later arrival joins by "
+    "id and moves no sighting"
 )
 SHAPES = [(False, False), (False, True), (True, False), (True, True)]
 SHAPE_IDS = ["live", "live-again", "rebuilt", "rebuilt-again"]
@@ -170,10 +166,8 @@ class TestAWeekOfEqualPaymentsOnConsecutiveDays:
         assert walk_differences(store) == {}
 
     def test_Rows_WhenEachPaymentSettlesTheDayAfter_RowsListedEqualRowsHeld(
-        self, request, stores, order, linked, rebuild, again
+        self, stores, order, linked, rebuild, again
     ):
-        if again and ((linked, order) in EXPORT_ON_ITS_OWN_PAYMENT):
-            request.applymarker(pytest.mark.xfail(strict=True, reason=SECOND_EXPORT_SURPLUS))
         store = stores(order, WEEK, rebuild=rebuild, again=again, linked=linked)
 
         assert check_rows(store, canonical).row_faults == []
@@ -194,7 +188,7 @@ class TestAWeekOfEqualPaymentsOnConsecutiveDays:
     def test_Export_WhenEachRowIsListedOnItsSettlementDay_SitsOnItsOwnPaymentsRow(
         self, request, stores, order, linked, rebuild, again
     ):
-        if again or (linked, order) not in EXPORT_ON_ITS_OWN_PAYMENT:
+        if (linked, order) in STILL_ON_THE_NEXT_PAYMENT:
             request.applymarker(pytest.mark.xfail(strict=True, reason=EXPORT_ON_THE_NEXT_PAYMENT))
         store = stores(order, WEEK, rebuild=rebuild, again=again, linked=linked)
 

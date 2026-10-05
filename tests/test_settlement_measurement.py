@@ -5,7 +5,8 @@ the real doors in the order the deployed store's artefacts arrived in (the feed,
 aggregator, then the export), live and rebuilt, and with a second export of an overlapping
 span and the feed fetched again. The answers were decided before the first run.
 
-KNOWN ANSWERS, by household:
+KNOWN ANSWERS, by household (read from a store built WITHOUT the settlement rule, which is
+what the measurement exists to describe; `test_settlement_rule` reads it again with the rule):
 
     a week of one payee paid one amount on consecutive days, each settling the day after
         seven export rows, each naming exactly one stored transaction by its settlement day
@@ -41,6 +42,7 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
+from obdi import matching
 from obdi.exact_rule_measure import SettlementFigures, exact_rule_report
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
@@ -75,11 +77,23 @@ def stores(tmp_path) -> Iterator[Callable[..., Store]]:
         store.close()
 
 
+@pytest.fixture
+def without_the_rule(monkeypatch):
+    """The matcher as it was before a record listed on its settlement day was planned.
+
+    The measurement says what the rule WOULD do to a store built without it, so the
+    store these answers are read from must be built without it. `test_settlement_rule`
+    asserts that the same measurement says none once the rule is applied.
+    """
+    monkeypatch.setattr(matching, "plan_settlement", lambda batch, index, **kwargs: {})
+
+
 def figures_of(store: Store) -> SettlementFigures:
     (found,) = [f for f in exact_rule_report(store, MAP).settlement if f.account == MAIN]
     return found
 
 
+@pytest.mark.usefixtures("without_the_rule")
 @pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
 class TestAWeekOfEqualPaymentsOnConsecutiveDays:
     def test_Measurement_WhenEachRowSitsOnTheNextPayment_NamesEveryRowAsMoved(
@@ -112,6 +126,7 @@ def week_without_its_last_export_row() -> list[Payment]:
     return [*week[:-1], replace(week[-1], listed=None)]
 
 
+@pytest.mark.usefixtures("without_the_rule")
 @pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
 class TestAChainThatIsBrokenAtItsEnd:
     """The week, but the export never lists the last payment's settlement day.
@@ -153,6 +168,7 @@ def bakery_week(*, broken: bool) -> list[Payment]:
     return [*payments[:-1], replace(payments[-1], listed=None)] if broken else payments
 
 
+@pytest.mark.usefixtures("without_the_rule")
 @pytest.mark.parametrize(("rebuild", "again"), SHAPES, ids=SHAPE_IDS)
 class TestWhichMovesAreSafe:
     """A group of moves is safe when no day would hold a different total afterwards.
@@ -211,6 +227,7 @@ class TestWhichMovesAreSafe:
         assert figures.unsafe_days == [date(2026, 9, 15), date(2026, 9, 21)]
 
 
+@pytest.mark.usefixtures("without_the_rule")
 class TestAChainWhoseClosingRowThePlanRefuses:
     """The week, plus a second export row of the last row's size and date.
 
@@ -231,6 +248,7 @@ class TestAChainWhoseClosingRowThePlanRefuses:
         assert figures.unsafe_open_unclosed == 0
 
 
+@pytest.mark.usefixtures("without_the_rule")
 class TestRowsOnATransactionWithNoFeedSighting:
     """PREDICTED, before the first run: the household's row inside the feed's span, and the two
     rows added here, one a month before the feed's first item and one a month after its last,
@@ -418,6 +436,7 @@ class TestRowsThatShareTheirOneTransaction:
 
 
 class TestTheSentences:
+    @pytest.mark.usefixtures("without_the_rule")
     def test_Report_WhenTheWeekIsMeasured_StatesEachFigureInWordsAndNoValue(self, stores):
         text = exact_rule_report(stores(consecutive_payments(7)), MAP).describe()
 

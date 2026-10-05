@@ -23,6 +23,7 @@ says which days count.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -137,18 +138,23 @@ def recorded_for(transaction: Transaction) -> list[StatedTime]:
     return stated_times(transaction.raw) if from_file is None else from_file
 
 
-def lists_on_settlement_day(source: str) -> bool:
-    """Whether a file source lists a payment on its settlement day, by its parser's own word.
+@functools.cache
+def listing_sources() -> frozenset[str]:
+    """The file sources that list a payment on its settlement day, by their parsers' own word.
 
     The parser is the one place that knows how its file dates a row, so the matcher
     asks here and never compares a source's name.
     """
     from .parsers.uk_banks import PARSERS
 
-    return any(
-        parser_class.source == source and parser_class.lists_on_settlement_day
-        for parser_class in PARSERS
+    return frozenset(
+        parser_class.source for parser_class in PARSERS if parser_class.lists_on_settlement_day
     )
+
+
+def lists_on_settlement_day(source: str) -> bool:
+    """Whether a file source lists a payment on its settlement day (`listing_sources`)."""
+    return source in listing_sources()
 
 
 def _last_sunday(year: int, month: int) -> date:
