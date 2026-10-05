@@ -18,12 +18,8 @@ counted row one source lists is amber, and a claimed transfer stays red.
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -32,6 +28,7 @@ import httpx
 import pytest
 
 from obdi.store import Store
+from served_store import environment_for, served_store
 from test_space_attribution import AGGREGATOR, BILLS, FEED, MAIN, Household, pay
 
 COPIES_WORDS = "copies not counted (held under a Space, or itemised by a statement)"
@@ -66,46 +63,8 @@ def _arrive_household(store: Store) -> None:
     )
 
 
-@contextmanager
-def _served(root: Path) -> Iterator[str]:
-    from obdi.cli import build_web_config
-    from obdi.web import AuthorisationSession, ConnectionHandler
-
-    environment = {
-        "OBDI_CONNECTION_STORE": str(root / "connections.json"),
-        "OBDI_ACCOUNT_MAP": str(root / "accounts.json"),
-        "OBDI_INSTANCE_LABEL": "obdi",
-        "OBDI_INSTANCE_ROLE": "production",
-    }
-    saved = {name: os.environ.get(name) for name in environment}
-    os.environ.update(environment)
-    (root / "accounts.json").write_text(
-        json.dumps(
-            {
-                "bindings": [],
-                "actual": [{"canonical_id": MAIN, "actual_account_id": "act-main"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    db = root / "store.sqlite3"
-    with Store(db) as store:
-        _arrive_household(store)
-    config = build_web_config(db)
-    assert config is not None
-    handler = type("H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()})
-    httpd = ConnectionHandler.make_server(("127.0.0.1", 0), handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{httpd.server_port}"
-    finally:
-        httpd.shutdown()  # type: ignore[attr-defined]
-        httpd.server_close()  # type: ignore[attr-defined]
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
+def _served(root: Path):
+    return served_store(root, _arrive_household, bound=[MAIN])
 
 
 @pytest.fixture(scope="module")
@@ -121,10 +80,8 @@ def base(root: Path) -> Iterator[str]:
 
 @pytest.fixture(autouse=True)
 def _environment(base: str, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OBDI_CONNECTION_STORE", str(root / "connections.json"))
-    monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(root / "accounts.json"))
-    monkeypatch.setenv("OBDI_INSTANCE_LABEL", "obdi")
-    monkeypatch.setenv("OBDI_INSTANCE_ROLE", "production")
+    for name, value in environment_for(root).items():
+        monkeypatch.setenv(name, value)
 
 
 def masked(base: str, month: str = "2026-09") -> str:

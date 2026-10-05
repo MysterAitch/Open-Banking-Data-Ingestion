@@ -220,71 +220,88 @@ class TestTwoAnchors:
 
 #: With the opening at the end of 03-10, no row falls after 03-20, so a balance
 #: stated for any later day in March agrees when it is 4,489.89.
-AGREEING_LATER_DAYS = ("03-20", "03-21", "03-22", "03-23", "03-24", "03-25")
+AGREEING_LATER_DAYS = tuple(f"03-{day}" for day in range(20, 32))
+
+#: Of the agreeing later balances, this many are listed and the rest are one line linking to all
+#: of them (`web_ledger._SHOWN_AGREEING_ANCHORS`, which `test_account_page_known_balances` holds).
+LISTED = 10
+
+IN_AGREEMENT = '<span class="pill pill-ok">in agreement</span>'
+DIFFERS = '<span class="pill pill-bad">differs</span>'
 
 
-def _outside_details(page: str) -> str:
-    return re.sub(r'<details class="agreeing">.*?</details>', "", page, flags=re.S)
-
-
-class TestALongRunOfAgreeingAnchorsFolds:
-    def test_FiveAgreeingLaterAnchors_FoldIntoOneSummaryStatingTheCount(self, lab):
+class TestALongRunOfAgreeingAnchorsIsCutToTheNewest:
+    def test_TwelveAgreeingLaterAnchors_ListTheNewestTenAndCountTheTwoEarlier(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
-        for day in AGREEING_LATER_DAYS[:5]:
+        for day in AGREEING_LATER_DAYS:
             lab.seed(f"2026-{day}", "4489.89")
 
         page = lab.get().text
 
-        assert "5 later known balances are in agreement with what the rows predict" in page
-        assert page.count('<details class="agreeing">') == 1
-        assert _outside_details(page).count('<span class="pill pill-ok">in agreement</span>') == 0
-        assert page.count('<span class="pill pill-ok">in agreement</span>') == 5
-        assert "the opening balance is worked out from this" in _outside_details(page)
+        assert page.count(IN_AGREEMENT) == LISTED
+        assert "and 2 earlier known balances, all in agreement" in page
+        assert "balances=all#opening" in page
+        assert "End of <span class=\"mono nowrap\">2026-03-31</span>" in page
+        assert "End of <span class=\"mono nowrap\">2026-03-21</span>" not in page
+        assert "the opening balance is worked out from this" in page
         assert_no_secret(page)
 
-    def test_ThreeAgreeingLaterAnchors_AreListedPlainlyWithNoFold(self, lab):
+    def test_TenAgreeingLaterAnchors_AreAllListedWithNoEarlierLine(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
-        for day in AGREEING_LATER_DAYS[:3]:
+        for day in AGREEING_LATER_DAYS[:LISTED]:
             lab.seed(f"2026-{day}", "4489.89")
 
         page = lab.get().text
 
-        assert '<details class="agreeing">' not in page
-        assert page.count('<span class="pill pill-ok">in agreement</span>') == 3
+        assert page.count(IN_AGREEMENT) == LISTED
+        assert "earlier known balance" not in page
 
-    def test_FourAgreeingLaterAnchors_FoldBecauseThreeIsTheMostShownPlainly(self, lab):
+    def test_ElevenAgreeingLaterAnchors_LeaveOneEarlierBalanceInTheSingular(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
-        for day in AGREEING_LATER_DAYS[:4]:
+        for day in AGREEING_LATER_DAYS[: LISTED + 1]:
             lab.seed(f"2026-{day}", "4489.89")
 
         page = lab.get().text
 
-        assert "4 later known balances are in agreement with what the rows predict" in page
+        assert page.count(IN_AGREEMENT) == LISTED
+        assert "and 1 earlier known balance, in agreement" in page
 
-    def test_ADifferingAnchorAmongManyAgreeing_StaysVisibleOutsideTheFold(self, lab):
+    def test_ADifferingAnchorAmongManyAgreeing_IsListedAlongsideTheNewestAgreeingOnes(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
-        for day in AGREEING_LATER_DAYS[:5]:
+        for day in AGREEING_LATER_DAYS:
             lab.seed(f"2026-{day}", "4489.89")
-        lab.seed("2026-03-26", STATED_SECOND)
+        lab.seed("2026-04-02", STATED_SECOND)
 
         page = lab.get().text
         shown = lab.show_values().text
 
-        assert "5 later known balances are in agreement with what the rows predict" in page
-        assert _outside_details(page).count('<span class="pill pill-bad">differs</span>') == 1
-        assert '<details class="agreeing">' in page and "1 later known balance differs" in page
-        assert "overdrawn or owed £489.89" in _outside_details(shown)
+        assert page.count(DIFFERS) == 1
+        assert page.count(IN_AGREEMENT) == LISTED
+        assert "and 2 earlier known balances, all in agreement" in page
+        assert "1 later known balance differs" in page
+        assert "overdrawn or owed £489.89" in shown
         assert_no_secret(page)
 
-    def test_OnlyDifferingAnchors_NeedNoFold(self, lab):
+    def test_FullList_ListsEveryAgreeingAnchorAndOffersTheWayBack(self, lab):
+        lab.seed("2026-03-10", STATED_FIRST)
+        for day in AGREEING_LATER_DAYS:
+            lab.seed(f"2026-{day}", "4489.89")
+
+        page = lab.get(balances="all").text
+
+        assert page.count(IN_AGREEMENT) == len(AGREEING_LATER_DAYS)
+        assert "earlier known balance" not in page
+        assert "Every known balance is listed. Show only the newest" in page
+
+    def test_OnlyDifferingAnchors_NeedNoEarlierLine(self, lab):
         lab.seed("2026-03-10", STATED_FIRST)
         for day in AGREEING_LATER_DAYS[:5]:
             lab.seed(f"2026-{day}", STATED_SECOND)
 
         page = lab.get().text
 
-        assert '<details class="agreeing">' not in page
-        assert page.count('<span class="pill pill-bad">differs</span>') == 5
+        assert "earlier known balance" not in page
+        assert page.count(DIFFERS) == 5
 
 
 class TestANilBalanceIsJustNil:

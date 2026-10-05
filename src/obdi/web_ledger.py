@@ -16,6 +16,7 @@ to show unmasked is shown unmasked because the VIEW was built with
 from __future__ import annotations
 
 import html
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -58,10 +59,22 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
 
 _HOME = '<p><a class="tap" href="/">Back to overview</a></p>'
 
-#: Agreeing anchors are listed plainly up to this many, and folded beyond it.
-#: A card with years of statements has one agreeing anchor a month, and the
-#: ones worth reading are the defining anchor and any that differ.
-_PLAIN_AGREEING_ANCHORS = 3
+#: The newest this many agreeing known balances are listed on the account page and the rest are a
+#: count with a link to the full list (`_listed_anchors`). Reading the deployed main account
+#: showed 1,906 balances, all in agreement, listed in full on every load: 5,700 of the page's
+#: 6,100 text lines. Ten rows of three lines is about a screenful on a phone, enough to lay
+#: against the bank's app; the opening's own balance and every one that differs are always listed.
+_SHOWN_AGREEING_ANCHORS = 10
+
+#: Earlier dates a protection can be pressed through that the drop-down offers before the full list.
+_OFFERED_DATES = 24
+
+#: The account page's parameter that asks for every known balance, and its one value.
+BALANCES_PARAM = "balances"
+BALANCES_ALL = "all"
+
+#: The id of the known-balances section, which the held-back box and the full list link into.
+OPENING_ANCHOR = "opening"
 
 _NOTHING_SENT = "Nothing in this account is sent to Actual, so there is nothing to compare."
 
@@ -139,9 +152,12 @@ def _words(items: list[str]) -> str:
 #: counted elsewhere, withheld from Actual so it is not counted twice (`replay.WITHHELD_FOLDED`
 #: gives the two cases), so it is history and not a fault.
 _COPY_CHIP = "copy, not counted"
-_COPIES_NOUN = "copy not counted"
-_COPIES_PLURAL = "copies not counted"
 _COPIES_WHY = "held under a Space, or itemised by a statement"
+
+
+def _copies(count: int) -> str:
+    """A count of copies with its noun, which names what they are: "3 copies not counted"."""
+    return _plural(count, "copy not counted", "copies not counted")
 
 
 def _is_copy(row: Any) -> bool:
@@ -545,38 +561,42 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
     )
 
 
-def _anchors_html(
-    anchors: tuple[Any, ...], *, balance_only: bool = False, unmasked: bool = True
-) -> str:
-    """The anchors, with a long run of agreeing ones folded away.
+def _listed_anchors(
+    anchors: tuple[Any, ...], *, everything: bool
+) -> tuple[tuple[Any, ...], int]:
+    """The known balances worth listing, and how many agreeing ones are left out.
 
-    The defining anchor and every differing one stay in view, since those are what
-    a reader came for.
-    The agreeing ones are a count to open rather than a list to scroll past.
+    The balance that sets the opening and every one that differs or was not tested are always
+    listed, since those are what a reader came for. Of the agreeing ones the newest
+    `_SHOWN_AGREEING_ANCHORS` are listed, being what a person lays beside the bank's app. The
+    anchors arrive oldest first, so "newest" is the tail. `everything` lists them all.
     """
     agreeing = [line for line in anchors if not line.defines_opening and line.verdict == "agrees"]
+    if everything or len(agreeing) <= _SHOWN_AGREEING_ANCHORS:
+        return anchors, 0
+    left_out = {id(line) for line in agreeing[:-_SHOWN_AGREEING_ANCHORS]}
+    return tuple(line for line in anchors if id(line) not in left_out), len(left_out)
 
-    def row(line: Any) -> str:
-        return _anchor_row(line, balance_only=balance_only, unmasked=unmasked)
 
-    if len(agreeing) <= _PLAIN_AGREEING_ANCHORS:
-        return '<ul class="anchors">' + "".join(row(line) for line in anchors) + "</ul>"
-    folded = {id(line) for line in agreeing}
-    return (
-        '<ul class="anchors">'
-        + "".join(row(line) for line in anchors if id(line) not in folded)
-        + "</ul>"
-        '<details class="agreeing"><summary>'
-        f"{_plural(len(agreeing), 'later known balance')} "
-        + (
-            f"{agree(len(agreeing), 'is')} followed"
-            if balance_only
-            else f"{agree(len(agreeing), 'is')} in agreement with what the rows predict"
-        )
-        + "</summary>"
-        '<ul class="anchors">' + "".join(row(line) for line in agreeing) + "</ul>"
-        "</details>"
+def _anchors_html(
+    anchors: tuple[Any, ...],
+    *,
+    balance_only: bool = False,
+    unmasked: bool = True,
+    everything: bool = False,
+    earlier: Callable[[int], str] | None = None,
+) -> str:
+    """The known balances worth listing (`_listed_anchors`), then one line for the earlier ones.
+
+    `earlier` makes that line from the count left out, as a link to the full list; without it a
+    long run is simply listed whole.
+    """
+    listed, left_out = _listed_anchors(anchors, everything=everything or earlier is None)
+    items = "".join(
+        _anchor_row(line, balance_only=balance_only, unmasked=unmasked) for line in listed
     )
+    line = earlier(left_out) if earlier is not None and left_out else ""
+    return f'<ul class="anchors">{items}</ul>{line}'
 
 
 def _opening_note(family: Any) -> str:
@@ -1471,23 +1491,39 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
     )
 
 
-def _remove_forms(view: Any, ref: str, month: str) -> str:
+def _remove_forms(view: Any, ref: str, month: str, *, unmasked: bool, everything: bool) -> str:
     """One button per balance a person stated, each asking for confirmation before it removes.
 
     They sit in the danger zone at the foot of the page, where the stylesheet outlines every
     button in red, so a thumb scrolling past them does not mistake one for the page's action.
+
+    Only the balances the page lists have a button (`_listed_anchors`): a button for each of
+    1,906 stated balances was as much of the page as the list was. The rest are removed from
+    the full list, which this ends with a way to.
     """
     hidden = (
         f'<input type="hidden" name="ref" value="{_esc(ref)}">'
         f'<input type="hidden" name="month" value="{_esc(month)}">'
     )
-    return "".join(
+    listed, left_out = _listed_anchors(view.opening.anchors, everything=everything)
+    omitted = {line.day for line in view.opening.anchors} - {line.day for line in listed}
+    forms = "".join(
         '<form method="post" action="/ledger-anchor-remove">'
         + hidden
         + f'<input type="hidden" name="day" value="{_esc(day)}">'
         + submit_button(f"Remove the known balance for the end of {day}", secondary=True)
         + "</form>"
         for day in view.opening.stated_days
+        if day not in omitted
+    )
+    if not left_out:
+        return forms
+    return forms + _balances_control(
+        view,
+        "Remove an older known balance from the full list",
+        unmasked=unmasked,
+        everything=True,
+        fragment=f"#{OPENING_ANCHOR}",
     )
 
 
@@ -1751,11 +1787,15 @@ def _state_html(view: Any, today: date) -> str:
     return body
 
 
-def _protect_html(view: Any) -> str:
+def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -> str:
     """The protection where the state is described: what can be pressed, or the line and its exit.
 
     Every press goes to a confirmation first (`LedgerPages._confirm_page`), including the
     withdrawal, so nothing here acts on a single tap.
+
+    The earlier dates offered are the newest `_OFFERED_DATES` unless `everything` asks for the
+    full list of known balances: the account whose page held 1,906 known balances offered a date
+    for each, 92 kilobytes of a drop-down nobody scrolls.
     """
     protection = view.protection
     if protection is None or view.rebuilding:
@@ -1811,9 +1851,23 @@ def _protect_html(view: Any) -> str:
             "/protect", ref, month, _through(newest), f"Protect through {newest.isoformat()}"
         )
         if len(offer) > 1:
+            dates = list(reversed(offer))
+            held_back = len(dates) - _OFFERED_DATES
+            if held_back > 0 and not everything:
+                dates = dates[:_OFFERED_DATES]
             options = "".join(
                 f'<option value="{_esc(d.isoformat())}">{_esc(d.isoformat())}</option>'
-                for d in reversed(offer)
+                for d in dates
+            )
+            older = (
+                _balances_control(
+                    view,
+                    f"{_plural(held_back, 'older date')} offered with every known balance listed",
+                    unmasked=unmasked,
+                    everything=True,
+                )
+                if held_back > 0 and not everything
+                else ""
             )
             body += _disclosure(
                 "Protect through an earlier date",
@@ -1821,7 +1875,8 @@ def _protect_html(view: Any) -> str:
                 f'value="{_esc(ref)}"><input type="hidden" name="month" value="{_esc(month)}">'
                 f'<p><select name="through" aria-label="Protect through">{options}</select></p>'
                 + submit_button("Protect through the date chosen", secondary=True)
-                + "</form>",
+                + "</form>"
+                + older,
             )
     elif protection.not_offered and state == "none":
         body += f'<p class="sub">Not offered: {_esc(protection.not_offered)}.</p>'
@@ -1840,16 +1895,63 @@ def _opening_gist(opening: Any) -> str:
     return f"{agree:,} in agreement, {'none' if not differ else f'{differ:,}'} differ"
 
 
-def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
+def _balances_control(
+    view: Any, label: str, *, unmasked: bool, everything: bool, fragment: str = ""
+) -> str:
+    """The way to the full list of known balances (or back from it), as its own line.
+
+    A link where the page is masked, since a masked page has an address. Where values are shown
+    it is a posted button, so no address that opens a page of values exists to be kept.
+    """
+    if unmasked:
+        extra = f'<input type="hidden" name="{BALANCES_PARAM}" value="{BALANCES_ALL}">'
+        return (
+            '<form method="post" action="/ledger">'
+            f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
+            f'<input type="hidden" name="month" value="{_esc(view.month)}">'
+            f"{extra if everything else ''}" + submit_button(label, secondary=True) + "</form>"
+        )
+    params = {"ref": view.ref, "month": view.month}
+    if everything:
+        params[BALANCES_PARAM] = BALANCES_ALL
+    return f'<p><a class="tap" href="{_url("/ledger", **params)}{fragment}">{_esc(label)}</a></p>'
+
+
+def _earlier_balances(view: Any, count: int, *, unmasked: bool, balance_only: bool) -> str:
+    """The one line for the agreeing known balances that are not listed, linking to all of them."""
+    state = "followed" if balance_only else "in agreement"
+    label = f"and {_plural(count, 'earlier known balance')}, {'all ' if count != 1 else ''}{state}"
+    return _balances_control(
+        view, label, unmasked=unmasked, everything=True, fragment=f"#{OPENING_ANCHOR}"
+    )
+
+
+def _opening_html(
+    view: Any, unmasked: bool, *, held: bool = False, everything: bool = False
+) -> str:
     """The "Known balances and the opening" section, and the forms that edit it.
 
     Folded away, since an account in agreement has no use for it, and open where the account is
-    held back, since the explanation of the difference is in it and the box above links here.
+    held back, since the explanation of the difference is in it and the box above links here. It
+    lists the balances worth reading and links to the rest (`_listed_anchors`); `everything` lists
+    them all, and is open because it is what a person asked for.
     """
     opening = view.opening
     if opening is None:
         return ""
+
+    def earlier(count: int) -> str:
+        return _earlier_balances(view, count, unmasked=unmasked, balance_only=opening.balance_only)
+
     body = ""
+    if everything and _listed_anchors(opening.anchors, everything=False)[1]:
+        body += _balances_control(
+            view,
+            "Every known balance is listed. Show only the newest",
+            unmasked=unmasked,
+            everything=False,
+            fragment=f"#{OPENING_ANCHOR}",
+        )
     if opening.state == "none":
         body += (
             '<p class="warn"><strong>No opening balance: the figures on this page '
@@ -1858,7 +1960,13 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
             "it, and neither the bank's records nor a held statement supplies one.</p>"
         )
     else:
-        body += _anchors_html(opening.anchors, balance_only=opening.balance_only, unmasked=unmasked)
+        body += _anchors_html(
+            opening.anchors,
+            balance_only=opening.balance_only,
+            unmasked=unmasked,
+            everything=everything,
+            earlier=earlier,
+        )
         if sum(1 for line in opening.anchors if line.basis == "statement") >= 2:
             body += (
                 '<p class="muted"><a class="tap" '
@@ -1903,7 +2011,11 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
             if any(line.verdict for line in opening.anchors):
                 # Tested against nil (a Space's listings): the verdicts are the finding.
                 body += _anchors_html(
-                    opening.anchors, balance_only=opening.balance_only, unmasked=unmasked
+                    opening.anchors,
+                    balance_only=opening.balance_only,
+                    unmasked=unmasked,
+                    everything=everything,
+                    earlier=earlier,
                 )
                 differing = sum(1 for line in opening.anchors if line.verdict == "differs")
                 if differing:
@@ -1937,8 +2049,8 @@ def _opening_html(view: Any, unmasked: bool, *, held: bool = False) -> str:
     return _disclosure(
         f"Known balances and the opening ({_opening_gist(opening)})",
         body,
-        open=held or differing,
-        anchor="opening",
+        open=held or differing or everything,
+        anchor=OPENING_ANCHOR,
     )
 
 
@@ -2225,14 +2337,20 @@ def _navigation(view: Any, unmasked: bool) -> str:
     return f'<div class="foot-links">{shape}{_HOME}</div>'
 
 
-def _mode(view: Any, unmasked: bool) -> str:
+def _mode(view: Any, unmasked: bool, everything: bool = False) -> str:
+    kept = (
+        f'<input type="hidden" name="{BALANCES_PARAM}" value="{BALANCES_ALL}">'
+        if everything
+        else ""
+    )
+    around = {BALANCES_PARAM: BALANCES_ALL} if everything else {}
     if unmasked:
         return (
             '<p class="bad shown">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
             f'<p><a class="button secondary" '
-            f'href="{_url("/ledger", ref=view.ref, month=view.month)}">'
+            f'href="{_url("/ledger", ref=view.ref, month=view.month, **around)}">'
             "Hide values</a></p>"
         )
     # The button is the call to action and the sealed slots are the state; what masked means is
@@ -2241,6 +2359,7 @@ def _mode(view: Any, unmasked: bool) -> str:
         '<form method="post" action="/ledger">'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
         f'<input type="hidden" name="month" value="{_esc(view.month)}">'
+        + kept
         + submit_button("Show values")
         + "</form>"
         + _disclosure(
@@ -2259,7 +2378,9 @@ def _name(view: Any) -> str:
     return str(view.label or view.ref)
 
 
-def _danger_zone(view: Any, *, archive_wired: bool) -> str:
+def _danger_zone(
+    view: Any, *, archive_wired: bool, unmasked: bool = False, everything: bool = False
+) -> str:
     """The controls that remove or retire something, in one bordered place at the foot.
 
     A review of the page found two full-width "Remove the known balance" buttons in the middle
@@ -2267,7 +2388,7 @@ def _danger_zone(view: Any, *, archive_wired: bool) -> str:
     confirmation before it acts.
     """
     removals = (
-        _remove_forms(view, view.ref, view.month)
+        _remove_forms(view, view.ref, view.month, unmasked=unmasked, everything=everything)
         if view.opening is not None and view.opening.stated_days
         else ""
     )
@@ -2321,7 +2442,7 @@ def _month_line(view: Any) -> str:
     void = f", {summary.void} void" if int(str(summary.void)) else ""
     return (
         f'<p class="sub">{_esc(str(rows))} {noun}: {counted} counted, '
-        f"{copies} {_COPIES_PLURAL if copies != 1 else _COPIES_NOUN}{void}. "
+        f"{_copies(copies)}{void}. "
         f"Sources {sources}.</p>"
     )
 
@@ -2334,11 +2455,9 @@ def _copies_html(rows: list[str]) -> str:
     """
     if not rows:
         return ""
-    count = len(rows)
-    noun = _COPIES_NOUN if count == 1 else _COPIES_PLURAL
     return (
         '<details class="folded-rows">'
-        f"<summary>{count} {noun} ({_COPIES_WHY})</summary>"
+        f"<summary>{_copies(len(rows))} ({_COPIES_WHY})</summary>"
         f'<ul class="txns">{"".join(rows)}</ul></details>'
     )
 
@@ -2392,8 +2511,11 @@ def render_ledger(
     archive_wired: bool = False,
     notice: str = "",
     today: date | None = None,
+    all_balances: bool = False,
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
+
+    `all_balances` lists every known balance and not the newest few (`_listed_anchors`).
 
     It is for a confirmation that names a date and a basis; a value must never
     be passed in it, since the masked rendering is the one that carries it.
@@ -2429,23 +2551,27 @@ def render_ledger(
                 '<p class="warn"><strong>This account holds no transactions at all.</strong> '
                 "It is declared, but nothing has been imported or fetched for it, or "
                 "its feed has been silent since it was set up. This is not a clean "
-                "month.</p>" + _state_html(view, end) + _protect_html(view)
+                "month.</p>" + _state_html(view, end) + _protect_html(view, unmasked, all_balances)
             ),
             month="",
             txns="",
             more=(
-                _opening_html(view, unmasked, held=held)
+                _opening_html(view, unmasked, held=held, everything=all_balances)
                 + _clearing_html(view.clearing)
                 + _anchor_forms(view, view.ref, view.month)
                 + _unitemised_html(view)
                 + _typed_html(view, ref=view.ref, month=view.month)
                 + _removed_balances_html(view, view.ref, view.month, unmasked)
                 + _navigation(view, unmasked)
-                + _danger_zone(view, archive_wired=archive_wired)
+                + _danger_zone(
+                    view, archive_wired=archive_wired, unmasked=unmasked, everything=all_balances
+                )
             ),
         )
 
-    state = _state_html(view, end) + _protect_html(view) + _mode(view, unmasked)
+    state = _state_html(view, end) + _protect_html(view, unmasked, all_balances) + _mode(
+        view, unmasked, all_balances
+    )
     month = (
         f"<h2>{_esc(view.month)}</h2>"
         + _month_links(view, unmasked)
@@ -2489,7 +2615,7 @@ def render_ledger(
     )
     more = (
         _joins_html(view.joins, clock)
-        + _opening_html(view, unmasked, held=held)
+        + _opening_html(view, unmasked, held=held, everything=all_balances)
         + _clearing_html(view.clearing)
         + counts
         + position
@@ -2499,11 +2625,17 @@ def render_ledger(
         + _removed_balances_html(view, view.ref, view.month, unmasked)
         + limits
         + _navigation(view, unmasked)
-        + _danger_zone(view, archive_wired=archive_wired)
+        + _danger_zone(
+                    view, archive_wired=archive_wired, unmasked=unmasked, everything=all_balances
+                )
     )
     return _frame(
         view, notice=notice, head=head, state=state, month=month, txns=txns, more=more
     )
+
+
+def _asks_for_all_balances(fields: dict[str, list[str]]) -> bool:
+    return (fields.get(BALANCES_PARAM, [""])[0] or "").strip() == BALANCES_ALL
 
 
 def _page(title: str, message: str) -> bytes:
@@ -2522,12 +2654,13 @@ class LedgerPages(AnswerPages):
         raise NotImplementedError
 
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
-        # Nothing in the query string can unmask: only `ref` and `month` are
-        # read, and the rendering is chosen by which method was used.
+        # Nothing in the query string can unmask: only `ref`, `month`, and which known balances
+        # to list are read, and the rendering is chosen by which method was used.
         self._ledger(
             (params.get("ref", [""])[0] or "").strip(),
             (params.get("month", [""])[0] or "").strip(),
             unmasked=False,
+            all_balances=_asks_for_all_balances(params),
         )
 
     def _ledger_post(self, form: dict[str, list[str]]) -> None:
@@ -2535,6 +2668,7 @@ class LedgerPages(AnswerPages):
             (form.get("ref", [""])[0] or "").strip(),
             (form.get("month", [""])[0] or "").strip(),
             unmasked=True,
+            all_balances=_asks_for_all_balances(form),
         )
 
     def _anchor_refusal(self, status: int, title: str, message: str, *, ref: str = "") -> None:
@@ -2891,6 +3025,7 @@ class LedgerPages(AnswerPages):
         unmasked: bool,
         notice: str = "",
         no_store: bool = False,
+        all_balances: bool = False,
     ) -> None:
         hook = self.bound_config.ledger_data
         if hook is None:
@@ -2915,6 +3050,7 @@ class LedgerPages(AnswerPages):
                 archive_wired=self.bound_config.archive_account is not None,
                 notice=notice,
                 today=datetime.now(UTC).date(),
+                all_balances=all_balances,
             ),
             no_store=unmasked or no_store,
         )

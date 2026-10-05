@@ -301,7 +301,7 @@ class TestRowAnchors:
 
 class TestTheDangerZone:
     def test_Removals_SitInTheOneDangerZoneAtTheFootAndNowhereElse(self, base):
-        page = get(base)
+        page = httpx.get(f"{base}/ledger", params={"ref": HELD, "balances": "all"}, timeout=60).text
 
         zone = at(page, '<details class="ledger-danger">')
         removals = [m.start() for m in re.finditer("Remove the known balance for", page)]
@@ -309,6 +309,16 @@ class TestTheDangerZone:
         assert all(position > zone for position in removals)
         assert page.count('class="ledger-danger"') == 1
         assert at(page, "Archive this account") > zone
+
+    def test_Removals_OnTheDefaultPage_AreForTheBalancesListedAndALinkToTheRest(self, base):
+        page = get(base)
+
+        zone = at(page, '<details class="ledger-danger">')
+        removals = [m.start() for m in re.finditer("Remove the known balance for", page)]
+        # The opening's balance, ten agreeing ones, and the nineteen that differ.
+        assert len(removals) == 1 + 10 + 19
+        assert all(position > zone for position in removals)
+        assert "Remove an older known balance from the full list" in page[zone:]
 
     def test_DangerZone_IsTheLastThingOnThePage(self, base):
         page = get(base)
