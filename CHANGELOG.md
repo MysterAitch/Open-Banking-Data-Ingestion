@@ -26,6 +26,50 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.322] - 2026-10-05
+
+### Added
+- **Every coded word a source states is kept against its sighting.** The
+  store's schema is now version 18, with a table beside the one that keeps a
+  sighting's stated times: the bank's feed's `source`, `sourceSubType`,
+  `spendingCategory`, `counterPartyType`, status, direction, and currencies,
+  and the aggregator's type, category, classification, and currency. The
+  fields are named in a list, never found by looking for upper-case text,
+  since a reference can be a payee's one-word name. A word follows its
+  sighting wherever a sighting is moved, joined, or removed, and a rebuild
+  refills the table from the stored originals. Each row's "Dates and joins"
+  on an account's page now ends with what each source says of it.
+- **The cash measurement says how many transfers a rule would make, and
+  makes none.** Read from the stored words where it used to re-read every
+  artefact. Per account: "The rule would make N transfers with the cash
+  account: W withdrawals and D deposits", with their dates and what would be
+  left out and why. It also sets the feed's cash-machine rows against the
+  aggregator's category for the same transactions, and the aggregator's CASH
+  rows against the feed's words, since the real store showed 16 of each and
+  nothing said whether they were the same payments.
+
+### Changed
+- **Two sources disagree about a payment's kind only where each states a
+  kind that excludes the other.** The measurement counted 16 disagreements
+  on the real store where the feed said a cash machine and the aggregator
+  said PURCHASE. A purchase is a coarser word for a card payment, not a
+  contradiction of it; a transfer or a direct debit would be.
+- The words a rule would act on are the ones the real store showed
+  (`sourceSubType` ATM, `source` CASH_DEPOSIT, and the aggregator's
+  `transaction_category` CASH). The unconfirmed candidates are removed.
+
+### Not released, and why
+- **The rule that makes a cash withdrawal a transfer with the cash account**
+  is written and held back until this measurement has been read on the real
+  store. It makes a row in the cash account for each withdrawal and pairs
+  the two, which a push then carries to Actual.
+
+### Not covered
+- The real store holds no words until the rebuild this deploy runs, so the
+  first reading of the measurement there is after that rebuild.
+- What the table adds to the rebuild's time is not known; it has taken 86 to
+  87 seconds.
+
 ## [0.4.321] - 2026-10-05
 
 ### Fixed
