@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.335] - 2026-10-05
+
+### Changed
+- **Plain words for the remaining terms on Today, the account page, and the
+  reports.** After "held back" and "in agreement", the owner asked for the
+  class to be fixed and not the instances. About twenty-five more terms are
+  replaced, each defined once and refused on any page from now on: for
+  example "unproven" is "unknown", "not yet proven from A to B" is "From A to
+  B the transactions are not shown to add up to the known balance for B",
+  "sighting" is "report", "founded this row" is "the first report of this
+  transaction", "seams to check" is "possible cut-offs to check", and "copy,
+  not counted" is "counted elsewhere". Today's "Verification" line is "Known
+  balances".
+- **Nothing is said about protection where there is none.** Nearly every
+  account line ended "; not protected". "Protected through" and a broken
+  protection are said as before.
+- **Today's chip for known balances is amber only when an account does not
+  add up.** It was amber, reading "nothing to check against", whenever any
+  account lacked a known balance.
+- **A page carries the stylesheet without its comments.** They were a fifth
+  of every page (54,538 bytes written, 43,199 sent), and a word or number in
+  one was text in every page.
+
+### Fixed
+- An account's folded heading counted a statement balance explained as
+  having closed before a transaction as one that "differ"; it is counted
+  under its own words, and the verb agrees with the count.
+
+### Not covered
+- The wording sweep is partial: "rows" remains in some counts and reports,
+  and the field statistics page and the long explanations on an account that
+  does not add up are untouched. "Artefact" is left for the owner to decide.
+  Much of this sits on pages that are being designed again.
+- 0.4.334 was tagged and never published: the build refused it, because the
+  comment explaining its fix took one page past a size bound. Its fix is in
+  this version, and the cause is what the stylesheet change above removes.
+
 ## [0.4.334] - 2026-10-05
 
 ### Fixed
