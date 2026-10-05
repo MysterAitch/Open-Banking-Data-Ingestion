@@ -403,7 +403,8 @@ class TestTheFirstScreenIsInOrder:
             "Actual",
             "Position",
         ]
-        for target in ("/connections", "/accounts", "/actual", "/position"):
+        # A troubled household's Verification line lands on the accounts that need a look.
+        for target in ("/connections", "/accounts#needs-a-look", "/actual", "/position"):
             assert f'class="tap status-row" href="{target}"' in status
 
     def test_Verification_OnTheTroubledWorld_SaysHowManyAreInAgreementHeldBackAndUnprovable(

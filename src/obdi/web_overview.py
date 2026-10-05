@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
-from .navigation import page_name
+from .navigation import NEEDS_A_LOOK, page_name
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -45,7 +45,13 @@ from .overview import (
 )
 from .plural import plural
 from .proof_rail import build_rail, rail_svg
-from .standing_data import standing_lines
+from .standing_data import (
+    HELD_BACK,
+    VERIFIED,
+    standing_lines,
+    verification_of,
+    verification_sentence,
+)
 
 _esc = html.escape
 
@@ -236,20 +242,16 @@ def verification_counts(accounts: Iterable[AccountOverview]) -> tuple[int, int, 
     An archived account and one holding no rows are not counted: nothing is expected of them.
     Agreement is the standing's own state, so this and each row say one thing.
     """
-    from .agreement import AGREES, NONE, UNTESTED
-
     counted = agree = held = unproven = 0
     for account in accounts:
         if not _is_counted(account):
             continue
         counted += 1
-        standing = account.standing
-        if standing is None or standing.standing.own.state in (NONE, UNTESTED):
-            unproven += 1
-        elif standing.standing.own.held is not None:
-            held += 1
-        elif standing.standing.own.state == AGREES:
+        verdict = verification_of(account.standing)
+        if verdict == VERIFIED:
             agree += 1
+        elif verdict == HELD_BACK:
+            held += 1
         else:
             unproven += 1
     return counted, agree, held, unproven
@@ -266,19 +268,11 @@ def verification_line(overview: Overview | None) -> StatusLine:
         return StatusLine(
             "Verification", href, "nothing held", "pill-quiet", "No account holds rows yet."
         )
+    sentence = verification_sentence(counted, agree, held, unproven)
     if agree == counted:
-        return StatusLine(
-            "Verification", href, "in agreement", "pill-ok",
-            f"All {plural(counted, 'account')} in agreement through their latest known balance.",
-        )
-    said = [f"{agree} of {plural(counted, 'account')} in agreement through their latest "
-            "known balance"]
-    if held:
-        said.append(f"{held} held back")
-    if unproven:
-        said.append(f"{unproven} cannot be verified")
-    word, css = ("held back", "pill-warn") if held else ("unproven", "pill-warn")
-    return StatusLine("Verification", href, word, css, f"{'; '.join(said)}.")
+        return StatusLine("Verification", href, VERIFIED, "pill-ok", sentence)
+    word = HELD_BACK if held else "unproven"
+    return StatusLine("Verification", f"{href}#{NEEDS_A_LOOK}", word, "pill-warn", sentence)
 
 
 def actual_line(

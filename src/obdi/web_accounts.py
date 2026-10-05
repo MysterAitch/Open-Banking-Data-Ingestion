@@ -41,17 +41,27 @@ from .accounts import (
     UnknownAccountError,
     closing_problem,
 )
+from .agreement import held_sentence
 from .callback import render_page
 from .coverage import DoubtReport
 from .errors import DataError
 from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .logs import say
 from .namespaces import validate_canonical_name
+from .navigation import NEEDS_A_LOOK
 from .overview import ARCHIVED
 from .plural import agree, plural
 from .rebuild_hold import RebuildInProgress
 from .spaces import FINAL_MOVEMENTS_MEANING
-from .standing_data import AccountStanding, standing_lines
+from .standing_data import (
+    HELD_BACK,
+    UNVERIFIED,
+    VERIFIED,
+    AccountStanding,
+    standing_lines,
+    verification_of,
+    verification_sentence,
+)
 from .web_answers import UNREAD, AnswerPages, ledger_href, ledger_link
 from .web_destinations import accounts_links_html
 from .web_sections import back_link, referring_page
@@ -401,6 +411,53 @@ def _spaces_phrase(spaces: list[KnownAccount], today: date) -> str:
     return f"{len(spaces)} {noun} ({len(spaces) - archived} live, {archived} archived)"
 
 
+def _is_counted(account: KnownAccount, today: date) -> bool:
+    """Whether verification is expected of it: the Overview's rule, neither archived nor empty."""
+    return not _is_archived(account, today) and account.rows > 0
+
+
+def _verdict(
+    account: KnownAccount, today: date, standings: Mapping[str, AccountStanding] | None
+) -> str:
+    """The account's verification in the chip's words, or "" where none is expected or known."""
+    if standings is None or not _is_counted(account, today):
+        return ""
+    return verification_of(standings.get(account.ref))
+
+
+#: What a row that needs a look says would settle it, by its verdict.
+_REMEDIES = {
+    HELD_BACK: "Open its page to see what holds it back.",
+    UNVERIFIED: (
+        "State a known balance on its page, or upload a statement, and its rows can be tested."
+    ),
+}
+_VERDICT_CHIPS = {VERIFIED: "pill-ok", HELD_BACK: "pill-warn", UNVERIFIED: "pill-warn"}
+
+
+def _anchor(ref: str) -> str:
+    """The id of an account's row, which the list of accounts needing a look links to."""
+    return f"account-{quote(ref, safe='')}"
+
+
+def _verification_html(standing: AccountStanding | None, verdict: str) -> str:
+    """The standing's sentences, with the one that says why it needs a look made to stand out."""
+    if standing is None:
+        return (
+            '<br><strong class="warn">Its verification could not be worked out.</strong>'
+            if verdict in _REMEDIES
+            else ""
+        )
+    lines = standing_lines(standing)
+    reason = (held_sentence(standing.standing.own) or lines[0]) if verdict in _REMEDIES else ""
+    return "".join(
+        f'<br><strong class="warn">{html.escape(line)}</strong>'
+        if line == reason
+        else f"<br>{html.escape(line)}"
+        for line in lines
+    )
+
+
 def _known_row(
     account: KnownAccount,
     today: date,
@@ -409,8 +466,14 @@ def _known_row(
     depth: int = 0,
     show_parent: bool = True,
     standing: AccountStanding | None = None,
+    verdict: str = "",
 ) -> str:
-    """One account obdi holds, on a line that wraps rather than scrolls."""
+    """One account obdi holds, on a line that wraps rather than scrolls.
+
+    The chip beside the name is the account's VERIFICATION, since that is what a person comes
+    to this list to learn. Being declared is the ordinary state and carries no chip: a green
+    tick that said "declared" on every row read as "verified" on rows that were not.
+    """
     ref = quote(account.ref, safe="")
     detail = [f'<span class="mono">{html.escape(account.ref)}</span>']
     detail.append(html.escape(account.kind) if account.kind else "no kind")
@@ -419,28 +482,29 @@ def _known_row(
     detail.append(plural(account.rows, "row"))
     if spaces:
         detail.append(_spaces_phrase(spaces, today))
-    state = (
-        '<span class="pill pill-ok">declared</span>'
-        if account.declared
-        else '<span class="pill pill-bad">not declared</span>'
+    chips = (
+        f' <span class="pill {_VERDICT_CHIPS[verdict]}">{verdict}</span>' if verdict else ""
     )
-    archived = f" {_archived_pill(account)}" if _is_archived(account, today) else ""
+    if not account.declared:
+        chips += ' <span class="pill pill-bad">not declared</span>'
+    if _is_archived(account, today):
+        chips += f" {_archived_pill(account)}"
     links = f'<a class="tap" href="/ledger?ref={ref}">Ledger</a>'
     if account.declared:
         links += f' <a class="tap" href="/edit-account?ref={ref}">Edit</a>'
-    # Indented inline, because the shared stylesheet is searched by other pages' tests
-    # for words and figures, and a rule added there is read by all of them.
-    indent = f' style="margin-left:{1.25 * depth:g}rem"' if depth else ""
-    verification = (
-        ""
-        if standing is None
-        else "".join(f"<br>{html.escape(line)}" for line in standing_lines(standing))
-    )
+    look = verdict in _REMEDIES
+    # Indented and railed inline, because the shared stylesheet is searched by other pages'
+    # tests for words and figures, and a rule added there is read by all of them.
+    styles = [f"margin-left:{1.25 * depth:g}rem"] if depth else []
+    if look:
+        styles.append("border-left:4px solid var(--warn);padding-left:.6rem")
+    style = f' style="{";".join(styles)}"' if styles else ""
+    remedy = f'<br><span class="muted">{_REMEDIES[verdict]}</span>' if look else ""
     return (
-        f'<div class="row"{indent}><strong>'
-        f"{html.escape(account.label)}</strong> {state}{archived}<br>"
+        f'<div class="row" id="{_anchor(account.ref)}"{" data-look" if look else ""}{style}>'
+        f"<strong>{html.escape(account.label)}</strong>{chips}<br>"
         + " - ".join(detail)
-        + f"{verification}<br>{links}</div>"
+        + f"{_verification_html(standing, verdict)}{remedy}<br>{links}</div>"
     )
 
 
@@ -449,7 +513,11 @@ def _listing(
     today: date,
     standings: Mapping[str, AccountStanding] | None = None,
 ) -> str:
-    """Live accounts first, archived last, each Space beneath its parent in the same order.
+    """The accounts that need a look first, then the rest, archived last.
+
+    Held back comes before cannot be verified, and an account takes the worst of its own
+    verdict and its Spaces', so a main account is not filed under "fine" with a troubled
+    Space folded beneath it. Each Space stays beneath its parent, in the same order.
 
     A Space whose parent is not among the accounts listed stays at the top level and names its
     parent, as it did before the list was nested.
@@ -462,9 +530,14 @@ def _listing(
             children.setdefault(account.parent, []).append(account)
         else:
             top.append(account)
+    rank = {HELD_BACK: 0, UNVERIFIED: 1}
 
-    def order(account: KnownAccount) -> tuple[bool, str]:
-        return (_is_archived(account, today), account.ref)
+    def urgency(account: KnownAccount) -> int:
+        family = [account, *children.get(account.ref, [])]
+        return min(rank.get(_verdict(member, today, standings), 2) for member in family)
+
+    def order(account: KnownAccount) -> tuple[bool, int, str]:
+        return (_is_archived(account, today), urgency(account), account.ref)
 
     out: list[str] = []
     shown: set[str] = set()
@@ -482,6 +555,7 @@ def _listing(
                 depth=depth,
                 show_parent=account.parent not in held,
                 standing=None if standings is None else standings.get(account.ref),
+                verdict=_verdict(account, today, standings),
             )
         )
         for space in spaces:
@@ -493,6 +567,46 @@ def _listing(
     for account in sorted(held.values(), key=order):
         emit(account, 0)
     return "".join(out)
+
+
+def _verification_summary(
+    accounts: Iterable[KnownAccount],
+    today: date,
+    standings: Mapping[str, AccountStanding] | None,
+) -> str:
+    """What the page leads with: Today's own sentence, and the accounts that need a look by name.
+
+    The sentence is `standing_data.verification_sentence`, which Today's Verification line
+    also says, counted by the same verdicts the rows' chips show. Nothing is said while the
+    standings are not known (a rebuild holds them), since a count of nothing would read as
+    "all is well".
+    """
+    if standings is None:
+        return ""
+    listed = sorted(accounts, key=lambda account: account.ref)
+    verdicts = {account.ref: _verdict(account, today, standings) for account in listed}
+    counts = {
+        word: sum(1 for verdict in verdicts.values() if verdict == word)
+        for word in (VERIFIED, HELD_BACK, UNVERIFIED)
+    }
+    sentence = verification_sentence(
+        sum(counts.values()), counts[VERIFIED], counts[HELD_BACK], counts[UNVERIFIED]
+    )
+    if not sentence:
+        return ""
+    body = f"<p><strong>{html.escape(sentence)}</strong></p>"
+    named = []
+    for word in (HELD_BACK, UNVERIFIED):
+        links = ", ".join(
+            f'<a class="tap" href="#{_anchor(account.ref)}">{html.escape(account.label)}</a>'
+            for account in listed
+            if verdicts[account.ref] == word
+        )
+        if links:
+            named.append(f"{word.capitalize()}: {links}.")
+    if named:
+        body += f'<p id="{NEEDS_A_LOOK}">{" ".join(named)}</p>'
+    return body
 
 
 def _declare_known_section(known: KnownAccounts) -> str:
@@ -612,7 +726,8 @@ def accounts_page(
     if known is not None:
         return render_page(
             "Accounts",
-            "<p>Every account obdi holds, declared or not. An account exists here by "
+            _verification_summary(known.accounts, today, standings)
+            + "<p>Every account obdi holds, declared or not. An account exists here by "
             "holding rows or by being bound in the account map; it is declared when "
             "it has a record in the registry, which is where its kind, parent, and "
             "dates are kept.</p>"

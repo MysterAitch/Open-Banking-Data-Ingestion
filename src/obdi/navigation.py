@@ -174,6 +174,12 @@ PAGE_NAMES: dict[str, PageName] = {
 }
 
 
+#: Where on the Accounts page the accounts that need a look are named. Today's Verification
+#: line links there when any does, so a tap from "1 held back" lands on the one held back and
+#: not on the top of a list in which it looks like every other account.
+NEEDS_A_LOOK = "needs-a-look"
+
+
 def page_name(route: str) -> str:
     """The page's name, as its heading, its index row, and every link to it say it."""
     return PAGE_NAMES[route].name

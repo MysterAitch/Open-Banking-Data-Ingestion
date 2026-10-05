@@ -204,6 +204,52 @@ def standings_for(
     return found
 
 
+#: What an account's verification comes to, in the words its chip says. Today's Verification
+#: line counts accounts by these and the Accounts page marks each account with one, from the
+#: one function below, so a count on one page is the number of chips on the other.
+VERIFIED = "in agreement"
+HELD_BACK = "held back"
+UNVERIFIED = "cannot be verified"
+
+
+def verification_of(item: AccountStanding | None) -> str:
+    """Which of the three an account is: in agreement, held back, or not verifiable.
+
+    An account with no standing, no known balance, or one known balance that only sets the
+    opening has nothing testing its rows. One whose agreement stops short of its latest
+    known balance is held back, whatever its state up to there.
+    """
+    from .agreement import AGREES, NONE, UNTESTED
+
+    if item is None or item.standing.own.state in (NONE, UNTESTED):
+        return UNVERIFIED
+    if item.standing.own.held is not None:
+        return HELD_BACK
+    return VERIFIED if item.standing.own.state == AGREES else UNVERIFIED
+
+
+def verification_sentence(counted: int, agreeing: int, held: int, unverified: int) -> str:
+    """The one sentence that says how many accounts are in agreement and how many are not.
+
+    Empty where no account is counted: the caller says what an empty household says.
+    """
+    from .plural import plural
+
+    if counted == 0:
+        return ""
+    if agreeing == counted:
+        return (
+            f"All {plural(counted, 'account')} in agreement through their latest known balance."
+        )
+    said = [f"{agreeing} of {plural(counted, 'account')} in agreement through their latest "
+            "known balance"]
+    if held:
+        said.append(f"{held} {HELD_BACK}")
+    if unverified:
+        said.append(f"{unverified} {UNVERIFIED}")
+    return "; ".join(said) + "."
+
+
 def standing_lines(item: AccountStanding) -> tuple[str, ...]:
     """The sentences a card or list line shows: the three dates, what holds agreement back, and
     a broken protection. Plain text; the caller escapes it."""
