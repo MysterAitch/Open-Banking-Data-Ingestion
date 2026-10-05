@@ -26,6 +26,62 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.324] - 2026-10-05
+
+### Added
+- **A coverage timeline, first cut.** The owner asked for a visualisation
+  like the fetch history's: a row per data source, a filled bar where that
+  source has seen a date, a marker at the boundary of each request ("an
+  export at 6pm might miss transactions at 9pm"), wide and scrolling, with
+  issues marked. `/coverage-timeline?ref=` draws one account: a verification
+  lane, a lane per source, and what to look at; `/coverage-timeline` draws
+  the household by month. It is masked and needs no values.
+  - COVERED is drawn apart from LISTED: a day a source would have listed a
+    payment on, against a day it did. A covered stretch with no payments no
+    longer looks like an uncovered one.
+  - How coverage is known shows in a bar's edge: stated by a statement,
+    asked of an API, or only observed from a file's first and last row
+    ("at least").
+  - A capture taken during a day covers that day only to the time it was
+    taken, in London time, and its last day is drawn partial. Where the time
+    is not known the day is "possibly partial".
+  - A seam between two captures is decided by arithmetic where it can be:
+    where another source holds rows on the boundary day that this source
+    never listed, the seam is red and says how many; where every row is
+    accounted for it is quiet, whatever the wedge looked like.
+  - Every mark has a sentence in a list beneath the chart, and a "Fetch
+    next" list above it answers the question the chart is for.
+
+### Fixed
+- The account page's size bound failed on a tree where that page had not
+  grown: it measured the whole page, half of which is the stylesheet every
+  page carries. It now measures what the page itself says.
+
+### Not built yet, and being built
+- The compact timeline on each account's own page, which the owner asked
+  for; collapsing long stretches in which nothing changes, likewise.
+- The timeline works out its own gaps, where "What to fetch next" has them
+  as data: the two can disagree until the timeline reads that data.
+- A statement is treated as covering from its first row unless its opening
+  balance equals the previous statement's closing. The owner's rule, to be
+  built: a statement covers its stated period whole, its closing day is a
+  whole day, and the day it was produced matters only where its period had
+  not yet ended; and the stretch since the newest statement is not a gap
+  until a full period has passed, because the statement does not exist yet.
+- Review flags, balance-difference steps, months one source lacks, and
+  conflicts between sources are not yet marked. The household lane carries
+  no verification band.
+- Twelve months on a phone shows about two weeks at a time and opens at the
+  oldest end.
+
+### Not covered
+- Nothing was measured on an account of the real main account's size; the
+  full page works out the account's opening on every request, which takes
+  about three seconds there on the account's own page.
+- No file read today states when it was exported, so an export's last day
+  can only be "possibly partial"; the arithmetic on that day is what
+  decides it.
+
 ## [0.4.323] - 2026-10-05
 
 ### Added
