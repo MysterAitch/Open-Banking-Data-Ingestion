@@ -41,6 +41,7 @@ from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_gaps import render_gaps, verdict_sentence
 from obdi.web_marks import evidence_text
+from page_dom import elements, parse
 
 VIRGIN = (D(2026, 6, 5), D(2026, 7, 4))
 NAMES = accounts_shown(
@@ -514,15 +515,24 @@ class TestScopeOverHttp:
 
 class TestTodaysItemFollowsTheDecisionOverHttp:
     def test_Today_WhenTheAwaitedPeriodIsAcknowledged_StopsNamingTheAccount(self, served, db):
-        before = words(get(served, "/").text)
+        def waiting_for(page: str) -> list[str]:
+            """The accounts a thing to do on Today names, one entry for each thing to do."""
+            todos = [li for li in elements(parse(page), "li") if "todo" in li.classes]
+            return [
+                name.text()
+                for todo in todos
+                for name in elements(todo, "b")
+                if name.text() in ("Behind card", "Late-one card")
+            ]
+
+        before = waiting_for(get(served, "/").text)
         with Store(db) as store:
             epoch = store.standing_epoch()
         post(served, "/gaps-mark", account="card-late-one", source="", first="2026-06-11",
              last="2026-08-01", kind="known-gap", step="mark")
-        after = words(get(served, "/").text)
+        after = waiting_for(get(served, "/").text)
 
-        assert "Behind card (since 2026-07-10) and Late-one card (since 2026-06-10)" in before
-        assert "Late-one card (since" not in after, "Today must not ask for a period he set aside"
-        assert "Behind card (since 2026-07-10)" in after
+        assert set(before) == {"Behind card", "Late-one card"}
+        assert set(after) == {"Behind card"}, "Today must not ask for a period he set aside"
         with Store(db) as store:
             assert store.standing_epoch() > epoch, "a mark moves what the held pages key on"

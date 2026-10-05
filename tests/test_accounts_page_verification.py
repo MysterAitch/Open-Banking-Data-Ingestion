@@ -156,8 +156,8 @@ class TestTheSummary:
     def test_Accounts_SaysTheSentenceTodaySays(self, pages):
         accounts, today = pages
 
-        assert SUMMARY in text_of(today)
         assert SUMMARY in text_of(accounts)
+        assert SUMMARY not in text_of(today), "Today's bars say it per account; the count is cut"
 
     def test_Accounts_NamesTheAccountsThatNeedALook_AsLinksToTheirRows(self, pages):
         accounts, _ = pages
@@ -171,14 +171,15 @@ class TestTheSummary:
         accounts, today = all_agree
         said = "The account adds up to its latest known balance."
 
-        assert said in text_of(today)
+        assert said not in text_of(today)
         assert said in text_of(accounts)
         assert 'id="needs-a-look"' not in accounts
 
-    def test_Today_WhenSomethingNeedsALook_LinksStraightToIt(self, pages):
+    def test_Today_WhenSomethingNeedsALook_SaysItOnTheAccountsOwnRowAndNotInACount(self, pages):
         _, today = pages
 
-        assert 'href="/accounts#needs-a-look"' in today
+        assert 'href="/accounts#needs-a-look"' not in today
+        assert "Does not add up from" in text_of(today)
 
     def test_Today_WhenEveryAccountAddsUp_LinksToTheList(self, all_agree):
         _, today = all_agree
