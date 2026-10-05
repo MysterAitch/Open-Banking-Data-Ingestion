@@ -61,7 +61,7 @@ _esc = html.escape
 
 #: The drawing's own units; it is scaled to the width of the page.
 WIDTH = 300.0
-LABEL_W = 62.0
+LABEL_W = 68.0
 RIGHT = 6.0
 ROW_H = 17.0
 TOP = 16.0
@@ -233,6 +233,26 @@ def _rect(cls: str, left: float, right: float, y: float, height: float, extra: s
     )
 
 
+#: A mark is a link, so it carries a transparent target this many units across and tall, which
+#: drawn at a phone's width is a thumb (44 px) and more, however small the mark itself is.
+TARGET_UNITS = 44.0
+
+
+def _mark_link(
+    href: str, title: str, inner: str, left: float, right: float, middle: float
+) -> str:
+    """A mark as a link with a thumb-sized target about it (`TARGET_UNITS`)."""
+    centre = (left + right) / 2
+    half = max(right - left, TARGET_UNITS) / 2
+    target = _rect(
+        "cov-target", centre - half, centre + half, middle - TARGET_UNITS / 2, TARGET_UNITS,
+        ' fill="transparent"',
+    )
+    return (
+        f'<a class="tap" href="{_esc(href)}"><title>{_esc(title)}</title>{inner}{target}</a>'
+    )
+
+
 def full_href(ref: str, first: date, last: date, fragment: str = "") -> str:
     """The full page over `first` to `last`, landing on the entry `fragment` names."""
     query = {
@@ -329,9 +349,13 @@ def compact_svg(
             used.add("break")
     if shown is not None and shown[1] >= first and shown[0] <= last:
         left, right = axis.x(max(shown[0], first)), axis.end_x(min(shown[1], last))
+        # The label is centred under the bracket, or ends at the drawing's edge where the
+        # bracket is at it, so it is never cut.
+        near_edge = (left + right) / 2 > WIDTH - 24
+        label_x, anchor = (WIDTH - 2, "end") if near_edge else ((left + right) / 2, "middle")
         body.append(
             _rect("cov-month", left, right, TOP - 3, bottom - TOP + 6)
-            + f'<text x="{(left + right) / 2:.1f}" y="{bottom + 13:.1f}" text-anchor="middle">'
+            + f'<text x="{label_x:.1f}" y="{bottom + 13:.1f}" text-anchor="{anchor}">'
             f"{shown[0]:%Y-%m}</text>"
         )
     # Marks: every one links to the full page, at a window around it, landing on its sentence.
@@ -347,9 +371,11 @@ def compact_svg(
             min(gap.last + timedelta(days=14), view.today), gap.anchor,
         )
         marks.append(
-            f'<a href="{_esc(href)}"><title>{_esc(_gap_sentence(view, gap))}</title>'
-            + _rect("cov-gap cov-focus", left, right, gap_y + 2, ROW_H - 4)
-            + "</a>"
+            _mark_link(
+                href, _gap_sentence(view, gap),
+                _rect("cov-gap cov-focus", left, right, gap_y + 2, ROW_H - 4),
+                left, right, gap_y + ROW_H / 2,
+            )
         )
         used.add("gap")
     for seam in view.seams_to_check:
@@ -365,10 +391,11 @@ def compact_svg(
             view.ref, seam.day - margin, min(seam.day + margin, view.today),
             seam_anchor(seam.source, seam.day),
         )
+        seam_y = row_y[seam.source] + ROW_H / 2
         marks.append(
-            f'<a href="{_esc(href)}"><title>{_esc(_seam_sentence(view, seam))}</title>'
-            + MARKS[kind].draw(x, row_y[seam.source] + ROW_H / 2)
-            + "</a>"
+            _mark_link(
+                href, _seam_sentence(view, seam), MARKS[kind].draw(x, seam_y), x, x, seam_y
+            )
         )
         used.add(kind)
     grouped: list[list[Marker]] = []
@@ -402,7 +429,7 @@ def compact_svg(
         inner = MARKS[lead.kind].draw(x, y + ROW_H / 2)
         if len(group) > 1:
             inner += f'<text x="{x + 7:.1f}" y="{y + ROW_H / 2 + 3:.1f}">{count}</text>'
-        marks.append(f'<a href="{_esc(href)}"><title>{_esc(said)}</title>{inner}</a>')
+        marks.append(_mark_link(href, said, inner, x, x, y + ROW_H / 2))
         used.add(lead.kind)
     today_x = axis.x(view.today) + axis.per_day / 2 if first <= view.today <= last else None
     if today_x is not None:
@@ -433,7 +460,7 @@ def compact_svg(
     svg = (
         f'<svg class="cov-svg cov-compact-svg" role="img" aria-labelledby="cov-c-t cov-c-d" '
         f'style="width:100%;height:auto" viewBox="0 0 {WIDTH:.0f} {height:.0f}" '
-        'xmlns="http://www.w3.org/2000/svg">'
+        ">"
         f'<title id="cov-c-t">Coverage timeline for {_esc(view.label)}</title>'
         f'<desc id="cov-c-d">{_esc(desc)}</desc>{defs}{axis_text}'
         + "".join(body)

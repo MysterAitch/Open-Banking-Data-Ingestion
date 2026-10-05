@@ -2,15 +2,15 @@
 `coverage_timeline_world`, served by the real application with the day fixed at 2026-10-05.
 
 The span is the twelve months ending with the month shown, cut at the first day anything is held
-(2026-07-01) and at today. The drawing is 300 units wide with a 62 unit label column and a 6 unit
-margin, so the days are drawn in 232 units. Where nothing is collapsed (this household has no
-stretch in which nothing changes) a day is 232 / days units wide, and a cell is a week.
+(2026-07-01) and at today. The drawing is 300 units wide with a 68 unit label column and a 6 unit
+margin, so the days are drawn in 226 units. Where nothing is collapsed (this household has no
+stretch in which nothing changes) a day is 226 / days units wide, and a cell is a week.
 
-  MONTH 2026-09   window 2026-07-01 to 2026-09-30, 92 days, 232 / 92 = 2.5217 units a day.
+  MONTH 2026-09   window 2026-07-01 to 2026-09-30, 92 days, 226 / 92 = 2.4565 units a day.
                   The bracket is the month: 2026-09-01 is day 62, so it begins at
-                  62 + 62 * 2.5217 = 218.3 and ends at the right edge, 294.0.
+                  68 + 62 * 2.4565 = 220.3 and ends at the right edge, 294.0.
   MONTH 2026-07   window 2026-07-01 to 2026-07-31, 31 days, 7.4839 a day: the bracket is the
-                  whole drawing, 62.0 to 294.0.
+                  whole drawing, 68.0 to 294.0.
   FEED LANE       the feed's asks reach 07-01 to 08-20. In week cells from 07-01 (a cell is the
                   days 7k to 7k + 6 from 07-01) that is full through the cell ending 08-18 (7 cells,
                   49 days) and part in the one holding 08-19 and 08-20, then nothing.
@@ -44,7 +44,8 @@ from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
 from served_store import environment_for, served_store
 
-PER_DAY_SEP = 232 / 92
+PER_DAY_SEP = 226 / 92
+LEFT = 68.0
 BRACKET = r'<rect class="cov-month" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"'
 
 
@@ -150,7 +151,7 @@ class TestTheShownMonth:
         block = block_of(page(base, MAIN, "2026-09"))
         bracket = re.search(BRACKET, block)
         assert bracket is not None
-        assert float(bracket.group(1)) == pytest.approx(62 + 62 * PER_DAY_SEP, abs=0.2)
+        assert float(bracket.group(1)) == pytest.approx(LEFT + 62 * PER_DAY_SEP, abs=0.2)
         assert float(bracket.group(1)) + float(bracket.group(2)) == pytest.approx(294.0, abs=0.2)
         assert ">2026-09</text>" in block
 
@@ -158,7 +159,7 @@ class TestTheShownMonth:
         block = block_of(page(base, MAIN, "2026-07"))
         bracket = re.search(BRACKET, block)
         assert bracket is not None
-        assert float(bracket.group(1)) == pytest.approx(62.0, abs=0.2)
+        assert float(bracket.group(1)) == pytest.approx(LEFT, abs=0.2)
         assert float(bracket.group(1)) + float(bracket.group(2)) == pytest.approx(294.0, abs=0.2)
         assert ">2026-07</text>" in block
 
@@ -175,15 +176,15 @@ class TestCells:
             ("cov-bar", ".3"), ("cov-bar", ".12")
         ]
         full, part = cells
-        assert float(full["x"]) == pytest.approx(62.0, abs=0.2)
+        assert float(full["x"]) == pytest.approx(LEFT, abs=0.2)
         assert float(full["width"]) == pytest.approx(49 * PER_DAY_SEP, abs=0.3)
-        assert float(part["x"]) == pytest.approx(62 + 49 * PER_DAY_SEP, abs=0.3)
+        assert float(part["x"]) == pytest.approx(LEFT + 49 * PER_DAY_SEP, abs=0.3)
         assert float(part["width"]) == pytest.approx(7 * PER_DAY_SEP, abs=0.3)
 
     def test_AggregatorLane_ShowsItsUnaskedDaysAsNothingBetweenPartCells(self, base):
         cells = rects_in_row(block_of(page(base, MAIN, "2026-09")), 2)
         assert [c["fill-opacity"] for c in cells] == [".3", ".12", ".12", ".3", ".12"]
-        starts = [round((float(c["x"]) - 62) / PER_DAY_SEP) for c in cells]
+        starts = [round((float(c["x"]) - LEFT) / PER_DAY_SEP) for c in cells]
         widths = [round(float(c["width"]) / PER_DAY_SEP) for c in cells]
         assert starts == [0, 35, 49, 56, 70]
         assert widths == [35, 7, 7, 14, 7]
@@ -192,7 +193,7 @@ class TestCells:
 class TestMarksLinkToTheFullPage:
     def test_EveryMark_LandsOnAnAnchorThatExistsOnTheFullPage(self, base):
         block = block_of(page(base, MAIN, "2026-09"))
-        links = re.findall(r'<a href="([^"]*)"><title>', block)
+        links = re.findall(r'<a class="tap" href="([^"]*)"><title>', block)
         assert len(links) >= 3
         for link in links:
             address = link.replace("&amp;", "&")
