@@ -784,13 +784,17 @@ class TestTheFirstStatementWithAnotherSourceHoldingEarlierDays:
 
         assert (only.link, only.passes, only.unlisted) == (Link.FIRST, True, 0)
 
-    def test_Account_WhenTheFirstStatementPasses_ItsStretchIsNewlyVerifiedAsTheFirst(self, world):
+    def test_Account_WhenTheFirstStatementPassesButAFeedHoldsEarlierDays_ItsDaysAreNotVerified(
+        self, world
+    ):
         account = world[1]["first"]
+        only = account.statements[0]
 
-        assert [(n.closing, n.link) for n in account.newly_verified] == [
-            (D(2026, 2, 10), Link.FIRST)
-        ]
-        assert account.newly_verified[0].spans == ((D(2026, 1, 10), D(2026, 2, 10)),)
+        # Verified by what it lists, but two feed transactions precede its first day and no
+        # statement lists them, so the days are not claimed (`agreement`, R1).
+        assert only.passes is True
+        assert only.unlisted_before == 2
+        assert account.newly_verified == []
 
 
 class TestAListedTransactionMissingFromTheStore:
@@ -882,7 +886,9 @@ class TestOverlappingStatements:
         assert (short.passes, long.passes) == (True, True)
         assert short.held == Held(2, same=2, also_by_another=2)
         assert long.held == Held(3, same=3, also_by_another=2)
-        assert long.link is Link.DIFFERS
+        # The two share transactions, so they are not consecutive and their balances conclude
+        # nothing about money moving between them (`agreement`, R4).
+        assert (long.link, long.shared) == (Link.OVERLAPS, 2)
 
 
 class TestAStatementWithNoOpeningStated:

@@ -118,6 +118,15 @@ JUSTIFIED = {
     ("test_statement_listing_measure.py", "statement_readings"): "a held statement with no "
     "kept reading: the import door keeps one for every statement it reads, so a document "
     "whose lines are unavailable can only be made by taking the reading away afterwards",
+    ("test_statement_listing_rule_accounts.py", "transactions"): "a listed transaction the "
+    "store does not hold, and a held one under another figure than its statement states: "
+    "the faults the listing rule must name, and states the importer, which derives the rows "
+    "and the sightings from the same bytes, cannot produce",
+    ("test_statement_listing_rule_accounts.py", "transaction_sources"): "the sightings of the "
+    "transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_rule_accounts.py", "statement_readings"): "a held statement with "
+    "no kept reading: the import door keeps one for every statement it reads, so a document "
+    "whose lines are unavailable can only be made by taking the reading away afterwards",
     ("test_row_parting.py", "transaction_sources"):"the sightings of the removed row, "
     "so the store holds no trace of the payment at all",
     ("test_aggregator_day_anchors.py", "transactions"): "a stored date a day later than the "

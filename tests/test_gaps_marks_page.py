@@ -3,12 +3,13 @@
 Known answers (over `fetch_marks_world`, TODAY 2026-10-05; the HTTP tests make marks over days
 well before any real clock):
 
-  * Marking card-virgin's hole "nothing to fetch": "12 things to fetch for 10 accounts; 3 accounts
+  * Marking card-virgin's hole "nothing to fetch": "11 things to fetch for 9 accounts; 4 accounts
     need nothing; 1 with nothing to fetch." Acknowledging it as a known gap instead says "1 known
     gap acknowledged" and never claims anything about the data.
   * The same mark over a hole the feed lists two rows in is contradicted, shown above the
-    accounts, and counted: "13 things to fetch for 11 accounts; 2 accounts need nothing; 1 mark is
-    contradicted by what is held."
+    accounts, and counted: "12 things to fetch for 10 accounts; 3 accounts need nothing; 1 mark is
+    contradicted by what is held." (One fewer thing and account each than while a lone statement
+    counted as a known balance that tested nothing: `agreement`, R1.)
   * main's aggregator history begins 2026-03-15 and an ask for days from 2026-01-01 came back
     empty, so one offer is made; card-behind's begins 2026-08-02 and was never asked about, so it
     is not.
@@ -69,7 +70,7 @@ class TestTheVerdictCountsEachKindApart:
              first_day=VIRGIN[0], last_day=VIRGIN[1])
 
         assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "12 things to fetch for 10 accounts; 3 accounts need nothing; "
+            "11 things to fetch for 9 accounts; 4 accounts need nothing; "
             "1 with nothing to fetch."
         )
 
@@ -94,7 +95,7 @@ class TestTheVerdictCountsEachKindApart:
 
     def test_Verdict_WhenNothingIsDecided_IsExactlyWhatItWas(self, db):
         assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "13 things to fetch for 11 accounts; 2 accounts need nothing."
+            "12 things to fetch for 10 accounts; 3 accounts need nothing."
         )
 
     def test_Verdict_WhenAMarkIsContradicted_CountsItAndTheGapStillCounts(self, db):
@@ -103,7 +104,7 @@ class TestTheVerdictCountsEachKindApart:
              first_day=VIRGIN[0], last_day=VIRGIN[1])
 
         assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "13 things to fetch for 11 accounts; 2 accounts need nothing; "
+            "12 things to fetch for 10 accounts; 3 accounts need nothing; "
             "1 mark is contradicted by what is held."
         )
 

@@ -62,8 +62,10 @@ from obdi.ledger import (
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,
     FEED_TIME_QUERIES,
+    HELD_STATEMENT_CHECK_QUERIES,
     QUERIES_PER_PAGE,
     SPACE_QUERIES,
+    STATEMENT_CHECK_QUERIES,
     build_ledger,
 )
 from obdi.models import TransactionStatus
@@ -1055,6 +1057,8 @@ class TestWhatTheFamilyReadingCosts:
         assert cost == (
             QUERIES_PER_PAGE
             + ANCHOR_QUERIES
+            + STATEMENT_CHECK_QUERIES
+            + HELD_STATEMENT_CHECK_QUERIES
             + FAMILY_QUERIES
             + len(found.spaces_of(MAIN))
             + FEED_TIME_QUERIES

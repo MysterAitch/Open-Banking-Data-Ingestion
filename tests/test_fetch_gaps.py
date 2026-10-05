@@ -97,10 +97,12 @@ class TestEveryKindOfGap:
             "santander-cc-pdf",
         )
 
-    def test_Card_WhenOnlyOneStatementIsHeld_SaysOnlyOneKnownBalanceIsHeld(self, world):
-        (gap,) = world.gaps("card-single")
-        assert shape(gap)[:2] == (GapKind.ONE_BALANCE, D(2026, 9, 5))
-        assert gap.last_day == D(2026, 9, 10)
+    def test_Card_WhenOnlyOneStatementIsHeldAndItAddsUpByWhatItLists_NeedsNothingFetched(
+        self, world
+    ):
+        # A lone statement used to be one known balance that only set the opening. It now tests
+        # itself (`agreement`, R1), so the account adds up through its closing and no gap names it.
+        assert world.gaps("card-single") == []
 
     def test_Account_WhenNoFileAndNoBalanceIsHeld_SaysOnlyTheAutomaticSourcesFeedIt(self, world):
         (gap,) = world.gaps("card-feed-only")
@@ -158,10 +160,10 @@ class TestWhatNeedsNothing:
         assert world.outlook("card-old") is None
 
     def test_Report_CountsEveryGapAndEveryAccountThatNeedsSomething(self, world):
-        assert len(world.report.gaps) == 13
-        assert len(world.report.needing) == 11
+        assert len(world.report.gaps) == 12
+        assert len(world.report.needing) == 10
         assert [o.account for o in world.report.accounts if not o.gaps] == [
-            "card-quiet", "savings-hand",
+            "card-quiet", "card-single", "savings-hand",
         ]
 
     def test_Report_ListsTheMostUrgentAccountsFirst(self, world):

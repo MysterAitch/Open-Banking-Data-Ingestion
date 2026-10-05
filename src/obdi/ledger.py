@@ -79,6 +79,7 @@ from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
+from .standing_data import statement_checks_for
 from .store import Store
 from .typed_transactions import TypedEntry, typed_entries
 
@@ -103,6 +104,16 @@ QUERIES_PER_PAGE = 11
 #: statement not yet read, adds statements beyond this, so a page for such an account costs more
 #: and the fixed figure is a floor.
 ANCHOR_QUERIES = 10
+
+#: Statements issued to find what an account's statements conclude by what they list
+#: (`standing_data.statement_checks_for`, read by the verdict): the held statements, the sections
+#: assigned to accounts, the kept readings, and the sightings behind them. Measured at 7 on an
+#: account that holds none; each held statement adds reads beyond it, so this too is a floor.
+STATEMENT_CHECK_QUERIES = 7
+
+#: What reading one held statement's sightings and transactions adds to `STATEMENT_CHECK_QUERIES`,
+#: measured on a main account holding one statement.
+HELD_STATEMENT_CHECK_QUERIES = 13
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -982,7 +993,9 @@ def _ledger_for(
         )
         entries = typed_entries(store, ref)
         if not opening.unitemised:
-            standing = standing_of(opening, members, movement)
+            standing = standing_of(
+                opening, members, movement, statement_checks_for(store, ref, opening, families)
+            )
             return replace(
                 empty,
                 opening=opening_view(opening),
@@ -1208,7 +1221,9 @@ def _ledger_for(
             ),
         )
 
-    final_standing = standing_of(opening, members, movement)
+    final_standing = standing_of(
+        opening, members, movement, statement_checks_for(store, ref, opening, families)
+    )
     return Ledger(
         ref=ref,
         label=label,

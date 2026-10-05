@@ -29,10 +29,10 @@ KIND first..last, basis, source, probably):
                   NOTHING_BEFORE 2026-06-01..2026-08-04, stated.
   card-quiet      Santander statements closing 06-10, 07-10, 08-10, 09-10 and nothing else.
                   No gap. Twenty-five days since the last: the next is expected 2026-10-10.
-  card-single     One statement closing 09-10. A statement is one known balance, so the Accounts
-                  page's "only the known balance for 2026-09-10 sets the opening" applies:
-                  ONE_BALANCE 2026-09-05..2026-09-10, stated, santander-cc-pdf. (First decided as
-                  "no gap": the first run showed a lone statement is one known balance, not two.)
+  card-single     One statement closing 09-10 that lists every row the account holds. No gap: the
+                  statement tests itself by what it lists (`agreement`, R1). (It was decided as
+                  ONE_BALANCE 2026-09-05..2026-09-10 while a lone statement was one known balance
+                  that only set the opening and nothing tested.)
   card-feed-only  Feed rows 08-02 and 09-15, no file, no balance.
                   AUTOMATIC_ONLY 2026-08-02..2026-09-15, stated.
   card-qif        A QIF export with rows 08-03 and 08-20, no balance.

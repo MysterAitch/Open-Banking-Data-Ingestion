@@ -112,7 +112,14 @@ from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
-from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
+from .standing_data import (
+    AccountStanding,
+    KeyedMemo,
+    movement_key,
+    standing_key,
+    standings_for,
+    statement_checks_for,
+)
 from .statement_listing_measure import StatementListingReport
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .store import Store, StoreIsNewer
@@ -3388,7 +3395,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families = families_of(store, account_map)
                 opening = opening or effective_opening(store, ref, families=families)
                 agreement = standing_of(
-                    opening, [ref, *families.spaces_of(ref)], movement_report(store)
+                    opening,
+                    [ref, *families.spaces_of(ref)],
+                    movement_report(store),
+                    statement_checks_for(store, ref, opening, families),
                 ).own
             record = store.protection_record(ref)
             built = build_account_timeline(
@@ -3537,7 +3547,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             families = families_of(store, account_map)
             opening = effective_opening(store, ref, families=families)
             standing = standing_of(
-                opening, [ref, *families.spaces_of(ref)], movement_report(store)
+                opening,
+                [ref, *families.spaces_of(ref)],
+                movement_report(store),
+                statement_checks_for(store, ref, opening, families),
             )
             press(store, ref, through, opening=opening, standing=standing)
 

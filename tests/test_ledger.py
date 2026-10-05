@@ -24,6 +24,7 @@ from obdi.ingest import pair_transfers_across_store, reconcile_batch
 from obdi.ledger import (
     ANCHOR_QUERIES,
     QUERIES_PER_PAGE,
+    STATEMENT_CHECK_QUERIES,
     AnchorLine,
     Ledger,
     LedgerRequestError,
@@ -539,7 +540,10 @@ class TestWhatAPageCosts:
     def test_Page_CostsTheDocumentedNumberOfStatements(self, household):
         # An account with no TrueLayer records and no held statements: the
         # anchor search has no per-artefact reads to add.
-        assert self._statements(household, CURRENT) == QUERIES_PER_PAGE + ANCHOR_QUERIES
+        assert (
+            self._statements(household, CURRENT)
+            == QUERIES_PER_PAGE + ANCHOR_QUERIES + STATEMENT_CHECK_QUERIES
+        )
 
     def test_Page_CostsTheSameForAMonthTenTimesAsBig(self, tmp_path):
         path = tmp_path / "big.sqlite3"
@@ -554,7 +558,10 @@ class TestWhatAPageCosts:
                     for n in range(120)
                 ),
             )
-        assert self._statements(path, CURRENT) == QUERIES_PER_PAGE + ANCHOR_QUERIES
+        assert (
+            self._statements(path, CURRENT)
+            == QUERIES_PER_PAGE + ANCHOR_QUERIES + STATEMENT_CHECK_QUERIES
+        )
 
 
 class TestStructureIsDeclaredNotAssumed:

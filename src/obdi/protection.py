@@ -62,7 +62,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
-from .agreement import MET, Standing, known_of_opening
+from .agreement import Standing
 from .balance_anchors import EffectiveOpening, parse_calendar_day
 from .errors import DataError
 from .masking import Structural
@@ -475,16 +475,7 @@ def tested_days(opening: EffectiveOpening, standing: Standing) -> tuple[date, ..
     limit = standing.own.through
     if limit is None:
         return ()
-    tested = set(standing.own.tested)
-    return tuple(
-        sorted(
-            {
-                k.day
-                for k in known_of_opening(opening)
-                if k.verdict == MET and k.day <= limit and k.day in tested
-            }
-        )
-    )
+    return tuple(sorted({k.day for k in standing.own.tested_known if k.day <= limit}))
 
 
 def press(
@@ -536,7 +527,7 @@ def press(
     if start > through:
         raise ProtectionRefused("the account holds no rows dated on or before that date")
     verified = max(
-        (k for k in known_of_opening(opening) if k.verdict == MET and k.day <= through),
+        (k for k in standing.own.tested_known if k.day <= through),
         key=lambda k: (k.day, k.source),
     )
     from .ledger import running_balance
