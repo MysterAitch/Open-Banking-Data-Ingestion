@@ -66,6 +66,7 @@ from .callback import render_page
 from .classification import redact_summary
 from .connections import ConnectionStore, build_connection
 from .coverage import DoubtReport, SourceCoverage
+from .coverage_timeline import AccountTimeline
 from .doctor import shape_problems
 from .fetch_gaps import FetchReport
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
@@ -104,6 +105,7 @@ from .web_accounts import (
     submit_button,
 )
 from .web_balance_chart import BalanceChartPages
+from .web_coverage_timeline import CoverageTimelinePages
 from .web_destinations import DestinationPages
 from .web_empty import (
     EmptyPlan,
@@ -731,6 +733,9 @@ class WebConfig:
     #: One account's stated balances against its rows, as DATA with real values,
     #: for the timeline and the values chart (`balance_chart`).
     balance_chart_data: Callable[[str], BalanceChart] | None = None
+    #: One account's coverage timeline for a day, as DATA with no value in it, or None where the
+    #: account is unknown (`coverage_timeline`).
+    coverage_timeline_data: Callable[[str, date], AccountTimeline | None] | None = None
     #: Everything held and what it comes to, as DATA with real values, for the
     #: same reason `ledger_data` is data: the page decides in one place whether
     #: a reader may see them.
@@ -3869,6 +3874,7 @@ class ConnectionHandler(
     LedgerPages,
     FlagPages,
     BalanceChartPages,
+    CoverageTimelinePages,
     PositionPages,
     DestinationPages,
     GapPages,
@@ -3997,6 +4003,9 @@ class ConnectionHandler(
             return
         if route == "/balance-chart":
             self._balance_chart_get(params)
+            return
+        if route == "/coverage-timeline":
+            self._coverage_timeline_get(params)
             return
         if route == "/position":
             self._position_get()

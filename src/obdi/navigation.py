@@ -62,6 +62,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/accounts": "accounts",
     "/ledger": "accounts",
     "/balance-chart": "accounts",
+    "/coverage-timeline": "bring-in",
     "/declare-account": "accounts",
     "/edit-account": "accounts",
     "/coverage": "accounts",
@@ -173,6 +174,7 @@ PAGE_NAMES: dict[str, PageName] = {
     "/diagnostics": PageName("Diagnostics", "Evidence and Admin"),
     "/bring-in": PageName("Bring in"),
     "/gaps": PageName("What to fetch next"),
+    "/coverage-timeline": PageName("Coverage timeline"),
 }
 
 

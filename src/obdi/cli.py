@@ -59,6 +59,7 @@ from .coverage import (
     transpositions,
 )
 from .coverage import report as coverage_report
+from .coverage_timeline import AccountTimeline
 from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
@@ -3276,6 +3277,41 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, ref, label=label, families=families_of(store, _account_map(store))
             )
 
+    def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
+        from .account_names import merged_names  # deferred like the other data hooks
+        from .agreement import standing_of
+        from .balance_anchors import effective_opening, known_account
+        from .coverage_timeline import build_account_timeline
+
+        try:
+            provider_labels = display_labels()
+        except Exception:
+            # A name is a convenience; the timeline must not depend on the label scan.
+            provider_labels = {}
+        with Store(db_path) as store:
+            if not known_account(store, ref):
+                return None
+            account_map = _account_map(store)
+            families = families_of(store, account_map)
+            opening = effective_opening(store, ref, families=families)
+            standing = standing_of(
+                opening, [ref, *families.spaces_of(ref)], movement_report(store)
+            )
+            record = store.protection_record(ref)
+            names = merged_names(provider_labels, store.declared_accounts())
+            return build_account_timeline(
+                store,
+                ref,
+                today=today,
+                label=names.get(ref, ""),
+                agreement=standing.own,
+                opening=opening,
+                protected_through=(
+                    date.fromisoformat(str(record["through"])) if record is not None else None
+                ),
+                canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+            )
+
     def position_data() -> Position:
         from .position import read_position  # deferred like the other data hooks
 
@@ -4207,6 +4243,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         period_reconciliation_text=period_reconciliation_text,
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
+        coverage_timeline_data=coverage_timeline_data,
         position_data=position_data,
         home_position=home_position,
         anchor_save=anchor_save,
