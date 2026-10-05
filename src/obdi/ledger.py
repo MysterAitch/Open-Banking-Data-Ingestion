@@ -71,7 +71,7 @@ from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
 from .feed_statuses import FeedStatuses
 from .identity_health import provider_ids_by_row, shared_identity_groups
-from .join_basis import JoinCounts, SightingView, join_counts, sighting_views
+from .join_basis import JoinCounts, SightingView, join_counts_of_bases, sighting_views
 from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
@@ -90,9 +90,11 @@ if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
 #: review flags, the two annotation kinds, the one read of every sighting's basis
-#: and stated dates (`join_basis`), and the one read of the coded words its sources stated.
-#: An account with no rows adds
-#: the registry lookup that tells "declared but empty" from "unknown".
+#: (`join_basis.join_counts_of_bases`, from the read that gives each source's date), and the
+#: two reads of the stated dates and the coded words its sources stated for the month's rows
+#: alone (`Store.sighting_details_of`, which asks in chunks of 400, so a month of more rows adds
+#: two for each chunk beyond the first; a month holding none issues neither). An account with
+#: no rows adds the registry lookup that tells "declared but empty" from "unknown".
 QUERIES_PER_PAGE = 11
 
 #: Statements issued to look for the account's opening-balance anchors when it
@@ -1022,8 +1024,7 @@ def _ledger_for(
     other_side = _confirmed_other_sides(store, ref)
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
 
-    sightings = _sightings(store, ref)
-    details = store.sighting_details(ref)
+    sightings, bases = _sightings(store, ref)
     # A derived row has no source in the sense this list means: nothing fed it.
     account_sources = sorted(
         (
@@ -1055,6 +1056,12 @@ def _ledger_for(
         shown = _label(year, number)
     year, number = parse_month(shown)
     first, last = date(year, number, 1), _month_end(year, number)
+
+    # Only the rows on show are listed with what each sighting stated; every other row is
+    # counted by the basis its sightings joined on, which is all `joins` reads of one.
+    details = store.sighting_details_of(
+        ref, [t.entity_id for t in rows if first <= t.value_date <= last]
+    )
 
     built: list[tuple[Transaction, LedgerRow]] = []
     for t in rows:
@@ -1259,8 +1266,8 @@ def _ledger_for(
             if with_protection
             else None
         ),
-        joins=join_counts(
-            (t.value_date, row.sightings)
+        joins=join_counts_of_bases(
+            (t.value_date, bases.get(t.entity_id, ()))
             for t, row in built
             if not t.status.is_history and row.origin == ""
         ),
@@ -1334,22 +1341,26 @@ def _confirmed_other_sides(store: Store, ref: str) -> dict[str, str]:
     return found
 
 
-def _sightings(store: Store, ref: str) -> dict[str, dict[str, str]]:
-    """entity id -> source -> the earliest date that source gave it, or ''."""
+def _sightings(
+    store: Store, ref: str
+) -> tuple[dict[str, dict[str, str]], dict[str, list[str]]]:
+    """(entity id -> source -> the earliest date that source gave it, or ''; entity id -> the
+    basis each of its sightings joined on), from one read of the account's sightings."""
     seen: dict[str, dict[str, str]] = {}
+    bases: dict[str, list[str]] = {}
     for row in store.connection.execute(
         "SELECT s.entity_id AS entity_id, s.source AS source, "
-        "       MIN(s.observed_date) AS observed_date "
+        "       s.observed_date AS observed_date, s.basis AS basis "
         "FROM transaction_sources s "
         "JOIN transactions t ON t.entity_id = s.entity_id "
-        "WHERE t.account_id = ? "
-        "GROUP BY s.entity_id, s.source",
+        "WHERE t.account_id = ?",
         (ref,),
     ):
-        seen.setdefault(str(row["entity_id"]), {})[str(row["source"])] = str(
-            row["observed_date"] or ""
-        )
-    return seen
+        by_source = seen.setdefault(str(row["entity_id"]), {})
+        source, day = str(row["source"]), str(row["observed_date"] or "")
+        by_source[source] = min(by_source[source], day) if source in by_source else day
+        bases.setdefault(str(row["entity_id"]), []).append(str(row["basis"]))
+    return seen, bases
 
 
 def _absorbed_ids(store: Store, ref: str) -> dict[str, int]:

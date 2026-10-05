@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from functools import cache
 
 from .london_clock import london
 from .masking import Structural
@@ -163,6 +164,7 @@ _LATER_EVENTS = (
 )
 
 
+@cache
 def _event_rank(field: str) -> int:
     lowered = field.casefold()
     for words, rank in _LATER_EVENTS:
@@ -173,10 +175,7 @@ def _event_rank(field: str) -> int:
 
 def _in_event_order(moments: Iterable[StatedMoment]) -> tuple[StatedMoment, ...]:
     """Each moment once, ordered by when its event happens and otherwise as stated."""
-    unique: list[StatedMoment] = []
-    for moment in moments:
-        if moment not in unique:
-            unique.append(moment)
+    unique = dict.fromkeys(moments)
     return tuple(sorted(unique, key=lambda moment: _event_rank(moment.field)))
 
 
@@ -218,20 +217,24 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
     row (`_weakest`) is the same as it was when every sighting was listed.
     """
     views: list[SightingView] = []
+    # Looked up rather than searched for: a row the feed has sighted on every pull for weeks
+    # holds dozens of sightings, and finding each one's twin among the views already made by
+    # scanning them all was quadratic in that number. A view's moments and words never change
+    # once it is made (only its count does), so the shape it was made with finds it again.
+    by_shape: dict[tuple[str, bool, tuple[StatedMoment, ...], tuple[StatedWord, ...]], list[int]]
+    by_shape = {}
+    latest_of_source: dict[tuple[str, bool], int] = {}
     for detail in details:
         moments = _in_event_order(
             StatedMoment(field, stated, kind, zone) for field, stated, kind, zone in detail.moments
         )
         words = tuple(StatedWord(field, word) for field, word in detail.words)
-        same_source = [v for v in views if (v.source, v.copy) == (detail.source, detail.copy)]
+        shape = (detail.source, detail.copy, moments, words)
         again = next(
             (
                 position
-                for position, view in enumerate(views)
-                if view in same_source
-                and view.moments == moments
-                and view.words == words
-                and detail.basis in (view.basis, BASIS_OWN_ID)
+                for position in by_shape.get(shape, ())
+                if detail.basis in (views[position].basis, BASIS_OWN_ID)
             ),
             None,
         )
@@ -244,7 +247,10 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
                 repeats_basis=detail.basis if same_basis else "",
             )
             continue
-        change = _what_changed(same_source[-1].moments, moments) if same_source else ""
+        previous = latest_of_source.get((detail.source, detail.copy))
+        change = _what_changed(views[previous].moments, moments) if previous is not None else ""
+        by_shape.setdefault(shape, []).append(len(views))
+        latest_of_source[(detail.source, detail.copy)] = len(views)
         views.append(
             SightingView(
                 source=detail.source,
@@ -259,7 +265,11 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
 
 
 def _weakest(views: Iterable[SightingView]) -> str:
-    held = {view.basis for view in views}
+    return _weakest_of(view.basis for view in views)
+
+
+def _weakest_of(bases: Iterable[str]) -> str:
+    held = set(bases)
     for basis in _WEAKEST_FIRST:
         if basis in held:
             return basis
@@ -268,10 +278,20 @@ def _weakest(views: Iterable[SightingView]) -> str:
 
 def join_counts(rows: Iterable[tuple[date, Sequence[SightingView]]]) -> JoinCounts:
     """Count rows by the weakest join among their sightings, and list the guessed ones' dates."""
+    return join_counts_of_bases((day, [view.basis for view in views]) for day, views in rows)
+
+
+def join_counts_of_bases(rows: Iterable[tuple[date, Iterable[str]]]) -> JoinCounts:
+    """`join_counts` from the basis each sighting joined on, which is all it reads of a view.
+
+    The same counts as from the views: `sighting_views` folds a later sighting into an earlier
+    view only where it joined on that view's own basis or on the source's own id again, and the
+    own-id basis is not one `_weakest` looks for, so no basis it does look for is lost to a view.
+    """
     counts: dict[str, int] = {}
     days: list[date] = []
-    for day, views in rows:
-        basis = _weakest(views)
+    for day, bases in rows:
+        basis = _weakest_of(bases)
         counts[basis] = counts.get(basis, 0) + 1
         if basis in HEURISTIC:
             days.append(day)

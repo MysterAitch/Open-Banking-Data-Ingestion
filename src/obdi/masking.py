@@ -123,6 +123,14 @@ def total_field_names(record_type: type) -> frozenset[str]:
     return _fields_marked(record_type, TOTAL)
 
 
+@cache
+def _field_names(record_type: type) -> frozenset[str]:
+    """Every field of a record type. Asked once per type: a ledger page wraps a record per row
+    and per nested record (125,000 wrappings on a main account's page), and listing a record's
+    fields for each was a quarter of the time spent masking."""
+    return frozenset(f.name for f in fields(record_type))
+
+
 class Disclosed(Generic[_T]):
     """A record as a reader is allowed to see it.
 
@@ -136,7 +144,7 @@ class Disclosed(Generic[_T]):
             raise TypeError("only a dataclass instance can be disclosed")
         self._record = record
         self._unmasked = unmasked
-        self._names = frozenset(f.name for f in fields(record))
+        self._names = _field_names(type(record))
         self._structural = structural_field_names(type(record))
         self._totals = total_field_names(type(record))
 

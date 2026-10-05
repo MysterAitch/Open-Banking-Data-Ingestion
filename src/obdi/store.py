@@ -23,7 +23,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -3482,17 +3482,41 @@ class Store:
         A copy placed on a Space row by a fold states nothing of its own: its source's
         statements are on the row it was copied from.
         """
+        return self._sighting_details(account_id, None)
+
+    def sighting_details_of(
+        self, account_id: str, entities: Collection[str]
+    ) -> dict[str, list[SightingDetail]]:
+        """`sighting_details` for the named entities of the account alone: the same sightings,
+        in the same order, for each. The page lists one month of an account's rows, so reading
+        the stated moments of every row it holds (measured: 1.0 profiled seconds of a 3.8 second
+        reading, over 37,000 sightings) was reading what nothing shows."""
+        found: dict[str, list[SightingDetail]] = {}
+        names = sorted(set(entities))
+        for start in range(0, len(names), 400):
+            found.update(self._sighting_details(account_id, names[start : start + 400]))
+        return found
+
+    def _sighting_details(
+        self, account_id: str, only: Sequence[str] | None
+    ) -> dict[str, list[SightingDetail]]:
         found: dict[str, list[SightingDetail]] = {}
         position: dict[tuple[str, str, str], SightingDetail] = {}
+        # Placeholders only: the interpolation builds "?,?", never data.
+        named = "" if only is None else f" AND s.entity_id IN ({','.join('?' for _ in only)})"
+        words_named = (
+            "" if only is None else f" AND w.entity_id IN ({','.join('?' for _ in only)})"
+        )
+        extra = () if only is None else tuple(only)
         for row in self.connection.execute(
-            "SELECT s.entity_id, s.source, s.artefact_digest, s.basis, "
+            "SELECT s.entity_id, s.source, s.artefact_digest, s.basis, "  # noqa: S608
             "COALESCE(s.source_id, '') LIKE ?, t.field, t.stated, t.kind, t.zone "
             "FROM transaction_sources s JOIN transactions x ON x.entity_id = s.entity_id "
             "LEFT JOIN sighting_times t ON t.entity_id = s.entity_id AND t.source = s.source "
             "AND t.artefact_digest = s.artefact_digest "
-            "WHERE x.account_id = ? "
+            f"WHERE x.account_id = ?{named} "
             "ORDER BY s.first_seen_at, s.source, s.artefact_digest, t.rowid",
-            (_COPY_PATTERN, account_id),
+            (_COPY_PATTERN, account_id, *extra),
         ):
             key = (str(row[0]), str(row[1]), str(row[2]))
             sighting = position.get(key)
@@ -3505,10 +3529,10 @@ class Store:
             if row[5] is not None:
                 sighting.moments.append((str(row[5]), str(row[6]), str(row[7]), str(row[8])))
         for row in self.connection.execute(
-            "SELECT w.entity_id, w.source, w.artefact_digest, w.field, w.word "
+            "SELECT w.entity_id, w.source, w.artefact_digest, w.field, w.word "  # noqa: S608
             "FROM sighting_words w JOIN transactions x ON x.entity_id = w.entity_id "
-            "WHERE x.account_id = ? ORDER BY w.field, w.word",
-            (account_id,),
+            f"WHERE x.account_id = ?{words_named} ORDER BY w.field, w.word",
+            (account_id, *extra),
         ):
             owner = position.get((str(row[0]), str(row[1]), str(row[2])))
             if owner is not None:
