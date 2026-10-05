@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .account_observations import Observation
+from .london_clock import london
 from .parsers.base import ParseError
 from .parsers.pdf_statements import (
     PdfStatementParser,
@@ -185,6 +186,17 @@ class StatementPeriod:
     #: The date of the earliest row the statement lists, from the kept reading; None where there
     #: is no kept reading or the statement lists nothing.
     first_row: date | None = None
+    #: The date of the latest row the statement lists; None as for `first_row`.
+    last_row: date | None = None
+    #: The balances the statement prints at its start and its end, in the store's sign
+    #: convention. The opening is None where there is no kept reading or the format prints none.
+    opening_minor: int | None = None
+    closing_minor: int | None = None
+    #: The day the document says it was produced, where its format prints one.
+    produced: date | None = None
+    #: The day obdi received the document (London's calendar day of the earliest time any copy
+    #: of it was kept); None where unknown. Weaker than `produced`, which is the document's own.
+    received: date | None = None
 
     @property
     def covers_from(self) -> date | None:
@@ -193,28 +205,55 @@ class StatementPeriod:
         return self.opens or self.first_row
 
 
+def received_days(store: Store) -> dict[str, date]:
+    """Digest -> the day the earliest kept copy of that PDF was received, on London's calendar.
+
+    A moment with no zone is taken at its own calendar day: the clock the host kept it by is
+    not knowable here, and reading the machine's would make the answer depend on where it ran.
+    """
+    found: dict[str, date] = {}
+    for row in store.connection.execute(
+        "SELECT digest, MIN(fetched_at) AS at FROM raw_artefacts "
+        "WHERE media_type = 'application/pdf' GROUP BY digest"
+    ):
+        try:
+            moment = datetime.fromisoformat(str(row["at"]))
+        except ValueError:
+            continue
+        found[str(row["digest"])] = (
+            moment.date() if moment.tzinfo is None else london(moment).date()
+        )
+    return found
+
+
 def statement_periods(store: Store) -> list[StatementPeriod]:
     """Each trusted statement's closing day with the period it states, from kept readings.
 
     The statements are the ones `statement_balances` trusts, so a period is never offered for a
     document whose closing balance is not. The period is read from the reading the store kept
     and never from the document: a view must not extract text, so a statement with no kept
-    reading is listed with no stated start.
+    reading is listed with no stated start. `statement_span.statement_spans` is what says what
+    a period means.
     """
     found: list[StatementPeriod] = []
     balances, _ = statement_balances(store)
+    received = received_days(store)
     for balance in balances:
         kept = _kept_reading(store, balance.digest) if balance.source else None
         reading = None if kept is None else kept[1]
+        dates = [] if reading is None else [row.value_date for row in reading.transactions]
         found.append(
             StatementPeriod(
                 balance.account_ref,
                 balance.day,
                 None if reading is None else reading.period_start,
                 balance.source,
-                None
-                if reading is None
-                else min((row.value_date for row in reading.transactions), default=None),
+                min(dates, default=None),
+                max(dates, default=None),
+                None if reading is None else reading.opening_balance_minor,
+                balance.balance_minor,
+                None if reading is None else reading.produced,
+                received.get(balance.digest),
             )
         )
     return found

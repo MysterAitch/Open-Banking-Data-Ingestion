@@ -146,7 +146,9 @@ class TestWhereTheStatementBegins:
 
     def test_Statement_WhenTheLabelIsFusedByTheWordGrid_StillStatesItsStart(self):
         fused = [
-            line.replace("Previous balance as at 11th June 2026:", "Previousbalanceasat11thJune2026:")
+            line.replace(
+                "Previous balance as at 11th June 2026:", "Previousbalanceasat11thJune2026:"
+            )
             for line in STATEMENT
         ]
 
