@@ -425,6 +425,28 @@ def _below_nil(
     return ALL_BELOW_NIL if max(values) < 0 else SOME_BELOW_NIL
 
 
+def unit_word(resolution: Resolution) -> str:
+    """What one point of a chart is, as a noun: the one place a chart's unit is named.
+
+    The key, the chart's description, the sentence beneath it, and its labels all read
+    this, so a chart of days never calls a point a month.
+    """
+    return {
+        Resolution.DAY: "day",
+        Resolution.WEEK: "week",
+        Resolution.MONTH: "month",
+    }[resolution]
+
+
+def _leaves_out(resolution: Resolution) -> str:
+    """Said of a point that leaves something out: on that point's date an item counted today
+    had no known figure yet. In the chart's own unit, so a daily chart says "on a day"."""
+    return (
+        f"{'on' if resolution is Resolution.DAY else 'in'} a {unit_word(resolution)} "
+        "that leaves something out"
+    )
+
+
 def _key(
     lines: tuple[str, ...],
     *,
@@ -435,14 +457,15 @@ def _key(
     """The chart's key: each line it draws, as a swatch drawn the way the line is, and its name.
 
     Where the chart goes below nil the key also says what the marked region means. A chart
-    over a window (a `resolution`) also says how often it has a figure.
+    over a window (a `resolution`) also says how often it has a figure; one without is
+    monthly.
     """
     if not lines and not below_nil and resolution is None:
         return ""
     total = "Total of the chosen accounts" if narrowed else "Net worth"
     words = {
         "known": f"{total} that is known",
-        "partial": f"{total} in a partial month, which leaves something out",
+        "partial": f"{total} {_leaves_out(resolution or Resolution.MONTH)}",
         "provisional": "Provisional total, which counts each unknown opening balance as nil",
     }
     swatch = '<svg width="46" height="10" aria-hidden="true" style="vertical-align:middle">'
@@ -725,10 +748,9 @@ def _chart(
         )
     label = 'font-size="12" fill="currentColor"'
     scope = "window " if windowed else ""
-    every = {Resolution.MONTH: "months", Resolution.WEEK: "weeks", Resolution.DAY: "days"}
     if high == low:
         top_labels = (
-            f'<text x="{left}" y="16" {label}>{scope}all {every[resolution]} '
+            f'<text x="{left}" y="16" {label}>{scope}all {unit_word(resolution)}s '
             f"{_esc(_signed(low))}</text>"
         )
         bottom_label = ""
@@ -777,6 +799,8 @@ def _chart(
         desc += "A window of what is held: lowest, highest, and latest are of the window. "
     if narrowed:
         desc += "Drawn from the chosen accounts only, so not the net worth. "
+    if "partial" in drawn:
+        desc += f"Dashed {_leaves_out(resolution)}. "
     if known:
         desc += (
             f"{'Chosen total' if narrowed else 'Net worth'}, "
@@ -875,9 +899,8 @@ def _legend(
         what = "the total of the chosen accounts that is known" if narrowed else (
             "the net worth that is known"
         )
-        units = {Resolution.DAY: "days", Resolution.WEEK: "weeks"}
-        unit = units.get(resolution, "months") if resolution is not None else "months"
-        text += f"The solid blue line is {what}, dashed for the partial {unit}. "
+        leaves_out = _leaves_out(resolution or Resolution.MONTH)
+        text += f"The solid blue line is {what}, dashed {leaves_out}. "
     if has_provisional:
         text += (
             "The dotted line is the provisional total, which counts each unknown opening "

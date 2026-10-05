@@ -304,7 +304,7 @@ class TestTheKeyThatNamesTheLines:
         key = key_entries(page)
         assert set(key) == {"known", "partial", "provisional"}
         assert key["known"][2] == "Net worth that is known"
-        assert key["partial"][2] == "Net worth in a partial month, which leaves something out"
+        assert key["partial"][2] == "Net worth in a month that leaves something out"
         assert key["provisional"][2] == (
             "Provisional total, which counts each unknown opening balance as nil"
         )
