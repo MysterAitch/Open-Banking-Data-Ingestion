@@ -79,6 +79,7 @@ from obdi.models import RawArtefact, SourceTier, Transaction
 from obdi.providers import starling
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
+from obdi.typed_transactions import record_typed_transaction
 from test_period_reconciliation import _statement
 
 TODAY = date(2026, 10, 5)
@@ -228,12 +229,9 @@ def build_main(
             "Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8"
         )
         import_file(store, path, account_id=MAIN)
-    body = json.dumps({"typed": "M1"}).encode()
-    artefact = _land(store, source="manual", body=body)
-    reconcile_batch(
-        store,
-        [_transaction("M1", source="manual", source_id="m1", tier=SourceTier.MANUAL)],
-        digest=artefact.digest,
+    record_typed_transaction(
+        store, MAIN, ROWS["M1"].day, "out", ROWS["M1"].pounds, ROWS["M1"].payee,
+        today=TODAY,
     )
     if with_balances:
         for day, pounds in BALANCES:
@@ -294,25 +292,28 @@ def build_long(root: Path) -> Path:
     """
     db = root / "long.sqlite3"
     with Store(db) as store:
-        store.declare_account(AccountRecord(ref=AccountRef(LONG), label="Long account"))
-        lines = "".join(
-            f"15/{month:02d}/{year},Standing order,Rent,STANDING ORDER,-10.00\n"
-            for year in range(2019, 2027)
-            for month in range(1, 13)
-            if (year, month) <= (2026, 9)
-        )
-        path = root / "long.csv"
-        path.write_text(
-            "Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8"
-        )
-        import_file(store, path, account_id=LONG)
-        for day, pounds in (
-            ("2019-01-01", "1000.00"),
-            ("2022-06-15", "580.00"),
-            ("2026-09-15", "70.00"),
-        ):
-            record_stated_anchor(store, LONG, day, pounds, today=TODAY)
+        land_long(root, store)
     return db
+
+
+def land_long(root: Path, store: Store) -> None:
+    """The long account's rows and balances, landed into `store` (`build_long` describes them)."""
+    store.declare_account(AccountRecord(ref=AccountRef(LONG), label="Long account"))
+    lines = "".join(
+        f"15/{month:02d}/{year},Standing order,Rent,STANDING ORDER,-10.00\n"
+        for year in range(2019, 2027)
+        for month in range(1, 13)
+        if (year, month) <= (2026, 9)
+    )
+    path = root / "long.csv"
+    path.write_text("Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8")
+    import_file(store, path, account_id=LONG)
+    for day, pounds in (
+        ("2019-01-01", "1000.00"),
+        ("2022-06-15", "580.00"),
+        ("2026-09-15", "70.00"),
+    ):
+        record_stated_anchor(store, LONG, day, pounds, today=TODAY)
 
 
 def build_household(

@@ -78,7 +78,10 @@ TIMELINE_STYLES = """
  .cov-household { list-style: none; margin: var(--s3) 0; padding: 0; }
  .cov-household li { margin: var(--s2) 0; }
  .cov-lane-name { font: 600 var(--text-sm) var(--sans); margin: 0 0 var(--s1); }
+ .cov-compact { margin: var(--s2) 0; }
  .cov-compact summary { min-height: var(--hit); display: flex; align-items: center; }
+ .cov-compact-svg { display: block; max-width: 100%; margin: var(--s1) 0; }
+ .cov-month { fill: none; stroke: var(--ink); stroke-width: 1.5; }
  @media (min-width: 40rem) {
   .cov-labels { width: 9rem; }
  }

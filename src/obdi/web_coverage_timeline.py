@@ -61,7 +61,9 @@ from .coverage_timeline import (
     Marker,
     Quiet,
     Seam,
+    marker_anchor,
     quiet_stretches,
+    seam_anchor,
     span_words,
 )
 from .date_window import resolve
@@ -279,6 +281,9 @@ class _Entry:
     links: list[tuple[str, str]] = field(default_factory=list)
     #: The gap a "fetch" entry is about, so the list above the chart reads its source from it.
     gap: Gap | None = None
+    #: Further addresses that land on this entry: every marker merged into a mark is reachable
+    #: by its own, so a link made from one marker finds the group that holds it.
+    aliases: list[str] = field(default_factory=list)
 
 
 #: The width, in chart units, of a collapsed stretch: room for a two-line label of its length.
@@ -808,12 +813,12 @@ def _draw(
         entries.append(_Entry(ident, "fetch", sentence, gap.first, gap.last, gap=gap))
 
     # Seams that need a look.
-    for number, seam in enumerate(view.seams_to_check, start=1):
+    for seam in view.seams_to_check:
         seam_row = lane_row.get(seam.source)
         if seam_row is None or not scale.start <= seam.day <= scale.end:
             continue
         at = seam_row
-        ident = f"s{number}"
+        ident = seam_anchor(seam.source, seam.day)
         fraction = seam.fraction if seam.last_state == PARTIAL and seam.fraction else 1.0
         x = scale.x(seam.day) + fraction * px
         kind = "seam-red" if seam.verdict == MISSING else "seam-amber"
@@ -832,8 +837,8 @@ def _draw(
             continue
         index = _bucket_index(scale, marker.day, wide)
         merged.setdefault((marker.kind, marker.source, index), []).append(marker)
-    for number, ((kind, source, index), group) in enumerate(sorted(merged.items()), start=1):
-        ident = f"i{number}"
+    for (kind, source, index), group in sorted(merged.items()):
+        ident = marker_anchor(kind, source, group[0].day)
         count = sum(m.count for m in group)
         x = scale.x(scale.start) + (index + 0.5) * wide
         lead = group[0]
@@ -851,7 +856,12 @@ def _draw(
             inner += f'<text x="{x + 7:.1f}" y="{y + 4:.1f}">{count}</text>'
         layers["marks"].append(_link(ident, sentence, inner))
         used.add(kind)
-        entries.append(_Entry(ident, "look", sentence, group[0].day, group[-1].day))
+        entries.append(
+            _Entry(
+                ident, "look", sentence, group[0].day, group[-1].day,
+                aliases=[marker_anchor(m.kind, m.source, m.day) for m in group[1:]],
+            )
+        )
 
     if scale.start <= view.today <= scale.end:
         x = scale.x(view.today) + px / 2
@@ -1077,7 +1087,9 @@ def _entries_html(ref: str, entries: Sequence[_Entry]) -> str:
                 f'<li><a href="{_esc(href)}">{_esc(text)}</a></li>' for href, text in links
             )
             out.append(
-                f'<div class="cov-entry" id="e-{entry.ident}"><p>{_esc(entry.sentence)}</p>'
+                f'<div class="cov-entry" id="e-{entry.ident}">'
+                + "".join(f'<span id="e-{alias}"></span>' for alias in entry.aliases)
+                + f"<p>{_esc(entry.sentence)}</p>"
                 f'<ul class="cov-links"><li><a href="#m-{entry.ident}">Find it on the chart</a>'
                 f"</li>{items}</ul></div>"
             )

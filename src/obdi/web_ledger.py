@@ -53,6 +53,7 @@ from .plural import agree
 from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
 from .protection import protection_line
+from .web_account_timeline import block_for
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
@@ -2524,8 +2525,12 @@ def render_ledger(
     notice: str = "",
     today: date | None = None,
     all_balances: bool = False,
+    timeline: str = "",
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
+
+    `timeline` is the compact coverage timeline's block (`web_account_timeline.block_for`), which
+    sits directly under the state it qualifies.
 
     `all_balances` lists every known balance and not the newest few (`_listed_anchors`).
 
@@ -2581,8 +2586,11 @@ def render_ledger(
             ),
         )
 
-    state = _state_html(view, end) + _protect_html(view, unmasked, all_balances) + _mode(
-        view, unmasked, all_balances
+    state = (
+        _state_html(view, end)
+        + timeline
+        + _protect_html(view, unmasked, all_balances)
+        + _mode(view, unmasked, all_balances)
     )
     month = (
         f"<h2>{_esc(view.month)}</h2>"
@@ -3054,6 +3062,7 @@ class LedgerPages(AnswerPages):
         except Exception as exc:
             self._respond(500, _page("Ledger failed", str(exc)))
             return
+        today = datetime.now(UTC).date()
         self._respond(
             404 if ledger.state == "unknown" else 200,
             render_ledger(
@@ -3061,8 +3070,13 @@ class LedgerPages(AnswerPages):
                 unmasked=unmasked,
                 archive_wired=self.bound_config.archive_account is not None,
                 notice=notice,
-                today=datetime.now(UTC).date(),
+                today=today,
                 all_balances=all_balances,
+                timeline=(
+                    block_for(self.bound_config, ref, ledger.month, today)
+                    if ledger.state in ("ok", "empty-month")
+                    else ""
+                ),
             ),
             no_store=unmasked or no_store,
         )

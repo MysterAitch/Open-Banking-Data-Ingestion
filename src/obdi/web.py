@@ -736,6 +736,9 @@ class WebConfig:
     #: One account's coverage timeline for a day, as DATA with no value in it, or None where the
     #: account is unknown (`coverage_timeline`).
     coverage_timeline_data: Callable[[str, date], AccountTimeline | None] | None = None
+    #: The same without the known balances' own readings, from the memoised standing alone, for
+    #: the compact timeline on an account's page (`web_account_timeline`).
+    coverage_timeline_compact: Callable[[str, date], AccountTimeline | None] | None = None
     #: The same for every account that holds rows, not archived first (the household view).
     coverage_timeline_household: Callable[[date], list[AccountTimeline]] | None = None
     #: Everything held and what it comes to, as DATA with real values, for the

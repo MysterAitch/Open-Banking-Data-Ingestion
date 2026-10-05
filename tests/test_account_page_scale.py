@@ -35,7 +35,10 @@ REFLOW = 320
 #: The sixth screen's tenth is the one line the coverage timeline's link adds to the foot of the
 #: page (measured at 390 px: the page was 4821 px with it, 21 px past six screens); nothing else
 #: was allowed to grow.
-WHOLE_PAGE_SCREENS = 6.1
+#: The page's own compact coverage timeline, folded under the verdict, adds a summary line (its
+#: one sentence) and a link row, measured at 390 px as 86 px (the page was 4907 px with it, 27 px
+#: past 6.1 screens): 6.2 screens is that and nothing more.
+WHOLE_PAGE_SCREENS = 6.2
 
 
 @pytest.fixture(scope="module")

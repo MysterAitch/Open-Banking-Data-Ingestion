@@ -212,8 +212,21 @@ def gap_anchor(account: str, kind: str, first: date) -> str:
     Account, kind, and first day, never a position in a list, so a link made from the What to
     fetch next page (which holds the same three) lands on the right place whatever else is drawn.
     """
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", account).strip("-") or "account"
-    return f"gap-{slug}-{kind}-{first.isoformat()}"
+    return f"gap-{_slug(account)}-{kind}-{first.isoformat()}"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-") or "x"
+
+
+def seam_anchor(source: str, day: date) -> str:
+    """The address of a seam's mark and sentence, from the seam alone (as `gap_anchor`)."""
+    return f"seam-{_slug(source)}-{day.isoformat()}"
+
+
+def marker_anchor(kind: str, source: str, day: date) -> str:
+    """The address of one issue marker, whichever group the page merges it into."""
+    return f"mark-{_slug(kind)}-{_slug(source)}-{day.isoformat()}"
 
 
 @dataclass(frozen=True)
@@ -992,5 +1005,6 @@ __all__ = [
     "STATEMENT", "TYPED", "UNCHECKED", "UNMATCHED", "UNREPRODUCED", "WEAKNESS",
     "AccountTimeline", "Band", "Capture", "FetchGapLike", "Gap", "Known", "Lane", "Marker", "Quiet",
     "Run", "Seam", "StatementCover", "Verification", "build_account_timeline", "gap_anchor",
-    "kind_of_source", "quiet_stretches", "span_words", "statement_cover",
+    "kind_of_source", "marker_anchor", "quiet_stretches", "seam_anchor", "span_words",
+    "statement_cover",
 ]

@@ -3284,7 +3284,17 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def space_refs(store: Store) -> set[str]:
         return {str(r.ref) for r in store.declared_accounts() if r.kind == "starling-space"}
 
-    def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
+    #: Each account's timeline data for a day, held while nothing the standings and the gaps are
+    #: read from has changed. The window is not part of the key: it is applied when the page is
+    #: drawn, so every window of one day is one entry.
+    timeline_memo: KeyedMemo[dict[tuple[str, date, bool], AccountTimeline | None]] = KeyedMemo(
+        fetch_evidence_key, name="coverage timelines", epoch=rebuild_epoch
+    )
+
+    def timeline_for(ref: str, today: date, *, balances: bool) -> AccountTimeline | None:
+        """One account's timeline. With `balances` it reads the known balances themselves, for
+        the tick on each; without, the standing the memo holds is all it reads of verification,
+        which is what an account's own page can afford beside its rows."""
         from .account_names import merged_names  # deferred like the other data hooks
         from .agreement import standing_of
         from .balance_anchors import effective_opening, known_account
@@ -3296,22 +3306,35 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # A name is a convenience; the timeline must not depend on the label scan.
             provider_labels = {}
         with Store(db_path) as store:
+            held = timeline_memo.get(store, dict)
+            key = (ref, today, balances)
+            if key in held:
+                return held[key]
             if not known_account(store, ref):
+                held[key] = None
                 return None
             account_map = _account_map(store)
-            families = families_of(store, account_map)
-            opening = effective_opening(store, ref, families=families)
-            standing = standing_of(
-                opening, [ref, *families.spaces_of(ref)], movement_report(store)
-            )
+            standings = account_standings(store)
+            opening = None
+            if balances:
+                families = families_of(store, account_map)
+                opening = effective_opening(store, ref, families=families)
+            if ref in standings:
+                agreement = standings[ref].standing.own
+            else:
+                families = families_of(store, account_map)
+                opening = opening or effective_opening(store, ref, families=families)
+                agreement = standing_of(
+                    opening, [ref, *families.spaces_of(ref)], movement_report(store)
+                ).own
             record = store.protection_record(ref)
             names = merged_names(provider_labels, store.declared_accounts())
-            return build_account_timeline(
+            built = build_account_timeline(
                 store,
                 ref,
                 today=today,
                 label=names.get(ref, ""),
-                agreement=standing.own,
+                agreement=agreement,
                 opening=opening,
                 protected_through=(
                     date.fromisoformat(str(record["through"])) if record is not None else None
@@ -3320,6 +3343,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 fetch_gaps=gaps_by_account(today).get(ref, ()),
                 is_space=ref in space_refs(store),
             )
+            held[key] = built
+            return built
+
+    def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
+        return timeline_for(ref, today, balances=True)
+
+    def coverage_timeline_compact(ref: str, today: date) -> AccountTimeline | None:
+        return timeline_for(ref, today, balances=False)
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
         from .account_names import merged_names  # deferred like the other data hooks
@@ -4287,6 +4318,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
         coverage_timeline_data=coverage_timeline_data,
+        coverage_timeline_compact=coverage_timeline_compact,
         coverage_timeline_household=coverage_timeline_household,
         position_data=position_data,
         home_position=home_position,
