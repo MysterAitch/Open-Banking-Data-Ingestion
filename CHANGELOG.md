@@ -26,6 +26,61 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.326] - 2026-10-05
+
+### Added
+- **A period to fetch can be set aside, by kind.** "What to fetch next" would
+  go on asking for a statement the bank never issued, or for the aggregator's
+  history before the day it begins, for ever, and a list that always holds
+  things that cannot be done stops being read. The owner asked for a way to
+  mark such a period, and then drew the distinctions the marks now keep:
+  - **Known gap**: says nothing about the data. He has seen it and asks not
+    to be told again; it stays counted as missing, quietly, and can carry a
+    day to look again on.
+  - **Nothing to fetch**: there were no transactions, so nothing was issued.
+  - **No longer provided**: the source once offered the period and does not
+    now. The page names any other source that still reaches it.
+  - **Before the source's history**: the source never provided days this
+    early. Where the provider itself says its history is cut, or an ask
+    reaching further back came back empty, the page offers this ready-made;
+    where the source was never asked, it says so and offers nothing.
+  - **Account not open**, and **Other** with a note.
+  Each mark records whether it was his decision or the source's own answer.
+- **A record's scope**: per account, from a fixed day or the last so many
+  months. Nothing before it is looked for. A rolling scope can carry a gap
+  out of view unfilled, and the page says when one has.
+- **A mark that makes a claim is weighed against what is held, before he
+  confirms it and afterwards.** "Nothing to fetch" over a period in which
+  another source lists rows is contradicted, says how many and when, and
+  the gap stays on the list: a contradicted mark never hides a gap. A
+  period that comes to hold a statement after all is satisfied.
+- Everything is undone in one press, and a removed mark is kept as history.
+
+### What a mark does not do
+- **It changes nothing about verification.** A period with no statement is
+  still a period with no known balance; a test holds every account's
+  standing equal before and after each kind of mark and a scope. A mark
+  answers "should I fetch something?", and Today's line about statements
+  reads the same answer.
+
+### Store
+- Schema version 19: the marks and the scopes each have a table. Both move
+  the epoch page memos are keyed on, so a mark shows at once, and both
+  survive a rebuild.
+
+### Not covered
+- The coverage timeline does not draw the marks yet; the function it will
+  read exists.
+- A scope is set on "What to fetch next" only, not on an account's edit
+  page. A Space takes no mark.
+- An open end into the future is refused for every kind, since it would
+  silence a source for good by accident; a rolling scope is the one edge
+  that moves.
+- The note is the owner's own words and is shown as typed on a masked page.
+  The form says to write words and not figures; nothing enforces it.
+- A history boundary the aggregator newly reports shows on the page only
+  after the next change that moves the epoch.
+
 ## [0.4.325] - 2026-10-05
 
 ### Changed
