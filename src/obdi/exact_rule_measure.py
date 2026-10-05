@@ -459,8 +459,9 @@ class ExactRuleReport:
         if self.cash is not None:
             lines.append("")
             lines.append(
-                "Stored transactions that are cash withdrawals by what a source states, read "
-                "from the landed artefacts and the stored transactions without changing them:"
+                "Stored transactions that are cash withdrawals or deposits by what a source "
+                "states, read from the words kept against each sighting without changing "
+                "anything:"
             )
             lines.extend(f"  {sentence}" for sentence in self.cash.sentences())
         return "\n".join(lines)
@@ -703,9 +704,7 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     report.pairs = pair_figures(store, account_map)
     report.settlement = settlement_figures(store, account_map, landed)
     report.no_row_status = no_row_status_figures(store)
-    report.cash = cash_withdrawal_report(
-        store, store.declared_accounts(), feed=landed.feed, aggregator=landed.aggregator
-    )
+    report.cash = cash_withdrawal_report(store, store.declared_accounts())
     return report
 
 

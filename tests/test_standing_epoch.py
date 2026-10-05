@@ -263,8 +263,8 @@ class TestTheEpochMovesWithTheWriteThatChangesAStanding:
             )
             assert store.standing_epoch() == before
 
-    def test_Schema_IsTheVersionTheEpochTableWasAddedIn(self):
-        assert SCHEMA_VERSION == 17
+    def test_Schema_IsTheVersionTheSightingWordsTableWasAddedIn(self):
+        assert SCHEMA_VERSION == 18
 
 
 class TestTheAccountMapFileIsPartOfTheKey:

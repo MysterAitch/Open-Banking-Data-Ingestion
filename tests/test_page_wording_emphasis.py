@@ -25,7 +25,7 @@ ACRONYMS = frozenset(
         "DECLINED",
         # Words a bank or an aggregator states in a coded field, named as data where the cash
         # withdrawal measurement counts them (`cash_withdrawal_measure`).
-        *("ATM", "CASH", "PURCHASE", "GENERAL"),
+        *("ATM", "CASH", "PURCHASE", "GENERAL", "TRANSFER"),
     }
 )
 SHOUTING = re.compile(r"\b[A-Z]{3,}\b")

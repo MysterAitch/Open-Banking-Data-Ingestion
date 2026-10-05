@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import pathlib
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -223,6 +224,16 @@ class TestWhatMovesToTheKeptRow:
         store.queue_for_review(absorbed, "looked odd")
         store.append_event("test_event", absorbed, {"note": "carried"})
         store.replace_transfer_pairs([(absorbed, partner.entity_id)])
+        # A sighting that states a coded word, whichever source made the row.
+        held = next(t for t in store.transactions_for_account(MAIN) if t.entity_id == absorbed)
+        store.record_source(
+            replace(
+                held,
+                source="truelayer",
+                artefact_digest="planted-sighting",
+                raw={"transaction_category": "PURCHASE"},
+            )
+        )
         store.connection.commit()
         planted_in = {
             table

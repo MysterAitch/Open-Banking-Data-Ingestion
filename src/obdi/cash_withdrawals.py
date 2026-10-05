@@ -1,63 +1,106 @@
-"""What a source STATES about a payment being money taken out at a cash machine.
+"""What a source STATES about a payment being cash taken out of, or paid into, an account.
 
 A STATEMENT IS REQUIRED. A description that looks like a cash machine is a guess and nothing
 acts on it: a shop can name itself after one, and a transfer to a person can say "cash". Only a
-coded field a source gives its own item makes a row a cash withdrawal, so `says_cash_machine`
-reads the item as the source stated it and `description_patterns` exists only so a measurement
-can count the rows the guess would have taken and the statement does not.
+coded word a source gave its own item makes a row a cash movement. The words are kept against
+each sighting (`stated_words`, table `sighting_words`) and read from there, so no landed payload
+is parsed to decide a row.
 
-THE WORDS ARE CANDIDATES until a landed artefact shows them. No fixture and no provider mapping
-in this repository carries a cash machine's coded word: the feed's field names (`source`,
-`sourceSubType`, `spendingCategory`) and the aggregator's (`transaction_category`,
-`transaction_classification`) are known, and the values below are what each provider is believed
-to document and not what any landed item has been seen to hold. `exact_rule_measure` counts them
-by word and also lists every word a field states, so the word a real bank uses is read from the
-measurement and a wrong candidate counts zero instead of acting. Promote a candidate by editing
-`CANDIDATE_WORDS`, and only after that reading.
+THE WORDS ARE THOSE A REAL STORE HAS SHOWN. Counted over a deployed store: the bank's feed says
+a cash machine as `sourceSubType` ATM (19 of the transactions in the account that are not
+history), and says cash paid in as `source` CASH_DEPOSIT. The aggregator's word for cash is
+`transaction_category` CASH. Rejected, because that store held no such word: `source`
+CASH_WITHDRAWAL, `spendingCategory` CASH, a `transaction_category` ATM, and a classification
+"Cash & ATM", which were each the provider's documented word and none was ever stated. A word is
+added here only after a measurement has counted it on a store.
 
-WHICH FIELD NAMES A KIND. A source's kind of payment is one field (`KIND_FIELD`): the feed's
-spending category and the aggregator's transaction category. Two sources disagree when one says
-a cash machine and another states a different kind in its kind field.
+PRECEDENCE. An account that has the bank's own feed is decided by the feed's statement alone, and
+the aggregator's category neither adds a movement nor blocks one: the aggregator calls the same
+withdrawal a purchase, which is a COARSER statement (a card transaction) and not a contradiction.
+An account with no first-party feed is decided by the aggregator's word.
+
+DISAGREEMENT is two sources each stating a kind that EXCLUDES the other: a cash machine against an
+aggregator category that is a transfer, a direct debit, and the like (`EXCLUDING_AGGREGATOR_KINDS`).
+Where they disagree the rule makes no leg, because a payment that is also a transfer to a person is
+not a withdrawal and a wrong leg is a wrong balance in the cash account.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from .accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef, is_cash_account
+from .models import Transaction, TransactionStatus
+from .namespaces import CASH_LEG_SOURCE
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
+from .store import Store
 
-#: (field, value) pairs a source's own item may state for a cash machine, by source.
-#: Compared without regard to case. See the module text for why these are candidates.
-CANDIDATE_WORDS: Mapping[str, frozenset[tuple[str, str]]] = {
-    "starling": frozenset(
-        {
-            ("source", "CASH_WITHDRAWAL"),
-            ("sourceSubType", "ATM"),
-            ("spendingCategory", "CASH"),
-        }
-    ),
-    "truelayer": frozenset(
-        {
-            ("transaction_category", "ATM"),
-            ("transaction_classification", "Cash & ATM"),
-        }
-    ),
+WITHDRAWAL = "withdrawal"
+DEPOSIT = "deposit"
+
+#: The (field, word) the bank's feed states for each kind of cash movement.
+FEED_WORDS: Mapping[str, tuple[str, str]] = {
+    WITHDRAWAL: ("sourceSubType", "ATM"),
+    DEPOSIT: ("source", "CASH_DEPOSIT"),
 }
 
-#: The one field that says what KIND of payment an item is, per source.
-KIND_FIELD: Mapping[str, str] = {
-    "starling": "spendingCategory",
-    "truelayer": "transaction_category",
-}
+#: The aggregator's word for cash. It does not say which way the money moved, so the payment's
+#: own sign does.
+AGGREGATOR_CASH: tuple[str, str] = ("transaction_category", "CASH")
 
-#: Every coded field a source gives that a measurement lists the words of.
-CODED_FIELDS: Mapping[str, tuple[str, ...]] = {
-    "starling": ("source", "sourceSubType", "spendingCategory"),
-    "truelayer": ("transaction_category", "transaction_classification"),
-}
+#: Every word that makes a row a candidate, which is what the one indexed read asks for.
+CANDIDATE_WORDS: tuple[tuple[str, str], ...] = (*FEED_WORDS.values(), AGGREGATOR_CASH)
+
+#: Aggregator categories a cash machine is not. A coarse one (a purchase, a debit, other,
+#: unknown, a credit) is not listed: it does not say what the payment was not.
+EXCLUDING_AGGREGATOR_KINDS = frozenset(
+    {
+        "TRANSFER",
+        "DIRECT_DEBIT",
+        "STANDING_ORDER",
+        "BILL_PAYMENT",
+        "INTEREST",
+        "FEE_CHARGE",
+        "DIVIDEND",
+        "CHEQUE",
+    }
+)
+
+#: The bank's own words for a kind of movement that is not cash, where the aggregator says cash.
+#: Taken from the words a real store's feed was seen to state.
+EXCLUDING_FEED_WORDS: frozenset[tuple[str, str]] = frozenset(
+    {
+        *(
+            ("source", word)
+            for word in (
+                "INTERNAL_TRANSFER",
+                "DIRECT_DEBIT",
+                "DIRECT_CREDIT",
+                "FASTER_PAYMENTS_IN",
+                "FASTER_PAYMENTS_OUT",
+                "INTEREST_PAYMENT",
+                "STARLING_PAYMENT",
+                "WITHHELD_TAX",
+                "NOSTRO_DEPOSIT",
+            )
+        ),
+        *(
+            ("sourceSubType", word)
+            for word in (
+                "ANDROID_PAY",
+                "ANDROID_PAY_ONLINE",
+                "CARD_SUBSCRIPTION",
+                "CHIP_AND_PIN",
+                "CONTACTLESS",
+                "MAGNETIC_STRIP",
+                "MANUAL_KEY_ENTRY",
+                "ONLINE",
+            )
+        ),
+    }
+)
 
 #: Descriptions that LOOK like a cash machine. A guess, counted by a measurement and acted on by
 #: nothing, which is why each has a name a sentence can print.
@@ -67,6 +110,13 @@ DESCRIPTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("cashpoint", re.compile(r"\bcash\s?point\b", re.IGNORECASE)),
     ("cash machine", re.compile(r"\bcash\s+machine\b", re.IGNORECASE)),
 )
+
+#: What came of a row that a source says is a cash movement, in the order each is decided.
+LEG = "leg"
+PENDING = "pending"
+WRONG_WAY = "wrong way"
+DISAGREED = "disagreed"
+NOT_STATED = "not stated"
 
 
 @dataclass(frozen=True)
@@ -92,48 +142,157 @@ def choose_cash_account(records: Iterable[AccountRecord]) -> CashAccountChoice:
     open_records = [r for r in records if r.closed is None]
     cash = [r for r in open_records if is_cash_account(r.kind)]
     plain = [r for r in open_records if r.kind.strip().casefold() == BALANCE_ONLY_KIND]
-    return CashAccountChoice(
-        cash[0].ref if len(cash) == 1 else None, len(cash), len(plain)
+    return CashAccountChoice(cash[0].ref if len(cash) == 1 else None, len(cash), len(plain))
+
+
+@dataclass(frozen=True)
+class Judgement:
+    """What the stated words make of one row: which movement, and what the rule does with it."""
+
+    #: WITHDRAWAL or DEPOSIT, or "" where no deciding source states one.
+    movement: str
+    #: LEG, or why there is none.
+    outcome: str
+    #: "feed" or "aggregator": the source whose statement decided, or "" where none did.
+    decided_by: str = ""
+    #: The two statements that exclude each other, or "".
+    disagreement: str = ""
+
+
+Words = set[tuple[str, str]]
+
+
+def by_kind(words: Mapping[str, Sequence[tuple[str, str]]]) -> tuple[Words, Words]:
+    """The words the bank's feed stated and the words the aggregator stated, each once."""
+    feed: Words = set()
+    aggregator: Words = set()
+    for source, stated in words.items():
+        if source in FIRST_PARTY_FEEDS:
+            feed.update(stated)
+        elif source in AGGREGATORS:
+            aggregator.update(stated)
+    return feed, aggregator
+
+
+def judge(
+    words: Mapping[str, Sequence[tuple[str, str]]],
+    *,
+    has_feed: bool,
+    amount_minor: int,
+    pending: bool,
+) -> Judgement:
+    """What the words a row's sources stated make of it, by the precedence in the module text.
+
+    `has_feed` is whether the row's account has the bank's own feed, which decides who is asked.
+    """
+    feed, aggregator = by_kind(words)
+    movement = ""
+    decided_by = ""
+    if has_feed:
+        for kind, word in FEED_WORDS.items():
+            if word in feed:
+                movement, decided_by = kind, "feed"
+                break
+    elif AGGREGATOR_CASH in aggregator:
+        movement, decided_by = (WITHDRAWAL if amount_minor < 0 else DEPOSIT), "aggregator"
+    if not movement:
+        return Judgement("", NOT_STATED)
+    disagreement = _disagreement(decided_by, feed, aggregator)
+    if disagreement:
+        return Judgement(movement, DISAGREED, decided_by, disagreement)
+    if (movement == WITHDRAWAL) != (amount_minor < 0):
+        return Judgement(movement, WRONG_WAY, decided_by)
+    if pending:
+        return Judgement(movement, PENDING, decided_by)
+    return Judgement(movement, LEG, decided_by)
+
+
+def aggregator_excludes_cash_machine(aggregator: Words) -> str:
+    """The aggregator's category that says a payment is not a cash machine, or ""."""
+    found = sorted(
+        word
+        for field, word in aggregator
+        if field == AGGREGATOR_CASH[0] and word in EXCLUDING_AGGREGATOR_KINDS
     )
+    return found[0] if found else ""
 
 
-def is_statement_source(source: str) -> bool:
-    """Whether this source gives items with coded fields to read."""
-    return source in FIRST_PARTY_FEEDS or source in AGGREGATORS
+def feed_excludes_cash(feed: Words) -> str:
+    """The feed's own word that says a payment is not cash, as "field word", or ""."""
+    found = sorted(
+        f"{field} {word}" for field, word in feed if (field, word) in EXCLUDING_FEED_WORDS
+    )
+    return found[0] if found else ""
 
 
-def coded_words(source: str, raw: Mapping[str, object]) -> list[tuple[str, str]]:
-    """Every (field, value) the item states in a coded field, a list-valued field word by word."""
-    found: list[tuple[str, str]] = []
-    for name in CODED_FIELDS.get(source, ()):
-        value = raw.get(name)
-        values = value if isinstance(value, list) else [value]
-        found.extend((name, v.strip()) for v in values if isinstance(v, str) and v.strip())
-    return found
+def _disagreement(decided_by: str, feed: Words, aggregator: Words) -> str:
+    """The other source's statement that excludes the deciding one's, or ""."""
+    if decided_by != "feed":
+        return ""
+    excluding = aggregator_excludes_cash_machine(aggregator)
+    return f"{FEED_WORDS[WITHDRAWAL][0]} {FEED_WORDS[WITHDRAWAL][1]} against " \
+        f"{AGGREGATOR_CASH[0]} {excluding}" if excluding else ""
 
 
-def says_cash_machine(source: str, raw: Mapping[str, object]) -> list[tuple[str, str]]:
-    """The candidate words this source's item states; empty where it does not say a cash machine."""
-    wanted = {(f, v.casefold()) for f, v in CANDIDATE_WORDS.get(source, ())}
-    return [(f, v) for f, v in coded_words(source, raw) if (f, v.casefold()) in wanted]
+def has_first_party_feed(store: Store, account: str) -> bool:
+    """Whether any stored transaction of the account was sighted by the bank's own feed."""
+    marks = ",".join("?" for _ in FIRST_PARTY_FEEDS)
+    row = store.connection.execute(
+        "SELECT 1 FROM transactions t JOIN transaction_sources s ON s.entity_id = t.entity_id "  # noqa: S608
+        f"WHERE t.account_id = ? AND s.source IN ({marks}) LIMIT 1",
+        (account, *sorted(FIRST_PARTY_FEEDS)),
+    ).fetchone()
+    return row is not None
 
 
-def kind_word(source: str, raw: Mapping[str, object]) -> tuple[str, str] | None:
-    """The (field, value) this item states for its kind of payment, or None where it states none."""
-    name = KIND_FIELD.get(source)
-    for field_name, value in coded_words(source, raw):
-        if field_name == name:
-            return field_name, value
-    return None
+@dataclass(frozen=True)
+class Reading:
+    """One stored transaction a source states a cash word for, and what the rule makes of it."""
+
+    row: Transaction
+    #: Source -> (field, word) each of its sightings stated, each once.
+    words: Mapping[str, Sequence[tuple[str, str]]]
+    has_feed: bool
+    judgement: Judgement
+
+
+def read_candidates(store: Store, cash_account: str | None) -> list[Reading]:
+    """Every stored transaction, not history, some source states a cash word for, judged.
+
+    THE ONE READER of what the rule and its measurement are made of, so the measurement says N
+    and the rule makes exactly N. One indexed read finds the entities (`entities_stating`);
+    nothing else in the store is read, which is what keeps the pass in proportion to the cash
+    movements held and not to the rows. The cash account's own rows are never candidates.
+    """
+    entities = store.entities_stating(CANDIDATE_WORDS)
+    rows = [
+        t
+        for t in store.transactions_for_entities(entities)
+        if not t.status.is_history and t.account_id != cash_account and t.source != CASH_LEG_SOURCE
+    ]
+    stated = store.stated_words_for_entities(t.entity_id for t in rows)
+    has_feed: dict[str, bool] = {}
+    readings: list[Reading] = []
+    for row in sorted(rows, key=lambda t: (t.value_date, t.entity_id)):
+        if row.account_id not in has_feed:
+            has_feed[row.account_id] = has_first_party_feed(store, row.account_id)
+        words = stated.get(row.entity_id, {})
+        readings.append(
+            Reading(
+                row,
+                words,
+                has_feed[row.account_id],
+                judge(
+                    words,
+                    has_feed=has_feed[row.account_id],
+                    amount_minor=row.amount_minor,
+                    pending=row.status is TransactionStatus.PENDING,
+                ),
+            )
+        )
+    return readings
 
 
 def description_patterns(description: str) -> list[str]:
     """The names of the guesses a description matches."""
     return [name for name, pattern in DESCRIPTION_PATTERNS if pattern.search(description)]
-
-
-def states_foreign_currency(raw: Mapping[str, object]) -> bool:
-    """Whether a feed item states an original amount in a currency other than sterling."""
-    original = raw.get("sourceAmount")
-    currency = original.get("currency") if isinstance(original, Mapping) else None
-    return isinstance(currency, str) and bool(currency) and currency.upper() != "GBP"

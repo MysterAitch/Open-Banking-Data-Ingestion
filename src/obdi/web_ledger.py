@@ -29,7 +29,7 @@ from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .errors import DataError
 from .feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
-from .join_basis import COUNT_LABELS, count_sentence, how_words, moment_text
+from .join_basis import COUNT_LABELS, count_sentence, how_words, moment_text, word_text
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,
@@ -279,6 +279,8 @@ def _sighting_line(sighting: Any) -> str:
         f"{_esc(moment.field)} {_esc(moment_text(moment))}" for moment in sighting.moments
     )
     tail = f": {stated}" if stated else ""
+    if sighting.words:
+        tail += f"{'; ' if stated else ': '}says {_esc(word_text(sighting.words))}"
     return f'<p class="muted"><strong>{_esc(sighting.source)}</strong> - {_esc(how)}{tail}</p>'
 
 

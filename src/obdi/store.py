@@ -23,7 +23,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -59,6 +59,7 @@ from .namespaces import (
 from .payment_links import stated_link_of
 from .plural import plural
 from .stated_times import recorded_for
+from .stated_words import recorded_words
 
 #: Bumped whenever SCHEMA changes or a migration must run again. It is
 #: the ONLY thing that makes an open do work, so a store at this version
@@ -98,7 +99,10 @@ from .stated_times import recorded_for
 #:
 #: 16 -> 17: the one-row `standing_epoch` table and the triggers that move it (see EPOCH_TABLES).
 #: A store stamped 16 has neither, and only an open that does work creates them.
-SCHEMA_VERSION = 17
+#:
+#: 17 -> 18: the `sighting_words` table, likewise: a new table needs no migration, but a store
+#: stamped 17 would never have grown it. It is derived, and the rebuild every deploy runs fills it.
+SCHEMA_VERSION = 18
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -545,6 +549,21 @@ CREATE TABLE IF NOT EXISTS sighting_times (
     PRIMARY KEY (entity_id, source, artefact_digest, field)
 );
 
+-- Every coded word a source stated for a payment (its kind, subtype, category, and the like), one
+-- record per word of each sighting (`stated_words` says which fields are read and from which
+-- sources). A field may state several words (an aggregator's classification is a list), so the
+-- word is part of the key. DERIVED: a rebuild empties it and replays it from the raw artefacts.
+-- Keyed on the sighting exactly as sighting_times is.
+CREATE TABLE IF NOT EXISTS sighting_words (
+    entity_id       TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    artefact_digest TEXT NOT NULL,
+    field           TEXT NOT NULL,
+    word            TEXT NOT NULL,
+    PRIMARY KEY (entity_id, source, artefact_digest, field, word)
+);
+CREATE INDEX IF NOT EXISTS ix_sighting_words_word ON sighting_words(field, word);
+
 -- A stated balance a person removed: when, and the figure it held. Kept so one removed by
 -- mistake can be read back on the values view and stated again; the figure is as private as
 -- the valuation it came from. Never read by a standing: the removal itself is a write to
@@ -616,6 +635,11 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "rebuild_runs": (
         "the history of rebuilds and their timings; the rows a rebuild rewrites are "
         "classified in their own tables"
+    ),
+    "sighting_words": (
+        "the coded kinds a source stated, read by the cash transfer rule and the sighting's "
+        "disclosure; the rule's own writes are to transactions and transfer_pairs, which move "
+        "the epoch, and no standing reads a word"
     ),
     "removed_stated_balances": (
         "the record of balances a person removed, read only by the values view; the removal "
@@ -723,6 +747,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'review_queue': ['created_at', 'entity_id', 'reason', 'resolved_at'],
     'same_money_outcomes': ['account', 'outcome'],
     'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
+    'sighting_words': ['artefact_digest', 'entity_id', 'field', 'source', 'word'],
     'standing_epoch': ['epoch', 'id'],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
@@ -879,6 +904,8 @@ class SightingDetail:
     copy: bool
     #: (field, stated text, kind, zone) for each date or instant the sighting stated.
     moments: list[tuple[str, str, str, str]]
+    #: (field, word) for each coded word the sighting stated (`stated_words`).
+    words: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -889,6 +916,7 @@ class _WriteBatch:
     upserts: list[tuple[object, ...]] = field(default_factory=list)
     sightings: list[tuple[object, ...]] = field(default_factory=list)
     times: list[tuple[object, ...]] = field(default_factory=list)
+    words: list[tuple[object, ...]] = field(default_factory=list)
     reviews: list[tuple[object, ...]] = field(default_factory=list)
     #: (kept, absorbed) pairs, applied last: the rows they name may be written by this batch.
     absorptions: list[tuple[str, str]] = field(default_factory=list)
@@ -972,6 +1000,12 @@ _RECORD_TIME_SQL = """
         (entity_id, source, artefact_digest, field, stated, kind, zone)
     VALUES (?,?,?,?,?,?,?)
     ON CONFLICT(entity_id, source, artefact_digest, field) DO NOTHING
+"""
+
+_RECORD_WORD_SQL = """
+    INSERT INTO sighting_words (entity_id, source, artefact_digest, field, word)
+    VALUES (?,?,?,?,?)
+    ON CONFLICT(entity_id, source, artefact_digest, field, word) DO NOTHING
 """
 
 _QUEUE_REVIEW_SQL = (
@@ -1730,6 +1764,8 @@ class Store:
             self.connection.executemany(_RECORD_SOURCE_SQL, batch.sightings)
         if batch.times:
             self.connection.executemany(_RECORD_TIME_SQL, batch.times)
+        if batch.words:
+            self.connection.executemany(_RECORD_WORD_SQL, batch.words)
         if batch.reviews:
             self.connection.executemany(_QUEUE_REVIEW_SQL, batch.reviews)
         for kept, absorbed in batch.absorptions:
@@ -1884,6 +1920,22 @@ class Store:
             "SELECT * FROM transactions WHERE account_id = ?", (account_id,)
         ).fetchall()
         return [_row_to_transaction(row) for row in rows]
+
+    def transactions_for_entities(self, entities: Iterable[str]) -> list[Transaction]:
+        """The stored transactions with these entity ids, in the order of their ids."""
+        names = sorted(set(entities))
+        found: list[Transaction] = []
+        for start in range(0, len(names), 400):
+            chunk = names[start : start + 400]
+            marks = ",".join("?" for _ in chunk)
+            found.extend(
+                _row_to_transaction(row)
+                for row in self.connection.execute(
+                    f"SELECT * FROM transactions WHERE entity_id IN ({marks})",  # noqa: S608
+                    chunk,
+                )
+            )
+        return sorted(found, key=lambda t: t.entity_id)
 
     def all_transactions(self) -> list[Transaction]:
         """Every stored transaction, with pairing confirmations applied.
@@ -3157,12 +3209,24 @@ class Store:
             )
             for stated in recorded_for(transaction)
         ]
+        words = [
+            (
+                transaction.entity_id,
+                transaction.source,
+                transaction.artefact_digest,
+                name,
+                word,
+            )
+            for name, word in recorded_words(transaction)
+        ]
         if self._batch is not None:
             self._batch.sightings.append(params)
             self._batch.times.extend(times)
+            self._batch.words.extend(words)
             return
         self.connection.execute(_RECORD_SOURCE_SQL, params)
         self.connection.executemany(_RECORD_TIME_SQL, times)
+        self.connection.executemany(_RECORD_WORD_SQL, words)
 
     def stated_times_for(self, entity_id: str) -> list[dict[str, str]]:
         """Every moment each source stated for this stored row, in a stable order.
@@ -3251,6 +3315,56 @@ class Store:
                 found.setdefault(key[0], []).append(sighting)
             if row[5] is not None:
                 sighting.moments.append((str(row[5]), str(row[6]), str(row[7]), str(row[8])))
+        for row in self.connection.execute(
+            "SELECT w.entity_id, w.source, w.artefact_digest, w.field, w.word "
+            "FROM sighting_words w JOIN transactions x ON x.entity_id = w.entity_id "
+            "WHERE x.account_id = ? ORDER BY w.field, w.word",
+            (account_id,),
+        ):
+            owner = position.get((str(row[0]), str(row[1]), str(row[2])))
+            if owner is not None:
+                owner.words.append((str(row[3]), str(row[4])))
+        return found
+
+    def stated_words_for_entities(
+        self, entities: Iterable[str]
+    ) -> dict[str, dict[str, list[tuple[str, str]]]]:
+        """Entity -> source -> every (field, word) that source's sightings stated, each once.
+
+        The one read of the words, for every rule and measurement that needs what a payment's
+        sources said of its kind. Asked in chunks, so a store of any size is read in
+        proportion to the entities named.
+        """
+        found: dict[str, dict[str, list[tuple[str, str]]]] = {}
+        names = sorted(set(entities))
+        for start in range(0, len(names), 400):
+            chunk = names[start : start + 400]
+            marks = ",".join("?" for _ in chunk)
+            for row in self.connection.execute(
+                "SELECT DISTINCT entity_id, source, field, word FROM sighting_words "  # noqa: S608
+                f"WHERE entity_id IN ({marks}) ORDER BY entity_id, source, field, word",
+                chunk,
+            ):
+                found.setdefault(str(row[0]), {}).setdefault(str(row[1]), []).append(
+                    (str(row[2]), str(row[3]))
+                )
+        return found
+
+    def entities_stating(self, words: Iterable[tuple[str, str]]) -> set[str]:
+        """The entities some sighting stated any of these (field, word) pairs for.
+
+        One indexed read (`ix_sighting_words_word`), so its cost is the rows that state
+        the words and not the rows the store holds.
+        """
+        found: set[str] = set()
+        for name, word in words:
+            found.update(
+                str(row[0])
+                for row in self.connection.execute(
+                    "SELECT DISTINCT entity_id FROM sighting_words WHERE field = ? AND word = ?",
+                    (name, word),
+                )
+            )
         return found
 
     def bases_by_entity(self, account_id: str) -> dict[str, list[tuple[str, str, str]]]:

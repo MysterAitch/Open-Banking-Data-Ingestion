@@ -82,10 +82,11 @@ if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
 
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
-#: review flags, the two annotation kinds, and the one read of every sighting's basis
-#: and stated dates (`join_basis`). An account with no rows adds
+#: review flags, the two annotation kinds, the one read of every sighting's basis
+#: and stated dates (`join_basis`), and the one read of the coded words its sources stated.
+#: An account with no rows adds
 #: the registry lookup that tells "declared but empty" from "unknown".
-QUERIES_PER_PAGE = 10
+QUERIES_PER_PAGE = 11
 
 #: Statements issued to look for the account's opening-balance anchors when it
 #: has no TrueLayer records and no held statements: the stated balances, the

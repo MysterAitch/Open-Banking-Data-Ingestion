@@ -166,6 +166,11 @@ JUSTIFIED = {
     "by the source's own id, to prove the schema-16 migration replaces that table: no current "
     "writer can produce the old shape, and the migration is reachable only on a real store "
     "at upgrade time",
+    ("test_sighting_words.py", "obdi_meta"): "stamps a store with the version BEFORE the "
+    "sighting_words table existed, for the same reason as the entries above",
+    ("test_sighting_words.py", "sighting_words"): "drops the table a store stamped at the "
+    "version before it never had, so opening it must grow the table: no current writer can "
+    "produce a store without it",
     ("test_standing_epoch.py", "obdi_meta"): "stamps a store with the version BEFORE the "
     "standing_epoch table and its triggers existed, for the same reason as the entries "
     "above: only a rewound marker shows that opening an old store grows what every later "

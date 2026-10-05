@@ -72,6 +72,26 @@ class StatedMoment:
     zone: Structural[str]
 
 
+@dataclass(frozen=True)
+class StatedWord:
+    """One coded word a source stated, as it was stated: its kind of payment, not a value."""
+
+    field: Structural[str]
+    word: Structural[str]
+
+
+def word_text(words: Iterable[StatedWord]) -> str:
+    """The words a sighting stated, one phrase per field in the order given.
+
+    A free function because a record reached through `masking.Disclosed` exposes its fields
+    and nothing else.
+    """
+    by_field: dict[str, list[str]] = {}
+    for stated in words:
+        by_field.setdefault(stated.field, []).append(stated.word)
+    return ", ".join(f"{name} {' / '.join(found)}" for name, found in by_field.items())
+
+
 def moment_text(moment: StatedMoment) -> str:
     """The moment in London time where it is an instant, and as stated where it is a date.
 
@@ -103,12 +123,14 @@ class SightingView:
     #: Placed on a Space row by a fold; its source's statements are on the row copied from.
     copy: Structural[bool]
     moments: Structural[tuple[StatedMoment, ...]]
-    #: Later sightings that stated exactly these moments, folded into this view.
+    #: Later sightings that stated exactly these moments and words, folded into this view.
     repeats: Structural[int] = 0
     #: The basis those later sightings joined on, and "" where it was not one basis throughout.
     repeats_basis: Structural[str] = ""
     #: What this view stated that the same source's previous view did not, or "".
     change: Structural[str] = ""
+    #: The coded words the sighting stated, in field order (`stated_words`).
+    words: Structural[tuple[StatedWord, ...]] = ()
 
 
 def how_words(view: SightingView) -> str:
@@ -200,6 +222,7 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
         moments = _in_event_order(
             StatedMoment(field, stated, kind, zone) for field, stated, kind, zone in detail.moments
         )
+        words = tuple(StatedWord(field, word) for field, word in detail.words)
         same_source = [v for v in views if (v.source, v.copy) == (detail.source, detail.copy)]
         again = next(
             (
@@ -207,6 +230,7 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
                 for position, view in enumerate(views)
                 if view in same_source
                 and view.moments == moments
+                and view.words == words
                 and detail.basis in (view.basis, BASIS_OWN_ID)
             ),
             None,
@@ -228,6 +252,7 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
                 copy=detail.copy,
                 moments=moments,
                 change=change,
+                words=words,
             )
         )
     return tuple(views)

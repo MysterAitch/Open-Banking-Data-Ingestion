@@ -108,6 +108,13 @@ MANUAL_SOURCES = frozenset({MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE})
 #: is not in SOURCES: no query over raw evidence can meet it.
 UNITEMISED_SOURCE = "unitemised"
 
+#: The `source` of the leg the cash account holds for a cash withdrawal or deposit made in
+#: another account (`cash_transfers`). It is DERIVED from a row that is evidence, stored so that
+#: every reader sees an ordinary row, rebuilt on every rebuild, and listed by no source: it is
+#: not in SOURCES, so no query over raw evidence can meet it, and `cash_transfers` says where
+#: it is excluded from the counts of rows a source lists.
+CASH_LEG_SOURCE = "cash-leg"
+
 #: Every value that may appear in raw_artefacts.source or
 #: fetch_attempts.source.
 SOURCES = API_SOURCES | FILE_SOURCES | MANUAL_SOURCES
@@ -293,6 +300,7 @@ ENTITY_KEYED_TABLES: dict[str, tuple[str, ...]] = {
     "transactions": ("entity_id", "matched_entity_id"),
     "transaction_sources": ("entity_id",),
     "sighting_times": ("entity_id",),
+    "sighting_words": ("entity_id",),
     "review_queue": ("entity_id",),
     "annotations": ("entity_id",),
     "events": ("entity_id",),

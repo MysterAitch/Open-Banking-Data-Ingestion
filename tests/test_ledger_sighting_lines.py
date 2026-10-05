@@ -48,6 +48,8 @@ MADE = "transactionTime 2026-09-14 11:00"
 SETTLEMENT = "settlementTime 2026-09-15 04:00"
 FIRST = "updatedAt 2026-09-15 06:30"
 SECOND = "updatedAt 2026-09-16 09:15"
+#: The coded words the feed states, said after the stated times, by field name.
+SAYS = "; says amount.currency GBP, direction OUT, source MASTER_CARD, status SETTLED"
 
 
 @pytest.fixture
@@ -89,7 +91,7 @@ class TestTheFeedFetchedAgain:
         fetch(bare, 1)
 
         assert lines_of(page_of(bare), "starling") == [
-            f"founded this row: {MADE}, {SETTLEMENT}, {FIRST}"
+            f"founded this row: {MADE}, {SETTLEMENT}, {FIRST}{SAYS}"
         ]
 
     def test_Row_WhenFetchedSixTimesIdentically_HasOneLineCountingTheFiveLaterFetches(self, bare):
@@ -98,7 +100,7 @@ class TestTheFeedFetchedAgain:
 
         assert lines_of(page_of(bare), "starling") == [
             "founded this row, sighted again by its own id in 5 later fetches: "
-            f"{MADE}, {SETTLEMENT}, {FIRST}"
+            f"{MADE}, {SETTLEMENT}, {FIRST}{SAYS}"
         ]
 
     def test_Row_WhenFetchedTwice_SaysOneLaterFetchInTheSingular(self, bare):
@@ -114,10 +116,10 @@ class TestTheFeedFetchedAgain:
         fetch(bare, 3, settled=True, touch=SECOND_TOUCH)
 
         assert lines_of(page_of(bare), "starling") == [
-            f"founded this row: {MADE}, {FIRST}",
+            f"founded this row: {MADE}, {FIRST}{SAYS}",
             "the same source's own id again (settlementTime appeared; updatedAt moved from "
             "2026-09-15 06:30 to 2026-09-16 09:15), sighted again by its own id in 1 later "
-            f"fetch: {MADE}, {SETTLEMENT}, {SECOND}",
+            f"fetch: {MADE}, {SETTLEMENT}, {SECOND}{SAYS}",
         ]
 
     def test_Row_WhenAReFetchStopsStatingAField_SaysItIsNoLongerStated(self, bare):
@@ -144,7 +146,7 @@ class TestTheAggregatorFetchedAgain:
 
         assert lines_of(page_of(bare), "truelayer") == [
             "joined to the row by id, sighted again by its own id in 2 later fetches: "
-            "timestamp 2026-09-14 11:00"
+            "timestamp 2026-09-14 11:00; says currency GBP, transaction_type DEBIT"
         ]
 
 
