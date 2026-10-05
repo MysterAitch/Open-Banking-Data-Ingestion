@@ -152,7 +152,7 @@ class FetchReport:
     accounts: tuple[AccountOutlook, ...]
     today: date
     #: What the owner's decisions took out of the lists above, and the decisions themselves.
-    marks: MarkSet = MarkSet()
+    marks: MarkSet = field(default_factory=MarkSet)
     set_aside: tuple[SetAside, ...] = ()
     out_of_scope: tuple[OutOfScope, ...] = ()
     #: Each account's first known balance, for the page to say a scope leaves it standing.

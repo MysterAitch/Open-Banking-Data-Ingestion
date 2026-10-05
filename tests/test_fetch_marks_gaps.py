@@ -20,7 +20,8 @@ Known answers, decided before the first run (over `fetch_marks_world`, TODAY 202
 from __future__ import annotations
 
 import pytest
-from fetch_gaps_world import D, TODAY
+
+from fetch_gaps_world import TODAY, D
 from fetch_marks_world import (
     add_feed_rows_in_virgin_hole,
     household,
@@ -157,8 +158,8 @@ class TestKnownGapIsAnAcknowledgement:
 
 class TestTodayAndThePageReadOneAnswer:
     def items(self, db, marks):
-        from obdi.fetch_marks import period_is_set_aside
         from obdi.fetch_gaps import STATEMENT_SOURCES
+        from obdi.fetch_marks import period_is_set_aside
 
         return standing_items_from(
             standings_of(db), lambda ref: ref, lambda ref: False, TODAY,
@@ -288,7 +289,7 @@ class TestAScopeTrimsWhatIsLookedFor:
 
         assert report_with(db, marks_read(db)).gaps == before.gaps
 
-    def test_Report_WhenTheFirstKnownBalanceIsBeforeTheScope_TheReportCarriesItAndTheStandingIsUnchanged(
+    def test_Report_WhenTheFirstKnownBalanceIsBeforeTheScope_StandingIsUnchangedAndReportCarriesIt(
         self, db
     ):
         before = standings_of(db)

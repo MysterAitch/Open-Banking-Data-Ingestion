@@ -1,4 +1,4 @@
-"""The household `/gaps` is tested over, with the decisions about it made through the module's doors.
+"""The household `/gaps` is tested over, with decisions about it made through the module's doors.
 
 `TODAY` is 2026-10-05 and nothing reads a clock. The gaps are those `fetch_gaps_world` decides;
 this adds the evidence a mark is weighed against, each with its answer decided first:

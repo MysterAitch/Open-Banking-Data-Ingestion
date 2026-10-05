@@ -6,13 +6,14 @@ import sqlite3
 from datetime import date
 
 import pytest
-from fetch_gaps_world import D, TODAY, Household
+
+from fetch_gaps_world import TODAY, D, Household
 from fetch_marks_world import (
-    april_statement,
     add_feed_rows_in_virgin_hole,
+    april_statement,
     household,
-    marks_read,
     mark,
+    marks_read,
     report_with,
 )
 from obdi.fetch_gaps import GapKind
@@ -55,8 +56,8 @@ class TestNothingToFetchIsWeighedAgainstEveryRow:
         assert reading.evidence.chain is True
 
     def test_Mark_WhenTheStatementsEitherSideDoNotJoin_IsStillSupportedButSaysSo(self):
-        from obdi.fetch_marks import MarkWorld, StatementFact, gather_evidence, judge
         from obdi.fetch_gaps import STATEMENT_SOURCES
+        from obdi.fetch_marks import MarkWorld, StatementFact, gather_evidence, judge
 
         world = MarkWorld(statements={"a": (
             StatementFact(D(2026, 1, 31), D(2026, 1, 1), 100, 400, "p"),

@@ -843,13 +843,14 @@ def reach_offers(
     unasked: list[NotAsked] = []
     for account, reach in sorted(world.reach.items()):
         own = [d for d, src in world.rows.get(account, ()) if src.startswith(AGGREGATOR)]
-        if not own or account in marked:
+        if not own or account in marked or world.declared.get(account, (None, None))[1]:
             continue
         earliest = min(own)
         if reach.boundary is not None or (
             reach.asked_back_to is not None and reach.asked_back_to < earliest
         ):
-            offers.append(ReachOffer(account, AGGREGATOR, earliest - timedelta(days=1), earliest, reach))
+            before = earliest - timedelta(days=1)
+            offers.append(ReachOffer(account, AGGREGATOR, before, earliest, reach))
         else:
             unasked.append(NotAsked(account, earliest))
     return tuple(offers), tuple(unasked)
@@ -1030,7 +1031,7 @@ def marks_for_account(
     store: Store, account: str, today: date, *, world: MarkWorld | None = None,
     statement_sources: frozenset[str] | None = None,
 ) -> tuple[TimelineMark, ...]:
-    """The account's marks with their kind, dates, source, and standing, for the timeline to draw."""
+    """The account's marks with kind, dates, source, and standing, for the timeline to draw."""
     if statement_sources is None:
         from .fetch_gaps import STATEMENT_SOURCES
 

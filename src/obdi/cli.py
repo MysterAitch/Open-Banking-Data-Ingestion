@@ -64,7 +64,14 @@ from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
-from .fetch_gaps import FetchEvidence, FetchReport, fetch_report, gather_evidence
+from .fetch_gaps import (
+    STATEMENT_SOURCES,
+    FetchEvidence,
+    FetchReport,
+    fetch_report,
+    gather_evidence,
+)
+from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .known_accounts import (
     DeclareOutcome,
@@ -3199,6 +3206,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
         fetch_evidence_key, name="fetch evidence", epoch=rebuild_epoch
     )
+    # Held on the same key: every write a decision reads moves the standing epoch inside it.
+    mark_world_memo: KeyedMemo[MarkWorld] = KeyedMemo(
+        fetch_evidence_key, name="mark world", epoch=rebuild_epoch
+    )
+
+    def mark_world(store: Store) -> MarkWorld:
+        return mark_world_memo.get(
+            store, lambda: gather_world(store, aliases_of=_evidence_aliases)
+        )
 
     def fetch_gaps_report(today: date) -> FetchReport:
         """The files still to fetch. The walk of the store is held with the standings' own key,
@@ -3208,7 +3224,27 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         standings = account_standings()
         with Store(db_path) as store:
             evidence = fetch_evidence_memo.get(store, lambda: gather_evidence(store))
-        return fetch_report(evidence, standings, today)
+            decisions = read_marks(
+                store, mark_world(store), today, statement_sources=STATEMENT_SOURCES
+            )
+        return fetch_report(evidence, standings, today, decisions)
+
+    def fetch_marks_read(today: date) -> tuple[MarkWorld, MarkSet]:
+        """The owner's decisions about the files to fetch, and what they are weighed against.
+
+        Raises `RebuildInProgress` while a rebuild holds the layer."""
+        require_idle(db_path)
+        with Store(db_path) as store:
+            world = mark_world(store)
+            return world, read_marks(store, world, today, statement_sources=STATEMENT_SOURCES)
+
+    def fetch_marks_write(action: Callable[[Store, MarkWorld], str]) -> str:
+        """Run one write of a decision against the store and its world; its sentence comes back.
+
+        Raises `RebuildInProgress` while a rebuild holds the layer."""
+        require_idle(db_path)
+        with Store(db_path) as store:
+            return action(store, mark_world(store))
 
     def warm_memos() -> None:
         """Work out both memos, so the first person after a start does not pay for them.
@@ -4283,6 +4319,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         typed_withdraw=typed_withdraw,
         account_standings=account_standings,
         fetch_gaps=fetch_gaps_report,
+        fetch_marks_read=fetch_marks_read,
+        fetch_marks_write=fetch_marks_write,
         warm=warm_memos,
         protect=protect,
         protect_withdraw=protect_withdraw,
