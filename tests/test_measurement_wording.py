@@ -15,7 +15,7 @@ import json
 import re
 
 from consecutive_days_corpus import consecutive_payments
-from late_settlement_corpus import household
+from late_settlement_corpus import ORDERS, household
 from obdi import rebuild
 from obdi.exact_rule_measure import exact_rule_report
 from obdi.page_words import INTERNAL_ON_PAGES
@@ -23,6 +23,7 @@ from obdi.providers import starling
 from obdi.store import Store
 from round_up_corpus import card_payment
 from test_absorbed_rows import arrive
+from test_cash_withdrawal_measure import measured
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_page_wording_emphasis import ACRONYMS, SHOUTING
 from test_page_wording_times import CLOCK_WITH_ZONE_SUFFIX, ISO_INSTANT
@@ -77,4 +78,30 @@ class TestTheMeasurementReadsLikeThePage:
         text = declined_text(tmp_path, monkeypatch)
 
         assert "DECLINED: 2, dated" in text
+        assert offences(text) == []
+
+    def test_CashWithdrawals_WhenRenderedOverTheHousehold_UseNoRetiredWordOrShout(self, tmp_path):
+        text = measured(tmp_path, ORDERS[0]).describe()
+
+        assert "cash withdrawals by what a source states" in text
+        assert offences(text) == []
+
+    def test_CashWithdrawals_WhenOneOfEachCountIsOne_ReadAsSingularSentences(self, tmp_path):
+        with Store(tmp_path / "one.sqlite3") as store:
+            land_evidence(store)
+            arrive(
+                store,
+                starling.artefact_for(
+                    json.dumps(
+                        {"feedItems": [card_payment("f-1", "Shop", 100, 3, sourceSubType="ATM")]}
+                    ).encode(),
+                    account_id="starling:cat-main",
+                    kind="feed",
+                    origin=f"{FEED_ORIGIN}?changesSince=2026-09-02T00:00:00Z",
+                ),
+            )
+            text = exact_rule_report(store, MAP).describe()
+
+        assert "1 stored transaction that is not history is a cash withdrawal" in text
+        assert "(s)" not in text
         assert offences(text) == []

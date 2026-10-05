@@ -69,9 +69,27 @@ AccountRef = NewType("AccountRef", str)
 BALANCE_ONLY_KIND = "balance-only"
 
 
+#: The kind of a balance-only account that is also where cash taken from a cash machine goes.
+#: A kind holds one word, and the cash account is balance-only (a purse has no feed), so the
+#: designation is a second kind that is balance-only too, and not a second field: the registry
+#: file, the export, the backup, a rebind, and the account's edit page already carry a kind,
+#: and the store's schema is not changed for a designation. Rejected: matching the label or
+#: the reference (a rename would move cash), the `parent` field (it says a Space belongs to an
+#: account and drives how Space rows are attributed), a key in `obdi_meta` (a fact about the
+#: file, not an account, so no registry file, export, or edit page would show it), and the
+#: existing `cash` kind, which the person chose as a word that "changes nothing" and which
+#: would take the account out of its stated-balance reading.
+CASH_ACCOUNT_KIND = "cash-balance-only"
+
+
 def is_balance_only(kind: str) -> bool:
     """Whether a declared kind says the account is tracked by its stated balances."""
-    return kind.strip().casefold() == BALANCE_ONLY_KIND
+    return kind.strip().casefold() in (BALANCE_ONLY_KIND, CASH_ACCOUNT_KIND)
+
+
+def is_cash_account(kind: str) -> bool:
+    """Whether a declared kind says this is the account cash from a cash machine goes to."""
+    return kind.strip().casefold() == CASH_ACCOUNT_KIND
 
 
 #: Says what the identifier is when one turns up in a log line or a URL.

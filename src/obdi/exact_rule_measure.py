@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from .accounts import AccountMap
+from .cash_withdrawal_measure import CashWithdrawalReport, cash_withdrawal_report
 from .feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
 from .matching import (
     REFUSALS,
@@ -330,6 +331,8 @@ class ExactRuleReport:
     unreadable: int = 0
     #: Per account, the pairs of stored rows an exact rule would join (`pair_figures`).
     pairs: list[PairFigures] = field(default_factory=list)
+    #: The cash withdrawals a source states (`cash_withdrawal_measure`); None where not read.
+    cash: CashWithdrawalReport | None = None
 
     def describe(self) -> str:
         lines: list[str] = []
@@ -382,6 +385,13 @@ class ExactRuleReport:
         for found in self.pairs:
             lines.append(f"{found.account}:")
             lines.extend(f"  {sentence}" for sentence in found.sentences())
+        if self.cash is not None:
+            lines.append("")
+            lines.append(
+                "Stored transactions that are cash withdrawals by what a source states, read "
+                "from the landed artefacts and the stored transactions without changing them:"
+            )
+            lines.extend(f"  {sentence}" for sentence in self.cash.sentences())
         return "\n".join(lines)
 
 
@@ -622,6 +632,9 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     report.pairs = pair_figures(store, account_map)
     report.settlement = settlement_figures(store, account_map, landed)
     report.no_row_status = no_row_status_figures(store)
+    report.cash = cash_withdrawal_report(
+        store, store.declared_accounts(), feed=landed.feed, aggregator=landed.aggregator
+    )
     return report
 
 

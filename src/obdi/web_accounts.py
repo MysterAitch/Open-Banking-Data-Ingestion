@@ -35,6 +35,7 @@ from urllib.parse import quote
 
 from .accounts import (
     BALANCE_ONLY_KIND,
+    CASH_ACCOUNT_KIND,
     AccountRecord,
     AccountRef,
     ArchiveOutcome,
@@ -90,9 +91,9 @@ NEAR_ENOUGH = 0.8
 #: the moment somebody edited an unrelated field, so "other" carries the free text and an
 #: existing kind this list does not know is kept as it is.
 #:
-#: Only `balance-only` (`accounts.is_balance_only`) and `starling-space` (`spaces.SPACE_KIND`)
-#: are compared anywhere; `credit-card` is the kind `known_accounts` suggests for an account fed
-#: by card statements. The rest are names for the person, and say so.
+#: Only `balance-only` and `cash-balance-only` (`accounts.is_balance_only`) and `starling-space`
+#: (`spaces.SPACE_KIND`) are compared anywhere; `credit-card` is the kind `known_accounts`
+#: suggests for an account fed by card statements. The rest are names for the person, and say so.
 ACCOUNT_KINDS: tuple[tuple[str, str], ...] = (
     ("current-account", "An everyday account. The word is for you; it changes nothing."),
     ("savings", "A savings account. The word is for you; it changes nothing."),
@@ -111,6 +112,11 @@ ACCOUNT_KINDS: tuple[tuple[str, str], ...] = (
         "Tracked by the balances you state alone, such as a mortgage at another bank: the change "
         "between two known balances is counted as it happened instead of being reported as a "
         "failed check.",
+    ),
+    (
+        CASH_ACCOUNT_KIND,
+        "Tracked by the balances you state alone, as balance-only is, and named as the place cash "
+        "taken from a cash machine goes. Declare one account this way.",
     ),
     (
         "starling-space",

@@ -23,6 +23,9 @@ ACRONYMS = frozenset(
         *("ISO", "OCR", "QIF", "DEBIT", "CREDIT", "FASTER", "CARD", "OUT", "SETTLED", "PENDING"),
         # A status the bank states, named as data where a count of items is given by status.
         "DECLINED",
+        # Words a bank or an aggregator states in a coded field, named as data where the cash
+        # withdrawal measurement counts them (`cash_withdrawal_measure`).
+        *("ATM", "CASH", "PURCHASE", "GENERAL"),
     }
 )
 SHOUTING = re.compile(r"\b[A-Z]{3,}\b")
