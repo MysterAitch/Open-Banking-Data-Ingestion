@@ -132,6 +132,16 @@ def evidence_text(
                 if marked
                 else "Saying there were no transactions would disagree with what is held: "
             )
+            if not source and ev.between:
+                span = (
+                    f", from {ev.unlisted_first.isoformat()} to {ev.unlisted_last.isoformat()}"
+                    if ev.unlisted_first and ev.unlisted_last
+                    else ""
+                )
+                return (
+                    f"{lead}another source holds {plural(ev.unlisted, 'payment')} dated in it "
+                    f"that no statement held lists{span}."
+                )
             return f"{lead}{_listed(ev.by_source)} in it{_rows_span(ev)}."
         text = "No source lists a row in this period."
         if ev.chain is True:
@@ -543,7 +553,7 @@ def gap_actions_html(account: str, gap_source: str, gap_first: date, gap_last: d
 
 
 def _statement_sources() -> frozenset[str]:
-    from .fetch_gaps import STATEMENT_SOURCES
+    from .statement_span import STATEMENT_SOURCES
 
     return STATEMENT_SOURCES
 

@@ -120,13 +120,13 @@ class TestEachGapOffersTwoWaysToSetItAside:
 
     def test_Gap_WhenSplitByAMark_SaysWhatRemainsOfTheOriginal(self, db):
         mark(db, account="card-hole", kind="nothing-to-fetch",
-             first_day=D(2026, 3, 11), last_day=D(2026, 4, 10))
+             first_day=D(2026, 3, 11), last_day=D(2026, 3, 31))
 
         said = words(page(db).split('aria-label="Hole card"')[1].split("</section>")[0])
 
-        assert "2026-04-11 to 2026-05-09" in said
+        assert "2026-04-01 to 2026-04-10" in said
         assert (
-            "This is what remains of 2026-03-11 to 2026-05-09 after the part you set aside."
+            "This is what remains of 2026-03-11 to 2026-04-10 after the part you set aside."
         ) in said
 
 
@@ -142,9 +142,10 @@ class TestAContradictedMarkStandsOut:
         warned = markup.split('class="gaps-contradictions"')[1].split("</ul>")[0]
 
         assert markup.index("gaps-contradictions") < markup.index('class="gaps-account"')
-        assert "You marked this period as having no transactions; the aggregator lists 2 rows" in (
-            words(warned))
-        assert "from 2026-06-20 to 2026-07-01" in words(warned)
+        assert (
+            "You marked this period as having no transactions; another source holds 2 payments "
+            "dated in it that no statement held lists, from 2026-06-20 to 2026-07-01."
+        ) in words(warned)
         assert "The gap stays in the list until you change or remove the mark." in words(warned)
         assert "Hole Feed" not in markup, "counts and dates only"
 
@@ -178,7 +179,10 @@ class TestEvidenceWords:
         assert said.startswith(
             "Saying there were no transactions would disagree with what is held:"
         )
-        assert "the aggregator lists 2 rows in it, from 2026-06-20 to 2026-07-01" in said
+        assert (
+            "another source holds 2 payments dated in it that no statement held lists, "
+            "from 2026-06-20 to 2026-07-01"
+        ) in said
 
     def test_BeforeHistory_WhenNeverAsked_SaysNothingYetShowsItHoldsNone(self, db):
         said = self.evidence(db, "card-behind", "before-history", None, D(2026, 8, 1),

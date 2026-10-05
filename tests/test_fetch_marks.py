@@ -264,6 +264,29 @@ class TestWhatMakingAMarkRefuses:
         assert len(marks_read(db).readings) == 3
 
 
+class TestASpaceHasNothingToSetAside:
+    def test_Mark_WhenTheAccountIsASpaceOfAParent_IsRefusedAndTheParentIsNot(self, tmp_path):
+        from obdi.fetch_gaps import STATEMENT_SOURCES
+        from obdi.fetch_marks import MarkWorld, make_mark
+
+        world = MarkWorld(
+            declared={"space": (None, None), "parent": (None, None)},
+            spaces=frozenset({"space"}),
+        )
+        with Store(tmp_path / "spaces.sqlite3") as store:
+            def attempt(account):
+                return make_mark(
+                    store, world, account=account, source="", kind="known-gap", first_day=None,
+                    last_day=D(2026, 3, 1), note="", review_on=None, origin="owner",
+                    now="2026-10-05T00:00:00+00:00", today=TODAY,
+                    statement_sources=STATEMENT_SOURCES,
+                )
+
+            with pytest.raises(MarkRefused, match="A Space has no statement"):
+                attempt("space")
+            assert attempt("parent").account == "parent"
+
+
 class TestMarksAreKeptAndUndone:
     def test_Remove_WhenAMarkIsUndone_TheGapReturnsAndTheHistoryKeepsBoth(self, db):
         made = mark(db, account="card-virgin", kind="nothing-to-fetch",

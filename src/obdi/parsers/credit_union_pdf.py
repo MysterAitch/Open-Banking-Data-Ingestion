@@ -625,6 +625,7 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
         if reading.closing_balance_minor is not None:
             reading.closing_balance_minor = -reading.closing_balance_minor
 
+    reading.produced = issued
     if reading.statement_date is None:
         # The period is the statement's own account of what it covers; the
         # issue date is when it was printed, which is close enough to date

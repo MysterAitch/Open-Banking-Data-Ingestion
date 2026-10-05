@@ -8,9 +8,9 @@ this adds the evidence a mark is weighed against, each with its answer decided f
                 the earlier one closed on (measured: the first guess, that the chain was
                 broken, was wrong), so a mark of "nothing to fetch" over exactly the hole is
                 SUPPORTED with the chain joined.
-  card-hole     INFERRED hole 2026-03-11..2026-05-09. The May statement's own row is dated
-                05-05, so the hole's last month is not empty; the days 03-11..04-10, which an
-                April statement would have covered, are: no row, the chain joins.
+  card-hole     INFERRED hole 2026-03-11..2026-04-10 (its end is the closing day the missing
+                April statement is expected to have had). No row is dated in it and the chain
+                joins, so a mark over all of it is SUPPORTED.
   main          The aggregator's rows begin 2026-03-15. One ask for days from 2026-01-01 came
                 back empty, so "before the aggregator's history" (2026-03-14 and earlier) is
                 offered. card-behind's aggregator rows begin 2026-08-02 and nothing was ever

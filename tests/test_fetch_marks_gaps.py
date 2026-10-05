@@ -6,8 +6,9 @@ Known answers, decided before the first run (over `fetch_marks_world`, TODAY 202
     list and the account moves to those needing nothing; the household goes from 13 things to
     fetch for 11 accounts to 12 for 10.
   * The same mark over a hole the feed lists two rows in is contradicted: the gap stays.
-  * A mark over card-hole's 03-11..04-10 splits its inferred hole 03-11..05-09: what remains is
-    04-11..05-09, with no closing day left to name (the one inferred, 04-10, is inside the cut).
+  * A mark over card-hole's 03-11..03-31 splits its inferred hole 03-11..04-10: what remains is
+    04-01..04-10, which still names the closing day 04-10 and still ends on the inferred day. A
+    mark over 04-01..04-10 leaves 03-11..03-31, whose end is now a day he named.
   * A known gap with a day to look again on hides the gap until that day and then returns it,
     saying so.
   * Rolling scope of 7 months on main: on 2026-10-05 the scope begins 2026-03-05, so March's
@@ -105,22 +106,32 @@ class TestAGapPartlyInsideAMarkIsSplit:
         self, db
     ):
         mark(db, account="card-hole", kind="nothing-to-fetch",
-             first_day=D(2026, 3, 11), last_day=D(2026, 4, 10))
+             first_day=D(2026, 3, 11), last_day=D(2026, 3, 31))
 
         (rest,) = gaps_of(report_with(db, marks_read(db)), "card-hole")
 
-        assert (rest.first_day, rest.last_day) == (D(2026, 4, 11), D(2026, 5, 9))
-        assert rest.split_from == (D(2026, 3, 11), D(2026, 5, 9))
-        assert rest.probably is None and rest.closings == ()
+        assert (rest.first_day, rest.last_day) == (D(2026, 4, 1), D(2026, 4, 10))
+        assert rest.split_from == (D(2026, 3, 11), D(2026, 4, 10))
+        assert rest.closings == (D(2026, 4, 10),) and rest.probably == 1
+        assert rest.last_day_inferred, "the end is still the missing statement's expected close"
+
+    def test_Report_WhenTheMarkCutsTheInferredEnd_TheNewEndIsADayHeNamedNotAnInference(self, db):
+        mark(db, account="card-hole", kind="known-gap",
+             first_day=D(2026, 4, 1), last_day=D(2026, 4, 10))
+
+        (rest,) = gaps_of(report_with(db, marks_read(db)), "card-hole")
+
+        assert (rest.first_day, rest.last_day) == (D(2026, 3, 11), D(2026, 3, 31))
+        assert not rest.last_day_inferred and rest.closings == ()
 
     def test_Report_WhenAMarkCoversTheMiddleOfAGap_TwoPartsRemain(self, db):
         mark(db, account="card-hole", kind="known-gap",
-             first_day=D(2026, 4, 1), last_day=D(2026, 4, 10))
+             first_day=D(2026, 3, 20), last_day=D(2026, 3, 25))
 
         parts = gaps_of(report_with(db, marks_read(db)), "card-hole")
 
         assert [(g.first_day, g.last_day) for g in parts] == [
-            (D(2026, 3, 11), D(2026, 3, 31)), (D(2026, 4, 11), D(2026, 5, 9))]
+            (D(2026, 3, 11), D(2026, 3, 19)), (D(2026, 3, 26), D(2026, 4, 10))]
 
 
 class TestKnownGapIsAnAcknowledgement:

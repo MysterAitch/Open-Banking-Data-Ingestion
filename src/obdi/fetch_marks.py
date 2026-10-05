@@ -48,6 +48,7 @@ from datetime import date, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from .statement_span import STATEMENT_SOURCES, RowEvidence
 from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; fetch_gaps imports this module
@@ -293,17 +294,28 @@ class MarkWorld:
     #: Per account, the declared opening and closing days.
     declared: Mapping[str, tuple[date | None, date | None]] = field(default_factory=dict)
     reach: Mapping[str, Reach] = field(default_factory=dict)
+    #: The rows no statement lists, which the to-fetch page counts for a hole between statements:
+    #: a period between two statements is weighed by this count, so the page that says "a hole
+    #: because another source holds 2 payments no statement lists" and the mark over it agree.
+    unlisted: RowEvidence = field(default_factory=RowEvidence)
+    #: Accounts that are Spaces of a parent: a Space has no statement or export of its own, so
+    #: nothing is to be set aside for one.
+    spaces: frozenset[str] = frozenset()
 
 
 def gather_world(
-    store: Store, *, aliases_of: Callable[[str], Sequence[str]] | None = None
+    store: Store,
+    *,
+    aliases_of: Callable[[str], Sequence[str]] | None = None,
+    space_parents: Mapping[str, str] | None = None,
 ) -> MarkWorld:
     """Read the rows, statements, declared dates, and the aggregator's reach. Costs a walk of the
     store: keep the result."""
     from .statement_terms import held_statement_readings, statement_balances, statement_periods
 
     rows: dict[str, list[tuple[date, str]]] = {}
-    for sighting in store.transactions_by_sighting():
+    sightings = store.transactions_by_sighting()
+    for sighting in sightings:
         rows.setdefault(sighting.account_id, []).append((sighting.value_date, sighting.source))
     openings = {
         (account, reading.statement_date): reading.opening_balance_minor
@@ -330,6 +342,8 @@ def gather_world(
         statements={ref: tuple(by[day] for day in sorted(by)) for ref, by in held.items()},
         declared=declared,
         reach=reach,
+        unlisted=RowEvidence.from_sightings(sightings),
+        spaces=frozenset(space_parents or ()),
     )
 
 
@@ -415,6 +429,13 @@ class Evidence:
     reach: Reach | None
     #: The aggregator's earliest row for the account, where this concerns it.
     source_first_row: date | None
+    #: Whether a statement is held either side of the period, and then how many rows no statement
+    #: lists are dated in it (`RowEvidence`: the count the to-fetch page gives a hole), and the
+    #: first and last such day.
+    between: bool = False
+    unlisted: int = 0
+    unlisted_first: date | None = None
+    unlisted_last: date | None = None
 
     @property
     def rows(self) -> int:
@@ -465,7 +486,14 @@ def gather_evidence(
         chain = later[0].opening_minor == earlier[-1].closing_minor
     opened, closed = world.declared.get(account, (None, None))
     own_all = [day for day, src in listed if own_source(src)]
+    unlisted_days = [
+        day for day in world.unlisted.unlisted.get(account, ()) if low <= day <= last_day
+    ]
     return Evidence(
+        between=bool(earlier and later),
+        unlisted=len(unlisted_days),
+        unlisted_first=min(unlisted_days, default=None),
+        unlisted_last=max(unlisted_days, default=None),
         by_source=tuple(sorted(by_source.items())),
         first_row=min((d for d, _ in inside), default=None),
         last_row=max((d for d, _ in inside), default=None),
@@ -515,7 +543,9 @@ def judge(
     if kind is MarkKind.NOTHING_TO_FETCH:
         if statement_class and evidence.statements:
             return Standing.SATISFIED, "statement-held"
-        if evidence.rows:
+        # Between two statements the count is the rows no statement lists, the one the page
+        # gives the hole; elsewhere it is every row held.
+        if (evidence.unlisted if statement_class and evidence.between else evidence.rows):
             return Standing.CONTRADICTED, "rows-listed"
         return Standing.SUPPORTED, "no-rows"
     if kind is MarkKind.BEFORE_HISTORY:
@@ -655,6 +685,11 @@ def make_mark(
         raise MarkRefused("The store does not offer that kind from a source's own answer.")
     if account not in world.rows and account not in world.declared:
         raise MarkRefused("That is not an account obdi knows.")
+    if account in world.spaces:
+        raise MarkRefused(
+            "A Space has no statement or export of its own, so there is nothing to set aside "
+            "for it: it is tested with its parent account as a whole."
+        )
     if source and not _known_source(world, account, source, statement_sources):
         raise MarkRefused("That is not a source that feeds this account.")
     if first_day is not None and first_day > last_day:
@@ -967,6 +1002,10 @@ def partition(
                     last_day=last,
                     probably=(len(closings) or None) if gap.closings else gap.probably,
                     closings=closings if gap.closings else gap.closings,
+                    # A cut end is a day the owner named, not the missing statement's expected
+                    # close, so it stays an inference only where it is still the gap's own end.
+                    last_day_inferred=gap.last_day_inferred and last == gap.last_day,
+                    unlisted_rows=gap.unlisted_rows if whole else 0,
                     split_from=None if whole else (gap.first_day, gap.last_day),
                     reminder=reminded,
                 )
@@ -1001,8 +1040,6 @@ def awaited_set_aside_for(
     """The question Today asks about a statement an account is waiting for, from the store's own
     marks and scopes; None where there are none, so a household that has decided nothing pays
     for no walk of its rows."""
-    from .fetch_gaps import STATEMENT_SOURCES
-
     if not marks_in(store) and not scopes_in(store):
         return None
     found = read_marks(store, gather_world(store), today, statement_sources=STATEMENT_SOURCES)
@@ -1039,8 +1076,6 @@ def marks_for_account(
 ) -> tuple[TimelineMark, ...]:
     """The account's marks with kind, dates, source, and standing, for the timeline to draw."""
     if statement_sources is None:
-        from .fetch_gaps import STATEMENT_SOURCES
-
         statement_sources = STATEMENT_SOURCES
     held = world if world is not None else gather_world(store)
     return tuple(

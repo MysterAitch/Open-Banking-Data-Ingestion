@@ -64,13 +64,7 @@ from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
-from .fetch_gaps import (
-    STATEMENT_SOURCES,
-    FetchEvidence,
-    FetchReport,
-    fetch_report,
-    gather_evidence,
-)
+from .fetch_gaps import FetchEvidence, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .known_accounts import (
@@ -118,6 +112,7 @@ from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
 from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
+from .statement_span import STATEMENT_SOURCES
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -3200,7 +3195,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         queue = store.connection.execute(
             "SELECT COUNT(*), COALESCE(MAX(resolved_at), '') FROM review_queue"
         ).fetchone()
-        registry = tuple((str(r.ref), r.kind, r.closed) for r in store.declared_accounts())
+        registry = tuple(
+            (str(r.ref), r.kind, r.closed, str(r.parent)) for r in store.declared_accounts()
+        )
         return (*standings_memo_key(store), *tuple(queue), registry)
 
     fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
@@ -3213,7 +3210,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def mark_world(store: Store) -> MarkWorld:
         return mark_world_memo.get(
-            store, lambda: gather_world(store, aliases_of=_evidence_aliases)
+            store,
+            lambda: gather_world(
+                store,
+                aliases_of=_evidence_aliases,
+                space_parents=families_of(store, _account_map(store)).parents,
+            ),
         )
 
     def fetch_gaps_report(today: date) -> FetchReport:
@@ -3223,7 +3225,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Raises `RebuildInProgress` while a rebuild holds the layer."""
         standings = account_standings()
         with Store(db_path) as store:
-            evidence = fetch_evidence_memo.get(store, lambda: gather_evidence(store))
+            evidence = fetch_evidence_memo.get(
+                store,
+                lambda: gather_evidence(
+                    store, space_parents=families_of(store, _account_map(store)).parents
+                ),
+            )
+            # The decisions are read live and applied after the memo, so a mark never has to be
+            # part of its key: the memo holds what the store holds, not what the owner decided.
             decisions = read_marks(
                 store, mark_world(store), today, statement_sources=STATEMENT_SOURCES
             )

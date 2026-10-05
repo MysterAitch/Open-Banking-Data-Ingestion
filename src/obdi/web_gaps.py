@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from .account_names import merged_names, name_html, name_text
 from .callback import render_page
-from .fetch_gaps import STATEMENT_SOURCES, AccountOutlook, Basis, FetchGap, FetchReport, GapKind
+from .fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from .fetch_marks import (
     CLAIM_KINDS,
     KINDS,
@@ -41,6 +41,7 @@ from .fetch_marks import (
 from .navigation import page_name
 from .plural import agree, plural
 from .rebuild_hold import RebuildInProgress
+from .statement_span import STATEMENT_SOURCES, HoleReason
 from .store import Store
 from .web_marks import (
     contradicted_html,
@@ -164,6 +165,50 @@ def _lines(gap: FetchGap) -> tuple[str, str, str]:
         return span, f"Fetch every statement after {before}.", why
     if kind is GapKind.HOLE_BETWEEN:
         after = (gap.last_day + timedelta(days=1)).isoformat()
+        earlier = (gap.earlier_closing or gap.first_day - timedelta(days=1)).isoformat()
+        later = (gap.later_closing or gap.last_day + timedelta(days=1)).isoformat()
+        apart = (
+            (gap.later_closing - gap.earlier_closing).days
+            if gap.later_closing and gap.earlier_closing
+            else (gap.last_day - gap.first_day).days + 2
+        )
+        between = f"Fetch the statement closing between {earlier} and {later}."
+        end = (
+            f" Where the gap ends is inferred: the missing statement is expected to have "
+            f"closed about {gap.last_day.isoformat()}."
+            if gap.last_day_inferred
+            else ""
+        )
+        if gap.reason is HoleReason.BALANCES_DIFFER:
+            spacing = (
+                f" The two statements close {apart} days apart and the statements held "
+                f"usually close about a month apart, which agrees. {_inferred(gap)}{end}"
+                if gap.probably
+                else ""
+            )
+            return (
+                span,
+                between if gap.probably else f"Fetch the statement covering {span}.",
+                f"The statement closing {later} opens on a balance that is not the one the "
+                f"statement closing {earlier} ended on, so something lies between them that "
+                f"neither lists, starting {first}.{spacing}",
+            )
+        if gap.reason is HoleReason.UNLISTED_ROWS:
+            return (
+                span,
+                f"Fetch the statement covering {span}.",
+                f"Another source holds {plural(gap.unlisted_rows, 'payment')} dated in these "
+                f"days that no statement held lists. {_inferred(gap)}{end}".rstrip(),
+            )
+        if gap.reason is HoleReason.BALANCES_MEET_NET_NIL:
+            return (
+                span,
+                between,
+                f"The later statement opens on the balance the earlier one closed on, but they "
+                f"close {apart} days apart and the statements held usually close about a month "
+                "apart. A statement between them would have to net to nil, which cannot be "
+                f"ruled out from the balances. {_inferred(gap)}{end}".rstrip(),
+            )
         if gap.basis is Basis.STATED:
             return (
                 span,
@@ -173,9 +218,9 @@ def _lines(gap: FetchGap) -> tuple[str, str, str]:
             )
         return (
             span,
-            f"Fetch the statement closing between {before} and {after}.",
-            f"Those two statements close {(gap.last_day - gap.first_day).days + 2} days apart, "
-            f"and the statements held usually close about a month apart. {_inferred(gap)}",
+            between,
+            f"Those two statements close {apart} days apart, "
+            f"and the statements held usually close about a month apart. {_inferred(gap)}{end}",
         )
     if kind is GapKind.EXPORT_STOPS:
         held = f" other sources hold rows to {gap.rows_to.isoformat()}." if gap.rows_to else ""
@@ -286,7 +331,12 @@ def _quiet_line(
     outlook: AccountOutlook, names: Mapping[str, str], decided: frozenset[str] = frozenset()
 ) -> str:
     ref = outlook.account
-    if ref in decided:
+    if outlook.space_of:
+        said = (
+            f"a Space of {name_html(outlook.space_of, names)}: no statement exists for a "
+            f"Space; it is tested with {name_html(outlook.space_of, names)} as a whole."
+        )
+    elif ref in decided:
         said = "everything missing is set aside by your decision."
     elif outlook.balance_only:
         said = (
@@ -459,7 +509,7 @@ class GapPages:
             review_on=values.get("review_on", ""),
             today=today,
             names=names,
-            accounts=sorted(set(world.rows) | set(world.declared)),
+            accounts=sorted((set(world.rows) | set(world.declared)) - world.spaces),
             sources=sorted({src for rows in world.rows.values() for _, src in rows}),
             previews=previews,  # type: ignore[arg-type]
             parsed_last=last,

@@ -29,7 +29,7 @@ refused rather than stored.
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from .statement_reading import RateWindow, StatementReading, StatementRow
 
@@ -63,8 +63,12 @@ _OPENING = re.compile(
 #: The summary's restatement of the opening position. The first statement an
 #: account ever receives opens its table with "Opening balance" and NO figure,
 #: so this is the only place that statement says where it started.
+#:
+#: The date beside it is the day the PREVIOUS statement closed (the fixtures' first row is the
+#: day after it), so the first day this statement covers is the day after that. Words are
+#: separated by `\s*`, not `\s+`: a word grid can deliver a label with its spaces gone.
 _PREVIOUS_BALANCE = re.compile(
-    r"Previous balance as at\s+\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4}:"
+    r"Previous\s*balance\s*as\s*at\s*(\d{1,2})(?:st|nd|rd|th)\s*([A-Za-z]+)\s*(\d{4}):"
     r"\s*£?\s*([\d,]+\.\d{2})"
 )
 _CLOSING = re.compile(r"Your new balance:\s*£?\s*([\d,]+\.\d{2})")
@@ -127,7 +131,18 @@ def read_statement(lines: list[str]) -> StatementReading:
         previous = _PREVIOUS_BALANCE.search(line)
         if previous:
             if stated_previous is None:
-                stated_previous = -_minor(previous.group(1))
+                stated_previous = -_minor(previous.group(4))
+                month = _MONTHS.get(previous.group(2)[:3].lower())
+                if month is not None:
+                    try:
+                        reading.period_start = date(
+                            int(previous.group(3)), month, int(previous.group(1))
+                        ) + timedelta(days=1)
+                    except ValueError:
+                        reading.notes.append(
+                            f"the previous balance is dated {previous.group(1)} "
+                            f"{previous.group(2)} {previous.group(3)}, a day that does not exist"
+                        )
             continue
         opening = _OPENING.search(line)
         if opening:
