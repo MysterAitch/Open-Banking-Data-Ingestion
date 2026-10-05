@@ -98,6 +98,20 @@ and twenty forms) and the upload pages' entry points.
 
 ## Loose ends recorded so they are not lost
 
+Seen on the real store the first time the rebuilt Today was read there (0.4.337, 2026-10-06):
+
+- Three things to do are stale under the listing rule (0.4.333): "upload an earlier statement"
+  for days a first statement now tests, and "a flagged transaction needs a known balance near
+  this day" for an account whose one statement now adds up. `fetch_gaps` does not read
+  `statement_checks`; fixing that is the first step of slice 3 and also corrects the headline's
+  count.
+- "Confirm the balance for D" shows an age taken from the account's first transaction ("over 4
+  years ago" for a day 17 months back); the age must be from the day named.
+- A declared balance-only account with no transactions (a mortgage) is missing from Today's
+  account list; it should read "Its balance is stated by hand."
+- While a rebuild runs every account row says "Paused while the rebuild runs."; one line above
+  the list should say it once.
+
 - Statement-only accounts never become "due" (`statement_awaited` needs transactions after the
   last balance).
 - An aggregator transaction whose id names a different feed payment is kept apart and unmatched;
