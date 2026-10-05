@@ -39,6 +39,7 @@ TIMELINE_STYLES = """
  .cov-listed { fill: var(--act); }
  .cov-edge-stated { stroke: var(--act); stroke-width: 3; }
  .cov-edge-asked { stroke: var(--act); stroke-width: 2; }
+ .cov-edge-meets { stroke: var(--act); stroke-width: 2; stroke-dasharray: 1 3; }
  .cov-edge-observed { stroke: var(--act); stroke-width: 2; stroke-dasharray: 3 3; }
  .cov-next { margin: var(--s1) 0 var(--s2); padding-left: var(--s5); font: var(--text-md)/140% var(--sans); }
  .cov-next a { display: inline-flex; align-items: center; min-height: var(--hit); }
@@ -46,8 +47,8 @@ TIMELINE_STYLES = """
  .cov-keybox summary { min-height: var(--hit); display: flex; align-items: center; }
  .cov-notch { stroke: var(--ink); stroke-width: 1; }
  .cov-gap { fill: none; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 3; }
- .cov-gap-due { fill: var(--warn); stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 3; }
- .cov-gap-quiet { fill: none; stroke: var(--edge); stroke-width: 1; stroke-dasharray: 2 4; }
+ .cov-unavailable-line { stroke: var(--rule); stroke-width: 1; }
+ .cov-expected-mark { fill: var(--card); stroke: var(--ink-2); stroke-width: 1; }
  .cov-seam-red { fill: var(--bad); stroke: var(--bad); stroke-width: 1; }
  .cov-seam-amber { fill: var(--card); stroke: var(--warn); stroke-width: 2; }
  .cov-known-ok { stroke: var(--ok); stroke-width: 2; }

@@ -12,18 +12,33 @@ been made that day, that source would have listed it:
                      asked on covers that day only up to the moment it was asked.
   export file        every day from the file's first row to its last row. A file states no span,
                      so this is "at least": the file may reach further and say nothing.
-  statement          from the day after the previous statement's closing to its own closing date,
-                     where its opening balance equals that previous closing (a chain the
-                     arithmetic proves). Otherwise from its first row, which is "at least".
+  statement          its period WHOLE, and `statement_cover` is the one place that says which days
+                     and how each end is known. A statement's closing day is a complete day: the
+                     "export at 6pm" doubt belongs to exports and asks, never to a file that
+                     states its period. It is partial only where its stated end is later than the
+                     day obdi received it (an interim statement, or a period still running).
   typed entries      nothing: a person typing a payment says nothing of the days around it. Their
                      lane shows the days with an entry and no coverage.
 
 THE VOCABULARY OF CERTAINTY. Each edge of a capture is one of `STATED` (the source printed it),
-`ASKED` (the window obdi asked for, which the provider answered), or `OBSERVED` (the first or last
-row seen, which the source did not promise was an edge). A last day is `COMPLETE`, `PARTIAL` (taken
-during that day, at a known time), or `POSSIBLY` (taken at a time nobody recorded, so rows later
-that day may be missing). Nothing here invents a time: a file's own export time is not stated by
-any parser held, and the time obdi received it says nothing about when it was exported.
+`ASKED` (the window obdi asked for, which the provider answered), `MEETS` (a statement's opening
+balance equals the previous statement's closing balance: consistent with the two meeting, and
+proof of nothing more, because a missing statement whose movements net to nil leaves them equal),
+or `OBSERVED` (the first or last row seen, which the source did not promise was an edge). A last
+day is `COMPLETE`, `PARTIAL` (taken during that day, at a known time), or `POSSIBLY` (taken at a
+time nobody recorded, so rows later that day may be missing). Nothing here invents a time: a
+file's own export time is not stated by any parser held, and the time obdi received it says
+nothing about when it was exported.
+
+GAPS COME FROM `fetch_gaps`. Whatever the What to fetch next page names for the account (statements
+and exports, and the verification gaps) is joined here as given, with the same first and last days,
+so the two pages cannot disagree. The one gap derived here is what `fetch_gaps` has no notion of: a
+stretch no answered ask reaches (`ASK_HOLE`). A gap is never closed by coverage: a run that joins
+across a gap `fetch_gaps` reports is drawn joined and the gap is drawn over it.
+
+NOT YET AVAILABLE. After the newest statement's close the next does not exist until its period
+ends, so that stretch is quiet and not a gap; `Lane.next_expected` is the closing day the cadence
+`fetch_gaps.cadence_of` finds says it will have, where one is found.
 
 A SEAM is where a capture whose last day is not complete is followed by a capture that does not
 supply that day again. It is decided by arithmetic where the store can: of the rows another source
@@ -38,18 +53,19 @@ account once, the landed asks once, the artefacts' times once, the kept statemen
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
-from itertools import pairwise
 from typing import Protocol
 
 from .agreement import Agreement
 from .asked_coverage import asked_days, coverage_of
 from .balance_anchors import EffectiveOpening
+from .fetch_gaps import add_months, cadence_of
 from .london_clock import london
 from .parsers.statement_reading import reading_from_json
 from .store import FOLDED_SIGHTING_PREFIX, Store
@@ -58,7 +74,11 @@ from .timeline import parse_window
 #: How an edge is known (see the module docstring).
 STATED = "stated"
 ASKED = "asked"
+MEETS = "meets"
 OBSERVED = "observed"
+
+#: How much each basis proves, weakest first: a run is no more certain than its weakest edge.
+WEAKNESS = {OBSERVED: 0, MEETS: 1, ASKED: 2, STATED: 3}
 
 #: What is known of a capture's last day.
 COMPLETE = "complete"
@@ -83,11 +103,8 @@ STATEMENT = "statement"
 TYPED = "typed"
 LANE_ORDER = (FEED, AGGREGATOR, EXPORT, STATEMENT, TYPED)
 
-#: The kinds of gap.
+#: The one kind of gap derived here; every other kind is a `fetch_gaps.GapKind` value.
 ASK_HOLE = "ask-hole"
-FILE_HOLE = "file-hole"
-STATEMENT_MISSING = "statement-missing"
-STATEMENT_DUE = "statement-due"
 
 #: The kinds of marker.
 UNREPRODUCED = "unreproduced"
@@ -181,6 +198,16 @@ class Seam:
         return self.verdict in (MISSING, UNCHECKED)
 
 
+def gap_anchor(account: str, kind: str, first: date) -> str:
+    """The address of a gap's mark and sentence, from the gap alone.
+
+    Account, kind, and first day, never a position in a list, so a link made from the What to
+    fetch next page (which holds the same three) lands on the right place whatever else is drawn.
+    """
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", account).strip("-") or "account"
+    return f"gap-{slug}-{kind}-{first.isoformat()}"
+
+
 @dataclass(frozen=True)
 class Gap:
     """Days a person could fill. `stated` is False for every gap inferred from what is held."""
@@ -192,16 +219,46 @@ class Gap:
     stated: bool = False
     #: For an ask hole: whether the provider still serves these days unattended.
     within_reach: bool | None = None
+    account: str = ""
+    #: `fetch_gaps`' own sentence for why the gap matters; "" for an ask hole.
+    why: str = ""
+    probably: int | None = None
+    closings: tuple[date, ...] = ()
+
+    @property
+    def anchor(self) -> str:
+        return gap_anchor(self.account, self.kind, self.first)
 
 
 class FetchGapLike(Protocol):
-    """What a list of gaps handed in from elsewhere must carry to be joined to these."""
+    """What a gap handed in from `fetch_gaps` must carry to be joined to these."""
 
-    first: date
-    last: date
-    kind: str
-    source: str
-    stated: bool
+    @property
+    def account(self) -> str: ...
+
+    @property
+    def first_day(self) -> date: ...
+
+    @property
+    def last_day(self) -> date: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def source(self) -> str: ...
+
+    @property
+    def basis(self) -> str: ...
+
+    @property
+    def why(self) -> str: ...
+
+    @property
+    def probably(self) -> int | None: ...
+
+    @property
+    def closings(self) -> tuple[date, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -243,9 +300,11 @@ class Lane:
     runs: tuple[Run, ...]
     #: Rows listed per day (distinct rows, folded copies included: the source did list them).
     listed: dict[date, int]
-    #: The stretch from the last covered day to today, and whether one is due.
+    #: The stretch from the last covered day to today. For a statement lane it is the stretch
+    #: in which the next statement does not exist yet ("not yet available"), not a gap.
     trailing: tuple[date, date] | None = None
-    trailing_due: bool = False
+    #: A statement lane's expected next closing day (see the module docstring); None otherwise.
+    next_expected: date | None = None
 
     def covers(self, day: date) -> bool:
         index = bisect_right([run.first for run in self.runs], day) - 1
@@ -336,9 +395,8 @@ def _runs(captures: Sequence[Capture]) -> tuple[Run, ...]:
     """Captures merged into the runs of days they cover together.
 
     A run is no more certain than its least certain edge, so the weaker basis of two joined
-    captures is kept: `OBSERVED` is weaker than `ASKED`, which is weaker than `STATED`.
+    captures is kept (`WEAKNESS`).
     """
-    weakness = {OBSERVED: 0, ASKED: 1, STATED: 2}
     ordered = sorted(captures, key=lambda c: (c.first, c.last))
     runs: list[Run] = []
     for capture in ordered:
@@ -347,7 +405,7 @@ def _runs(captures: Sequence[Capture]) -> tuple[Run, ...]:
             last, last_basis = run.last, run.last_basis
             if capture.last > run.last:
                 last, last_basis = capture.last, capture.last_basis
-            first_basis = min(run.first_basis, capture.first_basis, key=weakness.__getitem__)
+            first_basis = min(run.first_basis, capture.first_basis, key=WEAKNESS.__getitem__)
             runs[-1] = Run(run.first, last, first_basis, last_basis)
         else:
             runs.append(Run(capture.first, capture.last, capture.first_basis, capture.last_basis))
@@ -428,62 +486,85 @@ def _seams(
     return sorted(seams, key=lambda s: (s.day, s.source))
 
 
-def _gaps_between_runs(source: str, runs: Sequence[Run], kind: str) -> list[Gap]:
-    return [
-        Gap(earlier.last + _DAY, later.first - _DAY, kind, source)
-        for earlier, later in pairwise(runs)
-        if later.first - earlier.last > _DAY
-    ]
-
-
 @dataclass(frozen=True)
 class _Statement:
     digest: str
     closing: date
     opening_minor: int | None
     closing_minor: int | None
+    #: The first day the statement itself says it covers, where its format prints one.
+    opens: date | None = None
+    #: When obdi received the document, which is not when the bank produced it.
+    received: datetime | None = None
+    #: The day of its earliest listed row.
+    first_row: date | None = None
 
 
-def _statement_captures(
-    source: str,
-    statements: list[_Statement],
-    row_span: dict[str, tuple[date, date]],
-) -> tuple[list[Capture], list[Gap], date | None, int | None]:
-    """The captures of one statement source, its inferred gaps, and its cadence in days."""
+@dataclass(frozen=True)
+class StatementCover:
+    """The days a statement covers and how each end is known."""
+
+    first: date
+    first_basis: str
+    last: date
+    last_basis: str
+    last_state: str
+    fraction: float | None = None
+
+
+def statement_cover(statement: _Statement, previous: _Statement | None) -> StatementCover:
+    """What days a statement covers, and how each end is known: the ONE place it is decided.
+
+    The richer reading of a statement's period (`statement_terms`, which will say how each end is
+    known, whether it is complete, and when the next is expected) replaces the body of this
+    function and nothing else: every capture of a statement lane is made here.
+
+    The closing day is stated and, being the end of a period the bank closed, whole. It is cut
+    short only where the statement's stated end is later than the day obdi received it: then it
+    covers to that day, and that day is part of a day taken at the time it arrived.
+
+    The start is the stated opening where the format prints one. Failing that, where the opening
+    balance equals the previous statement's closing balance the start is the day after that
+    closing, known only as `MEETS`: equal balances do not prove nothing lies between (movements
+    can net to nil, even over several days). Unequal balances prove something does, and the
+    start is then the first row listed, which is "at least".
+    """
+    last, last_state, fraction = statement.closing, COMPLETE, None
+    if statement.received is not None:
+        received_day, elapsed = _london_day(statement.received)
+        if received_day < statement.closing:
+            last, last_state, fraction = received_day, PARTIAL, elapsed
+    if statement.opens is not None:
+        first, first_basis = statement.opens, STATED
+    elif (
+        previous is not None
+        and statement.opening_minor is not None
+        and previous.closing_minor is not None
+        and statement.opening_minor == previous.closing_minor
+    ):
+        first, first_basis = previous.closing + _DAY, MEETS
+    elif statement.first_row is not None:
+        first, first_basis = statement.first_row, OBSERVED
+    else:
+        first, first_basis = statement.closing, OBSERVED
+    return StatementCover(min(first, last), first_basis, last, STATED, last_state, fraction)
+
+
+def _statement_captures(source: str, statements: list[_Statement]) -> list[Capture]:
     captures: list[Capture] = []
-    gaps: list[Gap] = []
     previous: _Statement | None = None
     for statement in sorted(statements, key=lambda s: s.closing):
-        rows = row_span.get(statement.digest)
-        chained = (
-            previous is not None
-            and statement.opening_minor is not None
-            and previous.closing_minor is not None
-            and statement.opening_minor == previous.closing_minor
-        )
-        if chained and previous is not None:
-            first, first_basis = previous.closing + _DAY, STATED
-        elif rows is not None:
-            first, first_basis = rows[0], OBSERVED
-            if previous is not None and first - previous.closing > _DAY:
-                gaps.append(Gap(previous.closing + _DAY, first - _DAY, STATEMENT_MISSING, source))
-        else:
-            first, first_basis = statement.closing, OBSERVED
+        cover = statement_cover(statement, previous)
         captures.append(
-            Capture(source, min(first, statement.closing), statement.closing, first_basis,
-                    STATED, COMPLETE)
+            Capture(
+                source, cover.first, cover.last, cover.first_basis, cover.last_basis,
+                cover.last_state, cover.fraction,
+                taken=statement.received if cover.last_state == PARTIAL else None,
+                received=statement.received,
+            )
         )
         previous = statement
-    closings = sorted(s.closing for s in statements)
-    # The SHORTEST interval between closings, not the median: a missing statement doubles the
-    # interval across it, and a median over a few statements follows that doubled figure and
-    # reports a statement as not yet due that is a month overdue.
-    cadence = (
-        min((b - a).days for a, b in pairwise(closings))
-        if len(closings) > 1
-        else None
-    )
-    return captures, gaps, closings[-1] if closings else None, cadence
+    return captures
 
 
 def _verification(
@@ -552,13 +633,13 @@ def build_account_timeline(
     opening: EffectiveOpening | None = None,
     protected_through: date | None = None,
     canonical_of: Callable[[str], str] = lambda ref: ref,
-    extra_gaps: Sequence[FetchGapLike] = (),
+    fetch_gaps: Sequence[FetchGapLike] = (),
 ) -> AccountTimeline:
     """The coverage timeline of one account, read in four statements.
 
     `agreement` and `opening` are the standing the caller already holds (the memoised one): this
-    module never works verification out for itself. `extra_gaps` is where a list of gaps worked
-    out elsewhere is joined to those derived here (`FetchGapLike`).
+    module never works verification out for itself. `fetch_gaps` is the account's gaps from
+    `fetch_gaps.gaps_for_account`, joined to the one kind derived here.
     """
     connection = store.connection
     sighting_rows = connection.execute(
@@ -616,32 +697,39 @@ def build_account_timeline(
                 _Statement(
                     str(row["digest"]), reading.statement_date,
                     reading.opening_balance_minor, reading.closing_balance_minor,
+                    opens=reading.period_start,
                 ),
             )
 
     gaps: list[Gap] = []
-    cadence_of: dict[str, tuple[date | None, int | None]] = {}
+    expected_of: dict[str, date | None] = {}
     statements: dict[str, list[_Statement]] = defaultdict(list)
-    row_span: dict[str, tuple[date, date]] = {}
     for (source, digest), items in by_digest.items():
         days = [item.day for item in items]
         kind = kind_of_source(source)
+        when = received.get(digest)
         if kind == STATEMENT and digest in readings:
-            statements[source].append(readings[digest][1])
-            row_span[digest] = (min(days), max(days))
-        elif kind in (EXPORT, STATEMENT):
-            when = received.get(digest)
+            statements[source].append(
+                replace(readings[digest][1], received=when, first_row=min(days))
+            )
+        elif kind == STATEMENT:
+            # A statement with no reading kept still lists its period's rows, and a statement
+            # is never "possibly cut": its last row is the least it reaches.
+            captures[source].append(
+                Capture(source, min(days), max(days), OBSERVED, OBSERVED, COMPLETE,
+                        received=when, rows=len({i.entity for i in items}))
+            )
+        elif kind == EXPORT:
             captures[source].append(
                 Capture(source, min(days), max(days), OBSERVED, OBSERVED, POSSIBLY,
                         received=when, rows=len({i.entity for i in items}))
             )
     for source, found_statements in statements.items():
-        found, found_gaps, last_closing, cadence = _statement_captures(
-            source, found_statements, row_span
+        captures[source].extend(_statement_captures(source, found_statements))
+        closings = sorted(s.closing for s in found_statements)
+        expected_of[source] = (
+            add_months(closings[-1], 1) if cadence_of(closings) is not None else None
         )
-        captures[source].extend(found)
-        gaps.extend(found_gaps)
-        cadence_of[source] = (last_closing, cadence)
 
     lanes: list[Lane] = []
     for source in sorted(
@@ -651,29 +739,20 @@ def build_account_timeline(
         ordered = tuple(sorted(captures.get(source, ()), key=lambda c: (c.first, c.last)))
         runs = _runs(ordered)
         trailing: tuple[date, date] | None = None
-        due = False
-        if kind == STATEMENT and source in cadence_of:
-            last_closing, cadence = cadence_of[source]
-            if last_closing is not None and last_closing < today:
-                trailing = (last_closing + _DAY, today)
-                due = cadence is not None and today >= last_closing + timedelta(days=cadence)
-                if due:
-                    gaps.append(Gap(last_closing + _DAY, today, STATEMENT_DUE, source))
-        elif runs and runs[-1].last < today:
+        if runs and runs[-1].last < today:
             trailing = (runs[-1].last + _DAY, today)
         if kind in (FEED, AGGREGATOR) and ordered:
             window = coverage_of([(c.first, c.last) for c in ordered], today)
             for hole in window.holes if window is not None else ():
                 gaps.append(
-                    Gap(hole.first, hole.last, ASK_HOLE, source, within_reach=hole.within_reach)
+                    Gap(hole.first, hole.last, ASK_HOLE, source, within_reach=hole.within_reach,
+                        account=ref)
                 )
-        elif kind == EXPORT:
-            gaps.extend(_gaps_between_runs(source, runs, FILE_HOLE))
         lanes.append(
             Lane(
                 source, kind, ordered, runs,
                 {day: len(entities) for day, entities in listed.get(source, {}).items()},
-                trailing, due,
+                trailing, expected_of.get(source),
             )
         )
     by_source = {lane.source: lane for lane in lanes}
@@ -724,8 +803,14 @@ def build_account_timeline(
         if known_one.problem == UNREPRODUCED:
             markers.append(Marker(UNREPRODUCED, known_one.day, ""))
     markers.extend(standing_markers)
-    for extra in extra_gaps:
-        gaps.append(Gap(extra.first, extra.last, extra.kind, extra.source, extra.stated))
+    for told in fetch_gaps:
+        gaps.append(
+            Gap(
+                told.first_day, told.last_day, str(told.kind), told.source,
+                stated=told.basis == STATED, account=told.account or ref, why=told.why,
+                probably=told.probably, closings=told.closings,
+            )
+        )
     return AccountTimeline(
         ref, label or ref, today, first_day, verification, tuple(lanes), tuple(seams),
         tuple(sorted(gaps, key=lambda g: (g.first, g.source, g.kind))),
@@ -736,9 +821,10 @@ def build_account_timeline(
 
 __all__ = [
     "ABUTTING", "AGGREGATOR", "ASKED", "ASK_HOLE", "CLEAN", "COMPLETE", "CONFLICT", "EXPORT",
-    "FEED", "FILE_HOLE", "GAPPED", "HELD_BACK", "KIND_NAMES", "LANE_ORDER",
+    "FEED", "GAPPED", "HELD_BACK", "KIND_NAMES", "LANE_ORDER", "MEETS",
     "MISSING", "OBSERVED", "OVERLAPPED", "PARTIAL", "POSSIBLY", "STATED", "STATEMENT",
-    "STATEMENT_DUE", "STATEMENT_MISSING", "TYPED", "UNCHECKED", "UNMATCHED", "UNREPRODUCED",
+    "TYPED", "UNCHECKED", "UNMATCHED", "UNREPRODUCED", "WEAKNESS",
     "AccountTimeline", "Band", "Capture", "FetchGapLike", "Gap", "Known", "Lane", "Marker", "Run",
-    "Seam", "Verification", "build_account_timeline", "kind_of_source",
+    "Seam", "StatementCover", "Verification", "build_account_timeline", "gap_anchor",
+    "kind_of_source", "statement_cover",
 ]

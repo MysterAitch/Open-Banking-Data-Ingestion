@@ -87,6 +87,7 @@ def _timeline_link(ref: str, gap: FetchGap, today: date) -> str:
     """The coverage timeline over the gap and a margin either side (never past today), where
     that page is served."""
     from . import web_destinations
+    from .coverage_timeline import gap_anchor
 
     if not web_destinations.dispatcher_serves("/coverage-timeline"):
         return ""
@@ -95,6 +96,7 @@ def _timeline_link(ref: str, gap: FetchGap, today: date) -> str:
     href = (
         f"/coverage-timeline?ref={quote(ref, safe='')}&window={BETWEEN}"
         f"&window_from={first.isoformat()}&window_to={last.isoformat()}"
+        f"#e-{gap_anchor(ref, str(gap.kind), gap.first_day)}"
     )
     return f'<a class="tap gaps-timeline" href="{_esc(href)}">See it on the coverage timeline</a>'
 

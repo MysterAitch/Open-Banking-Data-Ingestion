@@ -64,7 +64,7 @@ from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
-from .fetch_gaps import FetchEvidence, FetchReport, fetch_report, gather_evidence
+from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .known_accounts import (
     DeclareOutcome,
@@ -3277,6 +3277,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, ref, label=label, families=families_of(store, _account_map(store))
             )
 
+    def gaps_by_account(today: date) -> dict[str, tuple[FetchGap, ...]]:
+        """What to fetch next, by account: the one list the timeline joins (never re-derived)."""
+        return {outlook.account: outlook.gaps for outlook in fetch_gaps_report(today).accounts}
+
     def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
         from .account_names import merged_names  # deferred like the other data hooks
         from .agreement import standing_of
@@ -3310,6 +3314,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     date.fromisoformat(str(record["through"])) if record is not None else None
                 ),
                 canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+                fetch_gaps=gaps_by_account(today).get(ref, ()),
             )
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
@@ -3320,6 +3325,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             provider_labels = display_labels()
         except Exception:
             provider_labels = {}
+        by_account = gaps_by_account(today)
         with Store(db_path) as store:
             account_map = _account_map(store)
             names = merged_names(provider_labels, store.declared_accounts())
@@ -3338,6 +3344,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     label=names.get(ref, ""),
                     agreement=standings[ref].standing.own if ref in standings else None,
                     canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+                    fetch_gaps=by_account.get(ref, ()),
                 )
                 for ref in refs
             ]

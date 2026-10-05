@@ -43,17 +43,15 @@ from .coverage_timeline import (
     ASK_HOLE,
     COMPLETE,
     CONFLICT,
-    FILE_HOLE,
     HELD_BACK,
     KIND_NAMES,
+    MEETS,
     MISSING,
     OBSERVED,
     PARTIAL,
     POSSIBLY,
     STATED,
     STATEMENT,
-    STATEMENT_DUE,
-    STATEMENT_MISSING,
     TYPED,
     UNMATCHED,
     UNREPRODUCED,
@@ -112,16 +110,43 @@ FAINT = {
     "protected": ".1",
     "agrees": ".6",
     "ver-held": ".6",
-    "due": ".1",
 }
 
-#: What each way of knowing an edge is called, said once for the key and the titles.
+#: What each way of knowing an edge is called, said once for the key and the titles. "Balances
+#: meet" is deliberately the weakest claim a statement's start can make short of a first row.
 CERTAINTY_WORDS = {
-    STATED: "stated by the source",
+    STATED: "printed by the source itself",
     "asked": "the window that was asked for",
+    MEETS: "an opening balance equal to the previous statement's closing balance: it fits the "
+    "two meeting but does not prove it, because a missing statement can net to nil",
     OBSERVED: "the first or last row seen, so the source may reach further (at least)",
 }
-EDGE_CLASS = {STATED: "cov-edge-stated", "asked": "cov-edge-asked", OBSERVED: "cov-edge-observed"}
+EDGE_CLASS = {
+    STATED: "cov-edge-stated",
+    "asked": "cov-edge-asked",
+    MEETS: "cov-edge-meets",
+    OBSERVED: "cov-edge-observed",
+}
+EDGE_NAMES = {STATED: "stated", "asked": "asked", MEETS: "balances meet", OBSERVED: "observed"}
+
+#: The gaps that are about verification, not about a source's days: drawn on the verification
+#: lane. Every other kind is drawn on the lane of the source expected to supply the file.
+VERIFICATION_GAPS = frozenset(
+    {"no-balance", "automatic-only", "one-balance", "nothing-before", "flag-settle"}
+)
+
+#: What each kind of gap is called in its sentence.
+GAP_LABELS = {
+    "newer-statement": "Newer statements are needed",
+    "hole-between": "No statement is held",
+    "export-stops": "The export stops short",
+    "export-months": "The export lacks months",
+    "no-balance": "No known balance tests these rows",
+    "automatic-only": "No known balance tests these rows",
+    "one-balance": "Only one known balance is held",
+    "nothing-before": "Rows before the first known balance are untested",
+    "flag-settle": "A review flag is waiting for a known balance",
+}
 
 #: The fields this page adds to the window's own.
 SCALE_FIELD = "scale"
@@ -247,6 +272,8 @@ class _Entry:
     first: date
     last: date
     links: list[tuple[str, str]] = field(default_factory=list)
+    #: The gap a "fetch" entry is about, so the list above the chart reads its source from it.
+    gap: Gap | None = None
 
 
 def notch_xs(lane: Lane, scale: Scale) -> list[float]:
@@ -322,8 +349,13 @@ def _lane_name(view: AccountTimeline, source: str) -> str:
     return KIND_NAMES[lane.kind] if lane is not None else source
 
 
+def _span(first: date, last: date) -> str:
+    """The days of a gap as the What to fetch next page says them: one date for one day."""
+    return first.isoformat() if first == last else range_text(first, last)
+
+
 def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
-    span = range_text(gap.first, gap.last)
+    span = _span(gap.first, gap.last)
     days = plural((gap.last - gap.first).days + 1, "day")
     who = _lane_name(view, gap.source)
     if gap.kind == ASK_HOLE:
@@ -334,16 +366,21 @@ def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
             "extend or a file."
         )
         return f"No answered ask reaches {span} ({days}) from the {who.lower()}. {reach}"
-    if gap.kind == FILE_HOLE:
-        return f"No export file reaches {span} ({days}): download one that covers it."
-    if gap.kind == STATEMENT_MISSING:
-        return (
-            f"No statement is held for {span} ({days}). This is inferred: the next statement "
-            "does not open on the balance the one before it closed on."
+    label = GAP_LABELS.get(gap.kind, f"{who}: nothing is held")
+    basis = (
+        "This is stated by what is held."
+        if gap.stated
+        else "This is inferred from how regularly the statements held arrive."
+    )
+    probably = ""
+    if gap.probably:
+        closing = " and ".join(day.isoformat() for day in gap.closings)
+        probably = (
+            f" Probably {plural(gap.probably, 'statement')} "
+            f"{'is' if gap.probably == 1 else 'are'} missing"
+            + (f", closing about {closing}." if closing else ".")
         )
-    if gap.kind == STATEMENT_DUE:
-        return f"A statement is due: none is held for {span}, and they have arrived regularly."
-    return f"{who}: nothing is held for {span} ({days})."
+    return f"{label} for {span} ({days}). {gap.why}{probably} {basis}"
 
 
 def _seam_sentence(view: AccountTimeline, seam: Seam) -> str:
@@ -539,6 +576,13 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
                 )
                 used.add(run.last_basis)
             used.add("covered")
+        for capture in lane.captures:
+            # A run joins its captures and shows only its weakest outer edges, but where a
+            # statement begins on "balances meet" the join itself is the claim, so it is drawn.
+            if capture.first_basis == MEETS and scale.start <= capture.first <= scale.end:
+                x = scale.x(capture.first)
+                layers["bars"].append(_line(EDGE_CLASS[MEETS], x, bar_y - 2, x, bar_y + bar_h + 2))
+                used.add(MEETS)
         for x, width, share in listed_marks(lane, scale):
             opacity = "" if share >= 1.0 else f' fill-opacity="{min(1.0, 0.3 + 0.7 * share):.1f}"'
             layers["bars"].append(
@@ -549,46 +593,78 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
         for x in notch_xs(lane, scale):
             layers["bars"].append(_line("cov-notch", x, bar_y - 4, x, bar_y + bar_h + 4))
             used.add("notch")
-        if lane.trailing is not None and not lane.trailing_due and lane.kind == STATEMENT:
+        if lane.kind == STATEMENT and lane.trailing is not None:
             first, last = lane.trailing
-            if _in_window(first, last, scale):
+            # The quiet stretch stops where a gap on this lane begins: a newer statement that
+            # is needed is not a statement that does not exist yet.
+            starts = [g.first for g in view.gaps if g.source == lane.source and first <= g.first]
+            if starts:
+                last = min(last, min(starts) - timedelta(days=1))
+            if first <= last and _in_window(first, last, scale):
                 x0, x1 = _clamp(scale, scale.x(first)), _clamp(scale, scale.x(last) + px)
-                layers["gaps"].append(_rect("cov-gap-quiet", x0, bar_y, x1 - x0, bar_h))
-                if x1 - x0 >= 70:
+                layers["gaps"].append(
+                    _el("rect", "cov-unavailable", ("x", f"{x0:.1f}"), ("y", f"{bar_y:.1f}"),
+                        ("width", f"{max(x1 - x0, 0):.1f}"), ("height", f"{bar_h:.1f}"),
+                        ("fill", "url(#cov-unavailable)"))
+                )
+                if x1 - x0 >= 100:
                     layers["gaps"].append(
                         f'<text class="cov-dim" x="{x0 + 4:.1f}" y="{bar_y + bar_h / 2 + 4:.1f}">'
-                        "not yet due</text>"
+                        "not available yet</text>"
                     )
-                used.add("not-due")
+                used.add("unavailable")
+            if lane.next_expected is not None and lane.next_expected >= scale.start:
+                at_x = _clamp(scale, scale.x(min(lane.next_expected, scale.end)) + px / 2)
+                text = f"next statement expected {lane.next_expected.isoformat()}"
+                anchor = ' text-anchor="end"' if at_x > scale.width / 2 else ""
+                layers["gaps"].append(
+                    f'<g class="cov-expected"><title>{_esc(text)}</title>'
+                    + _el("polygon", "cov-expected-mark",
+                          ("points", f"{at_x:.1f},{bar_y - 1:.1f} {at_x + 5:.1f},{bar_y + 5:.1f} "
+                                     f"{at_x:.1f},{bar_y + 11:.1f} {at_x - 5:.1f},{bar_y + 5:.1f}"))
+                    + f'<text class="cov-dim" x="{at_x + (-8 if anchor else 8):.1f}" '
+                    f'y="{bar_y - 3:.1f}"{anchor}>expected '
+                    f"{lane.next_expected.isoformat()}</text></g>"
+                )
+                used.add("expected")
 
     lane_row = {row.lane.source: row for row in rows if row.lane is not None}
     first_lane = next(iter(lane_row.values()), None)
+    verification_row = rows[0]
 
     # Gaps.
-    for number, gap in enumerate(view.gaps, start=1):
-        at = lane_row.get(gap.source, first_lane)
-        if at is None or not _in_window(gap.first, gap.last, scale):
+    seen_anchors: set[str] = set()
+    for gap in view.gaps:
+        row_of_gap: _Row | None
+        if gap.kind in VERIFICATION_GAPS:
+            row_of_gap, at_h = verification_row, VERIFICATION_H
+        else:
+            row_of_gap, at_h = lane_row.get(gap.source, first_lane), LANE_H
+        if row_of_gap is None or not _in_window(gap.first, gap.last, scale):
             continue
-        ident = f"g{number}"
+        at = row_of_gap
+        ident = gap.anchor
+        suffix = 1
+        while ident in seen_anchors:
+            suffix += 1
+            ident = f"{gap.anchor}-{suffix}"
+        seen_anchors.add(ident)
         x0, x1 = _clamp(scale, scale.x(gap.first)), _clamp(scale, scale.x(gap.last) + px)
-        due = gap.kind == STATEMENT_DUE
         sentence = _gap_sentence(view, gap)
-        inner = _rect("cov-gap-due cov-focus" if due else "cov-gap cov-focus", x0, at.y + 5,
-                      x1 - x0, LANE_H - 10, "due" if due else "")
+        inner = _rect("cov-gap cov-focus", x0, at.y + 5, x1 - x0, at_h - 10)
         if x1 - x0 >= GAP_LABEL_PX:
-            label = f"{'due' if due else 'gap'} {range_text(gap.first, gap.last)}"
-            inner += (
-                f'<text x="{x0 + 5:.1f}" y="{at.y + LANE_H / 2 + 4:.1f}">{_esc(label)}</text>'
-            )
+            label = f"gap {_span(gap.first, gap.last)}"
+            inner += f'<text x="{x0 + 5:.1f}" y="{at.y + at_h / 2 + 4:.1f}">{_esc(label)}</text>'
         layers["gaps"].append(_link(ident, sentence, inner))
-        used.add("gap-due" if due else "gap")
-        entries.append(_Entry(ident, "fetch", sentence, gap.first, gap.last))
+        used.add("gap")
+        entries.append(_Entry(ident, "fetch", sentence, gap.first, gap.last, gap=gap))
 
     # Seams that need a look.
     for number, seam in enumerate(view.seams_to_check, start=1):
-        at = lane_row.get(seam.source)
-        if at is None or not scale.start <= seam.day <= scale.end:
+        seam_row = lane_row.get(seam.source)
+        if seam_row is None or not scale.start <= seam.day <= scale.end:
             continue
+        at = seam_row
         ident = f"s{number}"
         fraction = seam.fraction if seam.last_state == PARTIAL and seam.fraction else 1.0
         x = scale.x(seam.day) + fraction * px
@@ -640,7 +716,9 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
     defs = (
         '<defs><pattern id="cov-hatch" width="6" height="6" patternUnits="userSpaceOnUse" '
         'patternTransform="rotate(45)"><line class="cov-hatch-line" x1="0" y1="0" x2="0" '
-        'y2="6"/></pattern></defs>'
+        'y2="6"/></pattern><pattern id="cov-unavailable" width="4" height="4" '
+        'patternUnits="userSpaceOnUse"><line class="cov-unavailable-line" x1="0" y1="0" '
+        'x2="0" y2="4"/></pattern></defs>'
     )
     return _Drawn(layers, used, entries, defs)
 
@@ -722,18 +800,28 @@ def _key(used: set[str]) -> str:
         swatch(_line("cov-notch", 15, 1, 15, 17), "Where one capture begins or ends")
     if "gap" in used:
         swatch(_rect("cov-gap", 2, 3, 26, 12), "Days to fill")
-    if "gap-due" in used:
-        swatch(_rect("cov-gap-due", 2, 3, 26, 12, "due"), "Due now")
-    if "not-due" in used:
-        swatch(_rect("cov-gap-quiet", 2, 3, 26, 12), "Not yet due")
+    if "unavailable" in used:
+        swatch(
+            _el("rect", "cov-unavailable", ("x", 2), ("y", 3), ("width", 26), ("height", 12),
+                ("fill", "url(#cov-unavailable)")),
+            "Not available yet: the next statement does not exist until its period ends",
+        )
+    if "expected" in used:
+        swatch(
+            _el("polygon", "cov-expected-mark", ("points", "15,2 20,8 15,14 10,8")),
+            "When the next statement is expected to close",
+        )
     for kind, style in MARKS.items():
         if kind in used:
             swatch(style.draw(15, 9), style.label)
     edges = [
-        (STATED, "thick edge"), ("asked", "thin edge"), (OBSERVED, "dashed edge")
+        (STATED, "thick edge"), ("asked", "thin edge"), (MEETS, "dotted edge"),
+        (OBSERVED, "dashed edge"),
     ]
     edge_words = "; ".join(
-        f"a {name} is {CERTAINTY_WORDS[basis]}" for basis, name in edges if basis in used
+        f"a {name} is {EDGE_NAMES[basis]}, which is {CERTAINTY_WORDS[basis]}"
+        for basis, name in edges
+        if basis in used
     )
     edge_line = f'<p class="cov-key-edge">Edges: {_esc(edge_words)}.</p>' if edge_words else ""
     edge_swatches = []
@@ -742,7 +830,7 @@ def _key(used: set[str]) -> str:
             edge_swatches.append(
                 f'<li><svg width="30" height="18" viewBox="0 0 30 18" aria-hidden="true" '
                 f'class="cov-svg">{_line(EDGE_CLASS[basis], 15, 1, 15, 17)}</svg>'
-                f"<span>{_esc(basis.capitalize())} edge</span></li>"
+                f"<span>{_esc(EDGE_NAMES[basis].capitalize())} edge</span></li>"
             )
     return (
         f'<ul class="cov-key" aria-label="Key">{"".join(items)}{"".join(edge_swatches)}</ul>'
@@ -760,6 +848,8 @@ def _entries_html(ref: str, entries: Sequence[_Entry]) -> str:
         out.append(f"<h3>{title}</h3>")
         for entry in found:
             links = entry.links or _links_for(ref, entry, review=key == "look")
+            if key == "fetch":
+                links = [("/gaps", "What to fetch next"), *links]
             items = "".join(
                 f'<li><a href="{_esc(href)}">{_esc(text)}</a></li>' for href, text in links
             )
@@ -780,12 +870,11 @@ def _next_list(view: AccountTimeline, drawn: _Drawn) -> str:
     gaps = [e for e in drawn.entries if e.group == "fetch"]
     if not gaps:
         return ""
-    wanted = {f"g{n}": g for n, g in enumerate(view.gaps, start=1)}
     items = "".join(
-        f'<li><a href="#e-{e.ident}">{_esc(_lane_name(view, wanted[e.ident].source))}: '
-        f"{_esc(range_text(e.first, e.last))}</a></li>"
+        f'<li><a href="#e-{e.ident}">{_esc(_lane_name(view, e.gap.source))}: '
+        f"{_esc(_span(e.first, e.last))}</a></li>"
         for e in gaps[:4]
-        if e.ident in wanted
+        if e.gap is not None
     )
     more = len(gaps) - 4
     tail = f"<li>and {more} more, listed below the chart</li>" if more > 0 else ""
@@ -799,11 +888,26 @@ def verdict(view: AccountTimeline, drawn: _Drawn, scale: Scale) -> str:
     sources = [lane for lane in view.lanes if lane.kind != TYPED]
     head = f"{plural(len(sources), 'source')}, {range_text(scale.start, scale.end)}"
     if not (gaps or seams or looks):
-        return f"{head}: nothing to fetch, nothing to check, and nothing to look at."
-    return (
-        f"{head}: {plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
-        f"{plural(looks, 'thing')} to look at."
-    )
+        said = f"{head}: nothing to fetch, nothing to check, and nothing to look at."
+    else:
+        said = (
+            f"{head}: {plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
+            f"{plural(looks, 'thing')} to look at."
+        )
+    return said + expected_sentence(view)
+
+
+def expected_sentence(view: AccountTimeline) -> str:
+    """The sentence naming when the next statement is expected, where one can be said.
+
+    Said only where nothing is waiting on a statement: while a gap names newer statements that are
+    needed, "expected" would be the wrong word for them.
+    """
+    days = [lane.next_expected for lane in view.lanes if lane.next_expected is not None]
+    waiting = any(gap.kind == "newer-statement" for gap in view.gaps)
+    if not days or waiting:
+        return ""
+    return f" Next statement expected about {min(days).isoformat()}."
 
 
 # ---------------------------------------------------------------------------

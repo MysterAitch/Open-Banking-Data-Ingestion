@@ -73,7 +73,7 @@ def rects(svg: str, cls: str) -> list[dict[str, str]]:
 class TestPage:
     def test_Page_ForAKnownAccount_LoadsWithItsVerdictCountedByHand(self, page):
         assert (
-            "3 sources, 2026-07-01 to 2026-10-05: 2 gaps to fill, 2 seams to check, "
+            "3 sources, 2026-07-01 to 2026-10-05: 1 gap to fill, 2 seams to check, "
             "3 things to look at."
         ) in page
 
@@ -94,7 +94,8 @@ class TestPage:
     def test_Page_FetchListNamesTheDaysBeforeTheChart(self, page):
         before_chart = page[: page.index('class="cov-frame"')]
         assert "Aggregator: 2026-08-11 to 2026-08-19" in before_chart
-        assert "Export file: 2026-08-26 to 2026-09-11" in before_chart
+        # The export's own hole is no gap to fill: the account is verified through it.
+        assert "Export file" not in before_chart
 
 
 class TestAxisAndBars:
@@ -138,8 +139,8 @@ class TestAxisAndBars:
 
 class TestMarksAndTheList:
     def test_EveryMark_LinksToAnEntryThatNamesItsDateAndLinksBack(self, page):
-        marks = re.findall(r'<a href="#e-(\w+)" id="m-\1"><title>([^<]*)</title>', page)
-        assert len(marks) == 7
+        marks = re.findall(r'<a href="#e-([\w-]+)" id="m-\1"><title>([^<]*)</title>', page)
+        assert len(marks) == 6
         for ident, title in marks:
             entry = re.search(rf'<div class="cov-entry" id="e-{ident}"><p>([^<]*)</p>', page)
             assert entry is not None, ident

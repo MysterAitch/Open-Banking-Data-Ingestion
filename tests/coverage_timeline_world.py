@@ -248,10 +248,30 @@ CARD_STATEMENTS = (
 )
 
 
-def build_card(root: Path, store: Store, *, skip: tuple[int, ...] = ()) -> None:
+#: The same card where the statement that is not held (S3) paid money out and took it back
+#: within the period, so its movements net to nil: S4 opens on the balance S2 closed on, though a
+#: whole statement lies between them.
+CARD_NET_NIL_STATEMENTS = (
+    *CARD_STATEMENTS[:2],
+    (
+        "11th Aug 2026",
+        [("15th Jul", "Echo Rail", 300), ("20th Jul", "Echo Refund", -300)],
+        False,
+    ),
+    CARD_STATEMENTS[3],
+)
+
+
+def build_card(
+    root: Path,
+    store: Store,
+    *,
+    skip: tuple[int, ...] = (),
+    statements: tuple[tuple[str, list[tuple[str, str, int]], bool], ...] = CARD_STATEMENTS,
+) -> None:
     store.declare_account(AccountRecord(ref=AccountRef(CARD), label="Household card"))
     owed = 10000
-    for position, (day, rows, held) in enumerate(CARD_STATEMENTS):
+    for position, (day, rows, held) in enumerate(statements):
         payload, owed = _statement(day, owed, rows)
         if held and position not in skip:
             path = root / f"statement-{position}.pdf"
@@ -264,6 +284,7 @@ def build_household(
     *,
     exports: tuple[tuple[str, ...], ...] = EXPORTS,
     aggregator: tuple[tuple[str, str, tuple[str, ...]], ...] = AGGREGATOR,
+    card_statements: tuple[tuple[str, list[tuple[str, str, int]], bool], ...] = CARD_STATEMENTS,
 ) -> Path:
     """Land both accounts at `root/store.sqlite3`.
 
@@ -274,6 +295,6 @@ def build_household(
     db = root / "store.sqlite3"
     with Store(db) as store:
         build_main(root, store, exports=exports, aggregator=aggregator)
-        build_card(root, store)
+        build_card(root, store, statements=card_statements)
         keep_statement_readings(store)
     return db

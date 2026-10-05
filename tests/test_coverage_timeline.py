@@ -21,6 +21,7 @@ from coverage_timeline_world import (
 from obdi import coverage_timeline as ct
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening
+from obdi.fetch_gaps import gaps_for_account
 from obdi.store import Store
 
 
@@ -33,7 +34,8 @@ def timeline(db: Path, ref: str = MAIN, today: date = TODAY) -> ct.AccountTimeli
         opening = effective_opening(store, ref)
         standing = standing_of(opening, [ref], None)
         return ct.build_account_timeline(
-            store, ref, today=today, agreement=standing.own, opening=opening
+            store, ref, today=today, agreement=standing.own, opening=opening,
+            fetch_gaps=gaps_for_account(store, ref, today),
         )
 
 
@@ -167,11 +169,10 @@ class TestGaps:
             ("truelayer", d("08-11"), d("08-19"), True)
         ]
 
-    def test_FileHole_WhenNoExportReachesAStretch_IsAGapOnTheExportLane(self, main):
-        holes = [g for g in main.gaps if g.kind == ct.FILE_HOLE]
-        assert [(g.source, g.first, g.last, g.stated) for g in holes] == [
-            ("starling-csv", d("08-26"), d("09-11"), False)
-        ]
+    def test_ExportHole_WhenAnotherSourceCoversTheStretch_IsNotAGapToFill(self, main):
+        # No export reaches 08-26 to 09-11, but the account is verified through 09-20 and the
+        # What to fetch next page names nothing for it, so the timeline names nothing either.
+        assert [g.kind for g in main.gaps] == [ct.ASK_HOLE]
 
     def test_Gap_WhenAnotherAggregatorAskFillsTheHole_IsGone(self, tmp_path):
         filler = (
@@ -234,30 +235,36 @@ class TestStatements:
         ]
         assert runs[0].last_basis == ct.STATED
 
-    def test_Statement_WhenItsOpeningIsThePreviousClosing_StartsTheDayAfterIt(self, card):
+    def test_Statement_WhenItsOpeningIsThePreviousClosing_StartsTheDayAfterItAsBalancesMeet(
+        self, card
+    ):
         second = lane(card, "santander-cc-pdf").captures[1]
-        assert (second.first, second.first_basis) == (d("06-12"), ct.STATED)
+        assert (second.first, second.first_basis) == (d("06-12"), ct.MEETS)
 
     def test_Statement_WhenTheChainIsBroken_StartsAtItsFirstRowAndIsOnlyObserved(self, card):
         fourth = lane(card, "santander-cc-pdf").captures[2]
         assert (fourth.first, fourth.first_basis) == (d("08-14"), ct.OBSERVED)
 
-    def test_MissingStatement_IsAnInferredGap(self, card):
-        gaps = [g for g in card.gaps if g.kind == ct.STATEMENT_MISSING]
-        assert [(g.first, g.last, g.stated) for g in gaps] == [(d("07-12"), d("08-13"), False)]
+    def test_MissingStatement_IsTheGapTheFetchPageNamesWithItsDates(self, card):
+        # What to fetch next puts the hole between the closings 07-11 and 09-11 (one statement
+        # probably missing, closing about 08-11), not between the first row of the next one.
+        assert [(g.kind, g.first, g.last, g.stated, g.probably) for g in card.gaps] == [
+            ("hole-between", d("07-12"), d("09-10"), False, 1)
+        ]
 
-    def test_NextStatement_WhenNotYetDue_IsQuietAndNotAGap(self, card):
+    def test_NextStatement_WhenNotYetDue_IsQuietExpectedOnItsDayAndNotAGap(self, card):
         statements = lane(card, "santander-cc-pdf")
         assert statements.trailing == (d("09-12"), TODAY)
-        assert not statements.trailing_due
-        assert not [g for g in card.gaps if g.kind == ct.STATEMENT_DUE]
+        assert statements.next_expected == d("10-11")
+        assert [g.kind for g in card.gaps] == ["hole-between"]
 
-    def test_NextStatement_WhenPastItsCadence_IsDueAndAGap(self, household):
+    def test_NextStatement_WhenItsExpectedDayHasPassed_IsStillNotAGapUnlessTheFetchPageSaysSo(
+        self, household
+    ):
         late = timeline(household, CARD, today=date(2026, 10, 20))
-        assert lane(late, "santander-cc-pdf").trailing_due
-        assert [(g.first, g.last) for g in late.gaps if g.kind == ct.STATEMENT_DUE] == [
-            (d("09-12"), d("10-20"))
-        ]
+        statements = lane(late, "santander-cc-pdf")
+        assert statements.next_expected == d("10-11")
+        assert [g.kind for g in late.gaps] == ["hole-between"]
 
 
 class TestCost:
