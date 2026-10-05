@@ -7,12 +7,13 @@ person's request would reach. Statements are counted on every connection the pro
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import HTTPServer
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,13 @@ class Served:
     statements: int
     selects: int
     body: str
+
+
+def copy_of(large: LargeStore, directory: Path) -> LargeStore:
+    """The store copied into `directory`, for a test that writes to it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(large.path, directory / "store.sqlite3")
+    return replace(large, directory=directory, path=directory / "store.sqlite3")
 
 
 class Pages:

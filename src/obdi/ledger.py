@@ -46,7 +46,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .accounts import AccountRef
 from .agreement import Standing, standing_of
@@ -902,6 +902,20 @@ def _empty(
     )
 
 
+class OpeningReader(Protocol):
+    """What `effective_opening` is called with, for a caller that answers it from a held reading."""
+
+    def __call__(
+        self,
+        store: Store,
+        ref: str,
+        rows: list[Transaction] | None = None,
+        *,
+        families: Families | None = None,
+        explain_after: date | None = None,
+    ) -> EffectiveOpening: ...
+
+
 def build_ledger(
     store: Store,
     ref: str,
@@ -914,8 +928,13 @@ def build_ledger(
     movement: MovementCompleteness | None = None,
     explain_after: date | None = None,
     with_protection: bool = False,
+    opening_reader: OpeningReader | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
+
+    `opening_reader` stands in for `effective_opening` where the caller holds readings of the
+    account's balances between requests (the page's data hook does: `cli.ledger_data`). It is
+    called with exactly the arguments `effective_opening` would be.
 
     `bound` is whether the account has an Actual destination; it is passed in
     because the bindings live in a file the store does not read. `archive` is
@@ -949,6 +968,7 @@ def build_ledger(
         explain_after=explain_after,
         with_protection=with_protection,
         check=check,
+        opening_reader=opening_reader or effective_opening,
     )
     return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
 
@@ -983,6 +1003,7 @@ def _ledger_for(
     explain_after: date | None,
     with_protection: bool,
     check: Check | None,
+    opening_reader: OpeningReader,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -1015,7 +1036,7 @@ def _ledger_for(
         # A balance-only account holds no rows of its own, and what its stated
         # balances imply is its ledger.
     else:
-        opening = effective_opening(
+        opening = opening_reader(
             store, ref, held, families=families, explain_after=explain_after
         )
         entries = typed_entries(store, ref)

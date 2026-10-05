@@ -64,7 +64,7 @@ from .coverage_timeline import AccountTimeline
 from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
-from .family_anchors import families_of
+from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
@@ -640,6 +640,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 
 if TYPE_CHECKING:
+    from .balance_anchors import EffectiveOpening
     from .models import Transaction
     from .movement_completeness import MovementCompleteness
     from .parsers.base import StatementParser
@@ -3326,6 +3327,41 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with contextlib.suppress(RebuildInProgress):
             account_standings()
 
+    def openings_key(store: Store) -> tuple[object, ...]:
+        """The standings' key, and the provider-request log that a reading's unheld-Space note
+        is drawn from: no standing reads that log (`store.NOT_STANDING_TABLES` says so), but the
+        page that shows the reading does, so a request recorded must show on the next view."""
+        attempts = store.connection.execute(
+            "SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM fetch_attempts"
+        ).fetchone()
+        return (*standings_memo_key(store), *tuple(attempts))
+
+    #: Each account's reading of its known balances, as its own page draws it, held while
+    #: nothing it reads has changed. A main account's reading is a third of its page (measured
+    #: on an invented store of 5,223 rows and five Spaces: 1.9 of 4.5 profiled seconds) and
+    #: depends on the store alone, so every month of the page, and every reload, shares it.
+    openings_memo: KeyedMemo[dict[tuple[str, date | None], EffectiveOpening]] = KeyedMemo(
+        openings_key, name="account openings", epoch=rebuild_epoch
+    )
+
+    def held_opening(
+        store: Store,
+        ref: str,
+        rows: list[Transaction] | None = None,
+        *,
+        families: Families | None = None,
+        explain_after: date | None = None,
+    ) -> EffectiveOpening:
+        from .balance_anchors import effective_opening
+
+        held = openings_memo.get(store, dict)
+        key = (ref, explain_after)
+        if key not in held:
+            held[key] = effective_opening(
+                store, ref, rows, families=families, explain_after=explain_after
+            )
+        return held[key]
+
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
 
@@ -3360,6 +3396,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families=families_of(store, _account_map(store)),
                 movement=movement_report(store),
                 with_protection=True,
+                opening_reader=held_opening,
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:

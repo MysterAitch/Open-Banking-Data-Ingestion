@@ -30,7 +30,7 @@ from datetime import date
 import pytest
 
 from large_store_corpus import MAIN, LargeStore, cached_large_store
-from large_store_pages import serving
+from large_store_pages import copy_of, serving
 from obdi.join_basis import (
     SightingView,
     StatedMoment,
@@ -271,6 +271,29 @@ class TestTheAccountPagesOverTheLargeStore:
         assert later.statements <= LEDGER_STATEMENTS, later.statements
         assert first.seconds <= FIRST_LEDGER_SECONDS, first.seconds
         assert later.seconds <= LEDGER_SECONDS, later.seconds
+
+    def test_MainAccountPage_AfterTheStoreChanges_ReadsTheOpeningAgainThenHoldsIt(
+        self, large, tmp_path
+    ):
+        from obdi.ingest import reconcile_batch
+        from test_ledger import txn
+
+        with serving(copy_of(large, tmp_path / "copy"), tmp_path) as served:
+            served.get(LEDGER)
+            held = served.get(LEDGER)
+            with Store(tmp_path / "copy" / "store.sqlite3") as store:
+                reconcile_batch(
+                    store,
+                    [txn(MAIN, "starling", "late-2", date(2026, 9, 29), -777, "LATE ARRIVAL")],
+                    digest="late",
+                )
+            after = served.get(LEDGER)
+            then_held = served.get(LEDGER)
+
+        assert after.body != held.body
+        assert after.statements > held.statements + 20, (after.statements, held.statements)
+        assert then_held.body == after.body
+        assert then_held.statements <= held.statements + 5
 
     def test_CardPage_CostsFewStatementsAndLittleTime(self, pages):
         pages.get(CARD)

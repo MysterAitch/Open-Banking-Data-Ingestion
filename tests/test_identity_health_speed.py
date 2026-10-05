@@ -22,12 +22,10 @@ The bounds below are loose on time (a slower machine must not flake) and tight o
 
 from __future__ import annotations
 
-import shutil
-
 import pytest
 
 from large_store_corpus import MAIN, LargeStore, cached_large_store
-from large_store_pages import serving
+from large_store_pages import copy_of, serving
 from obdi import statement_opening_measure
 from obdi.exact_rule_measure import exact_rule_report
 from obdi.family_anchors import families_of
@@ -138,19 +136,7 @@ class TestTheIdentityHealthPageOverTheLargeStore:
         from obdi.ingest import reconcile_batch
         from test_ledger import txn
 
-        copy = tmp_path / "copy"
-        copy.mkdir()
-        shutil.copy2(large.path, copy / "store.sqlite3")
-        held = LargeStore(
-            copy,
-            copy / "store.sqlite3",
-            large.account_map,
-            large.main_rows_distinct,
-            large.space_rows_distinct,
-            large.statements,
-            large.stated_days,
-            large.other_accounts,
-        )
+        held = copy_of(large, tmp_path / "copy")
         with serving(held, tmp_path) as served:
             served.get(PAGE)
             held_again = served.get(PAGE)
