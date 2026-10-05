@@ -35,6 +35,7 @@ from datetime import UTC, date, datetime
 from . import matching
 from .accounts import AccountMap
 from .cash_withdrawal_measure import CashWithdrawalReport, cash_withdrawal_report
+from .family_anchors import families_of
 from .feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
 from .matching import (
     REFUSALS,
@@ -51,6 +52,7 @@ from .plural import agree, plural
 from .rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
 from .space_attribution import space_parents
 from .stated_times import settlement_days
+from .statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 _FEED_ARTEFACT = "starling-feed"
@@ -404,6 +406,9 @@ class ExactRuleReport:
     pairs: list[PairFigures] = field(default_factory=list)
     #: The cash withdrawals a source states (`cash_withdrawal_measure`); None where not read.
     cash: CashWithdrawalReport | None = None
+    #: Where each statement's opening balance would fall and what that changes
+    #: (`statement_opening_measure`); None where not read.
+    openings: StatementOpeningReport | None = None
 
     def describe(self) -> str:
         lines: list[str] = []
@@ -464,6 +469,13 @@ class ExactRuleReport:
                 "anything:"
             )
             lines.extend(f"  {sentence}" for sentence in self.cash.sentences())
+        if self.openings is not None:
+            lines.append("")
+            lines.append(
+                "Statements' opening balances, if each were a known balance of its own, against "
+                "the known balances the account has now, read without changing anything:"
+            )
+            lines.extend(f"  {sentence}" for sentence in self.openings.sentences())
         return "\n".join(lines)
 
 
@@ -705,6 +717,7 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     report.settlement = settlement_figures(store, account_map, landed)
     report.no_row_status = no_row_status_figures(store)
     report.cash = cash_withdrawal_report(store, store.declared_accounts())
+    report.openings = statement_opening_report(store, families_of(store, account_map))
     return report
 
 

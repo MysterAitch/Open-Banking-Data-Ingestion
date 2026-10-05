@@ -139,6 +139,10 @@ from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND, Store
 STATED = "stated"
 BANK = "bank"
 STATEMENT = "statement"
+#: A statement's OPENING balance, told apart from its closing (`STATEMENT`). It is judged
+#: exactly as a closing is (booked rows, the rows the statement lists on its own days); where it
+#: is placed, and why, is said once in `statement_openings`.
+STATEMENT_OPENING = "statement-opening"
 FAMILY = "family"
 EXPORT = "export"
 #: Nil before a Space's first row, which is assumed and never shown (`_space_nil`).
@@ -150,8 +154,12 @@ ASSUMED_NIL = "assumed-nil"
 #: outcome when the two disagree. A family anchor comes last: it is a
 #: document's or a feed's figure with an assumption about the Spaces applied.
 _PRECEDENCE = {
-    OPENED: -1, ASSUMED_NIL: -1, STATED: 0, STATEMENT: 1, BANK: 2, EXPORT: 2, FAMILY: 3,
+    OPENED: -1, ASSUMED_NIL: -1, STATED: 0, STATEMENT: 1, STATEMENT_OPENING: 1, BANK: 2,
+    EXPORT: 2, FAMILY: 3,
 }
+
+#: The bases of a held statement's own figures, whose rows are placed by what the statements list.
+_STATEMENT_BASES = (STATEMENT, STATEMENT_OPENING)
 
 #: The bases of a nil opening, which define the opening whatever day they fall on.
 _NIL_BASES = (OPENED, ASSUMED_NIL)
@@ -534,7 +542,7 @@ def derive_opening(
                 )
 
             return rows_through(held, anchor.at, feed_day, moments)
-        by_statement = anchor.basis == STATEMENT and bool(placed)
+        by_statement = anchor.basis in _STATEMENT_BASES and bool(placed)
         by_source = (
             anchor.source
             if sightings is not None
@@ -984,8 +992,13 @@ def effective_opening(
     *,
     families: Families | None = None,
     explain_after: date | None = None,
+    extra_anchors: Sequence[Anchor] = (),
 ) -> EffectiveOpening:
     """The account's opening balance as the store can derive it right now.
+
+    `extra_anchors` are known balances to read as if the account's own held them, which only a
+    measurement of a rule not yet in force passes (`statement_opening_measure`): nothing is
+    stored, and an empty sequence leaves the reading exactly as it was.
 
     `rows` lets a caller that has already read the account's rows avoid
     reading them again. `families` says which accounts are Spaces of which and
@@ -999,7 +1012,7 @@ def effective_opening(
     """
     gathered = _gather(store, ref, families)
     held = store.transactions_for_account(ref) if rows is None else rows
-    anchors = list(gathered.own)
+    anchors = [*gathered.own, *extra_anchors]
     balance_only = is_balance_only(store.declared_kind(ref))
     unitemised = (
         derive_unitemised(ref, gathered.own, held) if balance_only else ()

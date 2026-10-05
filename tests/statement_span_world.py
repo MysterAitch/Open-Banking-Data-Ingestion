@@ -54,12 +54,15 @@ def statement(
     *,
     received: date | None,
     previous_close: date | None = None,
+    import_rows: bool = True,
 ) -> int:
     """Land one Santander statement; returns the balance owed at its close, in minor units.
 
     `received` is the day obdi is taken to have been given the file (noon UTC); None leaves it
     to `import_file`'s own clock, which no test of a period may do - it is only for statements
-    whose receipt the test does not ask about.
+    whose receipt the test does not ask about. `import_rows` False holds the document without
+    reading its rows into the account, as a statement uploaded for its balances while the bank's
+    feed supplies the rows (it needs `received`).
     """
     owed = opening_minor + sum(row.minor for row in rows)
     lines = [
@@ -98,7 +101,8 @@ def statement(
                 origin=path.name,
             )
         )
-    import_file(store, path, account_id=ref)
+    if import_rows or received is None:
+        import_file(store, path, account_id=ref)
     return owed
 
 

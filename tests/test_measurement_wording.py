@@ -88,6 +88,25 @@ class TestTheMeasurementReadsLikeThePage:
         assert "cash withdrawals by what a source states" in text
         assert offences(text) == []
 
+    def test_StatementOpenings_WhenRenderedOverTheHousehold_UseNoRetiredWordOrShout(
+        self, tmp_path
+    ):
+        from obdi.statement_opening_measure import statement_opening_report
+        from test_statement_opening_measure import NO_SPACES, WITH_A_SPACE, build
+
+        with Store(tmp_path / "openings.sqlite3") as store:
+            build(store, tmp_path)
+            text = "\n".join(
+                [
+                    *statement_opening_report(store, NO_SPACES).sentences(),
+                    *statement_opening_report(store, WITH_A_SPACE).sentences(),
+                ]
+            )
+
+        assert "opening balance" in text and "In agreement from" in text
+        assert offences(text) == []
+        assert not re.search(r"anchor|segment|frontier", text, re.I)
+
     def test_CashTransfers_WhenTheLegsAreMadeAndTheAccountIsNamedCash_ReadAsThePageShowsThem(
         self, tmp_path
     ):
