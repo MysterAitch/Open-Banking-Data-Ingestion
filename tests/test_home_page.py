@@ -217,6 +217,7 @@ EXPECTED_BANDS = {
     "spaces": HOUSEKEEPING,
     "known-balances-disagree": SOON,
     "agreement-lapsed": NOW,
+    "statement-fault": NOW,
     "statement-due": HOUSEKEEPING,
 }
 

@@ -391,6 +391,7 @@ _LINK_WORDS: dict[str, tuple[str, str]] = {
     "protection-broken": ("Open {a}'s ledger", "Open the ledgers"),
     "known-balances-disagree": ("Open {a}'s ledger", "Open the ledgers"),
     "agreement-lapsed": ("Open {a}'s ledger", "Open the ledgers"),
+    "statement-fault": ("Open {a}'s ledger", "Open the ledgers"),
     "silent-feed": ("Open {a}'s account page", "Open the accounts page"),
     "stale-feed": ("Open {a}'s account page", "Open the accounts page"),
     "refusals": ("Open the fetch attempts", "Open the fetch attempts"),

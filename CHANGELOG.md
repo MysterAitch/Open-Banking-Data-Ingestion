@@ -26,6 +26,73 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.333] - 2026-10-05
+
+### Changed
+- **A statement is tested by what it lists.** The owner's correction was
+  that a statement's dates and balances do not mean what the system assumed:
+  an item pending when a statement is produced appears on the next one,
+  interest can be printed out of order, and what holds for one bank or
+  account need not hold for another. A statement says "from this opening
+  balance, these transactions, to this closing balance", and that is now
+  what is checked, with no date in the question. A statement in use that
+  states an opening balance, whose every listed transaction is held as
+  listed, and whose sum reaches its closing balance tests that closing
+  balance itself. An account with one such statement adds up through it,
+  where before it had nothing to check against; the days from a first
+  statement's start are tested where no transaction in them is left
+  unlisted. Read on the real store beforehand, all 31 statements on 8
+  accounts add up this way, against as few as none of seven by date.
+- **A statement that closed before a day's transactions is not in conflict
+  with a balance for the end of that day.** Where a statement's closing
+  balance and another source's balance for the same day differ by exactly
+  all the transactions dated that day that the statement does not list, and
+  the statement itself adds up, the statement is taken to have closed before
+  them. The page says it is taken so, and why: exact equality is strong
+  evidence and not proof. One account on the real store has been blocked by
+  such a day since August. Anything else is a conflict as before, including
+  a difference that only some of the day's transactions would explain.
+- **A statement in use that does not sum is a fault**, named on the account
+  and on Today whatever else is wrong there, with a way out on the page
+  (disregarding that statement's closing balance). A statement the reader
+  could not read whole, one with a line held under another account, and one
+  whose lines cannot be found are "cannot say": they verify nothing and
+  fault nothing. A complete household with Spaces was called a fault during
+  review until that was settled.
+- **Where a statement's balance and the balance by date part, the page says
+  so.** They are different quantities: a listed purchase can be held under a
+  later posting date, a purchase before the close can be on the next
+  statement, and a pending transaction counts in the position and not in a
+  statement. The statement's own line gives the counts.
+- Overlapping statements draw no conclusion from their balances, and the
+  measurement no longer says of them that money moved which neither lists.
+  A disregarded statement lists nothing in any calculation.
+- "Do the statements add up?" says "transactions" and "add up".
+
+### Fixed
+- A test that plants private figures and searches Today for them failed for
+  one hour when the page read "Assembled 101 hours ago"; it no longer
+  searches the page's own clock.
+
+### Not covered
+- Protection is offered exactly the days it was: a day tested only by its
+  own statement is not offered, because a protection records a balance by
+  date and a statement is tested by what it lists. The page says so.
+- The checks are worked out once per state of the store and shared by Today
+  and the account page; the first page after any change, including each
+  scheduled pull, pays for them once (about 400 more queries on a test store
+  of 96 statements).
+- Not tested under the rule: one account's section of a statement covering
+  several accounts, accounts in other currencies, and at the level of a
+  whole store a statement with a transaction held twice or listed twice.
+- Three rounds of review by construction found, and this version answers, a
+  day read as tested on which nothing was, a complete account called a
+  fault, and two widenings that were withdrawn (a balance "taken the day
+  after", and a line folded into another account as a fault). What it has
+  not been is read on the real store: the expectation written beforehand is
+  10 or 11 of 13 accounts adding up (9 today), none or one not adding up
+  (one today), and 2 or 3 with nothing to check against (3 today).
+
 ## [0.4.332] - 2026-10-05
 
 ### Fixed
