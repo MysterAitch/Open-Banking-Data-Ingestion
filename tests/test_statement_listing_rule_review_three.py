@@ -33,6 +33,20 @@ THE DAY NEWLY TESTED AND OFFERED TO PROTECTION (the gap itself is older than the
               Expected: protection pressed through 10 Jan records a balance its span reaches.
               Got: records 104.19; the span reaches 107.26.
 
+A DISREGARD MAKES A CONFLICT OF A DAY THAT WAS EXPLAINED (the reach of "a disregarded statement
+lists nothing"):
+
+  y-set-aside Statements closing 10 Jan, 10 Feb, and 10 Mar; March's lists a purchase of 7.77 made
+              10 Feb (pending at February's close), and the balance typed for 10 Feb includes it.
+              The day is explained and the account adds up through 10 Mar. The person then
+              disregards March's closing. The measurement now calls the purchase listed by no
+              statement and tells the rule the chain counts it at February's closing; the chain
+              still places it by March's statement, so the claim is not borne out.
+              Expected: 10 Feb is still explained (the two balances differ by exactly that
+              purchase, as before) and the account adds up through 10 Feb.
+              Got: a conflict on 10 Feb, adding up through 10 Jan only. (13b2a32 answered this
+              input "adds up"; f2440eb, without the rule, a conflict.)
+
 OLDER THAN THE RULE, and stated here because it is the invariant as asked (it fails at f2440eb
 too, where these accounts already "add up"): over the measurement's own household, the accounts
 `december`, `december-current`, `pending`, and `settled` are shown a balance other than the
@@ -47,7 +61,12 @@ from pathlib import Path
 import pytest
 
 from listing_rule_reading import app_reading
-from obdi.balance_anchors import effective_opening
+from obdi.balance_anchors import (
+    STATEMENT,
+    disregard_balance,
+    effective_opening,
+    record_stated_anchor,
+)
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
 from obdi.ledger import running_balance
@@ -199,6 +218,44 @@ class TestAFirstStatementNewlyOfferedToProtection:
         assert (offered_before, offered) == ((FEB,), (JAN, FEB))
         assert record is not None
         assert int(str(record["verified_minor"])) == reached
+
+
+class TestALaterStatementSetAside:
+    def test_Day_WhenTheStatementListingItsPendingPurchaseIsDisregarded_IsStillExplained(
+        self, tmp_path
+    ):
+        mar = D(2026, 3, 10)
+        with Store(tmp_path / "store.sqlite3") as store:
+            owed = chain(
+                store, tmp_path, "y-set-aside", [JAN, FEB, mar],
+                [
+                    [Spend(D(2026, 1, 5), "One y-set-aside", 419)],
+                    [Spend(D(2026, 1, 20), "Two y-set-aside", 717)],
+                    [
+                        Spend(FEB, "Pending y-set-aside", 777),
+                        Spend(D(2026, 2, 20), "Later y-set-aside", 331),
+                    ],
+                ],
+            )
+            record_stated_anchor(
+                store, "y-set-aside", FEB.isoformat(), f"{-(owed[1] + 777) / 100:.2f}",
+                today=D(2026, 9, 1),
+            )
+            before, before_verdict = app_reading(store, "y-set-aside", FAMILIES)
+            march = next(
+                r.anchor
+                for r in effective_opening(store, "y-set-aside", families=FAMILIES).readings
+                if r.anchor.basis == STATEMENT and r.anchor.day == mar
+            )
+            disregard_balance(
+                store, "y-set-aside", mar.isoformat(), march.stating, STATEMENT, families=FAMILIES
+            )
+            now, verdict = app_reading(store, "y-set-aside", FAMILIES)
+
+        assert (before_verdict, before.own.through) == (ADDS_UP, mar)
+        assert [c.day for c in before.own.closed_before] == [FEB]
+        assert now.own.conflicts == ()
+        assert (verdict, now.own.through) == (ADDS_UP, FEB)
 
 
 class TestEveryKnownBalanceOfAnAccountSaidToAddUp:
