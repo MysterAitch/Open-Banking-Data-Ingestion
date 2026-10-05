@@ -151,6 +151,46 @@ class TestTheFirstScreen:
             page.close()
 
 
+class TestBetweenAPhoneAndADesk:
+    """A phone asked for the desktop site lays the page out about 980 px wide.
+
+    The owner sent that view: two columns, the transactions in a right-hand column of some 480
+    px, and each transaction laid out as four cells that need more than that, so the description
+    was squeezed to one character a line and a single row ran to a screen and a half. The left
+    column's sections were also spread down the page with a screen of nothing between them,
+    because the tall right-hand column shared its height out among their rows.
+    """
+
+    @pytest.mark.parametrize("width", [960, 980, 1100, 1240])
+    def test_Rows_WhenTheTransactionsColumnIsNarrow_AreEachAFewLinesTall(
+        self, browser, base, width
+    ):
+        page = opened(browser, base, AGREEING, width=width, height=900)
+        try:
+            tallest = float(
+                page.evaluate(
+                    "Math.max(...[...document.querySelectorAll('li.txn .t-row')]"
+                    ".map(e => e.getBoundingClientRect().height))"
+                )
+            )
+            assert tallest <= 120, f"a transaction is {tallest:.0f} px tall at {width} px"
+        finally:
+            page.close()
+
+    @pytest.mark.parametrize("width", [980, 1280])
+    def test_LeftColumn_BesideALongListOfTransactions_KeepsItsSectionsTogether(
+        self, browser, base, width
+    ):
+        page = opened(browser, base, AGREEING, width=width, height=900)
+        try:
+            gap = top_of(page, ".acct-month") - bottom_of(page, ".acct-state")
+            assert gap <= 48, f"{gap:.0f} px of nothing between the state and the month"
+            below = top_of(page, ".ledger-more") - bottom_of(page, ".acct-month")
+            assert below <= 48, f"{below:.0f} px of nothing under the month"
+        finally:
+            page.close()
+
+
 class TestTheWholePage:
     @pytest.mark.parametrize("ref", [AGREEING, HELD])
     def test_PageForAMonthOfFiftyRows_WithEveryDisclosureClosed_FillsUnderSixScreens(

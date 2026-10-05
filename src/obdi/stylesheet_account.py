@@ -140,8 +140,12 @@ ACCOUNT_STYLES = """
 
  @media (min-width: 60rem) {
   body.ledger-page { max-width: 80rem; }
+  /* The transactions span the three rows beside them and are far taller than those rows, and a
+     grid shares a spanning item's height out among the rows it spans: the last row is the one
+     that stretches, or the left-hand sections drift a screen apart. */
   .acct-grid { grid-template-columns: 28rem minmax(0, 1fr); column-gap: var(--s5); align-items: start;
-               grid-template-areas: "head head" "state txns" "month txns" "more txns"; }
+               grid-template-areas: "head head" "state txns" "month txns" "more txns";
+               grid-template-rows: auto auto auto 1fr; }
   .acct-head { grid-area: head; }
   .acct-state { grid-area: state; }
   .acct-month { grid-area: month; }
@@ -151,6 +155,13 @@ ACCOUNT_STYLES = """
   .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; }
   .year { grid-template-columns: 3rem minmax(0, 1fr); }
   .monthgrid li > a.tap, .monthgrid li > button.tap, .absent { padding: 0; font-size: var(--text-xs); }
+ }
+ /* A transaction is one line of four cells only where the right-hand column can hold them: the
+    date, the figure, and the chips want some 30rem between them before the description gets a
+    word. Between the two widths the page has two columns and each transaction keeps its stacked
+    form; at 60rem the description was squeezed to one character a line (a phone asked for the
+    desktop site is about 61rem wide). */
+ @media (min-width: 80rem) {
   .t-row, .txns li.txn summary.t-row { grid-template-columns: 8.5rem minmax(0, 1fr) auto 13rem;
                  grid-template-areas: "when desc fig chips"; column-gap: var(--s4); align-items: baseline; }
   .t-meta { display: contents; }
