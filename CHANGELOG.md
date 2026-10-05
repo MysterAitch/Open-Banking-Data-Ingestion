@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.318] - 2026-10-05
+
+### Added
+- **Identity health counts the cash withdrawals a source states, and changes
+  nothing.** The owner asked for a withdrawal at a cash machine to be a
+  transfer to his Cash account. Before any rule makes a row: per account, how
+  many transactions a source says are cash withdrawals, by which field and
+  word, said by the bank's feed, the aggregator, or both; where two sources
+  disagree about the kind; how many are money in; pending against booked; by
+  year; in another currency; on a credit card; and how many only LOOK like a
+  cash machine by their description, which no rule will act on. It also
+  lists every coded word each source's kind fields state, because no fixture
+  in this repository holds the word either source uses for a cash machine,
+  and the real store is where that is to be read.
+- **An account can be declared as where cash goes.** A kind,
+  `cash-balance-only`, on the account's edit page: it reads exactly as a
+  balance-only account does and is the one account a withdrawal rule would
+  use. Exactly one open account of that kind is needed; with none or several
+  a rule does nothing. Matching the label or reference was rejected, since a
+  rename would move the cash.
+
+### Not built, and why
+- **The rule itself.** Two things are missing. The word a source uses for a
+  cash machine is not known here, so the measurement is released to read it.
+  And a sighting's stated kind words are not stored against it: a rule would
+  have to re-read every artefact for every row. That needs a table beside the
+  one that holds a sighting's stated times, which is a schema change, and is
+  the next step once the words are known.
+
 ## [0.4.317] - 2026-10-05
 
 ### Changed
