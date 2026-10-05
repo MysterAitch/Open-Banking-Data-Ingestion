@@ -26,6 +26,59 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.337] - 2026-10-06
+
+### Changed
+- **Today says how far each account can be trusted, and what to do about
+  it.** The owner, of the pages as they were: "thrown together based on what
+  data or information is being inspected at the time and clearly not
+  designed", with no call to action where something was wanted; and of what
+  they are for: "trust is a key central theme. If OBDI tells me my balance
+  is x, can I trust this is true? Is the data stale ... Are there gaps ...
+  can I 'lock it in'". Today is now a verdict, one folded line of evidence
+  that it was looked at, the things to do each with the control that does
+  it, and one row per account.
+- **Each account's bar is on one scale, the last twelve months.** Each bar
+  used to span its own account's history, so two accounts with the same
+  dates drew differently and he could not read them. Equal widths are equal
+  time; an account younger than a year shows a bare line before it existed.
+  The bar draws four things - nothing held, held, adds up to the known
+  balances, locked in - with a mark where it stops adding up and where a
+  file is wanted, and the key says who did each (obdi, by arithmetic,
+  against the balances the sources state; he, by accepting). An account
+  tested only by what its statement lists is drawn as adding up; it was
+  drawn as unchecked.
+- **Things to do are one kind of thing**, made from the checks, the files
+  still to fetch, the flagged transactions, and balances to confirm: what to
+  do, for which account, the days, how long it has been waiting, and one
+  control. Statements wanted for one account are one row. The headline
+  counts them, so a household with files to fetch reads "No faults. N things
+  when convenient" where it read "in order".
+- **"Locked in" is the word for what was "protected"** on this page, and
+  locking in is not offered from Today: he decided it belongs on an
+  account's page with its transactions in view.
+- **Five tabs in one row on a phone**: Today, Bring in, Position,
+  Connections, More. Connections, his grouping, is where data goes out (the
+  budgeting tool) and where it comes from (the banks). Accounts, Checks, and
+  Diagnostics are under More; every page is still reachable and no route
+  changed.
+
+### Not covered
+- This is the first slice. The account page, Bring in, and locking in on an
+  account's page are next, set out in `docs/design/2026-10-clean-slate/`.
+  Until then the account page still says "protected" and still has no
+  upload control beside what it is waiting for.
+- Only files wanted and balances to confirm show how long they have waited:
+  a fault and an expiring consent carry no date. The Upload control opens
+  the upload page without choosing the account and period; the row names
+  them.
+- What used to be on Today and is now folded, moved to More, or cut is
+  listed in the design's inventory. The count of accounts that add up is no
+  longer on Today; the bars say it per account and the Accounts page keeps
+  the count.
+- No verdict or calculation changed. Read on the real store, the first load
+  of a page after the store changes still takes seconds.
+
 ## [0.4.336] - 2026-10-05
 
 ### Changed
