@@ -470,12 +470,20 @@ def recheck(
 
 def tested_days(opening: EffectiveOpening, standing: Standing) -> tuple[date, ...]:
     """The days a protection may be pressed through: tested known balances the account is in
-    agreement through. Pressing for any other date would protect a span nothing has verified."""
+    agreement through. Pressing for any other date would protect a span nothing has verified, and
+    a day on which balances merely agree with each other is not tested (`agreement`, rule 2)."""
     limit = standing.own.through
     if limit is None:
         return ()
+    tested = set(standing.own.tested)
     return tuple(
-        sorted({k.day for k in known_of_opening(opening) if k.verdict == MET and k.day <= limit})
+        sorted(
+            {
+                k.day
+                for k in known_of_opening(opening)
+                if k.verdict == MET and k.day <= limit and k.day in tested
+            }
+        )
     )
 
 

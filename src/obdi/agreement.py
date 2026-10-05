@@ -10,9 +10,15 @@ THE RULE. An account is IN AGREEMENT THROUGH the day C of the latest known balan
   1  every known balance dated on or before C is met: the rows reproduce it. The one that
      defines the opening is met by construction, and a nil opening (`balance_anchors.OPENED`,
      `ASSUMED_NIL`) is a premise rather than a known balance, so it is neither counted nor shown;
-  2  at least one known balance on or before C has actually been TESTED, that is met by
-     reproducing rather than by defining. An opening derived from one known balance absorbs every
-     missing row before it, so a lone known balance verifies nothing (state `UNTESTED`);
+  2  at least one known balance on or before C has actually been TESTED: met by the transactions
+     and the arithmetic from a known balance on an EARLIER day, rather than by defining. An
+     opening derived from one known balance absorbs every missing transaction before it, so a lone
+     known balance verifies nothing (state `UNTESTED`), and neither do two balances for the same
+     day (a statement's closing and a balance a person typed, or two sources) however well they
+     agree: they test no transaction. So `through` is never the day of the earliest known
+     balance, with one exception: an account created with its history held starts from a nil that
+     is a premise, not derived from any balance (`balance_anchors.OPENED`), and its first known
+     balance IS tested against that nil by every transaction since (`Known.premised`);
   3  no two known balances disagree with each other on a day on or before C. Two sources stating
      different figures for the same day are a conflict between SOURCES, said in its own words
      and never attributed to the rows. A balance stated for a moment (the bank's own, judged at
@@ -73,6 +79,10 @@ class Known:
     figure: int
     #: Stated for a moment rather than a day's end, so not comparable with one that is.
     instant: bool = False
+    #: The account was created with its history held, so its opening is a nil premise rather
+    #: than one derived from a balance, and the first known balance is tested by every
+    #: transaction since (rule 2).
+    premised: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,6 +122,9 @@ class Agreement:
     #: Whether the movement faults were read at all; False says the figure is from balances alone.
     movement_checked: Structural[bool]
     conflicts: Structural[tuple[Conflict, ...]]
+    #: The days on which a known balance was tested (rule 2), so that a reader which asks which
+    #: days a span may reach (`protection.tested_days`) asks the rule and does not restate it.
+    tested: Structural[tuple[date, ...]] = ()
 
 
 @dataclass(frozen=True)
@@ -156,7 +169,7 @@ def derive_agreement(
         starts[HELD_MOVEMENT] = first_fault.day
     blocked_from = min(starts.values(), default=None)
 
-    tested = [d for d in days if d not in conflicts and any(k.verdict == MET for k in by_day[d])]
+    tested = [d for d in days if _tested(d, days[0], by_day[d], conflicts)]
     clear = [d for d in days if blocked_from is None or d < blocked_from]
     first_tested = min(tested, default=None)
     through = max(
@@ -184,12 +197,26 @@ def derive_agreement(
         held=held,
         movement_checked=movement_checked,
         conflicts=tuple(Conflict(day, sources) for day, sources in sorted(conflicts.items())),
+        tested=tuple(tested),
     )
+
+
+def _tested(
+    day: date, earliest: date, here: Sequence[Known], conflicts: Collection[date]
+) -> bool:
+    """Whether the known balances of `day` were tested (rule 2). The earliest day tests nothing
+    however many balances state it, unless the account's nil opening is a premise."""
+    if day in conflicts:
+        return False
+    if day == earliest:
+        return any(k.premised and k.verdict == MET for k in here)
+    return any(k.verdict == MET for k in here)
 
 
 def known_of_opening(opening: EffectiveOpening) -> list[Known]:
     """The account's own known balances, each with whether the rows reproduce it."""
     found = []
+    premised = any(r.anchor.basis == OPENED for r in opening.readings)
     for reading in opening.readings:
         anchor = reading.anchor
         if anchor.basis in _NIL_BASES:
@@ -202,6 +229,7 @@ def known_of_opening(opening: EffectiveOpening) -> list[Known]:
                 verdict,
                 anchor.balance_minor,
                 instant=anchor.at is not None,
+                premised=premised,
             )
         )
     return found
@@ -209,15 +237,16 @@ def known_of_opening(opening: EffectiveOpening) -> list[Known]:
 
 def known_of_walk(walk: FamilyWalk) -> list[Known]:
     """The whole family's known balances, from the walk of the family's rows."""
+    premised = walk.opened is not None
     found = []
     for reading in walk.readings:
-        found.append(_known_of_reading(reading, instant=False))
+        found.append(_known_of_reading(reading, instant=False, premised=premised))
     for reading in walk.bank_readings:
-        found.append(_known_of_reading(reading, instant=True))
+        found.append(_known_of_reading(reading, instant=True, premised=premised))
     return found
 
 
-def _known_of_reading(reading: FamilyReading, *, instant: bool) -> Known:
+def _known_of_reading(reading: FamilyReading, *, instant: bool, premised: bool) -> Known:
     verdict = DEFINES if reading.agrees is None else MET if reading.agrees else UNMET
     return Known(
         reading.day,
@@ -225,6 +254,7 @@ def _known_of_reading(reading: FamilyReading, *, instant: bool) -> Known:
         verdict,
         reading.balance_minor,
         instant=instant,
+        premised=premised,
     )
 
 
