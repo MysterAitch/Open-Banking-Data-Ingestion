@@ -44,6 +44,9 @@ THE CONVENTIONS, stated once, here, and tested against hand-worked answers in
 * A length of zero or less, and a first day after the last, are refused in a
   sentence (`WindowRefused`). A length so large that no date reaches it is cut to
   what is held; it does not fail.
+* A chart whose days stop before today, such as an account's known balances, gives
+  the last day held (`held_to`), and a window reaching past it is cut there and
+  says so (`Window.ended_after_held`); one that starts after it is `empty`.
 * EVERYTHING is the first day held to today, and is what a chart shows when
   nothing is chosen.
 
@@ -182,6 +185,8 @@ class Window:
     began_before_held: bool
     empty: bool
     empty_reason: str
+    #: Cut at the last day held (`resolve`'s `held_to`), which falls before today.
+    ended_after_held: bool = False
 
     @property
     def days(self) -> int:
@@ -281,8 +286,13 @@ def _asked_span(spec: WindowSpec, today: date, held_from: date) -> tuple[date, d
     return (start if start == date.min else start + one_day), end
 
 
-def resolve(spec: WindowSpec, *, today: date, held_from: date | None) -> Window:
+def resolve(
+    spec: WindowSpec, *, today: date, held_from: date | None, held_to: date | None = None
+) -> Window:
     """The days `spec` covers as at `today`, given the first day anything is held.
+
+    A chart whose days stop before today (the last known balance of an account) passes
+    that day as `held_to`, and a window reaching past it is cut there.
 
     Raises `WindowRefused` for a choice that cannot be a window at all; one that
     can be but holds nothing comes back `empty`, with its reason.
@@ -298,6 +308,9 @@ def resolve(spec: WindowSpec, *, today: date, held_from: date | None) -> Window:
     asked_first, asked_last = _asked_span(spec, today, held_from)
     first = max(asked_first, held_from)
     last = min(asked_last, today)
+    ended_after_held = held_to is not None and last > held_to
+    if held_to is not None:
+        last = min(last, held_to)
     ended_in_future = asked_last > today
     began_before_held = asked_first < held_from
     reason = ""
@@ -311,16 +324,21 @@ def resolve(spec: WindowSpec, *, today: date, held_from: date | None) -> Window:
             f"The window ends on {last.isoformat()}, before anything is held: the first "
             f"day held is {held_from.isoformat()}."
         )
+    elif held_to is not None and first > held_to:
+        reason = (
+            f"The window starts on {asked_first.isoformat()}, after the last day held, "
+            f"{held_to.isoformat()}, so nothing is held in it."
+        )
     if reason:
         return Window(
             first=None, last=None, asked_first=asked_first, asked_last=asked_last,
             ended_in_future=ended_in_future, began_before_held=began_before_held,
-            empty=True, empty_reason=reason,
+            empty=True, empty_reason=reason, ended_after_held=ended_after_held,
         )
     return Window(
         first=first, last=last, asked_first=asked_first, asked_last=asked_last,
         ended_in_future=ended_in_future, began_before_held=began_before_held,
-        empty=False, empty_reason="",
+        empty=False, empty_reason="", ended_after_held=ended_after_held,
     )
 
 

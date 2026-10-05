@@ -11,6 +11,7 @@ text, never matched as strings beyond a literal marker.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import replace
@@ -431,12 +432,14 @@ class TestOverHttp:
         assert "£" not in response.text
 
     def test_Get_WhenTheMaskedPageOffersValues_TheFormPostsToANewTabWithTheRange(self, served):
-        page = Parsed(
-            httpx.get(
-                f"{served}/balance-chart",
-                params={"ref": MAIN, "from": "2026-03-01", "to": "2026-03-31"},
-            ).text
-        )
+        text = httpx.get(
+            f"{served}/balance-chart",
+            params={"ref": MAIN, "from": "2026-03-01", "to": "2026-03-31"},
+        ).text
+        # The window's own control is the page's other form; the one that asks for values
+        # is the one that opens a new tab.
+        (opened,) = re.findall(r'<form[^>]*target="_blank".*?</form>', text, re.S)
+        page = Parsed(opened)
 
         (form,) = page.find("form")
         assert (form["method"], form["action"], form["target"]) == (

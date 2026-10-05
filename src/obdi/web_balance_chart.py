@@ -27,6 +27,22 @@ column beside the scrolling chart, so the figures stay in view while the dates
 scroll. It cannot scroll itself to a change, so a row of posted links opens it
 around each change in range.
 
+THE WINDOW. The days drawn are chosen with the Position page's own control
+(`window_control`, over `date_window`), so the named periods, the lengths, the
+two-days form, and every refusal are the same sentences there and here. Where a
+window may travel is `window_control`'s rule; this page takes it in the query
+string of the masked GET and in the body of the POST, and the POST's answer has
+no address of its own. An explicit `from`/`to` range, which the links in the
+page's own tables and forms carry, is the older way to name days and is read as
+it always was; a request that carries window fields is read as the window, and
+its range, if any, is not. The window is relative to today, cut at the last day
+the account has a known balance, and is drawn by the fitting above: a window
+narrows the span the same `choose_scale` fits, so a short one is drawn at a
+larger scale per day, not in a smaller drawing. A timing pair whose earlier step
+falls before the window and whose later step does not is drawn from the window's
+first day and said to have begun earlier, with its real first day; a pair never
+begins at the edge of a window.
+
 Charts are inline SVG with presentation attributes and no script, as the
 position page's is, so nothing is added to the shared stylesheet that pages
 which must show no figure are searched against.
@@ -35,12 +51,12 @@ which must show no figure are searched against.
 from __future__ import annotations
 
 import html
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from math import floor, log10
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .balance_chart import OWN, WHOLE, BalanceChart, SourceLine
 from .balance_chart_bins import (
@@ -61,6 +77,7 @@ from .balance_chart_bins import (
     periods_of,
 )
 from .callback import render_page
+from .date_window import Window, WindowSpec, between, resolve
 from .errors import DataError
 from .fault_structure import (
     EXPLAINED,
@@ -80,6 +97,15 @@ from .page_times import percent_text
 from .plural import agree
 from .plural import plural as _plural
 from .web_accounts import submit_button
+from .window_control import (
+    BETWEEN,
+    DEFAULT_KEY,
+    KEEP,
+    WINDOW_FIELDS,
+    WindowChoice,
+    window_controls,
+)
+from .window_control import window_choice as read_window_choice
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .web import WebConfig
@@ -180,9 +206,22 @@ def _oxford(items: Sequence[str]) -> str:
     return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
-def _href(ref: str, start: date | None = None, end: date | None = None) -> str:
+def _today() -> date:
+    """The day a window is relative to: the one place this page reads the clock, and a seam."""
+    return datetime.now(UTC).date()
+
+
+def _href(
+    ref: str,
+    start: date | None = None,
+    end: date | None = None,
+    window: Mapping[str, str] | None = None,
+) -> str:
+    """The masked page's address, for a range (`from`/`to`) or a window's fields, or neither."""
     query = f"ref={quote(ref, safe='')}"
-    if start is not None and end is not None:
+    if window:
+        query += "&" + urlencode(window)
+    elif start is not None and end is not None:
         query += f"&from={start.isoformat()}&to={end.isoformat()}"
     return _esc(f"/balance-chart?{query}")
 
@@ -578,23 +617,74 @@ def _kind_phrase(kind: str, count: int) -> str:
     }[kind]
 
 
-def _range_summary(changes: Sequence[Change], start: date, end: date) -> str:
-    """What the range holds, in one line, before any chart."""
+def _range_summary(
+    changes: Sequence[Change], start: date, end: date, noun: str = "range"
+) -> str:
+    """What the range (or `noun`, the window) holds, in one line, before any chart."""
     if not changes:
         return (
-            f"<p><strong>No change falls in this range</strong>, {_mono(start)} to "
+            f"<p><strong>No change falls in this {noun}</strong>, {_mono(start)} to "
             f"{_mono(end)}: the rows are in agreement with the known balances throughout it.</p>"
         )
     counts = count_by_kind(changes)
     held = [_kind_phrase(kind, counts[kind]) for kind in KINDS if counts[kind]]
     return (
-        f"<p><strong>{_plural(len(changes), 'change')} in this range</strong>, {_mono(start)} "
+        f"<p><strong>{_plural(len(changes), 'change')} in this {noun}</strong>, {_mono(start)} "
         f"to {_mono(end)}: {_oxford(held)}; the first on {_mono(changes[0].day)}, the last on "
         f"{_mono(changes[-1].day)}.</p>"
     )
 
 
-def _longest_level_sentence(structure: FaultStructure, start: date, end: date) -> str:
+def _carried_in(structure: FaultStructure, start: date) -> list[Change]:
+    """Timing pairs whose earlier step is before `start` and whose later step is not.
+
+    `changes_in` counts a pair in the range of its earlier step, so a window that begins
+    between the two steps would otherwise lose the pair altogether, and the later step
+    would look like a difference from nowhere.
+    """
+    found: list[Change] = []
+    for number, step in enumerate(structure.steps):
+        if step.kind != TRANSIENT or step.day >= start or step.partner < number:
+            continue
+        later = structure.steps[step.partner].day
+        if later >= start:
+            found.append(Change(step.day, step.kind, step.size_class, later))
+    return found
+
+
+def _begun_earlier(
+    structure: FaultStructure, carried: Sequence[Change], start: date, end: date
+) -> str:
+    """What began before the window and goes on into it, each with its real first day.
+
+    A pair is drawn from the window's first day, and so is the level the difference was
+    at: neither may be read as starting at the window's edge.
+    """
+    parts = [
+        f"<p>A timing pair began before this window, on {_mono(pair.day)}; its other step is "
+        f"on {_mono(pair.last_day)}, "
+        + ("after the window" if pair.last_day > end else "in the window")
+        + ". It is drawn from the window's first day, and is not counted among the changes "
+        "in the window.</p>"
+        for pair in carried
+    ]
+    last_level = len(structure.levels) - 1
+    for index, level in enumerate(structure.levels):
+        in_force = (
+            start <= level.last_day if index == last_level else start < level.until
+        )
+        if index and level.first_day < start and in_force:
+            parts.append(
+                f"<p>The difference in force on the window's first day began on "
+                f"{_mono(level.first_day)}, before the window. It is drawn from the window's "
+                "first day.</p>"
+            )
+    return "".join(parts)
+
+
+def _longest_level_sentence(
+    structure: FaultStructure, start: date, end: date, noun: str = "range"
+) -> str:
     """The longest level in view, with its span in words and not on the strip."""
     best: tuple[int, date, date] | None = None
     last_level = len(structure.levels) - 1
@@ -608,22 +698,29 @@ def _longest_level_sentence(structure: FaultStructure, start: date, end: date) -
         return ""
     days, first, until = best
     return (
-        f"<p>The longest level in this range runs from {_mono(first)} until {_mono(until)} "
+        f"<p>The longest level in this {noun} runs from {_mono(first)} until {_mono(until)} "
         f"({_plural(days, 'day')}): the difference does not change across it.</p>"
     )
 
 
 def _fitted_strip(
-    structure: FaultStructure, changes: Sequence[Change], plot: _Plot
+    structure: FaultStructure,
+    changes: Sequence[Change],
+    plot: _Plot,
+    carried: Sequence[Change] = (),
 ) -> tuple[str, str]:
     """(chart, unit of its bins). No element's geometry depends on a size: marks
-    are one height and width, and joins depend only on dates."""
+    are one height and width, and joins depend only on dates.
+
+    `carried` are pairs that began before the plot: each is drawn as a join from the
+    plot's first day, with no mark of its own, since its earlier step is not in view.
+    """
     unit = choose_bin_unit(plot.days, plot.width)
     mark_width = min(
         _MARK_WIDEST,
         max(_MARK_NARROWEST, nominal_bin_width(unit, plot.days, plot.width) - 2),
     )
-    rows = _rows(structure, changes)
+    rows = _rows(structure, sorted([*changes, *carried], key=lambda change: change.day))
     top = 32
     height = top + ROW_HEIGHT * (len(rows) + 1) + 4
     pad = (ROW_HEIGHT - MARK_HEIGHT) / 2
@@ -638,7 +735,8 @@ def _fitted_strip(
             f'<line x1="2" y1="{y0 + ROW_HEIGHT:.1f}" x2="{VIEW_WIDTH - 2}" '
             f'y2="{y0 + ROW_HEIGHT:.1f}" stroke="currentColor" stroke-opacity=".1"/>'
         )
-        for found in bins_of([c.day for c in row.changes], unit, plot.start, plot.end):
+        in_view = [c.day for c in row.changes if c.day >= plot.start]
+        for found in bins_of(in_view, unit, plot.start, plot.end):
             x = plot.centre(found.first, found.last)
             noun = KINDS[row.kind][0].lower()
             body.append(
@@ -664,7 +762,9 @@ def _fitted_strip(
             if change.partner_day is None:
                 continue
             mid = mark_y + MARK_HEIGHT / 2
-            begins = plot.centre(change.day, change.day)
+            earlier = change.day < plot.start
+            first_shown = max(change.day, plot.start)
+            begins = plot.centre(first_shown, first_shown)
             reaches = min(change.partner_day, plot.end)
             ends = plot.centre(reaches, reaches)
             cap = ""
@@ -673,16 +773,28 @@ def _fitted_strip(
                     row.kind, ends, mark_y, mark_width, hollow=True,
                     extra=f' class="cap" data-kind="{row.kind}"',
                 )
+            began = (
+                " It began before the window, so it is drawn from the window's first day."
+                if earlier
+                else ""
+            )
             body.append(
                 f"<g><title>Timing pair: {change.day} and {change.partner_day}, "
                 f"{(change.partner_day - change.day).days} days apart. The two undo each other "
-                "exactly.</title>"
+                f"exactly.{began}</title>"
                 f'<path class="join" d="M{begins:.1f},{mid:.1f} H{ends:.1f}" '
                 f'stroke="{KINDS[row.kind][1]}" stroke-width="2" fill="none"/>' + cap + "</g>"
             )
+    began_earlier = (
+        f" {_plural(len(carried), 'timing pair')} began before the first day and "
+        f"{agree(len(carried), 'is')} drawn from it."
+        if carried
+        else ""
+    )
     desc = (
         f"From {plot.start} to {plot.end}: {_plural(len(changes), 'change')} of the "
-        f"difference in {_plural(len(rows), 'row')} by kind, and the levels between them. "
+        f"difference in {_plural(len(rows), 'row')} by kind, and the levels between them."
+        f"{began_earlier} "
         f"Each mark stands for the changes in one {unit}; a number beside it is how many. "
         "Marks are all one size; sizes are not drawn."
     )
@@ -999,7 +1111,7 @@ def _change_links(ref: str, changes: Sequence[Change]) -> str:
     )
 
 
-def _steps_table(structure: FaultStructure, scale: Scale) -> str:
+def _steps_table(structure: FaultStructure, scale: Scale, noun: str = "range") -> str:
     rows = []
     for step in structure.steps:
         if not scale.start <= step.day <= scale.end:
@@ -1019,7 +1131,7 @@ def _steps_table(structure: FaultStructure, scale: Scale) -> str:
             "</tr>"
         )
     if not rows:
-        return "<p>No step falls in this range.</p>"
+        return f"<p>No step falls in this {noun}.</p>"
     head = (
         "<tr><th>Day</th><th>Size</th><th>Kind</th><th>Pair with</th><th>Gap, days</th>"
         "<th>Size class</th><th>Stated by</th><th>Ledger</th></tr>"
@@ -1063,20 +1175,144 @@ def _scope_note(chart: Any) -> str:
     return "<p>Each balance is checked against this account's own rows.</p>"
 
 
-def _mode(view: Any, unmasked: bool, start: date | None, end: date | None) -> str:
+@dataclass(frozen=True)
+class _Chosen:
+    """The days a request chose to draw, and the words that say so."""
+
+    choice: WindowChoice
+    today: date
+    #: The days to draw, or None for everything held.
+    start: date | None
+    end: date | None
+    #: The window in words, with what was cut from it; "" where no window was chosen.
+    words: str
+    #: False where the choice was refused or the window holds no day: nothing is drawn.
+    drawn: bool
+    #: True where the days are a window (and not everything, or an explicit range).
+    windowed: bool
+
+    @property
+    def fields(self) -> dict[str, str]:
+        """The window as the fields that carry it on to the next request, if one is chosen."""
+        if not self.windowed:
+            return {}
+        fields = {
+            name: value
+            for name, value in self.choice.fields.items()
+            if name not in ("window", "window_held")
+        }
+        return {**fields, "window": self.choice.held, "window_held": self.choice.held}
+
+
+def _window_words(spec: WindowSpec, window: Window, *, today: date, held: BalanceChart) -> str:
+    """The window in words, above the chart: the days it covers and what was cut from it."""
+    named_as = spec.describe(today=today)
+    if window.empty or window.first is None or window.last is None:
+        return (
+            f"<p data-window-words><strong>{_esc(named_as)}.</strong> "
+            f"{_esc(window.empty_reason)} No chart is drawn.</p>"
+        )
+    sentence = (
+        f"{named_as}: {window.first.isoformat()} to {window.last.isoformat()} "
+        f"({_plural(window.days, 'day')})."
+    )
+    if window.ended_in_future:
+        sentence += (
+            f" The period runs to {window.asked_last.isoformat()}, which has not come, so "
+            "it is shown to today."
+        )
+    if window.ended_after_held and held.last_day is not None:
+        sentence += (
+            f" The last known balance is on {held.last_day.isoformat()}, so the window ends there."
+        )
+    if window.began_before_held:
+        sentence += (
+            f" No balance is known before {window.first.isoformat()}, so the window starts there."
+        )
+    return (
+        f"<p data-window-words><strong>{_esc(sentence)}</strong></p>"
+        '<p class="muted" data-window-note>The counts, the first and last change, the levels, '
+        "and the chart below are of this window and not of every day held.</p>"
+    )
+
+
+def _chosen(
+    chart: BalanceChart,
+    start: date | None,
+    end: date | None,
+    window_fields: Mapping[str, str] | None,
+    today: date,
+) -> _Chosen:
+    """What the request asked to draw: a window, an explicit range, or everything held.
+
+    Window fields win over a range when both arrive; see the module docstring.
+    """
+    if not window_fields:
+        if start is None or end is None:
+            return _Chosen(WindowChoice("", None, "", DEFAULT_KEY, {}), today, None, None, "",
+                           True, False)
+        shown = {"window_from": start.isoformat(), "window_to": end.isoformat()}
+        return _Chosen(
+            WindowChoice(BETWEEN, between(start, end), "", BETWEEN, shown),
+            today, start, end, "", True, False,
+        )
+    choice = read_window_choice(window_fields, today=today, held_from=chart.first_day)
+    if choice.refusal:
+        return _Chosen(choice, today, None, None, "", False, False)
+    if choice.spec is None:
+        return _Chosen(choice, today, None, None, "", True, False)
+    window = resolve(
+        choice.spec, today=today, held_from=chart.first_day, held_to=chart.last_day
+    )
+    words = _window_words(choice.spec, window, today=today, held=chart)
+    if window.empty:
+        return _Chosen(choice, today, None, None, words, False, True)
+    return _Chosen(choice, today, window.first, window.last, words, True, True)
+
+
+def _window_form(ref: str, chosen: _Chosen, *, unmasked: bool) -> str:
+    """The window's controls, in a form of their own: a GET for the masked page, whose
+    address may then carry the window, and a POST for the page with values, whose answer
+    has none. The first button sends `KEEP`, so a bare Enter in a field redraws what the
+    page already shows and never picks a window."""
+    note = (
+        ""
+        if unmasked
+        else '<p class="muted">Choosing a window redraws this timeline over it. Values stay '
+        "hidden until they are asked for.</p>"
+    )
+    method = "post" if unmasked else "get"
+    return (
+        f'<form method="{method}" action="/balance-chart" data-window-form>'
+        f'<input type="hidden" name="ref" value="{_esc(ref)}">'
+        f'<button type="submit" name="window" value="{KEEP}" class="visually-hidden" '
+        'tabindex="-1" aria-hidden="true">Redraw</button>'
+        + window_controls(chosen.choice, today=chosen.today.isoformat(), note=note)
+        + "</form>"
+    )
+
+
+def _mode(
+    view: Any, unmasked: bool, start: date | None, end: date | None, chosen: _Chosen
+) -> str:
     ref = view.ref
     if unmasked:
+        back = _href(ref, None, None, chosen.fields) if chosen.windowed else _href(ref, start, end)
         return (
             '<p class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
-            f'<p><a class="button secondary" href="{_href(ref, start, end)}">'
+            f'<p><a class="button secondary" href="{back}">'
             "Hide values</a></p>"
         )
-    fields = f'<input type="hidden" name="ref" value="{_esc(ref)}">' + (
+    carried = "".join(
+        f'<input type="hidden" name="{name}" value="{_esc(value)}">'
+        for name, value in chosen.fields.items()
+    )
+    fields = f'<input type="hidden" name="ref" value="{_esc(ref)}">' + carried + (
         f'<input type="hidden" name="from" value="{start.isoformat()}">'
         f'<input type="hidden" name="to" value="{end.isoformat()}">'
-        if start is not None and end is not None
+        if start is not None and end is not None and not chosen.windowed
         else ""
     )
     return (
@@ -1114,7 +1350,12 @@ def render_balance_chart(
     unmasked: bool,
     start: date | None = None,
     end: date | None = None,
+    window_fields: Mapping[str, str] | None = None,
+    today: date | None = None,
 ) -> bytes:
+    """The page. The days drawn are an explicit range (`start` and `end`), or the window
+    `window_fields` ask for (see the module docstring), as at `today`; neither means
+    everything held."""
     view = Disclosed(chart, unmasked=unmasked)
     name = view.label or view.ref
     body = f"<p><strong>{_esc(name)}</strong></p>"
@@ -1138,22 +1379,34 @@ def render_balance_chart(
     structure = chart.structure.whole if chart.structure is not None else None
     if structure is None:  # pragma: no cover - a drawn chart always has one
         return _page("Balance differences", "No structure was built for this account.")
-    scale = choose_scale(chart.first_day, chart.last_day, start, end)
+    chosen = _chosen(chart, start, end, window_fields, today or _today())
+    body += _heading(view) + _window_form(view.ref, chosen, unmasked=unmasked) + chosen.words
+    if not chosen.drawn:
+        if chosen.choice.refusal:
+            body += (
+                '<p data-window-refused-note>The window was not changed, and no chart is drawn '
+                "from a choice that was refused.</p>"
+            )
+        return render_page("Balance differences", body + _links(view.ref), wide=True)
+    scale = choose_scale(chart.first_day, chart.last_day, chosen.start, chosen.end)
     changes = changes_in(structure, scale.start, scale.end)
-    body += _heading(view)
+    noun = "window" if chosen.windowed else "range"
+    carried = _carried_in(structure, scale.start) if chosen.windowed else []
+    earlier = _begun_earlier(structure, carried, scale.start, scale.end) if chosen.windowed else ""
     everything = (
         ""
-        if start is None
+        if chosen.start is None or chosen.windowed
         else f'<p><a class="tap" href="{_href(view.ref)}">Draw everything held</a></p>'
     )
     if unmasked:
         body += (
             _scope_note(view)
-            + _mode(view, unmasked, start, end)
+            + _mode(view, unmasked, start, end, chosen)
             + f"<p>Drawn from {_mono(scale.start)} to {_mono(scale.end)} at "
             f"{scale.per_day:.2f} pixels a day.</p>"
             + everything
-            + _range_summary(changes, scale.start, scale.end)
+            + _range_summary(changes, scale.start, scale.end, noun)
+            + earlier
             + _change_links(view.ref, changes)
         )
         figures, drawing, _ = _values_svgs(chart, scale)
@@ -1164,32 +1417,41 @@ def render_balance_chart(
             + _values_legend(chart, kinds)
             + _scroller(figures, drawing, "Balances and their difference")
             + "<h3>The steps, with their figures</h3>"
-            + _steps_table(structure, scale)
+            + _steps_table(structure, scale, noun)
         )
     else:
-        body += _range_summary(changes, scale.start, scale.end)
-        if changes:
-            strip, unit = _fitted_strip(structure, changes, _Plot(scale.start, scale.end))
-            kinds = [k for k in KINDS if any(c.kind == k for c in changes)]
+        body += _range_summary(changes, scale.start, scale.end, noun) + earlier
+        if changes or carried:
+            strip, unit = _fitted_strip(
+                structure, changes, _Plot(scale.start, scale.end), carried
+            )
+            kinds = [k for k in KINDS if any(c.kind == k for c in [*changes, *carried])]
             body += (
                 strip
                 + f"<p>Each mark stands for the changes in one {unit}, and a number beside a "
                 "mark is how many it holds.</p>"
-                + _longest_level_sentence(structure, scale.start, scale.end)
+                + _longest_level_sentence(structure, scale.start, scale.end, noun)
                 + _kind_legend(kinds)
                 + everything
-                + _counts_table(view.ref, changes, scale.start, scale.end)
             )
+            if changes:
+                body += _counts_table(view.ref, changes, scale.start, scale.end)
         else:
             body += everything
         body += (
             _scope_note(view)
-            + _mode(view, unmasked, start, end)
+            + _mode(view, unmasked, start, end, chosen)
             + "<h3>The structure in words</h3>"
             + _structure_html(structure)
         )
     body += _links(view.ref)
     return render_page("Balance differences", body, wide=True)
+
+
+def _window_of(fields: Mapping[str, list[str]]) -> dict[str, str] | None:
+    """The window's own fields from a query or a body, and none of the rest; None if absent."""
+    found = {name: fields[name][0] for name in WINDOW_FIELDS if fields.get(name)}
+    return found or None
 
 
 class BalanceChartPages:
@@ -1205,11 +1467,13 @@ class BalanceChartPages:
 
     def _balance_chart_get(self, params: dict[str, list[str]]) -> None:
         # Nothing in the query string can unmask: the rendering is chosen by
-        # which method was used.
+        # which method was used. The window may ride here, since this page draws no
+        # figure (`window_control` states where a window may travel).
         self._balance_chart(
             (params.get("ref", [""])[0] or "").strip(),
             params.get("from", [""])[0] or "",
             params.get("to", [""])[0] or "",
+            _window_of(params),
             unmasked=False,
         )
 
@@ -1218,10 +1482,19 @@ class BalanceChartPages:
             (form.get("ref", [""])[0] or "").strip(),
             form.get("from", [""])[0] or "",
             form.get("to", [""])[0] or "",
+            _window_of(form),
             unmasked=True,
         )
 
-    def _balance_chart(self, ref: str, start: str, end: str, *, unmasked: bool) -> None:
+    def _balance_chart(
+        self,
+        ref: str,
+        start: str,
+        end: str,
+        window_fields: Mapping[str, str] | None,
+        *,
+        unmasked: bool,
+    ) -> None:
         hook = self.bound_config.balance_chart_data
         if hook is None:
             self._respond(404, _page("Not available", "No balance chart is wired."))
@@ -1246,7 +1519,14 @@ class BalanceChartPages:
             return
         self._respond(
             404 if chart.state == "unknown" else 200,
-            render_balance_chart(chart, unmasked=unmasked, start=first, end=last),
+            render_balance_chart(
+                chart,
+                unmasked=unmasked,
+                start=first,
+                end=last,
+                window_fields=window_fields,
+                today=_today(),
+            ),
             no_store=unmasked,
         )
 

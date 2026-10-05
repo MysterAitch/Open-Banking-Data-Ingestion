@@ -373,11 +373,12 @@ class TestEverythingElseTheTimelineHadIsKept:
 
         assert page.find("ul", class_="legend")
         assert "The structure in words" in page.text
-        (form,) = page.find("form")
+        # The window's own control is the page's other form; the one that asks for values
+        # is the one that opens a new tab.
+        ((form, hidden),) = [f for f in page.forms if f[0].get("target") == "_blank"]
         assert (form["method"], form["action"], form["target"]) == (
             "post", "/balance-chart", "_blank"
         )
-        hidden = {a["name"]: a["value"] for a in page.find("input")}
         assert hidden == {"ref": REF, "from": "2022-01-01", "to": "2022-12-31"}
 
     def test_Page_WhenMasked_CarriesNoMoneySymbolAndNoWordForIt(self):
