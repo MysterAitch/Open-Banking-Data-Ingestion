@@ -195,7 +195,7 @@ def window_choice(
 
 def _chip(key: str, label: str, *, pressed: bool) -> str:
     return (
-        f'<button type="submit" name="window" value="{_esc(key)}" class="position-chip" '
+        f'<button type="submit" name="window" value="{_esc(key)}" class="window-chip" '
         f'aria-pressed="{"true" if pressed else "false"}">{_esc(label)}</button>'
     )
 
@@ -207,7 +207,7 @@ def _select(name: str, options: list[tuple[str, str]], chosen: str, label: str) 
         for value, text in options
     )
     return (
-        f'<div class="position-cell"><label for="{name}">{label}</label>'
+        f'<div class="window-cell"><label for="{name}">{label}</label>'
         f'<select id="{name}" name="{name}">{rows}</select></div>'
     )
 
@@ -218,7 +218,7 @@ def _field(name: str, label: str, value: str, *, kind: str = "text") -> str:
         "text": ' inputmode="numeric" pattern="[0-9]*" autocomplete="off"',
     }[kind]
     return (
-        f'<div class="position-cell"><label for="{name}">{label}</label>'
+        f'<div class="window-cell"><label for="{name}">{label}</label>'
         f'<input id="{name}" name="{name}" type="{kind}"{extra} value="{_esc(value)}"></div>'
     )
 
@@ -250,13 +250,13 @@ def window_controls(choice: WindowChoice, *, today: str, note: str = "") -> str:
         if not choice.refusal or choice.key != key:
             return ""
         return (
-            '<p class="warn position-refused" role="alert" data-window-refused>'
+            '<p class="warn window-refused" role="alert" data-window-refused>'
             f"{_esc(choice.refusal)}</p>"
         )
 
     other = (
-        '<fieldset class="position-other"><legend>A length</legend>'
-        '<div class="position-pair">'
+        '<fieldset class="window-other"><legend>A length</legend>'
+        '<div class="window-pair">'
         + _field("window_count", "Length", fields.get("window_count", "12"))
         + _select(
             "window_unit",
@@ -278,8 +278,8 @@ def window_controls(choice: WindowChoice, *, today: str, note: str = "") -> str:
         "</fieldset>"
     )
     between_dates = (
-        '<fieldset class="position-between"><legend>Between two dates</legend>'
-        '<div class="position-pair">'
+        '<fieldset class="window-between"><legend>Between two dates</legend>'
+        '<div class="window-pair">'
         + _field("window_from", "From", fields.get("window_from", ""), kind="date")
         + _field("window_to", "To", fields.get("window_to", ""), kind="date")
         + "</div>"
@@ -292,19 +292,19 @@ def window_controls(choice: WindowChoice, *, today: str, note: str = "") -> str:
     )
     spec = choice.spec if choice.spec is not None else everything()
     now = (
-        f'<p class="position-now" data-window-now>Window: '
+        f'<p class="window-now" data-window-now>Window: '
         f"{_esc(spec.describe(today=date.fromisoformat(today)))}</p>"
         if not choice.refusal
         else ""
     )
     return (
-        '<fieldset class="position-window"><legend>Chart window</legend>'
+        '<fieldset class="window-control"><legend>Chart window</legend>'
         + now
         + note
-        + f'<div class="position-chips" role="group" aria-label="Common windows">{shown}</div>'
-        + f'<details class="position-more"{" open" if more_open else ""}>'
+        + f'<div class="window-chips" role="group" aria-label="Common windows">{shown}</div>'
+        + f'<details class="window-more"{" open" if more_open else ""}>'
         "<summary>More windows, or choose your own</summary>"
-        f'<div class="position-chips" role="group" aria-label="More windows">{rest}</div>'
+        f'<div class="window-chips" role="group" aria-label="More windows">{rest}</div>'
         + other
         + between_dates
         + "</details></fieldset>"

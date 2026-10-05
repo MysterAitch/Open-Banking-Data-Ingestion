@@ -765,8 +765,8 @@ def test_PositionPage_WindowControls_AreEachAtLeastAThumbTall(
         page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = true)")
         heights = page.evaluate(
             """() => [...document.querySelectorAll(
-                '.position-window button, .position-window input, .position-window select,'
-                + ' .position-window summary')]
+                '.window-control button, .window-control input, .window-control select,'
+                + ' .window-control summary')]
               .map(e => [e.tagName + ' ' + (e.name || e.textContent.trim().slice(0, 20)),
                          e.getBoundingClientRect().height])"""
         )

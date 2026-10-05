@@ -351,11 +351,11 @@ class TestTheControlIsTheOneTheOtherChartUses:
     def test_Page_OffersTheSameControlWithEverythingInOneTap(self):
         page = window_page(window="m12")
 
-        assert 'class="position-window"' in page
-        assert re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page) == [
+        assert 'class="window-control"' in page
+        assert re.findall(r'value="([^"]+)" class="window-chip" aria-pressed="true"', page) == [
             "m12"
         ]
-        assert 'name="window" value="all" class="position-chip"' in page
+        assert 'name="window" value="all" class="window-chip"' in page
         assert 'name="window_held" value="m12"' in page
 
     def test_MaskedPage_ControlIsAGetFormAndTheValuesPagesIsAPostForm(self):
@@ -377,15 +377,15 @@ class TestTheControlIsTheOneTheOtherChartUses:
         page = window_page()
 
         for key in ("this-week", "last-week", "last-4-weeks"):
-            assert f'value="{key}" class="position-chip"' in page
+            assert f'value="{key}" class="window-chip"' in page
 
     def test_ValuesPage_OffersWindowAndEverythingToo(self):
         page = window_page(unmasked=True, window="d90")
 
-        assert re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page) == [
+        assert re.findall(r'value="([^"]+)" class="window-chip" aria-pressed="true"', page) == [
             "d90"
         ]
-        assert 'name="window" value="all" class="position-chip"' in page
+        assert 'name="window" value="all" class="window-chip"' in page
 
 
 class TestTheValuesChartIsDrawnAtTheExistingFit:

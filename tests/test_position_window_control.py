@@ -68,7 +68,7 @@ class TestTheControl:
     def test_Page_OffersFourWindowsInOneTapAndTheRestUnderAFold(self, held):
         form = form_of(render_position(held, unmasked=True).decode())
 
-        first, rest = form.split('<details class="position-more"')
+        first, rest = form.split('<details class="window-more"')
         for label in ("Everything", "Last 90 days", "Last 12 months", "This tax year"):
             assert f">{label}</button>" in first
         for label in (
@@ -82,7 +82,7 @@ class TestTheControl:
         form = form_of(render_position(held, unmasked=True).decode())
 
         chips = re.findall(
-            r'<button type="submit" name="window" value="([^"]+)" class="position-chip"', form
+            r'<button type="submit" name="window" value="([^"]+)" class="window-chip"', form
         )
         assert len(chips) == 20 and len(set(chips)) == 20
 
@@ -106,31 +106,31 @@ class TestTheControl:
         page = asked(held, window=key)
 
         assert words in page
-        assert re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page) == [
+        assert re.findall(r'value="([^"]+)" class="window-chip" aria-pressed="true"', page) == [
             key
         ]
 
     def test_Page_SetsTheControlsToTheWindowInForceAndMarksItsChip(self, held):
         page = asked(held, window="m12")
 
-        pressed = re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page)
+        pressed = re.findall(r'value="([^"]+)" class="window-chip" aria-pressed="true"', page)
         assert pressed == ["m12"]
         assert 'name="window_held" value="m12"' in page
 
     def test_Page_WithADefaultChoice_MarksEverythingAndOpensNothing(self, held):
         page = render_position(held, unmasked=True).decode()
 
-        assert re.findall(r'value="([^"]+)" class="position-chip" aria-pressed="true"', page) == [
+        assert re.findall(r'value="([^"]+)" class="window-chip" aria-pressed="true"', page) == [
             "all"
         ]
-        assert '<details class="position-more">' in page
+        assert '<details class="window-more">' in page
 
     def test_TheMoreWindowsFold_IsOpenWhenTheWindowInForceIsInsideIt(self, held):
-        assert '<details class="position-more" open>' in asked(held, window="last-tax")
-        assert '<details class="position-more" open>' in asked(
+        assert '<details class="window-more" open>' in asked(held, window="last-tax")
+        assert '<details class="window-more" open>' in asked(
             held, window="between", window_from="2026-09-01", window_to="2026-09-10"
         )
-        assert '<details class="position-more">' in asked(held, window="d90")
+        assert '<details class="window-more">' in asked(held, window="d90")
 
     def test_TheTicks_AreFoldedAndTheirSummarySaysWhatIsDrawn(self, held):
         page = render_position(held, unmasked=True).decode()
@@ -296,7 +296,7 @@ class TestWhatIsRefused:
         assert (
             "The window starts on 2026-02-01, which is after it ends on 2026-01-31." in page
         )
-        between = re.search(r'<fieldset class="position-between">.*?</fieldset>', page, re.S)
+        between = re.search(r'<fieldset class="window-between">.*?</fieldset>', page, re.S)
         assert between and "data-window-refused" in between.group(0)
         assert "<svg role=" not in page
         assert "no chart is drawn from a choice that was refused" in page
@@ -309,7 +309,7 @@ class TestWhatIsRefused:
 
         assert 'value="2026-02-01"' in page and 'value="2026-01-31"' in page
         assert 'name="window_held" value="m12"' in page
-        assert '<details class="position-more" open>' in page
+        assert '<details class="window-more" open>' in page
 
     def test_ANonNumber_IsRefusedAndNothingIsEchoedAsMarkup(self, held):
         raw = render_position(

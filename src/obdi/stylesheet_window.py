@@ -3,9 +3,7 @@
 stylesheet by `stylesheet`.
 
 Written with the shared tokens: no colour, face, or size is declared in this file, and every
-rule leads with a class of the control's own (`window_control` writes the markup). The classes
-keep the `position-` prefix they were first written under, on the Position page, so that page's
-markup is unchanged by the control's being shared.
+rule leads with a class of the control's own (`window_control` writes the markup).
 
 THE SHAPE. The chart's window is chosen with the thumb, so the common windows are buttons that
 send the form themselves: one tap, no select to open and no second press. They wrap two to a
@@ -17,26 +15,26 @@ short strip above the chart and not a wall of fields.
 """
 
 WINDOW_STYLES = """
- .position-window { border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
+ .window-control { border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
                     margin: var(--s2) 0; padding: var(--s1) var(--s3) var(--s3); min-width: 0; }
- .position-window > legend { font: 600 var(--text-md) var(--sans); padding: 0 var(--s1); }
- .position-now { margin: 0 0 var(--s1); font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
- .position-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0; }
- .position-chips button.position-chip { flex: 1 1 calc(50% - var(--s2)); width: auto; margin: 0;
+ .window-control > legend { font: 600 var(--text-md) var(--sans); padding: 0 var(--s1); }
+ .window-now { margin: 0 0 var(--s1); font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .window-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0; }
+ .window-chips button.window-chip { flex: 1 1 calc(50% - var(--s2)); width: auto; margin: 0;
             min-height: var(--hit); padding: 0 var(--s3); font: 600 var(--text-md)/130% var(--sans); }
- .position-chips button.position-chip[aria-pressed="true"] { background: var(--act); color: var(--act-ink); }
- .position-more { margin: var(--s2) 0 0; }
- .position-more .position-chips button.position-chip { flex: 1 1 calc(33% - var(--s2)); padding: 0 var(--s2);
+ .window-chips button.window-chip[aria-pressed="true"] { background: var(--act); color: var(--act-ink); }
+ .window-more { margin: var(--s2) 0 0; }
+ .window-more .window-chips button.window-chip { flex: 1 1 calc(33% - var(--s2)); padding: 0 var(--s2);
             font-size: var(--text-sm); }
- .position-other, .position-between { border: var(--rule-weight) solid var(--rule-2); border-radius: var(--radius);
+ .window-other, .window-between { border: var(--rule-weight) solid var(--rule-2); border-radius: var(--radius);
             margin: var(--s3) 0 0; padding: var(--s1) var(--s3) var(--s2); min-width: 0; }
- .position-other > legend, .position-between > legend { font: 600 var(--text-sm) var(--sans);
+ .window-other > legend, .window-between > legend { font: 600 var(--text-sm) var(--sans);
             color: var(--ink-2); padding: 0 var(--s1); }
- .position-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s3); }
- .position-cell { min-width: 0; margin: var(--s1) 0; }
- .position-cell > label { display: block; margin: 0 0 var(--s1); color: var(--ink-2); }
- .position-refused { margin: var(--s2) 0; }
+ .window-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s3); }
+ .window-cell { min-width: 0; margin: var(--s1) 0; }
+ .window-cell > label { display: block; margin: 0 0 var(--s1); color: var(--ink-2); }
+ .window-refused { margin: var(--s2) 0; }
  @media (min-width: 40rem) {
-  .position-chips button.position-chip { flex: 0 1 auto; min-width: 8rem; }
+  .window-chips button.window-chip { flex: 0 1 auto; min-width: 8rem; }
  }
 """

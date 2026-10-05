@@ -60,7 +60,7 @@ class TestReadingTheChoice:
 
     def test_TheWeekPeriods_AreInTheFoldAndNotAmongTheOneTapChips(self):
         page = window_controls(read(), today=TODAY.isoformat())
-        before_fold, fold = page.split('<details class="position-more"')
+        before_fold, fold = page.split('<details class="window-more"')
 
         for key in ("this-week", "last-week", "last-4-weeks"):
             assert f'value="{key}"' in fold
@@ -117,5 +117,5 @@ class TestDrawingTheControl:
 
 class TestTheStyles:
     def test_TheControlsRules_AreTheSharedModulesAndNotAnyPagesOwn(self):
-        assert ".position-chip" in WINDOW_STYLES
-        assert ".position-chip" not in POSITION_STYLES
+        assert ".window-chip" in WINDOW_STYLES
+        assert ".window-chip" not in POSITION_STYLES
