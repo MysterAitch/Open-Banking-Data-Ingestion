@@ -432,7 +432,7 @@ class TestALoanAccount:
         wired.assign_statement_section(artefact, LOAN_KEY, LOAN)
 
         with Store(db) as store:
-            position = read_position(store, labels={}, today=date(2025, 6, 30))
+            position = read_position(store, today=date(2025, 6, 30))
             accounts = {
                 account.ref: account
                 for group in position.groups

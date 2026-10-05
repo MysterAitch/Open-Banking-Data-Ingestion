@@ -67,7 +67,7 @@ TOP, PLOT = 30, 168
 def held(tmp_path) -> Position:
     with Store(tmp_path / "w.sqlite3") as store:
         window_household(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 def page(position: Position, window, *, chart_in=None, unmasked=True) -> str:
@@ -389,7 +389,7 @@ class TestTheThresholdsOnARealChart:
     def long_history(self, tmp_path) -> Position:
         with Store(tmp_path / "e.sqlite3") as store:
             eight_years(store)
-            return read_position(store, labels={}, today=D(2026, 10, 2))
+            return read_position(store, today=D(2026, 10, 2))
 
     def window_chart(self, position, first: date, last: date):
         html = render_position(position, unmasked=True, window=between(first, last)).decode()

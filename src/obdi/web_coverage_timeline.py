@@ -37,7 +37,7 @@ from math import ceil
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode
 
-from .account_names import name_html
+from .account_names import AccountShown
 from .callback import render_page
 from .coverage_timeline import (
     ASK_HOLE,
@@ -1315,7 +1315,6 @@ def render_account_timeline(
     *,
     fields: Mapping[str, str] | None,
     mode: str = "",
-    names: Mapping[str, str] | None = None,
     every_day: bool = False,
     expanded: Sequence[tuple[date, date]] = (),
     keep: Sequence[tuple[date, date]] = (),
@@ -1325,8 +1324,7 @@ def render_account_timeline(
     Quiet stretches are collapsed unless `every_day`; `expanded` are stretches the request has
     opened; `keep` are days never collapsed (the month an account page is showing).
     """
-    names = names or {view.ref: view.label}
-    heading = f"<p>{name_html(view.ref, names)}</p>"
+    heading = f"<p>{AccountShown.named(view.ref, view.label).inline()}</p>"
     chosen = choose_window(fields, today=view.today, first_day=view.first_day)
     carried = {
         k: v for k, v in chosen.choice.fields.items() if k in WINDOW_FIELDS
@@ -1531,7 +1529,7 @@ def render_household(views: Sequence[AccountTimeline]) -> bytes:
         first = view.first_day
         items.append(
             f'<li><p class="cov-lane-name"><a href="/coverage-timeline?ref='
-            f'{_esc(quote(view.ref, safe=""))}">{name_html(view.ref, {view.ref: view.label})}'
+            f'{_esc(quote(view.ref, safe=""))}">{AccountShown.named(view.ref, view.label).inline()}'
             f"</a></p>{_household_lane(view)}"
             f'<p class="muted">{"" if not view.lanes else f"From {_esc(first.isoformat())}. "}'
             f"{_esc(_household_sentence(view))}</p></li>"

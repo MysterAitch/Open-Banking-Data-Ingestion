@@ -29,6 +29,7 @@ from urllib.parse import urlencode
 import pytest
 
 from obdi import asked_coverage
+from obdi.account_names import accounts_shown
 from obdi.accounts import AccountMap
 from obdi.asked_coverage import (
     HEAL_ASKS_PER_CONNECTION,
@@ -598,7 +599,7 @@ class TestWhatThePagesSay:
                 findings=lambda: [],
                 canonical_for_ref=lambda ref: "halifax-card" if ref == "truelayer:card-1" else ref,
                 watched=set(),
-                labels={"halifax-card": "Halifax card"},
+                names=accounts_shown({"halifax-card": "Halifax card"}, []),
                 actual_bound=None,
                 rebuild_status={},
             )
@@ -634,7 +635,6 @@ class TestWhatThePagesSay:
                 findings=lambda: [],
                 canonical_for_ref=lambda ref: ref,
                 watched=set(),
-                labels={},
                 actual_bound=None,
                 rebuild_status={},
             )

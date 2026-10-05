@@ -67,7 +67,6 @@ def capture(browser, db, tmp_path) -> Iterator[Callable[[str], dict[str, object]
                 findings=lambda: collect_alert_findings(db, now=now),
                 canonical_for_ref=lambda ref: ref,
                 watched=set(),
-                labels={},
                 actual_bound=None,
                 rebuild_status={},
             )

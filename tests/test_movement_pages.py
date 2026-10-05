@@ -96,7 +96,6 @@ def overview_of(store: Store):
         findings=lambda: [],
         canonical_for_ref=canonical,
         watched=set(),
-        labels={},
         actual_bound=None,
         rebuild_status={},
     )

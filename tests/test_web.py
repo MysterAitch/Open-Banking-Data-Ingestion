@@ -13,6 +13,7 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.connections import ConnectionStore, build_connection
 from obdi.spaces import RECOVERY_BOUND
 from obdi.web import (
@@ -2171,7 +2172,7 @@ class TestNamesLeadAndDormancySpeaks:
             redirect_uri="https://obdi.example.com/callback",
             connection_store=ConnectionStore(tmp_path / "c.json"),
             holdings=holdings,
-            display_labels=display_labels,
+            account_names=lambda: accounts_shown(display_labels(), []),
         )
         handler = type(
             "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
@@ -2301,7 +2302,7 @@ class TestUploadingAFileFromThePage:
             connection_store=ConnectionStore(tmp_path / "c.json"),
             preview_upload=preview_upload,
             confirm_upload=confirm_upload,
-            display_labels=(lambda: labels or {}),
+            account_names=lambda: accounts_shown(labels or {}, []),
         )
         handler = type(
             "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}

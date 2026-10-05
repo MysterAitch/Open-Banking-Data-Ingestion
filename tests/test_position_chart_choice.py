@@ -111,14 +111,14 @@ def provisional_of(points) -> dict[str, int]:
 def position(tmp_path) -> Position:
     with Store(tmp_path / "p.sqlite3") as store:
         household(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 @pytest.fixture
 def position_with_house(tmp_path) -> Position:
     with Store(tmp_path / "p.sqlite3") as store:
         household_with_house(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 def every_key(position: Position) -> set[str]:

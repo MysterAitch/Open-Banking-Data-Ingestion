@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.connections import Connection, ConnectionStore
 from obdi.namespaces import UNASSIGNED_ACCOUNT
 from obdi.navigation import PAGE_NAMES
@@ -204,7 +205,7 @@ class TestBringInTheBanksOwnFeed:
                 **held_by("starling", "starling-personal", "starling-joint"),
                 **held_by("truelayer", "halifax-current"),
             },
-            display_labels=lambda: {"starling-personal": "Main account"},
+            account_names=lambda: accounts_shown({"starling-personal": "Main account"}, []),
         )
 
         assert "The bank&#x27;s own feed" in page
@@ -329,7 +330,7 @@ class TestDiagnostics:
     def test_DiagnosticsPage_OffersFieldStatisticsForEachHeldAccount(self, serve):
         base = serve(
             held_accounts=lambda: ["acct-b", "acct-a"],
-            display_labels=lambda: {"acct-a": "Current"},
+            account_names=lambda: accounts_shown({"acct-a": "Current"}, []),
         )
 
         page = httpx.get(f"{base}/diagnostics", timeout=20).text

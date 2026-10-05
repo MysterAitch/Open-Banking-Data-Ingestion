@@ -60,7 +60,7 @@ def from_month(store: Store, first: date, *, with_uncounted: bool = False) -> No
 def chart_of(tmp_path, build, **kwargs) -> str:
     with Store(tmp_path / "p.sqlite3") as store:
         build(store, **kwargs)
-        position = read_position(store, labels={}, today=TODAY)
+        position = read_position(store, today=TODAY)
     page = render_position(position, unmasked=True).decode("utf-8")
     found = CHART.search(page)
     assert found, "the page with values shown draws no chart"
@@ -70,7 +70,7 @@ def chart_of(tmp_path, build, **kwargs) -> str:
 def page_of(tmp_path, build, *, unmasked: bool, **kwargs) -> str:
     with Store(tmp_path / "p.sqlite3") as store:
         build(store, **kwargs)
-        position = read_position(store, labels={}, today=TODAY)
+        position = read_position(store, today=TODAY)
     return render_position(position, unmasked=unmasked).decode("utf-8")
 
 
@@ -343,7 +343,7 @@ class TestTheKeyThatNamesTheLines:
     def test_Key_OfAChartDrawnFromSomeAccounts_SaysChosenAndNotNetWorth(self, tmp_path):
         with Store(tmp_path / "p.sqlite3") as store:
             household(store)
-            position = read_position(store, labels={}, today=TODAY)
+            position = read_position(store, today=TODAY)
         rest = {item.key for item in position.chart_items} - {"account:hsbc-mortgage"}
 
         page = render_position(position, unmasked=True, chart_in=rest).decode("utf-8")

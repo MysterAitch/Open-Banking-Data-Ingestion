@@ -472,7 +472,6 @@ class TestABrokenProtectionIsLoud:
                 findings=lambda: collect_alert_findings(db, now=self.NOW),
                 canonical_for_ref=lambda ref: ref,
                 watched=(),
-                labels={},
                 actual_bound=None,
                 rebuild_status={},
             )

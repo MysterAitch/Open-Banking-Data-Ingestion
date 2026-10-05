@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from . import fingerprint
+from .account_names import AccountsShown, accounts_shown
 from .accounts import (
     AccountBinding,
     AccountMap,
@@ -2404,8 +2405,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     feeders.setdefault(canonical, []).append(f"{source}:{ref}")
         return {c: sorted(refs) for c, refs in feeders.items()}
 
-    def display_labels() -> dict[str, str]:
-        """Human names for canonical refs, from layer 0 alone.
+    def provider_labels() -> dict[str, str]:
+        """The names the providers gave canonical refs, from layer 0 alone.
+
+        RAW INPUT to `account_names` and used nowhere else: a page that asked for these alone
+        ignored the label he declared. `account_names` below is the only way a hook or a page
+        reaches an account's name.
 
         The providers have been TELLING us the names since the first pull -
         TrueLayer's display_name, Starling's account and Space names - all
@@ -2472,6 +2477,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                                 account_map.resolve("starling", uid)
                             ] = f"{name} (starling space)"
         return labels
+
+    def account_names(store: Store | None = None) -> AccountsShown:
+        """Every account as a page shows it: the one place the hooks reach a name.
+
+        A provider scan that fails leaves the declared accounts, named as ever: a name is a
+        convenience, and no page may depend on the scan succeeding. `store` is the caller's own,
+        where it already holds one open.
+        """
+        try:
+            provider = provider_labels()
+        except Exception:
+            provider = {}
+        if store is not None:
+            return accounts_shown(provider, store.declared_accounts())
+        with Store(db_path) as opened:
+            return accounts_shown(provider, opened.declared_accounts())
 
     def pinned_providers(name: str) -> str | None:
         """The provider id this connection ALREADY goes through, for pinning
@@ -2720,7 +2741,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         one remaining blocker (no canonical name) carries its remedy.
         """
         from .actual_push import declared_to_create
-        from .labels import collect_display_labels
 
         settle_emptied_budgets_for(db_path)
         actual_bound = {b.canonical_id for b in _actual_bindings()}
@@ -2734,22 +2754,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     for b in raw.get("bindings", [])
                     if isinstance(b, dict) and b.get("canonical_id")
                 }
-        connection_ids: list[str] = []
-        store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
-        if store_path_env:
-            with contextlib.suppress(OSError, ValueError):
-                connection_ids = sorted(ConnectionStore(store_path_env).load())
         with Store(db_path) as store:
-            account_map = _account_map(store)
-            labels = collect_display_labels(store, account_map, connection_ids)
-            # The registry's declared names win: a human named the account,
-            # and declared-but-feedless accounts appear at all only here.
-            # Assigned key by key rather than updated wholesale: the
-            # registry's keys are account REFS and the label map's are
-            # plain strings, and a dict of the narrower key type is not a
-            # dict of the wider one.
-            for declared_ref, declared_label in account_map.registry_labels().items():
-                labels[declared_ref] = declared_label
+            names = account_names(store)
             counts = {
                 str(row[0]): int(row[1])
                 for row in store.connection.execute(
@@ -2769,7 +2775,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             rows.append(
                 {
                     "ref": ref,
-                    "label": labels.get(ref, ref),
+                    "label": names.of(ref).name,
                     "state": state,
                     "count": counts.get(ref, 0),
                 }
@@ -3012,14 +3018,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .review_flags import build_queue
 
         _flags_held()
-        labels = display_labels()
         with Store(db_path) as store:
-            declared = {
-                str(record.ref): record.label
-                for record in store.declared_accounts()
-                if record.label
-            }
-            return build_queue(store, lambda ref: declared.get(ref) or labels.get(ref) or ref)
+            names = account_names(store)
+            return build_queue(store, lambda ref: names.of(ref).name)
 
     def review_flags_answer(answer: str, flag: str, neighbour: str, fingerprint: str) -> Outcome:
         from .review_flags import answer_one_payment, answer_two_payments
@@ -3105,12 +3106,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """Archive one account, naming it as the pages already do if it is new."""
         from .accounts import archive_account
 
-        try:
-            label = display_labels().get(ref, "")
-        except Exception:
-            # A name is a convenience; archiving must not depend on the
-            # provider-label scan succeeding.
-            label = ""
         with Store(db_path) as store:
             return archive_account(
                 store,
@@ -3118,7 +3113,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 closed=closed,
                 basis=basis,
                 today=datetime.now(UTC).date(),
-                label=label,
+                label=account_names(store).of(ref).label,
             )
 
     def unarchive_account_hook(ref: str) -> ArchiveOutcome:
@@ -3277,22 +3272,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             account_standings()
 
     def ledger_data(ref: str, month: str) -> Ledger:
-        from .account_names import merged_names
         from .ledger import build_ledger
 
-        try:
-            provider_labels = display_labels()
-        except Exception:
-            # A name is a convenience; the ledger must not depend on the
-            # provider-label scan succeeding.
-            provider_labels = {}
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
         hold = hold_for(db_path)
         with Store(db_path) as store:
-            # The label he declared wins over the provider's (`account_names`): the page was
-            # headed by the bare reference for an account he had named, because only the
-            # provider's label was asked for.
-            label = merged_names(provider_labels, store.declared_accounts()).get(ref, "")
+            label = account_names(store).of(ref).label
             if hold is not None:
                 # The rows are shown as they stand, and the verification - agreement and the
                 # protection's comparison with its span - says the one sentence instead.
@@ -3325,15 +3310,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def balance_chart_data(ref: str) -> BalanceChart:
         from .balance_chart import build_balance_chart  # deferred like the other data hooks
 
-        try:
-            label = display_labels().get(ref, "")
-        except Exception:
-            # A name is a convenience; the chart must not depend on the
-            # provider-label scan succeeding.
-            label = ""
         with Store(db_path) as store:
             return build_balance_chart(
-                store, ref, label=label, families=families_of(store, _account_map(store))
+                store,
+                ref,
+                label=account_names(store).of(ref).label,
+                families=families_of(store, _account_map(store)),
             )
 
     def gaps_by_account(today: date) -> dict[str, tuple[FetchGap, ...]]:
@@ -3359,16 +3341,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """One account's timeline. With `balances` it reads the known balances themselves, for
         the tick on each; without, the standing the memo holds is all it reads of verification,
         which is what an account's own page can afford beside its rows."""
-        from .account_names import merged_names  # deferred like the other data hooks
         from .agreement import standing_of
         from .balance_anchors import effective_opening, known_account
         from .coverage_timeline import build_account_timeline
 
-        try:
-            provider_labels = display_labels()
-        except Exception:
-            # A name is a convenience; the timeline must not depend on the label scan.
-            provider_labels = {}
         with Store(db_path) as store:
             held = timeline_memo.get(store, dict)
             key = (ref, today, balances)
@@ -3392,12 +3368,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     opening, [ref, *families.spaces_of(ref)], movement_report(store)
                 ).own
             record = store.protection_record(ref)
-            names = merged_names(provider_labels, store.declared_accounts())
             built = build_account_timeline(
                 store,
                 ref,
                 today=today,
-                label=names.get(ref, ""),
+                label=account_names(store).of(ref).label,
                 agreement=agreement,
                 opening=opening,
                 protected_through=(
@@ -3418,17 +3393,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return timeline_for(ref, today, balances=False)
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
-        from .account_names import merged_names  # deferred like the other data hooks
         from .coverage_timeline import build_account_timeline
 
-        try:
-            provider_labels = display_labels()
-        except Exception:
-            provider_labels = {}
         by_account = gaps_by_account(today)
         with Store(db_path) as store:
             account_map = _account_map(store)
-            names = merged_names(provider_labels, store.declared_accounts())
+            names = account_names(store)
             standings = account_standings(store)
             spaces = space_refs(store)
             refs = [
@@ -3442,7 +3412,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     store,
                     ref,
                     today=today,
-                    label=names.get(ref, ""),
+                    label=names.of(ref).label,
                     agreement=standings[ref].standing.own if ref in standings else None,
                     canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
                     fetch_gaps=by_account.get(ref, ()),
@@ -3455,16 +3425,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def position_data() -> Position:
         from .position import read_position  # deferred like the other data hooks
 
-        try:
-            labels = display_labels()
-        except Exception:
-            # A name is a convenience; the position must not depend on the
-            # provider-label scan succeeding.
-            labels = {}
         with Store(db_path) as store:
             return read_position(
                 store,
-                labels=labels,
+                names=account_names(store),
                 today=datetime.now(UTC).date(),
                 families=families_of(store, _account_map(store)),
             )
@@ -4194,27 +4158,19 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 )
             ]
 
-    def _labels_or_none() -> dict[str, str]:
-        try:
-            return display_labels()
-        except Exception:
-            # A name is a convenience; the accounts page must not depend on
-            # the provider-label scan succeeding.
-            return {}
-
     def known_accounts_data() -> tuple[KnownAccounts, ParentPlan]:
-        labels = _labels_or_none()
         with Store(db_path) as store:
             account_map = _account_map(store)
             return (
-                read_known_accounts(store, account_map, labels),
+                read_known_accounts(store, account_map, account_names(store)),
                 plan_parents(store, account_map),
             )
 
     def declare_known(refs: list[str]) -> DeclareOutcome:
-        labels = _labels_or_none()
         with Store(db_path) as store:
-            return declare_known_accounts(store, _account_map(store), labels, refs)
+            return declare_known_accounts(
+                store, _account_map(store), account_names(store), refs
+            )
 
     def set_parents(spaces: list[str]) -> ParentOutcome:
         with Store(db_path) as store:
@@ -4240,12 +4196,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def assemble_overview() -> Overview:
         now = datetime.now(UTC)
         hold = hold_for(db_path, now)
-        try:
-            labels = display_labels()
-        except Exception:
-            # A name is a convenience; the Overview must not depend on the
-            # provider-label scan succeeding.
-            labels = {}
         with Store(db_path) as store:
             account_map = _account_map(store)
             return build_overview(
@@ -4254,7 +4204,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 findings=lambda: collect_alert_findings(db_path, now=now),
                 canonical_for_ref=lambda ref: _canonical_for_ref(account_map, ref),
                 watched=_scheduled_sources(),
-                labels=labels,
+                names=account_names(store),
                 actual_bound=(
                     {binding.canonical_id for binding in _actual_bindings()}
                     if os.getenv("ACTUAL_SYNC_ID", "").strip()
@@ -4348,7 +4298,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         bind_account=bind_account,
         provider_knowledge=provider_knowledge,
         starling_status=starling_status,
-        display_labels=display_labels,
+        account_names=account_names,
         declared_accounts=declared_accounts,
         held_accounts=held_accounts,
         declare_account=declare_account,

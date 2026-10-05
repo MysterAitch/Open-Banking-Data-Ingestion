@@ -40,6 +40,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from datetime import date
 
+from .account_names import AccountsShown
 from .accounts import AccountMap, AccountRecord, AccountRef
 from .namespaces import UK_CARD_STATEMENT_SOURCE, validate_canonical_name
 from .overview import held_by_account
@@ -177,7 +178,7 @@ def _declarable(ref: str) -> bool:
 
 
 def read_known_accounts(
-    store: Store, account_map: AccountMap, labels: Mapping[str, str]
+    store: Store, account_map: AccountMap, names: AccountsShown
 ) -> KnownAccounts:
     """Every account held, bound, or declared, with what could be declared for it."""
     registry = {str(r.ref): r for r in store.declared_accounts()}
@@ -203,7 +204,7 @@ def read_known_accounts(
         accounts.append(
             KnownAccount(
                 ref=ref,
-                label=(record.label if record and record.label else labels.get(ref, "")) or ref,
+                label=names.of(ref).name,
                 kind=kind,
                 kind_reason=reason,
                 parent=str(record.parent) if record and record.parent else "",
@@ -231,7 +232,7 @@ def _infer_kind(
 def declare_known_accounts(
     store: Store,
     account_map: AccountMap,
-    labels: Mapping[str, str],
+    names: AccountsShown,
     refs: Collection[str],
 ) -> DeclareOutcome:
     """Declare the undeclared accounts among `refs`, and nothing else.
@@ -240,7 +241,7 @@ def declare_known_accounts(
     main account as parent where that account is declared by then (or in this
     same press), so one press leaves parents and children consistent.
     """
-    known = read_known_accounts(store, account_map, labels)
+    known = read_known_accounts(store, account_map, names)
     wanted = set(refs)
     chosen = [a for a in known.undeclared if a.ref in wanted]
     skipped = tuple(sorted(wanted - {a.ref for a in chosen}))

@@ -29,6 +29,7 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.cli import main as cli_main
 from obdi.export_declared import export_declared
@@ -87,7 +88,11 @@ def store(tmp_path):
 
 
 def known(store: Store):
-    return read_known_accounts(store, PROVIDER_MAP, LABELS)
+    return read_known_accounts(store, PROVIDER_MAP, named(store))
+
+
+def named(store: Store):
+    return accounts_shown(LABELS, store.declared_accounts())
 
 
 class TestFindingWhatIsHeldButNotDeclared:
@@ -130,7 +135,7 @@ class TestFindingWhatIsHeldButNotDeclared:
 
 class TestDeclaringWhatIsKnown:
     def test_Declare_DeclaresExactlyTheListGivenAndNamesEachOne(self, store):
-        outcome = declare_known_accounts(store, PROVIDER_MAP, LABELS, sorted(HELD_UNDECLARED))
+        outcome = declare_known_accounts(store, PROVIDER_MAP, named(store),sorted(HELD_UNDECLARED))
 
         assert {a.ref for a in outcome.declared} == HELD_UNDECLARED
         records = {str(r.ref): r for r in store.declared_accounts()}
@@ -141,30 +146,30 @@ class TestDeclaringWhatIsKnown:
         assert records[LOOSE].label == LOOSE
 
     def test_Declare_SetsASpacesParentWhenItsMainAccountIsDeclaredInTheSamePress(self, store):
-        declare_known_accounts(store, PROVIDER_MAP, LABELS, sorted(HELD_UNDECLARED))
+        declare_known_accounts(store, PROVIDER_MAP, named(store),sorted(HELD_UNDECLARED))
 
         records = {str(r.ref): r for r in store.declared_accounts()}
         assert records[BILLS].parent == MAIN
         assert records[MAIN].parent is None
 
     def test_Declare_WhenTheMainAccountIsNotBeingDeclared_LeavesTheSpacesParentEmpty(self, store):
-        declare_known_accounts(store, PROVIDER_MAP, LABELS, [BILLS])
+        declare_known_accounts(store, PROVIDER_MAP, named(store),[BILLS])
 
         (bills,) = [r for r in store.declared_accounts() if str(r.ref) == BILLS]
         assert bills.parent is None
 
     def test_Declare_WhenPressedAgain_DeclaresNothingAndReportsTheRefsAsSkipped(self, store):
-        declare_known_accounts(store, PROVIDER_MAP, LABELS, sorted(HELD_UNDECLARED))
+        declare_known_accounts(store, PROVIDER_MAP, named(store),sorted(HELD_UNDECLARED))
         before = [str(r.ref) for r in store.declared_accounts()]
 
-        again = declare_known_accounts(store, PROVIDER_MAP, LABELS, sorted(HELD_UNDECLARED))
+        again = declare_known_accounts(store, PROVIDER_MAP, named(store),sorted(HELD_UNDECLARED))
 
         assert again.declared == ()
         assert set(again.skipped) == HELD_UNDECLARED
         assert [str(r.ref) for r in store.declared_accounts()] == before
 
     def test_Declare_WhenAskedForSomethingObdiDoesNotHold_RefusesItAndDeclaresNoneOfIt(self, store):
-        outcome = declare_known_accounts(store, PROVIDER_MAP, LABELS, ["made-up", UNBOUND])
+        outcome = declare_known_accounts(store, PROVIDER_MAP, named(store),["made-up", UNBOUND])
 
         assert outcome.declared == () and set(outcome.skipped) == {"made-up", UNBOUND}
         assert {str(r.ref) for r in store.declared_accounts()} == {"tin"}
@@ -176,7 +181,7 @@ class TestDeclaringWhatIsKnown:
             )
         )
 
-        declare_known_accounts(store, PROVIDER_MAP, LABELS, [LOOSE])
+        declare_known_accounts(store, PROVIDER_MAP, named(store),[LOOSE])
 
         (loose,) = [r for r in store.declared_accounts() if str(r.ref) == LOOSE]
         assert (loose.kind, loose.label, loose.opened) == ("savings", "Mine", date(2020, 1, 1))

@@ -56,12 +56,13 @@ to pounds, so an account holding one has its opening withheld by
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import accumulate
 
+from .account_names import AccountsShown, accounts_shown
 from .balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
 from .date_window import Resolution
 from .family_anchors import Families
@@ -806,26 +807,23 @@ def build_position(
 def read_position(
     store: Store,
     *,
-    labels: Mapping[str, str],
+    names: AccountsShown | None = None,
     today: date,
     families: Families | None = None,
 ) -> Position:
     """The position of everything the store holds, as at `today`.
 
     The accounts are the ones the Overview lists: every account holding a row
-    and every declared one, labelled as the Overview labels them. `families`
-    says which accounts are Spaces of which and which sources are blind to
-    them, so a whole-account balance is never taken as a main account's own.
+    and every declared one, named as every page names them (`account_names`).
+    `families` says which accounts are Spaces of which and which sources are
+    blind to them, so a whole-account balance is never taken as a main account's own.
     """
     registry = {str(record.ref): record for record in store.declared_accounts()}
-    merged = dict(labels)
-    for ref, record in registry.items():
-        if record.label:
-            merged[ref] = record.label
+    shown = names or accounts_shown({}, registry.values())
     held, _ = held_by_account(store)
 
     inputs = []
-    for ref in sorted(set(held) | set(registry), key=lambda r: (merged.get(r) or r).lower()):
+    for ref in sorted(set(held) | set(registry), key=lambda r: shown.of(r).name.lower()):
         rows = store.transactions_for_account(ref)
         declared = registry.get(ref)
         closed = declared.closed if declared is not None else None
@@ -833,7 +831,7 @@ def read_position(
         inputs.append(
             AccountInput(
                 ref=ref,
-                label=merged.get(ref) or ref,
+                label=shown.of(ref).name,
                 kind=declared.kind if declared is not None else "",
                 archived=closed is not None and closed <= today,
                 opening=opening,

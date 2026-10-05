@@ -129,7 +129,7 @@ class TestThreeStatedBalances:
     ):
         state(store)
 
-        position = read_position(store, labels={}, today=TODAY)
+        position = read_position(store, today=TODAY)
 
         counted = {a.ref: a for g in position.groups for a in g.accounts}
         assert counted[MORTGAGE].balance.minor == -19_800_000
@@ -142,13 +142,13 @@ class TestThreeStatedBalances:
     def test_Position_WhenOnlyOneBalanceIsStated_CountsItFromThatBalance(self, store):
         record_stated_anchor(store, MORTGAGE, FEB, "-199200.00", today=TODAY)
 
-        position = read_position(store, labels={}, today=TODAY)
+        position = read_position(store, today=TODAY)
 
         assert position.accounts_counted == 1
         assert {p.month for p in position.history if p.included} >= {"2026-02", "2026-03"}
 
     def test_Position_WhenNoBalanceIsStated_DoesNotCountTheAccount(self, store):
-        position = read_position(store, labels={}, today=TODAY)
+        position = read_position(store, today=TODAY)
 
         assert (position.accounts_counted, position.accounts_uncounted) == (0, 1)
 

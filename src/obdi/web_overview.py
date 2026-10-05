@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
+from .account_names import AccountShown
 from .navigation import NEEDS_A_LOOK, page_name
 from .overview import (
     ALERT_CONDITIONS,
@@ -442,10 +443,13 @@ def attention_html(overview: Overview) -> str:
         # The verdict has already said so aloud; the words stay for a screen reader and the
         # anchor, without a second sentence on the screen.
         return '<p class="visually-hidden">Nothing needs attention.</p>'
-    labels = {account.ref: account.label for account in overview.accounts}
+    accounts = {
+        account.ref: AccountShown.named(account.ref, account.label)
+        for account in overview.accounts
+    }
 
     def label_of(ref: str) -> str:
-        return labels.get(ref, ref)
+        return (accounts.get(ref) or AccountShown(ref)).name
 
     bands = [
         (severity, [i for i in items if i.severity == severity])
@@ -641,11 +645,8 @@ def _facts_html(account: AccountOverview, today: date) -> str:
 def _row_html(account: AccountOverview, today: date, position: int, *, space: bool) -> str:
     target = _esc(quote(account.ref, safe=""))
     reading = row_reading(account)
-    ref = (
-        f'<span class="acct-ref mono">{_esc(account.ref)}</span>'
-        if account.label != account.ref
-        else ""
-    )
+    shown = AccountShown.named(account.ref, account.label)
+    ref = f'<span class="acct-ref">{shown.code()}</span>' if shown.labelled else ""
     return (
         f'<li class="acct{" acct-space" if space else ""}">'
         f'<a class="tap acct-row" href="/ledger?ref={target}">'

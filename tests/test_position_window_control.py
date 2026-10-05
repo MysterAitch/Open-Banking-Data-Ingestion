@@ -43,7 +43,7 @@ FORM = re.compile(r'<form method="post" action="/position">.*?</form>', re.S)
 def held(tmp_path) -> Position:
     with Store(tmp_path / "w.sqlite3") as store:
         window_household(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 def asked(position: Position, **fields: str) -> str:

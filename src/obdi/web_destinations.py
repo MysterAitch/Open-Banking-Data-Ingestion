@@ -22,6 +22,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from .account_names import AccountShown, AccountsShown
 from .alerts import consent_rung
 from .bank_balances import BANK_SOURCE
 from .callback import render_page
@@ -180,7 +181,7 @@ class BankFeed:
 
     configured: bool
     answered: str | None
-    accounts: tuple[str, ...]
+    accounts: tuple[AccountShown, ...]
 
 
 #: How many account names are listed before the line says a count alone.
@@ -192,14 +193,13 @@ def bank_feed_of(
     configured: bool,
     answered: str | None,
     held: dict[tuple[str, str], list[str]],
-    labels: dict[str, str],
+    names: AccountsShown,
 ) -> BankFeed:
     """The feed's state from what the page's hooks give: who fed which account, and the names."""
     refs = sorted({account for account, source in held if source == BANK_SOURCE})
-    named = tuple(
-        f"{labels[ref]} ({ref})" if labels.get(ref) and labels[ref] != ref else ref for ref in refs
+    return BankFeed(
+        configured=configured, answered=answered, accounts=tuple(names.of(ref) for ref in refs)
     )
-    return BankFeed(configured=configured, answered=answered, accounts=named)
 
 
 def _feed_row(feed: BankFeed | None) -> str:
@@ -216,21 +216,23 @@ def _feed_row(feed: BankFeed | None) -> str:
         heard = (
             f"Last answered {_stamp(feed.answered)}." if feed.answered else "Has never answered."
         )
-        said = [f"Read directly from the bank, not through the aggregator. {heard}"]
+        said = [_esc(f"Read directly from the bank, not through the aggregator. {heard}")]
     else:
-        said = ["Not configured here: the bank's access token is not set, so nothing is read."]
+        said = [
+            _esc("Not configured here: the bank's access token is not set, so nothing is read.")
+        ]
         if feed.answered:
-            said.append(f"It last answered {_stamp(feed.answered)}.")
+            said.append(_esc(f"It last answered {_stamp(feed.answered)}."))
     if feed.accounts:
         if len(feed.accounts) <= _NAMED_ACCOUNTS:
-            shown = ", ".join(feed.accounts)
-            said.append(f"Feeds {plural(len(feed.accounts), 'account')}: {shown}.")
+            shown = ", ".join(account.inline() for account in feed.accounts)
+            said.append(f"Feeds {_esc(plural(len(feed.accounts), 'account'))}: {shown}.")
         else:
-            said.append(f"Feeds {plural(len(feed.accounts), 'account')}.")
+            said.append(_esc(f"Feeds {plural(len(feed.accounts), 'account')}."))
     elif feed.configured:
         said.append("No account is fed yet.")
     chip = "" if not feed.configured or feed.answered else _chip("no answer yet", "warn")
-    return _row("/attempts", name, _esc(" ".join(said)), chip=chip)
+    return _row("/attempts", name, " ".join(said), chip=chip)
 
 
 def _connected_line(feed: BankFeed | None, aggregator: int) -> str:
@@ -440,7 +442,7 @@ EVIDENCE_ROWS: tuple[tuple[str, str, str], ...] = (
 
 
 def _statistics_rows(
-    held: Callable[[], list[str]] | None, labels: Callable[[], dict[str, str]] | None
+    held: Callable[[], list[str]] | None, names: Callable[[], AccountsShown] | None
 ) -> str:
     """Field statistics for every account that holds rows, one link each, folded."""
     if held is None:
@@ -449,17 +451,17 @@ def _statistics_rows(
         refs = sorted(held())
     except Exception:
         return _unread("The accounts")
-    named: dict[str, str] = {}
-    if labels is not None:
+    named = AccountsShown()
+    if names is not None:
         try:
-            named = labels()
+            named = names()
         except Exception:
-            named = {}
+            named = AccountsShown()
     if not refs:
         return ""
     items = "".join(
         f'<li><a class="tap" href="/account?ref={quote(ref, safe="")}">'
-        f"{_esc(named.get(ref, ref))}</a></li>"
+        f"{named.of(ref).inline()}</a></li>"
         for ref in refs
     )
     return (
@@ -515,7 +517,7 @@ def render_diagnostics(
     starling_probe_available: bool = False,
     probe_suggestions: Callable[[], list[object]] | None = None,
     held_accounts: Callable[[], list[str]] | None = None,
-    display_labels: Callable[[], dict[str, str]] | None = None,
+    account_names: Callable[[], AccountsShown] | None = None,
 ) -> bytes:
     from . import web
 
@@ -530,7 +532,7 @@ def render_diagnostics(
         "Today and Checks say all is well.</p>"
         + _formerly("/diagnostics")
         + evidence
-        + _statistics_rows(held_accounts, display_labels)
+        + _statistics_rows(held_accounts, account_names)
         + _repairs(rebuild_available, forget_available)
         + (web._rebuild_status_line(rebuild_status) if rebuild_available else "")
         + history
@@ -600,7 +602,7 @@ class DestinationPages:
     def _bring_in_page(self) -> None:
         config, timer = self.bound_config, HookTimer()
         sources = timer.wrap("source_connections", config.source_connections)
-        labels = timer.wrap("display_labels", config.display_labels)
+        names = timer.wrap("account_names", config.account_names)
         configured = config.starling_probe is not None
         fetch = timer.wrap("fetch_gaps", config.fetch_gaps)
 
@@ -609,7 +611,7 @@ class DestinationPages:
                 configured=configured,
                 answered=answered.get(STARLING_CONNECTION),
                 held=sources() if sources is not None else {},
-                labels=labels() if labels is not None else {},
+                names=names() if names is not None else AccountsShown(),
             )
 
         page = render_bring_in(
@@ -635,7 +637,7 @@ class DestinationPages:
             starling_probe_available=config.starling_probe is not None,
             probe_suggestions=timer.wrap("probe_suggestions", config.probe_suggestions),
             held_accounts=timer.wrap("held_accounts", config.held_accounts),
-            display_labels=timer.wrap("display_labels", config.display_labels),
+            account_names=timer.wrap("account_names", config.account_names),
         )
         timer.report("/diagnostics")
         self._respond(200, page)

@@ -24,7 +24,6 @@ asks first, and names the closest account it can see.
 
 from __future__ import annotations
 
-import contextlib
 import html
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -33,6 +32,7 @@ from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .account_names import AccountShown, AccountsShown
 from .accounts import (
     BALANCE_ONLY_KIND,
     CASH_ACCOUNT_KIND,
@@ -190,32 +190,32 @@ def nearest_name(typed: str, candidates: Iterable[str]) -> str | None:
     return best[1] if best is not None else None
 
 
-def picker_labels(
-    base: dict[str, str], declared: Iterable[AccountRecord], held: Iterable[str] = ()
+def picker_options(
+    names: AccountsShown, declared: Iterable[AccountRecord], held: Iterable[str] = ()
 ) -> dict[str, str]:
-    """Every account a picker may offer: declared ones, and ones that hold rows.
+    """The option text of every account a picker may offer: declared ones, and ones that hold rows.
 
     A registry nothing can select from is useless: an account is declared
     precisely so a document can be filed into it, and until this merge the
-    picker only knew accounts some provider had already mentioned. The
-    declared name wins where both exist - a person named the account.
+    picker only knew accounts some provider had already mentioned. The name is
+    the one `account_names` decides, in which the declared name wins.
 
     An account that holds rows but was never declared is just as real a destination, and
     leaving it out sent a person to the free-text box, where a name that matched nothing was
     answered with a suggestion of something unrelated. Each option says which it is, so the
     two can be told apart.
     """
-    merged = dict(base)
+    texts = {shown.ref: shown.name for shown in names}
     held_refs = set(held)
     declared_refs: set[str] = set()
     for record in declared:
         ref = str(record.ref)
         declared_refs.add(ref)
         mark = "declared, holds rows" if ref in held_refs else "declared"
-        merged[ref] = f"{record.label or ref} ({mark})"
+        texts[ref] = f"{names.of(ref).name} ({mark})"
     for ref in held_refs - declared_refs:
-        merged[ref] = f"{merged.get(ref) or ref} (holds rows, not declared)"
-    return merged
+        texts[ref] = f"{names.of(ref).name} (holds rows, not declared)"
+    return texts
 
 
 def _text_field(
@@ -265,7 +265,11 @@ def account_form(record: AccountRecord | None, declared: list[AccountRecord]) ->
         if record is not None
         else ""
     )
-    parents = [str(r.ref) for r in declared if record is None or r.ref != record.ref]
+    parents = [
+        AccountShown.named(str(r.ref), r.label)
+        for r in declared
+        if record is None or r.ref != record.ref
+    ]
     return (
         '<form method="post" action="/save-account">'
         + original
@@ -310,22 +314,25 @@ def _kind_field(kind: str) -> str:
         f'<select name="kind" style="width:100%;padding:.6rem">{options}</select></label></p>'
         f'<p><label>If other, the kind in your own words<br>'
         f'<input name="kind_other" value="{html.escape(kind if is_other else "")}"></label></p>'
-        f'<ul class="muted">{lines}</ul>'
+        f'<ul class="muted kinds">{lines}</ul>'
     )
 
 
-def _parent_field(parent: AccountRef | None, candidates: list[str]) -> str:
-    """Parent as a choice among the declared accounts."""
+def _parent_field(parent: AccountRef | None, candidates: list[AccountShown]) -> str:
+    """Parent as a choice among the declared accounts, each by name with its reference."""
     chosen = str(parent) if parent else ""
-    names = list(candidates)
-    if chosen and chosen not in names:
+    declared = {account.ref for account in candidates}
+    offered = list(candidates)
+    if chosen and chosen not in declared:
         # A parent that is no longer declared stays on the form, so saving does not drop it
         # without the person having said so.
-        names.append(chosen)
+        offered.append(AccountShown(chosen))
     options = '<option value="">(none)</option>' + "".join(
-        f'<option value="{html.escape(name)}"{" selected" if name == chosen else ""}>'
-        f"{html.escape(name)}{'' if name in candidates else ' (not declared)'}</option>"
-        for name in names
+        f'<option value="{html.escape(account.ref)}"'
+        f'{" selected" if account.ref == chosen else ""}>'
+        f"{html.escape(account.text())}"
+        f"{'' if account.ref in declared else ' (not declared)'}</option>"
+        for account in offered
     )
     return (
         "<p><label>Parent account<br>"
@@ -755,7 +762,7 @@ def accounts_page(
         "Declared accounts",
         # The last clause used to read "a statement can only be filed into one
         # that has been declared", which is not what the code does:
-        # picker_labels MERGES declared accounts over the ones a provider has
+        # picker_options MERGES declared accounts over the ones a provider has
         # already mentioned, so a document can be filed into either. Saying
         # otherwise on the page that teaches the concept is how somebody comes
         # to believe an empty registry is blocking them.
@@ -1118,6 +1125,10 @@ class AccountPages(AnswerPages):
         """Supplied by the handler this is composed into."""
         raise NotImplementedError
 
+    def _account_names(self) -> AccountsShown:
+        """Supplied by the handler this is composed into."""
+        raise NotImplementedError
+
     def _back_to_pressed_page(self) -> str:
         """Back to the page the archive toggle was pressed on, else coverage.
 
@@ -1141,9 +1152,11 @@ class AccountPages(AnswerPages):
         except Exception:
             return []
 
-    def picker_account_labels(self, base: dict[str, str]) -> dict[str, str]:
-        """`base` with every declared account and every account that holds rows, each marked."""
-        return picker_labels(base, self.declared_accounts(), self.held_accounts())
+    def picker_account_options(self) -> dict[str, str]:
+        """Every declared account and every account that holds rows, each marked, as option text."""
+        return picker_options(
+            self._account_names(), self.declared_accounts(), self.held_accounts()
+        )
 
     def _accounts_page(self) -> None:
         hook = self.bound_config.known_accounts
@@ -1460,12 +1473,9 @@ class AccountPages(AnswerPages):
         declared = sorted(str(record.ref) for record in self.declared_accounts())
         held = self.held_accounts()
         known = set(declared) | set(held)
-        labels = self.bound_config.display_labels
-        if labels is not None:
-            # A naming hook is a convenience, never a gate: one that fails
-            # must not turn every typed name into a question.
-            with contextlib.suppress(Exception):
-                known |= set(labels())
+        # A naming hook is a convenience, never a gate: one that fails
+        # must not turn every typed name into a question.
+        known |= self._account_names().refs()
         return TypedAccount(
             ref=typed,
             known=typed in known,

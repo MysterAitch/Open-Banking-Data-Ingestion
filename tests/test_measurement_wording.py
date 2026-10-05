@@ -17,7 +17,7 @@ import re
 from consecutive_days_corpus import consecutive_payments
 from late_settlement_corpus import ORDERS, household
 from obdi import rebuild
-from obdi.account_names import name_text
+from obdi.account_names import AccountShown, AccountsShown
 from obdi.exact_rule_measure import exact_rule_report
 from obdi.page_words import INTERNAL_ON_PAGES
 from obdi.providers import starling
@@ -116,7 +116,7 @@ class TestTheMeasurementReadsLikeThePage:
         finally:
             store.close()
 
-        shown = name_text(text, {"cash": "Cash"})
+        shown = AccountsShown([AccountShown.named("cash", "Cash")]).in_text(text)
 
         assert "5 transfers made by the rule are held: 4 withdrawals and 1 deposit" in shown
         assert offences(shown) == []

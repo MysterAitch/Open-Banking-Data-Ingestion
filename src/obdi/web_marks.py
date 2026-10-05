@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from urllib.parse import urlencode
 
-from .account_names import name_html
+from .account_names import AccountsShown
 from .fetch_marks import (
     AGGREGATOR,
     KINDS,
@@ -316,7 +316,7 @@ def _outside_record(reading: Reading, scope: Scope | None, today: date) -> str:
     )
 
 
-def contradicted_html(marks: MarkSet, names: Mapping[str, str], today: date) -> str:
+def contradicted_html(marks: MarkSet, names: AccountsShown, today: date) -> str:
     """Contradicted marks, where they cannot be missed: beside the gap each one failed to hide."""
     items = []
     for reading in marks.contradicted:
@@ -327,7 +327,8 @@ def contradicted_html(marks: MarkSet, names: Mapping[str, str], today: date) -> 
         )
         items.append(
             '<li class="gaps-contradicted">'
-            f"<p>{name_html(mark.account, names)}: <strong>{_esc(KINDS[mark.kind].label)}</strong> "
+            f"<p>{names.of(mark.account).inline()}: "
+            f"<strong>{_esc(KINDS[mark.kind].label)}</strong> "
             f'for <span class="mono">{_esc(span_words(mark.first_day, mark.last_day))}</span>.</p>'
             f"<p>{_esc(said)} The gap stays in the list until you change or remove the mark.</p>"
             f"{_undo_form(mark.id, 'Remove this mark')}</li>"
@@ -339,7 +340,7 @@ def contradicted_html(marks: MarkSet, names: Mapping[str, str], today: date) -> 
 
 def _mark_item(
     reading: Reading,
-    names: Mapping[str, str],
+    names: AccountsShown,
     scope: Scope | None,
     today: date,
     set_aside: Sequence[SetAside],
@@ -378,7 +379,7 @@ def _mark_item(
         f'<li class="gaps-mark gaps-mark-{reading.standing.value}">'
         f'<p class="gaps-head"><span class="gaps-kind">{_esc(KINDS[mark.kind].label)}</span> '
         f'{standing} <span class="pill">{_esc(origin_words(mark.origin))}</span></p>'
-        f"<p>{name_html(mark.account, names)} "
+        f"<p>{names.of(mark.account).inline()} "
         f'<span class="gaps-source">({_esc(source_words(mark.source))})</span></p>'
         f'<p class="gaps-range mono">{_esc(span_words(mark.first_day, mark.last_day))}</p>'
         f"{note}"
@@ -390,9 +391,9 @@ def _mark_item(
     )
 
 
-def _scope_line(scope: Scope, account: str, names: Mapping[str, str], today: date,
+def _scope_line(scope: Scope, account: str, names: AccountsShown, today: date,
                 known: Mapping[str, date]) -> str:
-    who = "every account" if not account else name_html(account, names)
+    who = "every account" if not account else names.of(account).inline()
     start = scope.starts(today)
     said = (
         f"You keep {who} {_esc(scope.describe(today))}; earlier days are not looked for. "
@@ -408,7 +409,7 @@ def _scope_line(scope: Scope, account: str, names: Mapping[str, str], today: dat
 
 
 def scope_lines_html(
-    marks: MarkSet, names: Mapping[str, str], today: date, known: Mapping[str, date]
+    marks: MarkSet, names: AccountsShown, today: date, known: Mapping[str, date]
 ) -> str:
     lines = "".join(
         _scope_line(scope, account, names, today, known)
@@ -417,7 +418,7 @@ def scope_lines_html(
     return f'<ul class="gaps-scope-lines muted">{lines}</ul>' if lines else ""
 
 
-def _out_of_scope_line(item: OutOfScope, names: Mapping[str, str]) -> str:
+def _out_of_scope_line(item: OutOfScope, names: AccountsShown) -> str:
     if item.left_on is not None:
         said = (
             f"left your {item.scope.months} months on {item.left_on.isoformat()} unfilled"
@@ -425,17 +426,15 @@ def _out_of_scope_line(item: OutOfScope, names: Mapping[str, str]) -> str:
     else:
         said = f"is before {item.scope.starts(item.last_day).isoformat()}, where your record begins"
     return (
-        f'<li class="gaps-quiet-item">{name_html(item.account, names)} '
+        f'<li class="gaps-quiet-item">{names.of(item.account).inline()} '
         f'<span class="mono">{_esc(span_words(item.first_day, item.last_day))}</span> '
         f'<span class="muted">- {_esc(said)}</span></li>'
     )
 
 
-def scope_form_html(names: Mapping[str, str], accounts: Sequence[str]) -> str:
+def scope_form_html(names: AccountsShown, accounts: Sequence[str]) -> str:
     options = '<option value="">Every account (the household default)</option>' + "".join(
-        f'<option value="{_esc(ref)}">{_esc(names.get(ref) or ref)} ({_esc(ref)})</option>'
-        if names.get(ref) and names.get(ref) != ref
-        else f'<option value="{_esc(ref)}">{_esc(ref)}</option>'
+        f'<option value="{_esc(ref)}">{_esc(names.of(ref).text())}</option>'
         for ref in accounts
     )
     return (
@@ -460,7 +459,7 @@ def folded_html(
     marks: MarkSet,
     set_aside: Sequence[SetAside],
     out_of_scope: Sequence[OutOfScope],
-    names: Mapping[str, str],
+    names: AccountsShown,
     accounts: Sequence[str],
     today: date,
 ) -> str:
@@ -472,7 +471,7 @@ def folded_html(
     )
     derived = [s for s in set_aside if s.reading is None]
     derived_html = "".join(
-        f'<li class="gaps-quiet-item">{name_html(s.account, names)} '
+        f'<li class="gaps-quiet-item">{names.of(s.account).inline()} '
         f'<span class="mono">{_esc(span_words(s.first_day, s.last_day))}</span> '
         '<span class="muted">- before the account opened, by its declared dates</span></li>'
         for s in derived
@@ -494,7 +493,7 @@ def folded_html(
     )
 
 
-def offers_html(marks: MarkSet, names: Mapping[str, str]) -> str:
+def offers_html(marks: MarkSet, names: AccountsShown) -> str:
     """The aggregator's own answers, as marks ready to accept, and where it has not been asked."""
     if not marks.offers and not marks.not_asked:
         return ""
@@ -509,7 +508,7 @@ def offers_html(marks: MarkSet, names: Mapping[str, str]) -> str:
     )
 
 
-def _offer(offer: ReachOffer, names: Mapping[str, str]) -> str:
+def _offer(offer: ReachOffer, names: AccountsShown) -> str:
     reach = offer.reach
     basis = []
     if reach.boundary is not None:
@@ -520,7 +519,7 @@ def _offer(offer: ReachOffer, names: Mapping[str, str]) -> str:
         )
     return (
         '<form method="post" action="/gaps-mark" class="gaps-offer">'
-        f"<p>{name_html(offer.account, names)}: the aggregator's history begins "
+        f"<p>{names.of(offer.account).inline()}: the aggregator's history begins "
         f"{offer.first_row.isoformat()}; {_esc(' and '.join(basis))}. "
         f"Mark everything before {offer.first_row.isoformat()} as before its history?</p>"
         + hidden(
@@ -532,9 +531,9 @@ def _offer(offer: ReachOffer, names: Mapping[str, str]) -> str:
     )
 
 
-def _not_asked(item: NotAsked, names: Mapping[str, str]) -> str:
+def _not_asked(item: NotAsked, names: AccountsShown) -> str:
     return (
-        f'<p class="muted gaps-reach-line">{name_html(item.account, names)}: the aggregator\'s '
+        f'<p class="muted gaps-reach-line">{names.of(item.account).inline()}: the aggregator\'s '
         f"history begins {item.first_row.isoformat()}. It has not been asked for earlier days, "
         "so nothing is offered.</p>"
     )
@@ -576,7 +575,7 @@ def form_html(
     note: str,
     review_on: str,
     today: date,
-    names: Mapping[str, str],
+    names: AccountsShown,
     accounts: Sequence[str],
     sources: Sequence[str],
     previews: Mapping[MarkKind, tuple[Standing, str, Evidence]],
@@ -585,11 +584,11 @@ def form_html(
 ) -> str:
     """The form, with what the store says about the period beside each kind that makes a claim."""
     if account:
-        who = f"<p class=\"lede\">{name_html(account, names)}, {_esc(source_words(source))}.</p>"
+        who = f"<p class=\"lede\">{names.of(account).inline()}, {_esc(source_words(source))}.</p>"
         chosen = hidden(account=account, source=source)
     else:
         options = "".join(
-            f'<option value="{_esc(ref)}">{_esc(names.get(ref) or ref)}</option>'
+            f'<option value="{_esc(ref)}">{_esc(names.of(ref).text())}</option>'
             for ref in accounts
         )
         sources_options = '<option value="">Any statement source</option>' + "".join(

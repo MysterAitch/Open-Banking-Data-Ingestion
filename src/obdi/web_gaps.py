@@ -20,7 +20,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import merged_names, name_html, name_text
+from .account_names import AccountsShown
 from .callback import render_page
 from .fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from .fetch_marks import (
@@ -320,24 +320,25 @@ def _actions(ref: str, outlook: AccountOutlook) -> str:
     return f'<p class="gaps-actions">{" ".join(links)}</p>'
 
 
-def _account_html(outlook: AccountOutlook, names: Mapping[str, str], today: date) -> str:
+def _account_html(outlook: AccountOutlook, names: AccountsShown, today: date) -> str:
     ref = outlook.account
     items = "".join(_gap_html(ref, gap, today) for gap in outlook.gaps)
     return (
-        f'<section class="gaps-account" aria-label="{_esc(names.get(ref) or ref)}">'
-        f'<h2 class="gaps-name">{name_html(ref, names)}</h2>'
+        f'<section class="gaps-account" aria-label="{_esc(names.of(ref).name)}">'
+        f'<h2 class="gaps-name">{names.of(ref).inline()}</h2>'
         f'<ul class="gaps-list">{items}</ul>{_actions(ref, outlook)}</section>'
     )
 
 
 def _quiet_line(
-    outlook: AccountOutlook, names: Mapping[str, str], decided: frozenset[str] = frozenset()
+    outlook: AccountOutlook, names: AccountsShown, decided: frozenset[str] = frozenset()
 ) -> str:
     ref = outlook.account
     if outlook.space_of:
+        parent = names.of(outlook.space_of).inline()
         said = (
-            f"a Space of {name_html(outlook.space_of, names)}: no statement exists for a "
-            f"Space; it is tested with {name_html(outlook.space_of, names)} as a whole."
+            f"a Space of {parent}: no statement exists for a "
+            f"Space; it is tested with {parent} as a whole."
         )
     elif ref in decided:
         said = "everything missing is set aside by your decision."
@@ -356,12 +357,12 @@ def _quiet_line(
         )
     return (
         f'<li class="gaps-quiet-item"><a class="tap" href="{_esc(_ledger(ref))}">'
-        f"{name_html(ref, names)}</a> <span class=\"muted\">- {said}</span></li>"
+        f"{names.of(ref).inline()}</a> <span class=\"muted\">- {said}</span></li>"
     )
 
 
 def render_gaps(
-    report: FetchReport, names: Mapping[str, str], *, rebuilding: str = ""
+    report: FetchReport, names: AccountsShown, *, rebuilding: str = ""
 ) -> bytes:
     """The page: the verdict, each account that needs something, then those that need nothing."""
     title = page_name("/gaps")
@@ -407,21 +408,9 @@ class GapPages:
     def _respond(self, status: int, body: bytes, *, no_store: bool = False) -> None:
         raise NotImplementedError
 
-    def _gaps_names(self) -> dict[str, str]:
-        config = self.bound_config
-        labels: dict[str, str] = {}
-        if config.display_labels is not None:
-            try:
-                labels = config.display_labels()
-            except Exception:
-                labels = {}
-        declared = []
-        if config.declared_accounts is not None:
-            try:
-                declared = config.declared_accounts()
-            except Exception:
-                declared = []
-        return merged_names(labels, declared)
+    def _account_names(self) -> AccountsShown:
+        """Supplied by the handler this is composed into."""
+        raise NotImplementedError
 
     def _gaps_page(self) -> None:
         config = self.bound_config
@@ -429,7 +418,7 @@ class GapPages:
         if hook is None:
             self._respond(404, render_page("Not available", "<p>Not wired.</p>"))
             return
-        names = self._gaps_names()
+        names = self._account_names()
         today = datetime.now(UTC).date()
         try:
             report = hook(today)
@@ -493,7 +482,7 @@ class GapPages:
         if found is None:
             return
         world = found[0]
-        names = self._gaps_names()
+        names = self._account_names()
         account, source = values.get("account", ""), values.get("source", "")
         first, last = _try_date(values.get("first", "")), _try_date(values.get("last", ""))
         previews: dict[MarkKind, tuple[Standing, str, object]] = {}
@@ -584,7 +573,7 @@ class GapPages:
         except RebuildInProgress as paused:
             self._marks_rebuilding(paused)
             return
-        names = self._gaps_names()
+        names = self._account_names()
         self._marks_page(
             200,
             "Period set aside",
@@ -617,7 +606,7 @@ class GapPages:
         except RebuildInProgress as paused:
             self._marks_rebuilding(paused)
             return
-        names = self._gaps_names()
+        names = self._account_names()
         self._marks_page(
             200,
             "Mark removed",
@@ -663,7 +652,7 @@ class GapPages:
         except RebuildInProgress as paused:
             self._marks_rebuilding(paused)
             return
-        names = self._gaps_names()
+        names = self._account_names()
         self._marks_page(
             200,
             "How far back you keep",
@@ -674,10 +663,10 @@ class GapPages:
 _BACK_TO_GAPS = '<p><a class="button" href="/gaps">Back to what to fetch next</a></p>'
 
 
-def _ok_html(sentence: str, names: Mapping[str, str]) -> str:
+def _ok_html(sentence: str, names: AccountsShown) -> str:
     """The one sentence that says what happened, with account labels as every page writes them,
     and the way back."""
-    return f'<p class="ok"><strong>{_esc(name_text(sentence, names))}</strong></p>{_BACK_TO_GAPS}'
+    return f'<p class="ok"><strong>{_esc(names.in_text(sentence))}</strong></p>{_BACK_TO_GAPS}'
 
 
 def _try_date(text: str) -> date | None:

@@ -116,7 +116,6 @@ def assemble(path, *, findings=lambda: [], watched=("starling", "truelayer"), **
         "findings": findings,
         "canonical_for_ref": canonical_for_ref,
         "watched": set(watched),
-        "labels": {},
         "actual_bound": None,
         "rebuild_status": {},
     }

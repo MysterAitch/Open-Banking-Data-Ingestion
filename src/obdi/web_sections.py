@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ParamSpec, TypeVar
 from urllib.parse import urlparse
 
+from .account_names import AccountsShown
 from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
@@ -345,7 +346,7 @@ def render_actual(
 def render_coverage(
     *,
     holdings: Callable[[], list[SourceCoverage]] | None = None,
-    display_labels: Callable[[], dict[str, str]] | None = None,
+    account_names: Callable[[], AccountsShown] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
     account_feeders: Callable[[], dict[str, list[str]]] | None = None,
     source_connections: dict[tuple[str, str], list[str]] | None = None,
@@ -356,7 +357,7 @@ def render_coverage(
 
     section = web._holdings_rows(
         holdings,
-        display_labels,
+        account_names,
         account_timelines,
         account_feeders,
         source_connections,
@@ -378,21 +379,21 @@ def render_coverage(
 
 def render_import(
     *,
-    display_labels: Callable[[], dict[str, str]] | None = None,
+    account_names: Callable[[], AccountsShown] | None = None,
     declared_accounts: Callable[[], list[AccountRecord]] | None = None,
     held_accounts: Callable[[], list[str]] | None = None,
 ) -> bytes:
     import contextlib
 
     from . import web
-    from .web_accounts import picker_labels
+    from .web_accounts import picker_options
 
     # The preview verifies the file against what the chosen account already
     # holds, so the destination is picked before anything is read.
-    labels: dict[str, str] = {}
-    if display_labels is not None:
+    names = AccountsShown()
+    if account_names is not None:
         with contextlib.suppress(Exception):
-            labels = display_labels()
+            names = account_names()
     declared: list[AccountRecord] = []
     held: list[str] = []
     if declared_accounts is not None:
@@ -401,7 +402,7 @@ def render_import(
     if held_accounts is not None:
         with contextlib.suppress(Exception):
             held = held_accounts()
-    labels = picker_labels(labels, declared, held)
+    options = picker_options(names, declared, held)
     lede = _lede(
         "Two ways to bring history in from outside a bank connection: a bank's CSV "
         "or QIF export, or a PDF statement."
@@ -412,7 +413,7 @@ def render_import(
 then verify the file against what that account already holds, before
 anything is stored.</p>
 <form action="/upload" method="post" enctype="multipart/form-data">
-  {web.account_picker(labels)}
+  {web.account_picker(options)}
   <p><input type="file" name="statement" aria-label="Statement file" required></p>
   <p><button class="button" type="submit"
      style="border:0;width:100%;font-size:inherit;cursor:pointer">Preview import</button></p>
@@ -476,7 +477,7 @@ class SectionPages:
         connections = timer.wrap("source_connections", config.source_connections)
         page = render_coverage(
             holdings=timer.wrap("holdings", config.holdings),
-            display_labels=timer.wrap("display_labels", config.display_labels),
+            account_names=timer.wrap("account_names", config.account_names),
             account_timelines=timer.wrap("account_timelines", config.account_timelines),
             account_feeders=timer.wrap("account_feeders", config.account_feeders),
             source_connections=connections() if connections is not None else None,
@@ -489,7 +490,7 @@ class SectionPages:
     def _import_page(self) -> None:
         config, timer = self.bound_config, HookTimer()
         page = render_import(
-            display_labels=timer.wrap("display_labels", config.display_labels),
+            account_names=timer.wrap("account_names", config.account_names),
             declared_accounts=timer.wrap("declared_accounts", config.declared_accounts),
             held_accounts=timer.wrap("held_accounts", config.held_accounts),
         )

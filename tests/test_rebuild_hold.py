@@ -119,7 +119,6 @@ def overview_of(db: Path, *, now: datetime):
             findings=lambda: collect_alert_findings(db, now=now),
             canonical_for_ref=canonical,
             watched=set(),
-            labels={},
             actual_bound=None,
             rebuild_status={},
             movement=lambda: movement_completeness(store, canonical),

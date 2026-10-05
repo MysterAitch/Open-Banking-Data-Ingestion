@@ -32,6 +32,7 @@ from datetime import date
 import httpx
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.accounts import AccountRecord, AccountRef, LimitWindow, RateWindow
 from obdi.connections import ConnectionStore
 from obdi.store import Store
@@ -156,7 +157,7 @@ def lab(tmp_path):
         connection_store=ConnectionStore(tmp_path / "c.json"),
         declared_accounts=declared_accounts,
         declare_account=declare_account,
-        display_labels=lambda: {"truelayer:xyz": "Old current (halifax)"},
+        account_names=lambda: accounts_shown({"truelayer:xyz": "Old current (halifax)"}, []),
         refile_artefact=refile_artefact,
         assign_kept_statement=assign_kept_statement,
         preview_upload=preview_upload,

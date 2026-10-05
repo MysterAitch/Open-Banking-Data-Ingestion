@@ -573,7 +573,7 @@ class TestBalances:
         assert settled.balance(BILLS) == 25000
 
     def test_ThePositionPage_ShowsTheSameBalances(self, settled):
-        position = read_position(settled.store, labels={}, today=date(2026, 10, 2))
+        position = read_position(settled.store, today=date(2026, 10, 2))
         by_ref = {a.ref: a for g in position.groups for a in g.accounts}
 
         assert by_ref[MAIN].balance.minor == 138000

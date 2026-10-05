@@ -56,7 +56,7 @@ from typing import Any, ClassVar
 import pytest
 
 from late_settlement_corpus import ORDERS, Payment, household
-from obdi.account_names import name_text
+from obdi.account_names import AccountShown, AccountsShown
 from obdi.accounts import (
     BALANCE_ONLY_KIND,
     CASH_ACCOUNT_KIND,
@@ -416,7 +416,7 @@ class TestTheCashAccount:
     def test_Text_WhenTheCashAccountIsNamedByThePage_ReadsOnceAsItsLabel(self, tmp_path):
         text = measured(tmp_path, ORDERS[0], records=[CASH]).describe()
 
-        shown = name_text(text, {"cash": "Cash"})
+        shown = AccountsShown([AccountShown.named("cash", "Cash")]).in_text(text)
 
         assert shown.count("Cash (cash)") == 1
         assert "Cash (cash) is the one open account declared as the place cash goes" in shown

@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from . import scheduler_status
+from .account_names import AccountsShown, accounts_shown
 from .agreement import held_sentence
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
@@ -961,9 +962,9 @@ def build_overview(
     findings: Callable[[], Sequence[Finding]],
     canonical_for_ref: Callable[[str], str],
     watched: Collection[str],
-    labels: Mapping[str, str],
     actual_bound: Collection[str] | None,
     rebuild_status: Mapping[str, object],
+    names: AccountsShown | None = None,
     standings: Callable[[], Mapping[str, AccountStanding]] | None = None,
     movement: Callable[[], MovementCompleteness] | None = None,
     rebuilding: RebuildHold | None = None,
@@ -1009,13 +1010,10 @@ def build_overview(
             alert_run -= 1
 
     registry = {str(record.ref): record for record in store.declared_accounts()}
-    merged_labels = dict(labels)
-    for ref, record in registry.items():
-        if record.label:
-            merged_labels[ref] = record.label
+    shown = names or accounts_shown({}, registry.values())
 
     def label_of(ref: str) -> str:
-        return merged_labels.get(ref) or ref
+        return shown.of(ref).name
 
     def closed_by_today(ref: str) -> bool:
         record = registry.get(ref)

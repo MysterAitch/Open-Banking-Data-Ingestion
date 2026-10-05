@@ -58,7 +58,7 @@ def daily(position: Position, first: date, last: date, drawn=None):
 def held(tmp_path) -> Position:
     with Store(tmp_path / "w.sqlite3") as store:
         window_household(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 def by_day(series) -> dict[str, int]:
@@ -70,7 +70,7 @@ class TestTheMonthEndChartIsUnchanged:
     def test_MonthEnds_ThroughThePathThatTakesDays_AreTheHistoryToThePence(self, tmp_path, build):
         with Store(tmp_path / "p.sqlite3") as store:
             build(store)
-            position = read_position(store, labels={}, today=date(2026, 10, 2))
+            position = read_position(store, today=date(2026, 10, 2))
         today = date(2026, 10, 2)
         days = sample_days(date(2026, 3, 1), today, Resolution.MONTH)
 
@@ -98,7 +98,7 @@ class TestTheMonthEndChartIsUnchanged:
     def test_ChosenItems_OverTheMonthEnds_StillMatchTheirOwnFigures(self, tmp_path):
         with Store(tmp_path / "p.sqlite3") as store:
             household(store)
-            position = read_position(store, labels={}, today=date(2026, 10, 2))
+            position = read_position(store, today=date(2026, 10, 2))
         rest = {i.key for i in position.chart_items} - {"account:hsbc-mortgage"}
 
         drawn = chart_series(position, rest)

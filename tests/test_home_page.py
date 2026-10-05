@@ -50,7 +50,6 @@ def overview_of(db, **options):
         "findings": lambda: [],
         "canonical_for_ref": lambda ref: ref,
         "watched": set(),
-        "labels": {},
         "actual_bound": None,
         "rebuild_status": {},
     }

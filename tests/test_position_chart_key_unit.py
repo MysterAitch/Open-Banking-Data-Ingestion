@@ -43,7 +43,7 @@ WINDOW_FOR = {"day": "d90", "week": "m12", "month": "all"}
 def held(tmp_path) -> Position:
     with Store(tmp_path / "k.sqlite3") as store:
         window_household(store)
-        return read_position(store, labels={}, today=TODAY)
+        return read_position(store, today=TODAY)
 
 
 def page_for(position: Position, unit: str, **kwargs) -> str:

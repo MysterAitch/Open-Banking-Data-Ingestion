@@ -42,7 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
-from .account_names import merged_names, name_text
+from .account_names import AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
@@ -628,10 +628,10 @@ class WebConfig:
     #: so without this the configured-and-pulling Starling account was
     #: entirely invisible on the page that lists banks.
     starling_status: Callable[[], dict[str, object] | None] | None = None
-    #: Human names for canonical refs, resolved from layer 0. Pages show
-    #: these with the id demoted to small print - the id is the query key,
-    #: not the thing a person recognises.
-    display_labels: Callable[[], dict[str, str]] | None = None
+    #: Every account as a page shows it (`account_names`): the name he gave it, else the
+    #: provider's, with the reference beside. The id is the query key, not the thing a person
+    #: recognises.
+    account_names: Callable[[], AccountsShown] | None = None
     #: Per-account timeline marks (boundary/probed/covered, iso dates) for
     #: the holdings strips - the axis and segments render in the page, the
     #: dates come from the store.
@@ -1772,7 +1772,7 @@ def _feeder_line(
 
 def _holdings_rows(
     holdings: Callable[[], list[SourceCoverage]] | None,
-    display_labels: Callable[[], dict[str, str]] | None = None,
+    account_names: Callable[[], AccountsShown] | None = None,
     account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
     account_feeders: Callable[[], dict[str, list[str]]] | None = None,
     source_connections: dict[tuple[str, str], list[str]] | None = None,
@@ -1804,12 +1804,12 @@ def _holdings_rows(
             feeders_map = account_feeders()
         except Exception:
             feeders_map = {}
-    labels: dict[str, str] = {}
-    if display_labels is not None:
+    names = AccountsShown()
+    if account_names is not None:
         try:
-            labels = display_labels()
+            names = account_names()
         except Exception:
-            labels = {}
+            names = AccountsShown()
     marks: dict[str, dict[str, str]] = {}
     if account_timelines is not None:
         try:
@@ -1854,13 +1854,9 @@ def _holdings_rows(
     # Living accounts lead; the archive sinks. Same information, but the
     # eye finds what changed this week without wading through 2022 first.
     for row in sorted(rows, key=lambda r: r.latest, reverse=True):
-        label = labels.get(row.account_id)
-        title = html.escape(label) if label else html.escape(row.account_id)
-        sub = (
-            f'<br><span class="muted mono">{html.escape(row.account_id)}</span>'
-            if label
-            else ""
-        )
+        shown = names.of(row.account_id)
+        title = shown.heading()
+        sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
         note = notes.get(row.account_id)
         quiet = ""
         if note is not None and note.state == "archived":
@@ -1898,9 +1894,7 @@ def _holdings_rows(
             # binding must not require the extend section (TrueLayer-only)
             # or a shell. The provider's display label above makes the row
             # recognisable; this form makes the name canonical.
-            held_suggestion = _suggest_slug(
-                labels.get(row.account_id, ""), row.account_id
-            )
+            held_suggestion = _suggest_slug(shown.label, row.account_id)
             bind_form = (
                 '<form method="post" action="/bind" '
                 'style="display:flex;gap:.4rem;margin:.35rem 0">'
@@ -1939,13 +1933,9 @@ def _holdings_rows(
     for ref, _entry in sorted(marks.items()):
         if ref in held_refs:
             continue
-        label = labels.get(ref)
-        title = html.escape(label) if label else html.escape(ref)
-        sub = (
-            f'<br><span class="muted mono">{html.escape(ref)}</span>'
-            if label
-            else ""
-        )
+        shown = names.of(ref)
+        title = shown.heading()
+        sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
         probed = _mark(ref, "probed")
         covered = _mark(ref, "covered")
         strip = _timeline_strip(
@@ -1970,7 +1960,7 @@ def _holdings_rows(
         # moves no rows; the next rebuild applies the new edge.
         empty_bind = ""
         if ":" in ref:
-            empty_suggestion = _suggest_slug(labels.get(ref, ""), ref)
+            empty_suggestion = _suggest_slug(shown.label, ref)
             empty_bind = (
                 '<form method="post" action="/bind" '
                 'style="display:flex;gap:.4rem;margin:.35rem 0">'
@@ -3760,8 +3750,11 @@ def _fetch_now_rows(
     )
 
 
-def account_options(labels: dict[str, str], *, selected: str = "") -> str:
+def account_options(texts: dict[str, str], *, selected: str = "") -> str:
     """The import destination picker's options, every one self-identifying.
+
+    `texts` is the option text of each account by reference, built from the one naming
+    component by `picker_account_options`.
 
     `selected` pre-selects one account, for a form that has a suggestion to
     offer. It is only ever a starting point: nothing is submitted until the
@@ -3776,9 +3769,9 @@ def account_options(labels: dict[str, str], *, selected: str = "") -> str:
     """
     from collections import Counter
 
-    counts = Counter(labels.values())
+    counts = Counter(texts.values())
     options = []
-    for ref, name in sorted(labels.items(), key=lambda kv: (kv[1], kv[0])):
+    for ref, name in sorted(texts.items(), key=lambda kv: (kv[1], kv[0])):
         shown = f"{name} [{ref}]" if counts[name] > 1 else name
         if ":" in ref:
             # A provider-qualified ref is an UNBOUND passthrough (resolve's
@@ -3795,7 +3788,7 @@ def account_options(labels: dict[str, str], *, selected: str = "") -> str:
 
 
 def account_picker(
-    labels: dict[str, str],
+    texts: dict[str, str],
     *,
     field: str = "account",
     other_field: str = "account_other",
@@ -3814,7 +3807,7 @@ def account_picker(
         f'<p><select name="{html.escape(field)}" aria-label="Account" '
         'style="width:100%;padding:.6rem">'
         '<option value="">choose an account...</option>'
-        f"{account_options(labels, selected=selected)}</select></p>"
+        f"{account_options(texts, selected=selected)}</select></p>"
         f'<p><input name="{html.escape(other_field)}" aria-label="Account name, typed" '
         f'placeholder="{html.escape(other_placeholder)}"></p>'
     )
@@ -4604,14 +4597,10 @@ class ConnectionHandler(
         )
         raw_summary = detail.get("summary")
         summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
-        refile_labels: dict[str, str] = {}
-        if self.bound_config.display_labels is not None:
-            with contextlib.suppress(Exception):
-                refile_labels = self.bound_config.display_labels()
         # Declared accounts included: an account with no feed is invisible
         # to every provider-derived label, and filing a document into one
         # is the reason it was declared.
-        refile_labels = self.picker_account_labels(refile_labels)
+        refile_options = self.picker_account_options()
         # Names beyond the first, which the line above already shows. The
         # same document arrives under a folder path and bare, and a
         # rolling fetch re-lands identical bytes under each window it
@@ -4662,7 +4651,7 @@ class ConnectionHandler(
                 '<form method="post" action="/refile-artefact">'
                 f'<input type="hidden" name="id" value="{artefact_id}">'
                 + account_picker(
-                    refile_labels,
+                    refile_options,
                     other_placeholder="or type the correct canonical, "
                     "e.g. starling-personal",
                 )
@@ -4818,14 +4807,9 @@ class ConnectionHandler(
         summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
         sources = shape.get("sources")
         source_list = ", ".join(
-            html.escape(str(s)) for s in (sources if isinstance(sources, list) else [])
+            code_html(str(s)) for s in (sources if isinstance(sources, list) else [])
         )
-        label = ""
-        if self.bound_config.display_labels is not None:
-            try:
-                label = self.bound_config.display_labels().get(ref, "")
-            except Exception:
-                label = ""
+        shown = self._account_names().of(ref)
         raw_details = shape.get("details")
         details = raw_details if isinstance(raw_details, dict) else {}
         details_html = ""
@@ -4836,10 +4820,8 @@ class ConnectionHandler(
                 f'({html.escape(str(details.get("account_type", "")))}) '
                 f'via {html.escape(str(details.get("connection", "")))}</span>'
             )
-        heading = html.escape(label) if label else html.escape(ref)
-        id_line = (
-            f'<br><span class="muted mono">{html.escape(ref)}</span>' if label else ""
-        )
+        heading = shown.heading()
+        id_line = f"<br>{shown.code()}" if shown.labelled else ""
         raw_breakdown = shape.get("breakdown")
         breakdown = raw_breakdown if isinstance(raw_breakdown, dict) else {}
         body = (
@@ -5404,7 +5386,7 @@ class ConnectionHandler(
         """
         if self.bound_config.assign_kept_statement is None:
             return ""
-        labels = self._account_labels()
+        options = self.picker_account_options()
         return (
             "<h3>Assign to an account</h3><p>Reading it in resolves its rows "
             "against everything already held. The parser's own arithmetic "
@@ -5412,7 +5394,7 @@ class ConnectionHandler(
             "declared balances is refused rather than stored.</p>"
             '<form action="/statement-assign" method="post">'
             f'<input type="hidden" name="artefact" value="{artefact_id}">'
-            + account_picker(labels)
+            + account_picker(options)
             + '<p><button type="submit">Assign and read in</button></p></form>'
         )
 
@@ -5421,14 +5403,6 @@ class ConnectionHandler(
         hook = self.bound_config.kept_statement_ids
         return hook is None or artefact_id in hook()
 
-    def _account_labels(self) -> dict[str, str]:
-        """Every account a statement can be given, as the picker offers them."""
-        labels: dict[str, str] = {}
-        hook = self.bound_config.display_labels
-        if hook is not None:
-            with contextlib.suppress(Exception):
-                labels = hook()
-        return self.picker_account_labels(labels)
 
     def _statements_page(self) -> None:
         """Every kept statement, grouped by what it is waiting for.
@@ -5441,7 +5415,8 @@ class ConnectionHandler(
             self._respond(404, error_page("Not available", "<p>Not wired.</p>"))
             return
         entries = hook()
-        labels = self._account_labels()
+        names = self._account_names()
+        options = self.picker_account_options()
         can_assign = self.bound_config.assign_kept_statement is not None
         can_section_assign = self.bound_config.assign_statement_section is not None
         # Recognised is not readable: a parser may claim a statement and then
@@ -5476,7 +5451,7 @@ class ConnectionHandler(
                 '<p><a class="button" href="/statement-shape">Upload a statement</a></p>'
             )
         else:
-            picker = account_picker(labels)
+            picker = account_picker(options)
 
             def file_order(item: dict[str, object]) -> tuple[str, int]:
                 return str(item["origin"]), int(str(item["id"]))
@@ -5484,16 +5459,8 @@ class ConnectionHandler(
             def card(item: dict[str, object], *, assignable: bool) -> str:
                 ident = int(str(item["id"]))
                 ref = str(item["account_ref"])
-                label = labels.get(ref, ref)
                 whose = (
-                    "no account yet"
-                    if ref == UNASSIGNED_ACCOUNT
-                    else html.escape(label)
-                    + (
-                        ""
-                        if label == ref
-                        else f' <span class="mono muted">{html.escape(ref)}</span>'
-                    )
+                    "no account yet" if ref == UNASSIGNED_ACCOUNT else names.of(ref).inline()
                 )
                 parser = item["parser"]
                 reader = (
@@ -5602,9 +5569,8 @@ class ConnectionHandler(
                     suggested = str(part.get("suggested") or "")
                     noun = "row" if count == 1 else "rows"
                     if held:
-                        shown = labels.get(held, held)
                         status = (
-                            f'<span class="ok">assigned to {html.escape(shown)}</span>'
+                            f'<span class="ok">assigned to {names.of(held).inline()}</span>'
                         )
                         form = ""
                     elif refusal:
@@ -5626,7 +5592,7 @@ class ConnectionHandler(
                             f'<input type="hidden" name="artefact" value="{ident}">'
                             f'<input type="hidden" name="section" value="{key}">'
                             + hint
-                            + account_picker(labels, selected=suggested)
+                            + account_picker(options, selected=suggested)
                             + '<p><button type="submit">Assign and read in</button></p>'
                             "</form></details>"
                             if can_section_assign
@@ -6311,21 +6277,24 @@ class ConnectionHandler(
             200, render_page(page_name("/review-report"), body), no_store=not masked
         )
 
-    def _account_names(self) -> dict[str, str]:
-        """Reference to label for every account that has one (`account_names`)."""
-        provider: dict[str, str] = {}
-        hook = self.bound_config.display_labels
+    def _account_names(self) -> AccountsShown:
+        """Every account as a page shows it (`account_names`).
+
+        A naming hook that fails leaves the declared accounts, which are named as ever: a name
+        is a convenience, and no page may depend on the provider-label scan succeeding.
+        """
+        hook = self.bound_config.account_names
         if hook is not None:
             with contextlib.suppress(Exception):
-                provider = hook()
+                return hook()
         declared: list[AccountRecord] = []
         with contextlib.suppress(Exception):
             declared = self.declared_accounts()
-        return merged_names(provider, declared)
+        return accounts_shown({}, declared)
 
     def _named(self, text: str) -> str:
         """A report's plain text, escaped, with each account's label beside its reference."""
-        return html.escape(name_text(text, self._account_names()))
+        return html.escape(self._account_names().in_text(text))
 
     def _date_lag(self) -> None:
         hook = self.bound_config.date_lag_text

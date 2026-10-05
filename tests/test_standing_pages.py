@@ -148,7 +148,6 @@ class TestTheCards:
             findings=lambda: [],
             canonical_for_ref=lambda ref: ref,
             watched=(),
-            labels={},
             actual_bound=None,
             rebuild_status={},
             standings=lambda: standings(store),
@@ -195,7 +194,7 @@ class TestTheCards:
             page = overview_html(
                 lambda fresh: build_overview(
                     bare, now=self.NOW, findings=lambda: [], canonical_for_ref=lambda r: r,
-                    watched=(), labels={}, actual_bound=None, rebuild_status={},
+                    watched=(), actual_bound=None, rebuild_status={},
                 ),
                 now=self.NOW,
             )

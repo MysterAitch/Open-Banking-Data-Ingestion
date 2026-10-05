@@ -13,11 +13,11 @@ derived layer, an account that holds no rows) the sentence is left out rather th
 
 from __future__ import annotations
 
-import contextlib
 import html
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from .account_names import AccountsShown
 from .agreement import NONE
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -84,25 +84,12 @@ class AnswerPages:
     def bound_config(self) -> WebConfig:  # pragma: no cover - satisfied by the handler
         raise NotImplementedError
 
+    def _account_names(self) -> AccountsShown:  # pragma: no cover - satisfied by the handler
+        raise NotImplementedError
+
     def answer_name(self, ref: str) -> str:
         """The account's own name, falling back to its reference."""
-        labels = self.bound_config.display_labels
-        if labels is not None:
-            try:
-                found = labels().get(ref, "")
-            except Exception:
-                found = ""
-            if found:
-                return found
-        declared = self.bound_config.declared_accounts
-        if declared is not None:
-            try:
-                for record in declared():
-                    if str(record.ref) == ref and record.label:
-                        return record.label
-            except Exception:
-                return ref
-        return ref
+        return self._account_names().of(ref).name
 
     def answer_known(self, ref: str) -> bool:
         """Whether the account is one the store declares or holds rows for.
@@ -110,19 +97,10 @@ class AnswerPages:
         A refusal that says "no such account" must not turn what was typed into a link, and
         must not echo it: the reference came from the request.
         """
-        declared = self.bound_config.declared_accounts
-        labels = self.bound_config.display_labels
-        if declared is None and labels is None:
+        config = self.bound_config
+        if config.declared_accounts is None and config.account_names is None:
             return True
-        # A hook that raises is no evidence either way, so the next source is asked.
-        if declared is not None:
-            with contextlib.suppress(Exception):
-                if ref in {str(record.ref) for record in declared()}:
-                    return True
-        if labels is not None:
-            with contextlib.suppress(Exception):
-                return ref in labels()
-        return False
+        return ref in self._account_names()
 
     def answer_link(self, ref: str) -> str:
         """The ledger link for an answer page, or nothing where no ledger is wired or the

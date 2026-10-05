@@ -163,7 +163,7 @@ def store(tmp_path):
 @pytest.fixture
 def position(store) -> Position:
     household(store)
-    return read_position(store, labels={}, today=TODAY)
+    return read_position(store, today=TODAY)
 
 
 def group(position: Position, key: str):
@@ -226,7 +226,7 @@ class TestAnAccountWithNoOpeningBalance:
         household(store)
         record_stated_anchor(store, "unanchored", "2026-03-31", "1000.00")
 
-        after = read_position(store, labels={}, today=TODAY)
+        after = read_position(store, today=TODAY)
 
         # opening 100,000 - 88,888 = 11,112; now 11,112 + 88,888 = 100,000
         assert after.uncounted == ()
@@ -240,7 +240,7 @@ class TestAnAccountWithNoOpeningBalance:
         land(store, "d-eur", euros)
         record_stated_anchor(store, "euro", "2026-03-31", "10.00")
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         [withheld] = shown.uncounted
         assert withheld.state == "withheld"
@@ -347,7 +347,7 @@ class TestTheBalanceIsTheLedgersBalance:
 
 class TestDegenerateHistories:
     def test_NothingHeld_IsNoNetWorthAndNoHistory(self, store):
-        empty = read_position(store, labels={}, today=TODAY)
+        empty = read_position(store, today=TODAY)
 
         assert empty.net_worth is None
         assert empty.net_direction == ""
@@ -358,7 +358,7 @@ class TestDegenerateHistories:
     def test_EveryAccountUncounted_IsNoNetWorthEvenThoughRowsExist(self, store):
         land(store, "d", txn("only", "src-a", "o1", D(2026, 3, 1), 12345, "ROW"))
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.net_worth is None
         assert (shown.accounts_counted, shown.accounts_total) == (0, 1)
@@ -370,7 +370,7 @@ class TestDegenerateHistories:
             observed_at=D(2026, 10, 1), source="note", value_minor=777777,
         )
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert [(p.month, p.net_worth.minor) for p in shown.history] == [("2026-10", 777777)]
         assert shown.complete_from == "2026-10"
@@ -382,7 +382,7 @@ class TestDegenerateHistories:
             source="note", value_minor=999900, currency="EUR",
         )
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.assets == ()
         assert shown.foreign_observations == 1
@@ -394,7 +394,7 @@ class TestDegenerateHistories:
             observed_at=D(2026, 9, 1), source="note", value_minor=-5000,
         )
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.net_worth is not None
         assert shown.net_worth.minor == -5000
@@ -431,7 +431,7 @@ class TestWhatAnUncountedAccountHasMoved:
         household(store)
         store.declare_account(AccountRecord(ref=AccountRef("dormant"), label="Dormant"))
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         dormant = account(shown, "dormant")
         assert dormant.moved is None
@@ -441,7 +441,7 @@ class TestWhatAnUncountedAccountHasMoved:
     def test_VoidRowsNeverMoveItAndPendingRowsDo(self, store):
         with_late_account(store)
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         late = account(shown, "late")
         assert late.moved is not None
@@ -472,7 +472,7 @@ class TestTheProvisionalTotal:
     def test_TwoUncountedAccounts_AddTheirMovementsAndLeaveTheKnownFiguresAlone(self, store):
         with_late_account(store)
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.accounts_uncounted == 2
         assert shown.provisional_total is not None
@@ -485,7 +485,7 @@ class TestTheProvisionalTotal:
         household(store)
         record_stated_anchor(store, "unanchored", "2026-03-31", "1000.00")
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.provisional_total is None
         assert shown.provisional_direction == ""
@@ -494,7 +494,7 @@ class TestTheProvisionalTotal:
     def test_WhenNothingIsCounted_ThereIsNoNetWorthButThereIsAProvisionalTotal(self, store):
         land(store, "d", txn("only", "src-a", "o1", D(2026, 3, 1), 12345, "ROW"))
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.net_worth is None
         assert shown.history == ()
@@ -505,7 +505,7 @@ class TestTheProvisionalTotal:
         household(store)
         store.declare_account(AccountRecord(ref=AccountRef("dormant"), label="Dormant"))
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert shown.accounts_uncounted == 2
         assert shown.provisional_total is not None
@@ -533,7 +533,7 @@ class TestTheProvisionalHistory:
     def test_TwoUncountedAccounts_EachContributeFromTheirOwnFirstRow(self, store):
         with_late_account(store)
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         assert provisional(shown, "2026-04") == 26817098
         assert provisional(shown, "2026-05") == 27004875
@@ -552,7 +552,7 @@ class TestTheProvisionalHistory:
     def test_WhenNothingIsCounted_TheHistoryRunsFromTheFirstRow(self, store):
         land(store, "d", txn("only", "src-a", "o1", D(2026, 3, 1), 12345, "ROW"))
 
-        shown = read_position(store, labels={}, today=TODAY)
+        shown = read_position(store, today=TODAY)
 
         months = [p.month for p in shown.provisional_history]
         assert (months[0], months[-1], len(months)) == ("2026-03", "2026-10", 8)

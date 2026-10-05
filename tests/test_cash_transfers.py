@@ -329,7 +329,7 @@ class TestTheEffectOnWhatIsKnown:
         try:
             pair_transfers_across_store(store, MAP)
 
-            position = read_position(store, labels={}, today=TODAY)
+            position = read_position(store, today=TODAY)
 
             assert position.net_worth is not None
             assert position.net_worth.minor == 99650
@@ -342,7 +342,7 @@ class TestTheEffectOnWhatIsKnown:
         try:
             pair_transfers_across_store(store, MAP)
 
-            position = read_position(store, labels={}, today=TODAY)
+            position = read_position(store, today=TODAY)
 
             assert legs_of(store) == []
             assert position.net_worth is not None
@@ -357,7 +357,7 @@ class TestTheEffectOnWhatIsKnown:
         try:
             pair_transfers_across_store(store, MAP)
 
-            position = read_position(store, labels={}, today=TODAY)
+            position = read_position(store, today=TODAY)
 
             assert position.net_worth is not None
             assert position.net_worth.minor == 94650

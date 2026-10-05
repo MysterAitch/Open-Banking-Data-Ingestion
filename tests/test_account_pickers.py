@@ -16,11 +16,12 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from obdi.account_names import accounts_shown
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import build_web_config
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
-from obdi.web_accounts import ACCOUNT_KINDS, picker_labels
+from obdi.web_accounts import ACCOUNT_KINDS, picker_options
 from test_balance_anchors import everyday
 
 HELD_ONLY = "held-only"
@@ -105,7 +106,9 @@ class TestThePickerOffersEveryAccountThatHoldsRowsOrIsDeclared:
         assert "No such account" not in answer.text
 
     def test_Labels_WhenNoAccountHoldsRowsAndNoneIsDeclared_AreTheProvidersAlone(self):
-        assert picker_labels({"a": "A (provider)"}, [], held=()) == {"a": "A (provider)"}
+        names = accounts_shown({"a": "A (provider)"}, [])
+
+        assert picker_options(names, [], held=()) == {"a": "A (provider)"}
 
 
 class TestAnUnknownNameIsNeverAnsweredWithAGuess:

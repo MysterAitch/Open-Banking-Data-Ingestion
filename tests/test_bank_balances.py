@@ -370,7 +370,7 @@ class TestTheOtherPagesUseTheSameAnchors:
         store = make(full_day(), export=EXPORT_ROWS)
 
         position = read_position(
-            store, labels={}, today=date(2026, 9, 30), families=families_of(store, MAP)
+            store, today=date(2026, 9, 30), families=families_of(store, MAP)
         )
 
         account = next(
