@@ -255,6 +255,13 @@ def verification_sentence(counted: int, adding_up: int, not_adding_up: int, noth
     return "; ".join(said) + "."
 
 
+def not_adding_up_sentence(count: int) -> str:
+    """How many accounts do not add up, as a sentence of its own: "1 account does not add up."."""
+    from .plural import agree, plural
+
+    return f"{plural(count, 'account')} {agree(count, 'does')} not add up."
+
+
 def standing_lines(item: AccountStanding) -> tuple[str, ...]:
     """The sentences a card or list line shows: the three dates, what holds agreement back, and
     a broken protection. Plain text; the caller escapes it."""

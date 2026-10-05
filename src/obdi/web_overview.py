@@ -50,6 +50,7 @@ from .standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
+    not_adding_up_sentence,
     standing_lines,
     verification_of,
     verification_sentence,
@@ -139,18 +140,25 @@ class Verdict:
     tone: str
 
 
-def verdict_of(counts: Mapping[int, int]) -> Verdict:
-    """The one sentence, true of the counts beneath it.
+def verdict_of(counts: Mapping[int, int], *, not_adding_up: int = 0) -> Verdict:
+    """The one sentence, true of the counts beneath it and of the status lines under it.
 
     Nothing at all wrong is a positive statement. Faults lead with themselves. Where there are
     none the sentence says so before it counts what is left, so that "4 things when convenient"
     is never read as 4 faults.
+
+    `not_adding_up` is the Verification line's count of accounts that do not add up. Such an
+    account is an item only once it has lagged `overview.STALE_AGREEMENT_DAYS`, so until then
+    there can be no item at all while the line beneath says one does not add up; the positive
+    statement would contradict that line, and the sentence says the line's count instead.
     """
     parts = [
         band_phrase(severity, counts[severity])
         for severity in (NOW, SOON, HOUSEKEEPING)
         if counts.get(severity)
     ]
+    if not parts and not_adding_up:
+        return Verdict(f"No faults. {not_adding_up_sentence(not_adding_up)}", "warn")
     if not parts:
         return Verdict("Everything checked is in order.", "ok")
     if counts.get(NOW):
@@ -800,7 +808,9 @@ def overview_html(
     elif overview.rebuilding is not None:
         verdict = Verdict(overview.rebuilding.sentence(), "warn")
     else:
-        verdict = verdict_of(_counts(overview))
+        verdict = verdict_of(
+            _counts(overview), not_adding_up=verification_counts(overview.accounts)[2]
+        )
         if overview.checks_run != overview.checks_total:
             lede = (
                 f"Only {overview.checks_run} of {overview.checks_total} checks could run, "

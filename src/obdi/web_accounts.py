@@ -661,17 +661,19 @@ def _declare_known_section(known: KnownAccounts) -> str:
     hidden = "".join(
         f'<input type="hidden" name="ref" value="{html.escape(a.ref)}">' for a in waiting
     )
-    noun = "account" if len(waiting) == 1 else "accounts"
+    one = len(waiting) == 1
     return (
-        f"<h2>Held but not declared</h2><p>{len(waiting)} {noun} obdi holds "
+        f"<h2>Held but not declared</h2><p>{plural(len(waiting), 'account')} obdi holds "
         "rows for, or has bound in the account map, with no record in the registry. "
-        "Declaring them changes no row and no figure: each is declared under its own "
-        "name, with the label obdi already shows for it, and a kind only where the "
-        "structure says so, with the reason beside it.</p>"
+        f"Declaring {'it' if one else 'them'} changes no row and no figure: each is declared "
+        "under its own name, with the label obdi already shows for it, and a kind only where "
+        "the structure says so, with the reason beside it.</p>"
         f'<ul class="plain">{items}</ul>'
         '<form method="post" action="/declare-known">'
         + hidden
-        + submit_button(f"Declare these {len(waiting)} {noun}")
+        + submit_button(
+            "Declare this account" if one else f"Declare these {len(waiting)} accounts"
+        )
         + "</form>"
         + unnamed
     )

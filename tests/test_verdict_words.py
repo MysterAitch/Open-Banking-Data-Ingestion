@@ -106,6 +106,25 @@ class TestThePagesSayItTheSameWay:
         chips = [e.text() for e in elements(parse(today), "span") if "pill" in e.classes]
         assert DOES_NOT_ADD_UP in chips
 
+    def test_Today_WhenAnAccountDoesNotAddUpAndNoItemNamesIt_DoesNotHeadThePageAllInOrder(
+        self, household_served  # noqa: F811
+    ):
+        today = parse(httpx.get(f"{household_served}/", timeout=60).text)
+
+        headline = next(e for e in elements(today, "p") if "verdict" in e.classes)
+        said = re.sub(r"\s+", " ", headline.text()).strip()
+        assert said == "No faults. 1 account does not add up."
+        assert "warn" in headline.classes
+        assert "ok" not in headline.classes
+
+    def test_Accounts_WhenOneAccountIsHeldButNotDeclared_OffersToDeclareThisAccount(
+        self, pages
+    ):
+        buttons = [e.text().strip() for e in elements(parse(pages["/accounts"]), "button")]
+
+        assert "Declare this account" in buttons
+        assert not [b for b in buttons if b.startswith("Declare these")]
+
     def test_Accounts_OverTheHousehold_SaysItsSentenceAndMarksEachAccountWithItsVerdict(
         self, pages
     ):

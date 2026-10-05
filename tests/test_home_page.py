@@ -122,6 +122,28 @@ class TestTheVerdict:
         assert "to look at" not in verdict_of({}).sentence
         assert "convenient" not in verdict_of({}).sentence
 
+    @pytest.mark.parametrize(
+        ("failing", "sentence"),
+        [
+            (1, "No faults. 1 account does not add up."),
+            (3, "No faults. 3 accounts do not add up."),
+        ],
+    )
+    def test_Verdict_WhenNoItemIsRaisedButAnAccountDoesNotAddUp_DoesNotSayAllIsInOrder(
+        self, failing, sentence
+    ):
+        verdict = verdict_of({}, not_adding_up=failing)
+
+        assert (verdict.sentence, verdict.tone) == (sentence, "warn")
+
+    def test_Verdict_WhenItemsAreRaisedAndAnAccountDoesNotAddUp_CountsTheItemsAsBefore(self):
+        verdict = verdict_of({HOUSEKEEPING: 4}, not_adding_up=1)
+
+        assert verdict.sentence == "No faults. 4 things when convenient."
+
+    def test_Verdict_WhenEveryAccountAddsUpAndNoItemIsRaised_SaysAllIsInOrder(self):
+        assert verdict_of({}, not_adding_up=0).sentence == "Everything checked is in order."
+
     def test_Verdict_OnTheTroubledWorld_CountsTheItemsBeneathIt(self, troubled):
         faults = [i for i in troubled.attention if i.severity == NOW]
         later = [i for i in troubled.attention if i.severity == HOUSEKEEPING]
