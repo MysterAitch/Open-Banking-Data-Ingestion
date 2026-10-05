@@ -80,6 +80,7 @@ from .namespaces import (
 from .navigation import answering, current_route, page_name
 from .overview import Overview
 from .page_times import UTC_NOTE, instant_of
+from .page_words import ARTEFACT_MOVED, ARTEFACT_REBUILT, MOVE_ARTEFACT, REBUILD_ARTEFACT
 from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
@@ -4616,7 +4617,7 @@ class ConnectionHandler(
                 f'<input type="hidden" name="id" value="{artefact_id}">'
                 '<p><button class="button" type="submit" '
                 'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-                "Replay into store</button></p></form>"
+                f"{html.escape(REBUILD_ARTEFACT)}</button></p></form>"
             )
             + (
                 # The wrong-destination remedy: the payload is evidence, the
@@ -4637,7 +4638,7 @@ class ConnectionHandler(
                 "and a rebuild will derive its transactions again</label>"
                 '<p><button class="button" type="submit" '
                 'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-                "Refile</button></p></form>"
+                f"{html.escape(MOVE_ARTEFACT)}</button></p></form>"
             )
             + "<h2>The stored payload</h2>"
             '<p class="muted">Every amount, name, and reference the artefact holds, '
@@ -4703,14 +4704,16 @@ class ConnectionHandler(
     def _refile_artefact(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.refile_artefact
         if hook is None:
-            self._respond(404, error_page("Not available", "<p>Refiling is not wired.</p>"))
+            self._respond(
+                404, error_page("Not available", "<p>Moving an artefact is not wired.</p>")
+            )
             return
         if form.get("confirm") != ["yes"]:
             self._respond(
                 400,
                 error_page(
                     "Not confirmed",
-                    "<p>Refiling changes which account the artefact's rows "
+                    "<p>Moving an artefact changes which account its rows "
                     "derive into. Tick the confirmation box to proceed.</p>",
                 ),
             )
@@ -4736,7 +4739,7 @@ class ConnectionHandler(
             confirmed=(form.get(NEW_ACCOUNT_FIELD, [""])[0] or ""),
             action="/refile-artefact",
             carry=lambda: {"id": str(artefact_id), "confirm": "yes"},
-            proceed_label=f"Declare it and refile artefact {artefact_id}",
+            proceed_label=f"Declare it and move artefact {artefact_id} to it",
         )
         if account is None:
             return
@@ -4749,11 +4752,11 @@ class ConnectionHandler(
         self._respond(
             200,
             render_page(
-                "Refiled",
+                ARTEFACT_MOVED,
                 self.answer_link(account)
                 + (self.answer_link(old) if old != account else "")
                 + (f"<p>{html.escape(verification)}</p>" if verification else "")
-                + f"<p>Refiled from <strong>{html.escape(old)}</strong> to "
+                + f"<p>Moved from <strong>{html.escape(old)}</strong> to "
                 f"<strong>{html.escape(account)}</strong>. The correction is "
                 "recorded in the artefact's provenance.</p>"
                 "<p>Now run <strong>Rebuild from raw</strong> (danger zone) so "
@@ -4987,7 +4990,7 @@ class ConnectionHandler(
             self._respond(
                 400,
                 error_page(
-                    "Could not replay",
+                    "Could not rebuild the artefact's transactions",
                     self.answer_link(account) + f"<p>{html.escape(str(exc))}</p>",
                 ),
             )
@@ -4996,11 +4999,11 @@ class ConnectionHandler(
         self._respond(
             200,
             render_page(
-                "Artefact replayed",
+                ARTEFACT_REBUILT,
                 self.answer_link(account)
                 + f"<p>{html.escape(summary)}</p>"
                 + (f"<p>{html.escape(verification)}</p>" if verification else "")
-                + "<p>Additive and idempotent: replaying again matches "
+                + "<p>Additive and idempotent: rebuilding again matches "
                 "instead of duplicating. A full rebuild is only for rows "
                 "that are wrong, not merely absent.</p>"
                 f'<p><a class="button" href="/artefact?id={artefact_id}">'

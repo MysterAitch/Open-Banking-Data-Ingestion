@@ -3343,7 +3343,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         busy = rebuild_in_progress_note(db_path)
         if busy:
-            raise TypedRefused(f"nothing was withdrawn: {busy}")
+            raise TypedRefused(f"nothing was removed: {busy}")
         with Store(db_path) as store:
             withdraw_typed_transaction(store, ref, entry_id, account_map=_account_map(store))
 

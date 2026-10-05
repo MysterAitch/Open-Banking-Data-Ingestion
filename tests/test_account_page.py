@@ -85,7 +85,7 @@ class TestTheOrderOfTheFirstScreens:
             at(page, '<svg class="rail"'),
             at(page, 'class="verdict'),
             at(page, 'class="held"'),
-            at(page, "Withdraw protection"),
+            at(page, "Remove protection"),
             at(page, "Show values"),
             at(page, f"<h2>{NEWEST_MONTH}</h2>"),
             at(page, "<h2>Transactions, newest first</h2>"),
@@ -104,7 +104,7 @@ class TestTheOrderOfTheFirstScreens:
         assert 'class="held"' not in page
         assert "Protect through 2026-09-30" in page
         assert at(page, "Protect through 2026-09-30") < at(page, "Show values")
-        assert "Withdraw protection" not in page, "nothing to withdraw"
+        assert "Remove protection" not in page, "nothing to remove"
 
     def test_Page_NamesTheAccountsOwnNameAsItsHeading_AndKeepsLedgerForTheBrowserTitle(
         self, base

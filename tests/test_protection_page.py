@@ -209,7 +209,7 @@ class TestABreakOnThePage:
             "the break is inside a collapsed block"
         )
 
-    def test_Ledger_WhenIntact_ShowsOneLineWithWithdrawVisibleAndTheDetailBehindIt(self, lab):
+    def test_Ledger_WhenIntact_ShowsOneLineWithRemoveVisibleAndTheDetailBehindIt(self, lab):
         lab.press()
 
         page = lab.get().text
@@ -218,18 +218,18 @@ class TestABreakOnThePage:
             r'<p class="protect-line"><strong>Protected through 2026-03-20: 5 rows', page
         )
         assert "protected through 2026-03-20." in page, "the verdict names the span"
-        before = page[: page.index("Withdraw protection")]
+        before = page[: page.index("Remove protection")]
         assert before.count("<details") == before.count("</details>"), (
             "the way out is inside a collapsed block"
         )
         assert re.search(r"<summary>About this protection</summary>", page)
         assert "The protection is broken" not in page
 
-    def test_Ledger_WhenNotProtected_OffersTheProtectionAndNoWithdrawal(self, lab):
+    def test_Ledger_WhenNotProtected_OffersTheProtectionAndNoRemoval(self, lab):
         page = lab.get().text
 
         assert "Protect through 2026-03-20" in page
-        assert "Withdraw protection" not in page, "there is nothing to withdraw"
+        assert "Remove protection" not in page, "there is nothing to remove"
 
     def test_Accept_AfterConfirmation_ProtectsTheNewStateAndRecordsIt(self, lab):
         self.broken(lab)
@@ -244,16 +244,17 @@ class TestABreakOnThePage:
         assert "The protection is broken" not in accepted.text
         assert lab.events() == ["pressed", "accepted"]
 
-    def test_Withdraw_AfterConfirmation_RemovesItAndRecordsIt(self, lab):
+    def test_Remove_AfterConfirmation_RemovesItAndRecordsIt(self, lab):
         lab.press()
 
         asked = lab.post("/protect-withdraw")
-        assert "Withdraw this account's protection?" in html.unescape(asked.text)
+        assert "Remove this account's protection?" in html.unescape(asked.text)
         assert lab.record() is not None
 
         done = lab.post("/protect-withdraw", confirmed="yes")
 
         assert done.status_code == 200
+        assert "Protection removed:" in done.text, "the result says the verb the button did"
         assert lab.record() is None
         assert lab.events() == ["pressed", "withdrawn"]
 

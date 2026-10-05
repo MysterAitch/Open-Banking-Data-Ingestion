@@ -72,7 +72,7 @@ _SIGN = re.compile(r"[-+()]")
 
 _NOT_TYPED = (
     "no typed transaction with that identity is held for this account, so there is "
-    "nothing to withdraw. A row a bank reported is not one: it is evidence about "
+    "nothing to remove. A row a bank reported is not one: it is evidence about "
     "the account, not something typed"
 )
 
@@ -331,7 +331,7 @@ def withdraw_typed_transaction(
     if entry is None:
         raise TypedRefused(_NOT_TYPED)
     if entry.withdrawn:
-        raise TypedRefused("that typed transaction has already been withdrawn")
+        raise TypedRefused("that typed transaction has already been removed")
     payload = json.dumps(
         {"kind": WITHDRAWAL_KIND, "version": PAYLOAD_VERSION, "withdraws": wanted},
         sort_keys=True,

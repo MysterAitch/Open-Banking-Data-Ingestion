@@ -433,7 +433,7 @@ class TestAJoinIsRefusedWhereTheStoredEvidenceOrAProtectionForbidsIt:
                 answer_one(store, card)
 
             assert "protected through 2026-09-15" in str(refused.value)
-            assert "Withdraw the protection" in str(refused.value)
+            assert 'Use "Remove protection" on the account page first' in str(refused.value)
             assert count(store, TICKETS) == rows
 
     def test_TwoPayments_InAProtectedPeriod_IsStillTaken_BecauseNoRowChanges(self, db):

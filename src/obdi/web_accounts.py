@@ -1369,7 +1369,7 @@ class AccountPages(AnswerPages):
                 + (f"<p>{html.escape(sentence)}</p>" if sentence else "")
                 + (
                     "<p>It can now be chosen wherever an account is chosen - "
-                    "the import door, the refile form and the assign form.</p>"
+                    "the import door, the form that moves an artefact, and the assign form.</p>"
                     if not original
                     else ""
                 )

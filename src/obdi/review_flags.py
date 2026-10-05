@@ -50,6 +50,7 @@ from .join_basis import how_words, sighting_views
 from .masking import Structural
 from .matching import EXACT_RULE_DOUBT
 from .models import SourceTier, TransactionStatus
+from .page_words import REMOVE_PROTECTION, REMOVE_TYPED_TRANSACTION
 from .payment_links import AGGREGATORS
 from .review_report import (
     GAP_AFTER,
@@ -579,8 +580,8 @@ def join_refusal(store: Store, flag_id: str, neighbour_id: str) -> str:
         return "One of them is void or folded already, so there is nothing to join."
     if SourceTier.MANUAL.value in (str(flagged["tier"]), str(other["tier"])):
         return (
-            "One of them is a typed entry. Withdraw it from the account page if it is wrong, "
-            "and the other stands."
+            f'One of them is a typed entry. Use "{REMOVE_TYPED_TRANSACTION}" on the account '
+            "page if it is wrong, and the other stands."
         )
     proof = neighbour_proof(store, flag_id, neighbour_id)
     if proof is not None:
@@ -602,7 +603,7 @@ def join_refusal(store: Store, flag_id: str, neighbour_id: str) -> str:
         if any(day <= through for day in days):
             return (
                 f"This account is protected through {through}, and joining these would change "
-                "a protected day. Withdraw the protection on the account page first, answer "
+                f'a protected day. Use "{REMOVE_PROTECTION}" on the account page first, answer '
                 "here, then protect it again."
             )
     return ""

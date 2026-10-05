@@ -67,6 +67,7 @@ from .balance_anchors import EffectiveOpening, parse_calendar_day
 from .errors import DataError
 from .masking import Structural
 from .models import Transaction
+from .page_words import REMOVE_PROTECTION
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -509,8 +510,8 @@ def press(
             )
         if through <= date.fromisoformat(str(existing["through"])):
             raise ProtectionRefused(
-                "the account is already protected through that date or later; withdraw its "
-                "protection first to protect a shorter span"
+                "the account is already protected through that date or later; use "
+                f'"{REMOVE_PROTECTION}" first to protect a shorter period'
             )
     rows = store.transactions_for_account(ref)
     if not rows:
@@ -603,7 +604,7 @@ def withdraw(store: Store, ref: str, *, now: datetime | None = None) -> None:
     ref = ref.strip()
     record = store.protection_record(ref)
     if record is None:
-        raise ProtectionRefused("the account has no protection to withdraw")
+        raise ProtectionRefused("the account has no protection to remove")
     store.add_protection_event(
         ref,
         WITHDRAWN,

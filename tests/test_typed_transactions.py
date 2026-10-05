@@ -293,7 +293,7 @@ class TestWithdrawing:
         first, _ = type_two(store)
         withdraw_typed_transaction(store, TIN, first, now=stamp(3))
 
-        with pytest.raises(TypedRefused, match="already been withdrawn"):
+        with pytest.raises(TypedRefused, match="already been removed"):
             withdraw_typed_transaction(store, TIN, first, now=stamp(4))
 
         assert artefact_count(store, MANUAL_WITHDRAWAL_SOURCE) == 1
@@ -476,7 +476,7 @@ class TestTheTypedTransactionPages:
             '<button class="button secondary" type="submit" '
             'style="width:100%;font-size:inherit;cursor:pointer">Save typed transaction'
         ) in page
-        assert "Withdraw this typed transaction" in page
+        assert "Remove typed transaction" in page
         assert '<span class="pill pill-quiet" title="A person typed this' in page
         assert "Show values" in page
 
@@ -541,7 +541,7 @@ class TestTheTypedTransactionPages:
 
         assert response.status_code == 200
         assert "no-store" in response.headers["cache-control"]
-        assert "Withdrawn: one typed transaction" in response.text
+        assert "Typed transaction removed." in response.text
         assert_no_secret(response.text, where="in the answer to a withdrawal")
         with Store(lab.db) as opened:
             assert len(opened.transactions_for_account(TIN)) == 2
@@ -551,8 +551,8 @@ class TestTheTypedTransactionPages:
             '<div class="ledger-more">'
         )[0]
         assert SECRET_WORDS not in listed, "a withdrawn entry is not among the counted rows"
-        assert '<span class="pill pill-quiet">withdrawn</span>' in shown, (
-            "it is still listed, as withdrawn, in the typed transactions"
+        assert '<span class="pill pill-quiet">removed</span>' in shown, (
+            "it is still listed, as removed, in the typed transactions"
         )
 
     def test_Withdraw_WhenTheEntryIsNotATypedOne_IsRefusedWithASentence(self, lab):

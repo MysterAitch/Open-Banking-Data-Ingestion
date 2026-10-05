@@ -34,6 +34,22 @@ from __future__ import annotations
 
 import re
 
+#: THE LABELS OF FOUR ACTIONS, declared here once: the button, the confirmation that asks, the
+#: result page that answers, and any sentence that refers to the button all read these, so a
+#: result says the same verb as the button that produced it. Each used to be a word that was too
+#: general or said an implementation: "Withdraw" named two different acts (ending a protection and
+#: deleting a typed transaction), "Refile" is a clerk's word for putting an artefact under another
+#: account, and "Replay into store" named the mechanism and not what a person gets.
+#: Reading the deployed pages named all three; the routes and function names keep their old words.
+REMOVE_PROTECTION = "Remove protection"
+PROTECTION_REMOVED = "Protection removed"
+REMOVE_TYPED_TRANSACTION = "Remove typed transaction"
+TYPED_TRANSACTION_REMOVED = "Typed transaction removed"
+MOVE_ARTEFACT = "Move to another account"
+ARTEFACT_MOVED = "Artefact moved to another account"
+REBUILD_ARTEFACT = "Rebuild this artefact's transactions"
+ARTEFACT_REBUILT = "Artefact's transactions rebuilt"
+
 #: Implementation details that name nothing a person can act on, matched case-insensitively.
 INTERNAL_ON_PAGES = re.compile(
     r"\btiers?\b|\buids?\b|\blayer 0\b|\bthe matcher\b|\bthe applier\b|\bthe map\b"
@@ -57,4 +73,12 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     "show the payees",
     "(masked view)",
     "(masked timeline)",
+    # The exact old labels of the four actions in `REMOVE_PROTECTION` and its neighbours, and not
+    # the verbs: a cash "withdrawal" is an ordinary word on a page. "refile" is matched with a
+    # space either side, which is how a button's own text stands in a page's visible text, so
+    # "refiled", the note an old correction left in an artefact's provenance, is not retired.
+    "withdraw protection",
+    "withdraw this typed transaction",
+    " refile ",
+    "replay into store",
 )

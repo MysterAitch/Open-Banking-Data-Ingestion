@@ -43,6 +43,12 @@ from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .models import BASIS_ID
 from .navigation import page_name
+from .page_words import (
+    PROTECTION_REMOVED,
+    REMOVE_PROTECTION,
+    REMOVE_TYPED_TRANSACTION,
+    TYPED_TRANSACTION_REMOVED,
+)
 from .plural import agree
 from .plural import plural as _plural
 from .proof_rail import build_rail, rail_svg
@@ -183,7 +189,7 @@ def _row_flags(row: Any) -> str:
         flags += _flag(
             "typed",
             "A person typed this transaction. It is evidence like any other, and "
-            "can be withdrawn from the typed transactions list below.",
+            "can be removed from the typed transactions list below.",
         )
     elif row.origin == "unitemised":
         flags += _flag(
@@ -1823,7 +1829,7 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
         detail += f"<p>{_plural(protection.events, 'recorded event')} in its history.</p>"
         body += (
             f'<p class="protect-line"><strong>{_esc(protection_line(protection))}</strong></p>'
-            + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
+            + _post("/protect-withdraw", ref, month, "", REMOVE_PROTECTION)
             + _disclosure("About this protection", detail)
         )
     elif state == "broken":
@@ -1837,7 +1843,7 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
             "until a later rebuild restores the protected period, or you accept the new "
             "state.</p>"
             + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
-            + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
+            + _post("/protect-withdraw", ref, month, "", REMOVE_PROTECTION)
         )
     if protection.earlier_said:
         body += (
@@ -2145,13 +2151,13 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
     for line in typed.lines:
         figure = _esc(_signed(line.direction, line.direction, line.amount))
         if line.withdrawn:
-            tail = '<p><span class="pill pill-quiet">withdrawn</span></p>'
+            tail = '<p><span class="pill pill-quiet">removed</span></p>'
         else:
             tail = (
                 '<form method="post" action="/ledger-typed-withdraw">'
                 + hidden
                 + f'<input type="hidden" name="entry" value="{_esc(line.entry_id)}">'
-                + submit_button("Withdraw this typed transaction", secondary=True)
+                + submit_button(REMOVE_TYPED_TRANSACTION, secondary=True)
                 + "</form>"
             )
         items += (
@@ -2169,12 +2175,12 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
         notes += (
             f"<p class=\"muted\">{_plural(typed.live_elsewhere, 'more typed transaction')} "
             f"{agree(typed.live_elsewhere, 'is')} dated in other months: step to that "
-            "month to withdraw one.</p>"
+            "month to remove one.</p>"
         )
     if typed.withdrawn_total:
         notes += (
             f"<p class=\"muted\">{_plural(typed.withdrawn_total, 'typed transaction')} "
-            "withdrawn in all. They stay in the record as evidence and count nowhere.</p>"
+            "removed in all. They stay in the record as evidence and count nowhere.</p>"
         )
     return _disclosure(
         f"Typed transactions ({len(typed.lines)} this month)",
@@ -2905,14 +2911,14 @@ class LedgerPages(AnswerPages):
         self._protection_action(
             form,
             hook_name="protect_withdraw",
-            refused_title="Protection not withdrawn",
-            refused_lead="Nothing was withdrawn.",
-            done="Withdrawn: the account's protection. The withdrawal is in its history.",
+            refused_title="Protection not removed",
+            refused_lead="Nothing was removed.",
+            done=f"{PROTECTION_REMOVED}: the account's protection. The removal is in its history.",
             question=(
-                "Withdraw this account's protection? Changes to its rows will no longer be "
+                "Remove this account's protection? Changes to its rows will no longer be "
                 "reported."
             ),
-            label="Withdraw protection",
+            label=REMOVE_PROTECTION,
         )
 
     def _protect_accept_post(self, form: dict[str, list[str]]) -> None:
@@ -2982,7 +2988,7 @@ class LedgerPages(AnswerPages):
         hook = self.bound_config.typed_withdraw
         if hook is None:
             self._respond(
-                404, _page("Not available", "Withdrawing a typed transaction is not wired.")
+                404, _page("Not available", "Removing a typed transaction is not wired.")
             )
             return
         ref = (form.get("ref", [""])[0] or "").strip()
@@ -2992,15 +2998,15 @@ class LedgerPages(AnswerPages):
             hook(ref, (form.get("entry", [""])[0] or "").strip())
         except DataError as exc:
             self._anchor_refusal(
-                400, "Transaction not withdrawn", f"Nothing was withdrawn. {exc}.", ref=ref
+                400, "Transaction not removed", f"Nothing was removed. {exc}.", ref=ref
             )
             return
         except Exception as fault:
             say("ledger.typed.withdraw.fault", kind=type(fault).__name__)
             self._anchor_refusal(
                 500,
-                "Transaction not withdrawn",
-                "Nothing was withdrawn, because of an unexpected fault.",
+                "Transaction not removed",
+                "Nothing was removed, because of an unexpected fault.",
                 ref=ref,
             )
             return
@@ -3009,7 +3015,7 @@ class LedgerPages(AnswerPages):
             month,
             unmasked=False,
             notice=self.answer_notice(
-                "Withdrawn: one typed transaction. It stays in the record as evidence "
+                f"{TYPED_TRANSACTION_REMOVED}. It stays in the record as evidence "
                 "and counts nowhere.",
                 ref,
                 before,
