@@ -106,20 +106,13 @@ QUERIES_PER_PAGE = 11
 #: and the fixed figure is a floor.
 ANCHOR_QUERIES = 10
 
-#: Statements issued to find what an account's statements conclude by what they list
-#: (`standing_data.statement_checks_for`, read by the verdict): the held statements, the sections
-#: assigned to accounts, the kept readings, and the sightings behind them. Measured at 7 on an
-#: account that holds none; each held statement adds reads beyond it, so this too is a floor.
-STATEMENT_CHECK_QUERIES = 7
-
-#: What reading one held statement's sightings and transactions adds to `STATEMENT_CHECK_QUERIES`,
-#: measured on a main account holding one statement.
-HELD_STATEMENT_CHECK_QUERIES = 13
-
-#: What the page's count of statements a calendar-day test would have reproduced adds for an
-#: account that holds a statement (`statement_listing_measure.statement_checks`, `by_date`): it
-#: reads every statement period and every sighting of the store. Measured on the same account.
-BY_DATE_SCORE_QUERIES = 68
+#: Statements a page issues to find what an account's statements conclude by what they list
+#: (`standing_data.statement_checks_for`, read by the verdict) once the store's checks are held:
+#: the one read of the standing epoch that says they still are. The checks themselves are worked
+#: out once per store state and shared by every page and account, held or not (see
+#: `standing_data._CHECKS`), so this does not follow the number of statements in the store, which
+#: made the page cost 618 statements instead of 77 on a store of 96 statements.
+STATEMENT_CHECK_QUERIES = 1
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -1004,7 +997,7 @@ def _ledger_for(
         entries = typed_entries(store, ref)
         if not opening.unitemised:
             standing = standing_of(
-                opening, members, movement, statement_checks_for(store, ref, opening, families)
+                opening, members, movement, statement_checks_for(store, ref, families)
             )
             return replace(
                 empty,
@@ -1231,7 +1224,7 @@ def _ledger_for(
             ),
         )
 
-    checks = statement_checks_for(store, ref, opening, families, by_date=True)
+    checks = statement_checks_for(store, ref, families)
     final_standing = standing_of(opening, members, movement, checks)
     return Ledger(
         ref=ref,

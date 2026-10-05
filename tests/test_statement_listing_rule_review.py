@@ -48,8 +48,11 @@ no two documents share their bytes.
                       Expected: adds up through 1 Mar, as without the rule; and the person can
                       set the statement aside. Got: does not add up, adding up through nothing,
                       and the statement cannot be disregarded (it is no known balance).
-  v-masked-earlier    A kept statement that does not read whole (10 Feb), and an earlier typed
-                      balance the transactions do not reproduce (15 Jan).
+  v-masked-earlier    A statement in use (10 Feb) one of whose listed transactions is not held, and
+                      an earlier typed balance the transactions do not reproduce (15 Jan).
+                      (The reviewer's first version used a statement the reader refused; round
+                      two's decision 1 makes that a fact about the reading, so the fixture now
+                      uses an in-use fault.)
   v-masked-conflict   The same statement fault, and an earlier statement whose closing day
                       (10 Jan) another source states a different balance for, unexplained.
                       Expected for both (R3): Today raises `statement-fault` for the account, and
@@ -236,8 +239,15 @@ def build(store: Store, root: Path) -> None:
     _typed_balance(store, "v-misread", D(2026, 1, 1), -OPENING)
     _typed_balance(store, "v-misread", D(2026, 3, 1), -OPENING - 623)
 
-    _unread_statement(store, root, "v-masked-earlier", "Fennel Earlier")
-    feed(store, "v-masked-earlier", [Spend(D(2026, 1, 20), "Fennel Earlier", 523)], digest="me")
+    # A statement IN USE (it read whole) one of whose listed transactions the store does not hold,
+    # behind an earlier hold. Round two: the first draft used a statement the reader refused,
+    # which is a fact about the reading and not a fault of the account (decision 1).
+    statement(
+        store, root, "v-masked-earlier", FEB, OPENING,
+        [Spend(D(2026, 1, 20), "Fennel Earlier", 523), Spend(D(2026, 2, 5), "Gone Earlier", 100)],
+        received=FEB, previous_close=JAN,
+    )
+    _forget(store, "v-masked-earlier", "Gone Earlier")
     _typed_balance(store, "v-masked-earlier", D(2026, 1, 1), -OPENING)
     _typed_balance(store, "v-masked-earlier", D(2026, 1, 15), -OPENING - 3)
 
@@ -246,7 +256,12 @@ def build(store: Store, root: Path) -> None:
         [Spend(D(2026, 1, 5), "Ash Conflict", 419)], received=JAN, previous_close=MID,
     )
     _typed_balance(store, "v-masked-conflict", JAN, -closing - 500)
-    _unread_statement(store, root, "v-masked-conflict", "Fennel Conflict")
+    statement(
+        store, root, "v-masked-conflict", FEB, closing,
+        [Spend(D(2026, 1, 20), "Fennel Conflict", 523), Spend(D(2026, 2, 5), "Gone Conflict", 100)],
+        received=FEB, previous_close=JAN,
+    )
+    _forget(store, "v-masked-conflict", "Gone Conflict")
 
     feed(
         store, "v-disregarded-first", [Spend(D(2025, 11, 20), "Early First", 413)], digest="early"
@@ -381,21 +396,28 @@ class TestACompleteAccountWhoseStatementTheReaderDidNotReadWhole:
         assert (today_verdict, today.own.through) == (ADDS_UP, D(2026, 3, 1))
         assert (verdict, now.own.through) == (ADDS_UP, D(2026, 3, 1))
 
-    def test_Statement_WhenItDoesNotReadWholeAndIsAFault_CanBeSetAsideByThePerson(self, world):
+    def test_Statement_WhenItDoesNotReadWhole_IsAFactAboutTheReadingAndNoFaultOfTheAccount(
+        self, world
+    ):
+        # Decision 1 (round two): a statement the reader refused is never a known balance, so it
+        # verifies nothing and faults nothing, and there is nothing to disregard. It is reported
+        # where unread statements already are (the account page's "could not supply a balance").
         store, _ = world
         before = read(*world, "v-misread", rule=False)[1]
-        try:
+        now, verdict = read(*world, "v-misread", rule=True)
+        opening = effective_opening(store, "v-misread", families=FAMILIES)
+
+        assert verdict == before
+        assert now.own.statement_faults == ()
+        assert [(c.adds_up, c.fault) for c in checks_of(store, "v-misread").statements] == [
+            (None, "")
+        ]
+        assert opening.unusable_statements == 1
+        with pytest.raises(AnchorRefused):
             disregard_balance(
                 store, "v-misread", FEB.isoformat(), "santander-cc-pdf", STATEMENT,
                 families=FAMILIES,
             )
-        except AnchorRefused as refused:
-            pytest.fail(
-                "a statement that is a fault and is no known balance cannot be disregarded, so "
-                f"nothing but removing the document clears it: {refused}"
-            )
-
-        assert read(*world, "v-misread", rule=True)[1] == before
 
 
 class TestAStatementFaultBehindAnotherHold:
@@ -411,8 +433,8 @@ class TestAStatementFaultBehindAnotherHold:
             Overview(datetime(2026, 3, 1, 12, tzinfo=UTC), 1, 1, tuple(items), ()),
         )
 
-        # The statement's lines were found and do not sum: the measurement says so.
-        assert "not-read-whole" in [s.fault for s in checks_of(store, ref).statements]
+        # The statement is in use and one of its listed transactions is not held.
+        assert "not-held" in [s.fault for s in checks_of(store, ref).statements]
         assert (
             [i.accounts for i in items if i.kind == "statement-fault"],
             row.state != IN_ORDER,

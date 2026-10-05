@@ -570,6 +570,11 @@ def _verification(
         return Verification((Band(first_day, today, "none"),), ()), markers
     bands: list[Band] = []
     from_day, to_day = agreement.known_from, agreement.known_to or agreement.known_from
+    # A balance tested by its own statement's listing tests the days from the statement's start
+    # (`agreement`, R1), so the strip does not call those days "no known balance".
+    starts = [t.start for t in agreement.listing_tested if t.start is not None]
+    if starts and min(starts) < from_day:
+        from_day = min(starts)
     if first_day < from_day:
         bands.append(Band(first_day, from_day - _DAY, "none"))
     held = agreement.held

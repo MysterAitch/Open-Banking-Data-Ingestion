@@ -18,7 +18,9 @@ without the statements' own listings laid on it; "now" is with them.
   r-lone-unread       A statement whose reading was never kept: cannot say. Nothing verified,
                       nothing faulted.
   r-unsummed          Jan statement adds up; a Feb statement whose own amounts do not reach its
-                      closing balance, landed unread: does not add up at 10 Feb, "do not reach".
+                      closing balance, landed unread. Round one called that a fault; it is a fact
+                      about the reading (the statement is never a known balance), so the account
+                      adds up through 10 Jan and nothing is faulted.
   r-first             Two consecutive statements (10 Feb, 10 Mar). Today tested on 10 Mar only;
                       now on 10 Feb as well. Adds up through 10 Mar either way.
   r-first-unlisted    As r-first and a feed purchase inside the first statement's days that no
@@ -35,9 +37,10 @@ without the statements' own listings laid on it; "now" is with them.
     sd-unexplained      the typed balance 5.00 away: a conflict today and now.
     sd-two              TWO feed purchases dated 10 Feb (7.77 and 1.23), the typed balance 7.77
                         away: only one explains it, so it stays a conflict (all or nothing).
-    sd-nextday          the purchase dated 11 Feb: not a conflict now; the statement's own
-                        balance is not reproduced by the typed one, so it does not add up (held
-                        unmet), as today does not add up (held conflict).
+    sd-nextday          the purchase dated 11 Feb: round one said not a conflict but still does
+                        not add up (held unmet). Round two (the two hypotheses): the typed
+                        balance is taken to have been taken the day after, so the day is
+                        explained and the account adds up through 10 Feb.
     sd-later-ok         explained, and a typed balance on 1 Mar that the transactions reproduce:
                         adds up through 1 Mar.
     sd-later-bad        explained, and a typed 1 Mar balance 0.03 out: adds up through 10 Feb,
@@ -51,12 +54,11 @@ from pathlib import Path
 
 import pytest
 
+from listing_rule_reading import app_reading
 from obdi.agreement import (
     HELD_CONFLICT,
-    HELD_STATEMENT,
     HELD_UNMET,
     Standing,
-    standing_of,
 )
 from obdi.balance_anchors import (
     STATEMENT,
@@ -69,10 +71,8 @@ from obdi.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
-    AccountStanding,
-    verification_of,
 )
-from obdi.statement_listing_measure import Link, statement_checks, statement_listing_report
+from obdi.statement_listing_measure import Link, statement_listing_report
 from obdi.store import Store
 from statement_span_world import Spend, feed, statement
 from test_statement_listing_measure import (
@@ -235,11 +235,7 @@ def world(tmp_path_factory):
 
 
 def read(store: Store, ref: str, *, rule: bool) -> tuple[Standing, str]:
-    rows = store.transactions_for_account(ref)
-    opening = effective_opening(store, ref, rows, families=FAMILIES)
-    checks = statement_checks(store, FAMILIES, {ref: opening}).get(ref) if rule else None
-    standing = standing_of(opening, [ref], None, checks)
-    return standing, verification_of(AccountStanding(standing, None, False))
+    return app_reading(store, ref, FAMILIES, rule=rule)
 
 
 class TestALoneStatement:
@@ -285,30 +281,34 @@ class TestAStatementThatDoesNotAddUpByWhatItLists:
     def test_Account_WhenAListedTransactionIsNotHeld_DoesNotAddUpAndSaysWhichCheckFailed(
         self, world
     ):
+        # With the movement report laid on (as the app does) an earlier movement fault is the
+        # account's hold, and the statement fault is still its own finding.
         now, verdict = read(world, "r-lone-missing", rule=True)
 
         assert verdict == DOES_NOT_ADD_UP
-        assert now.own.state == HELD_STATEMENT
-        assert now.own.held is not None
-        assert now.own.held.day == D(2026, 2, 10)
-        assert "is not held" in now.own.held.says
+        (fault,) = now.own.statement_faults
+        assert fault.day == D(2026, 2, 10)
+        assert "is not held" in fault.says
 
     def test_Account_WhenAListedTransactionIsHeldWithAnotherAmount_DoesNotAddUp(self, world):
         now, verdict = read(world, "r-lone-merged", rule=True)
 
         assert verdict == DOES_NOT_ADD_UP
-        assert now.own.held is not None and "different amount" in now.own.held.says
+        (fault,) = now.own.statement_faults
+        assert "different amount from the one the statement prints" in fault.says
 
-    def test_Account_WhenALaterStatementsAmountsDoNotReachItsClosing_DoesNotAddUpThere(
+    def test_Account_WhenALaterStatementDidNotReadWhole_ItIsTheReadingAndNotTheTransactions(
         self, world
     ):
+        # Round two (decision 1): the reader refused the February document, so it is no known
+        # balance, verifies nothing, and faults nothing. January's statement still adds up.
         _, today_verdict = read(world, "r-unsummed", rule=False)
         now, verdict = read(world, "r-unsummed", rule=True)
 
         assert today_verdict == NOTHING_TO_CHECK_AGAINST
-        assert verdict == DOES_NOT_ADD_UP
-        assert now.own.held is not None
-        assert (now.own.held.day, "do not reach" in now.own.held.says) == (D(2026, 2, 10), True)
+        assert (verdict, now.own.through, now.own.statement_faults) == (
+            ADDS_UP, D(2026, 1, 10), ()
+        )
 
 
 class TestTheFirstOfSeveralStatements:
@@ -383,12 +383,16 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
     def test_Account_WhenTwoArePurchasedThatDayAndOnlyOneExplainsIt_StaysAConflict(self, world):
         assert read(world, "sd-two", rule=True)[0].own.state == HELD_CONFLICT
 
-    def test_Account_WhenTheExplainingPurchaseIsDatedTheNextDay_IsNoLongerAConflictButStillFails(
+    def test_Account_WhenTheOtherBalanceWasTakenTheDayAfter_TheSecondHypothesisExplainsIt(
         self, world
     ):
+        # The typed balance for 10 Feb differs from the statement's by exactly the one purchase
+        # dated 11 Feb, and nothing else is unlisted: it is taken to have been taken the day
+        # after (decision 4). Round one answered "does not add up (unmet)", blaming the statement.
         now, verdict = read(world, "sd-nextday", rule=True)
 
-        assert (now.own.state, verdict) == (HELD_UNMET, DOES_NOT_ADD_UP)
+        assert (now.own.state, verdict, now.own.through) == ("agrees", ADDS_UP, D(2026, 2, 10))
+        assert [(c.day, c.next_day) for c in now.own.closed_before] == [(D(2026, 2, 10), True)]
 
     def test_Account_WhenALaterTypedBalanceIsReproducedAfterTheExplainedDay_ChainContinues(
         self, world

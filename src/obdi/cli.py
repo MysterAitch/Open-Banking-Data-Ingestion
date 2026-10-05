@@ -3398,7 +3398,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     opening,
                     [ref, *families.spaces_of(ref)],
                     movement_report(store),
-                    statement_checks_for(store, ref, opening, families),
+                    statement_checks_for(store, ref, families),
                 ).own
             record = store.protection_record(ref)
             built = build_account_timeline(
@@ -3550,7 +3550,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 opening,
                 [ref, *families.spaces_of(ref)],
                 movement_report(store),
-                statement_checks_for(store, ref, opening, families),
+                statement_checks_for(store, ref, families),
             )
             press(store, ref, through, opening=opening, standing=standing)
 

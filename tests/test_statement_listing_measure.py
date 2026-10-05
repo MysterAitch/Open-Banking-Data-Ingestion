@@ -811,13 +811,16 @@ class TestAListedTransactionMissingFromTheStore:
 
 
 class TestAStatementWhoseAmountsDoNotSum:
-    def test_Statement_WhenItsOwnAmountsMissTheClosing_DoesNotReadWholeAndIsAFault(self, world):
+    def test_Statement_WhenItsOwnAmountsMissTheClosing_DoesNotReadWholeAndIsNoFault(self, world):
+        # A statement the reader refused is never a known balance, so a fault of the account
+        # cannot be said of it: it is cannot say, and the page blames the reading (round two).
         account = world[1]["unsummed"]
         february = account.statements[1]
 
         assert [s.closing for s in account.statements] == [D(2026, 1, 10), D(2026, 2, 10)]
         assert (february.read_whole, february.lines_listed, february.held) == (False, 1, None)
-        assert february.fails is True
+        assert (february.fails, february.cannot_say, february.fault) == (False, True, "")
+        assert account.failing == []
         assert account.statements[0].passes is True
 
     def test_Statement_WhenItDoesNotReadWhole_TheLinkStillSaysWhetherTheBalancesMeet(self, world):
@@ -978,13 +981,18 @@ class TestAStatementWhoseReadingWasNeverKept:
 
 
 class TestAListedTransactionFoldedIntoAnother:
-    def test_Statement_WhenALineIsFoldedIntoAnotherThatCounts_IsHeldThroughIt(self, world):
+    def test_Statement_WhenALineIsFoldedIntoAnotherAccountsTransaction_IsHeldUnderAnotherAccount(
+        self, world
+    ):
+        # The line is folded into a transaction of `folded-pocket`, which is not a Space of
+        # `folded` (round two, decision 6): a statement that can see only its own account does not
+        # account for it, so it does not add up by what it lists.
         (only,) = world[1]["folded"].statements
 
-        assert only.held == Held(3, same=2, folded_through=1)
-        assert (only.as_held, only.through_folds, only.held_verdict) == (False, True, True)
-        assert only.passes is True
-        assert world[1]["folded"].failing == []
+        assert only.held == Held(3, same=2, elsewhere=1)
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, False)
+        assert only.passes is False and only.fault == "held-elsewhere"
+        assert [s.closing for s in world[1]["folded"].failing] == [D(2026, 2, 10)]
 
     def test_Statement_WhenAFoldedLinesDestinationIsNotRecorded_IsCannotSayAndNoFault(self, world):
         account = world[1]["folded-lost"]

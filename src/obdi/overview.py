@@ -31,7 +31,7 @@ from urllib.parse import quote
 
 from . import scheduler_status
 from .account_names import AccountsShown, accounts_shown
-from .agreement import HELD_STATEMENT, held_sentence
+from .agreement import held_sentence
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
@@ -219,9 +219,9 @@ _KINDS: dict[str, tuple[int, str]] = {
     # statement. It can be relaxed on the evidence of a trend of false alarms.
     "statement-fault": (
         NOW,
-        "Open the account's ledger to see which statement it is and which check it failed: "
-        "a transaction missing, held with another amount, or held twice, or a reading that "
-        "did not add up.",
+        "Open the account's ledger to see which statement it is and which check it failed: a "
+        "transaction missing, held with another amount, held twice, or held under another "
+        "account. If the statement's balance is the wrong thing, disregard it there.",
     ),
     "agreement-lapsed": (
         NOW,
@@ -680,18 +680,21 @@ def standing_items_from(
         if closed_by_today(ref):
             continue
         standing = standings[ref].standing
-        if standing.own.held is not None and standing.own.held.kind == HELD_STATEMENT:
+        # A statement fault is a fact about the statement, said whichever hold is earliest in
+        # the account's own sentence, and without ending the account's other items.
+        faulted = standing.own.statement_faults
+        if faulted:
+            more = f" And {len(faulted) - 1} more." if len(faulted) > 1 else ""
             items.append(
                 AttentionItem(
                     kind="statement-fault",
                     severity=_KINDS["statement-fault"][0],
-                    message=f"{label_of(ref)}: {held_sentence(standing.own)}",
+                    message=f"{label_of(ref)}: {faulted[0].says}{more}",
                     remedy=_KINDS["statement-fault"][1],
                     href=f"/ledger?ref={quote(ref, safe='')}#opening",
                     accounts=(ref,),
                 )
             )
-            continue
         conflicts = {c.day: c.sources for c in standing.own.conflicts}
         if standing.whole is not None:
             conflicts.update({c.day: c.sources for c in standing.whole.conflicts})
@@ -705,7 +708,12 @@ def standing_items_from(
                         f"{label_of(ref)}: known balances do not match each other on "
                         f"{_plural(len(conflicts), 'day')}, the first {first.isoformat()} "
                         f"({' and '.join(conflicts[first])}). That is a conflict between "
-                        "sources, not a fault in the rows."
+                        + (
+                            "sources; the statement that does not add up is reported "
+                            "separately."
+                            if faulted
+                            else "sources, not a fault in the rows."
+                        )
                     ),
                     remedy=_KINDS["known-balances-disagree"][1],
                     href=f"/ledger?ref={quote(ref, safe='')}#opening",

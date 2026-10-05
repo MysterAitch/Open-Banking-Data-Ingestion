@@ -59,11 +59,9 @@ from obdi.family_anchors import OPENED, Families, families_of, family_anchors
 from obdi.ingest import import_file, reconcile_batch
 from obdi.ledger import (
     ANCHOR_QUERIES,
-    BY_DATE_SCORE_QUERIES,
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,
     FEED_TIME_QUERIES,
-    HELD_STATEMENT_CHECK_QUERIES,
     QUERIES_PER_PAGE,
     SPACE_QUERIES,
     STATEMENT_CHECK_QUERIES,
@@ -1059,8 +1057,6 @@ class TestWhatTheFamilyReadingCosts:
             QUERIES_PER_PAGE
             + ANCHOR_QUERIES
             + STATEMENT_CHECK_QUERIES
-            + HELD_STATEMENT_CHECK_QUERIES
-            + BY_DATE_SCORE_QUERIES
             + FAMILY_QUERIES
             + len(found.spaces_of(MAIN))
             + FEED_TIME_QUERIES
@@ -1068,6 +1064,10 @@ class TestWhatTheFamilyReadingCosts:
 
     def test_SpaceAccount_CostsOnlyTheReadOfItsListingsMoreThanItDidWithoutFamilies(self, family):
         found = families(family)
+        # The statement checks are held per store state and per set of Spaces, so each reading is
+        # measured with its own held, as the second page of a process is.
+        self.statements(family.store, BILLS, found)
+        self.statements(family.store, BILLS, None)
 
         assert self.statements(family.store, BILLS, found) == (
             self.statements(family.store, BILLS, None) + SPACE_QUERIES

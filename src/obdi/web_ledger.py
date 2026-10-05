@@ -24,6 +24,7 @@ from urllib.parse import quote
 from .account_names import code_html
 from .agreement import (
     HELD_MOVEMENT,
+    HELD_STATEMENT,
     NONE,
     STRETCH_MEANINGS,
     closed_before_sentence,
@@ -687,7 +688,17 @@ def _listing_html(own: Any) -> str:
     taken to have closed before a day's last transactions. Plain quiet lines: both are said in
     `agreement`'s words, which carry how it is known. The verdict line already says it where the
     tested balance is the only one the account adds up through."""
-    return "".join(
+    # A statement fault is its own finding, said whichever hold is earliest above; the hold's box
+    # already carries it where it is the hold. The way out is to disregard that statement's
+    # balance, which the known-balances section offers.
+    held = own.held
+    faults = "".join(
+        f'<p class="warn">{_esc(fault.says)} If the statement\'s balance is the wrong thing, '
+        'disregard it under <a class="tap" href="#opening">known balances</a>.</p>'
+        for fault in own.statement_faults
+        if held is None or held.kind != HELD_STATEMENT or held.day != fault.day
+    )
+    return faults + "".join(
         f'<p class="sub">{_esc(listing_tested_sentence(tested))}</p>'
         for tested in own.listing_tested
         if own.through != own.known_from
@@ -697,23 +708,35 @@ def _listing_html(own: Any) -> str:
 
 
 def _statements_score_html(view: Any) -> str:
-    """How many of the account's statements add up by what they list, and how many a calendar-day
-    test would have reproduced: the evidence for testing this account's statements by what they
-    list. Counts only, in ordinary text."""
+    """How many of the account's statements add up by what they list, how many cannot say, and
+    which two documents clash: the evidence for testing this account's statements by what they
+    list. Counts only, in ordinary text. How many a calendar-day test would have reproduced is on
+    Identity health, where the two tests are compared."""
     checks = view.statements
     if checks is None or not checks.statements:
         return ""
     total = len(checks.statements)
     adding = sum(1 for s in checks.statements if s.adds_up is True)
+    unsaid = sum(1 for s in checks.statements if s.adds_up is None)
+    failing = sum(1 for s in checks.statements if s.adds_up is False)
     verb, them = ("adds", "it lists") if total == 1 else ("add", "they list")
     said = f"{adding} of {total} {word(total, 'statement')} {verb} up by what {them}"
-    if checks.by_date_adds_up is not None:
-        said += f"; {checks.by_date_adds_up} of {total} by date"
-    return (
+    if unsaid:
+        said += f"; {unsaid} cannot say"
+    if failing:
+        said += f"; {failing} {agree(failing, 'does')} not"
+    clashing = sorted({s.day.isoformat() for s in checks.statements if s.clash})
+    body = (
         f'<p class="muted">{_esc(said)}. A statement lists a purchase by the day it was made, '
         "which can fall either side of its closing day, so it is tested by what it lists and "
         "not by date.</p>"
     )
+    for day in clashing:
+        body += (
+            f'<p class="warn">Two documents close on {_esc(day)} and list different '
+            "transactions, so neither tests its days.</p>"
+        )
+    return body
 
 
 def _shared_days_html(view: Any) -> str:
@@ -1937,9 +1960,14 @@ def _rail_html(view: Any, own: Any, today: date) -> str:
     state = "none" if protection is None else protection.state
     held = own.held
     first = _month_start(view.oldest_month)
+    # Days a balance's own statement tests (`agreement`, R1) are not "no known balance".
+    starts = [t.start for t in own.listing_tested if t.start is not None]
+    known_from = own.known_from
+    if known_from is not None and starts and min(starts) < known_from:
+        known_from = min(starts)
     rail = build_rail(
         first=first,
-        known_from=own.known_from,
+        known_from=known_from,
         known_to=own.known_to,
         through=own.through,
         held_day=held.day if held is not None else None,
@@ -2100,11 +2128,12 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
     return f'<div class="protect">{body}</div>' if body else ""
 
 
-def _opening_gist(opening: Any) -> str:
-    """How the known balances stand, in a few words, for the summary that folds them away."""
+def _opening_gist(opening: Any, listing_tested: int = 0) -> str:
+    """How the known balances stand, in a few words, for the summary that folds them away. A
+    balance tested by its own statement's listing adds up though it sets the opening."""
     if opening.state == "none":
         return "none stated"
-    agree = sum(1 for line in opening.anchors if line.verdict == "agrees")
+    agree = sum(1 for line in opening.anchors if line.verdict == "agrees") + listing_tested
     differ = sum(1 for line in opening.anchors if line.verdict == "differs")
     family = opening.family
     if not agree and not differ and family is not None and family.anchors:
@@ -2206,7 +2235,13 @@ def _opening_html(
                 )
                 + "</p>"
             )
-            if opening.single_anchor and not opening.balance_only:
+            tested = view.standing is not None and bool(view.standing.own.listing_tested)
+            if opening.single_anchor and not opening.balance_only and tested:
+                body += (
+                    '<p class="muted">The one known balance is tested by its own statement: the '
+                    "transactions that statement lists carry its opening balance to it.</p>"
+                )
+            elif opening.single_anchor and not opening.balance_only:
                 body += (
                     '<p class="warn">An opening worked out from a single known balance absorbs '
                     "every missing or surplus row before that day into the opening figure, "
@@ -2272,7 +2307,12 @@ def _opening_html(
     # remove, so it is not left folded away.
     stale = any(entry.stale for entry in opening.disregarded)
     return _disclosure(
-        f"Known balances and the opening ({_opening_gist(opening)})",
+        "Known balances and the opening ("
+        + _opening_gist(
+            opening,
+            len(view.standing.own.listing_tested) if view.standing is not None else 0,
+        )
+        + ")",
         body,
         open=held or differing or everything or stale,
         anchor=OPENING_ANCHOR,

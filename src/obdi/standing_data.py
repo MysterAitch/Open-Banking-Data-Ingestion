@@ -175,23 +175,50 @@ class AccountStanding:
     newest_row: date | None = None
 
 
+#: The statement checks of the whole store, held for as long as nothing they read has changed:
+#: one computation, shared by Today, the Accounts page, and every account page, because the cost
+#: follows the statements of the WHOLE store and not of the account asked about. Keyed by the
+#: store's standing epoch (every write to a table the checks read moves it, in the same
+#: transaction) and by the accounts' Spaces, which the reading depends on. Measured by a review
+#: on 96 statements: re-deriving them on each account page took it from 77 SQL statements to 618.
+_CHECKS_LOCK = threading.Lock()
+_CHECKS: dict[str, tuple[int, dict[str, dict[str, StatementChecks]]]] = {}
+
+
+def _checks_of_store(store: Store, families: Families) -> dict[str, StatementChecks]:
+    from .statement_listing_measure import statement_checks_all
+
+    epoch = store.standing_epoch()
+    spaces = repr(
+        (
+            sorted(families.parents.items()),
+            sorted((source, sorted(fed)) for source, fed in families.feeds.items()),
+        )
+    )
+    where = str(store.path)
+    with _CHECKS_LOCK:
+        held = _CHECKS.get(where)
+        if held is not None and held[0] == epoch and spaces in held[1]:
+            return held[1][spaces]
+    found = statement_checks_all(store, families)
+    with _CHECKS_LOCK:
+        held = _CHECKS.get(where)
+        # One entry per reading of the Spaces at this epoch (the pages read with and without the
+        # families, and a reading must not evict the other); a new epoch discards them all.
+        if held is None or held[0] != epoch:
+            held = _CHECKS[where] = (epoch, {})
+        held[1][spaces] = found
+    return found
+
+
 def statement_checks_for(
-    store: Store,
-    ref: str,
-    opening: EffectiveOpening,
-    families: Families | None,
-    *,
-    by_date: bool = False,
+    store: Store, ref: str, families: Families | None
 ) -> StatementChecks | None:
     """What one account's statements conclude by what they list, read by the account page and
     every other reading of one account, so that all of them lay on the agreement rule the same
-    checks `standings_for` does. `by_date` also counts the statements a calendar-day test would
-    have reproduced, which only the account page shows."""
-    from .statement_listing_measure import statement_checks
-
-    return statement_checks(
-        store, families if families is not None else NO_FAMILIES, {ref: opening}, by_date=by_date
-    ).get(ref)
+    checks `standings_for` does. None for an account that holds no statement, which costs a
+    lookup in what is already held."""
+    return _checks_of_store(store, families if families is not None else NO_FAMILIES).get(ref)
 
 
 def standings_for(
@@ -222,13 +249,7 @@ def standings_for(
                 ),
             ),
         )
-    from .statement_listing_measure import statement_checks
-
-    checks = statement_checks(
-        store,
-        families if families is not None else NO_FAMILIES,
-        {ref: opening for ref, (_, opening) in built.items()},
-    )
+    checks = _checks_of_store(store, families if families is not None else NO_FAMILIES)
     for ref, (rows, opening) in built.items():
         record = protections.get(ref)
         members = [ref, *(families.spaces_of(ref) if families is not None else ())]

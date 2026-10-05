@@ -528,7 +528,9 @@ def press(
         raise ProtectionRefused("the account holds no rows dated on or before that date")
     verified = max(
         (k for k in standing.own.tested_known if k.day <= through),
-        key=lambda k: (k.day, k.source),
+        # On a day a statement is taken to have closed before some transactions, the balance the
+        # span is reproduced by is the other source's, not the statement's, so it is preferred.
+        key=lambda k: (k.day, k.closed_before is None, k.source),
     )
     from .ledger import running_balance
 

@@ -4,11 +4,11 @@ unmoved (`agreement`, R1 to R5).
 
 Decided before the first run, from the household's own docstring:
 
-  * the statements that fail are exactly `missing`, `merged`, the later statement of
-    `unsummed`, and `history` (which lists a reversed and a void transaction: the measurement's
-    own household says so, and the first draft of this list forgot it), and each is a fault in
-    the rule too (a statement whose lines were not found - `unkept`, `folded-lost` - is
-    neither);
+  * the statements that fail are exactly `missing`, `merged`, `history` (which lists a reversed
+    and a void transaction), and `folded` (a line folded into another account's transaction,
+    decision 6 of round two), and each is a fault in the rule too. A statement whose lines were
+    not found (`unkept`, `folded-lost`) or that the reader refused (`unsummed`) is neither: it
+    is a fact about the reading;
   * a statement's days are verified by the measurement exactly where the rule tests them;
   * an account that adds up without the listing checks still adds up with them, unless one of
     its statements is a fault;
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pytest
 
+from listing_rule_reading import movement_of
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening
 from obdi.standing_data import (
@@ -34,7 +35,7 @@ from obdi.statement_listing_measure import statement_checks
 from test_statement_listing_measure import FAMILIES
 from test_statement_listing_measure import world as listing_world  # noqa: F401 - the fixture
 
-EXPECTED_FAULTS = {"missing", "merged", "unsummed", "history"}
+EXPECTED_FAULTS = {"missing", "merged", "history", "folded"}
 
 
 def verdicts(store, ref: str):
@@ -42,8 +43,8 @@ def verdicts(store, ref: str):
     opening = effective_opening(store, ref, rows, families=FAMILIES)
     checks = statement_checks(store, FAMILIES, {ref: opening}).get(ref)
     members = [ref, *FAMILIES.spaces_of(ref)]
-    today = standing_of(opening, members, None)
-    now = standing_of(opening, members, None, checks)
+    today = standing_of(opening, members, movement_of(store))
+    now = standing_of(opening, members, movement_of(store), checks)
     return (
         checks,
         verification_of(AccountStanding(today, None, False)),

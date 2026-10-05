@@ -532,6 +532,9 @@ class TestWhatAPageCosts:
     def _statements(self, path, ref) -> int:
         issued: list[str] = []
         with Store(path) as store:
+            # The statement checks of the store are worked out once and held, so a page is
+            # measured with them held, as the second page of a process is.
+            build_ledger(store, ref, "2026-03", bound=True)
             store.connection.set_trace_callback(issued.append)
             build_ledger(store, ref, "2026-03", bound=True)
             store.connection.set_trace_callback(None)

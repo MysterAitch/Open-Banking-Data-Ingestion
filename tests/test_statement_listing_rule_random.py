@@ -95,13 +95,21 @@ def generate(rng: random.Random) -> tuple[list[Known], list[StatementCheck]]:
             difference = (
                 others[0].figure - k.figure if honest else rng.choice([-500, 500, 17])
             )
-            counted = rng.choice([difference, 0])
+            next_day = rng.random() < 0.3
+            if next_day:
+                split = rng.choice([0, difference // 2])
+                that_amounts, next_amounts = ((split,) if split else ()), (difference - split,)
+            else:
+                that_amounts, next_amounts = (difference,), ()
+            counted = that_amounts if rng.random() < 0.5 else ()
             checks.append(
                 StatementCheck(
-                    k.day, k.figure, rng.randint(1, 9), True, rng.random() < 0.8, 1,
+                    k.day, k.figure, rng.randint(1, 9), rng.choice([True, True, True, None]),
+                    rng.random() < 0.8, 1,
                     closed_before=ClosedBefore(
-                        k.day, 1, rng.random() < 0.3, difference, counted
+                        k.day, 1, next_day, that_amounts, next_amounts, counted
                     ),
+                    clash=rng.random() < 0.05,
                 )
             )
     return known, checks
@@ -119,25 +127,45 @@ def reference(known: list[Known], checks: list[StatementCheck]) -> dict[str, obj
             and k.figure == check.figure
         ]
         claim = check.closed_before
-        if claim is None or not mine:
+        if claim is None or not mine or check.adds_up is not True or check.clash:
             continue
         others = [
-            k for k in view if not k.instant and k.day == claim.day and k.figure != check.figure
+            i
+            for i, k in enumerate(view)
+            if not k.instant and k.day == claim.day and k.figure != check.figure
         ]
-        if not others or any(k.figure - check.figure != claim.difference_minor for k in others):
+        that, after = sum(claim.that_amounts), sum(claim.next_amounts)
+        if not others or (claim.next_day and not claim.next_amounts):
             continue
-        shift = 0 if claim.next_day else claim.counted_minor
-        defining = view[mine[0]].verdict == DEFINES
-        for i, k in enumerate(view):
-            if k.verdict == DEFINES or k.distance is None:
-                continue
-            if (defining and i not in mine) or (not defining and i in mine):
-                distance = k.distance + (-shift if defining else shift)
-                view[i] = replace(k, distance=distance, verdict=MET if distance == 0 else UNMET)
-        claimed.update(mine)
+        if not claim.next_day and not claim.that_amounts:
+            continue
+        expected = that + after if claim.next_day else that
+        if any(view[i].figure - check.figure != expected for i in others):
+            continue
+        counted = sum(claim.counted_amounts)
+        for redated in (after, 0) if claim.next_day else (0,):
+            # Work in the rows' own sums: with the opening taken as nil, what the rows predict for
+            # a balance is its figure less its distance, and moving a balance's dating moves
+            # that. The opening is then worked out afresh from the balance that defines it.
+            moves = dict.fromkeys(mine, -counted) | dict.fromkeys(others, redated)
+            predicted = {
+                i: k.figure - (k.distance or 0) + moves.get(i, 0) for i, k in enumerate(view)
+            }
+            defining = next((i for i, k in enumerate(view) if k.verdict == DEFINES), None)
+            opening = 0 if defining is None else view[defining].figure - predicted[defining]
+            trial = list(view)
+            for i, k in enumerate(view):
+                if k.verdict == DEFINES:
+                    continue
+                gap = k.figure - (opening + predicted[i])
+                trial[i] = replace(k, distance=gap, verdict=MET if gap == 0 else UNMET)
+            if all(trial[i].verdict in (MET, DEFINES) for i in (*mine, *others)):
+                view = trial
+                claimed.update(mine)
+                break
     tested_by_listing = set()
     for check in checks:
-        if check.adds_up is True and check.days_tested:
+        if check.adds_up is True and check.days_tested and not check.clash:
             for i, k in enumerate(view):
                 if (
                     k.basis == STATEMENT and not k.instant and k.day == check.day
@@ -244,6 +272,6 @@ def test_Rule_WhenAClaimIsNotBornOutByTheFigures_ChangesNothingAtAll():
             if not others:
                 continue
             wrong = max(abs(o.figure - k.figure) for o in others) + 1
-            claim = ClosedBefore(k.day, 1, False, wrong, wrong)
-            lone = [StatementCheck(k.day, k.figure, 1, None, False, None, closed_before=claim)]
+            claim = ClosedBefore(k.day, 1, False, (wrong,), (), (wrong,))
+            lone = [StatementCheck(k.day, k.figure, 1, True, False, None, closed_before=claim)]
             assert run(known, lone) == derive_agreement(known, [])

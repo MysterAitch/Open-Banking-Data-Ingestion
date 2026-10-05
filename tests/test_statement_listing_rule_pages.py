@@ -103,6 +103,17 @@ class TestTheAccountPage:
         assert "1 of 1 statement adds up by what it lists" in said
         assert "adds up" in said
 
+    def test_Page_WhenALoneStatementAddsUp_TellsOneStoryAndNotTheOldWarnings(self, served):
+        said = page_of(served[0], "r-lone", "2026-01").said
+
+        assert "Known balances and the opening (1 add up, none differ)" in said
+        assert "absorbs every missing or surplus row" not in said
+        assert "is tested by its own statement" in said
+        # The days its statement tests (from its first day, 2025-12-11) are not "no known
+        # balance"; the days before it, which nothing tests, still are.
+        assert "No known balance from 2025-12-01 to 2025-12-11" in said
+        assert "add up to the known balances from 2025-12-11 to 2026-01-10" in said
+
     def test_Page_WhenAStatementIsTakenToHaveClosedBeforeATransaction_SaysWhyAndHowItIsKnown(
         self, served
     ):
@@ -120,18 +131,29 @@ class TestTheAccountPage:
         assert "taken to have closed" not in said
 
     def test_Page_WhenAStatementDoesNotAddUp_NamesTheStatementAndTheCheck(self, served):
-        said = page_of(served[0], "r-unsummed", "2026-02").said
+        # r-lone-missing: an earlier movement fault is the account's hold; the statement's own
+        # fault is still said, with the way out.
+        said = page_of(served[0], "r-lone-missing", "2026-02").said
 
         assert (
-            "do not add up at the statement closing on 2026-02-10: its opening balance and the "
-            "amounts it states do not reach its closing balance"
+            "The statement closing on 2026-02-10 does not add up by what it lists: a "
+            "transaction it lists is not held."
         ) in said
+        assert "disregard it under known balances" in said
+
+    def test_Page_WhenTheReaderRefusedAStatement_BlamesTheReadingAndNotTheTransactions(
+        self, served
+    ):
+        said = page_of(served[0], "r-unsummed", "2026-02").said
+
+        assert "could not supply a balance" in said
+        assert "does not add up by what it lists" not in said
 
     def test_Pages_ForTheStatesTheRuleAdds_UseNoRetiredWordAndHoldNoClosingFigure(self, served):
         for ref, month in (
             ("r-lone", "2026-01"),
             ("sd-explained", "2026-02"),
-            ("r-unsummed", "2026-02"),
+            ("r-lone-missing", "2026-02"),
         ):
             said = page_of(served[0], ref, month).said.lower()
             for word in FORBIDDEN_WORDS:
