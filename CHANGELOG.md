@@ -26,6 +26,63 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.325] - 2026-10-05
+
+### Changed
+- **One function says which days a statement covers, and how each end is
+  known.** "What to fetch next" inferred a hole between two statements from
+  the spacing of their closing days, for four of the eight layouts, and the
+  coverage timeline worked the same thing out another way. The owner, who
+  holds the statements, set the rules: a statement prints an opening and a
+  closing balance; it covers its period whole; the day it was produced
+  matters only where its period had not ended; and the stretch since the
+  newest statement is not a gap until a full period has passed, because the
+  statement does not exist yet.
+  - Each end is STATED (the statement prints the day), BALANCES MEET (its
+    opening balance is the previous closing balance and the closing days are
+    one period apart), OBSERVED (its own first or last listed row), or
+    INFERRED (placed by how regularly statements arrive).
+  - Balances that differ prove something lies between two statements.
+    Balances that meet do not prove nothing does: money in and straight out
+    again leaves them equal. The owner corrected a first draft that called
+    equal balances contiguity "by arithmetic"; it is kept as evidence, named
+    so it does not read as proof, and never closes a gap alone. Equal
+    balances with closing days two or more periods apart are reported as a
+    probable hole that nets to nil; rows another source holds that no
+    statement lists make a hole a stated one, with their count.
+  - A statement is partial only where its closing day is later than the day
+    it was produced (one layout prints one) or, failing that, received.
+  - The next statement is due once its expected close, plus the shortest
+    delay the statements held took to appear, has passed.
+- **Santander and Nationwide statements state where they begin.** Both print
+  the previous statement's closing day beside their opening balance, which
+  was not read. Six of the eight layouts now keep a start day; a reading
+  kept in the older format is read again.
+
+### Fixed
+- **A Space is no longer asked for a statement.** "What to fetch next" on
+  the real store listed two Spaces as needing "an earlier statement". No
+  statement exists for a Space; it is tested with its main account as a
+  whole, and the page now says so under "Needs nothing".
+- **A hole proven by balances is called stated, with one pair of dates.** On
+  the real store one card's statements close 58 days apart and the later
+  does not open on the balance the earlier closed on; the two pages called
+  it inferred and gave different ends. The hole's existence is now a fact
+  and only its end is inferred, from the one function.
+
+### Not covered
+- The coverage timeline still works statements out its own way; a test pins
+  every difference between the two so the switch is made knowingly. It is
+  being switched.
+- What each layout prints was read from this repository's fixtures, which
+  were made from masked shapes of real statements; no real statement was
+  read. One layout's unlabelled date above its account box is not read.
+- A statement's opening balance is not used as a known balance in its own
+  right. It would let a first statement's rows be tested; it is the owner's
+  decision.
+- A partial statement's closing balance is still held at its stated closing
+  day, though the figure printed is the balance on the day it was produced.
+
 ## [0.4.324] - 2026-10-05
 
 ### Added
