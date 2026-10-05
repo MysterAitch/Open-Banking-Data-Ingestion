@@ -75,6 +75,11 @@ GAPS_STYLES = """
  .gaps-evidence.gaps-contradicted { border-left-color: var(--warn); background: var(--warn-bg); color: var(--ink); }
  .gaps-evidence.gaps-untested { border-left-style: dashed; color: var(--ink-2); }
  .gaps-short { display: inline-block; width: 5rem; margin: 0 var(--s1); }
+ /* The two decisions that sit beside a thumb-sized link are aligned to its text, not its padding. */
+ .gaps-ack button.tap, .gaps-undo button.tap { padding-left: 0; }
+ .gaps-choice input[type="number"], .gaps-choice input[type="date"] { min-height: var(--hit); padding: 0 var(--s2);
+     background: var(--card); color: var(--ink); border: var(--rule-weight) solid var(--edge); border-radius: var(--radius); font: inherit; }
+ .gaps-choice input[type="date"] { display: block; width: 100%; margin-top: var(--s1); }
  @media (min-width: 60rem) {
   body.gaps-page { max-width: 56rem; }
  }

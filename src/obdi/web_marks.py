@@ -22,7 +22,6 @@ from urllib.parse import urlencode
 from .account_names import name_html
 from .fetch_marks import (
     AGGREGATOR,
-    CLAIM_KINDS,
     KINDS,
     NOTE_LIMIT,
     ORIGIN_SOURCE,
@@ -42,7 +41,14 @@ from .plural import agree, plural
 _esc = html.escape
 
 #: The kinds in the order they are offered: those that make a claim the store can weigh first.
-FORM_KINDS = (*CLAIM_KINDS, MarkKind.KNOWN_GAP, MarkKind.OTHER)
+FORM_KINDS = (
+    MarkKind.NOTHING_TO_FETCH,
+    MarkKind.BEFORE_HISTORY,
+    MarkKind.NO_LONGER_PROVIDED,
+    MarkKind.NOT_OPEN,
+    MarkKind.KNOWN_GAP,
+    MarkKind.OTHER,
+)
 
 _STANDING_WORDS = {
     Standing.SUPPORTED: "supported by what is held",
@@ -81,6 +87,10 @@ def _listed(by_source: Sequence[tuple[str, int]]) -> str:
     return " and ".join(f"{name} lists {plural(n, 'row')}" for name, n in sorted(counts.items()))
 
 
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _rows_span(ev: Evidence) -> str:
     if ev.first_row is None or ev.last_row is None:
         return ""
@@ -105,10 +115,12 @@ def evidence_text(
     """
     if kind is MarkKind.KNOWN_GAP or kind is MarkKind.OTHER:
         return ""
-    named = source_words(source)
+    named = "the statements" if not source else source_words(source)
+    history = "the statements' history" if not source else f"{named}'s history"
+    verb = "list" if not source else "lists"
     if standing is Standing.SATISFIED:
         if reason == "source-provides":
-            return f"{named} lists {plural(ev.own_rows, 'row')} in this period after all."
+            return _cap(f"{named} {verb} {plural(ev.own_rows, 'row')} in this period after all.")
         return (
             "A statement is held for part of this period now, so there was something to fetch "
             "after all."
@@ -137,14 +149,14 @@ def evidence_text(
         before = (last + timedelta(days=1)).isoformat()
         if standing is Standing.CONTRADICTED:
             lead = (
-                f"You marked everything before {before} as before {named}'s history; "
+                f"You marked everything before {before} as before {history}; "
                 if marked
-                else f"Saying {named}'s history begins at {before} would disagree with what "
+                else f"Saying {history} begins at {before} would disagree with what "
                 "is held: "
             )
             own = ev.own_rows
             return (
-                f"{lead}{named} lists {plural(own, 'row')} before it"
+                f"{lead}{named} {verb} {plural(own, 'row')} before it"
                 f"{_rows_span(ev)}."
             )
         reach = ev.reach
@@ -154,7 +166,7 @@ def evidence_text(
                 if reach is not None and reach.asked_back_to is not None
                 else "It has never been asked."
             )
-            return (
+            return _cap(
                 f"{named} has not been asked for days this early, so nothing yet shows it "
                 f"holds none. {asked}"
             )
@@ -170,7 +182,7 @@ def evidence_text(
                     f"no row before {before}."
                 )
             return " ".join(said)
-        return f"{named} lists no row before {before}."
+        return _cap(f"{named} {verb} no row before {before}.")
     if kind is MarkKind.NOT_OPEN:
         if standing is Standing.CONTRADICTED:
             if reason == "declared-open":
@@ -211,7 +223,7 @@ def evidence_text(
     if ev.others:
         named_others = sorted({source_words(o) for o in ev.others})
         verb = "still lists" if len(named_others) == 1 else "still list"
-        return (
+        return _cap(
             f"{' and '.join(named_others)} {verb} rows in this period, so it can still be "
             "had from there."
         )
@@ -579,7 +591,8 @@ def form_html(
             "</label>"
         )
     radios = []
-    picked = kind if kind in {k.value for k in FORM_KINDS} else FORM_KINDS[0].value
+    # No kind is chosen for him: what is asserted is the one decision on this page.
+    picked = kind if kind in {k.value for k in FORM_KINDS} else ""
     for item in FORM_KINDS:
         meaning = KINDS[item]
         evidence_line = ""
@@ -594,6 +607,7 @@ def form_html(
                 )
         radios.append(
             f'<label class="gaps-kindrow"><input type="radio" name="kind" value="{item.value}"'
+            f'{" required" if item is FORM_KINDS[0] else ""}'
             f'{" checked" if item.value == picked else ""}>'
             f"<span><strong>{_esc(meaning.label)}</strong> "
             f'<span class="gaps-asserts">{_esc(meaning.asserts)}</span>'
@@ -621,7 +635,8 @@ def form_html(
         '<label class="gaps-field">Look again on (a known gap only)'
         f'<input type="date" name="review_on" value="{_esc(review_on)}" '
         f'min="{(today + timedelta(days=1)).isoformat()}"></label>'
-        '<p><button class="button secondary" type="submit" name="step" value="check">'
+        '<p><button class="button secondary" type="submit" name="step" value="check" '
+        "formnovalidate>"
         "Check what is held for these dates</button></p>"
         '<p><button class="button" type="submit" name="step" value="mark">'
         "Set this period aside</button></p></form>"

@@ -192,7 +192,7 @@ class TestEvidenceWords:
                              source="starling-csv")
 
         assert said == (
-            "the aggregator still lists rows in this period, so it can still be had from there."
+            "The aggregator still lists rows in this period, so it can still be had from there."
         )
 
     def test_KnownGap_SaysNothingAboutTheData(self, db):
@@ -336,6 +336,28 @@ class TestMakingAndUndoingOverHttp:
         assert "changes nothing about what is verified" in said
         assert response.text.count('type="radio" name="kind"') == 6
         assert "Check what is held for these dates" in said
+
+    def test_Form_ChoosesNoKindForHimAndOffersTheClaimsFirstInTheOrderOfLikelihood(self, served):
+        text = get(served, "/gaps-mark", account="card-virgin", first="2026-06-05",
+                   last="2026-07-04").text
+
+        kinds = re.findall(r'name="kind" value="([a-z-]+)"', text)
+        assert kinds == ["nothing-to-fetch", "before-history", "no-longer-provided", "not-open",
+                         "known-gap", "other"]
+        assert " checked" not in text.split('name="kind"', 1)[1].split("</fieldset>")[0]
+
+    def test_Form_WhenAFeedHoldsRowsInThePeriod_AStatementSourceIsNotCalledSuppliedByThem(
+        self, served, db
+    ):
+        add_feed_rows_in_virgin_hole(db)
+
+        said = words(get(served, "/gaps-mark", account="card-virgin", first="2026-06-05",
+                         last="2026-07-04").text)
+
+        assert (
+            "The aggregator still lists rows in this period, so it can still be had from there."
+        ) in said
+        assert "after all" not in said
 
     def test_Check_WhenDatesAreEdited_ShowsTheEvidenceForTheNewDatesAndMakesNothing(
         self, served, db

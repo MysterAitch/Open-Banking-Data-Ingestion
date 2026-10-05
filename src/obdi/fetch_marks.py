@@ -448,8 +448,14 @@ def gather_evidence(
     listed = world.rows.get(account, ())
     inside = [(day, src) for day, src in listed if low <= day <= last_day]
     by_source = Counter(src for _, src in inside)
-    own = sum(1 for _, src in inside if source_matches(source, src))
-    others = tuple(sorted({src for _, src in inside if not source_matches(source, src)}))
+
+    def own_source(src: str) -> bool:
+        """Whether a row is from the source the mark names; for "any statement source", from a
+        statement, because a feed's row says nothing about what statements offer."""
+        return src in statement_sources if not source else source_matches(source, src)
+
+    own = sum(1 for _, src in inside if own_source(src))
+    others = tuple(sorted({src for _, src in inside if not own_source(src)}))
     statements = world.statements.get(account, ())
     touching = [s for s in statements if s.closing >= low and s.first <= last_day]
     earlier = [s for s in statements if s.closing < low] if first_day else []
@@ -458,7 +464,7 @@ def gather_evidence(
     if earlier and later and later[0].opening_minor is not None:
         chain = later[0].opening_minor == earlier[-1].closing_minor
     opened, closed = world.declared.get(account, (None, None))
-    own_all = [day for day, src in listed if source_matches(source, src)]
+    own_all = [day for day, src in listed if own_source(src)]
     return Evidence(
         by_source=tuple(sorted(by_source.items())),
         first_row=min((d for d, _ in inside), default=None),
