@@ -26,6 +26,55 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.328] - 2026-10-05
+
+### Changed
+- **An account's verdict says what is compared.** The owner asked what "held
+  back" meant, and then of its replacement: "How can 7 accounts be in
+  agreement? Do they agree with each other?" Both were names for the rule
+  inside the code, and neither said that an account's transactions are being
+  added up against the balances its sources state. The three verdicts are
+  now "adds up", "does not add up", and "nothing to check against"; about
+  sixty sentences were rewritten whole, cause first ("The transactions do not
+  add up to the known balance for ..."), and Actual's chip says "agrees with
+  obdi". The words are defined once, and "in agreement" and "held back" are
+  refused on any page from now on. "Matches" was not used because it already
+  means sources or transfer pairs matching, and "reconciled" because that is
+  something the owner does deliberately.
+- **Every page names an account from one component.** Thirteen modules
+  decided an account's name for themselves, one of them with the order
+  reversed, and over an invented household thirty page-and-account pairs on
+  nine routes showed a reference with no name beside it. One object now
+  holds an account as shown (its name, its reference, and the forms a page
+  needs), built in one place, and a test fails when another module works a
+  name out for itself.
+- **Identifiers are set as code everywhere**, by one helper: sixty-four
+  page-and-identifier pairs on about fourteen routes set an account reference
+  or a source name as plain text. Inside a chip the code keeps the chip's
+  face, because monospace pushed each transaction's chips onto a second line.
+- **A good result is said quietly on every page**, by one shared rule:
+  ordinary size and weight beside a small tick. A test reads every
+  stylesheet for a good result set at display size, in bold, or wholly in
+  colour.
+
+### Not covered
+- Today's headline can say "Everything checked is in order" above a
+  Verification line that says an account does not add up: an account that
+  stops adding up becomes an item only after 45 days. Seen over an invented
+  household, not on the real store.
+- "Cannot be verified" stays where the movement checks say it of a transfer
+  leg. "Unproven", "not yet proven", "not protected", "seam", "sighting",
+  "folded", and "frontier" are still on pages and are the owner's to decide.
+- The quiet-result test reads stylesheets, not styles written inline in page
+  code, and the page walks do not reach pages shown only after a POST.
+- Today counts an account held under a provider-qualified reference that
+  cannot be declared, and the Accounts page does not.
+- The names obdi gives accounts inside Actual still take the provider's label
+  first; that is not a page and was left.
+- The opening-balance rule is built and not released: read on the real store,
+  the measurement shows it would stop three accounts adding up that add up
+  today, and a review reproduced faults in it.
+
 ## [0.4.327] - 2026-10-05
 
 ### Changed
