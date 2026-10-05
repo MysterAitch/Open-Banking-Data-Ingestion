@@ -19,7 +19,7 @@ may be held back further by a movement fault that neither sentence mentions.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -27,10 +27,13 @@ from .agreement import derive_agreement, held_sentence, known_of_opening, standi
 from .balance_anchors import (
     ASSUMED_NIL,
     STATEMENT,
+    STATEMENT_OPENING,
     EffectiveOpening,
     effective_opening,
 )
 from .family_anchors import OPENED, Families
+from .models import Transaction
+from .opening_edges import directly_follows
 from .plural import agree, plural
 from .statement_openings import (
     PlacedBy,
@@ -46,11 +49,12 @@ from .statement_openings import (
 from .statement_span import (
     Contradiction,
     HoleReason,
+    Known,
     RowEvidence,
     _one_per_closing,
     describe_account,
 )
-from .statement_terms import StatementPeriod, statement_periods
+from .statement_terms import StatementPeriod, statement_balances, statement_periods
 from .store import Store
 
 _NIL_BASES = (OPENED, ASSUMED_NIL)
@@ -73,6 +77,128 @@ def _days(spans: Sequence[tuple[date, date]]) -> str:
 
 def _dates(days: Sequence[date]) -> str:
     return ", ".join(day.isoformat() for day in sorted(days))
+
+
+@dataclass(frozen=True)
+class OpeningDiagnosis:
+    """Why an opening balance the transactions do not reproduce does not add up, in counts and
+    yes or no. No figure is held: each yes says that the difference is, in amount, exactly the
+    sum of a set of transactions, which is evidence of where the fault lies and never proof, and
+    is said of the size only because the direction a miscount runs cannot be told from here."""
+
+    placement: Placement
+    #: The known balance before it, and how many transactions are dated after that day up to and
+    #: including the opening's own.
+    after: date
+    between: int
+    #: The difference is the size of the transactions the opening's own statement lists that are
+    #: dated on or before the opening's day.
+    own_listed_before: bool
+    #: The difference is the size of what the statement before it lists, where that statement
+    #: closes after the opening's day. A listed transaction counts on its statement's closing day
+    #: whatever date it carries (`statement_membership`), so all of them fall after the opening's
+    #: day, however they are dated. A statement listing rows an earlier one lists as well is not
+    #: told apart here.
+    previous_listed_after: bool
+    #: The difference is the size of the transactions dated on the opening's day or the day after:
+    #: an off-by-one in the day.
+    off_by_a_day: bool
+    #: The statement follows the one before it with nothing between (`opening_edges`).
+    follows_directly: bool
+    #: Placed as the previous statement's closing day would place it (it follows directly), the
+    #: opening is reproduced: it states the same figure as that closing.
+    reproduced_if_second_statement_of_previous: bool
+
+
+def _size_matches(difference: int, parts: Iterable[int]) -> bool:
+    total = sum(parts)
+    return total != 0 and abs(difference) == abs(total)
+
+
+def _diagnose(
+    placement: Placement,
+    after: date,
+    item: StatementPeriod,
+    earlier: StatementPeriod | None,
+    rule: EffectiveOpening,
+    rows: Sequence[Transaction],
+    listed: Mapping[str, set[str]],
+    digests: Mapping[tuple[date, int, str], str],
+    follows: Mapping[date, Known],
+) -> OpeningDiagnosis:
+    held_rows = [t for t in rows if not t.status.is_history]
+    opening_reading = next(
+        r
+        for r in rule.readings
+        if r.anchor.day == placement.day
+        and r.anchor.basis == STATEMENT_OPENING
+        and r.anchor.balance_minor == placement.balance_minor
+    )
+    before_reading = next(r for r in rule.readings if r.anchor.day == after)
+    difference = (opening_reading.difference_minor or 0) - (before_reading.difference_minor or 0)
+
+    def listed_by(statement: StatementPeriod | None) -> set[str]:
+        if statement is None or statement.closing_minor is None:
+            return set()
+        digest = digests.get((statement.closing, statement.closing_minor, statement.source))
+        return listed.get(digest, set()) if digest else set()
+
+    own = listed_by(item)
+    previous = listed_by(earlier)
+    day = placement.day
+    return OpeningDiagnosis(
+        placement,
+        after,
+        sum(1 for t in held_rows if after < t.value_date <= day),
+        _size_matches(
+            difference,
+            (t.amount_minor for t in held_rows if t.entity_id in own and t.value_date <= day),
+        ),
+        _size_matches(
+            difference,
+            (
+                t.amount_minor
+                for t in held_rows
+                if t.entity_id in previous and earlier is not None and earlier.closing > day
+            ),
+        ),
+        _size_matches(
+            difference,
+            (
+                t.amount_minor
+                for t in held_rows
+                if t.value_date in (day, day + timedelta(days=1))
+            ),
+        ),
+        item.closing in follows,
+        item.closing in follows
+        and earlier is not None
+        and earlier.closing_minor == placement.balance_minor,
+    )
+
+
+def _yes(flag: bool) -> str:
+    return "yes" if flag else "no"
+
+
+def _diagnosis_lines(found: OpeningDiagnosis) -> list[str]:
+    placement = found.placement
+    return [
+        f"  Opening of the statement closing {placement.closing.isoformat()} "
+        f"({placement.source}), placed {placement.how.value} on {placement.day.isoformat()}, "
+        f"not reproduced from the known balance of {found.after.isoformat()}:",
+        f"    transactions dated after {found.after.isoformat()} up to that day: {found.between}.",
+        "    the difference is the size of the transactions its own statement lists dated on "
+        f"or before its day: {_yes(found.own_listed_before)}.",
+        "    the difference is the size of what the statement before it lists, which closes "
+        f"after its day: {_yes(found.previous_listed_after)}.",
+        "    the difference is the size of the transactions dated on its day or the day after: "
+        f"{_yes(found.off_by_a_day)}.",
+        "    it follows the statement before it with nothing between: "
+        f"{_yes(found.follows_directly)}.",
+        "    placed as a second statement of the previous closing, it is reproduced: "
+        f"{_yes(found.reproduced_if_second_statement_of_previous)}.",
+    ]
 
 
 @dataclass
@@ -104,6 +230,8 @@ class OpeningFigures:
     first: list[Placement] = field(default_factory=list)
     reproduced: list[Placement] = field(default_factory=list)
     unreproduced: list[tuple[Placement, date]] = field(default_factory=list)
+    #: For each of those, whether it is a placement fault or a real hole (`OpeningDiagnosis`).
+    diagnoses: list[OpeningDiagnosis] = field(default_factory=list)
     #: Placements the rows another source holds, in the days since the statement before,
     #: that no statement lists make doubtful.
     doubted: list[tuple[Placement, int]] = field(default_factory=list)
@@ -199,6 +327,8 @@ class OpeningFigures:
                 else "."
             )
         )
+        for found in self.diagnoses:
+            lines.extend(_diagnosis_lines(found))
         if self.doubted:
             lines.append(
                 f"{plural(len(self.doubted), 'opening balance')} {agree(len(self.doubted), 'has')}"
@@ -376,6 +506,26 @@ def account_figures(
             figures.reproduced.append(placement)
         else:
             figures.unreproduced.append((placement, ending[0].start))
+    if figures.unreproduced:
+        balances, _ = statement_balances(store, ref)
+        digests = {(b.day, b.balance_minor, b.source): b.digest for b in balances if b.digest}
+        listed = store.entities_sighted_by(ref, set(digests.values()))
+        follows = directly_follows(held, held[-1].closing, evidence)
+        by_closing = {item.closing: item for item in held}
+        for placement, after in figures.unreproduced:
+            figures.diagnoses.append(
+                _diagnose(
+                    placement,
+                    after,
+                    by_closing[placement.closing],
+                    before[placement.closing],
+                    rule,
+                    rows,
+                    listed,
+                    digests,
+                    follows,
+                )
+            )
     figures.today_sentence, now_days = _standing_today(today)
     figures.rule_sentence, rule_days, _ = _standing_rule(rule)
     figures.newly_agreeing = _spans_of(rule_days - now_days)
