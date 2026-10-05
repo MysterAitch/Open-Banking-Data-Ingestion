@@ -474,6 +474,12 @@ def tested_days(opening: EffectiveOpening, standing: Standing) -> tuple[date, ..
     a day on which balances merely agree with each other is not tested (`agreement`, rule 2). A
     day tested ONLY by a statement's own listing is not among them (`Agreement.chain_tested`):
     protection records a balance by date span, which a statement's listing does not reach."""
+    return tested_days_of(standing)
+
+
+def tested_days_of(standing: Standing) -> tuple[date, ...]:
+    """`tested_days` from the standing alone, for a reader that holds no opening (Today's offer to
+    lock an account in is told from the same days the account's page offers)."""
     limit = standing.own.through
     if limit is None:
         return ()
