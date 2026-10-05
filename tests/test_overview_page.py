@@ -343,13 +343,24 @@ class TestAccounts:
         assert_tap_targets_are_thumb_sized(page)
 
 
+def without_the_pages_own_clock(page: str) -> str:
+    """The page less the one line that counts hours since the overview was assembled.
+
+    The overview is assembled at a fixed moment and the page is served at the present one, so
+    that line holds a number that changes every hour and is no stored value. On 2026-10-05 it
+    read "Assembled 101 hours ago", and "101" is one of the planted figures: the test failed for
+    one hour and would have passed the next.
+    """
+    return re.sub(r"Assembled [^.<]*?\bago\b", "Assembled earlier", page)
+
+
 class TestNoFigureReachesTheOverview:
     def test_Get_WhenReconciliationHoldsFigures_ShowsNoBalanceAmountOrPayee(self, tmp_path):
         path = tmp_path / "r.sqlite3"
         with Store(path) as store:
             _built(store, omit=("e",))
 
-        page = home(tmp_path, lambda fresh: assemble(path))
+        page = without_the_pages_own_clock(home(tmp_path, lambda fresh: assemble(path)))
 
         assert "break" in page or "day" in page
         for secret in ("Alpha Bakery", "Echo Cafe", "Charlie Payroll", "Delta Rail"):
@@ -362,7 +373,7 @@ class TestNoFigureReachesTheOverview:
         with Store(path) as store:
             build_household(store)
 
-        page = home(tmp_path, lambda fresh: assemble(path))
+        page = without_the_pages_own_clock(home(tmp_path, lambda fresh: assemble(path)))
 
         for secret in SECRET_TEXT:
             assert secret not in page, secret
