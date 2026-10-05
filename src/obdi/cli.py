@@ -115,7 +115,7 @@ from .spaces import ArchiveNote
 from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
 from .statement_listing_measure import StatementListingReport
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
-from .store import Store
+from .store import Store, StoreIsNewer
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
 from .web import serve as serve_web
@@ -4451,6 +4451,11 @@ def _serve(host: str, port: int, db_path: Path) -> int:
                 "startup: derived data current (code fingerprint match)",
                 flush=True,
             )
+    except StoreIsNewer:
+        # A store written by a newer release is not "stale derived data": serving over it with
+        # older code would present, and could write, a shape the code does not know. The process
+        # stops here, where whoever deployed it is watching, and `/healthz` is never reached.
+        raise
     except Exception as exc:
         # Never let the freshness check keep the service down: serving
         # stale-derived data with the banner absent is bad; not serving at all

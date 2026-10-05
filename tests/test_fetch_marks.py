@@ -366,7 +366,7 @@ class TestAStoreAtTheVersionBefore:
         connection.close()
 
         with Store(path) as reopened:
-            assert SCHEMA_VERSION == 19
+            assert SCHEMA_VERSION >= 19
             before = reopened.standing_epoch()
             reopened.set_record_scope("x", first_day="2024-01-01", months=None, at="now")
             assert reopened.standing_epoch() > before, "a scope moves what pages say"

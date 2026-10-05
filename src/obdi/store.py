@@ -106,7 +106,11 @@ from .stated_words import recorded_words
 #: 18 -> 19: the `fetch_marks` and `record_scopes` tables, likewise: hand decisions about what the
 #: owner still has to fetch (`fetch_marks` says what each means). A store stamped 18 would never
 #: have grown them.
-SCHEMA_VERSION = 19
+#:
+#: 19 -> 20: the `disregarded_balances` table, likewise: a hand decision to leave one source's
+#: known balance for one day out of the reading, kept across the rebuild from raw. A store
+#: stamped 19 would never have grown it.
+SCHEMA_VERSION = 20
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -603,6 +607,23 @@ CREATE TABLE IF NOT EXISTS fetch_marks (
     fingerprint TEXT NOT NULL
 );
 
+-- DECLARED: a known balance the owner has told obdi to disregard, by account, day, and the source
+-- and basis that state it. The balance itself is derived from raw on every rebuild and is not
+-- stored; this row is the only thing remembered, so a rebuild finds the same balance and
+-- disregards it again. Using a balance again deletes the row. The figure is part of the key so
+-- that a disregard ends with its balance: a typed balance removed and typed again with another
+-- figure is a different balance, and two statements of one layout closing on one day are two.
+-- It is private and no page shows it.
+CREATE TABLE IF NOT EXISTS disregarded_balances (
+    account        TEXT NOT NULL,
+    day            TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    basis          TEXT NOT NULL,
+    balance_minor  INTEGER NOT NULL,
+    disregarded_at TEXT NOT NULL,
+    PRIMARY KEY (account, day, source, basis, balance_minor)
+);
+
 -- DECLARED: how much of an account's history the owner keeps. One row per account, and the row
 -- for the empty account is the household default. Either a fixed first day or the last `months`.
 CREATE TABLE IF NOT EXISTS record_scopes (
@@ -649,6 +670,7 @@ EPOCH_TABLES: tuple[str, ...] = (
     "protection_history",
     "fetch_marks",
     "record_scopes",
+    "disregarded_balances",
 )
 
 #: Every other table, and why a write to it cannot change a standing. A table added to SCHEMA
@@ -761,6 +783,9 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'made_at', 'note', 'origin', 'removed_at', 'review_on', 'source',
     ],
     'record_scopes': ['account', 'first_day', 'months', 'set_at'],
+    'disregarded_balances': [
+        'account', 'balance_minor', 'basis', 'day', 'disregarded_at', 'source',
+    ],
     'fetch_attempts': [
         'account_ref', 'artefact_digest', 'asked', 'attempted_at', 'connection_id',
         'detail', 'error_code', 'http_status', 'outcome', 'request_meta', 'source',
@@ -1086,6 +1111,10 @@ def _upsert_params(
     )
 
 
+class StoreIsNewer(RuntimeError):
+    """The store was written by a newer release than this one (`Store._refuse_a_newer_store`)."""
+
+
 class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -1135,10 +1164,35 @@ class Store:
             return False
         return bool(row) and str(row[0]) == str(SCHEMA_VERSION)
 
+    def _refuse_a_newer_store(self) -> None:
+        """Refuse a store stamped with a newer schema than this code knows.
+
+        Older code opening a newer store would run its own migrations over a shape it does not
+        know and then stamp the older version over the newer, so the next release, finding a
+        store it believes current, skips migrations it needs. Nothing about that is visible at
+        the time. It stops here, at the open, where whoever is rolling back is watching, and the
+        way forward is the newer code or a backup of the older store.
+        """
+        try:
+            row = self.connection.execute(
+                "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            stamped = int(str(row[0])) if row else 0
+        except (sqlite3.OperationalError, ValueError):
+            return
+        if stamped > SCHEMA_VERSION:
+            raise StoreIsNewer(
+                f"this store is at schema version {stamped}, newer than the {SCHEMA_VERSION} "
+                "this release knows. Opening it would run older migrations over a newer shape "
+                "and stamp the older version over it. Run the release that wrote it, or restore "
+                "a backup taken before it."
+            )
+
     def _prepare(self) -> None:
         """Bring the store up to date, exactly once per version."""
         if self._schema_is_current():
             return
+        self._refuse_a_newer_store()
         self.connection.executescript(SCHEMA)
         self._migrate_raw_artefact_key()
         self._migrate_transaction_tier_and_occurrence()
@@ -2388,6 +2442,68 @@ class Store:
         )
         self.connection.commit()
         return True
+
+    def disregard_balance(
+        self,
+        account: str,
+        day: date,
+        source: str,
+        basis: str,
+        balance_minor: int,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """Disregard one balance, named by day, whoever states it, basis, and figure, and commit.
+        False where it already was. Whether such a balance exists is for the caller to have
+        checked; the figure is what ends the disregard with the balance, and is never shown."""
+        cursor = self.connection.execute(
+            "INSERT OR IGNORE INTO disregarded_balances "
+            "(account, day, source, basis, balance_minor, disregarded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                account,
+                day.isoformat(),
+                source,
+                basis,
+                balance_minor,
+                (now or datetime.now(UTC)).isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def use_balance_again(
+        self, account: str, day: date, source: str, basis: str, balance_minor: int
+    ) -> bool:
+        """Stop disregarding a balance, and commit. False where it was not disregarded."""
+        cursor = self.connection.execute(
+            "DELETE FROM disregarded_balances "
+            "WHERE account = ? AND day = ? AND source = ? AND basis = ? AND balance_minor = ?",
+            (account, day.isoformat(), source, basis, balance_minor),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def disregarded_balance_rows(self, account: str) -> list[tuple[date, str, str, int]]:
+        """(day, source, basis, figure) of each balance disregarded for the account."""
+        return [
+            (
+                date.fromisoformat(str(row["day"])),
+                str(row["source"]),
+                str(row["basis"]),
+                int(row["balance_minor"]),
+            )
+            for row in self.connection.execute(
+                "SELECT day, source, basis, balance_minor FROM disregarded_balances "
+                "WHERE account = ? ORDER BY day, source, basis, balance_minor",
+                (account,),
+            )
+        ]
+
+    def disregarded_balance_keys(self, account: str) -> list[tuple[date, str, str]]:
+        """(day, source, basis) of each balance disregarded for the account, without its figure."""
+        rows = self.disregarded_balance_rows(account)
+        return [(day, source, basis) for day, source, basis, _ in rows]
 
     def removed_stated_balances(self, asset_id: str, *, limit: int = 20) -> list[sqlite3.Row]:
         """The balances removed from one account, newest first, that are not stated again now."""
