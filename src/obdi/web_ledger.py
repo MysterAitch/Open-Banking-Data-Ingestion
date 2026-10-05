@@ -21,6 +21,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .account_names import code_html
 from .agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
 from .balance_anchors import parse_calendar_day
 from .balance_chart import OWN
@@ -2421,8 +2422,8 @@ def _danger_zone(
 
 def _head(view: Any) -> str:
     """Under the name: the reference, where it is fed from, and whether it is sent to Actual."""
-    id_line = f'<p class="ref mono">{_esc(view.ref)}</p>' if view.label else ""
-    fed = ", ".join(view.sources) or "none"
+    id_line = f'<p class="ref">{code_html(view.ref)}</p>' if view.label else ""
+    fed = ", ".join(code_html(source) for source in view.sources) or "none"
     binding = (
         "bound to an Actual account"
         if view.actual_bound
@@ -2438,7 +2439,7 @@ def _head(view: Any) -> str:
     label = f" {archive_label(archive)}" if archived else ""
     return (
         f'{id_line}<p class="sub">{label.strip()} '
-        f"Fed by: {_esc(fed)}. This account is {_esc(binding)}. {held}</p>"
+        f"Fed by: {fed}. This account is {_esc(binding)}. {held}</p>"
     )
 
 

@@ -122,6 +122,36 @@ def text_of(markup: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", markup)).strip()
 
 
+class TestAnAccountsOwnPageIsHeadedByItsName:
+    """The owner opened an account he had named and found its page headed by its reference.
+
+    The page asked only for the name a provider gave the account, so a label declared by him
+    was ignored there while the Accounts page showed it.
+    """
+
+    @pytest.fixture
+    def page(self, tmp_path, monkeypatch) -> str:
+        httpd, base = _serve(tmp_path, monkeypatch)
+        try:
+            return httpx.get(f"{base}/ledger?ref=agreeing", timeout=30).text
+        finally:
+            httpd.shutdown()
+
+    def test_Heading_OfADeclaredAccount_IsItsLabelAndNotItsReference(self, page):
+        (heading,) = re.findall(r"<h1[^>]*>(.*?)</h1>", page, re.S)
+
+        assert "Card agreeing" in text_of(heading)
+        assert text_of(heading) != "agreeing"
+
+    def test_Reference_UnderTheHeading_IsSetAsCode(self, page):
+        assert '<p class="ref"><code>agreeing</code></p>' in page
+
+    def test_SourcesThatFeedTheAccount_AreSetAsCode(self, page):
+        fed = page.split("Fed by:")[1].split(".")[0]
+
+        assert re.findall(r"<code>([^<]+)</code>", fed) == ["s"]
+
+
 class TestTheSummary:
     def test_Accounts_SaysTheSentenceTodaySays(self, pages):
         accounts, today = pages

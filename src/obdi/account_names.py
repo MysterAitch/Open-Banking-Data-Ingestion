@@ -29,6 +29,15 @@ def merged_names(
     return names
 
 
+def code_html(identifier: str) -> str:
+    """An identifier set as inline code: an account's reference, a source's name.
+
+    The one place that decides how an identifier looks on a page, so that it looks the same
+    on every page: as a word between backticks does in markdown.
+    """
+    return f"<code>{html.escape(identifier)}</code>"
+
+
 def account_name(ref: str, names: Mapping[str, str]) -> str:
     """The label where one exists, else the reference."""
     return names.get(ref) or ref

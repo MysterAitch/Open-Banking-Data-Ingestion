@@ -3277,17 +3277,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             account_standings()
 
     def ledger_data(ref: str, month: str) -> Ledger:
+        from .account_names import merged_names
         from .ledger import build_ledger
 
         try:
-            label = display_labels().get(ref, "")
+            provider_labels = display_labels()
         except Exception:
             # A name is a convenience; the ledger must not depend on the
             # provider-label scan succeeding.
-            label = ""
+            provider_labels = {}
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
         hold = hold_for(db_path)
         with Store(db_path) as store:
+            # The label he declared wins over the provider's (`account_names`): the page was
+            # headed by the bare reference for an account he had named, because only the
+            # provider's label was asked for.
+            label = merged_names(provider_labels, store.declared_accounts()).get(ref, "")
             if hold is not None:
                 # The rows are shown as they stand, and the verification - agreement and the
                 # protection's comparison with its span - says the one sentence instead.

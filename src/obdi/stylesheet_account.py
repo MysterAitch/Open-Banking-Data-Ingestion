@@ -44,11 +44,13 @@ ACCOUNT_STYLES = """
  .proof { margin: var(--s2) 0 var(--s1); }
  .rail-ends { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--ink-2); }
 
- /* The verdict is the page's one display sentence. It is teal only where it is a claim of
-    agreement with nothing held back, and carries a glyph beside the colour. */
+ /* The verdict is the page's display sentence only where something needs the reader: held
+    back, or not verifiable. Agreement with nothing held back is said in ordinary text beside
+    a small teal tick. It was a display-size teal sentence, and the owner's answer was that
+    shouting to say all is well is not required: weight is how the page says where to look. */
  .verdict { font: 600 var(--text-xl)/130% var(--serif); margin: var(--s2) 0; }
- .verdict.clear { color: var(--ok); }
- .verdict.clear::before { content: "\\2713\\00a0"; content: "\\2713\\00a0" / ""; }
+ .verdict.clear { font: 400 var(--text-md)/150% var(--sans); color: var(--ink-2); }
+ .verdict.clear::before { content: "\\2713\\00a0"; content: "\\2713\\00a0" / ""; color: var(--ok); }
  .verdict.warn::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; }
 
  /* The one tinted box: what holds the account back, and the way to the explanation. */

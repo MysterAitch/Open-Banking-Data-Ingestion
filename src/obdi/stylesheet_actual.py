@@ -4,8 +4,9 @@
 """The Actual page's own rules, joined into the one stylesheet by `stylesheet`.
 
 Only what no other page uses belongs here, written with the shared tokens: no colour,
-face, or size is declared in this file. The page's one verdict is the loudest thing on it,
-in the display serif, with a rail in the colour of what it says; the steps behind it are a
+face, or size is declared in this file. The page's one verdict is the loudest thing on it
+when it calls for something, in the display serif, and quiet when it says Actual agrees;
+it has a rail in the colour of what it says; the steps behind it are a
 real sequence and so a vertical one; the controls that delete stand in one bordered block.
 """
 
@@ -17,9 +18,11 @@ ACTUAL_STYLES = r"""
  .actual-main .verdict h2 { margin: 0 0 var(--s2); font: 600 var(--text-2xl)/var(--leading-tight) var(--serif); }
  .actual-main .verdict h2::before { margin-right: var(--s2); font-family: var(--sans); }
  .actual-main .verdict > p { margin: var(--s1) 0; }
+ /* Agreement is said in ordinary type beside a teal tick, not at display size: a loud "all
+    is well" competes with the states that need the reader (see the account page's verdict). */
  .actual-main .verdict-ok { border-left-color: var(--ok); }
- .actual-main .verdict-ok h2 { color: var(--ok); }
- .actual-main .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; }
+ .actual-main .verdict-ok h2 { font: 600 var(--text-md)/var(--leading-tight) var(--sans); color: var(--ink); }
+ .actual-main .verdict-ok h2::before { content: "\2713"; content: "\2713" / ""; color: var(--ok); }
  .actual-main .verdict-bad { border-left-color: var(--bad); }
  .actual-main .verdict-bad h2 { color: var(--bad); }
  .actual-main .verdict-bad h2::before { content: "\2715"; content: "\2715" / ""; }
