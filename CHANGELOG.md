@@ -26,6 +26,64 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.327] - 2026-10-05
+
+### Changed
+- **The coverage timeline's second round.**
+  - It names the gaps "What to fetch next" names, with the same dates, from
+    the same data; its own derivation of statement holes is gone. A statement
+    covers its stated period whole, an edge is drawn by how it is known
+    (stated, balances meet, first or last row seen, inferred), and a hole is
+    drawn with a firm start and an open end where only its start is proven.
+  - The stretch since the newest statement is "not yet available" until one
+    is due, in a texture of its own with the day the next is expected, and is
+    not counted as a gap: the statement does not exist yet.
+  - **Stretches in which nothing changes are collapsed**, as the owner asked:
+    a short segment with a break through the axis and every lane, labelled
+    with what was skipped, expanded by a tap, and said in the verdict so the
+    chart is known not to be to scale. A seven-year invented account went
+    from 43 phone screens to under 4. An account that is held back or not
+    verified is never quiet.
+  - It opens at its newest end.
+  - An account whose only rows are ones obdi makes (the cash account) is no
+    longer drawn as covered.
+- **The timeline is on each account's own page**, which the owner asked for:
+  one line under the verdict ("Statements reach 2026-07-10; 1 gap to fill;
+  next statement expected about ...") that opens to the same lanes, fitted
+  to the page, with the month shown bracketed and each mark a link to its
+  sentence on the full page.
+- **An account's page is headed by the name he gave it.** It was headed by
+  the account's reference: the page asked only for a provider's name and
+  ignored a declared label.
+- **Agreement is said quietly.** The account page's verdict was a
+  display-size teal sentence when all was well; the owner's answer was that
+  shouting to say so is not required. It is ordinary text beside a small
+  tick, and the display sentence is kept for an account held back or not
+  verifiable. The Actual page's "agrees" verdict is quietened the same way.
+- The account's reference and the sources that feed it are set as code.
+
+### Added
+- **Identity health says what a statement's opening balance would change,
+  and changes nothing.** The owner decided an opening balance should be a
+  known balance, so that a statement after a missing one is tested from its
+  own starting figure and not carried out by the hole before it. Per account:
+  how many opening balances repeat a known balance already held, how many are
+  new, how many conflict; which the rows reproduce; and the account's
+  standing as it reads today beside how it would read. The rule waits on
+  this being read on the real store.
+
+### Not covered
+- The three presentation faults fixed on the account page (a name taken from
+  the provider alone, a good result set loud, an identifier not set as code)
+  are on other pages too: seven hooks name an account that way, and some
+  fifty places set an identifier in a plain monospace span. The sweep of
+  each class is the next piece of work.
+- The timeline does not yet draw the set-aside decisions, review flags,
+  balance-difference steps, or conflicts between sources; its household view
+  is the first cut's.
+- On a phone a collapsed stretch's break is often off screen; the verdict
+  and the list under the chart are what say time was skipped.
+
 ## [0.4.326] - 2026-10-05
 
 ### Added
