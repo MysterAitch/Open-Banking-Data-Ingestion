@@ -47,6 +47,17 @@ PROTECTION RECORDS A BALANCE THE SPAN DOES NOT REPRODUCE (decision 9).
                  118.25. Expected: protection pressed through 10 Feb records 118.25.
                  Got: the statement's 110.48 ("verified against" a figure the span is 7.77 from).
 
+A DISREGARDED STATEMENT'S TRANSACTIONS STILL COUNT AS LISTED INSIDE ANOTHER'S DAYS (decision 7).
+
+  w-reissue      Two documents close 10 Jan: one lists two purchases (117.56 owed); the reissue
+                 lists the same two and a third of 4.13 dated 7 Jan (121.69 owed). The person
+                 disregards the reissue's closing, which the page offers. The third purchase is
+                 still held and counts, inside the first statement's days, and no statement in
+                 use lists it. Expected: as `r-lone-unlisted`, nothing to check against, no day
+                 offered to protection. Got: adds up through 10 Jan, "tested by the 2
+                 transactions its statement lists", 10 Jan offered, from an opening of 95.87
+                 where the statement states 100.00.
+
 THE MEMO'S KEY CAN REPEAT (the cost fix). `standing_data._CHECKS` is keyed by the store's path,
 its standing epoch, and the Spaces. Two stores whose key is the same and whose statements
 conclude differently:
@@ -69,7 +80,12 @@ import pytest
 from listing_rule_reading import app_reading
 from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.agreement import HELD_CONFLICT
-from obdi.balance_anchors import effective_opening, record_stated_anchor
+from obdi.balance_anchors import (
+    STATEMENT,
+    disregard_balance,
+    effective_opening,
+    record_stated_anchor,
+)
 from obdi.family_anchors import Families, families_of
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
@@ -78,7 +94,7 @@ from obdi.models import SourceTier, Transaction
 from obdi.protection import press
 from obdi.protection import tested_days as days_offered
 from obdi.space_attribution import fold_space_copies
-from obdi.standing_data import ADDS_UP, statement_checks_for
+from obdi.standing_data import ADDS_UP, NOTHING_TO_CHECK_AGAINST, statement_checks_for
 from obdi.statement_listing_measure import statement_checks_all
 from obdi.store import Store
 from statement_span_world import Spend, feed, statement
@@ -283,6 +299,49 @@ class TestProtectionRecordsTheBalanceReproduced:
         # 100.00 owed, then 7.17, 3.31, and the 7.77 the statement closed before: 118.25.
         assert reached == -11825
         assert int(str(record["verified_minor"])) == reached
+
+
+class TestADisregardedStatementsTransactionInsideAnothersDays:
+    def test_Account_WhenAReissueIsDisregardedAndItsExtraTransactionIsStillHeld_NothingIsTested(
+        self, tmp_path
+    ):
+        mid, jan = D(2025, 12, 10), JAN
+        two = [
+            Spend(D(2025, 12, 20), "Alpha Reissue", 1237),
+            Spend(D(2026, 1, 5), "Bravo Reissue", 519),
+        ]
+        again = tmp_path / "again"
+        again.mkdir()
+        with Store(tmp_path / "store.sqlite3") as store:
+            statement(store, tmp_path, "w-reissue", jan, OPENING, two, received=jan,
+                      previous_close=mid)
+            statement(
+                store, again, "w-reissue", jan, OPENING,
+                [*two, Spend(D(2026, 1, 7), "Charlie Reissue", 413)],
+                received=jan, previous_close=mid,
+            )
+            closings = sorted(
+                (
+                    r.anchor
+                    for r in effective_opening(store, "w-reissue", families=FAMILIES).readings
+                    if r.anchor.basis == STATEMENT
+                ),
+                key=lambda a: a.balance_minor,
+            )
+            # The reissue's closing, 121.69 owed, is the first by place of the two for the day.
+            disregard_balance(
+                store, "w-reissue", jan.isoformat(), closings[0].stating, STATEMENT,
+                families=FAMILIES, which=1,
+            )
+            opening = effective_opening(store, "w-reissue", families=FAMILIES)
+            in_use = [r.anchor.balance_minor for r in opening.readings]
+            counting = sorted(t.amount_minor for t in store.transactions_for_account("w-reissue"))
+            now, verdict = app_reading(store, "w-reissue", FAMILIES)
+
+        assert in_use == [-11756]
+        assert counting == [-1237, -519, -413]
+        assert verdict == NOTHING_TO_CHECK_AGAINST
+        assert days_offered(opening, now) == ()
 
 
 def _faulted_store(path: Path, root: Path) -> None:
