@@ -26,6 +26,28 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.334] - 2026-10-05
+
+### Fixed
+- **An account's page is usable between phone and desk widths.** The owner
+  sent it as his phone lays it out when asked for the desktop site, about
+  980 px wide: each transaction's description was one character to a line,
+  so a single transaction ran to a screen and a half, and the sections in
+  the left column sat a screen apart. A transaction became one line of four
+  cells at a width where the column could not hold them, and the grid shared
+  the transactions' height out among the rows beside them. A transaction is
+  four cells only where they fit; the left column keeps its sections
+  together. Measured before: 636 px for one transaction and 6044 px of
+  nothing between two sections at 980 px.
+
+### Not covered
+- The whole suite was not run on this change before release; the account
+  page layout, stylesheet, and phone layout tests and the tests that search
+  pages for planted values were (988), and the build runs the whole suite.
+- The owner has asked for the main pages to be designed again from what is
+  useful and actionable, organised around how far each account can be
+  trusted; that is at the prototype stage and nothing of it is here.
+
 ## [0.4.333] - 2026-10-05
 
 ### Changed
