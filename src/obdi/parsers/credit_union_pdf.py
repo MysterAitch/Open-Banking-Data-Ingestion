@@ -142,7 +142,9 @@ _FIGURE_REACH = 3
 
 #: Every phrase below tolerates NO space between its words, for the reason
 #: given in the module's account of labels.
-_PERIOD = re.compile(r"Period\s*\d{2}/\d{2}/\d{4}\s*to\s*(\d{2})/(\d{2})/(\d{4})")
+_PERIOD = re.compile(
+    r"Period\s*(\d{2})/(\d{2})/(\d{4})\s*to\s*(\d{2})/(\d{2})/(\d{4})"
+)
 _ISSUED = re.compile(r"Date\s*of\s*Issue\s*(\d{2})/(\d{2})/(\d{4})")
 _OPENING = re.compile(rf"Opening\s*Balance.*?({_AMOUNT.pattern})")
 _CLOSING = re.compile(rf"Closing\s*Balance.*?({_AMOUNT.pattern})")
@@ -547,8 +549,11 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
 
         period = _PERIOD.search(joined)
         if period:
-            reading.statement_date = date(
+            reading.period_start = date(
                 int(period.group(3)), int(period.group(2)), int(period.group(1))
+            )
+            reading.statement_date = date(
+                int(period.group(6)), int(period.group(5)), int(period.group(4))
             )
             continue
         issue = _ISSUED.search(joined)

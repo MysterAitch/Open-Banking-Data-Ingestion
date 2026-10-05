@@ -611,6 +611,31 @@ def movement_items_from(report: MovementCompleteness) -> list[AttentionItem]:
 STALE_AGREEMENT_DAYS = 45
 
 
+def statement_awaited(item: AccountStanding, today: date) -> date | None:
+    """The day an account's agreement last moved, where its next statement is overdue; else None.
+
+    Overdue means: the balances do not disagree, nothing holds agreement back, rows run on past
+    the newest known balance, and `STALE_AGREEMENT_DAYS` have passed since agreement last moved
+    (its `through` day, else its first known balance). The one statement of that rule: Today's
+    "rows after their last known balance" item and the fetch-gaps page both read it, so the two
+    cannot name different accounts.
+    """
+    standing = item.standing
+    if standing.own.conflicts or (standing.whole is not None and standing.whole.conflicts):
+        return None
+    own = standing.own
+    if own.known_from is None or own.known_to is None:
+        return None
+    since = own.through or own.known_from
+    if (today - since).days <= STALE_AGREEMENT_DAYS:
+        return None
+    if own.held is not None:
+        return None
+    if item.newest_row is None or item.newest_row <= own.known_to:
+        return None
+    return since
+
+
 def standing_items_from(
     standings: Mapping[str, AccountStanding],
     label_of: Callable[[str], str],
@@ -658,6 +683,10 @@ def standing_items_from(
                 )
             )
             continue
+        waiting_since = statement_awaited(standings[ref], today)
+        if waiting_since is not None:
+            awaiting.append((ref, waiting_since))
+            continue
         own = standing.own
         if own.known_from is None or own.known_to is None:
             continue
@@ -665,9 +694,6 @@ def standing_items_from(
         if (today - since).days <= STALE_AGREEMENT_DAYS:
             continue
         if own.held is None:
-            newest = standings[ref].newest_row
-            if newest is not None and newest > own.known_to:
-                awaiting.append((ref, since))
             continue
         said = (
             f"in agreement through {own.through.isoformat()}"

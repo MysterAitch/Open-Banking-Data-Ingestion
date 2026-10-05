@@ -105,6 +105,9 @@ def read_statement(lines: list[str]) -> StatementReading:
 
         period = _PERIOD.search(line)
         if period:
+            reading.period_start = date(
+                int(period.group(3)), int(period.group(2)), int(period.group(1))
+            )
             reading.statement_date = date(
                 int(period.group(6)), int(period.group(5)), int(period.group(4))
             )

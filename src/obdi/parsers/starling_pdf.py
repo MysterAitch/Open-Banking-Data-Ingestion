@@ -211,6 +211,7 @@ def _summary_row(
             if period:
                 try:
                     reading.statement_date = _day(period, 3)
+                    reading.period_start = _day(period)
                 except ValueError:
                     notes.append(
                         f"the Summary's period {cell.text!r} names a date that "

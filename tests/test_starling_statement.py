@@ -378,6 +378,9 @@ class TestATwoPageStatement:
     def test_Statement_IsDatedByTheEndOfItsPeriod(self):
         assert read(STATEMENT).statement_date == date(2026, 3, 31)
 
+    def test_Statement_StatesWhereItsPeriodBegins(self):
+        assert read(STATEMENT).period_start == date(2026, 3, 1)
+
     def test_Statement_WhenFiguresAreWiderThanTheirHeading_ReadsThemUnderTheirOwnColumn(
         self,
     ):

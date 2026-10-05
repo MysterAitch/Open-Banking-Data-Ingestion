@@ -367,6 +367,9 @@ class TestAStatement:
     def test_HalifaxAccountStatement_IsDatedByTheEndOfItsPeriod(self):
         assert read(STATEMENT).statement_date == date(2026, 8, 31)
 
+    def test_HalifaxAccountStatement_StatesWhereItsPeriodBegins(self):
+        assert read(STATEMENT).period_start == date(2026, 8, 1)
+
     def test_HalifaxAccountStatement_HiddenLabelsFusedToValues_DoNotReachTheDescription(self):
         for _, description, _ in rows_of(STATEMENT):
             for label in ("Date", "Description", "Type", "Money", "blank", "Balance"):

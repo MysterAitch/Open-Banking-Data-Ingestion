@@ -56,6 +56,11 @@ class StatementReading:
     #: rows, and guessing the current year would mis-file a whole history
     #: of statements silently.
     notes: list[str] = field(default_factory=list)
+    #: The first day of the period the statement itself says it covers, where its format states
+    #: one (a heading such as "Statement period: 05/07/2026 - 04/08/2026"). None for a format
+    #: that states only the closing date, whose period is then known only from the statement
+    #: before it. Never the first row's date: that is a fact about the rows, not the document.
+    period_start: date | None = None
 
     @property
     def discrepancy_minor(self) -> int:
@@ -116,6 +121,7 @@ def reading_to_json(reading: StatementReading) -> str:
                 [window.percent, window.until.isoformat()] for window in reading.rate_windows
             ],
             "notes": reading.notes,
+            "period_start": _day(reading.period_start),
         }
     )
 
@@ -157,4 +163,7 @@ def reading_from_json(text: str) -> StatementReading:
             for percent, until in found["rate_windows"]
         ],
         notes=[str(note) for note in found["notes"]],
+        # A reading kept before periods were kept has no such key and reads as stating none;
+        # `statement_terms.keep_statement_readings` reads those documents again.
+        period_start=_maybe_day(found.get("period_start")),
     )

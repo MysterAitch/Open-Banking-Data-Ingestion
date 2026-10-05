@@ -466,6 +466,7 @@ def read_statement(lines: list[str]) -> StatementReading:
         )
     else:
         reading.statement_date = reader.period[1]
+        reading.period_start = reader.period[0]
     _balances(reader, reading)
     _totals(reader, reading)
     return reading

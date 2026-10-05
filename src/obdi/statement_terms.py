@@ -148,6 +148,65 @@ def _kept_reading(store: Store, digest: str) -> tuple[str, StatementReading] | N
         return None
 
 
+def _keeps_period(store: Store, digest: str) -> bool:
+    """Whether the kept reading was written by a version that kept a statement's own period.
+
+    A reading kept before then says nothing about the period start, which is not the same as
+    saying the document states none: only reading the document again tells the two apart.
+    """
+    stored = store.stored_statement_reading(digest)
+    return stored is not None and '"period_start"' in stored[1]
+
+
+@dataclass(frozen=True)
+class StatementPeriod:
+    """A held statement's closing day, and its own first day where the document states one."""
+
+    account_ref: str
+    closing: date
+    #: The first day the statement itself says it covers; None where the format states only a
+    #: closing date, or the reading kept does not hold one yet (`_keeps_period`).
+    opens: date | None
+    #: The parser's source name, "" for a section of an "all accounts" statement.
+    source: str
+    #: The date of the earliest row the statement lists, from the kept reading; None where there
+    #: is no kept reading or the statement lists nothing.
+    first_row: date | None = None
+
+    @property
+    def covers_from(self) -> date | None:
+        """The first day the statement is known to account for: its stated start, else the
+        day of its first row."""
+        return self.opens or self.first_row
+
+
+def statement_periods(store: Store) -> list[StatementPeriod]:
+    """Each trusted statement's closing day with the period it states, from kept readings.
+
+    The statements are the ones `statement_balances` trusts, so a period is never offered for a
+    document whose closing balance is not. The period is read from the reading the store kept
+    and never from the document: a view must not extract text, so a statement with no kept
+    reading is listed with no stated start.
+    """
+    found: list[StatementPeriod] = []
+    balances, _ = statement_balances(store)
+    for balance in balances:
+        kept = _kept_reading(store, balance.digest) if balance.source else None
+        reading = None if kept is None else kept[1]
+        found.append(
+            StatementPeriod(
+                balance.account_ref,
+                balance.day,
+                None if reading is None else reading.period_start,
+                balance.source,
+                None
+                if reading is None
+                else min((row.value_date for row in reading.transactions), default=None),
+            )
+        )
+    return found
+
+
 def keep_statement_readings(store: Store) -> int:
     """Read every held PDF that has no usable kept reading, keep what it says,
     and commit; returns how many documents were read.
@@ -159,7 +218,7 @@ def keep_statement_readings(store: Store) -> int:
     """
     read = 0
     for digest, account in _held_pdfs(store, None):
-        if _kept_reading(store, digest) is not None:
+        if _kept_reading(store, digest) is not None and _keeps_period(store, digest):
             continue
         found = _read_with_source(_payload_of(store, digest, account), digest[:12])
         read += 1

@@ -414,6 +414,13 @@ class TestDatingTheRows:
 
         assert reading.statement_date == date(2025, 5, 31)
 
+    def test_ThePeriodStartDate_IsStatedAndNeverInventedFromTheIssueDate(self):
+        stated = read_statement(grid(SAVINGS))
+        unstated = read_statement(grid(without(SAVINGS, "Period 01/05/2025")))
+
+        assert stated.period_start == date(2025, 5, 1)
+        assert unstated.period_start is None
+
     def test_WithNoPeriodLine_TheDateOfIssue_IsUsedInstead(self):
         reading = read_statement(grid(without(SAVINGS, "Period 01/05/2025")))
 
