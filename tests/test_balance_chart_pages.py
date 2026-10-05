@@ -361,8 +361,10 @@ class TestCostAndSizeAtScale:
         assert took < 3.0, f"{took:.2f}s"
         # The shared stylesheet is most of the difference between this and a page of its own:
         # the coverage timeline's rules add about 1.6 kilobytes to every page (250,287 bytes
-        # measured against the old bound of 250,000), and the chart itself did not change.
-        assert len(timeline) < 252_000, len(timeline)
+        # measured against the old bound of 250,000), and the chart itself did not change. The
+        # Coverage by source grid and blocks added about 1.6 kilobytes more (253,579 bytes
+        # measured against 252,000).
+        assert len(timeline) < 255_000, len(timeline)
         assert len(values) < 500_000, len(values)
         page = Parsed(values.decode())
         assert len([a for a in page.find("path") if "data-series" in a]) == 3

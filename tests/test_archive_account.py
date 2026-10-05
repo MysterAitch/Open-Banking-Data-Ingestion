@@ -57,6 +57,7 @@ from obdi.spaces import ArchiveNote
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_accounts import archive_controls
+from page_dom import Node, elements, parse
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_alert_wiring import NOW, SILENT, _db, _keys, _schedule_truelayer, _three_cards
 from test_ledger import land, txn
@@ -164,20 +165,24 @@ class Lab:
     def unarchive(self, ref: str) -> httpx.Response:
         return self.post("/unarchive-account", {"ref": ref})
 
-    def home_row(self, ref: str) -> str:
-        """The holdings row for one account, so assertions cannot be satisfied
-        by a neighbouring row."""
-        # The Overview names every account too, with its own ledger link, so
-        # the rows are read from the coverage page that holds only them.
-        page = self.get("/coverage").text
-        assert "Held so far" in page, "the coverage page has lost its holdings"
-        marker = f"/ledger?ref={quote(ref, safe='')}"
-        pieces = page.split('<div class="row"')
-        rows = [piece for piece in pieces if marker in piece]
-        assert rows, f"no holdings row for {ref}"
-        # A row's own markup nests divs, so it ends where the next row begins
-        # or where the page's fixed links do.
-        return rows[0].split('<p><a class="button" href="/accounts">')[0]
+    def coverage_block(self, ref: str) -> str:
+        """What the Coverage by source page says in one account's block, so assertions cannot be
+        satisfied by a neighbouring block. The archive action is not on that page: it lives on
+        the account's own page (`account_page`), which the block's name links to."""
+        root = parse(self.get("/coverage").text)
+        for node in elements(root, "section"):
+            if node.attrs.get("data-ref") == ref:
+                return " ".join(
+                    child.text()
+                    for child in node.children
+                    if isinstance(child, Node) and "cov-spaces" not in child.classes
+                )
+        raise AssertionError(f"no coverage block for {ref}")
+
+    def account_page(self, ref: str) -> str:
+        """The account's own page, where the archive action, its suggestion, and the meaning of
+        a final-movement count live."""
+        return self.get("/ledger", ref=ref).text
 
 
 @pytest.fixture
@@ -464,36 +469,35 @@ class TestTapTargets:
 
 
 class TestTheLabelWhereTheAccountIsNamed:
-    def test_Home_WhenArchivedWithAStatedDate_SaysArchivedAndStatedNotQuiet(self, lab):
+    def test_Coverage_WhenArchivedWithAStatedDate_SaysArchivedAndStatedAndOffersNoForm(self, lab):
         lab.archive(BILLS, closed="2026-06-30")
 
-        row = lab.home_row(BILLS)
+        block = lab.coverage_block(BILLS)
+        page = lab.account_page(BILLS)
 
-        assert "archived 2026-06-30 (stated)" in row
-        assert "quiet since" not in row
-        assert "/unarchive-account" in row and "/archive-account" not in row
+        assert "archived 2026-06-30 (stated)" in block
+        assert "/unarchive-account" in page and 'action="/archive-account"' not in page
+        coverage = lab.get("/coverage").text
+        assert "/unarchive-account" not in coverage and "/archive-account" not in coverage
 
-    def test_Home_WhenArchivedWithAnInferredDate_SaysInferred(self, lab):
+    def test_Coverage_WhenArchivedWithAnInferredDate_SaysInferred(self, lab):
         lab.archive(BILLS, closed="2026-07-15", date_basis=f"{ARCHIVE_BASIS_PREFIX}2026-07-15")
 
-        row = lab.home_row(BILLS)
+        assert "archived 2026-07-15 (inferred)" in lab.coverage_block(BILLS)
 
-        assert "archived 2026-07-15 (inferred)" in row
+    def test_Coverage_WhenOpenAndNotSuggested_ShowsNoLabelAndTheAccountPageOffersArchive(self, lab):
+        block = lab.coverage_block(KEEP)
+        page = lab.account_page(KEEP)
 
-    def test_Home_WhenOpenAndNotSuggested_ShowsNoLabelAndOffersArchive(self, lab):
-        row = lab.home_row(KEEP)
+        assert "archived" not in block
+        assert "inferred" not in block
+        assert "Archive this account" in page and "/unarchive-account" not in page
 
-        assert "archived" not in row.replace("Archive this account", "")
-        assert "inferred" not in row
-        assert "Archive this account" in row and "/unarchive-account" not in row
-
-    def test_Home_WhenTheDeclaredClosingDateIsInTheFuture_ShowsNoArchivedLabel(self, lab):
+    def test_Coverage_WhenTheDeclaredClosingDateIsInTheFuture_ShowsNoArchivedLabel(self, lab):
         lab.declare(AccountRecord(ref=AccountRef(KEEP), label="Keep", closed=date(2099, 1, 1)))
 
-        row = lab.home_row(KEEP)
-
-        assert "archived 2099" not in row
-        assert "Archive this account" in row
+        assert "archived 2099" not in lab.coverage_block(KEEP)
+        assert "Archive this account" in lab.account_page(KEEP)
 
     def test_Ledger_WhenArchivedWithAStatedDate_HeaderSaysArchivedAndStated(self, lab):
         lab.archive(BILLS, closed="2026-06-30")
@@ -548,22 +552,34 @@ class TestDecidingWhichFieldsAreValues:
 
 
 class TestTheSuggestionFromTheListings:
-    def test_Home_WhenASpaceIsAbsentFromTheNewestListing_SuggestsItBesideTheAccount(self, lab):
-        row = lab.home_row(BILLS)
+    def test_Account_WhenASpaceIsAbsentFromTheNewestListing_SuggestsItWithTheFormOnItsOwnPage(
+        self, lab
+    ):
+        page = lab.account_page(BILLS)
 
-        assert "no longer lists this Space" in row
-        assert "Nothing has been changed" in row
-        assert 'name="closed" value="2026-07-15"' in row
-        assert f'value="{ARCHIVE_BASIS_PREFIX}2026-07-15"' in row
-        assert "2026-09-28" in row
+        assert "no longer lists this Space" in page
+        assert "Nothing has been changed" in page
+        assert 'name="closed" value="2026-07-15"' in page
+        assert f'value="{ARCHIVE_BASIS_PREFIX}2026-07-15"' in page
+        assert "2026-09-28" in page
 
-    def test_Home_WhenASpaceIsListedInEveryResponse_SuggestsNothing(self, lab):
-        row = lab.home_row(KEEP)
+    def test_Coverage_WhenASpaceIsAbsentFromTheNewestListing_SaysSoWithNoFormAndPointsAtThePage(
+        self, lab
+    ):
+        block = lab.coverage_block(BILLS)
 
-        assert "no longer lists" not in row
-        assert "Archive as inferred" not in row
+        assert "stopped listing this Space after 2026-07-15" in block
+        assert "Open the account to archive it" in block
+        assert 'name="closed"' not in lab.get("/coverage").text
 
-    def test_Home_WhenASpaceIsMissingFromAMiddleListingOnly_SuggestsNothing(self, make_lab):
+    def test_Account_WhenASpaceIsListedInEveryResponse_SuggestsNothing(self, lab):
+        page = lab.account_page(KEEP)
+
+        assert "no longer lists" not in page
+        assert "Archive as inferred" not in page
+        assert "stopped listing" not in lab.coverage_block(KEEP)
+
+    def test_Account_WhenASpaceIsMissingFromAMiddleListingOnly_SuggestsNothing(self, make_lab):
         lab = make_lab(
             [
                 (date(2026, 7, 1), THREE),
@@ -572,18 +588,18 @@ class TestTheSuggestionFromTheListings:
             ]
         )
 
-        row = lab.home_row(BILLS)
+        assert "no longer lists" not in lab.account_page(BILLS)
+        assert "Archive as inferred" not in lab.account_page(BILLS)
+        assert "stopped listing" not in lab.coverage_block(BILLS)
 
-        assert "no longer lists" not in row
-        assert "Archive as inferred" not in row
-
-    def test_Home_WhenNoListingsAreHeld_SuggestsNothingForAnySpace(self, make_lab):
+    def test_Account_WhenNoListingsAreHeld_SuggestsNothingForAnySpace(self, make_lab):
         lab = make_lab([])
 
         for ref in (BILLS, QUIET, KEEP):
-            assert "Archive as inferred" not in lab.home_row(ref)
+            assert "Archive as inferred" not in lab.account_page(ref)
+            assert "stopped listing" not in lab.coverage_block(ref)
 
-    def test_Home_WhenTheNewestListingIsUnreadable_SuggestsNothing(self, make_lab):
+    def test_Account_WhenTheNewestListingIsUnreadable_SuggestsNothing(self, make_lab):
         lab = make_lab([(LISTING_ONE, THREE)])
         with Store(lab.db) as store:
             store.land_artefact(
@@ -598,7 +614,8 @@ class TestTheSuggestionFromTheListings:
                 )
             )
 
-        assert "Archive as inferred" not in lab.home_row(BILLS)
+        assert "Archive as inferred" not in lab.account_page(BILLS)
+        assert "stopped listing" not in lab.coverage_block(BILLS)
 
     def test_Suggestion_PressedAsRendered_ArchivesWithTheInferenceRecorded(self, lab):
         lab.archive(
@@ -609,8 +626,8 @@ class TestTheSuggestionFromTheListings:
         assert record is not None
         assert record.closed == date(2026, 7, 15)
         assert record.date_basis == "inferred: no longer listed after 2026-07-15"
-        assert "archived 2026-07-15 (inferred)" in lab.home_row(BILLS)
-        assert "Archive as inferred" not in lab.home_row(BILLS)
+        assert "archived 2026-07-15 (inferred)" in lab.coverage_block(BILLS)
+        assert "Archive as inferred" not in lab.account_page(BILLS)
 
     def test_Suggestion_ComputedAndRenderedOnEveryPage_WritesNothingToTheRegistry(self, lab):
         def counts() -> tuple[int, int, int]:
@@ -639,28 +656,40 @@ class TestTheSuggestionFromTheListings:
 
 
 class TestFinalMovementsArePresentOnlyAsACount:
-    def test_Home_ForASuggestedSpaceWithLateParentLegs_CountsExactlyThoseLegs(self, lab):
-        row = lab.home_row(BILLS)
+    def test_Account_ForASuggestedSpaceWithLateParentLegs_CountsExactlyThoseLegs(self, lab):
+        page = lab.account_page(BILLS)
 
-        assert f"Final movements not held in {PARENT}: <strong>2</strong>" in row
+        assert f"Final movements not held in {PARENT}: <strong>2</strong>" in page
 
-    def test_Home_ForASuggestedSpaceWithNoLaterParentLegs_CountsZero(self, lab):
-        row = lab.home_row(QUIET)
+    def test_Account_ForASuggestedSpaceWithNoLaterParentLegs_CountsZero(self, lab):
+        assert "<strong>0</strong>" in lab.account_page(QUIET)
 
-        assert "<strong>0</strong>" in row
+    def test_Account_TheCount_IsAccompaniedByWhatANonZeroCountMeans(self, lab):
+        assert "A non-zero count means" in lab.account_page(BILLS)
 
-    def test_Home_TheCount_IsAccompaniedByWhatANonZeroCountMeans(self, lab):
-        row = lab.home_row(BILLS)
+    def test_Coverage_ForASuggestedSpaceWithLateParentLegs_SaysWhatIsMissingInOneSentence(
+        self, lab
+    ):
+        block = lab.coverage_block(BILLS)
 
-        assert "A non-zero count means" in row
+        assert "2 transfers" in block
+        assert "last movements may be missing" in block
+        assert "Open the account to see what that means" in block
+        assert "A non-zero count means" not in lab.get("/coverage").text
 
-    def test_Home_ForAnArchivedSpace_ShowsTheCountToo(self, lab):
+    def test_Coverage_ForASuggestedSpaceWithNoLaterParentLegs_SaysNothingOfMovements(self, lab):
+        assert "movements" not in lab.coverage_block(QUIET)
+        assert "transfer" not in lab.coverage_block(QUIET)
+
+    def test_Coverage_ForAnArchivedSpace_SaysWhatIsMissingToo(self, lab):
         lab.archive(BILLS)
 
-        assert "<strong>2</strong>" in lab.home_row(BILLS)
+        assert "2 transfers" in lab.coverage_block(BILLS)
+        assert "<strong>2</strong>" in lab.account_page(BILLS)
 
-    def test_Home_ForAnOpenSpaceStillListed_ShowsNoCount(self, lab):
-        assert "Final movements" not in lab.home_row(KEEP)
+    def test_Coverage_ForAnOpenSpaceStillListed_SaysNothingOfMovements(self, lab):
+        assert "movements" not in lab.coverage_block(KEEP)
+        assert "Final movements" not in lab.account_page(KEEP)
 
     def test_Pages_CarryNoAmountOrDescriptionOfTheCountedLegs(self, lab):
         pages = [
@@ -675,7 +704,7 @@ class TestFinalMovementsArePresentOnlyAsACount:
             for secret in (*PRIVATE_DESCRIPTIONS, *PRIVATE_FIGURES):
                 assert secret not in page, secret
 
-    def test_Home_ForAnArchivedSpaceWithNoKnownParent_SaysItCouldNotBeCounted(self, lab):
+    def test_Coverage_ForAnArchivedSpaceWithNoKnownParent_SaysItCouldNotBeCounted(self, lab):
         # A Space that no listing names and that holds a row: nothing says
         # which account it sits under.
         with Store(lab.db) as store:
@@ -690,16 +719,20 @@ class TestFinalMovementsArePresentOnlyAsACount:
             )
         )
 
-        row = lab.home_row("starling:orphan")
+        block = lab.coverage_block("starling:orphan")
 
-        assert "Final movements: not counted - no parent account is known" in row
+        assert "last movements could not be counted: no parent account is known" in block
+        assert "Final movements: not counted - no parent account is known" in lab.account_page(
+            "starling:orphan"
+        )
 
-    def test_Home_ForAnArchivedPlainAccount_ShowsNoFinalMovementCount(self, lab):
+    def test_Coverage_ForAnArchivedPlainAccount_SaysNothingOfFinalMovements(self, lab):
         lab.declare(
             AccountRecord(ref=AccountRef(PARENT), label="Main", closed=date(2026, 6, 5))
         )
 
-        assert "Final movements" not in lab.home_row(PARENT)
+        assert "movements" not in lab.coverage_block(PARENT)
+        assert "Final movements" not in lab.account_page(PARENT)
 
 
 class TestTheSilentFeedAlertFollowsTheToggle:

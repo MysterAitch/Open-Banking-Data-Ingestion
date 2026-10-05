@@ -717,7 +717,7 @@ class TestWiring:
         finally:
             httpd.shutdown()
 
-    def test_HomePage_LinksEachHeldAccountToItsLedger_BesideTheShapeLink(self, tmp_path):
+    def test_CoveragePage_LinksEachHeldAccountToItsOwnPage_WhichIsItsLedger(self, tmp_path):
         from obdi.coverage import SourceCoverage
         from obdi.web_sections import render_coverage
 
@@ -735,8 +735,10 @@ class TestWiring:
         ]
         page = render_coverage(holdings=lambda: holdings).decode()
 
-        assert 'href="/account?ref=halifax-current"' in page
+        # The field-by-field shape page is no longer linked from every block of this page: the
+        # account's own page is the one onward link, and holds the archive action.
         assert 'href="/ledger?ref=halifax-current"' in page
+        assert page.count('href="/ledger?ref=halifax-current"') == 1
 
     def test_Hook_BuiltFromTheRealConfiguration_ReadsTheStoreAndTheActualBindings(
         self, tmp_path, monkeypatch
