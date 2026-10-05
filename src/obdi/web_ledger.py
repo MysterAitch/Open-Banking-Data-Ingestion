@@ -2216,10 +2216,13 @@ def _opening_html(
     differing = any(line.verdict == "differs" for line in opening.anchors) or (
         opening.family is not None and bool(opening.family.differing)
     )
+    # A disregard that no longer applies is a decision about nothing, which only this section can
+    # remove, so it is not left folded away.
+    stale = any(entry.stale for entry in opening.disregarded)
     return _disclosure(
         f"Known balances and the opening ({_opening_gist(opening)})",
         body,
-        open=held or differing or everything,
+        open=held or differing or everything or stale,
         anchor=OPENING_ANCHOR,
     )
 

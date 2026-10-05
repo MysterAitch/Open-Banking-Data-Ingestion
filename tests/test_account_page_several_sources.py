@@ -53,10 +53,18 @@ class Page(HTMLParser):
         self.attributes: list[str] = []
         self._button = False
         self._styled = False
+        self._details_open = False
+        self._summary = False
+        #: The summary of each folded section, and whether it is open.
+        self.sections: dict[str, bool] = {}
 
     def handle_starttag(self, tag, attrs):
         values = {k: v or "" for k, v in attrs}
         self.attributes += [v for v in values.values() if v]
+        if tag == "details":
+            self._details_open = "open" in values
+        elif tag == "summary":
+            self._summary = True
         if tag == "form":
             self.forms.append(Form(values.get("action", "")))
         elif tag == "input" and self.forms:
@@ -75,6 +83,9 @@ class Page(HTMLParser):
     def handle_data(self, data):
         if self._styled:
             return
+        if self._summary and data.strip():
+            self.sections[data.strip()] = self._details_open
+            self._summary = False
         if self._button and self.forms:
             self.forms[-1].button += data
         if data.strip():
@@ -119,6 +130,11 @@ def page_of(base: str) -> Page:
     parsed = Page()
     parsed.feed(response.text)
     return parsed
+
+
+def known_balances_open(page: Page) -> list[bool]:
+    """Whether the folded "Known balances and the opening" section is open, as a list of one."""
+    return [open_ for name, open_ in page.sections.items() if name.startswith("Known balances")]
 
 
 def holds_no_figure(page: Page) -> None:
@@ -218,6 +234,40 @@ class TestADisregardThatNoLongerApplies:
         assert removal[0].button.startswith("Remove the disregard")
         assert all(f.fields["source"] != "stated" for f in page.to("/ledger-balance-disregard"))
         holds_no_figure(page)
+
+    def test_Page_WhenADisregardNoLongerApplies_TheSectionThatRemovesItIsNotFoldedAway(
+        self, served
+    ):
+        base, path = served
+        with Store(path) as store:
+            disregard_balance(store, ACCOUNT, DAY.isoformat(), "stated", "stated")
+            remove_stated_anchor(store, ACCOUNT, DAY.isoformat())
+
+        assert known_balances_open(page_of(base)) == [True]
+
+    def test_Page_WhenNothingIsDisregardedAndAllAddsUp_LeavesTheSectionFolded(
+        self, tmp_path, monkeypatch
+    ):
+        """The control: a quiet account keeps the section folded, so opening it for a stale
+        disregard is the stale disregard's doing and not a change to every account."""
+        monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "connections.json"))
+        monkeypatch.delenv("OBDI_ACCOUNT_MAP", raising=False)
+        path = tmp_path / "store.sqlite3"
+        with Store(path) as store:
+            world(store, tmp_path, "-115.00")
+        config = build_web_config(path)
+        assert config is not None
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            page = page_of(f"http://127.0.0.1:{httpd.server_port}")
+        finally:
+            httpd.shutdown()
+
+        assert known_balances_open(page) == [False]
 
     def test_Disregard_WhenTheStaleOneIsRemovedFromThePage_TheStoreHoldsNoDisregard(self, served):
         base, path = served
