@@ -1229,11 +1229,15 @@ def _window_words(spec: WindowSpec, window: Window, *, today: date, held: Balanc
         sentence += (
             f" No balance is known before {window.first.isoformat()}, so the window starts there."
         )
-    return (
-        f"<p data-window-words><strong>{_esc(sentence)}</strong></p>"
-        '<p class="muted" data-window-note>The counts, the first and last change, the levels, '
-        "and the chart below are of this window and not of every day held.</p>"
-    )
+    return f"<p data-window-words><strong>{_esc(sentence)}</strong></p>"
+
+
+#: Said once a window's chart is in view, below it on a phone so the chart is not pushed
+#: off the first screen by explanation.
+_WINDOW_NOTE = (
+    '<p class="muted" data-window-note>The counts, the first and last change, the levels, '
+    "and the chart are of this window and not of every day held.</p>"
+)
 
 
 def _chosen(
@@ -1275,19 +1279,13 @@ def _window_form(ref: str, chosen: _Chosen, *, unmasked: bool) -> str:
     address may then carry the window, and a POST for the page with values, whose answer
     has none. The first button sends `KEEP`, so a bare Enter in a field redraws what the
     page already shows and never picks a window."""
-    note = (
-        ""
-        if unmasked
-        else '<p class="muted">Choosing a window redraws this timeline over it. Values stay '
-        "hidden until they are asked for.</p>"
-    )
     method = "post" if unmasked else "get"
     return (
         f'<form method="{method}" action="/balance-chart" data-window-form>'
         f'<input type="hidden" name="ref" value="{_esc(ref)}">'
         f'<button type="submit" name="window" value="{KEEP}" class="visually-hidden" '
         'tabindex="-1" aria-hidden="true">Redraw</button>'
-        + window_controls(chosen.choice, today=chosen.today.isoformat(), note=note)
+        + window_controls(chosen.choice, today=chosen.today.isoformat())
         + "</form>"
     )
 
@@ -1406,6 +1404,7 @@ def render_balance_chart(
             f"{scale.per_day:.2f} pixels a day.</p>"
             + everything
             + _range_summary(changes, scale.start, scale.end, noun)
+            + (_WINDOW_NOTE if chosen.windowed else "")
             + earlier
             + _change_links(view.ref, changes)
         )
@@ -1420,7 +1419,8 @@ def render_balance_chart(
             + _steps_table(structure, scale, noun)
         )
     else:
-        body += _range_summary(changes, scale.start, scale.end, noun) + earlier
+        body += _range_summary(changes, scale.start, scale.end, noun)
+        explained = (_WINDOW_NOTE if chosen.windowed else "") + earlier
         if changes or carried:
             strip, unit = _fitted_strip(
                 structure, changes, _Plot(scale.start, scale.end), carried
@@ -1428,6 +1428,7 @@ def render_balance_chart(
             kinds = [k for k in KINDS if any(c.kind == k for c in [*changes, *carried])]
             body += (
                 strip
+                + explained
                 + f"<p>Each mark stands for the changes in one {unit}, and a number beside a "
                 "mark is how many it holds.</p>"
                 + _longest_level_sentence(structure, scale.start, scale.end, noun)
@@ -1437,7 +1438,7 @@ def render_balance_chart(
             if changes:
                 body += _counts_table(view.ref, changes, scale.start, scale.end)
         else:
-            body += everything
+            body += explained + everything
         body += (
             _scope_note(view)
             + _mode(view, unmasked, start, end, chosen)

@@ -235,6 +235,13 @@ class TestADifferenceThatBeganBeforeTheWindow:
             "the join starts at the middle of the window's first day, not before the plot"
         )
 
+    def test_MaskedPage_PutsTheStripBeforeTheExplanationSoItIsOnTheFirstScreenOfAPhone(self):
+        page = window_page(**BETWEEN_THE_PAIRS_STEPS)
+
+        assert page.index('id="bc-strip-t"') < page.index("data-window-note")
+        assert page.index('id="bc-strip-t"') < page.index("A timing pair began before")
+        assert page.index("data-window-words") < page.index('id="bc-strip-t"')
+
     def test_PairBetweenItsTwoSteps_HasATitleSayingItBeganBeforeTheWindow(self):
         html = window_page(**BETWEEN_THE_PAIRS_STEPS)
 
