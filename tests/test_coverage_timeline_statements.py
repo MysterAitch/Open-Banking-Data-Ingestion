@@ -204,6 +204,21 @@ class TestNotYetAvailable:
         assert "1 gap to fill" in verdict.group(1)
         assert "Next statement expected about 2026-10-11." in verdict.group(1)
 
+    def test_HoleSentence_WhenTheBalancesDiffer_SaysTheFactAndKeepsOnlyTheEndAsAGuess(self, page):
+        assert "The statements either side do not meet" in page
+        assert "Where the missing statement ends is inferred" in page
+        assert "This is inferred from how regularly the statements held arrive." not in page
+
+    def test_HoleSentence_WhenTheBalancesAreEqual_StaysAnInference(self, net_nil):
+        view = timeline_of(net_nil, CARD, TODAY)
+        assert view is not None
+        assert [g.balances_differ for g in view.gaps] == [False]
+        text = render_account_timeline(
+            view, fields={"window": "all", "window_held": "all"}
+        ).decode()
+        assert "do not meet" not in text
+        assert "This is inferred from how regularly the statements held arrive." in text
+
     def test_Key_ExplainsTheQuietStretchAndTheExpectedMark(self, page):
         assert "Not available yet: the next statement does not exist until its period ends" in page
         assert "When the next statement is expected to close" in page

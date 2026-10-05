@@ -18,8 +18,14 @@ TIMELINE_STYLES = """
  .cov-label { display: flex; flex-direction: column; justify-content: center; padding: 0 var(--s2); border-bottom: var(--rule-weight) solid var(--rule-2); overflow: hidden; }
  .cov-label small { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
  .cov-label a { color: inherit; }
- .cov-scroll { flex: 1 1 0; min-width: 0; overflow-x: auto; }
+ .cov-scroll { flex: 1 1 0; min-width: 0; overflow-x: auto; direction: rtl; }
+ .cov-inner { direction: ltr; min-width: 100%; }
  .cov-scroll svg { display: block; max-width: none; }
+ .cov-break-fill { fill: var(--rule); }
+ .cov-break-cut { stroke: var(--ink-2); stroke-width: 1.5; }
+ .cov-svg text.cov-break-label { fill: var(--ink-2); paint-order: stroke; stroke: var(--card); stroke-width: 3; text-anchor: middle; }
+ .cov-quiet-list { margin: var(--s1) 0 var(--s2); padding-left: var(--s5); font: var(--text-sm)/140% var(--sans); }
+ .cov-quiet-list a { display: inline-flex; align-items: center; min-height: var(--hit); }
  .cov-fit { flex: 1 1 0; min-width: 0; }
  .cov-fit svg { display: block; width: 100%; height: auto; }
  .cov-svg text { font: var(--text-xs) var(--sans); fill: var(--ink); }

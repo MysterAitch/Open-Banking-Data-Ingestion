@@ -279,6 +279,42 @@ def build_card(
             import_file(store, path, account_id=CARD)
 
 
+LONG = "long"
+
+
+def build_long(root: Path) -> Path:
+    """One account over nearly eight years in which, for most of it, nothing changes.
+
+    A single export file lists one row of 10.00 on the 15th of every month from 2019-01 to
+    2026-09 (93 rows), and known balances are stated on 2019-01-01 (1000.00), 2022-06-15 (580.00)
+    and 2026-09-15 (70.00), each of which the rows reproduce. So the verification lane agrees
+    from 2019-01-01 to 2026-09-15 with nothing else to see: the export covers 2019-01-15 to
+    2026-09-15 and then stops, 20 days short of today (2026-10-05). Everything between the
+    margins of those events (2019-01-26 to 2026-09-04) is one quiet stretch.
+    """
+    db = root / "long.sqlite3"
+    with Store(db) as store:
+        store.declare_account(AccountRecord(ref=AccountRef(LONG), label="Long account"))
+        lines = "".join(
+            f"15/{month:02d}/{year},Standing order,Rent,STANDING ORDER,-10.00\n"
+            for year in range(2019, 2027)
+            for month in range(1, 13)
+            if (year, month) <= (2026, 9)
+        )
+        path = root / "long.csv"
+        path.write_text(
+            "Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8"
+        )
+        import_file(store, path, account_id=LONG)
+        for day, pounds in (
+            ("2019-01-01", "1000.00"),
+            ("2022-06-15", "580.00"),
+            ("2026-09-15", "70.00"),
+        ):
+            record_stated_anchor(store, LONG, day, pounds, today=TODAY)
+    return db
+
+
 def build_household(
     root: Path,
     *,

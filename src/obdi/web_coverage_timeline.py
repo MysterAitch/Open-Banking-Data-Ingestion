@@ -59,7 +59,10 @@ from .coverage_timeline import (
     Gap,
     Lane,
     Marker,
+    Quiet,
     Seam,
+    quiet_stretches,
+    span_words,
 )
 from .date_window import resolve
 from .logs import say
@@ -72,6 +75,7 @@ from .web_balance_chart import (
     TARGET_RANGE_WIDTH,
     Scale,
     _axis,
+    _label,
     choose_scale,
 )
 from .window_control import (
@@ -110,6 +114,7 @@ FAINT = {
     "protected": ".1",
     "agrees": ".6",
     "ver-held": ".6",
+    "break": ".35",
 }
 
 #: What each way of knowing an edge is called, said once for the key and the titles. "Balances
@@ -276,11 +281,71 @@ class _Entry:
     gap: Gap | None = None
 
 
+#: The width, in chart units, of a collapsed stretch: room for a two-line label of its length.
+BREAK_W = 72.0
+
+#: The fields this page adds for the quiet stretches (see `quiet_stretches`): `days=all` draws
+#: every day, and `expand` names stretches (as `first_last`, comma-joined) to draw in full.
+DAYS_FIELD = "days"
+EXPAND_FIELD = "expand"
+EVERY_DAY = "all"
+
+
+@dataclass(frozen=True)
+class BrokenScale(Scale):
+    """A `Scale` whose axis is not uniform: each quiet stretch is `BREAK_W` units wide.
+
+    `x` is the one mapping from a day to a place that knows the breaks, and everything on the
+    chart goes through it, so nothing can be drawn as if the axis were continuous. A day inside a
+    stretch is placed in proportion across the stretch's fixed width, so a bar that runs through
+    it is drawn straight through.
+    """
+
+    breaks: tuple[Quiet, ...] = ()
+
+    def in_break(self, day: date) -> bool:
+        return any(b.first <= day <= b.last for b in self.breaks)
+
+    def _removed(self, quiet: Quiet) -> float:
+        return quiet.days * self.per_day - BREAK_W
+
+    @property
+    def width(self) -> float:
+        return super().width - sum(self._removed(b) for b in self.breaks)
+
+    def x(self, day: date) -> float:
+        removed = 0.0
+        for b in self.breaks:
+            if day > b.last:
+                removed += self._removed(b)
+            elif day >= b.first:
+                left = EDGE + (b.first - self.start).days * self.per_day - removed
+                return left + (day - b.first).days / b.days * BREAK_W
+            else:
+                break
+        return EDGE + (day - self.start).days * self.per_day - removed
+
+    def break_edges(self) -> list[tuple[Quiet, float, float]]:
+        """Each stretch with the x of its left and right cut."""
+        return [(b, self.x(b.first), self.x(b.first) + BREAK_W) for b in self.breaks]
+
+
+def _in_break(scale: Scale, day: date) -> bool:
+    return isinstance(scale, BrokenScale) and scale.in_break(day)
+
+
+def _bucket_index(scale: Scale, day: date, width: float) -> int:
+    """Which `width`-unit bucket of the drawn axis a day falls in."""
+    return int((scale.x(day) - scale.x(scale.start)) / width + 1e-9)
+
+
 def notch_xs(lane: Lane, scale: Scale) -> list[float]:
     """The x of each capture boundary worth a notch, thinned by `NOTCH_MIN_PX`."""
     xs: list[float] = []
     for capture in lane.captures:
         if capture.last < scale.start or capture.first > scale.end:
+            continue
+        if _in_break(scale, capture.first) or _in_break(scale, capture.last):
             continue
         fraction = capture.fraction if capture.last_state == PARTIAL and capture.fraction else 1.0
         xs.append(scale.x(capture.first))
@@ -305,37 +370,44 @@ def listed_marks(lane: Lane, scale: Scale) -> list[tuple[float, float, float]]:
 
     One mark a day from `LISTED_DAY_MIN_PX` a day; one a bucket below it.
     """
-    days = sorted(d for d in lane.listed if scale.start <= d <= scale.end)
+    days = sorted(
+        d for d in lane.listed if scale.start <= d <= scale.end and not _in_break(scale, d)
+    )
     if scale.per_day >= LISTED_DAY_MIN_PX:
         return [(scale.x(d), scale.per_day, 1.0) for d in days]
     size = _bucket_days(scale.per_day, LISTED_DAY_MIN_PX)
+    wide = size * scale.per_day
     buckets: dict[int, int] = {}
     for day in days:
-        index = (day - scale.start).days // size
+        index = _bucket_index(scale, day, wide)
         buckets[index] = buckets.get(index, 0) + 1
     return [
-        (scale.x(scale.start) + index * size * scale.per_day, size * scale.per_day, count / size)
+        (scale.x(scale.start) + index * wide, wide, count / size)
         for index, count in sorted(buckets.items())
     ]
 
 
 def known_ticks(view: AccountTimeline, scale: Scale) -> list[tuple[float, str, int]]:
     """(x, worst problem, count) of the known balances in view; see `KNOWN_TICK_MIN_PX`."""
-    known = [k for k in view.verification.known if scale.start <= k.day <= scale.end]
+    known = [
+        k for k in view.verification.known
+        if scale.start <= k.day <= scale.end and not _in_break(scale, k.day)
+    ]
     if scale.per_day >= KNOWN_TICK_MIN_PX:
         return [(scale.x(k.day) + scale.per_day / 2, k.problem, 1) for k in known]
     size = _bucket_days(scale.per_day, KNOWN_TICK_MIN_PX)
+    wide = size * scale.per_day
     severity = {UNREPRODUCED: 2, CONFLICT: 1, "": 0}
     buckets: dict[int, tuple[str, int]] = {}
     for item in known:
-        index = (item.day - scale.start).days // size
+        index = _bucket_index(scale, item.day, wide)
         worst, count = buckets.get(index, ("", 0))
         buckets[index] = (
             item.problem if severity[item.problem] > severity[worst] else worst,
             count + 1,
         )
     return [
-        (scale.x(scale.start) + (index + 0.5) * size * scale.per_day, worst, count)
+        (scale.x(scale.start) + (index + 0.5) * wide, worst, count)
         for index, (worst, count) in sorted(buckets.items())
     ]
 
@@ -372,6 +444,13 @@ def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
         if gap.stated
         else "This is inferred from how regularly the statements held arrive."
     )
+    if gap.balances_differ and not gap.stated:
+        # Unequal balances prove a statement is missing; only where it ends is a guess.
+        basis = (
+            "The statements either side do not meet: the later one does not open on the "
+            "balance the earlier one closed on. Where the missing statement ends is inferred "
+            "from how regularly they arrive."
+        )
     probably = ""
     if gap.probably:
         closing = " and ".join(day.isoformat() for day in gap.closings)
@@ -380,7 +459,8 @@ def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
             f"{'is' if gap.probably == 1 else 'are'} missing"
             + (f", closing about {closing}." if closing else ".")
         )
-    return f"{label} for {span} ({days}). {gap.why}{probably} {basis}"
+    why = "" if gap.balances_differ and not gap.stated else f" {gap.why}"
+    return f"{label} for {span} ({days}).{why}{probably} {basis}"
 
 
 def _seam_sentence(view: AccountTimeline, seam: Seam) -> str:
@@ -481,9 +561,72 @@ def _run_end(lane: Lane, run_last: date) -> tuple[str, float | None]:
     return COMPLETE, None
 
 
-def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
+def _break_marks(
+    scale: BrokenScale, top: float, bottom: float, expand_href: Callable[[Quiet], str] | None
+) -> tuple[list[str], list[str]]:
+    """(the shading under the bars, the cuts and labels over them) for each collapsed stretch.
+
+    Each end of a stretch is a zigzag cut through the axis and every lane, so the axis is not
+    read as continuous, and the stretch is labelled with how long it is and linked to the chart
+    with it drawn in full. The label sits at mid-height, between the two axes' tick labels.
+    """
+    under: list[str] = []
+    over: list[str] = []
+    for quiet, left, right in scale.break_edges():
+        words = span_words(quiet.first, quiet.last)
+        full = (
+            f"{quiet.first.isoformat()} to {quiet.last.isoformat()} - {words}, nothing changed"
+        )
+        under.append(_rect("cov-break-fill", left, top, right - left, bottom - top, "break"))
+        cuts = "".join(
+            _el(
+                "polyline", "cov-break-cut",
+                ("points", _zigzag(edge, top, bottom)), ("fill", "none"),
+            )
+            for edge in (left, right)
+        )
+        tokens = words.split()
+        lines = [" ".join(tokens[i : i + 2]) for i in range(0, len(tokens), 2)]
+        mid = (top + bottom) / 2
+        text = "".join(
+            f'<text class="cov-break-label" x="{(left + right) / 2:.1f}" '
+            f'y="{mid + (n - (len(lines) - 1) / 2) * 13 + 4:.1f}" text-anchor="middle">'
+            f"{_esc(line)}</text>"
+            for n, line in enumerate(lines)
+        )
+        hit = _el("rect", "cov-break-hit cov-focus", ("x", f"{left:.1f}"), ("y", f"{top:.1f}"),
+                  ("width", f"{right - left:.1f}"), ("height", f"{bottom - top:.1f}"),
+                  ("fill", "transparent"))
+        inner = f"<title>{_esc(full)}</title>{hit}{cuts}{text}"
+        if expand_href is not None:
+            over.append(f'<a href="{_esc(expand_href(quiet))}">{inner}</a>')
+        else:
+            over.append(f"<g>{inner}</g>")
+    return under, over
+
+
+def _zigzag(x: float, top: float, bottom: float) -> str:
+    """A cut: a vertical line that steps three units either side of `x` every six."""
+    points = []
+    y, side = top, 1
+    while y < bottom:
+        points.append(f"{x + 3 * side:.1f},{y:.1f}")
+        y += 6
+        side = -side
+    points.append(f"{x + 3 * side:.1f},{bottom:.1f}")
+    return " ".join(points)
+
+
+def _draw(
+    view: AccountTimeline,
+    scale: Scale,
+    rows: Sequence[_Row],
+    expand_href: Callable[[Quiet], str] | None = None,
+) -> _Drawn:
     layers: dict[str, list[str]] = {
-        name: [] for name in ("hatch", "bands", "rules", "bars", "gaps", "seams", "marks", "today")
+        name: [] for name in (
+            "hatch", "bands", "rules", "bars", "breaks", "gaps", "seams", "marks", "today"
+        )
     }
     used: set[str] = set()
     entries: list[_Entry] = []
@@ -519,10 +662,15 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
 
     month = scale.start.replace(day=1)
     while month <= scale.end:
-        if month >= scale.start:
+        if month >= scale.start and not _in_break(scale, month):
             cls = "cov-rule-year" if month.month == 1 else "cov-rule"
             layers["rules"].append(_line(cls, scale.x(month), top, scale.x(month), bottom))
         month = (month + timedelta(days=32)).replace(day=1)
+    if isinstance(scale, BrokenScale) and scale.breaks:
+        under, over = _break_marks(scale, top - AXIS_H, bottom + AXIS_H, expand_href)
+        layers["bands"].extend(under)
+        layers["breaks"].extend(over)
+        used.add("break")
 
     # Verification lane.
     vrow = rows[0]
@@ -677,16 +825,17 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
     # Issues lane and unmatched marks.
     irow = rows[-1]
     size = _bucket_days(px, MERGE_PX)
+    wide = size * px
     merged: dict[tuple[str, str, int], list[Marker]] = {}
     for marker in view.markers:
         if not scale.start <= marker.day <= scale.end:
             continue
-        index = (marker.day - scale.start).days // size
+        index = _bucket_index(scale, marker.day, wide)
         merged.setdefault((marker.kind, marker.source, index), []).append(marker)
     for number, ((kind, source, index), group) in enumerate(sorted(merged.items()), start=1):
         ident = f"i{number}"
         count = sum(m.count for m in group)
-        x = scale.x(scale.start) + (index + 0.5) * size * px
+        x = scale.x(scale.start) + (index + 0.5) * wide
         lead = group[0]
         on_lane = lane_row.get(source) if kind == UNMATCHED else None
         y = on_lane.y + LANE_H - 9 if on_lane is not None else irow.y + irow.height / 2
@@ -723,20 +872,94 @@ def _draw(view: AccountTimeline, scale: Scale, rows: Sequence[_Row]) -> _Drawn:
     return _Drawn(layers, used, entries, defs)
 
 
-_PAINT = ("hatch", "bands", "rules", "bars", "gaps", "seams", "marks", "today")
+_PAINT = ("hatch", "bands", "rules", "bars", "breaks", "gaps", "seams", "marks", "today")
 
 
-def chart_svg(view: AccountTimeline, scale: Scale, *, fit: bool) -> tuple[str, _Drawn, list[_Row]]:
+def collapsed_words(scale: Scale) -> str:
+    """How much of the axis is abbreviated, or "" where none is: "3 quiet stretches collapsed,
+    5 years 8 months in all". Said in the verdict and the chart's description, because a
+    chart with breaks is not to scale."""
+    if not isinstance(scale, BrokenScale) or not scale.breaks:
+        return ""
+    total = sum(b.days for b in scale.breaks)
+    return (
+        f"{plural(len(scale.breaks), 'quiet stretch', 'quiet stretches')} collapsed, "
+        f"{span_words(scale.start, scale.start + timedelta(days=total - 1))} in all"
+    )
+
+
+def not_to_scale(scale: Scale) -> str:
+    """The sentence, with its leading space, that says how much is abbreviated; "" if none."""
+    said = collapsed_words(scale)
+    return f" {said[0].upper()}{said[1:]}: the chart is not to scale." if said else ""
+
+
+def _axis_for(scale: Scale, *, month_y: Sequence[float]) -> str:
+    """The balance chart's axis where the axis is continuous. Where it is cut, the same ticks
+    and labels, except those a cut would overlap or that fall inside a collapsed stretch."""
+    if not isinstance(scale, BrokenScale) or not scale.breaks:
+        return _axis(scale, month_y=month_y)
+    edges = [(left, right) for _, left, right in scale.break_edges()]
+
+    def clear(x: float, width: float) -> bool:
+        return not any(x - 6 <= right and left <= x + width for left, right in edges)
+
+    parts: list[str] = []
+    month = scale.start.replace(day=1)
+    while month <= scale.end:
+        if month >= scale.start and not scale.in_break(month) and clear(scale.x(month), 62):
+            for y in month_y:
+                parts.append(_label(scale.x(month) + 3, y, f"{month:%b} {month.year}"))
+        month = (month + timedelta(days=32)).replace(day=1)
+    step = 1 if scale.per_day >= 60 else 7 if scale.per_day >= 14 else 0
+    if step:
+        # A window that begins mid-month has no month tick at its left edge, so the first day is
+        # named in full, as the continuous axis does.
+        named_start = scale.fitted and scale.start.day != 1
+        if named_start:
+            parts.append(
+                _label(scale.x(scale.start) + 2, month_y[0] + 13,
+                       f"{scale.start.day} {scale.start:%b} {scale.start.year}",
+                       ' fill-opacity=".7"')
+            )
+        for offset in range(scale.days):
+            day = scale.start + timedelta(days=offset)
+            if (
+                (day.day - 1) % step == 0
+                and not (named_start and offset * scale.per_day < 80)
+                and day.day != 1
+                and not scale.in_break(day)
+                and clear(scale.x(day), 16)
+                and not any(
+                    0 <= scale.x(day) - scale.x(first_of) < 62
+                    for first_of in (day.replace(day=1),)
+                    if first_of >= scale.start and not scale.in_break(first_of)
+                )
+            ):
+                parts.append(
+                    _label(scale.x(day) + 2, month_y[0] + 13, str(day.day), ' fill-opacity=".7"')
+                )
+    return "".join(parts)
+
+
+def chart_svg(
+    view: AccountTimeline,
+    scale: Scale,
+    *,
+    fit: bool,
+    expand_href: Callable[[Quiet], str] | None = None,
+) -> tuple[str, _Drawn, list[_Row]]:
     rows = _rows(view)
-    drawn = _draw(view, scale, rows)
+    drawn = _draw(view, scale, rows, expand_href)
     height = _height(rows)
     width = scale.width
     desc = (
         f"Coverage of {plural(len(view.lanes), 'source')} from {scale.start.isoformat()} to "
         f"{scale.end.isoformat()}, with {plural(len(view.gaps), 'gap')} and "
         f"{plural(len(drawn.entries), 'marked place')}."
+        + not_to_scale(scale)
     )
-    axis = _axis(scale, month_y=[14]) + _axis(scale, month_y=[height - AXIS_H + 14])
+    axis = _axis_for(scale, month_y=[14]) + _axis_for(scale, month_y=[height - AXIS_H + 14])
     size = (
         'style="width:100%;height:auto"' if fit else f'width="{width:.0f}" height="{height:.0f}"'
     )
@@ -894,7 +1117,7 @@ def verdict(view: AccountTimeline, drawn: _Drawn, scale: Scale) -> str:
             f"{head}: {plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
             f"{plural(looks, 'thing')} to look at."
         )
-    return said + expected_sentence(view)
+    return said + not_to_scale(scale) + expected_sentence(view)
 
 
 def expected_sentence(view: AccountTimeline) -> str:
@@ -940,17 +1163,30 @@ def choose_window(
     return Chosen(choice, window.first, window.last, "", True)
 
 
-def pick_scale(chosen: Chosen, mode: str, *, windowed: bool) -> Scale | None:
+def pick_scale(
+    chosen: Chosen, mode: str, *, windowed: bool, breaks: Sequence[Quiet] = ()
+) -> Scale | None:
+    """The scale for the chosen days. The room a collapsed stretch gives up is spent on the
+    days that are drawn: the pixels a day takes are worked out as if the window were only those."""
     if chosen.start is None or chosen.end is None:
         return None
+    total = (chosen.end - chosen.start).days + 1
+    drawn_days = total - sum(b.days for b in breaks)
+    shaped_end = chosen.start + timedelta(days=drawn_days - 1)
     if mode == WIDE:
-        return choose_scale(chosen.start, chosen.end, chosen.start, chosen.end, fitted=False)
-    if mode == FIT:
-        days = (chosen.end - chosen.start).days + 1
-        return Scale(chosen.start, chosen.end, max((VIEW_WIDTH - 2 * EDGE) / days, 0.05))
-    if windowed:
-        return choose_scale(chosen.start, chosen.end, chosen.start, chosen.end, fitted=True)
-    return Scale(chosen.start, chosen.end, PIXELS_PER_DAY)
+        shaped = choose_scale(chosen.start, shaped_end, chosen.start, shaped_end, fitted=False)
+    elif mode == FIT:
+        room = VIEW_WIDTH - 2 * EDGE - len(breaks) * BREAK_W
+        shaped = Scale(chosen.start, shaped_end, max(room / drawn_days, 0.05))
+    elif windowed:
+        shaped = choose_scale(chosen.start, shaped_end, chosen.start, shaped_end, fitted=True)
+    else:
+        shaped = Scale(chosen.start, shaped_end, PIXELS_PER_DAY)
+    if not breaks:
+        return shaped
+    return BrokenScale(
+        chosen.start, chosen.end, shaped.per_day, fitted=shaped.fitted, breaks=tuple(breaks)
+    )
 
 
 def _mode_links(ref: str, fields: Mapping[str, str], mode: str) -> str:
@@ -972,58 +1208,152 @@ def _mode_links(ref: str, fields: Mapping[str, str], mode: str) -> str:
     return '<p class="linkrow">' + " ".join(parts) + "</p>"
 
 
+def _expand_text(ranges: Sequence[tuple[date, date]]) -> str:
+    return ",".join(f"{a.isoformat()}_{b.isoformat()}" for a, b in ranges)
+
+
+def parse_expanded(text: str) -> list[tuple[date, date]]:
+    """The stretches a request asks to see in full; anything malformed is ignored."""
+    found: list[tuple[date, date]] = []
+    for part in text.split(","):
+        first, _, last = part.partition("_")
+        try:
+            found.append((date.fromisoformat(first), date.fromisoformat(last)))
+        except ValueError:
+            continue
+    return found
+
+
+def _quiet_list(
+    quiet: Sequence[Quiet], href: Callable[[Quiet], str]
+) -> str:
+    """The text of what the chart skipped, each with the link that draws it in full."""
+    if not quiet:
+        return ""
+    items = "".join(
+        f'<li>{_esc(q.first.isoformat())} to {_esc(q.last.isoformat())} - '
+        f"{_esc(span_words(q.first, q.last))}, nothing changed. "
+        f'<a class="tap" href="{_esc(href(q))}">Show these days</a></li>'
+        for q in quiet
+    )
+    return f'<ul class="cov-quiet-list" aria-label="Quiet stretches skipped">{items}</ul>'
+
+
+def _strip(
+    view: AccountTimeline, first: date, last: date
+) -> tuple[str, _Drawn, list[_Row], Scale]:
+    """A short steady-state strip: the first fortnight of a window in which nothing changes."""
+    strip = Scale(first, min(last, first + timedelta(days=13)), 14.0)
+    svg, drawn, rows = chart_svg(view, strip, fit=False)
+    return svg, drawn, rows, strip
+
+
 def render_account_timeline(
     view: AccountTimeline,
     *,
     fields: Mapping[str, str] | None,
     mode: str = "",
     names: Mapping[str, str] | None = None,
+    every_day: bool = False,
+    expanded: Sequence[tuple[date, date]] = (),
+    keep: Sequence[tuple[date, date]] = (),
 ) -> bytes:
-    """The account's timeline page for the window `fields` ask for (twelve months if none)."""
+    """The account's timeline page for the window `fields` ask for (twelve months if none).
+
+    Quiet stretches are collapsed unless `every_day`; `expanded` are stretches the request has
+    opened; `keep` are days never collapsed (the month an account page is showing).
+    """
     names = names or {view.ref: view.label}
     heading = f"<p>{name_html(view.ref, names)}</p>"
     chosen = choose_window(fields, today=view.today, first_day=view.first_day)
     carried = {
         k: v for k, v in chosen.choice.fields.items() if k in WINDOW_FIELDS
     } if fields else {"window": "m12", "window_held": "m12"}
+    extras: dict[str, str] = {}
+    if every_day:
+        extras[DAYS_FIELD] = EVERY_DAY
+    if expanded:
+        extras[EXPAND_FIELD] = _expand_text(expanded)
     form = (
         '<form method="get" action="/coverage-timeline" data-window-form>'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
         + (f'<input type="hidden" name="{SCALE_FIELD}" value="{_esc(mode)}">' if mode else "")
+        + "".join(
+            f'<input type="hidden" name="{name}" value="{_esc(value)}">'
+            for name, value in extras.items()
+        )
         + f'<button type="submit" name="window" value="{KEEP}" class="visually-hidden" '
         'tabindex="-1" aria-hidden="true">Redraw</button>'
         + window_controls(chosen.choice, today=view.today.isoformat())
         + "</form>"
     )
-    scale = pick_scale(chosen, mode, windowed=True)
-    if scale is None:
+    plain = pick_scale(chosen, mode, windowed=True)
+    if plain is None or chosen.start is None or chosen.end is None:
         return render_page(
             "Coverage timeline", heading + form + chosen.words, wide=True,
             heading="Coverage timeline",
         )
-    svg, drawn, rows = chart_svg(view, scale, fit=mode == FIT)
+    quiet: tuple[Quiet, ...] = (
+        () if every_day
+        else quiet_stretches(view, chosen.start, chosen.end, keep=keep, expanded=expanded)
+    )
+    whole = len(quiet) == 1 and (quiet[0].first, quiet[0].last) == (chosen.start, chosen.end)
+
+    def link(**more: str) -> str:
+        query = {"ref": view.ref, **carried, **({SCALE_FIELD: mode} if mode else {}), **more}
+        return f"/coverage-timeline?{urlencode(query)}"
+
+    def expand_href(opened: Quiet) -> str:
+        return link(**{EXPAND_FIELD: _expand_text([*expanded, (opened.first, opened.last)])})
+
+    scale: Scale
+    if whole:
+        svg, drawn, rows, scale = _strip(view, chosen.start, chosen.end)
+        verdict_text = (
+            f"Nothing changed from {chosen.start.isoformat()} to {chosen.end.isoformat()} "
+            f"({span_words(chosen.start, chosen.end)}): every source held one state throughout. "
+            "The strip shows the first two weeks of it."
+        )
+    else:
+        scale = pick_scale(chosen, mode, windowed=True, breaks=quiet) or plain
+        svg, drawn, rows = chart_svg(view, scale, fit=mode == FIT, expand_href=expand_href)
+        verdict_text = verdict(view, drawn, scale)
     height = _height(rows)
-    if mode == FIT:
+    if mode == FIT and not whole:
         frame = (
             f'<div class="cov-frame">{_labels(view, rows, height)}'
             f'<div class="cov-fit">{svg}</div></div>'
         )
     else:
+        # The scroller reads right to left so that, where the chart is wider than the screen, it
+        # opens at its newest end; the chart's own box reads left to right as ever.
         frame = (
             f'<div class="cov-frame">{_labels(view, rows, height)}'
             f'<div class="cov-scroll" tabindex="0" role="region" '
-            f'aria-label="Coverage timeline, scrolls sideways">{svg}</div></div>'
+            f'aria-label="Coverage timeline, scrolls sideways, opens at the newest day">'
+            f'<div class="cov-inner" style="width:{scale.width:.0f}px">'
+            f"{svg}</div></div></div>"
         )
+    collapse_links = (
+        f'<a class="tap" href="{_esc(link(**{DAYS_FIELD: EVERY_DAY}))}">Show every day</a>'
+        if quiet and not whole
+        else f'<a class="tap" href="{_esc(link())}">Collapse the quiet stretches</a>'
+        if every_day or expanded or whole
+        else ""
+    )
     body = (
         heading
-        + f'<p class="cov-verdict" data-verdict>{_esc(verdict(view, drawn, scale))}</p>'
+        + f'<p class="cov-verdict" data-verdict>{_esc(verdict_text)}</p>'
+        + account_notes(view)
         + _next_list(view, drawn)
         + frame
+        + (f'<p class="linkrow">{collapse_links}</p>' if collapse_links else "")
+        + _quiet_list(quiet if not whole else (), expand_href)
         + '<details class="cov-keybox"><summary>Key to the marks</summary>'
         + _key(drawn.used)
         + "</details>"
         + form
-        + _mode_links(view.ref, carried, mode)
+        + _mode_links(view.ref, {**carried, **extras}, mode)
         + _entries_html(view.ref, drawn.entries)
         + f'<p><a class="tap" href="/ledger?ref={_esc(view.ref)}">Back to the account</a></p>'
     )
@@ -1078,7 +1408,29 @@ def _household_lane(view: AccountTimeline) -> str:
     )
 
 
+def account_notes(view: AccountTimeline) -> str:
+    """What the lanes cannot say about this kind of account, said once."""
+    notes = []
+    if view.is_space:
+        notes.append(
+            "This is a Space: exports and statements cannot see Spaces, so only the bank's own "
+            "feed lists its rows."
+        )
+    if view.made_by_obdi and not view.lanes:
+        notes.append(MADE_BY_OBDI_WORDS)
+    return "".join(f'<p class="muted">{_esc(note)}</p>' for note in notes)
+
+
+#: What an account says whose rows no source lists.
+MADE_BY_OBDI_WORDS = (
+    "No source lists the rows of this account: obdi makes them from another account's "
+    "withdrawals, and its balances are stated by hand."
+)
+
+
 def _household_sentence(view: AccountTimeline) -> str:
+    if view.made_by_obdi and not view.lanes:
+        return MADE_BY_OBDI_WORDS
     gaps = len(view.gaps)
     seams = len(view.seams_to_check)
     looks = len(view.markers)
@@ -1119,7 +1471,7 @@ def render_household(views: Sequence[AccountTimeline]) -> bytes:
             f'<li><p class="cov-lane-name"><a href="/coverage-timeline?ref='
             f'{_esc(quote(view.ref, safe=""))}">{name_html(view.ref, {view.ref: view.label})}'
             f"</a></p>{_household_lane(view)}"
-            f'<p class="muted">From {_esc(first.isoformat())}. '
+            f'<p class="muted">{"" if not view.lanes else f"From {_esc(first.isoformat())}. "}'
             f"{_esc(_household_sentence(view))}</p></li>"
         )
     body = (
@@ -1186,12 +1538,23 @@ class CoverageTimelinePages:
             )
             return
         self._respond(
-            200, render_account_timeline(view, fields=_window_of(params), mode=mode)
+            200,
+            render_account_timeline(
+                view,
+                fields=_window_of(params),
+                mode=mode,
+                every_day=(params.get(DAYS_FIELD, [""])[0] or "") == EVERY_DAY,
+                expanded=parse_expanded(params.get(EXPAND_FIELD, [""])[0] or ""),
+            ),
         )
 
 
 __all__ = [
     "AXIS_H",
+    "BREAK_W",
+    "DAYS_FIELD",
+    "EVERY_DAY",
+    "EXPAND_FIELD",
     "FIT",
     "GAP_LABEL_PX",
     "KNOWN_TICK_MIN_PX",
@@ -1203,12 +1566,16 @@ __all__ = [
     "SCALE_FIELD",
     "TARGET_RANGE_WIDTH",
     "WIDE",
+    "BrokenScale",
     "CoverageTimelinePages",
     "chart_svg",
+    "collapsed_words",
     "known_ticks",
     "listed_marks",
     "month_cells",
     "notch_xs",
+    "parse_expanded",
+    "pick_scale",
     "render_account_timeline",
     "render_household",
     "verdict",

@@ -60,6 +60,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from itertools import pairwise
 from typing import Protocol
 
 from .agreement import Agreement
@@ -67,7 +68,9 @@ from .asked_coverage import asked_days, coverage_of
 from .balance_anchors import EffectiveOpening
 from .fetch_gaps import add_months, cadence_of
 from .london_clock import london
+from .namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
 from .parsers.statement_reading import reading_from_json
+from .plural import plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 from .timeline import parse_window
 
@@ -111,6 +114,11 @@ UNREPRODUCED = "unreproduced"
 CONFLICT = "conflict"
 HELD_BACK = "held-back"
 UNMATCHED = "unmatched"
+
+#: The sighting sources that are obdi's own rows (the other side of a cash withdrawal, an
+#: unitemised balance movement). No source lists them, so they give no lane, no listed day, and
+#: no coverage: a filled bar would claim a source had seen those days.
+MADE_BY_OBDI = frozenset({CASH_LEG_SOURCE, UNITEMISED_SOURCE})
 
 #: The ask ledger's names for the asks whose windows say what a source covered, and the lane each
 #: belongs to (the sighting source's name).
@@ -224,6 +232,10 @@ class Gap:
     why: str = ""
     probably: int | None = None
     closings: tuple[date, ...] = ()
+    #: For a hole between two statements: True where the later opens on a different balance from
+    #: the one the earlier closed on (proof something lies between), False where equal, None
+    #: where that cannot be told.
+    balances_differ: bool | None = None
 
     @property
     def anchor(self) -> str:
@@ -324,6 +336,10 @@ class AccountTimeline:
     markers: tuple[Marker, ...]
     queries: int = 0
     notes: tuple[str, ...] = field(default=())
+    #: Rows obdi made itself (`MADE_BY_OBDI`), which no source lists and so no lane draws.
+    made_by_obdi: int = 0
+    #: A Space (a pot inside another account): exports and statements cannot see it.
+    is_space: bool = False
 
     @property
     def fetch_gaps(self) -> tuple[Gap, ...]:
@@ -634,6 +650,7 @@ def build_account_timeline(
     protected_through: date | None = None,
     canonical_of: Callable[[str], str] = lambda ref: ref,
     fetch_gaps: Sequence[FetchGapLike] = (),
+    is_space: bool = False,
 ) -> AccountTimeline:
     """The coverage timeline of one account, read in four statements.
 
@@ -669,7 +686,11 @@ def build_account_timeline(
             date.fromisoformat(str(r["day"])), str(r["status"]) == "folded",
         )
         for r in sighting_rows
+        if str(r["source"]) not in MADE_BY_OBDI
     ]
+    made_by_obdi = len(
+        {str(r["entity"]) for r in sighting_rows if str(r["source"]) in MADE_BY_OBDI}
+    )
     received = {str(r["digest"]): _stamp(str(r["fetched_at"])) for r in artefact_rows}
 
     listed: dict[str, dict[date, set[str]]] = defaultdict(lambda: defaultdict(set))
@@ -809,22 +830,167 @@ def build_account_timeline(
                 told.first_day, told.last_day, str(told.kind), told.source,
                 stated=told.basis == STATED, account=told.account or ref, why=told.why,
                 probably=told.probably, closings=told.closings,
+                balances_differ=_balances_differ(told, statements),
             )
         )
     return AccountTimeline(
         ref, label or ref, today, first_day, verification, tuple(lanes), tuple(seams),
         tuple(sorted(gaps, key=lambda g: (g.first, g.source, g.kind))),
         tuple(sorted(markers, key=lambda m: (m.day, m.kind, m.source))),
-        queries=4,
+        queries=4, made_by_obdi=made_by_obdi, is_space=is_space,
     )
+
+
+def _balances_differ(told: FetchGapLike, statements: dict[str, list[_Statement]]) -> bool | None:
+    """For a hole between two statements: whether the later one opens on a different balance
+    from the one the earlier closed on, which PROVES something lies between them. None where the
+    two cannot be compared, and for any other kind of gap."""
+    if str(told.kind) != "hole-between":
+        return None
+    held = sorted(statements.get(told.source, ()), key=lambda s: s.closing)
+    for earlier, later in pairwise(held):
+        if earlier.closing == told.first_day - _DAY:
+            if earlier.closing_minor is None or later.opening_minor is None:
+                return None
+            return earlier.closing_minor != later.opening_minor
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Quiet stretches: where nothing changes, stated once.
+
+#: Days of ordinary drawing kept either side of every event, so an event is seen in its context.
+MARGIN_DAYS = 10
+
+#: The fewest days worth collapsing: a shorter stretch saves less room than its break costs.
+MIN_QUIET_DAYS = 28
+
+
+@dataclass(frozen=True)
+class Quiet:
+    """A run of consecutive days in which nothing changes (`quiet_stretches`)."""
+
+    first: date
+    last: date
+
+    @property
+    def days(self) -> int:
+        return (self.last - self.first).days + 1
+
+
+def _lane_state(lane: Lane, day: date) -> int:
+    if lane.covers(day):
+        return 1
+    if lane.kind == STATEMENT and lane.trailing is not None:
+        first, last = lane.trailing
+        if first <= day <= last:
+            return 2
+    return 0
+
+
+def _band_state(view: AccountTimeline, day: date) -> str:
+    for band in view.verification.bands:
+        if band.first <= day <= band.last:
+            return band.state
+    return "none"
+
+
+def quiet_stretches(
+    view: AccountTimeline,
+    first: date,
+    last: date,
+    *,
+    keep: Iterable[tuple[date, date]] = (),
+    expanded: Iterable[tuple[date, date]] = (),
+) -> tuple[Quiet, ...]:
+    """The runs of days in `first` to `last` in which NOTHING CHANGES, for a page to abbreviate.
+
+    A day belongs to a stretch only if it is not within `MARGIN_DAYS` of an event, the
+    verification lane is in agreement on it, and it is not in a range the page keeps (`keep`: a
+    month being shown) or has been asked to show in full (`expanded`). Within a stretch every
+    lane therefore holds one state throughout (covered the whole way, uncovered the whole way,
+    or "not yet available"), because a lane changing state is itself an event.
+
+    The events are: a change of any lane's state or of the verification band from the day before;
+    either end of a gap; a seam that needs a look (a quiet overlapped or clean one does not
+    count); every issue marker, which includes an unreproduced known balance (a reproduced one
+    does not); the day the account's first row or balance opens; today; and every day of `keep`.
+    Rows listed per day are not events: payments happen every day.
+
+    A stretch shorter than `MIN_QUIET_DAYS` is not returned. The window's own two ends are
+    events, so a collapsed chart never opens or closes on a break, unless there is no event at
+    all in the window: then the whole of it is one stretch, which the page says in a sentence.
+    """
+    if last < first:
+        return ()
+    days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
+    events: set[date] = set()
+    before: tuple[object, ...] | None = None
+    for day in days:
+        state: tuple[object, ...] = (
+            tuple(_lane_state(lane, day) for lane in view.lanes), _band_state(view, day)
+        )
+        if before is not None and state != before:
+            events.update((day - _DAY, day))
+        before = state
+    for gap in view.gaps:
+        events.update((gap.first, gap.last))
+    for seam in view.seams_to_check:
+        events.add(seam.day)
+    events.update(marker.day for marker in view.markers)
+    events.update((view.first_day, view.today))
+    protected = view.verification.protected
+    if protected is not None:
+        events.update((protected.first, protected.last))
+    for start, end in keep:
+        events.update(start + timedelta(days=n) for n in range((end - start).days + 1))
+    if any(first <= event <= last for event in events):
+        events.update((first, last))
+    near = {day + timedelta(days=n) for day in events for n in range(-MARGIN_DAYS, MARGIN_DAYS + 1)}
+    shown = {
+        start + timedelta(days=n) for start, end in expanded for n in range((end - start).days + 1)
+    }
+    found: list[Quiet] = []
+    run: list[date] = []
+    candidates: list[date | None] = [*days, None]
+    for candidate in candidates:
+        if (
+            candidate is not None
+            and candidate not in near
+            and candidate not in shown
+            and _band_state(view, candidate) == "agrees"
+        ):
+            run.append(candidate)
+            continue
+        if len(run) >= MIN_QUIET_DAYS:
+            found.append(Quiet(run[0], run[-1]))
+        run = []
+    return tuple(found)
+
+
+def span_words(first: date, last: date) -> str:
+    """How long the days `first` to `last` are, in calendar units and the largest two of them:
+    "5 years 2 months", "3 months 4 days", "11 days"."""
+    end = last + _DAY
+    months = (end.year - first.year) * 12 + end.month - first.month
+    if end.day < first.day:
+        months -= 1
+    extra = (end - add_months(first, months)).days
+    years, months = divmod(months, 12)
+    parts = [
+        plural(count, noun)
+        for count, noun in ((years, "year"), (months, "month"), (extra, "day"))
+        if count
+    ]
+    return " ".join(parts[:2]) if parts else "0 days"
 
 
 __all__ = [
     "ABUTTING", "AGGREGATOR", "ASKED", "ASK_HOLE", "CLEAN", "COMPLETE", "CONFLICT", "EXPORT",
-    "FEED", "GAPPED", "HELD_BACK", "KIND_NAMES", "LANE_ORDER", "MEETS",
-    "MISSING", "OBSERVED", "OVERLAPPED", "PARTIAL", "POSSIBLY", "STATED", "STATEMENT",
-    "TYPED", "UNCHECKED", "UNMATCHED", "UNREPRODUCED", "WEAKNESS",
-    "AccountTimeline", "Band", "Capture", "FetchGapLike", "Gap", "Known", "Lane", "Marker", "Run",
-    "Seam", "StatementCover", "Verification", "build_account_timeline", "gap_anchor",
-    "kind_of_source", "statement_cover",
+    "FEED", "GAPPED", "HELD_BACK", "KIND_NAMES", "LANE_ORDER", "MARGIN_DAYS", "MEETS",
+    "MIN_QUIET_DAYS", "MISSING", "OBSERVED", "OVERLAPPED", "PARTIAL", "POSSIBLY", "STATED",
+    "STATEMENT", "TYPED", "UNCHECKED", "UNMATCHED", "UNREPRODUCED", "WEAKNESS",
+    "AccountTimeline", "Band", "Capture", "FetchGapLike", "Gap", "Known", "Lane", "Marker", "Quiet",
+    "Run", "Seam", "StatementCover", "Verification", "build_account_timeline", "gap_anchor",
+    "kind_of_source", "quiet_stretches", "span_words", "statement_cover",
 ]

@@ -3281,6 +3281,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """What to fetch next, by account: the one list the timeline joins (never re-derived)."""
         return {outlook.account: outlook.gaps for outlook in fetch_gaps_report(today).accounts}
 
+    def space_refs(store: Store) -> set[str]:
+        return {str(r.ref) for r in store.declared_accounts() if r.kind == "starling-space"}
+
     def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
         from .account_names import merged_names  # deferred like the other data hooks
         from .agreement import standing_of
@@ -3315,6 +3318,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 ),
                 canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
                 fetch_gaps=gaps_by_account(today).get(ref, ()),
+                is_space=ref in space_refs(store),
             )
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
@@ -3330,6 +3334,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             account_map = _account_map(store)
             names = merged_names(provider_labels, store.declared_accounts())
             standings = account_standings(store)
+            spaces = space_refs(store)
             refs = [
                 str(row[0])
                 for row in store.connection.execute(
@@ -3345,6 +3350,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     agreement=standings[ref].standing.own if ref in standings else None,
                     canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
                     fetch_gaps=by_account.get(ref, ()),
+                    is_space=ref in spaces,
                 )
                 for ref in refs
             ]
