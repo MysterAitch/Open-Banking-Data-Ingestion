@@ -4,11 +4,11 @@ unmoved (`agreement`, R1 to R5).
 
 Decided before the first run, from the household's own docstring:
 
-  * the statements that fail are exactly `missing`, `merged`, `history` (which lists a reversed
-    and a void transaction), and `folded` (a line folded into another account's transaction,
-    decision 6 of round two), and each is a fault in the rule too. A statement whose lines were
-    not found (`unkept`, `folded-lost`) or that the reader refused (`unsummed`) is neither: it
-    is a fact about the reading;
+  * the statements that fail are exactly `missing`, `merged`, and `history` (which lists a
+    reversed and a void transaction), and each is a fault in the rule too. A statement whose
+    lines were not found (`unkept`, `folded-lost`), that the reader refused (`unsummed`), or one
+    of whose lines is held under another account (`folded`: only the store's own Space fold puts
+    one there) is none of them: it cannot say;
   * a statement's days are verified by the measurement exactly where the rule tests them;
   * an account that adds up without the listing checks still adds up with them, unless one of
     its statements is a fault;
@@ -35,7 +35,7 @@ from obdi.statement_listing_measure import statement_checks
 from test_statement_listing_measure import FAMILIES
 from test_statement_listing_measure import world as listing_world  # noqa: F401 - the fixture
 
-EXPECTED_FAULTS = {"missing", "merged", "history", "folded"}
+EXPECTED_FAULTS = {"missing", "merged", "history"}
 
 
 def verdicts(store, ref: str):

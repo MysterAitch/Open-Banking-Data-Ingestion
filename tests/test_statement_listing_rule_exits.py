@@ -6,7 +6,8 @@ first run: for each fault kind built below, the fault is there, disregarding the
 closing clears it from the standing, and the account's other statements are untouched.
 
   not-held, other-amount          the first round's accounts (`r-lone-missing`, `r-lone-merged`)
-  no-longer-counts, held-elsewhere  the measurement's household (`history`, `folded`)
+  no-longer-counts                the measurement's household (`history`)
+  (held-elsewhere is no fault kind: it is cannot-say, round three, so it needs no exit)
 
 `held-twice`, `listed-twice`, and `does-not-reach` are not built here: the doors cannot make the
 state (they deduplicate), so those three are covered by the same exit through the sentence and
@@ -70,7 +71,7 @@ def test_Fault_WhenDisregardedAtItsClosing_IsClearedFromTheStanding(mine, ref, w
 
 @pytest.mark.parametrize(
     ("ref", "words"),
-    [("history", "reversed or void"), ("folded", "under another account")],
+    [("history", "reversed or void")],
 )
 def test_FaultInTheMeasurementsHousehold_WhenDisregardedAtItsClosing_IsCleared(
     listing_world, ref, words  # noqa: F811

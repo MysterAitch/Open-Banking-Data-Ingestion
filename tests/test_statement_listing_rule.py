@@ -198,7 +198,7 @@ class TestAStatementThatIsAFaultAmongOthers:
 
 
 class TestAStatementClosedBeforeTheDaysLastTransaction:
-    EXPLAINED = ClosedBefore(FEB28, 1, False, (500,), (), (500,))
+    EXPLAINED = ClosedBefore(FEB28, 1, (500,), (500,))
 
     def known(self):
         return [
@@ -224,7 +224,7 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
         assert after.state == HELD_CONFLICT
 
     def test_Account_WhenTheClaimedDifferenceIsNotTheFiguresActualDifference_StaysAConflict(self):
-        wrong = ClosedBefore(FEB28, 1, False, (499,), (), (499,))
+        wrong = ClosedBefore(FEB28, 1, (499,), (499,))
 
         after = derive(self.known(), [check(FEB28, 1300, closed_before=wrong)])
 
@@ -247,11 +247,11 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
         assert (after.state, after.through) == (HELD_UNMET, FEB28)
         assert after.held is not None and after.held.day == MAR31
 
-    def test_Account_WhenTheStatementDefinesTheOpening_TheOtherBalancesAreJudgedWithTheTransaction(
-        self,
-    ):
-        # The statement is the earliest known balance, so the opening is derived from it with the
-        # 500.00 counted and the bank's balance and the later one both stand 500.00 away.
+    def test_Account_WhenTheStatementWouldDefineTheOpening_TheDayStaysTheConflictItIs(self):
+        # The opening is derived by counting transactions dated up to and including a day, which
+        # is wrong for a statement that closed before some of them: every balance the account
+        # then showed would be out by the 500.00. Round three, decision 3: refused (it was
+        # taken in rounds one and two, with the other balances shifted internally).
         known = [
             closing(FEB28, 1300, 0, defines=True),
             bank(FEB28, 1800, 500),
@@ -260,17 +260,19 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
 
         after = derive(known, [check(FEB28, 1300, closed_before=self.EXPLAINED)])
 
-        assert (after.state, after.through, after.conflicts) == (AGREES, MAR31, ())
+        assert after.state == HELD_CONFLICT
+        assert after.closed_before == ()
 
-    def test_Account_WhenTheTransactionIsDatedTheNextDay_TheStatementIsNotShiftedAndNoConflict(
-        self,
-    ):
-        known = [closing(FEB28, 1300, 0, defines=True), bank(FEB28, 1800, 0)]
-        next_day = ClosedBefore(FEB28, 1, True, (), (500,), ())
+    def test_Account_WhenTheEndOfDayBalanceDefinesTheOpening_ItIsTheOneRecordedAsReproduced(self):
+        known = [
+            Known(FEB28, "typed", DEFINES, 1800, basis="stated", distance=0),
+            closing(FEB28, 1300, -500),
+        ]
 
-        after = derive(known, [check(FEB28, 1300, closed_before=next_day)])
+        after = derive(known, [check(FEB28, 1300, closed_before=self.EXPLAINED)])
 
-        assert (after.state, after.conflicts) == (AGREES, ())
+        assert (after.state, after.through) == (AGREES, FEB28)
+        assert {k.source for k in after.tested_known if k.closed_before is None} == {"typed"}
 
     def test_Account_WhenThePendingExplanationIsAlreadyPlacedAfterTheClosing_NothingIsShiftedTwice(
         self,
@@ -282,39 +284,35 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
             closing(FEB28, 1300, 0),
             bank(FEB28, 1800, 0),
         ]
-        listed_later = ClosedBefore(FEB28, 1, False, (500,), (), ())
+        listed_later = ClosedBefore(FEB28, 1, (500,), ())
 
         after = derive(known, [check(FEB28, 1300, closed_before=listed_later)])
 
         assert (after.state, after.through, after.conflicts) == (AGREES, FEB28, ())
 
 
-class TestTheTwoHypothesesAndTheirLimits:
-    """A statement that closed at some moment precedes EVERYTHING unlisted after it: the other
-    balance is for the end of the closing day, or was taken the day after, and nothing else."""
+class TestTheOneHypothesisAndItsLimits:
+    """ONE hypothesis: the other balance is for the end of the closing day and differs by exactly
+    ALL the counting transactions dated that day that the statement does not list."""
 
     def typed_defines(self, figure: int) -> Known:
-        return Known(
-            FEB28, "typed", DEFINES, figure, basis="stated", distance=0
-        )
+        return Known(FEB28, "typed", DEFINES, figure, basis="stated", distance=0)
 
-    def test_Account_WhenTheOtherBalanceWasTakenTheDayAfter_BothDaysTransactionsExplainIt(self):
-        # S 1300, B 800; one unlisted of -300 dated 28 Feb and one of -200 dated 1 Mar. B is
-        # for the day after, so it includes both; S, which closed before them, does not.
-        known = [self.typed_defines(800), closing(FEB28, 1300, 500)]
-        claim = ClosedBefore(FEB28, 2, True, (-300,), (-200,), (-300,))
-
-        after = derive(known, [check(FEB28, 1300, closed_before=claim)])
-
-        assert (after.state, after.conflicts) == (AGREES, ())
-        assert [c.next_day for c in after.closed_before] == [True]
-
-    def test_Account_WhenOnlyTheNextDaysTransactionEqualsTheDifference_StaysAConflict(self):
-        # The same day also holds one of -123 that is left out: a subset fitted to the figure.
+    def test_Account_WhenOnlySomeOfTheDaysTransactionsEqualTheDifference_StaysAConflict(self):
+        # S 1300, B 523: the day holds -777 and -123, the claim names only one. The difference is
+        # not the sum of what the statement does not list, so nothing is explained.
         known = [self.typed_defines(523), closing(FEB28, 1300, 777)]
-        subset = ClosedBefore(FEB28, 1, True, (-123,), (-777,), (-123,))
+        subset = ClosedBefore(FEB28, 1, (-123,), (-123,))
 
         after = derive(known, [check(FEB28, 1300, closed_before=subset)])
+
+        assert after.state == HELD_CONFLICT
+
+    def test_Account_WhenTheClaimNamesNothingTheStatementDoesNotList_StaysAConflict(self):
+        known = [self.typed_defines(800), closing(FEB28, 1300, 500)]
+        empty = ClosedBefore(FEB28, 0, (), ())
+
+        after = derive(known, [check(FEB28, 1300, closed_before=empty)])
 
         assert after.state == HELD_CONFLICT
 
@@ -324,7 +322,7 @@ class TestTheTwoHypothesesAndTheirLimits:
             closing(FEB28, 1300, -500),
             bank(FEB28, 1800, 0),
         ]
-        explained = ClosedBefore(FEB28, 1, False, (500,), (), (500,))
+        explained = ClosedBefore(FEB28, 1, (500,), (500,))
 
         after = derive(
             known,

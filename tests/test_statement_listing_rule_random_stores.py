@@ -23,6 +23,7 @@ The counts are printed by `-s`.
 
 from __future__ import annotations
 
+import json
 import os
 import random
 from collections import Counter
@@ -32,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from listing_rule_reading import app_reading, movement_of
+from listing_rule_reading import app_reading, movement_of, shown_balances_are_the_stated_ones
 from obdi.balance_anchors import AnchorRefused, record_stated_anchor
 from obdi.family_anchors import Families
 from obdi.standing_data import ADDS_UP
@@ -52,6 +53,11 @@ class Truth:
     tampered: bool = False
     extra: bool = False
     wrong_typed: bool = False
+    #: (statement position, amount) of a purchase dated its closing day that nobody lists.
+    same_day: tuple[int, int] | None = None
+    merged: bool = False
+    #: How many transactions the statements print between them.
+    printed: int = 0
     statements: int = 0
     notes: list[str] = field(default_factory=list)
 
@@ -89,6 +95,7 @@ def build_one(store: Store, root: Path, rng: random.Random, number: int) -> Trut
         owed = statement(
             store, root, ref, closing, owed, spends, received=closing, previous_close=previous
         )
+    truth.printed = sum(len(s) for s in listed)
     roll = rng.random()
     if roll < 0.25:
         position = rng.randrange(count)
@@ -118,12 +125,28 @@ def build_one(store: Store, root: Path, rng: random.Random, number: int) -> Trut
         day = date(CLOSINGS[position].year, CLOSINGS[position].month, 12 if position else 5)
         feed(store, ref, [Spend(day, f"X{number}", rng.randint(100, 900))], digest=f"x{number}")
         truth.extra = True
-    if rng.random() < 0.25:
+    elif roll < 0.55:
+        # A purchase dated the closing day that no statement lists, and a typed balance for the
+        # end of that day: the statement closed before it (the one hypothesis).
         position = rng.randrange(count)
+        late = Spend(CLOSINGS[position], f"S{number}", rng.randint(100, 900))
+        feed(store, ref, [late], digest=f"s{number}")
+        truth.same_day = (position, late.minor)
+    elif roll < 0.65:
+        # A feed transaction with a listed purchase's date and amount under other words, which
+        # the identity matcher may merge into the statement's line.
+        position = rng.randrange(count)
+        twin = listed[position][0]
+        feed(
+            store, ref, [Spend(twin.day, f"TWIN {number}", twin.minor)], digest=f"twin{number}"
+        )
+        truth.merged = True
+    if rng.random() < 0.25 or truth.same_day is not None:
+        position = rng.randrange(count) if truth.same_day is None else truth.same_day[0]
         closing = CLOSINGS[position]
         later = sum(s.minor for k in range(position + 1) for s in listed[k])
-        true_owed = OPENING + later
-        off = 500 if rng.random() < 0.3 else 0
+        true_owed = OPENING + later + (truth.same_day[1] if truth.same_day is not None else 0)
+        off = 500 if truth.same_day is None and rng.random() < 0.3 else 0
         try:
             record_stated_anchor(
                 store, ref, closing.isoformat(), f"{-(true_owed + off) / 100:.2f}",
@@ -172,9 +195,24 @@ def test_Rule_OverWholeStoresBuiltThroughTheStatementDoor_HoldsAgainstTheOracle(
                     counts["newly adds up with an extra transaction beside"] += 1
             if truth.tampered and now.own.through is not None and not truth.extra:
                 counts["tampered, adding up through something"] += 1
+            if truth.same_day is not None:
+                counts["same-day purchase"] += 1
+                counts["same-day purchase explained"] += bool(now.own.closed_before)
+            # The balances the page shows are the ones stated, for every day taken as closed
+            # before some transactions and in every account the rule says adds up.
+            counts["days checked for shown balances"] += shown_balances_are_the_stated_ones(
+                store, truth.ref, NO_SPACES, now
+            )
+            if truth.merged:
+                counts["twin merged: " + before_verdict + " -> " + verdict] += 1
+                counts["twin merged: transactions held beyond the printed"] += max(
+                    0, len(store.transactions_for_account(truth.ref)) - truth.printed
+                )
+        report = {"disagreements": disagreements, "counts": dict(sorted(counts.items()))}
+        target = os.environ.get("LISTING_RULE_COUNTS")
+        if target:
+            Path(f"{target}.{seed}.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         with capsys.disabled():
             print("\nstore-level randomised check:", dict(counts))
             print("disagreements:", len(disagreements))
-            for line in disagreements[:12]:
-                print("  ", line)
     assert not disagreements

@@ -25,7 +25,6 @@ OTHER_AMOUNT = "other-amount"
 HELD_TWICE = "held-twice"
 LISTED_TWICE = "listed-twice"
 NO_LONGER_COUNTS = "no-longer-counts"
-HELD_ELSEWHERE = "held-elsewhere"
 DOES_NOT_REACH = "does-not-reach"
 
 
@@ -34,23 +33,20 @@ class ClosedBefore:
     """A statement taken to have closed before the transactions nobody lists, which explains why
     another source's balance for the same day differs from it (`agreement`, R2).
 
-    A statement that closed at some moment precedes EVERYTHING unlisted after it, so there are two
-    hypotheses and no more, each all-or-nothing: the other balance is for the end of the closing
-    day (the difference is ALL the unlisted transactions dated that day), or it was really taken
-    the day after (ALL the unlisted dated that day AND the next). The amounts are carried, not a
-    sum, so `agreement` adds them up for itself.
+    ONE hypothesis, all or nothing: the other balance is for the end of the closing day and
+    differs from the statement's closing by exactly ALL the counting transactions dated that day
+    that the statement does not list. Anything else stays the conflict it is. (A second, that the
+    other balance was really taken the day after, was tried and withdrawn: it widened what can
+    add up, and the balances the page then showed were not the ones stated.) The amounts are
+    carried, not a sum, so `agreement` adds them up for itself.
     """
 
     day: Structural[date]
     #: How many counting transactions the difference is exactly.
     transactions: Structural[int]
-    #: The second hypothesis: they include the ones dated the day AFTER the closing day.
-    next_day: Structural[bool]
-    #: The amounts of the unlisted counting transactions dated the closing day, and the day after.
-    #: None of them is listed by this statement or by an earlier one. Compared by the rule, never
-    #: rendered.
+    #: The amounts of the unlisted counting transactions dated the closing day. None of them is
+    #: listed by this statement or by an earlier one. Compared by the rule, never rendered.
     that_amounts: tuple[int, ...] = ()
-    next_amounts: tuple[int, ...] = ()
     #: Of `that_amounts`, the ones no statement at all lists, which the chain counts at the
     #: statement's closing and which the statement is taken not to hold.
     counted_amounts: tuple[int, ...] = ()

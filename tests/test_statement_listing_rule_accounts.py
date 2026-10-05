@@ -37,10 +37,8 @@ without the statements' own listings laid on it; "now" is with them.
     sd-unexplained      the typed balance 5.00 away: a conflict today and now.
     sd-two              TWO feed purchases dated 10 Feb (7.77 and 1.23), the typed balance 7.77
                         away: only one explains it, so it stays a conflict (all or nothing).
-    sd-nextday          the purchase dated 11 Feb: round one said not a conflict but still does
-                        not add up (held unmet). Round two (the two hypotheses): the typed
-                        balance is taken to have been taken the day after, so the day is
-                        explained and the account adds up through 10 Feb.
+    sd-nextday          the purchase dated 11 Feb: a conflict today and now (round three withdrew
+                        the day-after hypothesis that rounds one and two had in turn).
     sd-later-ok         explained, and a typed balance on 1 Mar that the transactions reproduce:
                         adds up through 1 Mar.
     sd-later-bad        explained, and a typed 1 Mar balance 0.03 out: adds up through 10 Feb,
@@ -54,7 +52,7 @@ from pathlib import Path
 
 import pytest
 
-from listing_rule_reading import app_reading
+from listing_rule_reading import app_reading, shown_balances_are_the_stated_ones
 from obdi.agreement import (
     HELD_CONFLICT,
     HELD_UNMET,
@@ -373,9 +371,8 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
         assert (today.own.state, today_verdict) == (HELD_CONFLICT, DOES_NOT_ADD_UP)
         assert (now.own.state, verdict) == ("agrees", ADDS_UP)
         assert now.own.through == D(2026, 2, 10)
-        assert [(c.day, c.transactions, c.next_day) for c in now.own.closed_before] == [
-            (D(2026, 2, 10), 1, False)
-        ]
+        assert [(c.day, c.transactions) for c in now.own.closed_before] == [(D(2026, 2, 10), 1)]
+        shown_balances_are_the_stated_ones(world, "sd-explained", FAMILIES, now)
 
     def test_Account_WhenNothingExplainsTheDifference_StaysAConflict(self, world):
         assert read(world, "sd-unexplained", rule=True)[0].own.state == HELD_CONFLICT
@@ -383,16 +380,17 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
     def test_Account_WhenTwoArePurchasedThatDayAndOnlyOneExplainsIt_StaysAConflict(self, world):
         assert read(world, "sd-two", rule=True)[0].own.state == HELD_CONFLICT
 
-    def test_Account_WhenTheOtherBalanceWasTakenTheDayAfter_TheSecondHypothesisExplainsIt(
-        self, world
-    ):
-        # The typed balance for 10 Feb differs from the statement's by exactly the one purchase
-        # dated 11 Feb, and nothing else is unlisted: it is taken to have been taken the day
-        # after (decision 4). Round one answered "does not add up (unmet)", blaming the statement.
+    def test_Account_WhenTheUnlistedPurchaseIsDatedTheNextDay_StaysTheConflictItIs(self, world):
+        # Round three, decision 2: the typed balance for 10 Feb differs from the statement's by
+        # exactly the purchase dated 11 Feb, and that is no hypothesis the rule takes (round
+        # two took it and showed balances out by the purchase).
+        today, today_verdict = read(world, "sd-nextday", rule=False)
         now, verdict = read(world, "sd-nextday", rule=True)
 
-        assert (now.own.state, verdict, now.own.through) == ("agrees", ADDS_UP, D(2026, 2, 10))
-        assert [(c.day, c.next_day) for c in now.own.closed_before] == [(D(2026, 2, 10), True)]
+        assert (today.own.state, today_verdict) == (HELD_CONFLICT, DOES_NOT_ADD_UP)
+        assert (now.own.state, verdict, now.own.closed_before) == (
+            HELD_CONFLICT, DOES_NOT_ADD_UP, ()
+        )
 
     def test_Account_WhenALaterTypedBalanceIsReproducedAfterTheExplainedDay_ChainContinues(
         self, world

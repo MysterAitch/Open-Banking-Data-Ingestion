@@ -981,18 +981,20 @@ class TestAStatementWhoseReadingWasNeverKept:
 
 
 class TestAListedTransactionFoldedIntoAnother:
-    def test_Statement_WhenALineIsFoldedIntoAnotherAccountsTransaction_IsHeldUnderAnotherAccount(
+    def test_Statement_WhenALineIsFoldedIntoAnotherAccountsTransaction_IsCannotSayAndNoFault(
         self, world
     ):
         # The line is folded into a transaction of `folded-pocket`, which is not a Space of
-        # `folded` (round two, decision 6): a statement that can see only its own account does not
-        # account for it, so it does not add up by what it lists.
+        # `folded`. Round two called that a fault; the only thing that puts a line there is the
+        # store's own Space fold, so it is not a fault in the owner's data (round three,
+        # decision 1): the statement cannot say.
         (only,) = world[1]["folded"].statements
 
         assert only.held == Held(3, same=2, elsewhere=1)
-        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, False)
-        assert only.passes is False and only.fault == "held-elsewhere"
-        assert [s.closing for s in world[1]["folded"].failing] == [D(2026, 2, 10)]
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, None)
+        assert (only.passes, only.fails, only.cannot_say, only.fault) == (False, False, True, "")
+        assert "held under another account" in only.held_note
+        assert world[1]["folded"].failing == []
 
     def test_Statement_WhenAFoldedLinesDestinationIsNotRecorded_IsCannotSayAndNoFault(self, world):
         account = world[1]["folded-lost"]
@@ -1048,7 +1050,7 @@ class TestADayTwoSourcesStateDifferentBalancesFor:
         found = only.day_conflict
         assert found is not None
         assert (found.day, found.verdict) == (D(2026, 2, 10), DayReading.SAME_DAY)
-        assert (found.unlisted_that_day, found.unlisted_next_day) == (1, 0)
+        assert found.unlisted_that_day == 1
 
     def test_Closing_WhenTheOtherBalanceDiffersByAnotherAmount_IsNotExplained(self, world):
         (only,) = world[1]["sameday-unexplained"].statements
@@ -1058,15 +1060,17 @@ class TestADayTwoSourcesStateDifferentBalancesFor:
         assert found.verdict is DayReading.NOT_EXPLAINED
         assert found.unlisted_that_day == 1
 
-    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedTheNextDay_SaysSoApart(
+    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedTheNextDay_IsNotExplained(
         self, world
     ):
+        # Round three: there is one hypothesis (the other balance is for the end of the closing
+        # day), so a purchase dated the next day explains nothing.
         (only,) = world[1]["sameday-nextday"].statements
 
         found = only.day_conflict
         assert found is not None
-        assert found.verdict is DayReading.NEXT_DAY
-        assert (found.unlisted_that_day, found.unlisted_next_day) == (0, 1)
+        assert found.verdict is DayReading.NOT_EXPLAINED
+        assert found.unlisted_that_day == 0
 
     def test_Closing_WhenNoOtherSourceDisagrees_HasNoConflictToExplain(self, world):
         assert column(world, "complete", "day_conflict") == [None] * 4

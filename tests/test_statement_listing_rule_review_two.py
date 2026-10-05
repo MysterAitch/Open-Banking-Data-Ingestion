@@ -94,7 +94,12 @@ from obdi.models import SourceTier, Transaction
 from obdi.protection import press
 from obdi.protection import tested_days as days_offered
 from obdi.space_attribution import fold_space_copies
-from obdi.standing_data import ADDS_UP, NOTHING_TO_CHECK_AGAINST, statement_checks_for
+from obdi.standing_data import (
+    ADDS_UP,
+    DOES_NOT_ADD_UP,
+    NOTHING_TO_CHECK_AGAINST,
+    statement_checks_for,
+)
 from obdi.statement_listing_measure import statement_checks_all
 from obdi.store import Store
 from statement_span_world import Spend, feed, statement
@@ -250,26 +255,25 @@ class TestTheOtherBalanceTakenToBeTheDayAfters:
     def test_Position_WhenTheAccountIsSaidToAddUp_ShowsTheBalancesTheHypothesisStates(
         self, cards
     ):
+        # Round three, decision 2: the second hypothesis (the other balance was really taken the
+        # day after) is withdrawn. The reviewer's expectation was the balances it would have had
+        # to show; with it gone the day is the conflict it is without the rule.
         now, verdict = app_reading(cards, "w-next-day", FAMILIES)
         opening = effective_opening(cards, "w-next-day", families=FAMILIES)
 
-        assert (verdict, now.own.through) == (ADDS_UP, FEB)
-        assert [c.next_day for c in now.own.closed_before] == [True]
-        # 100.00 owed, 7.17 and 3.31 by 10 Feb, 7.77 on 11 Feb.
-        assert (
-            opening.opening_minor,
-            _shown(cards, "w-next-day", FEB),
-            _shown(cards, "w-next-day", NEXT),
-        ) == (-10000, -11048, -11825)
+        assert verdict == DOES_NOT_ADD_UP
+        assert (now.own.state, now.own.closed_before) == (HELD_CONFLICT, ())
+        assert days_offered(opening, now) == ()
 
     def test_Position_WhenTheNextStatementListsThatPurchase_ShowsItsClosingBalanceOnItsDay(
         self, cards
     ):
+        # Round three, decision 2: stays the conflict it is (see the test above).
         now, verdict = app_reading(cards, "w-next-listed", FAMILIES)
 
-        assert (verdict, now.own.known_from, now.own.through) == (ADDS_UP, FEB, MAR)
-        # March's statement closes at 118.25 owed, a known balance the account "adds up to".
-        assert _shown(cards, "w-next-listed", MAR) == -11825
+        assert (verdict, now.own.state, now.own.closed_before) == (
+            DOES_NOT_ADD_UP, HELD_CONFLICT, ()
+        )
 
     def test_Day_WhenABalanceStatedForTheDayAfterSaysOtherwise_StaysAConflict(self, cards):
         now, _ = app_reading(cards, "w-contradicted", FAMILIES)

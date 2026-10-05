@@ -182,7 +182,7 @@ class AccountStanding:
 #: transaction) and by the accounts' Spaces, which the reading depends on. Measured by a review
 #: on 96 statements: re-deriving them on each account page took it from 77 SQL statements to 618.
 _CHECKS_LOCK = threading.Lock()
-_CHECKS: dict[str, tuple[int, dict[str, dict[str, StatementChecks]]]] = {}
+_CHECKS: dict[str, tuple[tuple[int, int, int], dict[str, dict[str, StatementChecks]]]] = {}
 
 
 def _checks_of_store(store: Store, families: Families) -> dict[str, StatementChecks]:
@@ -196,17 +196,30 @@ def _checks_of_store(store: Store, families: Families) -> dict[str, StatementChe
         )
     )
     where = str(store.path)
+    # The file's own identity beside the epoch: another copy of the store put at the same path
+    # has its own modification time. RESIDUE: a copy that keeps the original's time and size
+    # (`copy2`) and reached the same epoch by a different write is not told apart, which needs a
+    # restore without a restart of the process.
+    try:
+        seen = store.path.stat()
+        identity = (epoch, seen.st_mtime_ns, seen.st_size)
+    except OSError:
+        identity = (epoch, 0, 0)
     with _CHECKS_LOCK:
         held = _CHECKS.get(where)
-        if held is not None and held[0] == epoch and spaces in held[1]:
+        if held is not None and held[0] == identity and spaces in held[1]:
             return held[1][spaces]
     found = statement_checks_all(store, families)
+    # Never stored inside a transaction: a write that is rolled back returns the epoch to what
+    # it was, and checks read inside it would then stand for a store that never held them.
+    if store.connection.in_transaction:
+        return found
     with _CHECKS_LOCK:
         held = _CHECKS.get(where)
-        # One entry per reading of the Spaces at this epoch (the pages read with and without the
-        # families, and a reading must not evict the other); a new epoch discards them all.
-        if held is None or held[0] != epoch:
-            held = _CHECKS[where] = (epoch, {})
+        # One entry per reading of the Spaces at this identity (the pages read with and without
+        # the families, and a reading must not evict the other); a new one discards them all.
+        if held is None or held[0] != identity:
+            held = _CHECKS[where] = (identity, {})
         held[1][spaces] = found
     return found
 

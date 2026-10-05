@@ -733,8 +733,9 @@ def _statements_score_html(view: Any) -> str:
     )
     for day in clashing:
         body += (
-            f'<p class="warn">Two documents close on {_esc(day)} and list different '
-            "transactions, so neither tests its days.</p>"
+            f'<p class="warn">Two documents state a closing balance for {_esc(day)} and do not '
+            "list the same transactions, so neither tests its days. It may be one statement "
+            "uploaded twice.</p>"
         )
     return body
 

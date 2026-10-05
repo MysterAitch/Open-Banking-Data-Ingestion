@@ -113,21 +113,11 @@ def _conflict_sentence(item: StatementListing) -> str:
             f"{plural(found.unlisted_that_day, 'transaction')} dated that day, so the two "
             "balances are for different moments and do not contradict each other."
         )
-    if found.verdict is DayReading.NEXT_DAY:
-        return (
-            head
-            + "The two differ by exactly the counting transactions dated the next day that the "
-            "statement does not list: yes. "
-            f"The statement closed before {plural(found.unlisted_next_day, 'transaction')} dated "
-            "the next day, so the two balances are for different moments and do not "
-            "contradict each other."
-        )
     if found.verdict is DayReading.NOT_EXPLAINED:
         return (
             head + "The two differ by exactly the counting transactions dated that day that the "
             f"statement does not list: no ({plural(found.unlisted_that_day, 'such transaction')} "
-            "that day and "
-            f"{found.unlisted_next_day} the next)."
+            "that day)."
         )
     return (
         head + f"Whether the statement closing before some transactions explains it: cannot say - "

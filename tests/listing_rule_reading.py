@@ -28,6 +28,34 @@ def movement_of(store: Store) -> MovementCompleteness:
     return held[1]
 
 
+def shown_balances_are_the_stated_ones(
+    store: Store, ref: str, families: Families, standing: Standing
+) -> int:
+    """For every day a statement is taken to have closed before some transactions, the balance
+    the account page would show for that moment equals the stated one: the other source's at the
+    end of the day, the statement's before the transactions it closed before. Returns how many
+    days it checked. A rule that says an account adds up over balances the page does not show is
+    the failure this guards against."""
+    from obdi.balance_anchors import effective_opening
+    from obdi.ledger import running_balance
+
+    opening = effective_opening(store, ref, families=families)
+    assert opening.opening_minor is not None
+    rows = store.transactions_for_account(ref)
+    checked = 0
+    for claim in standing.own.closed_before:
+        end_of_day = running_balance(opening.opening_minor, rows, claim.day)
+        for known in standing.own.tested_known:
+            if known.day != claim.day or known.instant:
+                continue
+            if known.closed_before is None:
+                assert end_of_day == known.figure, (ref, claim.day, known.source)
+            else:
+                assert end_of_day - sum(claim.that_amounts) == known.figure, (ref, claim.day)
+        checked += 1
+    return checked
+
+
 def app_reading(
     store: Store, ref: str, families: Families, *, rule: bool = True
 ) -> tuple[Standing, str]:

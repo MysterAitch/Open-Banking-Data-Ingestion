@@ -73,16 +73,24 @@ here as `StatementCheck`s, and the arithmetic is its one implementation:
       verifies and faults nothing.
   R2  A statement's closing balance is the balance AFTER THE TRANSACTIONS IT LISTS, not the balance
       at the end of a calendar day. Where it and another source's balance for the same day differ
-      by exactly the counting transactions dated that day (or, apart, the next) that it does not
-      list, the statement is TAKEN TO HAVE CLOSED BEFORE THEM, which is strong evidence and not
-      proof. It is then taken out of that day's comparison (as a balance stated for a moment is,
+      by exactly ALL the counting transactions dated that day that it does not list, the
+      statement is TAKEN TO HAVE CLOSED BEFORE THEM, which is strong evidence and not proof. It is
+      then taken out of that day's comparison (as a balance stated for a moment is,
       `Known.instant`), the chain counts it as before them, and the other balance is judged with
-      them counted. All of the day's transactions are taken together or not at all: a subset that
-      happened to sum to the difference is arithmetic fitted to a hypothesis. `apply_checks`
-      checks the claim against the figures and ignores one they do not bear out.
-  R3  A statement whose lines were found and do not sum is a real fault: the account does not add
-      up there (`HELD_STATEMENT`), said with the statement and the check it failed. One whose
-      lines were not found is never a fault.
+      them counted. ONE hypothesis, all or nothing: a subset that happened to sum to the
+      difference is arithmetic fitted to a hypothesis, and so is taking the other balance to be
+      for another day (tried and withdrawn: the account then said it added up while every balance
+      the page showed was out). Only a statement that itself adds up by what it lists explains a
+      day away. The end-of-day balance may define the opening on such a day, never the
+      statement's, whose closing the opening's count of "dated up to the day" would get wrong: the
+      claim is refused where the statement would define it. `apply_checks` checks the claim
+      against the figures and ignores one they do not bear out.
+  R3  A statement IN USE (its closing is a known balance) whose lines were found and do not sum is
+      a real fault: the account does not add up there (`HELD_STATEMENT`), said with the statement
+      and the check it failed, and its exit is disregarding that statement's closing. One whose
+      lines were not found, that the reader refused, or one of whose lines is held under another
+      account (only the store's own Space fold puts one there) cannot say: it verifies nothing,
+      faults nothing, and moves no verdict. A disregarded statement lists nothing.
   R4  Consecutive statements are linked by their balances (an opening equal to the previous
       closing is evidence of it, never proof). Two that share a listed transaction, or where the
       later starts inside the earlier, OVERLAP and nothing is concluded from their balances; two
@@ -118,7 +126,6 @@ from .masking import Structural
 from .plural import plural
 from .statement_checks import (
     DOES_NOT_REACH,
-    HELD_ELSEWHERE,
     HELD_TWICE,
     LISTED_TWICE,
     NO_LONGER_COUNTS,
@@ -392,7 +399,19 @@ def derive_agreement(
             )
         ),
         tested_known=tuple(
-            k for k in balances if k.day in tested_days and (k.verdict == MET or k.self_tested)
+            k
+            for k in balances
+            if k.day in tested_days
+            and (
+                k.verdict == MET
+                or k.self_tested
+                # On a day a statement closed before some transactions, the balance the span
+                # reaches is the end-of-day one, even where it defines the opening.
+                or (
+                    k.verdict == DEFINES
+                    and any(o.closed_before is not None for o in by_day[k.day])
+                )
+            )
         ),
     )
 
@@ -465,46 +484,42 @@ def _close_before(
     """Apply one statement's R2 claim to `found`, in place, if the figures and the chain bear it
     out; otherwise leave the day exactly the conflict it is.
 
-    The sum is taken HERE from the amounts, so a wrong sum upstream cannot pass. Which balances
-    move: let `delta` be how far a balance's predicted figure moves under the claim (the statement
-    does not hold the transactions nobody lists that the chain counted at it; under the second
-    hypothesis the other balances of the day are taken to include the day after's). A balance's
-    distance becomes `distance + delta(defining) - delta(it)`, since the opening is worked out
-    from the defining balance. The claim stands only if every balance of the day is then reproduced.
+    The sum is taken HERE from the amounts, so a wrong sum upstream cannot pass. The opening is
+    derived by counting the transactions dated up to and including a day, which is right for a
+    balance stated for the end of that day and wrong for a statement that closed before some of
+    them. So on a day where this applies the end-of-day balance is the one that may define the
+    opening, never the statement's: where the statement would define it the claim is refused and
+    the day stays the conflict it is, because every balance the account then shows would be
+    out by the transactions the statement closed before. Where another balance defines the
+    opening, the statement's distance moves by what the chain counted at its closing, and the
+    claim stands only if every balance of the day is then reproduced.
     """
+    if any(found[i].verdict == DEFINES for i in at):
+        return
     others = [
         i
         for i, k in enumerate(found)
         if not k.instant and k.day == claim.day and k.figure != check.figure
     ]
-    if not others:
+    if not others or not claim.that_amounts:
         return
-    that, after = sum(claim.that_amounts), sum(claim.next_amounts)
-    if claim.next_day:
-        if not claim.next_amounts:
-            return
-        expected = that + after
-    else:
-        if not claim.that_amounts:
-            return
-        expected = that
-    if {found[i].figure - check.figure for i in others} != {expected}:
+    if {found[i].figure - check.figure for i in others} != {sum(claim.that_amounts)}:
         return
     counted = sum(claim.counted_amounts)
-    for redated in (after, 0) if claim.next_day else (0,):
-        delta = dict.fromkeys(at, -counted) | dict.fromkeys(others, redated)
-        base = next((delta.get(i, 0) for i, k in enumerate(found) if k.verdict == DEFINES), 0)
-        trial = list(found)
-        for i, k in enumerate(found):
-            if k.distance is None or k.verdict == DEFINES:
-                continue
-            distance = k.distance + base - delta.get(i, 0)
-            trial[i] = replace(k, distance=distance, verdict=MET if distance == 0 else UNMET)
-        if all(trial[i].verdict in (MET, DEFINES) for i in (*at, *others)):
-            for i in at:
-                trial[i] = replace(trial[i], closed_before=claim)
-            found[:] = trial
+    trial = list(found)
+    for i in at:
+        distance = found[i].distance
+        if distance is None:
             return
+        distance += counted
+        trial[i] = replace(
+            found[i],
+            distance=distance,
+            verdict=MET if distance == 0 else UNMET,
+            closed_before=claim,
+        )
+    if all(trial[i].verdict in (MET, DEFINES) for i in (*at, *others)):
+        found[:] = trial
 
 
 def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
@@ -687,7 +702,6 @@ _FAULT_REASONS = {
     HELD_TWICE: "a transaction it lists is held twice",
     LISTED_TWICE: "it lists a transaction twice that is held once",
     NO_LONGER_COUNTS: "a transaction it lists is held as reversed or void, so it no longer counts",
-    HELD_ELSEWHERE: "a transaction it lists is held under another account",
     DOES_NOT_REACH: (
         "the transactions it lists, as held, do not carry its opening balance to its closing "
         "balance"
@@ -719,18 +733,12 @@ def listing_tested_sentence(tested: ListingTested) -> str:
 def closed_before_sentence(claim: ClosedBefore) -> str:
     """Why two sources' balances for one day are not a conflict (R2), and how it is known."""
     counted = plural(claim.transactions, "transaction")
-    where = "that day and the day after" if claim.next_day else "that day"
-    then = (
-        "the statement is taken to have closed before them and the other balance to have been "
-        "taken the day after"
-        if claim.next_day
-        else "the statement is taken to have closed before them"
-    )
+    them = "it" if claim.transactions == 1 else "them"
     return (
         f"The statement's balance and another source's for {_day(claim.day)} differ by exactly "
-        f"the {counted} dated {where} that this statement does not list, so {then}. It is "
-        "taken so because the two differ by exactly those transactions, which is strong evidence "
-        "and not proof."
+        f"the {counted} dated that day that this statement does not list, so the statement is "
+        f"taken to have closed before {them}. It is taken so because the two differ by exactly "
+        "that, which is strong evidence and not proof."
     )
 
 
