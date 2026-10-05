@@ -468,10 +468,11 @@ def shown_refs(page: str) -> list[str]:
 
 
 class TestTheAccountsPage:
-    def test_AccountsDestination_IsTheAccountsPageItselfAndNotAnAnchorOnTheOverview(self):
-        hrefs = {key: href for key, _, href in DESTINATIONS}
+    def test_AccountsPage_IsAPageOfItsOwnAndNotAnAnchorOnTheOverview(self):
+        hrefs = {href for _, _, href in DESTINATIONS}
 
-        assert hrefs["accounts"] == "/accounts"
+        assert not any("#" in href for href in hrefs)
+        assert "/accounts" not in hrefs, "the accounts page has no tab: Today's list leads to it"
 
     def test_Page_LeadsWithEveryAccountHeldEachWithItsLedgerAndSaysWhichAreNotDeclared(self, lab):
         page = lab.get("/accounts").text

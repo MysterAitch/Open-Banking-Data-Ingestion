@@ -4036,6 +4036,9 @@ class ConnectionHandler(
         if route == "/connections":
             self._connections_page()
             return
+        if route == "/more":
+            self._more_page()
+            return
         if route == "/actual":
             self._actual_page()
             return

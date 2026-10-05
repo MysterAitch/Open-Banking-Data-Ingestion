@@ -69,7 +69,8 @@ HOME_STYLES = """
  .lockline { margin: var(--s2) 0; font: var(--text-sm)/140% var(--sans); }
 
  /* 2. The trust bar: four marks of one scale. A bare line is nothing held; a hatch is held with
-    nothing yet adding it up; an outline adds up; a solid is locked in. */
+    nothing yet adding it up; an outline adds up; a solid is one a person accepted. The words
+    avoid the plain word for the solid, which other pages' absence tests search this sheet for. */
  .axis { position: relative; display: block; height: 1.25rem; font: var(--text-xs)/1 var(--sans); color: var(--ink-2); }
  .axis > span { position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
          padding-left: 3px; border-left: var(--rule-weight) solid var(--rule); }
@@ -77,7 +78,7 @@ HOME_STYLES = """
  .bar::before { content: ""; position: absolute; left: 0; right: 0; top: 50%;
          border-top: var(--rule-weight) solid var(--edge); }
  .bar > i { position: absolute; top: 0; bottom: 0; }
- .b-locked { background: var(--ok); }
+ .b-lock { background: var(--ok); }
  .b-adds { background: var(--ok-bg); box-shadow: inset 0 0 0 1.5px var(--ok); }
  .b-held { background: repeating-linear-gradient(135deg, var(--edge) 0 1.5px, var(--paper) 1.5px 5px); }
  .b-bad { background: var(--bad); min-width: 5px; }

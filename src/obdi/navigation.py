@@ -1,9 +1,9 @@
 """The navigation strip every page carries, which part of it is current, and what pages are called.
 
 The destinations are a fixed, small set that says how the site is organised, in the order
-they are used: what is up to date today, the accounts held, the position they add up to,
-whether the push to Actual is right, how data comes in, whether it is healthy, and the pages
-that exist to explain a fault. Every one is a page of its own.
+they are used: what needs doing today, how data is brought in from files, the position the
+accounts add up to, the places data is fetched from and sent to, and everything else. Every one
+is a page of its own.
 
 EVERY ROUTE HAS A HOME. `SECTION_OF_ROUTE` names the destination of every route the
 dispatcher serves, GET or POST, so the current section is marked on an answer page as well
@@ -17,7 +17,7 @@ one edit and the old name is said once, on the page it led to, where somebody wh
 will look.
 
 NAVIGATION LINKS ARE NOT BUTTONS. A button is the action a page exists for, and the page's own
-buttons are full width so that doing and leaving are told apart at a glance. A strip of seven
+buttons are full width so that doing and leaving are told apart at a glance. A strip of five
 full-width buttons would bury every page's action under its own furniture, so these are a
 separate element: a wrapping row of links each at least 44 pixels tall (see `render_page`'s
 stylesheet), which is the thumb-reachable size without the weight.
@@ -32,17 +32,24 @@ from dataclasses import dataclass
 #: (section, label, destination). The section is what `SECTION_OF_ROUTE` names.
 #: "Today" rather than "Overview": the page opens with whether anything needs a person now, and
 #: a word that says when it is read says more than one that says only that it is broad.
-#: Seven items wrap to two rows of four at 360 pixels (the stylesheet trims the links' padding to
-#: allow it); the browser test in test_phone_layout.py holds it.
+#: Five items sit in one row on a phone; the browser test in test_phone_layout.py holds it.
+#: "Connections" is every external place data moves to or from: the banks and the aggregator it is
+#: fetched from, and the budgeting tool it is sent to. "More" lists everything else: the accounts
+#: page, the checks, and the diagnostics, which are read when something is wrong and are not a
+#: daily destination. An account's own page marks Today as current, because Today is the list it
+#: is opened from.
 DESTINATIONS: tuple[tuple[str, str, str], ...] = (
     ("today", "Today", "/"),
-    ("accounts", "Accounts", "/accounts"),
-    ("position", "Position", "/position"),
-    ("actual", "Actual", "/actual"),
     ("bring-in", "Bring in", "/bring-in"),
-    ("checks", "Checks", "/checks"),
-    ("diagnostics", "Diagnostics", "/diagnostics"),
+    ("position", "Position", "/position"),
+    ("connections", "Connections", "/connections"),
+    ("more", "More", "/more"),
 )
+
+#: The pages More lists that are the hub of a group of pages of their own. Like a destination's
+#: own page, a hub offers no way out and says its old name itself: More is one tap away in the
+#: strip, and a second "Back to More" beside the page's own note would say the name twice.
+HUBS = frozenset({"/checks", "/diagnostics"})
 
 #: Addresses that answer with a destination's own page, kept so that bookmarks and the links
 #: other pages hold go on working. Each is the landing page of the section it maps to.
@@ -55,61 +62,59 @@ ALIASES: dict[str, str] = {
 #: The section a route belongs to. A route absent from here marks nothing as current, which is
 #: right only for an address no page serves.
 SECTION_OF_ROUTE: dict[str, str] = {
-    # Today
+    # Today, and the pages opened from its list of accounts: one account, declaring and editing,
+    # Spaces, and what is done to an account with its transactions in view.
     "/": "today",
-    # Accounts: the list, one account, declaring and editing, Spaces, coverage by source,
-    # and the categorising that is done account by account.
-    "/accounts": "accounts",
-    "/ledger": "accounts",
-    "/balance-chart": "accounts",
-    "/coverage-timeline": "bring-in",
-    "/declare-account": "accounts",
-    "/edit-account": "accounts",
-    "/coverage": "accounts",
-    "/spaces": "accounts",
-    "/review": "accounts",
-    "/ledger-anchor": "accounts",
-    "/ledger-anchor-remove": "accounts",
-    "/ledger-balance-disregard": "accounts",
-    "/ledger-balance-use-again": "accounts",
-    "/ledger-typed": "accounts",
-    "/ledger-typed-withdraw": "accounts",
-    "/protect": "accounts",
-    "/protect-withdraw": "accounts",
-    "/protect-accept": "accounts",
-    "/declare-spaces": "accounts",
-    "/declare-known": "accounts",
-    "/set-parents": "accounts",
-    "/save-account": "accounts",
-    "/archive-account": "accounts",
-    "/unarchive-account": "accounts",
-    "/bind": "accounts",
-    "/review-apply": "accounts",
-    "/review-defer": "accounts",
+    "/accounts": "today",
+    "/ledger": "today",
+    "/balance-chart": "today",
+    "/declare-account": "today",
+    "/edit-account": "today",
+    "/spaces": "today",
+    "/ledger-anchor": "today",
+    "/ledger-anchor-remove": "today",
+    "/ledger-balance-disregard": "today",
+    "/ledger-balance-use-again": "today",
+    "/ledger-typed": "today",
+    "/ledger-typed-withdraw": "today",
+    "/protect": "today",
+    "/protect-withdraw": "today",
+    "/protect-accept": "today",
+    "/declare-spaces": "today",
+    "/declare-known": "today",
+    "/set-parents": "today",
+    "/save-account": "today",
+    "/archive-account": "today",
+    "/unarchive-account": "today",
+    "/bind": "today",
+    "/review-apply": "more",
+    "/review-defer": "more",
     # Position
     "/position": "position",
-    # Actual
-    "/actual": "actual",
-    "/actual-history": "actual",
-    "/push-actual": "actual",
-    "/audit-actual": "actual",
-    "/marker-actual": "actual",
-    "/prune-actual": "actual",
-    "/align-actual": "actual",
-    "/empty-actual": "actual",
-    # Bring in: every way data enters.
+    # Connections: the places data is fetched from (banks, the aggregator) and the place it is
+    # sent to (the budgeting tool, Actual).
+    "/connections": "connections",
+    "/connect": "connections",
+    "/callback": "connections",
+    "/rename-connection": "connections",
+    "/fetch-now": "connections",
+    "/extend": "connections",
+    "/extend-max": "connections",
+    "/actual": "connections",
+    "/actual-history": "connections",
+    "/push-actual": "connections",
+    "/audit-actual": "connections",
+    "/marker-actual": "connections",
+    "/prune-actual": "connections",
+    "/align-actual": "connections",
+    "/empty-actual": "connections",
+    # Bring in: every way data enters from a file.
     "/bring-in": "bring-in",
     "/gaps": "bring-in",
     "/gaps-mark": "bring-in",
     "/gaps-mark-undo": "bring-in",
     "/gaps-scope": "bring-in",
-    "/connect": "bring-in",
-    "/callback": "bring-in",
-    "/connections": "bring-in",
-    "/rename-connection": "bring-in",
-    "/fetch-now": "bring-in",
-    "/extend": "bring-in",
-    "/extend-max": "bring-in",
+    "/coverage-timeline": "bring-in",
     "/import": "bring-in",
     "/upload": "bring-in",
     "/upload-preview": "bring-in",
@@ -122,34 +127,38 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/statement-assign": "bring-in",
     "/statements-assign": "bring-in",
     "/statement-section-assign": "bring-in",
-    # Checks: the health of the data.
-    "/checks": "checks",
-    "/reports": "checks",
-    "/review-flags": "checks",
-    "/review-flags-two": "checks",
-    "/review-flags-one": "checks",
-    "/review-flags-undo": "checks",
-    "/agreements": "checks",
-    "/identity-health": "checks",
-    "/balance-reconciliation": "checks",
-    "/period-reconciliation": "checks",
-    "/balance-walk": "checks",
-    "/date-lag": "checks",
-    "/review-report": "checks",
-    # Diagnostics: pages that exist to explain a fault, and the repairs.
-    "/diagnostics": "diagnostics",
-    "/evidence": "diagnostics",
-    "/admin": "diagnostics",
-    "/account": "diagnostics",
-    "/artefacts": "diagnostics",
-    "/artefact": "diagnostics",
-    "/attempts": "diagnostics",
-    "/fetch-timeline": "diagnostics",
-    "/rebuild-derived": "diagnostics",
-    "/forget-actual-bindings": "diagnostics",
-    "/replay-artefact": "diagnostics",
-    "/refile-artefact": "diagnostics",
-    "/starling-probe": "diagnostics",
+    # More: everything else, in the plain groups its page lists them in. The accounts' own
+    # housekeeping, the checks of the data's health, and the pages that exist to explain a fault
+    # and the repairs.
+    "/more": "more",
+    "/coverage": "more",
+    "/review": "more",
+    "/checks": "more",
+    "/reports": "more",
+    "/review-flags": "more",
+    "/review-flags-two": "more",
+    "/review-flags-one": "more",
+    "/review-flags-undo": "more",
+    "/agreements": "more",
+    "/identity-health": "more",
+    "/balance-reconciliation": "more",
+    "/period-reconciliation": "more",
+    "/balance-walk": "more",
+    "/date-lag": "more",
+    "/review-report": "more",
+    "/diagnostics": "more",
+    "/evidence": "more",
+    "/admin": "more",
+    "/account": "more",
+    "/artefacts": "more",
+    "/artefact": "more",
+    "/attempts": "more",
+    "/fetch-timeline": "more",
+    "/rebuild-derived": "more",
+    "/forget-actual-bindings": "more",
+    "/replay-artefact": "more",
+    "/refile-artefact": "more",
+    "/starling-probe": "more",
 }
 
 
@@ -178,6 +187,8 @@ PAGE_NAMES: dict[str, PageName] = {
     "/checks": PageName("Checks", "Reports"),
     "/diagnostics": PageName("Diagnostics", "Evidence and Admin"),
     "/bring-in": PageName("Bring in"),
+    "/more": PageName("More"),
+    "/connections": PageName("Connections"),
     "/gaps": PageName("What to fetch next"),
     "/gaps-mark": PageName("Set a period aside"),
     "/coverage-timeline": PageName("Coverage timeline"),
@@ -230,6 +241,7 @@ def way_out_html(route: str | None = None) -> str:
     where = current_route.get() if route is None else route
     section = section_of(where)
     landing = {href for key, _, href in DESTINATIONS if key == section}
+    landing |= HUBS if section == "more" else set()
     landing |= {alias for alias, target in ALIASES.items() if target in landing}
     if not section or section == "today" or where in landing:
         return ""

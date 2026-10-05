@@ -381,14 +381,15 @@ class TestTheExistingSectionsRemain:
         assert "Add a bank" in page_at("/connections")
         assert "Push to Actual now" in page_at("/actual")
 
-    def test_Home_ChecksAndDiagnosticsAreReachedFromTheStripAndNotListedOnTheHomePage(
+    def test_Home_ChecksAndDiagnosticsAreReachedThroughMoreAndNotListedOnTheHomePage(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
         strip = re.search(r'<nav class="sitenav".*?</nav>', page, re.S).group(0)
         body = page.replace(strip, "")
 
-        assert 'href="/checks"' in strip and 'href="/diagnostics"' in strip
+        assert 'href="/more"' in strip
+        assert 'href="/checks"' not in strip and 'href="/diagnostics"' not in strip
         for route in ("/checks", "/diagnostics"):
             assert f'href="{route}"' not in body
         for route in ("/agreements", "/date-lag", "/balance-walk", "/artefacts", "/attempts"):

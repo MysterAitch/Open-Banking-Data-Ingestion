@@ -530,6 +530,12 @@ def _archived_html(
     )
 
 
+#: The way to the accounts page, which has no tab of its own: Today's list is where it is reached.
+_MANAGE_ACCOUNTS = (
+    '<p class="muted"><a class="tap" href="/accounts">Rename, archive, or declare accounts</a></p>'
+)
+
+
 def _accounts_html(
     overview: Overview,
     todos: Sequence[Todo],
@@ -537,10 +543,7 @@ def _accounts_html(
     shown: Callable[[str], AccountShown],
 ) -> str:
     today = overview.generated_at.date()
-    manage = (
-        '<p class="muted"><a class="tap" href="/accounts">'
-        "Rename, archive, or declare accounts</a></p>"
-    )
+    manage = _MANAGE_ACCOUNTS
     if not overview.accounts:
         return f"<p>No account is held or declared yet.</p>{manage}"
     first_todo: dict[str, Todo] = {}
@@ -716,5 +719,5 @@ def _unchecked(message: str, system_html: str) -> str:
         f"{_verdict_html(Verdict('Nothing was checked.', 'bad'))}"
         f"{_notice(message)}{system_html}</section>"
         '<section id="accounts" class="home-accounts">'
-        '<p class="muted">No account list is available.</p></section></div>'
+        f'<p class="muted">No account list is available.</p>{_MANAGE_ACCOUNTS}</section></div>'
     )

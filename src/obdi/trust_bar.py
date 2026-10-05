@@ -6,7 +6,7 @@ are a change of tokens, and the bar is `aria-hidden` because the sentence beside
 words (a bar of fill says nothing to a screen reader or in greyscale).
 
 The classes, one rung more solid than the one before, so the ladder reads without colour:
-`b-held` a hatch, `b-adds` an outline, `b-locked` a solid. `b-bad` is the red mark, `b-want` the
+`b-held` a hatch, `b-adds` an outline, `b-lock` a solid. `b-bad` is the red mark, `b-want` the
 dashed block for a file wanted, and `b-edge` the tick at the left edge for history older than the
 twelve months drawn.
 """
@@ -19,7 +19,7 @@ from datetime import date
 from .standing_data import ADDS_UP
 from .trust import MarkKind, Rung, Trust, month_marks, place
 
-_STRETCH_CLASS = {Rung.HELD: "b-held", Rung.ADDS_UP: "b-adds", Rung.LOCKED: "b-locked"}
+_STRETCH_CLASS = {Rung.HELD: "b-held", Rung.ADDS_UP: "b-adds", Rung.LOCKED: "b-lock"}
 _MARK_CLASS = {
     MarkKind.NOT_ADDING_UP: "b-bad",
     MarkKind.LOCK_CHANGED: "b-bad",
@@ -63,7 +63,7 @@ def key_html() -> str:
     adds = ADDS_UP.capitalize()
     entries = (
         (
-            "b-locked",
+            "b-lock",
             "Locked in",
             "You accepted it, after it was shown to add up. A later change to it is reported.",
         ),

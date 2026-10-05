@@ -89,7 +89,7 @@ def test_AccountsPage_WithManyAccountsAndAVeryLongName_AtPhoneWidth_DoesNotScrol
     _assert_fits(_overflow(browser, f"{base}/accounts"))
 
 
-def test_AccountsPage_AtPhoneWidth_KeepsTheNavigationToTwoRowsAndTheDeclareFormOnScreen(
+def test_AccountsPage_AtPhoneWidth_KeepsTheNavigationToOneRowAndTheDeclareFormOnScreen(
     browser: object, base: str
 ) -> None:
     page = browser.new_page(viewport={"width": 360, "height": 780})  # type: ignore[attr-defined]
@@ -99,7 +99,7 @@ def test_AccountsPage_AtPhoneWidth_KeepsTheNavigationToTwoRowsAndTheDeclareFormO
             "() => new Set([...document.querySelectorAll('.sitenav a')]"
             ".map(a => Math.round(a.getBoundingClientRect().top))).size"
         )
-        assert rows == 2
+        assert rows == 1
         assert page.get_by_role("button", name="Declare these 30 accounts").count() == 1
         _assert_fits(_measure(page))
     finally:

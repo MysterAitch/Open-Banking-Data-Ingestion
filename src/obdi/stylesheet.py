@@ -195,15 +195,19 @@ SHARED_STYLES = """
     an underline. None is a button, so the page's own action stays the
     heaviest thing on it. */
  .sitenav ul { list-style: none; margin: 0 0 var(--s3); padding: 0; display: grid;
-               grid-template-columns: repeat(4, minmax(0, 1fr));
+               grid-template-columns: repeat(5, minmax(0, 1fr));
                border-bottom: var(--rule-weight) solid var(--rule); }
  .sitenav li { min-width: 0; }
  .sitenav a { display: flex; align-items: center; justify-content: center; text-align: center;
               min-height: var(--hit); padding: 0 var(--s1); overflow-wrap: anywhere;
               border-bottom: 3px solid transparent; color: var(--ink-2); text-decoration: none;
               font: 500 var(--text-sm)/130% var(--sans); }
- .sitenav li:nth-child(n+5) a { border-top: var(--rule-weight) solid var(--rule-2); }
  .sitenav a[aria-current="page"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--act); }
+ /* Five words in one row on a phone: the longest, "Connections", must fit its fifth of the
+    width whole, because a label broken mid-word says less. */
+ @media (max-width: 30rem) {
+  .sitenav a { padding: 0; font-size: var(--text-xs); overflow-wrap: normal; }
+ }
  /* A link that is not a button but is still a thumb-sized target. The hit
     area is a pseudo-element, so the link adds nothing to its line's height
     and a paragraph ending in one is no taller than the lines above it. */

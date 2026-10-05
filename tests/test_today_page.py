@@ -318,7 +318,7 @@ class TestAnOrdinaryDay:
         drawn = cells(bar)
 
         # Locked 2025-10-06 (the window's first day) to 2026-04-10 is 187 of 365 days.
-        assert drawn["b-locked"] == "left:0.00%;width:51.23%"
+        assert drawn["b-lock"] == "left:0.00%;width:51.23%"
         # Adds up 2026-04-11 to 2026-07-10: 91 days, from day 187.
         assert drawn["b-adds"] == "left:51.23%;width:24.93%"
         # Waiting 2026-07-11 to today: 87 days, from day 278.
@@ -334,7 +334,7 @@ class TestAnOrdinaryDay:
         )
         root = page(overview(both), None)
 
-        assert cells(row(root, "long"))["b-locked"] == cells(row(root, "short"))["b-locked"]
+        assert cells(row(root, "long"))["b-lock"] == cells(row(root, "short"))["b-lock"]
         assert cells(row(root, "long"))["b-adds"] == cells(row(root, "short"))["b-adds"]
         assert cells(row(root, "long"))["b-held"] == cells(row(root, "short"))["b-held"]
 
