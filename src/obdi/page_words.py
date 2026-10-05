@@ -76,6 +76,11 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     # cannot be read, which is another thing.)
     "in agreement",
     "held back",
+    # "Checked" said bare names neither who did it nor against what. The rung is named by what it
+    # is (`standing_data.ADDS_UP`: obdi added the transactions up against the known balances), and
+    # a person vouching is "locked in". "not checked" was tried and rejected: the coverage
+    # timeline's own lane says it, and that page is not part of this redesign.
+    "checked to",
     # One label reveals values (`Show values` / `Hide values`; `Show raw payload (unmasked)` for
     # an artefact's bytes), so these older labels for the same press may not come back.
     "show the figures",

@@ -19,6 +19,7 @@ import pytest
 from obdi.alerts import CONSENT_RUNGS
 from obdi.connections import Connection, ConnectionStore
 from obdi.coverage import SourceCoverage
+from obdi.overview import Overview
 from obdi.probing import elapsed_words, sca_note
 from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
 from stylesheet_support import length_px
@@ -89,6 +90,11 @@ def serve(tmp_path):
     yield start
     for httpd in servers:
         httpd.shutdown()
+
+
+def quiet_overview(fresh: bool) -> Overview:
+    """Today's checks having run and found nothing, so the page's own lines are what is read."""
+    return Overview(datetime.now(UTC), 19, 19, (), ())
 
 
 def fetch(base: str, path: str) -> str:
@@ -271,7 +277,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         for action in MOVED_FORM_ACTIONS:
             assert f'action="{action}"' not in page, action
         assert "Everything else, by section" not in page
-        assert 'id="attention"' in page and 'id="accounts"' in page
+        assert 'id="verdict"' in page
 
     def test_Home_CarriesFourSystemFactsEachLinkingToThePageThatOwnsIt(self, serve):
         page = fetch(serve(), "/")
@@ -279,23 +285,26 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         facts = re.findall(r'<li class="fact"><a class="tap" href="([^"]+)"', page)
         assert facts == ["/connections", "/connections", "/admin", "/admin"]
 
-    def test_Home_StatesTheActualFactAsAStatusLineAndNotAsASystemFact(self, serve):
-        page = fetch(serve(), "/")
+    def test_Home_StatesTheActualFactInTheEvidenceAndNotAsASystemFact(self, serve):
+        page = fetch(serve(overview=quiet_overview), "/")
 
-        assert 'class="tap status-row" href="/actual"' in page
+        evidence = page.split('class="evidence"')[1].split('id="system"')[0]
+        assert "Not wired on this instance." in evidence
         assert "<strong>Actual</strong>" not in page.split('id="system"')[1]
 
-    def test_Home_AccountsSection_LinksToCoverageDeclaredImportAndCategorise(self, serve):
-        accounts = fetch(serve(), "/").split('id="accounts"')[1]
+    def test_Home_AccountsSection_LinksToTheAccountsPageAndNoLongerToTheOthers(self, serve):
+        accounts = fetch(serve(overview=quiet_overview), "/").split('id="accounts"')[1]
 
-        for href in ("/coverage", "/accounts", "/import", "/review"):
-            assert f'href="{href}"' in accounts, href
+        assert 'href="/accounts"' in accounts
+        for href in ("/coverage", "/import", "/review"):
+            assert f'href="{href}"' not in accounts, href
 
     def test_SystemStrip_StatesTheFactsFromTheirHooks(self, serve):
         soon = connection("halifax", expires_in=timedelta(days=40))
         later = connection("monzo", expires_in=timedelta(days=80))
         base = serve(
             (later, soon),
+            overview=quiet_overview,
             actual_status=lambda: [
                 {"kind": "push", "ok": False, "finished_at": "2026-10-01T12:00:00Z", "error": "x"}
             ],
@@ -313,7 +322,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         page = fetch(base, "/")
         strip = page.split('id="system"')[1]
 
-        status = page.split('id="status"')[1]
+        status = page.split('class="evidence"')[1]
         assert "The last push failed. The push of 2026-10-01 12:00 failed" in status
         assert "last rebuild FAILED, 2026-09-30 08:00Z" in strip
         assert "2 banks connected" in strip
@@ -322,11 +331,11 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         assert "scheduler last completed a cycle" in strip
 
     def test_SystemStrip_WithNothingWired_SaysSoRatherThanGoingMissing(self, serve):
-        page = fetch(serve(), "/")
+        page = fetch(serve(overview=quiet_overview), "/")
         strip = page.split('id="system"')[1]
 
         assert "no scheduler cycle recorded" in strip
-        assert "Not wired on this instance." in page.split('id="status"')[1]
+        assert "Not wired on this instance." in page.split('class="evidence"')[1]
         assert "no banks connected" in strip
         assert "no rebuild recorded" in strip
 
@@ -339,7 +348,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
             time.sleep(0.05)
             return []
 
-        fetch(serve(actual_status=slow), "/")
+        fetch(serve(overview=quiet_overview, actual_status=slow), "/")
 
         out = capsys.readouterr().out
         assert "web timing: / rendered in" in out and "actual_status" in out

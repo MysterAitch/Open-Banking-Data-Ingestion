@@ -3844,15 +3844,16 @@ def render_index(
     bank_authorisation: bool = True,
     overview: Callable[[bool], Overview] | None = None,
     fresh_overview: bool = False,
-    position: Callable[[], object] | None = None,
+    #: The files still to fetch, as of a day: what the things to do about files are made from.
+    fetch_gaps: Callable[[date], FetchReport] | None = None,
     #: The Actual page's other hooks, so the home page's line about Actual reads everything
     #: that page's verdict reads and the two cannot say different things.
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     actual_configured: Callable[[], bool] | None = None,
 ) -> bytes:
-    """The home page: a verdict, four status lines, what needs attention, the accounts, and the
-    System facts, and nothing else.
+    """Today: a verdict, one line of evidence, what to do, and the accounts with how far each can
+    be trusted.
 
     No forms live here. Everything a person does is on a page of its own,
     reached from the navigation strip; the banners stay because a secret that
@@ -3875,11 +3876,11 @@ def render_index(
     fresh=fresh_overview,
     actual_status=actual_status,
     scheduler_heartbeat=scheduler_heartbeat,
-    position=position,
     system_html=system,
     actual_queue=actual_queue,
     actual_heartbeat=actual_heartbeat,
     actual_configured=actual_configured,
+    fetch=fetch_gaps,
 )}
 """
     return render_page("Overview", body, wide=True)
@@ -4166,7 +4167,7 @@ class ConnectionHandler(
                 backfill_status=timer.wrap("backfill_status", config.backfill_status),
                 overview=timer.wrap("overview", config.overview),
                 fresh_overview=params.get("fresh", [""])[0] == "1",
-                position=timer.wrap("position", config.home_position),
+                fetch_gaps=timer.wrap("fetch_gaps", config.fetch_gaps),
                 actual_queue=config.actual_queue,
                 actual_heartbeat=config.actual_heartbeat,
                 actual_configured=config.actual_configured,

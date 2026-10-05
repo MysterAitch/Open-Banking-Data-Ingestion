@@ -89,34 +89,35 @@ def _box(page: object, selector: str) -> dict[str, float]:
 
 
 class TestTheFirstScreen:
-    def test_FirstScreen_WithTwentyAccountsAndTroubles_HoldsTheVerdictTheFourLinesAndTheFirstItem(
+    def test_FirstScreen_WithTwentyAccountsAndTroubles_HoldsVerdictEvidenceAndFirstToDoControl(
         self, browser: object, troubled: str
     ) -> None:
         page = _open(browser, f"{troubled}/")
         try:
             verdict = _box(page, "#verdict")
             assert verdict["y"] + verdict["height"] < HEIGHT
-            rows = page.locator("a.status-row")
-            assert rows.count() == 4
-            for index in range(4):
-                box = rows.nth(index).bounding_box()
-                assert box is not None
-                assert box["y"] + box["height"] <= HEIGHT, f"status line {index}"
-            first_item = _box(page, ".tier .attention li")
-            assert first_item["y"] + 40 <= HEIGHT, "the first item starts on the first screen"
+            evidence = _box(page, "details.evidence > summary")
+            assert evidence["y"] + evidence["height"] <= HEIGHT, "the evidence line"
+            assert evidence["y"] > verdict["y"], "the evidence line follows the verdict"
+            control = _box(page, ".todo a.button")
+            assert control["y"] + control["height"] <= HEIGHT, "the first control is on screen"
+            assert control["height"] >= MINIMUM_TARGET
         finally:
             page.close()
 
-    def test_FirstScreen_WithNothingNeedingAttention_HoldsThePositiveVerdictInTeal(
+    def test_FirstScreen_WithOnlyThingsWhenConvenient_HoldsTheVerdictInTealAndNoFault(
         self, browser: object, clear: str
     ) -> None:
+        """The household with nothing held back still has statements to fetch and balances to
+        confirm, which the to-do list now says and the old verdict did not."""
         page = _open(browser, f"{clear}/")
         try:
             verdict = page.locator("#verdict")
-            assert "Everything checked is in order." in verdict.inner_text()
+            assert verdict.inner_text().startswith("No faults.")
+            assert "ok" in (verdict.get_attribute("class") or "").split()
             box = _box(page, "#verdict")
             assert box["y"] + box["height"] < HEIGHT
-            assert page.locator(".tier").count() == 0
+            assert page.locator(".todo.now, .todo.soon").count() == 0
         finally:
             page.close()
 
@@ -163,12 +164,12 @@ class TestTheWholePage:
 
 
 class TestEveryRowIsATarget:
-    def test_Rows_AndStatusLinesAndDisclosureButtons_AreAtLeastFortyFourPixelsEachWay(
+    def test_Rows_AndControlsAndDisclosureButtons_AreAtLeastFortyFourPixelsEachWay(
         self, browser: object, troubled: str
     ) -> None:
         page = _open(browser, f"{troubled}/")
         try:
-            for selector in ("a.acct-row", "a.status-row", ".acct-more > summary"):
+            for selector in ("a.arow", ".todo a.button", "details.evidence > summary"):
                 boxes = page.locator(selector).evaluate_all(
                     "els => els.filter(e => e.checkVisibility()).map(e => {"
                     " const r = e.getBoundingClientRect(); return [r.width, r.height]; })"
@@ -186,10 +187,10 @@ class TestEveryRowIsATarget:
     ) -> None:
         page = _open(browser, f"{troubled}/")
         try:
-            visible = page.locator("a.acct-row").evaluate_all(
+            visible = page.locator("a.arow").evaluate_all(
                 "els => els.filter(e => e.checkVisibility()).length"
             )
             assert visible == world.TWENTY - len(world.ARCHIVED_SPACES)
-            assert page.locator("summary", has_text="4 archived Spaces").count() == 1
+            assert page.locator("summary", has_text="4 archived accounts").count() == 1
         finally:
             page.close()

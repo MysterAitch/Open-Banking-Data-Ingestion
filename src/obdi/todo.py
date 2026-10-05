@@ -296,6 +296,19 @@ def build_todos(
     return tuple(sorted(found, key=lambda todo: todo.urgency))
 
 
+def wanted_days(fetch: FetchReport | None) -> dict[str, list[tuple[date, date]]]:
+    """The days a file is wanted for, by account: what a bar marks. The days a balance would settle
+    are not a file, so they are not marked; the days are the to-dos' own."""
+    found: dict[str, list[tuple[date, date]]] = {}
+    if fetch is None:
+        return found
+    for outlook in fetch.accounts:
+        for gap in outlook.gaps:
+            if gap.kind not in _BALANCE_KINDS:
+                found.setdefault(gap.account, []).extend(_periods(gap))
+    return found
+
+
 def lockable(item: AccountStanding | None) -> bool:
     """Whether an account has days that add up and are not locked in, which the account's page
     offers to lock in (`protection.tested_days_of`), past what is locked now. A locked stretch

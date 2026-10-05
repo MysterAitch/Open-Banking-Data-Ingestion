@@ -1,8 +1,8 @@
-"""The home page's verdict, status lines, bands, and account rows, with answers decided up front.
+"""Today's verdict, evidence line, things to do, and account rows, with answers decided up front.
 
 The household is `home_world`: twenty accounts built through the real doors, whose standings are
 known from their construction. What is asserted is what a person reads, and the one place each
-sentence is decided (`verdict_of`, `row_reading`, `link_words`) is also held to a table.
+sentence is decided (`verdict_of`, the trust sentence) is also held to a table.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from obdi.overview import (
     NOW,
     SOON,
     AttentionItem,
+    Overview,
     build_overview,
 )
 from obdi.protection import press
@@ -31,7 +32,6 @@ from obdi.store import Store
 from obdi.web_overview import (
     arrange,
     band_phrase,
-    link_words,
     overview_html,
     plural,
     row_reading,
@@ -150,8 +150,9 @@ class TestTheVerdict:
 
         assert len(faults) == 2, "the two held-back accounts, each a fault"
         assert len(later) == 1, "the three accounts with rows after their balance, one reminder"
+        # The one reminder names three accounts, and each is a thing to do of its own.
         assert verdict_in(page_of(troubled)) == (
-            "2 faults to look at now and 1 thing when convenient."
+            "2 faults to look at now and 3 things when convenient."
         )
 
     def test_Verdict_OnTheClearWorld_IsThePositiveStatement(self, clear):
@@ -221,18 +222,10 @@ EXPECTED_BANDS = {
     "statement-due": HOUSEKEEPING,
 }
 
-#: The kinds whose link goes to the admin page, so that the default is a decision and not a gap.
-ADMIN_KINDS = {
-    "rebuild-running",
-    "rebuild:abandoned",
-    "rebuild:empty",
-    "check-failed",
-    "rebuild-problems",
-    "disk",
-}
+_EMPTY = Overview(NOW_TIME, 0, 0, (), ())
 
 
-class TestEveryKindHasABandAndALink:
+class TestEveryKindHasABandAndAnAct:
     def test_Kinds_EachIsInTheBandItsConsequenceCalls_AndNoKindIsLeftUnlisted(self):
         assert {kind: band for kind, (band, _) in _KINDS.items()} == EXPECTED_BANDS
 
@@ -246,27 +239,20 @@ class TestEveryKindHasABandAndALink:
         assert _KINDS["statement-due"][0] == HOUSEKEEPING
 
     @pytest.mark.parametrize("kind", sorted(_KINDS))
-    def test_LinkWords_ForEveryKind_SaysWhereItGoesAndNeverABareOpen(self, kind):
-        item = AttentionItem(kind, 1, "m", "r", "/x", accounts=("a", "b"))
+    def test_ToDo_ForEveryKindOfItem_HasAControlThatSaysWhatItDoesAndNeverABareOpen(self, kind):
+        from obdi.todo import build_todos
 
-        said = link_words(item, lambda ref: "Santander CC")
+        item = AttentionItem(kind, _KINDS[kind][0], "m", "r", "/x", accounts=("a", "b"))
+        overview = replace(_EMPTY, items=(item,))
 
-        assert said.startswith("Open ") and said != "Open"
-        assert (said == "Open the admin page") == (kind in ADMIN_KINDS)
+        todos = build_todos(overview, None, lambda ref: ref)
 
-    def test_LinkWords_ForAnItemAboutOneAccount_NamesItsLedger(self):
-        ledger = AttentionItem("agreement-lapsed", 1, "m", "r", "/ledger", accounts=("a",))
-        several = AttentionItem("agreement-lapsed", 1, "m", "r", "/ledger", accounts=("a", "b"))
-        report = AttentionItem("balance", 1, "m", "r", "/x", accounts=("a",))
-
-        assert link_words(ledger, lambda ref: "Santander CC") == "Open Santander CC's ledger"
-        assert link_words(several, lambda ref: "x") == "Open the ledgers"
-        assert link_words(report, lambda ref: "x") == "Open the balance reconciliation"
-
-    def test_LinkWords_ForTheMovementChecks_IsTheNameThePageGoesBy(self):
-        item = AttentionItem("movement-completeness", 1, "m", "r", "/identity-health")
-
-        assert link_words(item, lambda ref: ref) == "Open the movement checks"
+        if kind in ("rebuild-running", "scheduler-late-wait"):
+            assert todos == (), "information with nothing to do is not a thing to do"
+        else:
+            assert todos
+            assert all(t.control.label not in ("", "Open") for t in todos)
+            assert all(t.control.href.startswith("/") for t in todos)
 
 
 class TestAccountRows:
@@ -302,29 +288,6 @@ class TestAccountRows:
 
         assert (reading.word, reading.css, reading.group) == ("protection broken", "pill-bad", 0)
         assert reading.clause == "protected period has changed"
-
-    def test_Row_WhenItsDatesContradictEachOther_SaysSoAndThePageStillRenders(
-        self, clear, monkeypatch
-    ):
-        from obdi import web_overview
-
-        drawn = web_overview.build_rail
-
-        def refusing_one(**dates):
-            # The one protected account of the household stands in for a contradiction.
-            if dates["protected_through"] is not None:
-                raise ValueError("known_to is before known_from")
-            return drawn(**dates)
-
-        monkeypatch.setattr(web_overview, "build_rail", refusing_one)
-
-        page = page_of(clear)
-
-        assert page.count("No rail is drawn: this account's dates contradict each other.") == 1
-        assert page.count("<svg") >= 10, "every other row keeps its rail"
-
-    def test_Row_WhenItsDatesAreConsistent_SaysNothingOfTheRail(self, clear):
-        assert "No rail is drawn" not in page_of(clear)
 
     def test_Rows_AreOrderedHeldBackThenUnprovenThenInAgreementThenQuietThenArchived(
         self, troubled
@@ -367,12 +330,14 @@ class TestAccountRows:
     def test_ArchivedSpaces_AreFoldedBehindACount_AndLiveOnesAreNot(self, troubled):
         page = page_of(troubled)
 
-        assert "<summary>4 archived Spaces</summary>" in page
-        folded = page.split("<summary>4 archived Spaces</summary>")[1].split("</ul></details>")[0]
+        assert "<summary>4 archived accounts</summary>" in page
+        folded = page.split("<summary>4 archived accounts</summary>")[1].split("</ul></details>")[0]
         for ref in world.ARCHIVED_SPACES:
-            assert f'<a class="tap acct-row" href="/ledger?ref={ref}">' in folded
+            assert f'<a class="tap" href="/ledger?ref={ref}">' in folded
+            assert f'<a class="tap arow" href="/ledger?ref={ref}">' not in page
         for ref in world.LIVE_SPACES:
-            assert f'<a class="tap acct-row" href="/ledger?ref={ref}">' not in folded
+            assert f'<a class="tap" href="/ledger?ref={ref}">' not in folded
+            assert f'<a class="tap arow" href="/ledger?ref={ref}">' in page
 
     def test_Counts_OnTheTroubledWorld_AreTheKnownAnswer(self, troubled):
         # Twenty accounts, four of them archived Spaces: sixteen are live. Two do not add up,
@@ -385,24 +350,30 @@ class TestAccountRows:
         assert len(archived) == 4
         assert verification_counts(archived) == (0, 0, 0, 0)
 
-    def test_Rows_EachLiveAccountDrawsOneProofRailWhoseTextIsItsVerificationSentence(
-        self, troubled
-    ):
+    def test_Rows_EachLiveAccountDrawsOneBarWhoseWordsAreItsTrustSentence(self, troubled):
         page = page_of(troubled)
 
-        assert page.count('<svg class="rail"') == world.TWENTY - len(world.ARCHIVED_SPACES)
+        assert page.count('<span class="bar"') == world.TWENTY - len(world.ARCHIVED_SPACES)
+
         def row(ref):
-            opening = f'<a class="tap acct-row" href="/ledger?ref={ref}">'
+            opening = f'<a class="tap arow" href="/ledger?ref={ref}">'
             return page.split(opening)[1].split("</a>")[0]
 
-        assert "Stops adding up at 2026-03-15." in row("held-1")
-        assert "No known balance from 2026-03-02 to 2026-10-01." in row("no-balance-1")
-        protected = row(world.PROTECTED)
-        assert "Protected through 2026-03-20." in protected
-        assert (
-            "The transactions add up to the known balances from 2026-03-05 to 2026-03-20."
-            in protected
-        )
+        assert "Does not add up from 2026-03-15." in row("held-1")
+        assert "Nothing to check against." in row("no-balance-1")
+        assert "Locked in to 2026-03-20." in row(world.PROTECTED)
+        assert "Adds up to the known balances to 2026-03-20." in row(world.AGREE[1])
+
+    def test_Rows_AnAccountThatNeedsAFile_SaysWhatItWaitsForBesideItsName(self, troubled):
+        page = page_of(troubled)
+
+        row = page.split('<a class="tap arow" href="/ledger?ref=later-rows-1">')[1].split("</a>")[0]
+        assert '<span class="a-flag">Statement wanted</span>' in row
+
+    def test_Rows_OnTheClearWorld_AskNothingAndSayNothingBesideTheName(self, clear):
+        page = page_of(clear)
+
+        assert 'class="a-flag' not in page
 
 
 def with_more_items(base):
@@ -415,53 +386,45 @@ def with_more_items(base):
 
 
 class TestTheFirstScreenIsInOrder:
-    def test_Page_SaysVerdictThenFourStatusLinesThenAttentionThenAccounts(self, troubled):
+    def test_Page_SaysVerdictThenEvidenceThenThingsToDoThenAccounts(self, troubled):
         page = page_of(troubled)
 
-        names = ("verdict", "status", "attention", "accounts")
-        positions = [page.index(f'id="{name}"') for name in names]
+        names = ('id="verdict"', 'class="evidence"', 'class="todos"', 'id="accounts"')
+        positions = [page.index(name) for name in names]
         assert positions == sorted(positions)
-        status = page.split('id="status"')[1].split("</ul>")[0]
-        assert re.findall(r'<span class="status-label">(.*?)</span>', status) == [
-            "Data",
-            "Verification",
-            "Actual",
-            "Position",
-        ]
-        # A troubled household's Verification line lands on the accounts that need a look.
-        for target in ("/connections", "/accounts#needs-a-look", "/actual", "/position"):
-            assert f'class="tap status-row" href="{target}"' in status
 
-    def test_Verification_OnTheTroubledWorld_SaysHowManyAddUpDoNotAndCannotBeChecked(
+    def test_Page_SaysNoVerificationCountThatTheBarsBeneathItAlreadySay(self, troubled):
+        page = page_of(troubled)
+
+        assert "add up to their latest known balance" not in page
+        assert 'id="status"' not in page
+
+    def test_Evidence_OnTheTroubledWorld_NamesTheChecksThatRanAndFoldsTheRest(self, troubled):
+        page = page_of(troubled)
+
+        summary = re.search(r'<details class="evidence"><summary>(.*?)</summary>', page)
+        assert summary is not None
+        assert summary.group(1) == f"{troubled.checks_total} checks ran at 14:02"
+        assert "Last scheduled cycle" not in summary.group(1)
+        assert "No scheduled cycle recorded." in page.split('class="evidence"')[1].split(
+            "</details>"
+        )[0]
+
+    def test_ThingsToDo_WithFewerThanFourOpen_FoldTheRestBehindACountOfWhatIsWhenConvenient(
         self, troubled
     ):
-        assert (
-            "12 of 16 accounts add up to their latest known balance; "
-            "2 do not add up; 2 have nothing to check against."
-        ) in page_of(troubled)
+        page = page_of(troubled)
 
-    def test_Verification_OnTheClearWorld_SaysOnlyWhatStillHasNothingToCheckAgainst(self, clear):
-        assert (
-            "14 of 16 accounts add up to their latest known balance; "
-            "2 have nothing to check against."
-        ) in page_of(clear)
+        # Two faults are always open, so one when-convenient thing fits and two are folded.
+        assert "<summary>2 more when convenient</summary>" in page
 
-    def test_Attention_WithMoreThanFiveItems_OpensOnlyTheFirstBandAndFoldsTheRestBehindACount(
-        self, troubled
-    ):
+    def test_ThingsToDo_WithManyUrgentOnes_NeverFoldAFaultAndFoldEveryOtherThing(self, troubled):
         page = page_of(with_more_items(troubled))
 
-        assert '<h3 class="tier-title">2 faults to look at now</h3>' in page
-        assert "<summary>1 thing to look at soon</summary>" in page
-        assert "<summary>4 things when convenient</summary>" in page
-        assert '<h3 class="tier-title">4 things when convenient</h3>' not in page
-
-    def test_Attention_WithFiveItemsOrFewer_OpensEveryBand(self, troubled):
-        page = page_of(troubled)
-
-        assert '<h3 class="tier-title">2 faults to look at now</h3>' in page
-        assert '<h3 class="tier-title">1 thing when convenient</h3>' in page
-        assert '<details class="tier' not in page
+        assert "<summary>6 more when convenient</summary>" in page
+        opened = page.split("<summary>6 more when convenient</summary>")[0]
+        assert opened.count('class="todo now"') == 2
+        assert opened.count('class="todo soon"') == 1
 
 
 def push(stamp: str, *, ok: bool = True) -> dict[str, object]:
@@ -632,8 +595,8 @@ class TestTheDataLine:
         assert data_line(None, None, NOW_TIME).sentence == "Nothing was checked."
 
 
-class TestNothingForAPersonToDoIsInformationAndNotAttention:
-    def test_Page_WhenTheReviewFlagsHaveNoPageToResolveThem_SaysThemOnceQuietlyBelow(
+class TestFlaggedTransactionsAreSomethingToDecide:
+    def test_Page_WhenTransactionsAreFlagged_SaysThemOnceAsAThingToDecideWithItsControl(
         self, tmp_path
     ):
         db = tmp_path / "h.sqlite3"
@@ -644,15 +607,13 @@ class TestNothingForAPersonToDoIsInformationAndNotAttention:
         page = page_of(overview)
 
         assert [i.kind for i in overview.notes] == ["review"]
-        attention = page.split('id="attention"')[1].split('id="notes"')[0]
-        assert "flagged for a decision" not in attention
-        notes = page.split('id="notes"')[1].split("</ul>")[0]
         assert (
             "1 transaction is flagged for a decision that could not be made automatically"
-            in notes
+            in page
         )
         assert page.count("flagged for a decision") == 1
+        assert 'href="/review-flags">Decide</a>' in page
         assert "matcher" not in page.lower()
 
-    def test_Page_WhenNothingIsInformation_HasNoNotes(self, clear):
-        assert 'id="notes"' not in page_of(clear)
+    def test_Page_WhenNothingIsFlagged_HasNoDecisionToMake(self, clear):
+        assert "Decide" not in page_of(clear)

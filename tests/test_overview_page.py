@@ -77,15 +77,14 @@ def verdict_of_page(page: str) -> str:
 
 
 def row_of(page: str, ref: str) -> str:
-    """One account's row: its link and the facts folded beneath it, up to the next row."""
-    marker = f'<a class="tap acct-row" href="/ledger?ref={ref}">'
+    """One account's row: the link, which is all a person reads of it."""
+    marker = f'<a class="tap arow" href="/ledger?ref={ref}">'
     assert marker in page, f"no row for {ref}"
-    return re.split(r'<li class="acct|</li>', page.split(marker)[1], maxsplit=1)[0]
+    return page.split(marker)[1].split("</a>")[0]
 
 
-def head_of_row(page: str, ref: str) -> str:
-    """The row's link alone, which is what a person reads without opening anything."""
-    return row_of(page, ref).split("</a>")[0]
+def rows_in(page: str) -> list[str]:
+    return re.findall(r'<a class="tap arow" href="/ledger\?ref=(acct-[a-z]+)">', page)
 
 
 class TestNeedsAttention:
@@ -103,11 +102,11 @@ class TestNeedsAttention:
 
         assert verdict_of_page(page) == "Everything checked is in order."
         assert 'class="verdict ok' in page
-        assert "<summary>19 checks run at 14:02</summary>" in page
+        assert "<summary>19 checks ran at 14:02</summary>" in page
         assert re.search(r"\d\d:\d\dZ", page) is None, "the zone is said once, not on each time"
         assert "All times are UTC." in page
         assert '<ol class="attention">' not in page
-        assert "Nothing needs attention." in page
+        assert 'class="todos"' not in page, "a day with nothing to do says so in one line and stops"
 
     def test_Home_WhenSomethingNeedsAttention_RanksItInBandsNamedByWhatToDoAndLinksWhereItGoes(
         self, tmp_path, household
@@ -125,15 +124,13 @@ class TestNeedsAttention:
 
         assert verdict_of_page(page) == "1 fault to look at now and 1 thing to look at soon."
         assert "Everything checked is in order" not in page
-        assert page.index("acct-silent: gone quiet") < page.index("the data volume is 91% full")
-        assert page.index("1 fault to look at now</h3>") < page.index(
-            "1 thing to look at soon</h3>"
-        )
-        assert 'href="/account?ref=acct-silent">Open acct-silent&#x27;s account page</a>' in page
-        assert 'href="/admin">Open the admin page</a>' in page
+        assert page.index("gone quiet") < page.index("the data volume is 91% full")
+        assert page.index('class="todo now"') < page.index('class="todo soon"')
+        assert 'href="/account?ref=acct-silent">See the feed</a>' in page
+        assert 'href="/admin">See the space</a>' in page
         for old in ("Data at risk", "Will break soon", "Housekeeping"):
             assert old not in page
-        assert ">Open</a>" not in page, "every link says where it goes"
+        assert ">Open</a>" not in page, "every control says what it does"
 
     def test_Home_WhenOnlyRemindersRemain_SaysThereAreNoFaultsBeforeCountingThem(
         self, tmp_path, household
@@ -146,9 +143,9 @@ class TestNeedsAttention:
         )
 
         assert verdict_of_page(page) == "Everything checked is in order."
-        assert 'id="notes"' in page, "a fact with nothing to do is said, quietly, below"
-        assert "waiting" in page.split('id="notes"')[1]
-        assert "<ol class=\"attention\">" not in page
+        evidence = page.split('class="evidence"')[1].split("</details>")[0]
+        assert "waiting" in evidence, "a fact with nothing to do is said, quietly, in the evidence"
+        assert 'class="todos"' not in page
 
     def test_Home_WhenACheckCouldNotRun_SaysThatCheckDidNotRunAndTheVerdictCallsItAFault(
         self, tmp_path, household
@@ -159,7 +156,7 @@ class TestNeedsAttention:
         page = home(tmp_path, lambda fresh: assemble(household, findings=boom))
 
         assert "The alert check could not run (RuntimeError)" in page
-        assert "<summary>8 of 19 checks run at 14:02; the rest could not run</summary>" in page
+        assert "<summary>8 of 19 checks ran at 14:02; the rest could not run</summary>" in page
         assert "Only 8 of 19 checks could run" in page
         assert "fault to look at now" in verdict_of_page(page)
         assert "Everything checked is in order" not in page
@@ -225,91 +222,71 @@ class TestNeedsAttention:
 
 
 class TestAccounts:
-    def test_Home_AccountFedByThreeSources_AppearsAsOneRowWithAllThreeSources(
+    def test_Home_AccountFedByThreeSources_AppearsAsOneRowAndNamesNoSource(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        assert page.count('<a class="tap acct-row" href="/ledger?ref=acct-multi">') == 1
-        row = row_of(page, "acct-multi")
-        for source in ("csv-export", "starling", "truelayer"):
-            assert f">{source}</span>" in row, "the sources are behind the row's disclosure"
-        assert "csv-export" not in head_of_row(page, "acct-multi")
+        assert page.count('<a class="tap arow" href="/ledger?ref=acct-multi">') == 1
+        for source in ("csv-export", "truelayer"):
+            assert source not in row_of(page, "acct-multi"), "sources are on the account's page"
 
-    def test_Home_DeclaredButEmptyAccount_AppearsMarkedEmpty(self, tmp_path, household):
-        page = home(tmp_path, lambda fresh: assemble(household))
-
-        head = head_of_row(page, "acct-empty")
-        assert ">empty</span>" in head and "declared, no rows held" in head
-        assert "Label of acct-empty" in head and "<code>acct-empty</code>" in head, "name, then ref"
-
-    def test_Home_ArchivedAccount_IsLabelledWithItsDateAndListedLast(self, tmp_path, household):
-        page = home(tmp_path, lambda fresh: assemble(household))
-
-        rows = re.findall(r'<a class="tap acct-row" href="/ledger\?ref=(acct-[a-z]+)">', page)
-        assert rows[-1] == "acct-old"
-        head = head_of_row(page, "acct-old")
-        assert ">archived</span>" in head and "archived since 2026-01-31" in head
-
-    def test_Home_EveryAccount_IsOneTapToItsLedgerWithItsAccountPageBehindTheDisclosure(
+    def test_Home_DeclaredButEmptyAccount_SaysNothingIsHeldAndDrawsNoFill(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        for ref in ("acct-current", "acct-multi", "acct-empty", "acct-old"):
-            assert f'<a class="tap acct-row" href="/ledger?ref={ref}">' in page
-            assert f'href="/account?ref={ref}"' in row_of(page, ref).split("</a>", 1)[1]
+        row = row_of(page, "acct-empty")
+        assert "Nothing held yet." in row
+        assert "Label of acct-empty" in row
+        assert '<span class="bar" aria-hidden="true"></span>' in row
 
-    def test_Home_Accounts_AreListedHeldBackThenUnprovenThenInAgreementThenQuietThenArchived(
+    def test_Home_ArchivedAccount_IsFoldedWithItsDateAndIsNoRow(self, tmp_path, household):
+        page = home(tmp_path, lambda fresh: assemble(household))
+
+        assert "acct-old" not in rows_in(page)
+        folded = page.split("<summary>1 archived account</summary>")[1].split("</details>")[0]
+        assert 'href="/ledger?ref=acct-old"' in folded and "archived 2026-01-31" in folded
+
+    def test_Home_EveryLiveAccount_IsOneTapToItsPage(self, tmp_path, household):
+        page = home(tmp_path, lambda fresh: assemble(household))
+
+        for ref in ("acct-current", "acct-multi", "acct-empty"):
+            assert f'<a class="tap arow" href="/ledger?ref={ref}">' in page
+
+    def test_Home_Accounts_AreListedHeldBackThenUnprovenThenInAgreementThenQuiet(
         self, tmp_path, household
     ):
         page = home(tmp_path, lambda fresh: assemble(household))
 
-        order = re.findall(r'<a class="tap acct-row" href="/ledger\?ref=(acct-[a-z]+)">', page)
+        order = rows_in(page)
 
         # None of the household has a known balance, so every live account is unproven;
-        # the idle ones follow, then the archived one.
+        # the idle ones follow.
         assert order.index("acct-current") < order.index("acct-quiet") < order.index("acct-empty")
-        assert order[-1] == "acct-old"
 
-    def test_Home_AccountWithItemsConcerningIt_ShowsTheCountAsALinkToTheList(
+    def test_Home_AccountWithAFeedGoneQuiet_SaysWhatItWaitsForBesideItsNameInRed(
         self, tmp_path, household
     ):
         page = home(
             tmp_path,
             lambda fresh: assemble(
                 household,
-                findings=lambda: [
-                    Finding("silent-feed:acct-silent:starling", "a"),
-                    Finding("refusals:halifax:starling:uid-silent", "b"),
-                ],
+                findings=lambda: [Finding("silent-feed:acct-silent:starling", "a")],
             ),
         )
 
-        assert 'href="#attention">2 items</a>' in row_of(page, "acct-silent")
-        assert "none</span>" in row_of(page, "acct-current")
+        assert '<span class="a-flag bad">Feed silent</span>' in row_of(page, "acct-silent")
+        assert "a-flag" not in row_of(page, "acct-current")
 
-    def test_Home_ShowsEachFeedStateAsAWordBehindTheRowAndALegendWithEveryRule(
+    def test_Home_FeedStatesAndBindingsOfAnAccount_AreNotRepeatedOnEveryRow(
         self, tmp_path, household
     ):
-        page = home(tmp_path, lambda fresh: assemble(household))
+        page = home(tmp_path, lambda fresh: assemble(household, actual_bound={"acct-current"}))
 
-        for state, rule in STATE_RULES.items():
-            assert f"<strong>{state}</strong> - " in page
-            assert rule.split(";")[0].split(",")[0][:30] in text_of(page).replace("&#x27;", "'")
-        for word in ("current", "quiet", "silent", "never asked", "file-only"):
-            assert f">{word}</span>" in page
-
-    def test_Home_BoundToActual_SaysBoundOrNotBoundOrNothingWhereActualIsOff(
-        self, tmp_path, household
-    ):
-        on = home(
-            tmp_path, lambda fresh: assemble(household, actual_bound={"acct-current"})
-        )
-        off = home(tmp_path, lambda fresh: assemble(household))
-
-        assert "<dd>bound</dd>" in on and "<dd>not bound</dd>" in on
-        assert "not bound" not in off and "<dd>bound</dd>" not in off
+        for state in STATE_RULES:
+            assert f"<strong>{state}</strong> - " not in page
+        assert "<dd>bound</dd>" not in page and "<dd>not bound</dd>" not in page
 
     def test_Home_WhenNoAccountIsHeld_SaysSoRatherThanShowingAnEmptyTable(self, tmp_path):
         path = tmp_path / "empty.sqlite3"
@@ -329,7 +306,7 @@ class TestAccounts:
         page = home(tmp_path, lambda fresh: assemble(household))
         accounts = page.split('id="accounts"')[1].split("</section>")[0]
 
-        assert '<ul class="accounts-list">' in accounts
+        assert '<ul class="alist">' in accounts
         assert "<table" not in accounts
 
     def test_Home_Controls_AreThumbSizedTapTargets(self, tmp_path, household):
@@ -421,7 +398,7 @@ class TestTheExistingSectionsRemain:
         page = render_index(ConnectionStore(tmp_path / "c.json")).decode()
 
         assert "no Overview wired" in page
-        assert 'id="attention"' in page and 'id="system"' in page
+        assert 'id="verdict"' in page and 'id="system"' in page
 
 
 @pytest.mark.parametrize("path", ["/checks", "/diagnostics", "/bring-in"])

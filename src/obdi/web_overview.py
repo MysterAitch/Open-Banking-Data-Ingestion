@@ -1,35 +1,37 @@
-"""The Overview's markup: a verdict, four status lines, what needs a person, then the accounts.
+"""Today's markup: a verdict, one muted line of evidence, what to do, then the accounts.
 
-THE FIRST SCREEN ANSWERS FOUR QUESTIONS IN ORDER: is the data healthy and is anything waiting
-(the verdict, and what needs attention beneath it), did the push to Actual work and does Actual
-agree (a status line), and what is held (a status line). A quiet answer is a positive sentence
-that still says what was checked, because an empty list must never be mistakable for checks that
-never ran. Every state is a word and a glyph as well as a colour.
+THE PAGE IS SILENT WHEN THINGS ARE FINE. The first screen holds the verdict, one muted line that
+says the checks ran and opens to the detail, and the first thing to do with its control. A day
+with nothing to do says so in one line and stops. Reassurance is not removed, it is folded: the
+evidence line names how many checks ran, so an empty list is never mistakable for checks that
+never ran, and what was looked at, when, and what the machinery is doing is one tap away.
+
+TWO MODELS FEED IT, and this module only draws them. `todo` gathers everything waiting for the
+owner into one list of things to do, each with its one control. `trust` works out, for each
+account, the stretches of its history on one shared scale and the one sentence that says how far
+it can be trusted; `trust_bar` draws them. Nothing here decides a verdict, a calculation, or a
+route.
 
 NO FIGURES. This is served by GET, and no GET shows a monetary value. The account rows hold
-counts and dates, and `Overview` carries nothing else; the one figure the page mentions, the
-position's, is the masked one the Position page itself shows.
+counts and dates, and `Overview` carries nothing else.
 
-EVERY TIME PRINTED IS UTC, and the page says so once (`TIMES_NOTE`), not on each time.
+EVERY TIME PRINTED IS UTC, and the evidence fold says so once (`TIMES_NOTE`), not on each time.
 """
 
 from __future__ import annotations
 
 import html
-import itertools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
 from .account_names import AccountShown
-from .navigation import NEEDS_A_LOOK, page_name
+from .fetch_gaps import FetchReport
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
-    CURRENT,
     EMPTY,
-    FILE_ONLY,
     HOUSEKEEPING,
     NEVER_ASKED,
     NOW,
@@ -39,46 +41,33 @@ from .overview import (
     REBUILDING,
     SILENT,
     SOON,
-    STATE_RULES,
     AccountOverview,
-    AttentionItem,
     Overview,
 )
+from .page_times import date_with_age
 from .plural import plural
-from .proof_rail import build_rail, rail_svg
+from .rebuild_hold import RebuildInProgress
 from .standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
     not_adding_up_sentence,
-    standing_lines,
     verification_of,
-    verification_sentence,
 )
+from .todo import Todo, build_todos, lockable, wanted_days
+from .trust import Trust, trust_of
+from .trust_bar import axis_html, bar_html, key_html
 
 _esc = html.escape
 
-#: Said once, under the status lines, so that no time on the page carries a bare "Z".
+#: Said once, in the evidence fold, so that no time on the page carries a bare "Z".
 TIMES_NOTE = "All times are UTC."
 
-#: More items than this and only the most urgent band is open; the others fold behind a count.
-OPEN_ITEM_LIMIT = 5
+#: How many things to do are open before the when-convenient ones fold behind a count. What
+#: needs the owner now or soon is never folded.
+OPEN_TODO_LIMIT = 3
 
-_SEVERITY_CLASS = {NOW: "now", SOON: "soon", HOUSEKEEPING: "housekeeping"}
-
-_STATE_PILL = {
-    CURRENT: "pill-ok",
-    QUIET: "pill-quiet",
-    SILENT: "pill-bad",
-    NEVER_ASKED: "pill-warn",
-    FILE_ONLY: "pill-quiet",
-    EMPTY: "pill-quiet",
-    ARCHIVED: "pill-quiet",
-    REBUILDING: "pill-warn",
-}
-
-#: States for which "when did the provider last answer" is not a question.
-_NOT_ASKED_ABOUT = frozenset({FILE_ONLY, EMPTY, ARCHIVED})
+_SEVERITY_CLASS = {NOW: "now", SOON: "soon", HOUSEKEEPING: ""}
 
 
 def serial(parts: Sequence[str]) -> str:
@@ -96,17 +85,6 @@ def _clock(moment: datetime, now: datetime) -> str:
     return moment.strftime("%Y-%m-%d %H:%M")
 
 
-def _stamp(raw: object, now: datetime) -> str:
-    """A recorded ISO stamp as `_clock` would say it, or a plain statement that none was kept."""
-    try:
-        moment = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except ValueError:
-        return "at an unrecorded time"
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return _clock(moment, now)
-
-
 def _age(moment: datetime, now: datetime) -> str:
     seconds = max(0, int((now - moment).total_seconds()))
     if seconds < 90:
@@ -116,16 +94,11 @@ def _age(moment: datetime, now: datetime) -> str:
     return f"{round(seconds / 3600)} hours ago"
 
 
-def _days_ago(day: date, today: date) -> str:
-    days = (today - day).days
-    return {0: "today", 1: "yesterday"}.get(days, f"{days} days ago")
-
-
 # ------------------------------------------------------------------------------------ Verdict
 
 
 def band_phrase(severity: int, count: int) -> str:
-    """What a band says of its count: the one wording the verdict, headings, and folds use."""
+    """What a band says of its count: the one wording the verdict and the fold use."""
     if severity == NOW:
         return f"{plural(count, 'fault')} to look at now"
     if severity == SOON:
@@ -141,16 +114,16 @@ class Verdict:
 
 
 def verdict_of(counts: Mapping[int, int], *, not_adding_up: int = 0) -> Verdict:
-    """The one sentence, true of the counts beneath it and of the status lines under it.
+    """The one sentence, true of the counts beneath it.
 
     Nothing at all wrong is a positive statement. Faults lead with themselves. Where there are
     none the sentence says so before it counts what is left, so that "4 things when convenient"
     is never read as 4 faults.
 
-    `not_adding_up` is the Verification line's count of accounts that do not add up. Such an
-    account is an item only once it has lagged `overview.STALE_AGREEMENT_DAYS`, so until then
-    there can be no item at all while the line beneath says one does not add up; the positive
-    statement would contradict that line, and the sentence says the line's count instead.
+    `not_adding_up` is the count of accounts that do not add up. Such an account is a thing to do
+    only once it has lagged `overview.STALE_AGREEMENT_DAYS`, so until then there can be no item at
+    all while the account's own row says it does not add up; the positive statement would
+    contradict the row, and the sentence says the count instead.
     """
     parts = [
         band_phrase(severity, counts[severity])
@@ -166,10 +139,10 @@ def verdict_of(counts: Mapping[int, int], *, not_adding_up: int = 0) -> Verdict:
     return Verdict(f"No faults. {serial(parts)}.", "warn" if counts.get(SOON) else "ok")
 
 
-def _counts(overview: Overview) -> dict[int, int]:
+def _counts(todos: Iterable[Todo]) -> dict[int, int]:
     counts = {NOW: 0, SOON: 0, HOUSEKEEPING: 0}
-    for item in overview.attention:
-        counts[item.severity] += 1
+    for todo in todos:
+        counts[todo.urgency] += 1
     return counts
 
 
@@ -182,7 +155,7 @@ def _verdict_html(verdict: Verdict, lede: str = "") -> str:
     )
 
 
-# -------------------------------------------------------------------------------- Status lines
+# ------------------------------------------------------------------- Lines read by the evidence
 
 
 @dataclass(frozen=True)
@@ -267,24 +240,6 @@ def verification_counts(accounts: Iterable[AccountOverview]) -> tuple[int, int, 
     return counted, adding, failing, nothing
 
 
-def verification_line(overview: Overview | None) -> StatusLine:
-    href = "/accounts"
-    if overview is None:
-        return StatusLine("Verification", href, "unchecked", "pill-warn", "Nothing was checked.")
-    if overview.rebuilding is not None:
-        return _paused("Verification", href)
-    counted, adding, failing, nothing = verification_counts(overview.accounts)
-    if counted == 0:
-        return StatusLine(
-            "Verification", href, "nothing held", "pill-quiet", "No account holds rows yet."
-        )
-    sentence = verification_sentence(counted, adding, failing, nothing)
-    if adding == counted:
-        return StatusLine("Verification", href, ADDS_UP, "pill-ok", sentence)
-    word = DOES_NOT_ADD_UP if failing else NOTHING_TO_CHECK_AGAINST
-    return StatusLine("Verification", f"{href}#{NEEDS_A_LOOK}", word, "pill-warn", sentence)
-
-
 def actual_line(
     actual_status: Callable[[], list[dict[str, object]]] | None,
     now: datetime,
@@ -330,160 +285,85 @@ _ACTUAL_CHIPS = {
 }
 
 
-def position_line(
-    position: Callable[[], object] | None, overview: Overview | None
-) -> StatusLine:
-    """The masked position: the count of accounts it adds up and the masked total.
-
-    Built from the Position page's own words and its disclosure gate (`Disclosed`, with values
-    withheld), so a figure can reach this line only as that page shows it masked.
-    """
-    from .masking import Disclosed
-    from .web_ledger import _balance_word
-    from .web_position import _figure
-
-    href = "/position"
-    if overview is not None and overview.rebuilding is not None:
-        return _paused("Position", href)
-    if position is None:
-        return StatusLine("Position", href, "not wired", "pill-quiet", "Not available here.")
-    try:
-        view = Disclosed(position(), unmasked=False)
-    except Exception:
-        return StatusLine("Position", href, "unreadable", "pill-bad", "It could not be built.")
-    counted = (
-        f"Counts {plural(int(view.accounts_counted), 'account')} of {view.accounts_total}"
-    )
-    if not view.net_direction:
-        return StatusLine("Position", href, "masked", "pill-quiet", f"{counted}; no total yet.")
-    return StatusLine(
-        "Position", href, "masked", "pill-quiet",
-        f"{counted}; net worth {_figure(_balance_word(view.net_direction), view.net_worth)}",
-    )
+# ---------------------------------------------------------------------------------- Things to do
 
 
-def _status_html(lines: Sequence[StatusLine]) -> str:
-    rows = "".join(
-        f'<li><a class="tap status-row" href="{_esc(line.href)}">'
-        f'<span class="status-label">{_esc(line.label)}</span>'
-        f'<span class="pill {line.css}">{_esc(line.word)}</span>'
-        f'<span class="status-sentence">{_esc_figure(line.sentence)}</span></a></li>'
-        for line in lines
-    )
-    return f'<ul class="status" id="status">{rows}</ul><p class="muted tz">{TIMES_NOTE}</p>'
+def _age_words(day: date, today: date) -> tuple[str, str]:
+    """A date, and how long ago where that is worth saying: ("2026-08-10", "(8 weeks ago)")."""
+    head, _, tail = date_with_age(day, today).partition(" (")
+    return head, f"({tail}" if tail else ""
 
 
-def _esc_figure(sentence: str) -> str:
-    """A status sentence escaped, except the span the Position page's own figure builder wrote."""
-    marker = '<span class="mono nowrap">'
-    if marker not in sentence:
-        return _esc(sentence)
-    head, _, tail = sentence.partition(marker)
-    figure, _, rest = tail.partition("</span>")
-    return f"{_esc(head)}{marker}{figure}</span>{_esc(rest)}"
+def _names_html(todo: Todo, shown: Callable[[str], AccountShown]) -> str:
+    refs = (todo.account,) if todo.account is not None else todo.accounts
+    return serial([shown(ref).as_name() for ref in refs])
 
 
-# ----------------------------------------------------------------------- What needs attention
-
-#: Where each kind of item goes, said as the link says it. `{a}` is the account's name where the
-#: item concerns exactly one; otherwise the second phrase stands.
-_LINK_WORDS: dict[str, tuple[str, str]] = {
-    "protection-broken": ("Open {a}'s ledger", "Open the ledgers"),
-    "known-balances-disagree": ("Open {a}'s ledger", "Open the ledgers"),
-    "agreement-lapsed": ("Open {a}'s ledger", "Open the ledgers"),
-    "statement-fault": ("Open {a}'s ledger", "Open the ledgers"),
-    "silent-feed": ("Open {a}'s account page", "Open the accounts page"),
-    "stale-feed": ("Open {a}'s account page", "Open the accounts page"),
-    "refusals": ("Open the fetch attempts", "Open the fetch attempts"),
-    "uncovered-span": ("Open the bank connections", "Open the bank connections"),
-    "consent": ("Open the bank connections", "Open the bank connections"),
-    "shared-identity": ("Open the identity checks", "Open the identity checks"),
-    "identity-health": ("Open the identity checks", "Open the identity checks"),
-    "movement-completeness": ("Open the movement checks", "Open the movement checks"),
-    "balance": ("Open the balance reconciliation", "Open the balance reconciliation"),
-    "push-refused": ("Open the Actual sync page", "Open the Actual sync page"),
-    "push-stale": ("Open the Actual sync page", "Open the Actual sync page"),
-    "review": ("Open the review flags", "Open the review flags"),
-    "spaces": ("Open the recovered Spaces", "Open the recovered Spaces"),
-    "statement-due": ("Open the accounts page", "Open the accounts page"),
-}
-_SCHEDULER_LINK = "Open the scheduler record"
-_ADMIN_LINK = "Open the admin page"
-
-
-def link_words(item: AttentionItem, label_of: Callable[[str], str]) -> str:
-    """What the link of an item says: where it goes, never a bare "Open"."""
-    if item.kind.startswith("scheduler-"):
-        return _SCHEDULER_LINK
-    one, many = _LINK_WORDS.get(item.kind, (_ADMIN_LINK, _ADMIN_LINK))
-    if len(item.accounts) == 1 and "{a}" in one:
-        return one.format(a=label_of(item.accounts[0]))
-    return many
-
-
-def _item_html(item: AttentionItem, label_of: Callable[[str], str]) -> str:
+def _todo_html(todo: Todo, shown: Callable[[str], AccountShown], today: date, *, lead: bool) -> str:
+    parts = []
+    names = _names_html(todo, shown)
+    if names:
+        parts.append(f"<b>{names}</b>")
+    parts.append(_esc(todo.why))
+    if todo.since is not None:
+        day, age = _age_words(todo.since, today)
+        parts.append(
+            f"since {day}" + (f' <span class="age">{_esc(age)}</span>' if age else "")
+        )
+    named = ("todo", _SEVERITY_CLASS[todo.urgency], "guess" if todo.guess else "")
+    classes = " ".join(part for part in named if part)
+    button = "button" if lead else "button secondary"
     return (
-        f'<li class="{_SEVERITY_CLASS[item.severity]}">'
-        f'<p class="item-message">{_esc(item.message)}</p>'
-        f'<p class="item-do">{_esc(item.remedy)}</p>'
-        f'<p><a class="tap" href="{_esc(item.href)}">{_esc(link_words(item, label_of))}</a></p>'
-        "</li>"
+        f'<li class="{classes}"><div class="todo-text">'
+        f'<p class="todo-what">{_esc(todo.title)}</p>'
+        f'<p class="todo-why">{" &middot; ".join(parts)}</p></div>'
+        f'<a class="{button}" href="{_esc(todo.control.href)}">{_esc(todo.control.label)}</a></li>'
     )
 
 
-def _band_html(
-    severity: int,
-    items: Sequence[AttentionItem],
-    label_of: Callable[[str], str],
-    *,
-    folded: bool,
-) -> str:
-    phrase = band_phrase(severity, len(items))
-    css = _SEVERITY_CLASS[severity]
-    rows = f'<ol class="attention">{"".join(_item_html(i, label_of) for i in items)}</ol>'
-    if folded:
-        return f'<details class="tier tier-{css}"><summary>{_esc(phrase)}</summary>{rows}</details>'
-    return f'<div class="tier tier-{css}"><h3 class="tier-title">{_esc(phrase)}</h3>{rows}</div>'
-
-
-def attention_html(overview: Overview) -> str:
-    """The items by band, most urgent first. Past `OPEN_ITEM_LIMIT` only the first band is open."""
-    items = overview.attention
-    if not items:
-        # The verdict has already said so aloud; the words stay for a screen reader and the
-        # anchor, without a second sentence on the screen.
-        return '<p class="visually-hidden">Nothing needs attention.</p>'
-    accounts = {
-        account.ref: AccountShown.named(account.ref, account.label)
-        for account in overview.accounts
-    }
-
-    def label_of(ref: str) -> str:
-        return (accounts.get(ref) or AccountShown(ref)).name
-
-    bands = [
-        (severity, [i for i in items if i.severity == severity])
-        for severity in (NOW, SOON, HOUSEKEEPING)
-    ]
-    shown = [(severity, group) for severity, group in bands if group]
-    fold_rest = len(items) > OPEN_ITEM_LIMIT
-    return "".join(
-        _band_html(severity, group, label_of, folded=fold_rest and index > 0)
-        for index, (severity, group) in enumerate(shown)
-    )
-
-
-def _notes_html(overview: Overview) -> str:
-    """What is only information, said once and quietly. The rebuild is the verdict's to say."""
-    notes = [n for n in overview.notes if n.kind != "rebuild-running"]
-    if not notes:
+def todos_html(todos: Sequence[Todo], shown: Callable[[str], AccountShown], today: date) -> str:
+    """The things to do, most urgent first. What is urgent is always open; the rest are open up to
+    `OPEN_TODO_LIMIT` in all, and the others fold behind a count."""
+    if not todos:
         return ""
-    lines = "".join(
-        f'<li>{_esc(note.message)} <a class="tap" href="{_esc(note.href)}">'
-        f"{_esc(link_words(note, lambda ref: ref))}</a></li>"
-        for note in notes
+    urgent = [t for t in todos if t.urgency != HOUSEKEEPING]
+    easy = [t for t in todos if t.urgency == HOUSEKEEPING]
+    room = max(0, OPEN_TODO_LIMIT - len(urgent))
+    opened, folded = [*urgent, *easy[:room]], easy[room:]
+    rows = "".join(
+        _todo_html(todo, shown, today, lead=index == 0) for index, todo in enumerate(opened)
     )
-    return f'<ul class="notes muted" id="notes">{lines}</ul>'
+    out = f'<h2 class="visually-hidden">To do</h2><ul class="todos">{rows}</ul>'
+    if folded:
+        more = "".join(_todo_html(todo, shown, today, lead=False) for todo in folded)
+        out += (
+            f"<details><summary>{len(folded)} more when convenient</summary>"
+            f'<ul class="todos">{more}</ul></details>'
+        )
+    return out
+
+
+def _lock_line(
+    accounts: Sequence[AccountOverview], shown: Callable[[str], AccountShown]
+) -> str:
+    """The one quiet line that some accounts have days that add up and are not locked in. Locking
+    in is done on an account's page, with its transactions in view, so the line only leads there."""
+    offered = [a for a in accounts if a.state != ARCHIVED and lockable(a.standing)]
+    if not offered:
+        return ""
+    if len(offered) == 1:
+        only = offered[0]
+        target = f"/ledger?ref={quote(only.ref, safe='')}"
+        say = (
+            f"{shown(only.ref).as_name()} has days that add up and are not locked in. "
+            f'<a class="tap" href="{_esc(target)}">Go to its page</a>'
+        )
+    else:
+        say = (
+            f"{plural(len(offered), 'account')} have days that add up and are not locked in. "
+            '<a class="tap" href="/accounts">Go to the accounts</a>'
+        )
+    return f'<p class="muted lockline">{say}</p>'
 
 
 # ------------------------------------------------------------------------------------ Accounts
@@ -491,7 +371,7 @@ def _notes_html(overview: Overview) -> str:
 
 @dataclass(frozen=True)
 class RowReading:
-    """What a row says of an account: a chip, one clause, and where it sorts."""
+    """Where an account sorts: the one thing of its old chip and clause still used."""
 
     word: str
     css: str
@@ -577,185 +457,160 @@ def arrange(
     return [(parent, spaces) for _, parent, spaces in families]
 
 
-def _rail_html(account: AccountOverview, today: date, uid: str) -> str:
-    """The row's proof rail. The shared drawing is `proof_rail`; the dates are the standing's."""
-    if account.state in (REBUILDING, ARCHIVED, EMPTY):
+def _trust_of(
+    account: AccountOverview, wanted: Mapping[str, list[tuple[date, date]]], today: date
+) -> Trust:
+    return trust_of(
+        first=account.first,
+        newest=account.newest,
+        standing=account.standing,
+        wanted=wanted.get(account.ref, ()),
+        today=today,
+    )
+
+
+def _flag_html(todo: Todo | None, today: date) -> str:
+    """What the account is waiting for, with its age: the one slot that is empty when the account
+    asks nothing."""
+    if todo is None or not todo.waiting:
         return ""
-    standing = account.standing
-    own = standing.standing.own if standing is not None else None
-    try:
-        rail = build_rail(
-            first=account.first,
-            known_from=own.known_from if own is not None else None,
-            known_to=own.known_to if own is not None else None,
-            through=own.through if own is not None else None,
-            held_day=own.held.day if own is not None and own.held is not None else None,
-            protected_through=standing.protected_through if standing is not None else None,
-            protection_broken=standing.protection_broken if standing is not None else False,
-            today=today,
-        )
-    except ValueError:
-        # The rail refuses dates that contradict each other, and one account's contradiction
-        # must not take the whole home page down with it: the row says so in place of the
-        # rail, where it will be seen, and the account's own page still states the dates.
-        return (
-            '<span class="acct-rail muted">No rail is drawn: this account\'s dates '
-            "contradict each other.</span>"
-        )
-    return f'<span class="acct-rail">{rail_svg(rail, uid=uid)}</span>'
+    said = todo.waiting
+    if todo.since is not None:
+        _, age = _age_words(todo.since, today)
+        if age:
+            said += f" {age}"
+    bad = " bad" if todo.urgency == NOW else ""
+    return f'<span class="a-flag{bad}">{_esc(said)}</span>'
 
 
-def _sources_html(sources: tuple[str, ...]) -> str:
-    return " ".join(f'<span class="pill pill-quiet">{_esc(source)}</span>' for source in sources)
-
-
-def _facts_html(account: AccountOverview, today: date) -> str:
+def _row_html(
+    account: AccountOverview,
+    shown: Callable[[str], AccountShown],
+    first_todo: Mapping[str, Todo],
+    wanted: Mapping[str, list[tuple[date, date]]],
+    today: date,
+    *,
+    space: bool,
+) -> str:
     target = _esc(quote(account.ref, safe=""))
-    if account.bound is None:
-        bound = '<span class="muted">-</span>'
-    else:
-        bound = "bound" if account.bound else "not bound"
-    items = (
-        f'<a class="tap bad" href="#attention">{plural(account.items, "item")}</a>'
-        if account.items
-        else '<span class="muted">none</span>'
-    )
-    newest = (
-        f"{account.newest.isoformat()} ({_days_ago(account.newest, today)})"
-        if account.newest
-        else '<span class="muted">-</span>'
-    )
-    if account.state in _NOT_ASKED_ABOUT:
-        asked = '<span class="muted">-</span>'
-    elif account.last_asked is None:
-        asked = "never"
-    else:
-        day = account.last_asked.date()
-        asked = f"{day.isoformat()} ({_days_ago(day, today)})"
-
-    def fact(name: str, value: str) -> str:
-        return f"<div><dt>{name}</dt><dd>{value}</dd></div>"
-
-    state = f'<span class="pill {_STATE_PILL[account.state]}">{_esc(account.state)}</span>'
-    verification = (
-        fact(
-            "Verification",
-            "<br>".join(_esc(line) for line in standing_lines(account.standing)),
+    name = shown(account.ref).as_name()
+    if account.state == REBUILDING:
+        flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', (
+            "Paused while the rebuild runs."
         )
-        if account.standing is not None and account.state != REBUILDING
-        else ""
+    else:
+        trust = _trust_of(account, wanted, today)
+        flag = _flag_html(first_todo.get(account.ref), today)
+        bar = bar_html(trust, today)
+        said = trust.short
+        if account.parent is not None and said.startswith(NOTHING_TO_CHECK_AGAINST.capitalize()):
+            said = f"A Space of {shown(account.parent).name}, tested with it and not on its own."
+    return (
+        f'<li{" class=space" if space else ""}>'
+        f'<a class="tap arow" href="/ledger?ref={target}"><span class="a-name">{name}</span>'
+        f'{flag}{bar}<span class="a-trust">{_esc(said)}</span></a></li>'
+    )
+
+
+def _archived_html(
+    archived: Sequence[AccountOverview], shown: Callable[[str], AccountShown]
+) -> str:
+    if not archived:
+        return ""
+    names = "".join(
+        f'<li><a class="tap" href="/ledger?ref={_esc(quote(a.ref, safe=""))}">'
+        f"{shown(a.ref).as_name()}</a>"
+        + (f" - archived {_esc(a.closed.isoformat())}" if a.closed else "")
+        + "</li>"
+        for a in archived
     )
     return (
-        '<dl class="facts">'
-        + fact("Feed", state)
-        + fact("Rows", f"{account.rows:,}")
-        + fact("Newest row", newest)
-        + fact("Provider last answered", asked)
-        + fact("Actual", bound)
-        + fact("Needs attention", items)
-        + verification
-        + "</dl>"
-        f'<p class="account-sources">{_sources_html(account.sources)}</p>'
-        f'<p class="account-links"><a class="tap" href="/ledger?ref={target}">Ledger</a> '
-        f'<a class="tap" href="/account?ref={target}">{_esc(page_name("/account"))}</a></p>'
+        f"<details><summary>{plural(len(archived), 'archived account')}</summary>"
+        f'<ul class="keylist">{names}</ul></details>'
     )
 
 
-def _row_html(account: AccountOverview, today: date, position: int, *, space: bool) -> str:
-    target = _esc(quote(account.ref, safe=""))
-    reading = row_reading(account)
-    shown = AccountShown.named(account.ref, account.label)
-    ref = f'<span class="acct-ref">{shown.code()}</span>' if shown.labelled else ""
-    return (
-        f'<li class="acct{" acct-space" if space else ""}">'
-        f'<a class="tap acct-row" href="/ledger?ref={target}">'
-        f'<span class="acct-name">{_esc(account.label)}</span>'
-        f'<span class="pill {reading.css}">{_esc(reading.word)}</span>'
-        f"{_rail_html(account, today, f'rail-{position}')}"
-        f'<span class="acct-sub"><span class="acct-clause">{_esc(reading.clause)}</span>'
-        f"{ref}</span></a>"
-        '<details class="acct-more"><summary>'
-        f'<span class="visually-hidden">Rows, feeds, and sources of {_esc(account.label)}</span>'
-        f"</summary>{_facts_html(account, today)}</details>"
-    )
-
-
-def _accounts_html(overview: Overview) -> str:
+def _accounts_html(
+    overview: Overview,
+    todos: Sequence[Todo],
+    wanted: Mapping[str, list[tuple[date, date]]],
+    shown: Callable[[str], AccountShown],
+) -> str:
     today = overview.generated_at.date()
+    manage = (
+        '<p class="muted"><a class="tap" href="/accounts">'
+        "Rename, archive, or declare accounts</a></p>"
+    )
     if not overview.accounts:
-        return "<p>No account is held or declared yet.</p>"
-    # One number per row, so that each rail's hatch patterns have an id of their own.
-    numbers = itertools.count(1)
-
-    def nested(group: Sequence[AccountOverview]) -> str:
-        spaces = "".join(
-            _row_html(space, today, next(numbers), space=True) + "</li>" for space in group
-        )
-        return f'<ul class="spaces">{spaces}</ul>'
-
+        return f"<p>No account is held or declared yet.</p>{manage}"
+    first_todo: dict[str, Todo] = {}
+    for todo in todos:
+        if todo.account is not None:
+            first_todo.setdefault(todo.account, todo)
     rows = []
+    archived: list[AccountOverview] = []
     for parent, spaces in arrange(overview.accounts):
-        html_row = _row_html(parent, today, next(numbers), space=False)
-        live = [s for s in spaces if s.state != ARCHIVED]
-        archived = [s for s in spaces if s.state == ARCHIVED]
-        below = nested(live) if live else ""
-        if archived:
-            below += (
-                f'<details class="spaces-archived"><summary>'
-                f"{plural(len(archived), 'archived Space')}</summary>{nested(archived)}</details>"
-            )
-        rows.append(html_row + below + "</li>")
-    legend = "".join(
-        f"<li><strong>{_esc(state)}</strong> - {_esc(rule)}</li>"
-        for state, rule in STATE_RULES.items()
+        if parent.state == ARCHIVED:
+            archived.append(parent)
+        else:
+            rows.append(_row_html(parent, shown, first_todo, wanted, today, space=False))
+        for space in spaces:
+            if space.state == ARCHIVED:
+                archived.append(space)
+            else:
+                rows.append(_row_html(space, shown, first_todo, wanted, today, space=True))
+    live = (
+        f'{axis_html(today)}<ul class="alist">{"".join(rows)}</ul>' if rows else ""
     )
     return (
-        f'<ul class="accounts-list">{"".join(rows)}</ul>'
-        '<p class="muted">Counts and dates only. Amounts are on each ledger, masked until asked '
-        "for.</p>"
-        "<details><summary>What each feed state means</summary>"
-        f'<ul class="legend">{legend}</ul></details>'
+        live
+        + '<div class="p-more">'
+        f"<details><summary>What the bars show</summary>{key_html()}</details>"
+        f"{_archived_html(archived, shown)}{manage}</div>"
     )
 
 
-#: Where a person goes from the Accounts list: (destination, label).
-#: Coverage is per source and the rows are per account, which is why both exist.
-ACCOUNT_LINKS: tuple[tuple[str, str], ...] = (
-    ("/coverage", "Coverage by source"),
-    ("/accounts", "Declared accounts"),
-    ("/import", "Import"),
-    ("/review", "Categorise"),
-)
+# ------------------------------------------------------------------------------------ Evidence
 
 
-def _account_links_html() -> str:
-    links = "".join(
-        f'<li><a class="tap outline" href="{_esc(href)}">{_esc(label)}</a></li>'
-        for href, label in ACCOUNT_LINKS
-    )
-    return f'<ul class="linkrow">{links}</ul>'
-
-
-# ------------------------------------------------------------------------------------ The rest
-
-
-def _checks_html(overview: Overview, now: datetime) -> str:
+def _evidence_html(
+    overview: Overview,
+    lines: Sequence[StatusLine],
+    system_html: str,
+    fetch_unread: bool,
+    now: datetime,
+) -> str:
+    """The reassurance, kept and muted: how many checks ran and when, what was looked at, and what
+    the machinery is doing. Its summary is never removable: it is what stops silence being
+    mistaken for checks that did not run."""
     names = ", ".join((*ALERT_CONDITIONS, *OVERVIEW_CHECKS))
-    # The time of day alone: the overview is reused for at most a minute, and "Assembled N ago"
-    # beneath says how long ago, so a date here would only add a clock-dependent word.
     at = overview.generated_at.astimezone(UTC).strftime("%H:%M")
     if overview.checks_run == overview.checks_total:
-        said = f"{overview.checks_total} checks run at {at}"
+        summary = f"{overview.checks_total} checks ran at {at}"
     else:
-        said = (
-            f"{overview.checks_run} of {overview.checks_total} checks run at {at}; "
+        summary = (
+            f"{overview.checks_run} of {overview.checks_total} checks ran at {at}; "
             "the rest could not run"
         )
+    items = [f"<li>{_esc(line.sentence)}</li>" for line in lines]
+    # A fact with nothing for a person to do is said here and nowhere else. A flagged transaction
+    # is a thing to do (`todo`), and a rebuild in progress is the verdict's to say.
+    items.extend(
+        f"<li>{_esc(note.message)}</li>"
+        for note in overview.notes
+        if note.kind not in ("review", "rebuild-running")
+    )
+    items.append(f"<li>The checks: {_esc(names)}.</li>")
+    if fetch_unread:
+        items.append("<li>What is still to fetch could not be worked out just now.</li>")
+    items.append(
+        f"<li>Assembled {_age(overview.generated_at, now)} and reused for up to "
+        f'{OVERVIEW_CACHE_SECONDS} seconds. <a class="tap" href="/?fresh=1">Check again</a></li>'
+    )
+    items.append(f"<li>{TIMES_NOTE}</li>")
     return (
-        f"<details class=\"checks\"><summary>{_esc(said)}</summary>"
-        f'<p class="muted">{_esc(names)}.</p></details>'
-        f'<p class="muted">Assembled {_age(overview.generated_at, now)} and reused for up to '
-        f'{OVERVIEW_CACHE_SECONDS} seconds. <a class="tap" href="/?fresh=1">Check again</a></p>'
+        f'<details class="evidence"><summary>{_esc(summary)}</summary>'
+        f"<ul>{''.join(items)}</ul>{system_html}</details>"
     )
 
 
@@ -774,43 +629,55 @@ def overview_html(
     now: datetime | None = None,
     actual_status: Callable[[], list[dict[str, object]]] | None = None,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
-    position: Callable[[], object] | None = None,
     system_html: str = "",
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     actual_configured: Callable[[], bool] | None = None,
+    fetch: Callable[[date], FetchReport] | None = None,
 ) -> str:
-    """The home page's body.
+    """Today's body.
 
     Neither an unwired hook nor one that raises is allowed to render as an empty list: both say
     that no checks ran, and the verdict says nothing was checked.
     """
     now = now or datetime.now(UTC)
-    overview: Overview | None = None
     if load is None:
-        attention = _notice("This deployment has no Overview wired, so nothing was checked.")
-        accounts = '<p class="muted">No account list is available.</p>'
-    else:
+        return _unchecked(
+            "This deployment has no Overview wired, so nothing was checked.", system_html
+        )
+    try:
+        overview = load(fresh)
+    except Exception as error:
+        return _unchecked(
+            f"The overview could not be assembled ({type(error).__name__}), so no checks "
+            "ran. The web log has the error.",
+            system_html,
+        )
+    today = overview.generated_at.date()
+    report: FetchReport | None = None
+    fetch_unread = False
+    if fetch is not None and overview.rebuilding is None:
         try:
-            overview = load(fresh)
-        except Exception as error:
-            attention = _notice(
-                f"The overview could not be assembled ({type(error).__name__}), so no checks "
-                "ran. The web log has the error."
-            )
-            accounts = '<p class="muted">No account list is available.</p>'
-        else:
-            attention = attention_html(overview)
-            accounts = _accounts_html(overview)
+            report = fetch(today)
+        except RebuildInProgress:
+            report = None
+        except Exception:
+            report, fetch_unread = None, True
+    accounts_shown = {
+        account.ref: AccountShown.named(account.ref, account.label)
+        for account in overview.accounts
+    }
 
+    def shown(ref: str) -> AccountShown:
+        return accounts_shown.get(ref) or AccountShown(ref)
+
+    todos = build_todos(overview, report, lambda ref: shown(ref).name)
     lede = ""
-    if overview is None:
-        verdict = Verdict("Nothing was checked.", "bad")
-    elif overview.rebuilding is not None:
+    if overview.rebuilding is not None:
         verdict = Verdict(overview.rebuilding.sentence(), "warn")
     else:
         verdict = verdict_of(
-            _counts(overview), not_adding_up=verification_counts(overview.accounts)[2]
+            _counts(todos), not_adding_up=verification_counts(overview.accounts)[2]
         )
         if overview.checks_run != overview.checks_total:
             lede = (
@@ -819,7 +686,6 @@ def overview_html(
             )
     lines = [
         data_line(overview, scheduler_heartbeat, now),
-        verification_line(overview),
         actual_line(
             actual_status,
             now,
@@ -827,21 +693,28 @@ def overview_html(
             heartbeat=actual_heartbeat,
             configured=actual_configured,
         ),
-        position_line(position, overview),
     ]
-    rest = (
-        _checks_html(overview, now) if overview is not None else ""
-    )
-    notes = _notes_html(overview) if overview is not None else ""
-    quiet = overview is not None and not overview.attention and not notes
-    heading = '<h2 class="visually-hidden">' if quiet else "<h2>"
+    wanted = wanted_days(report)
     return (
-        '<div class="overview home">'
-        '<div class="home-main">'
-        f"{_verdict_html(verdict, lede)}{_status_html(lines)}"
-        f'<section id="attention">{heading}Needs attention</h2>{attention}{notes}</section>'
+        '<div class="overview home today">'
+        '<section class="home-lead" aria-label="What needs you">'
+        f"{_verdict_html(verdict, lede)}"
+        f"{_evidence_html(overview, lines, system_html, fetch_unread, now)}"
+        f"{todos_html(todos, shown, today)}"
+        f"{'' if any(t.urgency == NOW for t in todos) else _lock_line(overview.accounts, shown)}"
+        "</section>"
+        '<section id="accounts" class="home-accounts"><h2>Accounts</h2>'
+        f"{_accounts_html(overview, todos, wanted, shown)}</section>"
         "</div>"
-        f'<section id="accounts" class="home-accounts"><h2>Accounts</h2>{accounts}</section>'
-        f'<div class="home-rest">{system_html}{rest}{_account_links_html()}</div>'
-        "</div>"
+    )
+
+
+def _unchecked(message: str, system_html: str) -> str:
+    """Today when no checks ran. The machinery's facts stay: this is when they are wanted."""
+    return (
+        '<div class="overview home today"><section class="home-lead">'
+        f"{_verdict_html(Verdict('Nothing was checked.', 'bad'))}"
+        f"{_notice(message)}{system_html}</section>"
+        '<section id="accounts" class="home-accounts">'
+        '<p class="muted">No account list is available.</p></section></div>'
     )
