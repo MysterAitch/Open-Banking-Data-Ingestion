@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .overview import DERIVED_OVERVIEW_CHECKS, NOW, STALE_AGREEMENT_DAYS, Overview
+from .overview import DERIVED_OVERVIEW_CHECKS, NOW, STALE_AGREEMENT_DAYS, STANDING_CHECK, Overview
 
 IN_ORDER = "in order"
 LOOK = "look"
@@ -51,7 +51,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         "/agreements",
         frozenset({"known-balances-disagree"}),
-        ("known balances and agreement",),
+        (STANDING_CHECK,),
         "No two stated balances for an account contradict each other.",
     ),
     CheckSpec(
@@ -65,7 +65,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         "/balance-reconciliation",
         frozenset({"balance", "agreement-lapsed"}),
-        ("balance reconciliation", "known balances and agreement"),
+        ("balance reconciliation", STANDING_CHECK),
         "Every day's rows add up to the bank's own figures, and no account has gone more "
         f"than {STALE_AGREEMENT_DAYS} days without its transactions adding up to a known "
         "balance.",
@@ -77,7 +77,7 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec(
         "/period-reconciliation",
         frozenset({"statement-fault"}),
-        ("known balances and agreement",),
+        (STANDING_CHECK,),
         "No statement fails to add up by the transactions it lists.",
     ),
     CheckSpec(

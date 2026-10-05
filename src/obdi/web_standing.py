@@ -106,7 +106,7 @@ def protection_html(protection: Any, ref: str, month: str) -> str:
             "until a later rebuild restores the protected period, or you accept the new "
             "state.</p>"
             + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
-            + _post("/protect-withdraw", ref, month, "", "Withdraw protection")
+            + _post("/protect-withdraw", ref, month, "", REMOVE_PROTECTION)
         )
     if protection.earlier_said:
         body += (

@@ -85,11 +85,11 @@ def an_agreement(state: str, *, known: int) -> Agreement:
 
 
 class TestAnAccountNothingProtects:
-    def test_StandingLine_WhenNothingIsProtected_SaysNotProtected(self):
+    def test_StandingLine_WhenNothingIsProtected_SaysNothingOfProtection(self):
         said = standing_line(an_agreement("agrees", known=3), None)
 
-        assert said.endswith("; not protected.")
-        assert "nowhere" not in said
+        assert said.endswith("to 2026-06-30.")
+        assert "protected" not in said
 
     def test_StandingLine_WhenProtected_SaysThroughTheDate(self):
         said = standing_line(an_agreement("agrees", known=3), date(2026, 5, 31))

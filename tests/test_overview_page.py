@@ -233,14 +233,16 @@ class TestAccounts:
         assert page.count('<a class="tap acct-row" href="/ledger?ref=acct-multi">') == 1
         row = row_of(page, "acct-multi")
         for source in ("csv-export", "starling", "truelayer"):
-            assert f">{source}</span>" in row, "the sources are behind the row's disclosure"
+            assert f"><code>{source}</code></span>" in row, (
+                "the sources are behind the row's disclosure"
+            )
         assert "csv-export" not in head_of_row(page, "acct-multi")
 
     def test_Home_DeclaredButEmptyAccount_AppearsMarkedEmpty(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))
 
         head = head_of_row(page, "acct-empty")
-        assert ">empty</span>" in head and "declared, no rows held" in head
+        assert ">empty</span>" in head and "declared, no transactions held" in head
         assert "Label of acct-empty" in head and "<code>acct-empty</code>" in head, "name, then ref"
 
     def test_Home_ArchivedAccount_IsLabelledWithItsDateAndListedLast(self, tmp_path, household):

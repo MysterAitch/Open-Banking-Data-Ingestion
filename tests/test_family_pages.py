@@ -299,7 +299,7 @@ class TestTheMainAccountsLedger:
     ):
         page = healthy.ledger().text.replace("&#x27;", "'")
 
-        assert "the whole account's known balance, less its Spaces' own rows" in page
+        assert "the whole account's known balance, less its Spaces' own transactions" in page
         assert "a held statement's closing balance" not in page
 
 

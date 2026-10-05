@@ -30,7 +30,10 @@ def walked_urls(db, *, minimum_artefacts: int = 3) -> list[str]:
     assert len(ids) >= minimum_artefacts and refs, (
         "the invented store is not the store this walk describes"
     )
-    urls: list[str] = []
+    # Today is the dispatcher's `route == "/"`, which the route pattern (a name after the slash)
+    # cannot read out, so it is walked by name: a walk that skipped it left the page the owner
+    # opens first outside every wording rule.
+    urls: list[str] = ["/"]
     for route in dispatcher_routes():
         urls.append(route)
         urls.append(f"{route}?id={ids[0]}&artefact={ids[0]}&view=payload")

@@ -705,7 +705,10 @@ def held_sentence(agreement: Agreement) -> str:
         else:
             by = ""
         return f"The transactions do not add up to the known balance for {day}{by}."
-    return f"The transactions stop adding up at {day}, because of a movement fault: {held.says}."
+    return (
+        f"A check of the money moved found a problem dated {day}, so the transactions cannot be "
+        f"shown to add up from then on: {held.says}."
+    )
 
 
 #: Which check a statement failed, in the words of the sentence (`StatementCheck.fault`).
@@ -824,7 +827,10 @@ def standing_line(
     """The one-line summary shown on the ledger, the Accounts page, and the Overview cards.
 
     `with_protection` is False for a reading of a whole family, which nothing protects: a person
-    protects an account, and the clause would say "not protected" of a thing that cannot be.
+    protects an account, and a clause about protection would be said of a thing that cannot be.
+    An account nothing protects says nothing of protection: its absence is not a problem, so a
+    line never ends in "not protected". A protection that is intact is said; one that is broken
+    is said by the caller, which holds the protection's state.
     """
     if agreement.state == NONE:
         return "No known balance, so there is nothing to check the transactions against."
@@ -849,8 +855,6 @@ def standing_line(
         )
         if agreement.known_to and agreement.known_to != agreement.through:
             line += f"; the latest known balance is for {_day(agreement.known_to)}"
-    if not with_protection:
+    if not with_protection or not protected_through:
         return line + "."
-    if not protected_through:
-        return f"{line}; not protected."
     return f"{line}; protected through {_day(protected_through)}."

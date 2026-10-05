@@ -395,7 +395,7 @@ class TestAccountRows:
             opening = f'<a class="tap acct-row" href="/ledger?ref={ref}">'
             return page.split(opening)[1].split("</a>")[0]
 
-        assert "Stops adding up at 2026-03-15." in row("held-1")
+        assert "The transactions stop adding up at 2026-03-15." in row("held-1")
         assert "No known balance from 2026-03-02 to 2026-10-01." in row("no-balance-1")
         protected = row(world.PROTECTED)
         assert "Protected through 2026-03-20." in protected
@@ -424,7 +424,7 @@ class TestTheFirstScreenIsInOrder:
         status = page.split('id="status"')[1].split("</ul>")[0]
         assert re.findall(r'<span class="status-label">(.*?)</span>', status) == [
             "Data",
-            "Verification",
+            "Known balances",
             "Actual",
             "Position",
         ]
@@ -623,7 +623,7 @@ class TestTheDataLine:
     def test_Line_WhenNoCycleIsRecorded_IsUnprovenAndSaysSo(self, clear):
         from obdi.web_overview import data_line
 
-        assert data_line(clear, None, NOW_TIME).word == "unproven"
+        assert data_line(clear, None, NOW_TIME).word == "unknown"
         assert data_line(clear, None, NOW_TIME).sentence == "No scheduled cycle recorded."
 
     def test_Line_WhenNothingWasChecked_SaysSoRatherThanCurrent(self):

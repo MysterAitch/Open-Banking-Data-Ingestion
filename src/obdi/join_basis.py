@@ -34,14 +34,14 @@ from .store import SightingDetail
 #: What each basis says of a sighting, in the words the ledger uses.
 #: The one place they are worded.
 BASIS_WORDS = {
-    BASIS_FOUNDED: "founded this row",
-    BASIS_ID: "joined to the row by id",
-    BASIS_OWN_ID: "the same source's own id again",
-    BASIS_SETTLEMENT: "joined by settlement date",
-    BASIS_MANUAL: "joined to a typed entry",
-    BASIS_WINDOW: "joined by window and description",
-    BASIS_FOLD: "folded into this row by amount and date",
-    "": "basis not recorded",
+    BASIS_FOUNDED: "the first report of this transaction",
+    BASIS_ID: "matched to this transaction by its id",
+    BASIS_OWN_ID: "reported again under the same id",
+    BASIS_SETTLEMENT: "matched to this transaction by its settlement date",
+    BASIS_MANUAL: "matched to a transaction you typed",
+    BASIS_WINDOW: "matched to this transaction by a guess from amount, nearby dates, and text",
+    BASIS_FOLD: "set aside as a copy of this transaction, by a guess from amount and date",
+    "": "how it was matched is not recorded",
 }
 
 #: Weakest first. A row is counted under its weakest join, which is the one worth a look.
@@ -53,12 +53,12 @@ HEURISTIC = frozenset({BASIS_WINDOW, BASIS_FOLD})
 
 #: The label of each count, in the order shown.
 COUNT_LABELS = (
-    (BASIS_ID, "joined by id"),
-    (BASIS_SETTLEMENT, "joined by settlement date"),
-    (BASIS_WINDOW, "joined by window and description"),
-    (BASIS_FOLD, "folded by amount and date"),
-    (BASIS_MANUAL, "joined to a typed entry"),
-    ("", "with no join"),
+    (BASIS_ID, "matched by id"),
+    (BASIS_SETTLEMENT, "matched by settlement date"),
+    (BASIS_WINDOW, "matched by a guess from amount, nearby dates, and text"),
+    (BASIS_FOLD, "set aside as copies by a guess from amount and date"),
+    (BASIS_MANUAL, "matched to a typed transaction"),
+    ("", "reported by one source only"),
 )
 
 
@@ -141,16 +141,16 @@ def how_words(view: SightingView) -> str:
     exposes its fields and nothing else.
     """
     words = BASIS_WORDS.get(view.basis, BASIS_WORDS[""])
-    text = f"copied from the main account's row, {words}" if view.copy else words
+    text = f"copied from the main account's transaction, {words}" if view.copy else words
     if view.change:
         text += f" ({view.change})"
     if view.repeats:
         fetched = view.source in FIRST_PARTY_FEEDS | AGGREGATORS
-        noun = "fetch" if fetched else "sighting"
-        plural = "fetches" if fetched else "sightings"
+        noun = "fetch" if fetched else "report"
+        plural = "fetches" if fetched else "reports"
         count = f"{view.repeats} later {noun if view.repeats == 1 else plural}"
-        by = " by its own id" if view.repeats_basis == BASIS_OWN_ID else ""
-        text += f", sighted again{by} in {count}"
+        by = " under the same id" if view.repeats_basis == BASIS_OWN_ID else ""
+        text += f", reported again{by} in {count}"
     return text
 
 
@@ -282,9 +282,10 @@ def join_counts(rows: Iterable[tuple[date, Sequence[SightingView]]]) -> JoinCoun
 
 
 def count_sentence(counts: Mapping[str, int]) -> str:
-    """The counts in one sentence, "N rows joined by id, N by settlement date, ..."."""
+    """The counts in one sentence, "N transactions matched by id, N matched by settlement date"."""
     parts = [
-        f"{counts.get(basis, 0)} {'rows' if counts.get(basis, 0) != 1 else 'row'} {label}"
+        f"{counts.get(basis, 0)} "
+        f"{'transactions' if counts.get(basis, 0) != 1 else 'transaction'} {label}"
         for basis, label in COUNT_LABELS
         if counts.get(basis, 0)
     ]

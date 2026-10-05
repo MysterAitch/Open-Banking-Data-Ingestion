@@ -165,9 +165,10 @@ class TestTheCards:
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
         assert (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20; "
-            "not protected." in page
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20."
+            in page
         )
+        assert "not protected" not in page
 
     def test_Card_WhenProtected_SaysProtectedThroughTheDate(self, store):
         opening_standing = standings(store)[ACCOUNT].standing

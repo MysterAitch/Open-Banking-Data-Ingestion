@@ -165,7 +165,7 @@ class TestOneStatedAnchor:
         assert "end of 2026-03-10" in page
         assert "stated by you" in page
         assert "the opening balance is worked out from this" in page
-        assert "absorbs every missing or surplus row before that day" in page
+        assert "absorbs every missing or surplus transaction before that day" in page
         assert "A second known balance turns it into a test." in page
         assert_no_secret(page)
 
@@ -187,7 +187,7 @@ class TestOneStatedAnchor:
         assert "£4,450.39" in page
         assert "£4,489.89" in page
         assert "plus the opening balance" in page
-        assert "Both figures start from the account's derived opening balance" in page
+        assert "Both figures start from the account's opening balance, worked out and shown" in page
 
 
 class TestTwoAnchors:

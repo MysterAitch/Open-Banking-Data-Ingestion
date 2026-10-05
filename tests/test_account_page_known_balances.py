@@ -181,7 +181,7 @@ class TestABalanceThatDiffersIsAlwaysShown:
         assert differing_listed(page) == 1
         assert agreeing_listed(page) == SHOWN_AGREEING
         assert f"End of <span class=\"mono nowrap\">{FAULT_DAY.isoformat()}</span>" in page
-        assert "(198 add up, 1 differ)" in page
+        assert "(198 add up, 1 differs)" in page
 
     def test_TheEarlierLine_CountsOnlyTheAgreeingOnesLeftOut(self, base):
         page = get(base, FAULTY)

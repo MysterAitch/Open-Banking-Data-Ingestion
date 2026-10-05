@@ -268,13 +268,17 @@ _ALERT_GUARDS = {
     "scheduler": "scheduler cycle",
 }
 
+#: The check of whether each account's transactions add up to its known balances, as Today lists
+#: it among the checks run, and as a failure of it is named. Said once, here.
+STANDING_CHECK = "transactions against known balances"
+
 #: The checks the Overview itself runs on top of the alert's conditions.
 OVERVIEW_CHECKS = (
     "uncovered spans",
     "identity health",
     "movement completeness",
     "balance reconciliation",
-    "known balances and agreement",
+    STANDING_CHECK,
     "review flags",
     "recovered Spaces",
     "last rebuild",
@@ -287,7 +291,7 @@ DERIVED_OVERVIEW_CHECKS = (
     "identity health",
     "movement completeness",
     "balance reconciliation",
-    "known balances and agreement",
+    STANDING_CHECK,
     "review flags",
 )
 
@@ -309,24 +313,26 @@ REBUILDING = "rebuilding"
 #: rule applied. Precedence is the order below: the first that holds wins.
 #: `freshness` decides every state but REBUILDING, which `build_overview` applies over it.
 STATE_RULES: dict[str, str] = {
-    ARCHIVED: "the registry gives it a closing date that has passed; nothing is expected of it.",
+    ARCHIVED: "it has a closing date that has passed; nothing is expected of it.",
     REBUILDING: (
-        "a rebuild is replaying the derived rows, so the rows held and their newest date are "
-        "not yet a fact about the account."
+        "the transactions are being rebuilt from the stored originals, so the count held and "
+        "the newest date are not yet a fact about the account."
     ),
-    EMPTY: "declared in the registry, but no rows are held.",
-    FILE_ONLY: "no scheduled source feeds it, so rows only arrive when a file is imported.",
+    EMPTY: "you have declared it, but no transactions are held.",
+    FILE_ONLY: (
+        "no scheduled source feeds it, so transactions only arrive when a file is imported."
+    ),
     NEVER_ASKED: "a scheduled source feeds it, but the provider has never answered for it.",
     SILENT: (
         f"more than {SILENT_FEED_DAYS} days since the provider last answered for it "
-        "or since its newest row, whichever is later."
+        "or since its newest transaction, whichever is later."
     ),
     QUIET: (
-        f"the provider answered within {SILENT_FEED_DAYS} days, but its newest row "
+        f"the provider answered within {SILENT_FEED_DAYS} days, but its newest transaction "
         f"is more than {QUIET_ROW_DAYS} days old; the feed is working and the account is idle."
     ),
     CURRENT: (
-        f"the provider answered within {SILENT_FEED_DAYS} days and its newest row "
+        f"the provider answered within {SILENT_FEED_DAYS} days and its newest transaction "
         f"is at most {QUIET_ROW_DAYS} days old."
     ),
 }
@@ -881,7 +887,7 @@ def _rebuild_items(status: Mapping[str, object]) -> list[AttentionItem]:
         return []
     summary = str(status.get("summary", ""))
     if not status.get("ok"):
-        message = "The last rebuild failed, so the derived layer was not refreshed."
+        message = "The last rebuild failed, so the transactions were not refreshed."
     else:
         problems = sum(
             1 for line in summary.splitlines() if line.lstrip().startswith("problem:")
@@ -890,7 +896,7 @@ def _rebuild_items(status: Mapping[str, object]) -> list[AttentionItem]:
             return []
         message = (
             f"The last rebuild recorded {_plural(problems, 'problem')} replaying "
-            "raw artefacts, so some rows may be missing from the derived layer."
+            "the stored originals, so some transactions may be missing."
         )
     return [
         AttentionItem(
@@ -1088,7 +1094,7 @@ def build_overview(
             ),
         ),
         ("balance reconciliation", lambda: _balance_items(store, label_of)),
-        ("known balances and agreement", standing_check),
+        (STANDING_CHECK, standing_check),
         ("review flags", lambda: _review_items(store)),
         ("recovered Spaces", lambda: _space_items(store)),
         ("last rebuild", lambda: _rebuild_items(rebuild_status)),

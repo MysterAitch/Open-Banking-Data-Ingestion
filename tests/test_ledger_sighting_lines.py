@@ -91,7 +91,7 @@ class TestTheFeedFetchedAgain:
         fetch(bare, 1)
 
         assert lines_of(page_of(bare), "starling") == [
-            f"founded this row: {MADE}, {SETTLEMENT}, {FIRST}{SAYS}"
+            f"the first report of this transaction: {MADE}, {SETTLEMENT}, {FIRST}{SAYS}"
         ]
 
     def test_Row_WhenFetchedSixTimesIdentically_HasOneLineCountingTheFiveLaterFetches(self, bare):
@@ -99,7 +99,8 @@ class TestTheFeedFetchedAgain:
             fetch(bare, number)
 
         assert lines_of(page_of(bare), "starling") == [
-            "founded this row, sighted again by its own id in 5 later fetches: "
+            "the first report of this transaction, reported again under the same id in 5 later "
+            "fetches: "
             f"{MADE}, {SETTLEMENT}, {FIRST}{SAYS}"
         ]
 
@@ -108,7 +109,7 @@ class TestTheFeedFetchedAgain:
         fetch(bare, 2)
 
         (line,) = lines_of(page_of(bare), "starling")
-        assert "sighted again by its own id in 1 later fetch:" in line
+        assert "reported again under the same id in 1 later fetch:" in line
 
     def test_Row_WhenAReFetchStatesSomethingNew_KeepsItAsItsOwnLineAndSaysWhatChanged(self, bare):
         fetch(bare, 1, settled=False)
@@ -116,10 +117,10 @@ class TestTheFeedFetchedAgain:
         fetch(bare, 3, settled=True, touch=SECOND_TOUCH)
 
         assert lines_of(page_of(bare), "starling") == [
-            f"founded this row: {MADE}, {FIRST}{SAYS}",
-            "the same source's own id again (settlementTime appeared; updatedAt moved from "
-            "2026-09-15 06:30 to 2026-09-16 09:15), sighted again by its own id in 1 later "
-            f"fetch: {MADE}, {SETTLEMENT}, {SECOND}{SAYS}",
+            f"the first report of this transaction: {MADE}, {FIRST}{SAYS}",
+            "reported again under the same id (settlementTime appeared; updatedAt moved from "
+            "2026-09-15 06:30 to 2026-09-16 09:15), reported again under the same id in 1 "
+            f"later fetch: {MADE}, {SETTLEMENT}, {SECOND}{SAYS}",
         ]
 
     def test_Row_WhenAReFetchStopsStatingAField_SaysItIsNoLongerStated(self, bare):
@@ -145,7 +146,8 @@ class TestTheAggregatorFetchedAgain:
             )
 
         assert lines_of(page_of(bare), "truelayer") == [
-            "joined to the row by id, sighted again by its own id in 2 later fetches: "
+            "matched to this transaction by its id, reported again under the same id in 2 later "
+            "fetches: "
             "timestamp 2026-09-14 11:00; says currency GBP, transaction_type DEBIT"
         ]
 
@@ -167,11 +169,12 @@ class TestTheAccountsCountOfJoins:
             )
 
         sentence = re.search(
-            r"How the rows were joined \([^)]*\)</summary><p>(.*?)\.</p>", page_of(bare)
+            r"How the sources' reports were matched \([^)]*\)</summary><p>(.*?)\.</p>",
+            page_of(bare),
         )
         assert sentence is not None
         # The payment is joined by id once whatever the fetches; each fetch adds two other
         # payments (one from the feed, one from the aggregator) that no second source reached.
         assert html.unescape(sentence.group(1)) == (
-            f"1 row joined by id, {2 * fetches} rows with no join"
+            f"1 transaction matched by id, {2 * fetches} transactions reported by one source only"
         )

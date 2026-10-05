@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
-from .account_names import AccountShown
+from .account_names import AccountShown, code_html
 from .navigation import NEEDS_A_LOOK, page_name
 from .overview import (
     ALERT_CONDITIONS,
@@ -44,7 +44,8 @@ from .overview import (
     AttentionItem,
     Overview,
 )
-from .plural import plural
+from .page_words import KNOWN_BALANCES_LABEL
+from .plural import agree, plural
 from .proof_rail import build_rail, rail_svg
 from .standing_data import (
     ADDS_UP,
@@ -238,7 +239,7 @@ def data_line(
             f"{cycle}; {said}.",
         )
     if finished is None:
-        return StatusLine("Data", href, "unproven", "pill-warn", f"{cycle}.")
+        return StatusLine("Data", href, "unknown", "pill-warn", f"{cycle}.")
     return StatusLine("Data", href, "current", "pill-ok", f"{cycle}; no feed is stale or silent.")
 
 
@@ -270,19 +271,32 @@ def verification_counts(accounts: Iterable[AccountOverview]) -> tuple[int, int, 
 def verification_line(overview: Overview | None) -> StatusLine:
     href = "/accounts"
     if overview is None:
-        return StatusLine("Verification", href, "unchecked", "pill-warn", "Nothing was checked.")
+        return StatusLine(
+            KNOWN_BALANCES_LABEL, href, "unchecked", "pill-warn", "Nothing was checked."
+        )
     if overview.rebuilding is not None:
-        return _paused("Verification", href)
+        return _paused(KNOWN_BALANCES_LABEL, href)
     counted, adding, failing, nothing = verification_counts(overview.accounts)
     if counted == 0:
         return StatusLine(
-            "Verification", href, "nothing held", "pill-quiet", "No account holds rows yet."
+            KNOWN_BALANCES_LABEL,
+            href,
+            "nothing held",
+            "pill-quiet",
+            "No account holds transactions yet.",
         )
     sentence = verification_sentence(counted, adding, failing, nothing)
     if adding == counted:
-        return StatusLine("Verification", href, ADDS_UP, "pill-ok", sentence)
-    word = DOES_NOT_ADD_UP if failing else NOTHING_TO_CHECK_AGAINST
-    return StatusLine("Verification", f"{href}#{NEEDS_A_LOOK}", word, "pill-warn", sentence)
+        return StatusLine(KNOWN_BALANCES_LABEL, href, ADDS_UP, "pill-ok", sentence)
+    target = f"{href}#{NEEDS_A_LOOK}"
+    if failing:
+        return StatusLine(KNOWN_BALANCES_LABEL, target, DOES_NOT_ADD_UP, "pill-warn", sentence)
+    # Amber is for what needs attention. An account with no known balance has nothing to fail, so
+    # where none does not add up the chip is quiet and says what the sentence beside it counts;
+    # the link still goes to the accounts that need a look.
+    return StatusLine(
+        KNOWN_BALANCES_LABEL, target, f"{adding} {agree(adding, 'adds')} up", "pill-quiet", sentence
+    )
 
 
 def actual_line(
@@ -511,11 +525,11 @@ def row_reading(account: AccountOverview) -> RowReading:
         return RowReading("paused", "pill-warn", "paused while the rebuild runs", 2)
     standing = account.standing
     if account.state == EMPTY:
-        return RowReading("empty", "pill-quiet", "declared, no rows held", 3)
+        return RowReading("empty", "pill-quiet", "declared, no transactions held", 3)
     feed = {SILENT: "; feed silent", NEVER_ASKED: "; provider never asked"}.get(account.state, "")
     if standing is None:
         return RowReading(
-            NOTHING_TO_CHECK_AGAINST, "pill-warn", f"verification not read{feed}", 1
+            NOTHING_TO_CHECK_AGAINST, "pill-warn", f"known balances not read{feed}", 1
         )
     own = standing.standing.own
     if standing.protection_broken:
@@ -606,7 +620,9 @@ def _rail_html(account: AccountOverview, today: date, uid: str) -> str:
 
 
 def _sources_html(sources: tuple[str, ...]) -> str:
-    return " ".join(f'<span class="pill pill-quiet">{_esc(source)}</span>' for source in sources)
+    return " ".join(
+        f'<span class="pill pill-quiet">{code_html(source)}</span>' for source in sources
+    )
 
 
 def _facts_html(account: AccountOverview, today: date) -> str:
@@ -639,7 +655,7 @@ def _facts_html(account: AccountOverview, today: date) -> str:
     state = f'<span class="pill {_STATE_PILL[account.state]}">{_esc(account.state)}</span>'
     verification = (
         fact(
-            "Verification",
+            KNOWN_BALANCES_LABEL,
             "<br>".join(_esc(line) for line in standing_lines(account.standing)),
         )
         if account.standing is not None and account.state != REBUILDING
@@ -648,8 +664,8 @@ def _facts_html(account: AccountOverview, today: date) -> str:
     return (
         '<dl class="facts">'
         + fact("Feed", state)
-        + fact("Rows", f"{account.rows:,}")
-        + fact("Newest row", newest)
+        + fact("Transactions", f"{account.rows:,}")
+        + fact("Newest transaction", newest)
         + fact("Provider last answered", asked)
         + fact("Actual", bound)
         + fact("Needs attention", items)
@@ -669,13 +685,14 @@ def _row_html(account: AccountOverview, today: date, position: int, *, space: bo
     return (
         f'<li class="acct{" acct-space" if space else ""}">'
         f'<a class="tap acct-row" href="/ledger?ref={target}">'
-        f'<span class="acct-name">{_esc(account.label)}</span>'
+        f'<span class="acct-name">{shown.as_name()}</span>'
         f'<span class="pill {reading.css}">{_esc(reading.word)}</span>'
         f"{_rail_html(account, today, f'rail-{position}')}"
         f'<span class="acct-sub"><span class="acct-clause">{_esc(reading.clause)}</span>'
         f"{ref}</span></a>"
         '<details class="acct-more"><summary>'
-        f'<span class="visually-hidden">Rows, feeds, and sources of {_esc(account.label)}</span>'
+        f'<span class="visually-hidden">Transactions, feeds, and sources of '
+        f"{shown.as_name()}</span>"
         f"</summary>{_facts_html(account, today)}</details>"
     )
 

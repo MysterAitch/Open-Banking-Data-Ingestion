@@ -100,7 +100,8 @@ class TestOfferingAProtection:
 
         assert "Protect through 2026-03-20" in page
         assert 'action="/protect"' in page
-        assert "known balance from 2026-03-05 to 2026-03-20; not protected." in page
+        assert "known balance from 2026-03-05 to 2026-03-20." in page
+        assert "not protected" not in page, "nothing protects it, and that is not said"
         assert "protected through nowhere" not in page, "nothing protects it, so no place"
 
     def test_Ledger_WhenNoBalanceIsKnown_OffersNothingAndSaysWhy(self, tmp_path, lab):
