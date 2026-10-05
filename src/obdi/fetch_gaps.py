@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
 from itertools import pairwise
@@ -45,6 +45,7 @@ from itertools import pairwise
 from .accounts import is_balance_only
 from .agreement import NONE, UNTESTED
 from .coverage import coverage, gaps
+from .fetch_marks import MarkSet, OutOfScope, SetAside, partition
 from .namespaces import FILE_SOURCES
 from .overview import first_row_dates, held_by_account, statement_awaited
 from .parsers.pdf_statements import PDF_PARSERS
@@ -122,6 +123,11 @@ class FetchGap:
     rows_to: date | None = None
     #: The review flag's gap kind ("before", "after", "single"), for a flag a statement settles.
     flag: str = ""
+    #: The days of the gap as found, where `fetch_marks.partition` cut part of it away.
+    split_from: tuple[date, date] | None = None
+    #: A sentence for a gap that returned to the list because a known gap's day to look again on
+    #: came; "" otherwise.
+    reminder: str = ""
 
 
 @dataclass(frozen=True)
@@ -145,6 +151,10 @@ class FetchReport:
     #: Accounts that need something first, most urgent first; the rest after, by reference.
     accounts: tuple[AccountOutlook, ...]
     today: date
+    #: What the owner's decisions took out of the lists above, and the decisions themselves.
+    marks: MarkSet = MarkSet()
+    set_aside: tuple[SetAside, ...] = ()
+    out_of_scope: tuple[OutOfScope, ...] = ()
 
     @property
     def gaps(self) -> tuple[FetchGap, ...]:
@@ -504,16 +514,35 @@ def settle_evidence_text(need: FlagNeed) -> str:
 
 
 def fetch_report(
-    evidence: FetchEvidence, standings: Mapping[str, AccountStanding], today: date
+    evidence: FetchEvidence,
+    standings: Mapping[str, AccountStanding],
+    today: date,
+    marks: MarkSet | None = None,
 ) -> FetchReport:
-    """The gaps of every account that is neither archived nor empty, most urgent first."""
+    """The gaps of every account that is neither archived nor empty, most urgent first.
+
+    `marks` are the owner's decisions, applied last and by `fetch_marks.partition`, which does not
+    care how the gaps were found.
+    """
     refs = {ref for ref, count in evidence.rows.items() if count > 0} | evidence.balance_only
     outlooks = []
+    aside: list[SetAside] = []
+    outside: list[OutOfScope] = []
     for ref in sorted(refs):
         closed = evidence.closed.get(ref)
         if closed is not None and closed <= today:
             continue
-        outlooks.append(_outlook(ref, standings.get(ref), evidence, today))
+        outlook = _outlook(ref, standings.get(ref), evidence, today)
+        if marks is not None:
+            cut = partition(ref, outlook.gaps, marks, today, statement_sources=STATEMENT_SOURCES)
+            aside.extend(cut.set_aside)
+            outside.extend(cut.out_of_scope)
+            outlook = replace(
+                outlook,
+                gaps=cut.remaining,
+                next_expected=_next_after_set_aside(outlook, cut.remaining, evidence, today),
+            )
+        outlooks.append(outlook)
 
     def urgency(item: AccountOutlook) -> tuple[int, int, date, str]:
         if not item.gaps:
@@ -521,7 +550,28 @@ def fetch_report(
         top = item.gaps[0]
         return (_URGENCY[top.kind], 0, top.first_day, item.account)
 
-    return FetchReport(tuple(sorted(outlooks, key=urgency)), today)
+    return FetchReport(
+        tuple(sorted(outlooks, key=urgency)),
+        today,
+        marks or MarkSet(),
+        tuple(aside),
+        tuple(outside),
+    )
+
+
+def _next_after_set_aside(
+    outlook: AccountOutlook,
+    remaining: Sequence[FetchGap],
+    evidence: FetchEvidence,
+    today: date,
+) -> date | None:
+    """The expected next statement of an account whose every gap was set aside, as one that never
+    had a gap would have it."""
+    if remaining or not outlook.gaps:
+        return outlook.next_expected
+    closings = [s.closing for s in evidence.statements.get(outlook.account, ())]
+    cadence = cadence_of(closings)
+    return _next_after(closings[-1], today) if cadence is not None and closings else None
 
 
 def gaps_for_account(

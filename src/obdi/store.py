@@ -102,7 +102,11 @@ from .stated_words import recorded_words
 #:
 #: 17 -> 18: the `sighting_words` table, likewise: a new table needs no migration, but a store
 #: stamped 17 would never have grown it. It is derived, and the rebuild every deploy runs fills it.
-SCHEMA_VERSION = 18
+#:
+#: 18 -> 19: the `fetch_marks` and `record_scopes` tables, likewise: hand decisions about what the
+#: owner still has to fetch (`fetch_marks` says what each means). A store stamped 18 would never
+#: have grown them.
+SCHEMA_VERSION = 19
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -578,6 +582,36 @@ CREATE TABLE IF NOT EXISTS removed_stated_balances (
     removed_at  TEXT NOT NULL
 );
 
+-- DECLARED: what the owner decided about a period nobody has to fetch (`fetch_marks` says what
+-- each kind asserts). Like `protections`, nothing that regenerates the derived layers may touch
+-- it. A mark is never edited or deleted: removing one stamps `removed_at`, so the history is the
+-- table. `evidence` and `fingerprint` are what the store held about the period when the mark was
+-- made (counts and dates only), so a later reading can say that what it covers has changed.
+CREATE TABLE IF NOT EXISTS fetch_marks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account     TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    first_day   TEXT,
+    last_day    TEXT NOT NULL,
+    note        TEXT NOT NULL,
+    origin      TEXT NOT NULL,
+    review_on   TEXT,
+    made_at     TEXT NOT NULL,
+    removed_at  TEXT,
+    evidence    TEXT NOT NULL,
+    fingerprint TEXT NOT NULL
+);
+
+-- DECLARED: how much of an account's history the owner keeps. One row per account, and the row
+-- for the empty account is the household default. Either a fixed first day or the last `months`.
+CREATE TABLE IF NOT EXISTS record_scopes (
+    account   TEXT PRIMARY KEY,
+    first_day TEXT,
+    months    INTEGER,
+    set_at    TEXT NOT NULL
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -613,6 +647,8 @@ EPOCH_TABLES: tuple[str, ...] = (
     "same_money_outcomes",
     "protections",
     "protection_history",
+    "fetch_marks",
+    "record_scopes",
 )
 
 #: Every other table, and why a write to it cannot change a standing. A table added to SCHEMA
@@ -720,6 +756,11 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'parent', 'ref', 'stable_id',
     ],
     'events': ['created_at', 'entity_id', 'id', 'kind', 'payload', 'published_at'],
+    'fetch_marks': [
+        'account', 'evidence', 'fingerprint', 'first_day', 'id', 'kind', 'last_day',
+        'made_at', 'note', 'origin', 'removed_at', 'review_on', 'source',
+    ],
+    'record_scopes': ['account', 'first_day', 'months', 'set_at'],
     'fetch_attempts': [
         'account_ref', 'artefact_digest', 'asked', 'attempted_at', 'connection_id',
         'detail', 'error_code', 'http_status', 'outcome', 'request_meta', 'source',
@@ -3868,6 +3909,53 @@ class Store:
         return self.connection.execute(
             "SELECT * FROM protection_history WHERE account = ? ORDER BY id", (account,)
         ).fetchall()
+
+    def add_fetch_mark(self, fields: Mapping[str, object]) -> int:
+        """Record a mark and commit; returns its id. Every column but `id` and `removed_at` is
+        named by the caller, so a column added later cannot be silently defaulted."""
+        columns = [c for c in table_columns("fetch_marks") if c not in ("id", "removed_at")]
+        missing = [column for column in columns if column not in fields]
+        if missing:
+            raise KeyError(f"a mark needs {missing}")
+        cursor = self.connection.execute(
+            f"INSERT INTO fetch_marks ({', '.join(columns)}) "  # noqa: S608
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            tuple(fields[column] for column in columns),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def fetch_mark_rows(self, *, including_removed: bool = False) -> list[sqlite3.Row]:
+        where = "" if including_removed else " WHERE removed_at IS NULL"
+        return self.connection.execute(
+            f"SELECT * FROM fetch_marks{where} ORDER BY id"  # noqa: S608
+        ).fetchall()
+
+    def remove_fetch_mark(self, mark_id: int, at: str) -> bool:
+        """Stamp an active mark as removed, and commit; False where none was active."""
+        cursor = self.connection.execute(
+            "UPDATE fetch_marks SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+            (at, mark_id),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def record_scope_rows(self) -> list[sqlite3.Row]:
+        return self.connection.execute("SELECT * FROM record_scopes ORDER BY account").fetchall()
+
+    def set_record_scope(
+        self, account: str, *, first_day: str | None, months: int | None, at: str
+    ) -> None:
+        self.connection.execute(
+            "INSERT OR REPLACE INTO record_scopes (account, first_day, months, set_at) "
+            "VALUES (?, ?, ?, ?)",
+            (account, first_day, months, at),
+        )
+        self.connection.commit()
+
+    def clear_record_scope(self, account: str) -> None:
+        self.connection.execute("DELETE FROM record_scopes WHERE account = ?", (account,))
+        self.connection.commit()
 
     def statement_folded_ids(self) -> set[str]:
         """Rows folded as the same money as a statement's rows: every folded row
