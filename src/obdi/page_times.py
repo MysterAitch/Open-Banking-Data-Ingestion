@@ -3,7 +3,8 @@
 A date is `2026-06-28`; a month `2026-06`; a range `2026-01-10 to 2026-06-28`; an instant
 `2026-10-04 15:24`, with the zone said once on the page (`UTC_NOTE`) and never a trailing "Z", an
 offset, seconds, or microseconds. A relative age is whole days in brackets after its date,
-`(98 days ago)`. A percentage is `66.7%`. Diagnostic pages that quote a provider's own stamps as
+`(98 days ago)`; where the age exists to flag a stale date, `date_with_age` writes it in coarser
+words. A percentage is `66.7%`. Diagnostic pages that quote a provider's own stamps as
 evidence are the only exception, and say so by being the pages the wording tests exempt.
 """
 
@@ -50,6 +51,42 @@ def age_text(days: int) -> str:
     if days == 1:
         return "(yesterday)"
     return f"({days:,} days ago)"
+
+
+#: A date younger than this many days is written bare: a fortnight is not yet "a while ago".
+RECENT_DAYS = 14
+
+
+def date_with_age(day: date, today: date) -> str:
+    """A date, with how long ago it was in words where that is worth saying.
+
+    The age exists to make a STALE date stand out beside fresh ones, so a recent date is bare and
+    the words grow coarser as precision stops mattering. The thresholds, stated here and nowhere
+    else:
+
+    - under `RECENT_DAYS` days, or in the future: `2026-10-01`, nothing added;
+    - from `RECENT_DAYS` days until two whole calendar months have passed: `(3 weeks ago)`, in
+      whole weeks, so never more than `(8 weeks ago)`;
+    - from two whole months to eleven: `(2 months ago)`, counted in calendar months so that
+      the first of a month reads the same on any day of the next;
+    - from twelve months: `(over a year ago)`, then `(over 2 years ago)` from twenty-four.
+
+    A calendar month, not thirty days, because "2 months ago" read beside a date three days short
+    of two months would be wrong by a visible margin and nobody can check thirty-day months.
+    """
+    days = (today - day).days
+    if days < RECENT_DAYS:
+        return day.isoformat()
+    months = (today.year - day.year) * 12 + today.month - day.month - (today.day < day.day)
+    if months < 2:
+        age = f"{days // 7} weeks ago"
+    elif months < 12:
+        age = f"{months} months ago"
+    elif months < 24:
+        age = "over a year ago"
+    else:
+        age = f"over {months // 12} years ago"
+    return f"{day.isoformat()} ({age})"
 
 
 def percent_text(share: float) -> str:
