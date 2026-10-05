@@ -36,9 +36,12 @@ no address of its own. An explicit `from`/`to` range, which the links in the
 page's own tables and forms carry, is the older way to name days and is read as
 it always was; a request that carries window fields is read as the window, and
 its range, if any, is not. The window is relative to today, cut at the last day
-the account has a known balance, and is drawn by the fitting above: a window
-narrows the span the same `choose_scale` fits, so a short one is drawn at a
-larger scale per day, not in a smaller drawing. A timing pair whose earlier step
+the account has a known balance. The span a window names is the span the reader
+wants to see, so its values chart is drawn at `READABLE_PIXELS_PER_DAY` and not
+stretched to the range fitting above: a month is under two phone widths and a
+quarter under five, where the same days as a range would be ten thousand units. The
+form that opens it offers the old width beside it (`wide`), to pan across; a
+range, and everything held, are drawn as they always were. A timing pair whose earlier step
 falls before the window and whose later step does not is drawn from the window's
 first day and said to have begun earlier, with its real first day; a pair never
 begins at the edge of a window.
@@ -115,6 +118,16 @@ _esc = html.escape
 PIXELS_PER_DAY = 3.65
 TARGET_RANGE_WIDTH = 10_000
 MAX_PIXELS_PER_DAY = 240.0
+#: A window the reader chose is drawn at this many units a day (see `choose_scale`). Measured
+#: over three steps on consecutive days: at 8 their 10-unit marks overlap, at 12 they are clear
+#: but the axis names no day, and from 14 the axis names a day a week (`_axis`) and a day's
+#: offset is 14 units across, which is the least that reads as a day on a phone.
+READABLE_PIXELS_PER_DAY = 14.0
+#: The least a window's drawing is wide, so one day is not a sliver: the chart's share of the
+#: narrowest phone's width (360 less the page's margins, and the figures' column beside it).
+WINDOW_FIT_WIDTH = 250
+#: Units a day label needs clear of the named first day beside it ("10 Apr 2022").
+_NAMED_START_ROOM = 80
 
 #: The one height of every mark on the timeline, whatever it stands for.
 MARK_HEIGHT = 14
@@ -366,6 +379,8 @@ class Scale:
     start: date
     end: date
     per_day: float
+    #: Drawn for a window the reader chose (see `choose_scale`).
+    fitted: bool = False
 
     @property
     def days(self) -> int:
@@ -380,14 +395,30 @@ class Scale:
 
 
 def choose_scale(
-    first: date, last: date, start: date | None, end: date | None
+    first: date,
+    last: date,
+    start: date | None,
+    end: date | None,
+    *,
+    fitted: bool = False,
 ) -> Scale:
-    """The days to draw and the pixels each takes (see the module docstring)."""
+    """The days to draw and the pixels each takes (see the module docstring).
+
+    Any other range is drawn to about `TARGET_RANGE_WIDTH`, as it always was. A `fitted`
+    range is a window the reader chose, and is drawn at `READABLE_PIXELS_PER_DAY`, at no
+    less than fills `WINDOW_FIT_WIDTH` (so a short window is not a sliver), and at no more
+    than that range would be: a window is never wider than it was before windows fitted.
+    """
     if start is None or end is None:
         return Scale(first, max(first, last), PIXELS_PER_DAY)
     days = (end - start).days + 1
-    per_day = min(MAX_PIXELS_PER_DAY, max(PIXELS_PER_DAY, TARGET_RANGE_WIDTH / days))
-    return Scale(start, end, per_day)
+    ranged = min(MAX_PIXELS_PER_DAY, max(PIXELS_PER_DAY, TARGET_RANGE_WIDTH / days))
+    if fitted:
+        fills = (WINDOW_FIT_WIDTH - 2 * EDGE) / days
+        return Scale(
+            start, end, min(ranged, max(READABLE_PIXELS_PER_DAY, fills)), fitted=True
+        )
+    return Scale(start, end, ranged)
 
 
 def _months(scale: Scale) -> list[date]:
@@ -419,9 +450,22 @@ def _axis(scale: Scale, *, month_y: Sequence[float]) -> str:
             parts.append(_label(x + 3, y, text))
     step = 1 if per_day >= 60 else 7 if per_day >= 14 else 0
     if step:
+        # A window that begins mid-month has no month tick at its left edge, so without this
+        # nothing on the chart would say which month or year it is. The first day is named in
+        # full on the day row, and a day label too near it to read beside it is left out.
+        named_start = scale.fitted and scale.start.day != 1
         for offset in range(scale.days):
             day = scale.start + timedelta(days=offset)
-            if (day.day - 1) % step == 0 and day.day != 1:
+            if offset == 0 and named_start:
+                parts.append(
+                    _label(scale.x(day) + 2, month_y[0] + 13,
+                           f"{day.day} {day:%b} {day.year}", ' fill-opacity=".7"')
+                )
+            elif (
+                (day.day - 1) % step == 0
+                and day.day != 1
+                and not (named_start and offset * per_day < _NAMED_START_ROOM)
+            ):
                 parts.append(
                     _label(scale.x(day) + 2, month_y[0] + 13, str(day.day),
                            ' fill-opacity=".7"')
@@ -1313,13 +1357,45 @@ def _mode(
         if start is not None and end is not None and not chosen.windowed
         else ""
     )
+    buttons = (
+        submit_button("Show values, fitted to the window (opens in a new tab)")
+        + _wide_button("Show values, very wide to pan across (opens in a new tab)")
+        if chosen.windowed
+        else submit_button("Show values (opens in a new tab)")
+    )
     return (
         '<p class="muted">This timeline draws no size: every mark is the same shape, and '
         "the rows say what kind of change each is. Sizes are figures, so they appear only "
         "on the values chart, which opens in a new tab on request.</p>"
         f'<form method="post" action="/balance-chart" target="_blank">{fields}'
-        + submit_button("Show values (opens in a new tab)")
+        + buttons
         + "</form>"
+    )
+
+
+def _wide_button(label: str) -> str:
+    """A second submit that asks for the window drawn very wide (`wide=1` in the body)."""
+    return f'<p><button type="submit" name="wide" value="1">{_esc(label)}</button></p>'
+
+
+def _scale_switch(ref: str, chosen: _Chosen, *, wide: bool) -> str:
+    """On the values page of a window: the other way to draw it, in a new tab.
+
+    A window is drawn fitted to the screen unless `wide` asks for it as wide as a range is
+    (to pan across), and each page offers the other, so both are one tap from either.
+    """
+    carried = "".join(
+        f'<input type="hidden" name="{name}" value="{_esc(value)}">'
+        for name, value in {"ref": ref, **chosen.fields}.items()
+    )
+    button = (
+        submit_button("Fit this window to the screen (opens in a new tab)")
+        if wide
+        else _wide_button("Draw this window very wide to pan across (opens in a new tab)")
+    )
+    return (
+        f'<form method="post" action="/balance-chart" target="_blank" data-scale-switch>'
+        f"{carried}{button}</form>"
     )
 
 
@@ -1350,10 +1426,11 @@ def render_balance_chart(
     end: date | None = None,
     window_fields: Mapping[str, str] | None = None,
     today: date | None = None,
+    wide: bool = False,
 ) -> bytes:
     """The page. The days drawn are an explicit range (`start` and `end`), or the window
     `window_fields` ask for (see the module docstring), as at `today`; neither means
-    everything held."""
+    everything held. A window is drawn fitted to the screen unless `wide`."""
     view = Disclosed(chart, unmasked=unmasked)
     name = view.label or view.ref
     body = f"<p><strong>{_esc(name)}</strong></p>"
@@ -1386,7 +1463,8 @@ def render_balance_chart(
                 "from a choice that was refused.</p>"
             )
         return render_page("Balance differences", body + _links(view.ref), wide=True)
-    scale = choose_scale(chart.first_day, chart.last_day, chosen.start, chosen.end)
+    fitted = chosen.windowed and not wide
+    scale = choose_scale(chart.first_day, chart.last_day, chosen.start, chosen.end, fitted=fitted)
     changes = changes_in(structure, scale.start, scale.end)
     noun = "window" if chosen.windowed else "range"
     carried = _carried_in(structure, scale.start) if chosen.windowed else []
@@ -1402,6 +1480,7 @@ def render_balance_chart(
             + _mode(view, unmasked, start, end, chosen)
             + f"<p>Drawn from {_mono(scale.start)} to {_mono(scale.end)} at "
             f"{scale.per_day:.2f} pixels a day.</p>"
+            + (_scale_switch(view.ref, chosen, wide=wide) if chosen.windowed else "")
             + everything
             + _range_summary(changes, scale.start, scale.end, noun)
             + (_WINDOW_NOTE if chosen.windowed else "")
@@ -1485,6 +1564,7 @@ class BalanceChartPages:
             form.get("to", [""])[0] or "",
             _window_of(form),
             unmasked=True,
+            wide=form.get("wide", [""])[0] == "1",
         )
 
     def _balance_chart(
@@ -1495,6 +1575,7 @@ class BalanceChartPages:
         window_fields: Mapping[str, str] | None,
         *,
         unmasked: bool,
+        wide: bool = False,
     ) -> None:
         hook = self.bound_config.balance_chart_data
         if hook is None:
@@ -1527,6 +1608,7 @@ class BalanceChartPages:
                 end=last,
                 window_fields=window_fields,
                 today=_today(),
+                wide=wide,
             ),
             no_store=unmasked,
         )

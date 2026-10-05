@@ -34,10 +34,9 @@ before it. Over 2022-06-20 to 2022-07-31 the pair is inside and the window holds
 before it. The difference in force on a window's first day began at the last change before it:
 2025-03-03 for 12 months, 2026-02-03 for 90 days, 2019-06-25 for all of 2020.
 
-The values chart is drawn at `choose_scale`'s fit: width is 2 x 24 + days x pixels a day, and
-a window of more than 40 and fewer than 2,739 days is drawn about 10,000 wide:
-everything 2,738 days at 3.65 = 10,042; 12 months 365 days at 27.40 = 10,048; 90 days at 111.11
-= 10,048.
+Everything and a range are drawn at `choose_scale`'s range fit: width is 2 x 24 + days x pixels
+a day, so everything is 2,738 days at 3.65 = 10,042 and a year as a range is 10,048. How wide a
+WINDOW is drawn is `test_balance_chart_window_fit`'s.
 
 Where a window may travel: the masked GET takes it in its query, the POST in its body, and
 the POST's answer is `no-store` with no `Location`.
@@ -388,7 +387,7 @@ class TestTheControlIsTheOneTheOtherChartUses:
         assert 'name="window" value="all" class="window-chip"' in page
 
 
-class TestTheValuesChartIsDrawnAtTheExistingFit:
+class TestEverythingAndARangeAreDrawnAtTheExistingFit:
     @staticmethod
     def drawn_width(page: str) -> int:
         found = re.search(r'<svg role="img" aria-labelledby="bc-values-t[^>]*width="(\d+)"', page)
@@ -402,21 +401,8 @@ class TestTheValuesChartIsDrawnAtTheExistingFit:
 
         assert self.drawn_width(page) == 10_042
 
-    def test_TwelveMonths_IsDrawnAtTheSameTargetWidthButAtEightTimesTheScalePerDay(self):
-        page = window_page(unmasked=True, window="m12")
-
-        assert self.drawn_width(page) == 10_048
-        assert "at 27.40 pixels a day" in words(page)
-
-    def test_NinetyDays_IsDrawnAtTheSameTargetWidthAtThirtyTimesTheScalePerDay(self):
-        page = window_page(unmasked=True, window="d90")
-
-        assert self.drawn_width(page) == 10_048
-        assert "at 111.11 pixels a day" in words(page)
-
-    def test_AnExplicitRangeOfTheSameDays_IsDrawnExactlyAsTheWindowIs(self):
-        window = window_page(unmasked=True, window="m12")
-        ranged = render_balance_chart(
+    def test_AnExplicitRangeOfAYear_IsStillDrawnAboutTenThousandUnitsWide(self):
+        page = render_balance_chart(
             inv.invented_chart(),
             unmasked=True,
             start=date(2025, 7, 1),
@@ -424,11 +410,8 @@ class TestTheValuesChartIsDrawnAtTheExistingFit:
             today=TODAY,
         ).decode()
 
-        def drawing(html: str) -> str:
-            return re.search(r'<svg role="img" aria-labelledby="bc-values-t.*?</svg>', html, re.S
-                             ).group(0)
-
-        assert drawing(window) == drawing(ranged)
+        assert self.drawn_width(page) == 10_048
+        assert "at 27.40 pixels a day" in words(page)
 
 
 @pytest.fixture
