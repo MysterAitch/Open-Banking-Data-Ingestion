@@ -69,6 +69,7 @@ from .coverage import DoubtReport, SourceCoverage
 from .coverage_timeline import AccountTimeline
 from .doctor import shape_problems
 from .fetch_gaps import FetchReport
+from .fetch_marks import MarkSet, MarkWorld
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import Ledger
 from .logs import say
@@ -93,6 +94,7 @@ from .space_windows import RANGE_REFUSAL_MARK
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .standing_data import AccountStanding
 from .statement_shape import ShapeReport
+from .store import Store
 from .timings import Timings
 from .upload_script import UPLOAD_SCRIPT
 from .web_accounts import (
@@ -761,6 +763,10 @@ class WebConfig:
     #: The files still to fetch, as of the day given (`fetch_gaps`), held while nothing it reads
     #: has changed.
     fetch_gaps: Callable[[date], FetchReport] | None = None
+    #: The owner's decisions about those files, read as of a day with what they are weighed
+    #: against (`fetch_marks`), and a door that runs one write against the store and that world.
+    fetch_marks_read: Callable[[date], tuple[MarkWorld, MarkSet]] | None = None
+    fetch_marks_write: Callable[[Callable[[Store, MarkWorld], str]], str] | None = None
     #: Work out what the first page would otherwise pay for; run once in the background at start.
     warm: Callable[[], None] | None = None
     #: Protect an account through a date: (ref, through). Raises a DataError whose
@@ -4030,6 +4036,9 @@ class ConnectionHandler(
         if route == "/gaps":
             self._gaps_page()
             return
+        if route == "/gaps-mark":
+            self._gaps_mark_form(params)
+            return
         if route == "/checks":
             self._checks_page(params.get("fresh", [""])[0] == "1")
             return
@@ -6711,6 +6720,15 @@ class ConnectionHandler(
             return
         if route == "/protect-accept":
             self._protect_accept_post(self._read_form())
+            return
+        if route == "/gaps-mark":
+            self._gaps_mark_post(self._read_form())
+            return
+        if route == "/gaps-mark-undo":
+            self._gaps_mark_undo_post(self._read_form())
+            return
+        if route == "/gaps-scope":
+            self._gaps_scope_post(self._read_form())
             return
         if route == "/statement-held":
             self._statement_held()

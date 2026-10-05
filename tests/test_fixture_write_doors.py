@@ -175,6 +175,9 @@ JUSTIFIED = {
     "standing_epoch table and its triggers existed, for the same reason as the entries "
     "above: only a rewound marker shows that opening an old store grows what every later "
     "write relies on",
+    ("test_fetch_marks.py", "obdi_meta"): "stamps a store with the version BEFORE the "
+    "fetch_marks and record_scopes tables existed, for the same reason as the entries above: "
+    "only a rewound marker shows that opening an old store grows the tables the first mark needs",
     ("test_artefact_origins.py", "obdi_meta"): "rewinds the schema marker to force the "
     "upgrade path to run",
     ("test_attempts.py", "obdi_meta"): "rewinds the migration marker for the "
