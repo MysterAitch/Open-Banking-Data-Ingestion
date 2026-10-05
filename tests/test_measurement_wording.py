@@ -17,12 +17,14 @@ import re
 from consecutive_days_corpus import consecutive_payments
 from late_settlement_corpus import ORDERS, household
 from obdi import rebuild
+from obdi.account_names import name_text
 from obdi.exact_rule_measure import exact_rule_report
 from obdi.page_words import INTERNAL_ON_PAGES
 from obdi.providers import starling
 from obdi.store import Store
 from round_up_corpus import card_payment
 from test_absorbed_rows import arrive
+from test_cash_transfers import world
 from test_cash_withdrawal_measure import measured
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_page_wording_emphasis import ACRONYMS, SHOUTING
@@ -85,6 +87,22 @@ class TestTheMeasurementReadsLikeThePage:
 
         assert "cash withdrawals by what a source states" in text
         assert offences(text) == []
+
+    def test_CashTransfers_WhenTheLegsAreMadeAndTheAccountIsNamedCash_ReadAsThePageShowsThem(
+        self, tmp_path
+    ):
+        store = world(tmp_path, ORDERS[0], rebuild=True)
+        try:
+            text = exact_rule_report(store, MAP).describe()
+        finally:
+            store.close()
+
+        shown = name_text(text, {"cash": "Cash"})
+
+        assert "5 transfers made by the rule are held: 4 withdrawals and 1 deposit" in shown
+        assert offences(shown) == []
+        assert shown.count("Cash (cash)") == 1
+        assert "the cash account" in shown
 
     def test_CashWithdrawals_WhenOneOfEachCountIsOne_ReadAsSingularSentences(self, tmp_path):
         with Store(tmp_path / "one.sqlite3") as store:

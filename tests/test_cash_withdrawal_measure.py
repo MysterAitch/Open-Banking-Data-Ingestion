@@ -353,10 +353,26 @@ class TestTheCashAccount:
 
         assert (chosen.ref, chosen.designated) == (None, 2)
 
-    def test_Choice_WhenTheOnlyCashAccountIsClosed_IsNone(self):
+    def test_Choice_WhenTheOnlyCashAccountIsClosed_IsThatAccountWithTheDayItClosed(self):
         chosen = self.choose(self.declared("cash", CASH_ACCOUNT_KIND, closed=D(2026, 8, 1)))
 
-        assert (chosen.ref, chosen.designated) == (None, 0)
+        assert (chosen.ref, chosen.designated, chosen.until) == ("cash", 0, D(2026, 8, 1))
+
+    def test_Choice_WhenAClosedCashAccountHasAnOpenOne_IsTheOpenOne(self):
+        chosen = self.choose(
+            self.declared("old-cash", CASH_ACCOUNT_KIND, closed=D(2026, 8, 1)),
+            self.declared("cash", CASH_ACCOUNT_KIND),
+        )
+
+        assert (chosen.ref, chosen.until) == ("cash", None)
+
+    def test_Choice_WhenSeveralAreClosedAndNoneIsOpen_IsNone(self):
+        chosen = self.choose(
+            self.declared("old-cash", CASH_ACCOUNT_KIND, closed=D(2026, 8, 1)),
+            self.declared("older-cash", CASH_ACCOUNT_KIND, closed=D(2025, 8, 1)),
+        )
+
+        assert chosen.ref is None
 
     def test_Choice_WhenOnlyTheLabelOrReferenceSaysCash_IsNone(self):
         chosen = self.choose(self.declared("cash", "current-account"))

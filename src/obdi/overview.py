@@ -35,6 +35,7 @@ from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
 from .coverage import SILENT_FEED_DAYS
 from .models import TransactionStatus
+from .namespaces import CASH_LEG_SOURCE
 from .plural import plural as _plural
 from .rebuild_hold import RebuildInProgress
 from .scheduler_status import STEPS
@@ -887,7 +888,9 @@ def held_by_account(
         f"WHERE t.status NOT IN ({marks})",
         (*history, *history),
     ):
-        sources.setdefault(str(row["account_id"]), set()).add(str(row["source"]))
+        # A cash leg is derived from a withdrawal and no source feeds the account with it.
+        if str(row["source"]) != CASH_LEG_SOURCE:
+            sources.setdefault(str(row["account_id"]), set()).add(str(row["source"]))
     return held, sources
 
 

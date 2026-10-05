@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from .models import Transaction, TransactionStatus
-from .namespaces import UNITEMISED_SOURCE
+from .namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
 
 
 class ReplayError(RuntimeError):
@@ -56,8 +56,10 @@ def is_cleared(transaction: Transaction, cleared: Collection[str] | None) -> boo
     With `cleared`, the entity ids `clearing.cleared_entity_ids` found, a row is cleared when an
     authoritative listing lists it (`clearing` says which and why), or when it is the account's own
     arithmetic from balances its owner stated (`UNITEMISED_SOURCE`), which no source lists and which
-    is as authoritative as a figure gets. Without it, any row that is not pending, the rule before
-    clearing was a fact about a row.
+    is as authoritative as a figure gets, or when it is the leg of a booked cash withdrawal
+    (`CASH_LEG_SOURCE`), which no source lists and which is made only once its withdrawal is
+    booked. Without it, any row that is not pending, the rule before clearing was a fact about a
+    row.
 
     A pending row is never cleared: it will be superseded by its settled form.
     """
@@ -65,7 +67,9 @@ def is_cleared(transaction: Transaction, cleared: Collection[str] | None) -> boo
         return False
     if cleared is None:
         return True
-    return transaction.source == UNITEMISED_SOURCE or transaction.entity_id in cleared
+    return transaction.source in (UNITEMISED_SOURCE, CASH_LEG_SOURCE) or (
+        transaction.entity_id in cleared
+    )
 
 
 def to_actual_transaction(

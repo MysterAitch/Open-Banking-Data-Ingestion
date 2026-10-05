@@ -67,6 +67,7 @@ from .balance_anchors import EffectiveOpening, parse_calendar_day
 from .errors import DataError
 from .masking import Structural
 from .models import Transaction
+from .namespaces import CASH_LEG_SOURCE
 from .page_words import REMOVE_PROTECTION
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -117,7 +118,13 @@ def _ident(row: Transaction) -> str:
 
 
 def _partners(store: Store, account: str) -> dict[str, tuple[str, str]]:
-    """entity id -> (partner's account, partner's identity) for this account's confirmed legs."""
+    """entity id -> (partner's account, partner's identity) for this account's confirmed legs.
+
+    A pair with a cash leg (`cash_transfers`) is left out. The withdrawal is the bank's own row,
+    unchanged by the leg made from it, so a span of the current account that was verified
+    against the bank's balances reads as unchanged when the cash account gains the leg; the
+    leg itself is a row added to the cash account's span, which is a change there.
+    """
     found: dict[str, tuple[str, str]] = {}
     for row in store.connection.execute(
         "SELECT p.debit_entity_id AS debit, p.credit_entity_id AS credit, "
@@ -127,8 +134,8 @@ def _partners(store: Store, account: str) -> dict[str, tuple[str, str]]:
         "FROM transfer_pairs p "
         "JOIN transactions d ON d.entity_id = p.debit_entity_id "
         "JOIN transactions c ON c.entity_id = p.credit_entity_id "
-        "WHERE d.account_id = ? OR c.account_id = ?",
-        (account, account),
+        "WHERE (d.account_id = ? OR c.account_id = ?) AND d.source != ? AND c.source != ?",
+        (account, account, CASH_LEG_SOURCE, CASH_LEG_SOURCE),
     ):
         debit_side = (
             str(row["debit_account"]),

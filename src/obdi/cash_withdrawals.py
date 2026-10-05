@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 
 from .accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef, is_cash_account
 from .models import Transaction, TransactionStatus
@@ -117,6 +118,7 @@ PENDING = "pending"
 WRONG_WAY = "wrong way"
 DISAGREED = "disagreed"
 NOT_STATED = "not stated"
+AFTER_CLOSE = "after the cash account closed"
 
 
 @dataclass(frozen=True)
@@ -135,14 +137,29 @@ class CashAccountChoice:
     designated: int
     #: How many open accounts are plain balance-only: the ones that could be so declared.
     could_be_declared: int
+    #: The day the cash account closed, where the one chosen is closed: it takes no leg dated
+    #: after it, and keeps the legs it already holds. None for an open account.
+    until: date | None = None
 
 
 def choose_cash_account(records: Iterable[AccountRecord]) -> CashAccountChoice:
-    """The cash account among the declared accounts, by kind alone."""
-    open_records = [r for r in records if r.closed is None]
+    """The cash account among the declared accounts, by kind alone.
+
+    ONE OPEN account declared with the cash kind. Where there is none open and exactly one
+    closed, that one is chosen with the day it closed, so archiving the cash account stops new
+    legs without taking away the legs of the years it was open. Several open, or none open and
+    several closed, is no choice.
+    """
+    everyone = list(records)
+    open_records = [r for r in everyone if r.closed is None]
     cash = [r for r in open_records if is_cash_account(r.kind)]
+    closed_cash = [r for r in everyone if r.closed is not None and is_cash_account(r.kind)]
     plain = [r for r in open_records if r.kind.strip().casefold() == BALANCE_ONLY_KIND]
-    return CashAccountChoice(cash[0].ref if len(cash) == 1 else None, len(cash), len(plain))
+    if len(cash) == 1:
+        return CashAccountChoice(cash[0].ref, 1, len(plain))
+    if not cash and len(closed_cash) == 1:
+        return CashAccountChoice(closed_cash[0].ref, 0, len(plain), closed_cash[0].closed)
+    return CashAccountChoice(None, len(cash), len(plain))
 
 
 @dataclass(frozen=True)
@@ -256,13 +273,17 @@ class Reading:
     judgement: Judgement
 
 
-def read_candidates(store: Store, cash_account: str | None) -> list[Reading]:
+def read_candidates(
+    store: Store, cash_account: str | None, until: date | None = None
+) -> list[Reading]:
     """Every stored transaction, not history, some source states a cash word for, judged.
 
     THE ONE READER of what the rule and its measurement are made of, so the measurement says N
     and the rule makes exactly N. One indexed read finds the entities (`entities_stating`);
     nothing else in the store is read, which is what keeps the pass in proportion to the cash
     movements held and not to the rows. The cash account's own rows are never candidates.
+    `until` is the day a closed cash account closed: a row dated after it is left out
+    (`AFTER_CLOSE`), because an account takes nothing once it is closed.
     """
     entities = store.entities_stating(CANDIDATE_WORDS)
     rows = [
@@ -277,19 +298,15 @@ def read_candidates(store: Store, cash_account: str | None) -> list[Reading]:
         if row.account_id not in has_feed:
             has_feed[row.account_id] = has_first_party_feed(store, row.account_id)
         words = stated.get(row.entity_id, {})
-        readings.append(
-            Reading(
-                row,
-                words,
-                has_feed[row.account_id],
-                judge(
-                    words,
-                    has_feed=has_feed[row.account_id],
-                    amount_minor=row.amount_minor,
-                    pending=row.status is TransactionStatus.PENDING,
-                ),
-            )
+        judgement = judge(
+            words,
+            has_feed=has_feed[row.account_id],
+            amount_minor=row.amount_minor,
+            pending=row.status is TransactionStatus.PENDING,
         )
+        if judgement.outcome == LEG and until is not None and row.value_date > until:
+            judgement = replace(judgement, outcome=AFTER_CLOSE)
+        readings.append(Reading(row, words, has_feed[row.account_id], judgement))
     return readings
 
 

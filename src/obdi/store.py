@@ -1937,6 +1937,38 @@ class Store:
             )
         return sorted(found, key=lambda t: t.entity_id)
 
+    def transactions_with_source(self, source: str) -> list[Transaction]:
+        """Every stored transaction whose own source is this one.
+
+        A scan of the transactions' column, not a read of their rows' sightings, and no index:
+        an index made now would exist only on a store opened at a new schema version, and a
+        store already stamped with this one would never grow it.
+        """
+        return [
+            _row_to_transaction(row)
+            for row in self.connection.execute(
+                "SELECT * FROM transactions WHERE source = ?", (source,)
+            )
+        ]
+
+    def delete_derived_row(self, entity_id: str) -> None:
+        """Remove a row that is derived and not evidence, with everything that hangs off it.
+
+        Only for a row a pass made from other rows (`namespaces.CASH_LEG_SOURCE`), never for one
+        a source sighted. The annotations stay: a person's category on a row that is made again
+        by the next pass belongs to the row's stable identity, and a rebuild never touches them.
+        """
+        for table in ("transaction_sources", "sighting_times", "sighting_words", "review_queue"):
+            self.connection.execute(
+                f"DELETE FROM {table} WHERE entity_id = ?",  # noqa: S608
+                (entity_id,),
+            )
+        self.connection.execute(
+            "DELETE FROM transfer_pairs WHERE debit_entity_id = ? OR credit_entity_id = ?",
+            (entity_id, entity_id),
+        )
+        self.connection.execute("DELETE FROM transactions WHERE entity_id = ?", (entity_id,))
+
     def all_transactions(self) -> list[Transaction]:
         """Every stored transaction, with pairing confirmations applied.
 

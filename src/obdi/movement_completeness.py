@@ -79,6 +79,7 @@ from .accounts import AccountMap, AccountRef
 from .arrival_order import in_arrival_order
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
 from .models import SourceTier, Transaction
+from .namespaces import CASH_LEG_SOURCE
 from .plural import plural as _plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -1227,7 +1228,14 @@ def check_legs(
         paid, received = by_entity.get(debit_id), by_entity.get(credit_id)
         if paid is None or received is None or _is_leg(paid) or _is_leg(received):
             continue
-        unverifiable_pairs += 1
+        # A cash withdrawal and the leg made from it (`cash_transfers`) are a pair whose two
+        # sides this check can verify: the leg is derived from the withdrawal, so it is a leg
+        # of a pair, neither a transfer with a missing leg nor an ordinary pair it cannot verify.
+        cash = CASH_LEG_SOURCE in (paid.source, received.source)
+        if cash:
+            legs += 1
+        else:
+            unverifiable_pairs += 1
         kind = None
         if _direction(paid.amount_minor) == _direction(received.amount_minor):
             kind = WRONG_DIRECTION
@@ -1240,11 +1248,13 @@ def check_legs(
                     paid.value_date,
                     _direction(paid.amount_minor),
                     kind,
-                    "payment pair",
+                    "cash transfer" if cash else "payment pair",
                     None,
                     received.account_id,
                 )
             )
+        elif cash:
+            verified += 1
     faults.sort(key=lambda f: (f.day, f.account, f.kind))
     return legs, verified, unverifiable, unverifiable_pairs, faults
 

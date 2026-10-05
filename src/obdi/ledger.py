@@ -69,7 +69,7 @@ from .identity_health import provider_ids_by_row, shared_identity_groups
 from .join_basis import JoinCounts, SightingView, join_counts, sighting_views
 from .masking import Structural, Total
 from .models import Transaction
-from .namespaces import MANUAL_SOURCE, UNITEMISED_SOURCE
+from .namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
 from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
@@ -859,7 +859,7 @@ def _ledger_for(
             {source for seen in sightings.values() for source in seen}
             | {t.source for t in rows if t.entity_id not in sightings}
         )
-        - {UNITEMISED_SOURCE}
+        - {UNITEMISED_SOURCE, CASH_LEG_SOURCE}
     )
     feed = FeedStatuses(store, [ref]) if BANK_SOURCE in account_sources else None
     # Typed rows are listed as a source but do not make an account "fed by

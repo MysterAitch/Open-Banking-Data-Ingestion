@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .namespaces import CASH_LEG_SOURCE
 from .plural import agree, plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -287,6 +288,8 @@ def provider_ids_by_row(
         "WHERE s.source_id IS NOT NULL AND s.source_id != '' "
         # A sighting copied onto a Space row names no provider id of its own.
         "AND s.source_id NOT LIKE ? "
+        # A cash leg is derived from a withdrawal and listed by no source.
+        "AND s.source != ? "
         "AND (? IS NULL OR t.account_id = ?) "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM raw_artefacts a "
@@ -294,7 +297,13 @@ def provider_ids_by_row(
         # Placeholders only - the interpolation builds "?,?", never data.
         f"  AND a.source IN ({placeholders})"
         ")",
-        (FOLDED_SIGHTING_PREFIX + "%", account_id, account_id, *PENDING_SNAPSHOT_SOURCES),
+        (
+            FOLDED_SIGHTING_PREFIX + "%",
+            CASH_LEG_SOURCE,
+            account_id,
+            account_id,
+            *PENDING_SNAPSHOT_SOURCES,
+        ),
     ).fetchall()
 
     ids_by_row: dict[tuple[str, str], dict[str, set[str]]] = {}

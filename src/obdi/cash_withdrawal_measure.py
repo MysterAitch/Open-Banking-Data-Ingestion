@@ -29,6 +29,7 @@ from datetime import date
 
 from .accounts import AccountRecord
 from .cash_withdrawals import (
+    AFTER_CLOSE,
     AGGREGATOR_CASH,
     DEPOSIT,
     DISAGREED,
@@ -46,7 +47,8 @@ from .cash_withdrawals import (
     feed_excludes_cash,
     read_candidates,
 )
-from .models import TransactionStatus
+from .models import Transaction, TransactionStatus
+from .namespaces import CASH_LEG_SOURCE
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
 from .plural import agree, plural
 from .store import Store
@@ -267,7 +269,12 @@ class AccountCashFigures:
             for r in self.readings
             if r.judgement.outcome != LEG and r.judgement.movement == ""
         )
-        names = {PENDING: "pending", WRONG_WAY: "the wrong way round", DISAGREED: "disagreed"}
+        names = {
+            PENDING: "pending",
+            WRONG_WAY: "the wrong way round",
+            DISAGREED: "disagreed",
+            AFTER_CLOSE: "dated after the cash account closed",
+        }
         said = [f"{names[kind]} {left[kind]}" for kind in names if left[kind]]
         if undecided:
             said.append(
@@ -296,6 +303,21 @@ class CashWithdrawalReport:
     accounts: list[AccountCashFigures] = field(default_factory=list)
     #: Account -> (source name, field) -> word -> how many stored transactions state it.
     vocabulary: dict[str, dict[str, Counter[str]]] = field(default_factory=dict)
+    #: The legs the rule has made and the cash account holds.
+    held: list[Transaction] = field(default_factory=list)
+
+    def _held_sentence(self) -> str:
+        """What the rule has already made, to be read beside what it says it would make."""
+        if not self.held:
+            return "No transfer made by the rule is held."
+        withdrawals = sum(1 for t in self.held if t.raw.get("movement") == WITHDRAWAL)
+        deposits = len(self.held) - withdrawals
+        days = sorted(t.value_date for t in self.held)
+        return (
+            f"{plural(len(self.held), 'transfer')} made by the rule "
+            f"{agree(len(self.held), 'is')} held: {plural(withdrawals, 'withdrawal')} and "
+            f"{plural(deposits, 'deposit')}, dated {days[0].isoformat()} to {days[-1].isoformat()}."
+        )
 
     @property
     def would_make(self) -> list[Reading]:
@@ -310,7 +332,12 @@ class CashWithdrawalReport:
     def sentences(self) -> list[str]:
         lines: list[str] = []
         choice = self.choice
-        if choice.ref is not None:
+        if choice.ref is not None and choice.until is not None:
+            lines.append(
+                f"{choice.ref} is the one account declared as the place cash goes, and it closed "
+                f"on {choice.until.isoformat()}, so the rule would make no leg dated after that."
+            )
+        elif choice.ref is not None:
             # At the head of the line, so a page that writes an account's name writes this one's.
             lines.append(
                 f"{choice.ref} is the one open account declared as the place cash goes, "
@@ -328,6 +355,7 @@ class CashWithdrawalReport:
                 f"{choice.designated} open accounts are declared as the place cash goes, so the "
                 "rule would do nothing: it does not choose between them."
             )
+        lines.append(self._held_sentence())
         if not self.accounts:
             lines.append(
                 "No stored transaction that is not history is a cash movement by what a source "
@@ -366,7 +394,9 @@ def cash_withdrawal_report(store: Store, records: list[AccountRecord]) -> CashWi
             by_account[account] = AccountCashFigures(account)
         return by_account[account]
 
-    readings = read_candidates(store, str(choice.ref) if choice.ref is not None else None)
+    readings = read_candidates(
+        store, str(choice.ref) if choice.ref is not None else None, choice.until
+    )
     entities = [r.row.entity_id for r in readings]
     stating_no_kind = _sighted_by_sources_stating_no_kind(store, entities)
     on_card = _on_a_card_artefact(store, entities)
@@ -384,6 +414,9 @@ def cash_withdrawal_report(store: Store, records: list[AccountRecord]) -> CashWi
         figures.credit_card = kinds.get(account) == _CREDIT_CARD_KIND or bool(figures.on_card)
     report.accounts = [by_account[a] for a in sorted(by_account)]
     report.vocabulary = _vocabulary(store)
+    report.held = sorted(
+        store.transactions_with_source(CASH_LEG_SOURCE), key=lambda t: (t.value_date, t.entity_id)
+    )
     return report
 
 

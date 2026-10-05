@@ -352,15 +352,23 @@ def pair_transfers_across_store(store: Store, account_map: AccountMap | None = N
     # not be offered as the leg of a transfer, and nor can a reversed one or one the bank
     # declined: the money never moved, so the other side has nothing to pair with.
     never_moved = declined_void_entities(store)
+    # Made first, because the pass reads rows that are already history: a withdrawal the bank
+    # declined or a reversal loses its leg here, live and in a rebuild alike. A cash withdrawal
+    # and its leg are paired to each other by that pass (`cash_transfers`) and offered to no one.
+    from .cash_transfers import reconcile_cash_legs
+
+    cash = reconcile_cash_legs(store)
     pairs = pair_transfer_entities(
         (
             t
             for t in store.all_transactions()
             if t.status not in (TransactionStatus.FOLDED, TransactionStatus.REVERSED)
             and t.entity_id not in never_moved
+            and t.entity_id not in cash.entities
         ),
         counterpart=counterpart,
     )
+    pairs = [*pairs, *cash.pairs]
     store.replace_transfer_pairs(pairs)
     store.connection.commit()
     return len(pairs)
