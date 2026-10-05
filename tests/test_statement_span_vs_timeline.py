@@ -1,33 +1,22 @@
-"""Where the coverage timeline's derivation of a statement's days and `statement_span` differ.
+"""The coverage timeline's statement lane draws exactly what `statement_span` says.
 
-THIS TEST DOCUMENTS; it does not judge which is right. Each invented account is built through the
-real doors, the timeline is asked what its statement lane covers (`build_account_timeline`, the
-public derivation as it stands), `statement_span` is asked what each statement covers, and every
-statement whose first or last day differs is listed in EXPECTED. A difference that is not listed,
-or a listed one that has stopped differing, fails - so switching the timeline to `statement_span`
-is made knowingly, and a change to either derivation that moves a day is noticed.
+This began as a record of where the timeline's own derivation of a statement's days differed from
+`statement_span` over five invented accounts (a partial last day ending where the statement was
+produced or received; equal balances across a doubled interval being a probable net-nil hole
+and not contiguous; unequal balances a stated hole with an inferred end; a printed start winning
+over balances; nothing guessed from two statements; the cadence the lower median). The timeline
+now reads `statement_span` through `coverage_timeline.capture_of` and derives nothing, so the
+differences are gone, and this holds that: for every statement of every account, the days the
+lane covers are the days `statement_span` gives, and a second derivation growing in the timeline
+would show here as a difference.
 
-The accounts, with the answer decided before the first run:
+The accounts are the five the record was made over, built through the real doors:
 
-  five    the hand-worked account of test_statement_span. Two statements differ. The fourth
-          (closing 04-10, opening not the second's closing): the timeline begins it at its first
-          row, 04-02; `statement_span` places the missing statement's expected close at 03-10 and
-          begins it 03-11. The sixth was received (06-02) before its closing day (06-10), so it
-          is partial and covers to 06-02; the timeline gives every statement a complete last day.
-  nilfar  statements closing 11-10, 12-10, 01-10 and then 03-10, whose opening balance equals
-          01-10's closing (the statement between netted to nil). The timeline treats equal balances
-          as contiguous and starts 03-10 on 01-11; `statement_span` does not, because the closing
-          days are two periods apart: it expects the missing statement to have closed 02-10 and
-          begins 03-10 on 02-11.
-  stated  statements closing 01-10 and 03-10, the later printing "Previous balance as at" 02-10 and
-          a different opening balance. The timeline knows no printed start and begins it at its
-          first row, 03-02; `statement_span` begins it on 02-11, as printed.
-  near    the meeting that looks one period apart (closing 12-10, 01-10 and 02-10, openings equal).
-          The two agree, and it is here as the control: nothing is expected to differ.
-  pair    the same with only two statements (01-10 and 02-10). With fewer than three no cadence is
-          held, so `statement_span` does not infer that they meet and begins 02-10 at its first
-          row, 02-04; the timeline chains it from 01-11. (First written as the control; the
-          first run showed that two statements are not enough for the inference.)
+  five    the hand-worked account of `test_statement_span`
+  nilfar  statements closing 11-10, 12-10, 01-10 and then 03-10 whose opening equals 01-10's closing
+  stated  statements closing 01-10 and 03-10, the later printing the day the earlier closed
+  near    closings 12-10, 01-10 and 02-10 with equal balances: the control
+  pair    only two statements, 01-10 and 02-10: no cadence, so no meeting is inferred
 """
 
 from __future__ import annotations
@@ -43,15 +32,7 @@ from test_statement_span import _five_and_a_half
 
 D = date
 TODAY = D(2026, 6, 20)
-
-#: (account, closing day) -> (timeline first, timeline last, span first, span last)
-EXPECTED = {
-    ("five", D(2026, 6, 10)): (D(2026, 5, 11), D(2026, 6, 10), D(2026, 5, 11), D(2026, 6, 2)),
-    ("five", D(2026, 4, 10)): (D(2026, 4, 2), D(2026, 4, 10), D(2026, 3, 11), D(2026, 4, 10)),
-    ("nilfar", D(2026, 3, 10)): (D(2026, 1, 11), D(2026, 3, 10), D(2026, 2, 11), D(2026, 3, 10)),
-    ("pair", D(2026, 2, 10)): (D(2026, 1, 11), D(2026, 2, 10), D(2026, 2, 4), D(2026, 2, 10)),
-    ("stated", D(2026, 3, 10)): (D(2026, 3, 2), D(2026, 3, 10), D(2026, 2, 11), D(2026, 3, 10)),
-}
+ACCOUNTS = ("five", "nilfar", "stated", "near", "pair")
 
 
 def _held(store, root, ref: str, closings, owed: int, *, as_at=None):
@@ -96,26 +77,35 @@ def _build(store, root):
     _held(store, root, "pair", [D(2026, 1, 10), D(2026, 2, 10)], 5000)
 
 
-def test_TimelineAndStatementSpan_OnTheInventedAccounts_DifferExactlyWhereDocumented(tmp_path):
+def test_StatementLane_OnTheInventedAccounts_CoversExactlyTheDaysStatementSpanGives(tmp_path):
+    checked = 0
     with Store(tmp_path / "store.sqlite3") as store:
         _build(store, tmp_path)
         keep_statement_readings(store)
         store.connection.commit()
         spans = statement_spans(store, TODAY)
-        differing = {}
-        for ref in ("five", "nilfar", "stated", "near", "pair"):
-            timeline = build_account_timeline(store, ref, today=TODAY)
+        for ref in ACCOUNTS:
+            timeline = build_account_timeline(store, ref, today=TODAY, spans=spans[ref])
             lanes = [lane for lane in timeline.lanes if lane.kind == STATEMENT]
-            assert len(lanes) == 1
-            held = {capture.last: capture for capture in lanes[0].captures}
-            for span in spans[ref].statements:
-                capture = held[span.closing]
-                if (capture.first, capture.last) != (span.first, span.last):
-                    differing[(ref, span.closing)] = (
-                        capture.first,
-                        capture.last,
-                        span.first,
-                        span.last,
-                    )
+            assert len(lanes) == 1, ref
+            captures = sorted(lanes[0].captures, key=lambda c: (c.last, c.first))
+            held = sorted(spans[ref].statements, key=lambda s: s.closing)
+            assert len(captures) == len(held), ref
+            for capture, span in zip(captures, held, strict=True):
+                assert (capture.first, capture.last) == (span.first or span.last, span.last), (
+                    ref, span.closing
+                )
+                checked += 1
+    assert checked >= 15
 
-    assert differing == EXPECTED
+
+def test_StatementLane_WhenTheTimelineAsksTheStoreItself_GivesTheSameAnswer(tmp_path):
+    with Store(tmp_path / "store.sqlite3") as store:
+        _build(store, tmp_path)
+        keep_statement_readings(store)
+        store.connection.commit()
+        given = build_account_timeline(
+            store, "five", today=TODAY, spans=statement_spans(store, TODAY)["five"]
+        )
+        asked = build_account_timeline(store, "five", today=TODAY)
+    assert [lane.captures for lane in asked.lanes] == [lane.captures for lane in given.lanes]

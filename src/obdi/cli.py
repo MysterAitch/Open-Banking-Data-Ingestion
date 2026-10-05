@@ -64,7 +64,7 @@ from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
 from .family_anchors import families_of
-from .fetch_gaps import FetchEvidence, FetchReport, fetch_report, gather_evidence
+from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
 from .known_accounts import (
@@ -112,7 +112,7 @@ from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
 from .standing_data import AccountStanding, KeyedMemo, movement_key, standing_key, standings_for
-from .statement_span import STATEMENT_SOURCES
+from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .store import Store
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
@@ -3203,6 +3203,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     fetch_evidence_memo: KeyedMemo[FetchEvidence] = KeyedMemo(
         fetch_evidence_key, name="fetch evidence", epoch=rebuild_epoch
     )
+
     def mark_world_key(store: Store) -> tuple[object, ...]:
         """The standing epoch (every table a mark's evidence reads moves it) and the account map,
         which is one statement where the evidence key's own walk of the registry is several."""
@@ -3222,6 +3223,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             ),
         )
 
+    def fetch_evidence(store: Store) -> FetchEvidence:
+        """What the gaps and the statements' spans are read from, held with the standings' key."""
+        return fetch_evidence_memo.get(
+            store,
+            lambda: gather_evidence(
+                store, space_parents=families_of(store, _account_map(store)).parents
+            ),
+        )
+
     def fetch_gaps_report(today: date) -> FetchReport:
         """The files still to fetch. The walk of the store is held with the standings' own key,
         so a page view works out nothing but the gaps from it.
@@ -3229,12 +3239,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Raises `RebuildInProgress` while a rebuild holds the layer."""
         standings = account_standings()
         with Store(db_path) as store:
-            evidence = fetch_evidence_memo.get(
-                store,
-                lambda: gather_evidence(
-                    store, space_parents=families_of(store, _account_map(store)).parents
-                ),
-            )
+            evidence = fetch_evidence(store)
             # The decisions are read live and applied after the memo, so a mark never has to be
             # part of its key: the memo holds what the store holds, not what the owner decided.
             decisions = read_marks(
@@ -3326,7 +3331,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 store, ref, label=label, families=families_of(store, _account_map(store))
             )
 
-    def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
+    def gaps_by_account(today: date) -> dict[str, tuple[FetchGap, ...]]:
+        """What to fetch next, by account: the one list the timeline joins (never re-derived)."""
+        return {outlook.account: outlook.gaps for outlook in fetch_gaps_report(today).accounts}
+
+    def spans_of(store: Store, ref: str, today: date) -> AccountSpans:
+        """One account's statements as `statement_span` describes them, over the held evidence."""
+        evidence = fetch_evidence(store)
+        return describe_account(evidence.statements.get(ref, ()), today, evidence.unlisted)
+
+    def space_refs(store: Store) -> set[str]:
+        return {str(r.ref) for r in store.declared_accounts() if r.kind == "starling-space"}
+
+    #: Each account's timeline data for a day, held while nothing the standings and the gaps are
+    #: read from has changed. The window is not part of the key: it is applied when the page is
+    #: drawn, so every window of one day is one entry.
+    timeline_memo: KeyedMemo[dict[tuple[str, date, bool], AccountTimeline | None]] = KeyedMemo(
+        fetch_evidence_key, name="coverage timelines", epoch=rebuild_epoch
+    )
+
+    def timeline_for(ref: str, today: date, *, balances: bool) -> AccountTimeline | None:
+        """One account's timeline. With `balances` it reads the known balances themselves, for
+        the tick on each; without, the standing the memo holds is all it reads of verification,
+        which is what an account's own page can afford beside its rows."""
         from .account_names import merged_names  # deferred like the other data hooks
         from .agreement import standing_of
         from .balance_anchors import effective_opening, known_account
@@ -3338,28 +3365,52 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # A name is a convenience; the timeline must not depend on the label scan.
             provider_labels = {}
         with Store(db_path) as store:
+            held = timeline_memo.get(store, dict)
+            key = (ref, today, balances)
+            if key in held:
+                return held[key]
             if not known_account(store, ref):
+                held[key] = None
                 return None
             account_map = _account_map(store)
-            families = families_of(store, account_map)
-            opening = effective_opening(store, ref, families=families)
-            standing = standing_of(
-                opening, [ref, *families.spaces_of(ref)], movement_report(store)
-            )
+            standings = account_standings(store)
+            opening = None
+            if balances:
+                families = families_of(store, account_map)
+                opening = effective_opening(store, ref, families=families)
+            if ref in standings:
+                agreement = standings[ref].standing.own
+            else:
+                families = families_of(store, account_map)
+                opening = opening or effective_opening(store, ref, families=families)
+                agreement = standing_of(
+                    opening, [ref, *families.spaces_of(ref)], movement_report(store)
+                ).own
             record = store.protection_record(ref)
             names = merged_names(provider_labels, store.declared_accounts())
-            return build_account_timeline(
+            built = build_account_timeline(
                 store,
                 ref,
                 today=today,
                 label=names.get(ref, ""),
-                agreement=standing.own,
+                agreement=agreement,
                 opening=opening,
                 protected_through=(
                     date.fromisoformat(str(record["through"])) if record is not None else None
                 ),
                 canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+                fetch_gaps=gaps_by_account(today).get(ref, ()),
+                is_space=ref in space_refs(store),
+                spans=spans_of(store, ref, today),
             )
+            held[key] = built
+            return built
+
+    def coverage_timeline_data(ref: str, today: date) -> AccountTimeline | None:
+        return timeline_for(ref, today, balances=True)
+
+    def coverage_timeline_compact(ref: str, today: date) -> AccountTimeline | None:
+        return timeline_for(ref, today, balances=False)
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
         from .account_names import merged_names  # deferred like the other data hooks
@@ -3369,10 +3420,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             provider_labels = display_labels()
         except Exception:
             provider_labels = {}
+        by_account = gaps_by_account(today)
         with Store(db_path) as store:
             account_map = _account_map(store)
             names = merged_names(provider_labels, store.declared_accounts())
             standings = account_standings(store)
+            spaces = space_refs(store)
             refs = [
                 str(row[0])
                 for row in store.connection.execute(
@@ -3387,6 +3440,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     label=names.get(ref, ""),
                     agreement=standings[ref].standing.own if ref in standings else None,
                     canonical_of=lambda raw: _canonical_for_ref(account_map, raw),
+                    fetch_gaps=by_account.get(ref, ()),
+                    is_space=ref in spaces,
+                    spans=spans_of(store, ref, today),
                 )
                 for ref in refs
             ]
@@ -4323,6 +4379,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
         coverage_timeline_data=coverage_timeline_data,
+        coverage_timeline_compact=coverage_timeline_compact,
         coverage_timeline_household=coverage_timeline_household,
         position_data=position_data,
         home_position=home_position,

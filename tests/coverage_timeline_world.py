@@ -54,14 +54,19 @@ ACCOUNT `main`
   Known balances (end of day): 07-01 1000.00, 08-04 925.00, 09-02 792.00, 09-20 745.00, and
   09-28 700.00 where the rows say 694.00. In agreement through 09-20, held back from 09-28.
 
-ACCOUNT `card`: statements only (Santander layout; closing dates are the stated dates)
+ACCOUNT `card`: statements only (Santander layout; closing dates are the stated dates). What each
+statement covers is `statement_span`'s to say; the answers below are worked out from its rules.
     S1 closes 06-11, rows 05-15 and 06-11                       first statement: start observed
-    S2 closes 07-11, opens on S1's closing                      chain proven: covers 06-12 to 07-11
+    S2 closes 07-11, rows 06-14 and 07-09, opens on S1's closing
+                                                                balances meet a period on: starts
+                                                                06-12, known only as "balances meet"
     S3 closes 08-11: not held
-    S4 closes 09-11, rows 08-14 and 09-05, opens on S3's closing, not S2's: chain broken, start
-       observed at its first row 08-14
-  Covered: 05-15 to 06-11, 06-12 to 07-11, 08-14 to 09-11. Gap, inferred: 07-12 to 08-13.
-  Cadence 30 days, the last closing 09-11, so the next is not due on 10-05 but is due on 10-20.
+    S4 closes 09-11, rows 08-14 and 09-05, opens on S3's closing, not S2's: unequal balances prove
+       a statement is missing; the hole is 07-12 to 08-11 (the closing day it would have had,
+       inferred) and S4 is taken to begin 08-12, inferred
+  Covered: 05-15 to 06-11, 06-12 to 07-11, 08-12 to 09-11. Hole: 07-12 to 08-11.
+  Cadence 30 days (three statements, the lower median of 30 and 62), the last closing 09-11, so the
+  next is expected to close 10-11: nothing is due on 10-05.
 """
 
 from __future__ import annotations
@@ -79,6 +84,7 @@ from obdi.models import RawArtefact, SourceTier, Transaction
 from obdi.providers import starling
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
+from obdi.typed_transactions import record_typed_transaction
 from test_period_reconciliation import _statement
 
 TODAY = date(2026, 10, 5)
@@ -228,12 +234,9 @@ def build_main(
             "Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8"
         )
         import_file(store, path, account_id=MAIN)
-    body = json.dumps({"typed": "M1"}).encode()
-    artefact = _land(store, source="manual", body=body)
-    reconcile_batch(
-        store,
-        [_transaction("M1", source="manual", source_id="m1", tier=SourceTier.MANUAL)],
-        digest=artefact.digest,
+    record_typed_transaction(
+        store, MAIN, ROWS["M1"].day, "out", ROWS["M1"].pounds, ROWS["M1"].payee,
+        today=TODAY,
     )
     if with_balances:
         for day, pounds in BALANCES:
@@ -242,16 +245,36 @@ def build_main(
 
 CARD_STATEMENTS = (
     ("11th Jun 2026", [("15th May", "Alpha Grocer", 1200), ("11th Jun", "Bravo Fuel", 800)], True),
-    ("11th Jul 2026", [("12th Jun", "Charlie Cafe", 500), ("9th Jul", "Delta Books", 700)], True),
+    ("11th Jul 2026", [("14th Jun", "Charlie Cafe", 500), ("9th Jul", "Delta Books", 700)], True),
     ("11th Aug 2026", [("15th Jul", "Echo Rail", 300)], False),
     ("11th Sep 2026", [("14th Aug", "Foxtrot Gym", 400), ("5th Sep", "Golf Shop", 600)], True),
 )
 
 
-def build_card(root: Path, store: Store, *, skip: tuple[int, ...] = ()) -> None:
+#: The same card where the statement that is not held (S3) paid money out and took it back
+#: within the period, so its movements net to nil: S4 opens on the balance S2 closed on, though a
+#: whole statement lies between them.
+CARD_NET_NIL_STATEMENTS = (
+    *CARD_STATEMENTS[:2],
+    (
+        "11th Aug 2026",
+        [("15th Jul", "Echo Rail", 300), ("20th Jul", "Echo Refund", -300)],
+        False,
+    ),
+    CARD_STATEMENTS[3],
+)
+
+
+def build_card(
+    root: Path,
+    store: Store,
+    *,
+    skip: tuple[int, ...] = (),
+    statements: tuple[tuple[str, list[tuple[str, str, int]], bool], ...] = CARD_STATEMENTS,
+) -> None:
     store.declare_account(AccountRecord(ref=AccountRef(CARD), label="Household card"))
     owed = 10000
-    for position, (day, rows, held) in enumerate(CARD_STATEMENTS):
+    for position, (day, rows, held) in enumerate(statements):
         payload, owed = _statement(day, owed, rows)
         if held and position not in skip:
             path = root / f"statement-{position}.pdf"
@@ -259,11 +282,51 @@ def build_card(root: Path, store: Store, *, skip: tuple[int, ...] = ()) -> None:
             import_file(store, path, account_id=CARD)
 
 
+LONG = "long"
+
+
+def build_long(root: Path) -> Path:
+    """One account over nearly eight years in which, for most of it, nothing changes.
+
+    A single export file lists one row of 10.00 on the 15th of every month from 2019-01 to
+    2026-09 (93 rows), and known balances are stated on 2019-01-01 (1000.00), 2022-06-15 (580.00)
+    and 2026-09-15 (70.00), each of which the rows reproduce. So the verification lane agrees
+    from 2019-01-01 to 2026-09-15 with nothing else to see: the export covers 2019-01-15 to
+    2026-09-15 and then stops, 20 days short of today (2026-10-05). Everything between the
+    margins of those events (2019-01-26 to 2026-09-04) is one quiet stretch.
+    """
+    db = root / "long.sqlite3"
+    with Store(db) as store:
+        land_long(root, store)
+    return db
+
+
+def land_long(root: Path, store: Store) -> None:
+    """The long account's rows and balances, landed into `store` (`build_long` describes them)."""
+    store.declare_account(AccountRecord(ref=AccountRef(LONG), label="Long account"))
+    lines = "".join(
+        f"15/{month:02d}/{year},Standing order,Rent,STANDING ORDER,-10.00\n"
+        for year in range(2019, 2027)
+        for month in range(1, 13)
+        if (year, month) <= (2026, 9)
+    )
+    path = root / "long.csv"
+    path.write_text("Date,Counter Party,Reference,Type,Amount (GBP)\n" + lines, encoding="utf-8")
+    import_file(store, path, account_id=LONG)
+    for day, pounds in (
+        ("2019-01-01", "1000.00"),
+        ("2022-06-15", "580.00"),
+        ("2026-09-15", "70.00"),
+    ):
+        record_stated_anchor(store, LONG, day, pounds, today=TODAY)
+
+
 def build_household(
     root: Path,
     *,
     exports: tuple[tuple[str, ...], ...] = EXPORTS,
     aggregator: tuple[tuple[str, str, tuple[str, ...]], ...] = AGGREGATOR,
+    card_statements: tuple[tuple[str, list[tuple[str, str, int]], bool], ...] = CARD_STATEMENTS,
 ) -> Path:
     """Land both accounts at `root/store.sqlite3`.
 
@@ -274,6 +337,6 @@ def build_household(
     db = root / "store.sqlite3"
     with Store(db) as store:
         build_main(root, store, exports=exports, aggregator=aggregator)
-        build_card(root, store)
+        build_card(root, store, statements=card_statements)
         keep_statement_readings(store)
     return db

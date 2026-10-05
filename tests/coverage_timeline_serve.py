@@ -18,6 +18,7 @@ from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, known_account
 from obdi.connections import ConnectionStore
 from obdi.coverage_timeline import AccountTimeline, build_account_timeline
+from obdi.fetch_gaps import gaps_for_account
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
@@ -30,7 +31,7 @@ def timeline_of(db: Path, ref: str, today: date) -> AccountTimeline | None:
         standing = standing_of(opening, [ref], None)
         return build_account_timeline(
             store, ref, today=today, label=f"Account {ref}", agreement=standing.own,
-            opening=opening,
+            opening=opening, fetch_gaps=gaps_for_account(store, ref, today),
         )
 
 
