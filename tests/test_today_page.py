@@ -80,6 +80,7 @@ def account(
     parent: str | None = None,
     state: str = CURRENT,
     closed: str | None = None,
+    balance_only: bool = False,
 ) -> AccountOverview:
     return AccountOverview(
         ref=ref,
@@ -96,6 +97,7 @@ def account(
         standing=held,
         parent=parent,
         first=d(first) if first else None,
+        balance_only=balance_only,
     )
 
 
@@ -245,30 +247,51 @@ class TestAnOrdinaryDay:
     def test_Verdict_FourFilesWantedAndNothingWrong_SaysNoFaultsAndCountsThemAsThings(self) -> None:
         verdict = by_class(self.root(), "p", "verdict")[0]
 
-        assert verdict.text() == "No faults. 3 things when convenient."
+        assert verdict.text() == "No faults. 2 things when convenient."
         assert "ok" in verdict.classes
 
-    def test_ThingsToDo_StatementsDueForTwoAccounts_AreOnePerAccountPerFileWithAnUploadControl(
+    def test_ThingsToDo_TwoConsecutiveStatementsForOneAccount_AreOneRowSayingHowManyFiles(
         self,
     ) -> None:
         root = self.root()
 
-        titles = texts(root, "p", "todo-what")
-        folded = [t.text() for t in elements(root, "summary")]
-        assert titles == [
-            "Upload the statement covering 2026-07-11 to 2026-08-10",
-            "Upload the statement covering 2026-08-11 to 2026-09-10",
+        assert texts(root, "p", "todo-what") == [
+            "Upload 2 statements",
             "Upload the statement covering 2026-09-18 to 2026-10-05",
         ]
+        everyday, joint = texts(root, "p", "todo-why")
+        # The line says the account, the days, and when the first fell due, and nothing else.
+        assert everyday == (
+            "Everyday card · 2026-07-11 to 2026-09-10 · due since 2026-08-10 (8 weeks ago)"
+        )
+        assert joint == (
+            "Joint current · 2026-09-18 to 2026-10-05 · due since 2026-09-18 (2 weeks ago)"
+        )
         controls = [a.text() for e in by_class(root, "li", "todo") for a in elements(e, "a")]
-        assert controls == ["Upload", "Upload", "Upload"]
-        assert "1 more when convenient" not in folded
+        assert controls == ["Upload", "Upload"]
+
+    def test_ThingsToDo_AGapThatIsNotAdjacent_StaysItsOwnRowWithItsShortReason(self) -> None:
+        of, _ = ordinary()
+        apart = report(
+            gap("everyday", GapKind.NEWER_STATEMENT, "2026-07-11", "2026-10-05",
+                closings=("2026-08-10", "2026-09-10")),
+            gap("everyday", GapKind.HOLE_BETWEEN, "2026-04-11", "2026-05-10"),
+        )
+        root = page(of, apart)
+
+        assert texts(root, "p", "todo-what") == [
+            "Upload 2 statements",
+            "Upload the statement covering 2026-04-11 to 2026-05-10",
+        ]
+        assert texts(root, "p", "todo-why")[1] == (
+            "Everyday card · No statement held covers these days (5 months ago)"
+        )
 
     def test_ThingsToDo_TheFirstControlLeads_AndTheOthersAreSecondary(self) -> None:
         root = self.root()
 
         buttons = [a for e in by_class(root, "li", "todo") for a in elements(e, "a")]
-        assert [("secondary" in a.classes) for a in buttons] == [False, True, True]
+        assert [("secondary" in a.classes) for a in buttons] == [False, True]
 
     def test_Rows_EachLiveAccountIsOneRow_AndTheArchivedOneIsFolded(self) -> None:
         root = self.root()
@@ -295,14 +318,33 @@ class TestAnOrdinaryDay:
         order = [a.attrs["href"] for a in elements(root, "a") if a.attrs.get("class") == "tap arow"]
         assert order.index("/ledger?ref=bills") == order.index("/ledger?ref=joint") + 1
 
+    def test_Bars_ASpaceTestedWithItsParent_IsDrawnAsTheFamilysStretches(self) -> None:
+        root = self.root()
+
+        space, parent = cells(row(root, "bills")), cells(row(root, "joint"))
+        # The family adds up to 2026-09-17, which is the parent's own agreement here; nothing is
+        # locked or wanted for the Space itself.
+        assert space["b-adds"] == parent["b-adds"]
+        assert "b-lock" not in space and "b-want" not in space
+
+    def test_Rows_ABalanceOnlyAccount_SaysItsBalanceIsStatedByHandAndDrawsNoFill(self) -> None:
+        of = overview(
+            (account("bonds", "Premium bonds", first=None, state=EMPTY, balance_only=True),)
+        )
+        root = page(of, None)
+
+        bonds = row(root, "bonds")
+        assert texts(bonds, "span", "a-trust") == ["Its balance is stated by hand."]
+        assert not list(elements(bonds, "i"))
+
     def test_Rows_AnAccountWaitingForFiles_SaysWhatItWaitsForBesideItsName(self) -> None:
         root = self.root()
 
         # Joint's file has been wanted since 2026-09-18 (17 days: 2 whole weeks); Everyday's since
-        # 2026-07-11 (86 days, and two whole calendar months).
+        # 2026-08-10, when its first statement fell due (56 days: 8 whole weeks).
         assert texts(row(root, "joint"), "span", "a-flag") == ["Statement wanted (2 weeks ago)"]
         assert texts(row(root, "everyday"), "span", "a-flag") == [
-            "Statement wanted (2 months ago)"
+            "Statement wanted (8 weeks ago)"
         ]
 
     def test_Rows_EachSaysHowFarItIsTrustedInTheTrustSentence(self) -> None:
@@ -445,7 +487,7 @@ class TestNothingIsSaidTwice:
         root = page(of, gaps)
 
         text = root.text()
-        assert text.count("The statement closing on 2026-09-30 does not add up.") == 1
+        assert text.count("The statement closing on 2026-09-30 does not add up") == 1
         assert text.count("Find out why a statement does not add up") == 1
 
     def test_Page_Always_HoldsNoRetiredPhraseAndNoBareCheckedLabel(self) -> None:

@@ -71,6 +71,12 @@ def standing_key(store: Store) -> tuple[object, ...]:
     return (*movement_key(store), *tuple(stated), declared[0], *tuple(protections), events[0])
 
 
+def _writing(store: object) -> bool:
+    """Whether the store's connection is inside a transaction. A stand-in with no connection
+    (the memo's own tests key on one) is not."""
+    return bool(getattr(getattr(store, "connection", None), "in_transaction", False))
+
+
 class KeyedMemo(Generic[T]):
     """One computed value, reused while its key is unchanged.
 
@@ -145,7 +151,10 @@ class KeyedMemo(Generic[T]):
             settled = self._epoch is None or (
                 began is not None and not began.held and began == self._epoch()
             )
-            if settled:
+            # Never kept from inside a transaction: a write that is rolled back returns the
+            # standing epoch to what it was, and a value read inside it would then stand for a
+            # store that never held it (the failure `_CHECKS` records).
+            if settled and not _writing(store):
                 with self._lock:
                     self._held = (key, value)
             return value

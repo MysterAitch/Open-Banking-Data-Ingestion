@@ -129,7 +129,7 @@ class TestTheRecipientOnThePage:
 
         assert (
             "the export lists a row of the same size, direction, and recipient, 20 days away, "
-            "sighted on another stored row"
+            "reported on another stored row"
         ) in page
 
     def test_Page_WhenTheRecipientDiffers_SaysToADifferentRecipient(self, make):
@@ -137,7 +137,7 @@ class TestTheRecipientOnThePage:
 
         assert (
             "the export lists a row of the same size and direction, to a different recipient, "
-            "10 days away, sighted on another stored row"
+            "10 days away, reported on another stored row"
         ) in page
 
     def test_Page_WhenTheRecipientCouldNotBeCompared_SaysSo(self, make):

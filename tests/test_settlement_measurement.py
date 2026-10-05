@@ -442,7 +442,7 @@ class TestTheSentences:
 
         assert "7 name exactly one stored transaction by its settlement day." in text
         assert "Of those, 0 sit on that transaction and 7 sit on another transaction." in text
-        assert "7 sit on one whose own feed sighting states a different settlement day" in text
+        assert "7 sit on one whose own feed report states a different settlement day" in text
         assert "would move 7 rows from one stored transaction to another." in text
         assert "7 stored transactions would carry another date as a result" in text
         assert "0 days would then hold a different total of counted transactions." in text

@@ -330,44 +330,46 @@ class MovementCompleteness:
         return tuple(sorted(found))
 
     def describe(self) -> str:
-        lines = ["Every row a source lists is held once:"]
+        lines = ["Every transaction a source lists is held once:"]
         lines.append(
-            f"  {_plural(self.artefacts_listed, 'artefact')} read, "
-            f"{_plural(self.rows_listed, 'row')} listed, {self.rows_held} held"
+            f"  {_plural(self.artefacts_listed, 'stored original')} read, "
+            f"{_plural(self.rows_listed, 'transaction')} listed, {self.rows_held} held"
         )
         if self.artefacts_unread:
             lines.append(
-                f"  {_plural(self.artefacts_unread, 'artefact')} could not be read into "
-                "rows (a statement with no kept reading, or a file no parser reads) "
+                f"  {_plural(self.artefacts_unread, 'stored original')} could not be read into "
+                "transactions (a statement with no kept reading, or a file no parser reads) "
                 "and are not compared - this is not a pass for them"
             )
         if self.held_as_history:
             lines.append(
-                f"  {_plural(self.held_as_history, 'listed row')} held as history "
-                "(void, folded, or reversed): held, and not a fault"
+                f"  {_plural(self.held_as_history, 'listed transaction')} held as history "
+                "(void, counted elsewhere, or reversed): held, and not a fault"
             )
         lines += [f"  {item.says()}" for item in self.repeated[:NAMED]]
         if len(self.repeated) > NAMED:
             lines.append(f"  ... and {len(self.repeated) - NAMED} more repeats")
-        lines += _named([f.says() for f in self.row_faults], "every listed row is held once")
+        lines += _named(
+            [f.says() for f in self.row_faults], "every listed transaction is held once"
+        )
 
         lines += ["", "Every transfer leg has exactly one partner, in the account it names:"]
         lines.append(
-            f"  {_plural(self.legs, 'leg')}: {self.legs_verified} verified against the "
-            f"account each names; {self.legs_unverifiable} name no account that can be "
-            "resolved, so their partner's account cannot be verified"
+            f"  {_plural(self.legs, 'leg')}: {self.legs_verified} have their partner in the "
+            f"account they name; {self.legs_unverifiable} name no account that can be "
+            "found, so whether their partner is in the right account cannot be checked"
         )
         if self.pairs_unverifiable:
             lines.append(
-                f"  {_plural(self.pairs_unverifiable, 'pair')} of ordinary rows (a "
-                "current account paying a card): the counterpart account cannot be "
-                "verified, only that the two are opposite and equal"
+                f"  {_plural(self.pairs_unverifiable, 'pair')} of ordinary transactions (a "
+                "current account paying a card): which account holds the other side "
+                "cannot be checked, only that the two are opposite and equal"
             )
         lines += _named([f.says() for f in self.leg_faults], "every leg has its partner")
 
-        lines += ["", "The two sides of a chain agree, movement for movement:"]
+        lines += ["", "What leaves one account arrives in the other, movement for movement:"]
         lines.append(f"  {_plural(self.chain_days, 'account-pair day')} compared")
-        lines += _named([f.says() for f in self.chain_faults], "both sides agree every day")
+        lines += _named([f.says() for f in self.chain_faults], "both sides match every day")
         if self.check_seconds is not None and self.worked_out_at is not None:
             moment = self.worked_out_at.astimezone(UTC).strftime("%H:%M UTC")
             lines += ["", f"Worked out in {sum(self.check_seconds):.1f} s at {moment}."]

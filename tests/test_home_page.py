@@ -586,7 +586,7 @@ class TestTheDataLine:
     def test_Line_WhenNoCycleIsRecorded_IsUnprovenAndSaysSo(self, clear):
         from obdi.web_overview import data_line
 
-        assert data_line(clear, None, NOW_TIME).word == "unproven"
+        assert data_line(clear, None, NOW_TIME).word == "unknown"
         assert data_line(clear, None, NOW_TIME).sentence == "No scheduled cycle recorded."
 
     def test_Line_WhenNothingWasChecked_SaysSoRatherThanCurrent(self):

@@ -44,6 +44,8 @@ below into the one `STYLESHEET` every page carries, so the guards on the stylesh
 (contrast, no colour literal, no money-like text) cover them too.
 """
 
+import re
+
 from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
 from .stylesheet_flags import FLAGS_STYLES
@@ -323,8 +325,26 @@ SHARED_STYLES = """
  }
 """
 
-#: The one stylesheet a page carries: the shared rules, then each page's own.
+#: The one stylesheet, as written: the shared rules, then each page's own, with the comments
+#: that say why each rule exists.
 STYLESHEET = (
     SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
     + WINDOW_STYLES + POSITION_STYLES + GAPS_STYLES + TIMELINE_STYLES
 )
+
+
+def _as_served(written: str) -> str:
+    """The stylesheet without its comments and indentation, which is what a page carries.
+
+    The comments are for whoever edits a rule; a browser has no use for them, and they were a
+    fifth of every page (measured 2026-10-05: 54,538 bytes written, 43,199 served). They also
+    made a comment a hazard: a word or a number in one could fail another page's test that the
+    page does not hold it, and three sentences explaining a fix pushed a chart page past its size
+    bound and stopped a release. No rule here puts a comment marker inside a string.
+    """
+    bare = re.sub(r"/\*.*?\*/", "", written, flags=re.DOTALL)
+    return "\n".join(line.strip() for line in bare.splitlines() if line.strip()) + "\n"
+
+
+#: What every page carries in its `<style>`.
+SERVED_STYLESHEET = _as_served(STYLESHEET)

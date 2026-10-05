@@ -134,9 +134,9 @@ class TestThePage:
             )
         ).text
 
-        assert "every listed row is held once" in page
+        assert "every listed transaction is held once" in page
         assert "every leg has its partner" in page
-        assert "both sides agree every day" in page
+        assert "both sides match every day" in page
 
     def test_Page_WhenTheMovementCheckFails_SaysSoRatherThanShowingAPass(self, tmp_path):
         def broken() -> str:
@@ -157,7 +157,7 @@ class TestThePage:
         page = fetch(serve(tmp_path, identity_health_text=lambda: "identity report")).text
 
         assert "identity report" in page
-        assert "Every row a source lists" not in page
+        assert "Every transaction a source lists" not in page
 
     def test_WebHook_BuiltFromTheRealConfiguration_ReturnsTheSameReport(
         self, tmp_path, monkeypatch
@@ -176,7 +176,10 @@ class TestThePage:
 
         assert config is not None
         assert config.movement_completeness_text is not None
-        assert "Every row a source lists is held once" in config.movement_completeness_text()
+        assert (
+            "Every transaction a source lists is held once"
+            in config.movement_completeness_text()
+        )
 
     def test_Report_WhenMoreThanTwentyChainDaysDisagree_NamesTwentyAndCountsTheRest(self):
         report = MovementCompleteness(

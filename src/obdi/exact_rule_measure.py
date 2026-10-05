@@ -109,7 +109,7 @@ class AccountFigures:
             f"Of the {_pairs(joined)}, the store holds {self.held_as_two_rows} as two different "
             "rows, so a pair the id proves was not joined.",
             f"Of the pairs held as two rows, {self.on_another_feed_uid} have the aggregator's "
-            "sighting on a stored row whose feed sighting has a different id, so the wrong "
+            "report on a stored row whose feed report has a different id, so the wrong "
             "pair was joined.",
         ]
         if self.held_nowhere:
@@ -258,8 +258,8 @@ class SettlementFigures:
             f"Of those, {self.on_that_transaction} sit on that transaction and "
             f"{self.on_another} sit on another transaction.",
             f"Of those on another transaction, {self.on_another_other_day} sit on one whose own "
-            f"feed sighting states a different settlement day, {self.on_another_no_feed} sit on "
-            f"one with no feed sighting at all, and {self.on_another_other} sit on one of "
+            f"feed report states a different settlement day, {self.on_another_no_feed} sit on "
+            f"one with no feed report at all, and {self.on_another_other} sit on one of "
             "another kind.",
             f"{self.on_none} of those one-candidate rows sit on no transaction.",
             f"{self.sharing_one_candidate} of those share their one transaction with another "
@@ -273,8 +273,8 @@ class SettlementFigures:
             f"{self.one_candidate} and the {self.several_candidates} above makes "
             f"{self.one_candidate + self.several_candidates + self.none_named} of "
             f"{self.export_rows}.",
-            f"Of those, {self.none_on_no_time} sit on a transaction whose feed sighting states no "
-            f"settlement time, {self.none_on_no_feed} sit on one with no feed sighting, "
+            f"Of those, {self.none_on_no_time} sit on a transaction whose feed report states no "
+            f"settlement time, {self.none_on_no_feed} sit on one with no feed report, "
             f"{self.none_on_other} sit on one of another kind, and {self.none_on_none} sit on "
             "no transaction.",
             f"Taking the export rows of one size and date as a set, {self.sets_assignable} sets "
@@ -287,14 +287,14 @@ class SettlementFigures:
             f"The settlement rule would move {_rows(self.moved)} from one stored transaction "
             "to another.",
             f"{_transactions(self.dates_changed)} would carry another date as a result, counted "
-            "by moving those rows over the stored sightings and giving each transaction the "
-            "date of its latest sighting.",
+            "by moving those rows over the stored reports and giving each transaction the "
+            "date of its latest report.",
             f"{_days(self.days_changed)} would then hold a different total of counted "
             "transactions.",
             f"{self.in_protected} of the re-dated transactions carry a date, before or after, "
             "inside a protected period.",
             f"{_transactions(self.unreproduced)} carry a date that this reading of their "
-            "sightings does not reproduce, and the counts above are exact only where it does.",
+            "reports does not reproduce, and the counts above are exact only where it does.",
             *self._group_sentences(),
             *self._no_feed_sentences(),
         ]
@@ -334,7 +334,7 @@ class SettlementFigures:
     def _no_feed_sentences(self) -> list[str]:
         days = sorted(self.none_no_feed_days)
         if not days:
-            return ["No export row that names no transaction sits on one with no feed sighting."]
+            return ["No export row that names no transaction sits on one with no feed report."]
         if self.feed_span is None:
             before, after, inside = len(days), 0, 0
             span = "the feed holds no item for this account"
@@ -345,7 +345,7 @@ class SettlementFigures:
             inside = len(days) - before - after
             span = f"the feed's items run from {first.isoformat()} to {last.isoformat()}"
         return [
-            f"The {plural(len(days), 'row')} on a transaction with no feed sighting "
+            f"The {plural(len(days), 'row')} on a transaction with no feed report "
             f"{agree(len(days), 'is')} dated from {days[0].isoformat()} to "
             f"{days[-1].isoformat()}; {span}, and {before} {agree(before, 'is')} dated before "
             f"it, {after} after it, and {inside} inside it."
@@ -380,7 +380,7 @@ class NoRowStatusFigures:
             f"{'has' if len(self.rows) == 1 else 'have'}, as the newest landed status of "
             "its own feed item, a status that makes no row.",
             f"Of those, still pending: {pending}. Still booked: {len(self.rows) - pending}.",
-            "Also sighted by a source other than the bank's feed: "
+            "Also reported by a source other than the bank's feed: "
             f"{sum(1 for r in self.rows if r.corroborated)}.",
         ]
         for status in sorted({r.status for r in self.rows}):
@@ -428,8 +428,8 @@ class ExactRuleReport:
         lines.append("")
         lines.append(
             "Where the stored transactions hold the export's rows, against the settlement day "
-            "each row's date is, read from the stored transactions and sightings without "
-            "changing them:"
+            "each row's date is, read from the stored transactions and the sources' reports "
+            "without changing them:"
         )
         if not self.settlement:
             lines.append("  No account has export rows landed, so there is nothing to place.")
@@ -444,7 +444,7 @@ class ExactRuleReport:
         )
         if not self.no_row_status:
             lines.append(
-                "  No account holds a transaction the bank's feed sighted, so there is no feed "
+                "  No account holds a transaction the bank's feed reported, so there is no feed "
                 "status to read."
             )
         for declined in self.no_row_status:
@@ -453,7 +453,7 @@ class ExactRuleReport:
         lines.append("")
         lines.append(
             "Stored rows one record's exact rules name twice, read from the stored rows and "
-            "sightings without changing them:"
+            "the sources' reports without changing them:"
         )
         if not self.pairs:
             lines.append("  No account holds a record whose id names one row and whose "
@@ -465,7 +465,7 @@ class ExactRuleReport:
             lines.append("")
             lines.append(
                 "Stored transactions that are cash withdrawals or deposits by what a source "
-                "states, read from the words kept against each sighting without changing "
+                "states, read from the words kept against each source's report without changing "
                 "anything:"
             )
             lines.extend(f"  {sentence}" for sentence in self.cash.sentences())
@@ -695,8 +695,14 @@ def pair_figures(store: Store, account_map: AccountMap) -> list[PairFigures]:
     return found
 
 
-def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
-    """How often each exact rule holds, account by account, from the landed artefacts."""
+def exact_rule_report(
+    store: Store, account_map: AccountMap, openings: StatementOpeningReport | None = None
+) -> ExactRuleReport:
+    """How often each exact rule holds, account by account, from the landed artefacts.
+
+    `openings` is the statement-opening figures where the caller already holds them for this
+    store and these Spaces (the statement-listing measurement reads the same ones); without
+    them they are worked out here."""
     landed = _read_artefacts(store, account_map)
     held = _read_held(store)
     parents = space_parents(store, account_map)
@@ -719,7 +725,11 @@ def exact_rule_report(store: Store, account_map: AccountMap) -> ExactRuleReport:
     report.settlement = settlement_figures(store, account_map, landed)
     report.no_row_status = no_row_status_figures(store)
     report.cash = cash_withdrawal_report(store, store.declared_accounts())
-    report.openings = statement_opening_report(store, families_of(store, account_map))
+    report.openings = (
+        openings
+        if openings is not None
+        else statement_opening_report(store, families_of(store, account_map))
+    )
     return report
 
 

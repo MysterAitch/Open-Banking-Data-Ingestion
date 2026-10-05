@@ -112,7 +112,10 @@ class TestAnAccountWithKnownBalances:
         assert found.state == HELD_MOVEMENT
         assert found.through == D(2026, 3, 10)
         assert found.held is not None and found.held.day == D(2026, 3, 12)
-        assert "The transactions stop adding up at 2026-03-12, because of a movement fault" in (
+        assert (
+            "A check of the money moved found a problem dated 2026-03-12, so the transactions "
+            "cannot be shown to add up from then on"
+        ) in (
             held_sentence(found)
         )
 
@@ -178,8 +181,7 @@ class TestAnAccountWithKnownBalances:
         found = state(store, MovementCompleteness())
 
         assert standing_line(found, None) == (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10; "
-            "not protected."
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10."
         )
         assert standing_line(found, D(2026, 3, 10)).endswith("protected through 2026-03-10.")
 
@@ -308,7 +310,10 @@ class TestThePage:
 
         page = self.page(store, movement=report)
 
-        assert "The transactions stop adding up at 2026-03-08, because of a movement fault" in page
+        assert (
+            "A check of the money moved found a problem dated 2026-03-08, so the transactions "
+            "cannot be shown to add up from then on"
+        ) in page
         assert 'href="/identity-health"' in page
 
     def test_Page_ShowsWhichSourceClearedARowAndTheCounts(self, store):

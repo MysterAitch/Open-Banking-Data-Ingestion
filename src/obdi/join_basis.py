@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from functools import cache
 
 from .london_clock import london
 from .masking import Structural
@@ -34,14 +35,14 @@ from .store import SightingDetail
 #: What each basis says of a sighting, in the words the ledger uses.
 #: The one place they are worded.
 BASIS_WORDS = {
-    BASIS_FOUNDED: "founded this row",
-    BASIS_ID: "joined to the row by id",
-    BASIS_OWN_ID: "the same source's own id again",
-    BASIS_SETTLEMENT: "joined by settlement date",
-    BASIS_MANUAL: "joined to a typed entry",
-    BASIS_WINDOW: "joined by window and description",
-    BASIS_FOLD: "folded into this row by amount and date",
-    "": "basis not recorded",
+    BASIS_FOUNDED: "the first report of this transaction",
+    BASIS_ID: "matched to this transaction by its id",
+    BASIS_OWN_ID: "reported again under the same id",
+    BASIS_SETTLEMENT: "matched to this transaction by its settlement date",
+    BASIS_MANUAL: "matched to a transaction you typed",
+    BASIS_WINDOW: "matched to this transaction by a guess from amount, nearby dates, and text",
+    BASIS_FOLD: "set aside as a copy of this transaction, by a guess from amount and date",
+    "": "how it was matched is not recorded",
 }
 
 #: Weakest first. A row is counted under its weakest join, which is the one worth a look.
@@ -53,12 +54,12 @@ HEURISTIC = frozenset({BASIS_WINDOW, BASIS_FOLD})
 
 #: The label of each count, in the order shown.
 COUNT_LABELS = (
-    (BASIS_ID, "joined by id"),
-    (BASIS_SETTLEMENT, "joined by settlement date"),
-    (BASIS_WINDOW, "joined by window and description"),
-    (BASIS_FOLD, "folded by amount and date"),
-    (BASIS_MANUAL, "joined to a typed entry"),
-    ("", "with no join"),
+    (BASIS_ID, "matched by id"),
+    (BASIS_SETTLEMENT, "matched by settlement date"),
+    (BASIS_WINDOW, "matched by a guess from amount, nearby dates, and text"),
+    (BASIS_FOLD, "set aside as copies by a guess from amount and date"),
+    (BASIS_MANUAL, "matched to a typed transaction"),
+    ("", "reported by one source only"),
 )
 
 
@@ -141,16 +142,16 @@ def how_words(view: SightingView) -> str:
     exposes its fields and nothing else.
     """
     words = BASIS_WORDS.get(view.basis, BASIS_WORDS[""])
-    text = f"copied from the main account's row, {words}" if view.copy else words
+    text = f"copied from the main account's transaction, {words}" if view.copy else words
     if view.change:
         text += f" ({view.change})"
     if view.repeats:
         fetched = view.source in FIRST_PARTY_FEEDS | AGGREGATORS
-        noun = "fetch" if fetched else "sighting"
-        plural = "fetches" if fetched else "sightings"
+        noun = "fetch" if fetched else "report"
+        plural = "fetches" if fetched else "reports"
         count = f"{view.repeats} later {noun if view.repeats == 1 else plural}"
-        by = " by its own id" if view.repeats_basis == BASIS_OWN_ID else ""
-        text += f", sighted again{by} in {count}"
+        by = " under the same id" if view.repeats_basis == BASIS_OWN_ID else ""
+        text += f", reported again{by} in {count}"
     return text
 
 
@@ -163,6 +164,7 @@ _LATER_EVENTS = (
 )
 
 
+@cache
 def _event_rank(field: str) -> int:
     lowered = field.casefold()
     for words, rank in _LATER_EVENTS:
@@ -173,10 +175,7 @@ def _event_rank(field: str) -> int:
 
 def _in_event_order(moments: Iterable[StatedMoment]) -> tuple[StatedMoment, ...]:
     """Each moment once, ordered by when its event happens and otherwise as stated."""
-    unique: list[StatedMoment] = []
-    for moment in moments:
-        if moment not in unique:
-            unique.append(moment)
+    unique = dict.fromkeys(moments)
     return tuple(sorted(unique, key=lambda moment: _event_rank(moment.field)))
 
 
@@ -218,20 +217,24 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
     row (`_weakest`) is the same as it was when every sighting was listed.
     """
     views: list[SightingView] = []
+    # Looked up rather than searched for: a row the feed has sighted on every pull for weeks
+    # holds dozens of sightings, and finding each one's twin among the views already made by
+    # scanning them all was quadratic in that number. A view's moments and words never change
+    # once it is made (only its count does), so the shape it was made with finds it again.
+    by_shape: dict[tuple[str, bool, tuple[StatedMoment, ...], tuple[StatedWord, ...]], list[int]]
+    by_shape = {}
+    latest_of_source: dict[tuple[str, bool], int] = {}
     for detail in details:
         moments = _in_event_order(
             StatedMoment(field, stated, kind, zone) for field, stated, kind, zone in detail.moments
         )
         words = tuple(StatedWord(field, word) for field, word in detail.words)
-        same_source = [v for v in views if (v.source, v.copy) == (detail.source, detail.copy)]
+        shape = (detail.source, detail.copy, moments, words)
         again = next(
             (
                 position
-                for position, view in enumerate(views)
-                if view in same_source
-                and view.moments == moments
-                and view.words == words
-                and detail.basis in (view.basis, BASIS_OWN_ID)
+                for position in by_shape.get(shape, ())
+                if detail.basis in (views[position].basis, BASIS_OWN_ID)
             ),
             None,
         )
@@ -244,7 +247,10 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
                 repeats_basis=detail.basis if same_basis else "",
             )
             continue
-        change = _what_changed(same_source[-1].moments, moments) if same_source else ""
+        previous = latest_of_source.get((detail.source, detail.copy))
+        change = _what_changed(views[previous].moments, moments) if previous is not None else ""
+        by_shape.setdefault(shape, []).append(len(views))
+        latest_of_source[(detail.source, detail.copy)] = len(views)
         views.append(
             SightingView(
                 source=detail.source,
@@ -259,7 +265,11 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
 
 
 def _weakest(views: Iterable[SightingView]) -> str:
-    held = {view.basis for view in views}
+    return _weakest_of(view.basis for view in views)
+
+
+def _weakest_of(bases: Iterable[str]) -> str:
+    held = set(bases)
     for basis in _WEAKEST_FIRST:
         if basis in held:
             return basis
@@ -268,10 +278,20 @@ def _weakest(views: Iterable[SightingView]) -> str:
 
 def join_counts(rows: Iterable[tuple[date, Sequence[SightingView]]]) -> JoinCounts:
     """Count rows by the weakest join among their sightings, and list the guessed ones' dates."""
+    return join_counts_of_bases((day, [view.basis for view in views]) for day, views in rows)
+
+
+def join_counts_of_bases(rows: Iterable[tuple[date, Iterable[str]]]) -> JoinCounts:
+    """`join_counts` from the basis each sighting joined on, which is all it reads of a view.
+
+    The same counts as from the views: `sighting_views` folds a later sighting into an earlier
+    view only where it joined on that view's own basis or on the source's own id again, and the
+    own-id basis is not one `_weakest` looks for, so no basis it does look for is lost to a view.
+    """
     counts: dict[str, int] = {}
     days: list[date] = []
-    for day, views in rows:
-        basis = _weakest(views)
+    for day, bases in rows:
+        basis = _weakest_of(bases)
         counts[basis] = counts.get(basis, 0) + 1
         if basis in HEURISTIC:
             days.append(day)
@@ -282,9 +302,10 @@ def join_counts(rows: Iterable[tuple[date, Sequence[SightingView]]]) -> JoinCoun
 
 
 def count_sentence(counts: Mapping[str, int]) -> str:
-    """The counts in one sentence, "N rows joined by id, N by settlement date, ..."."""
+    """The counts in one sentence, "N transactions matched by id, N matched by settlement date"."""
     parts = [
-        f"{counts.get(basis, 0)} {'rows' if counts.get(basis, 0) != 1 else 'row'} {label}"
+        f"{counts.get(basis, 0)} "
+        f"{'transactions' if counts.get(basis, 0) != 1 else 'transaction'} {label}"
         for basis, label in COUNT_LABELS
         if counts.get(basis, 0)
     ]

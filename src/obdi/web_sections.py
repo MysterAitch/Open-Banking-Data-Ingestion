@@ -21,7 +21,7 @@ import html
 import os
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, ParamSpec, TypeVar
 from urllib.parse import urlparse
 
@@ -430,10 +430,10 @@ def render_coverage(
     source_connections: dict[tuple[str, str], list[str]] | None = None,
     feed_warnings: Callable[[], list[str]] | None = None,
     archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None,
+    declared_accounts: Callable[[], list[AccountRecord]] | None = None,
+    today: date | None = None,
 ) -> bytes:
-    from . import web
-
-    section = web._holdings_rows(
+    section = _coverage_section(
         holdings,
         account_names,
         account_timelines,
@@ -441,18 +441,77 @@ def render_coverage(
         source_connections,
         feed_warnings,
         archive_notes,
+        declared_accounts,
+        today or datetime.now(UTC).date(),
     )
-    body = _lede(
-        "What is held, one row for each source feeding an account, with the stretch of "
-        "history each source covers. The Accounts cards on the Overview are one card "
-        "per account, however many sources feed it; this page is where a source is "
-        "named, bound to an account, or archived."
-    ) + FETCH_NEXT_LINE + (section or _nothing_wired("Coverage"))
+    # The page opens with its counts, which say what it is for; a lede above them was a screen's
+    # tenth spent before the first fact.
+    body = section or _nothing_wired("Coverage")
     body += (
         '<p class="muted"><a class="tap" href="/coverage-timeline">'
-        "The same history, by day, as a chart</a></p>"
+        "The same history, by day, as a chart</a></p>" + FETCH_NEXT_LINE
     )
     return render_page("Coverage by source", body)
+
+
+def _hook(read: Callable[[], _HookReturn] | None, fallback: _HookReturn) -> _HookReturn:
+    """A hook's answer, or the fallback where it is unwired or raises.
+
+    The page that manages connections must not go down because the store is mid-write during a
+    backfill, which is exactly when someone refreshes it to see how it is going.
+    """
+    if read is None:
+        return fallback
+    try:
+        return read()
+    except Exception:
+        return fallback
+
+
+def _coverage_section(
+    holdings: Callable[[], list[SourceCoverage]] | None,
+    account_names: Callable[[], AccountsShown] | None,
+    account_timelines: Callable[[], dict[str, dict[str, str]]] | None,
+    account_feeders: Callable[[], dict[str, list[str]]] | None,
+    source_connections: dict[tuple[str, str], list[str]] | None,
+    feed_warnings: Callable[[], list[str]] | None,
+    archive_notes: Callable[[], dict[str, ArchiveNote]] | None,
+    declared_accounts: Callable[[], list[AccountRecord]] | None,
+    today: date,
+) -> str:
+    # Imported here because `web_coverage` reads `web_accounts`, which reads this module.
+    from .web_coverage import coverage_body
+
+    no_rows: list[SourceCoverage] = []
+    no_marks: dict[str, dict[str, str]] = {}
+    no_records: list[AccountRecord] = []
+    no_feeders: dict[str, list[str]] = {}
+    no_notes: dict[str, ArchiveNote] = {}
+    no_lines: list[str] = []
+    rows = _hook(holdings, no_rows)
+    held = {row.account_id for row in rows}
+    known_empty = sorted(set(_hook(account_timelines, no_marks)) - held)
+    declared = {
+        str(record.ref): str(record.parent)
+        for record in _hook(declared_accounts, no_records)
+        if record.parent
+    }
+    body = coverage_body(
+        rows,
+        names=_hook(account_names, AccountsShown()),
+        known_empty=known_empty,
+        feeders=_hook(account_feeders, no_feeders),
+        connections=source_connections or {},
+        parents=declared,
+        notes=_hook(archive_notes, no_notes),
+        today=today,
+    )
+    if not body:
+        return ""
+    warnings = "".join(
+        f'<p class="warn">{_esc(str(line))}</p>' for line in _hook(feed_warnings, no_lines)
+    )
+    return warnings + body
 
 
 def render_import(
@@ -568,6 +627,7 @@ class SectionPages:
             source_connections=connections() if connections is not None else None,
             feed_warnings=timer.wrap("feed_warnings", config.feed_warnings),
             archive_notes=timer.wrap("archive_notes", config.archive_notes),
+            declared_accounts=timer.wrap("declared_accounts", config.declared_accounts),
         )
         timer.report("/coverage")
         self._respond(200, page)

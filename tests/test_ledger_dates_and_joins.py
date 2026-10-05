@@ -72,14 +72,16 @@ class TestWhatEachSourceStated:
         page = page_of(made(REAL_ORDER, late_settlement_payments()))
 
         assert (
-            "<code>starling</code> - founded this row: "
+            "<code>starling</code> - the first report of this transaction: "
             "transactionTime 2026-09-14 11:20, settlementTime 2026-09-15 04:00"
         ) in page
         assert (
-            "<code>truelayer</code> - joined to the row by id: timestamp 2026-09-14 11:00"
+            "<code>truelayer</code> - matched to this transaction by its id: "
+            "timestamp 2026-09-14 11:00"
         ) in page
         assert (
-            "<code>starling-csv</code> - joined by settlement date: Date 2026-09-15"
+            "<code>starling-csv</code> - matched to this transaction by its settlement date: "
+            "Date 2026-09-15"
         ) in page
 
     def test_Row_WhenSettledMonthsLaterInWinter_ShowsTheWinterClockForTheSettlement(self, made):
@@ -100,7 +102,7 @@ class TestWhatEachSourceStated:
             land_evidence(store)
             page = page_of(store)
 
-        assert "Dates and joins" not in page
+        assert "What each source reported" not in page
 
 
 class TestHowTheAccountsRowsJoined:
@@ -108,14 +110,14 @@ class TestHowTheAccountsRowsJoined:
         page = page_of(made(REAL_ORDER, late_settlement_payments()))
 
         assert (
-            "6 rows joined by settlement date, 6 rows joined by window and description, "
-            "5 rows with no join."
+            "6 transactions matched by settlement date, 6 transactions matched by a guess from "
+            "amount, nearby dates, and text, 5 transactions reported by one source only."
         ) in page
 
     def test_Account_ListsTheDatesOfTheRowsThatRestOnTheGuess(self, made):
         page = page_of(made(REAL_ORDER, late_settlement_payments()))
 
-        assert "6 joined on a guess from amount, date, and description: the dates" in page
+        assert "6 matched by a guess from amount, date, and description: the dates" in page
         listed = page.split("the dates")[1]
         days = re.findall(r'<span class="mono nowrap">(2026-09-\d\d)</span>', listed)
         assert days[:6] == [
@@ -130,8 +132,8 @@ class TestHowTheAccountsRowsJoined:
             arrive(store, aggregator_artefact([aggregator_item(payment, link=True)]), MAIN)
             page = page_of(store)
 
-        assert "1 row joined by id" in page
-        assert "No row was joined on a guess." in page
+        assert "1 transaction matched by id" in page
+        assert "No transaction was matched by a guess." in page
 
     def test_Account_WhenRebuiltFromRaw_CountsTheSameJoins(self, made):
         store = made(REAL_ORDER, late_settlement_payments())
@@ -139,8 +141,11 @@ class TestHowTheAccountsRowsJoined:
 
         assert rebuild_from_raw(store, account_map=MAP).problems == []
 
-        assert "6 rows joined by settlement date, 6 rows joined by window" in page_of(store)
-        assert "6 rows joined by settlement date" in before
+        assert (
+            "6 transactions matched by settlement date, 6 transactions matched by a guess"
+            in page_of(store)
+        )
+        assert "6 transactions matched by settlement date" in before
 
 
 class TestASpacesCopy:
@@ -154,6 +159,6 @@ class TestASpacesCopy:
         page = page_of(made(REAL_ORDER, payments), BILLS)
 
         assert (
-            "<code>truelayer</code> - copied from the main account&#x27;s row, "
-            "joined to the row by id"
+            "<code>truelayer</code> - copied from the main account&#x27;s transaction, "
+            "matched to this transaction by its id"
         ) in page

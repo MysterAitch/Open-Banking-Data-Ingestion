@@ -8,7 +8,7 @@ THE SHAPE OF THE PAGE. A phone column read top to bottom: a verdict in the displ
 mark in the colour of its tone, one muted line of evidence, the things to do each with its
 control, then one row per account with a bar on a scale shared by every account. Where there is
 room (`min-width: 60rem`) the verdict, evidence, and things to do sit in a column beside the
-accounts, because the accounts list is the long part; from 76rem each account is one line.
+accounts, because the accounts list is the long part.
 
 THE COMPONENTS (each cut from the redesign's prototype to what Today uses):
   1. the to-do row (`.todo`): a rail says how pressing (red now, amber soon, grey when
@@ -110,16 +110,10 @@ HOME_STYLES = """
  .p-more > details:last-of-type { border-bottom: var(--rule-weight) solid var(--rule-2); }
  .p-more > details p { margin: var(--s1) 0 var(--s3); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
 
- /* Beside the accounts where there is room; from 76rem each account is one line. */
+ /* Beside the accounts where there is room. The page is 64rem at most, so the accounts' column
+    stays a bar over its words at every width: a one-line row left the bar a sliver. */
  @media (min-width: 60rem) {
   .home { display: grid; grid-template-columns: minmax(0, 26rem) minmax(0, 1fr); gap: 0 var(--s6); align-items: start; }
   .home-accounts h2 { margin-top: var(--s4); }
- }
- @media (min-width: 76rem) {
-  main a.arow, .axis-row { grid-template-columns: 11rem minmax(0, 1fr) 10.5rem; gap: 2px var(--s4); align-items: center; }
-  main a.arow { grid-template-areas: "name bar flag" ". trust trust"; }
-  .axis-row > .axis { grid-column: 2; }
-  .alist li.space { padding-left: 0; }
-  .alist li.space .a-name { padding-left: var(--s4); }
  }
 """

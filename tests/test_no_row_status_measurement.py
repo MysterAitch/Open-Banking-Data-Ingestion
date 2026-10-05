@@ -194,14 +194,14 @@ class TestAPaymentTheBankLaterDeclined:
             listed=(("Shop 9", -109, date(2026, 9, 9)),),
         )
 
-        assert "Also sighted by a source other than the bank's feed: 1." in describe(store)
+        assert "Also reported by a source other than the bank's feed: 1." in describe(store)
 
     def test_Measurement_WhenOnlyTheFeedSightedTheDeclinedPayment_SaysNoOtherSourceDid(
         self, stores, rebuild
     ):
         store = stores([payment(9)], [payment(9, "DECLINED")], rebuild=rebuild)
 
-        assert "Also sighted by a source other than the bank's feed: 0." in describe(store)
+        assert "Also reported by a source other than the bank's feed: 0." in describe(store)
 
     def test_Measurement_WhenTheDeclinedPaymentCarriedARoundUp_CountsThePaymentNotTheLeg(
         self, stores, rebuild
@@ -224,7 +224,7 @@ class TestTheReportAsAWhole:
         with Store(tmp_path / "empty.sqlite3") as store:
             text = exact_rule_report(store, MAP).describe()
 
-        assert "No account holds a transaction the bank's feed sighted" in text
+        assert "No account holds a transaction the bank's feed reported" in text
 
     def test_Report_WhenARowIsDeclined_ShowsNoPayeeOrFigure(self, stores):
         store = stores([payment(6)], [payment(6, "DECLINED")])

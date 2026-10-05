@@ -53,6 +53,14 @@ ARTEFACT_MOVED = "Artefact moved to another account"
 REBUILD_ARTEFACT = "Rebuild this artefact's transactions"
 ARTEFACT_REBUILT = "Artefact's transactions rebuilt"
 
+#: What Today's line and each account card call the question of whether an account's transactions
+#: add up to the known balances (the verdicts themselves are `standing_data.ADDS_UP` and its
+#: neighbours), and what an account page heads the same answer with. The first names the thing
+#: compared against, because the chip beside it says only how the comparison came out; the second
+#: asks the question. "Verification" named the act from the inside and was retired.
+KNOWN_BALANCES_LABEL = "Known balances"
+ACCOUNT_CHECK_HEADING = "Do the transactions add up?"
+
 #: Implementation details that name nothing a person can act on, matched case-insensitively.
 INTERNAL_ON_PAGES = re.compile(
     r"\btiers?\b|\buids?\b|\blayer 0\b|\bthe matcher\b|\bthe applier\b|\bthe map\b"
@@ -71,9 +79,7 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     # The verdict on an account's transactions was "in agreement" and "held back": each left out
     # the two things being compared, or needed explaining. The words now are
     # `standing_data.ADDS_UP`, `DOES_NOT_ADD_UP`, and `NOTHING_TO_CHECK_AGAINST`. "Agrees" is
-    # kept for Actual against obdi, where the sentence names both sides. ("Cannot be verified"
-    # is not retired: the movement checks still say it of a transfer leg whose partner account
-    # cannot be read, which is another thing.)
+    # kept for Actual against obdi, where the sentence names both sides.
     "in agreement",
     "held back",
     # "Checked" said bare names neither who did it nor against what. The rung is named by what it
@@ -81,8 +87,8 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     # a person vouching is "locked in". "not checked" was tried and rejected: the coverage
     # timeline's own lane says it, and that page is not part of this redesign.
     "checked to",
-    # One label reveals values (`Show values` / `Hide values`; `Show raw payload (unmasked)` for
-    # an artefact's bytes), so these older labels for the same press may not come back.
+    # One label reveals values (`Show values` / `Hide values`; `Show raw payload (real values)`
+    # for an artefact's bytes), so these older labels for the same press may not come back.
     "show the figures",
     "disclose the real contents",
     "show the payload",
@@ -97,4 +103,41 @@ RETIRED_ON_PAGES: tuple[str, ...] = (
     "withdraw this typed transaction",
     " refile ",
     "replay into store",
+    # Names from inside the code that left out what was compared with what, or what a thing is,
+    # found by the owner twice stopping at a status word and asking what it meant. Each is
+    # matched as the specific phrase, never the ordinary English word beside it ("held", "copy").
+    # Today's data chip said "unproven" of a feed with no recorded cycle; the account rail said
+    # "not yet proven" of a stretch whose transactions were not shown to add up to a known
+    # balance; the line and the account heading said "Verification" for the same question.
+    "unproven",
+    "not yet proven",
+    "verification",
+    "known balances and agreement",
+    "movement fault",
+    # A transaction's reports were "sightings" that "founded" it or "joined by id"; the words now
+    # say what each source reported and how the report was matched (`join_basis`).
+    "sighting",
+    "sighted",
+    "founded this row",
+    "dates and joins",
+    "how the rows were joined",
+    "joined on a guess",
+    "joined to the row",
+    "no row was joined",
+    "with no join",
+    "folded into this row",
+    "copy, not counted",
+    "copies not counted",
+    "verified against",
+    "cannot be verified",
+    # The timeline's "seams" are days a file or fetch may have been cut short (`CUT_OFF`); the
+    # reveal buttons and notes say "real values", not "unmasked".
+    "to check, 0 seam",
+    "seams to check",
+    "seam to check",
+    "(unmasked)",
+    "the unmasked rendering",
+    "derived layer",
+    "derived rows",
+    "frontier",
 )

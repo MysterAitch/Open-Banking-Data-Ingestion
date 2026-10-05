@@ -227,7 +227,7 @@ class TestTheHousehold:
             "The bank's feed says so for 7 (sourceSubType ATM).",
             "The aggregator says so for 2 (transaction_category CASH, money out).",
             "Of those, 1 is said by both, 6 by the feed alone, and 1 by the aggregator alone.",
-            "Also sighted by a source that states no kind of payment: 4.",
+            "Also reported by a source that states no kind of payment: 4.",
             "Out of the account: 7. Into the account: 1 (money back from a cash machine, which "
             "the rule leaves alone).",
             "Pending: 1. Booked: 7.",
@@ -240,10 +240,10 @@ class TestTheHousehold:
             "leaves alone).",
             "Earliest 2026-09-20, latest 2026-09-22. By year: 2026: 3.",
             "Of the 7 stored transactions the feed says are a cash machine, the aggregator's "
-            "category is: CASH 1, PURCHASE 1, TRANSFER 1, not sighted by the aggregator 4.",
+            "category is: CASH 1, PURCHASE 1, TRANSFER 1, not reported by the aggregator 4.",
             "Of the 2 stored transactions the aggregator says are cash, 2 are money out and 0 "
             "money in, and the feed's source and sourceSubType are: MASTER_CARD ATM 1, not "
-            "sighted by the feed 1.",
+            "reported by the feed 1.",
             "Two sources state kinds that exclude each other for 1 (sourceSubType ATM against "
             "transaction_category TRANSFER 1). A coarser statement, such as a purchase, is "
             "not one.",
@@ -522,7 +522,7 @@ class TestAnEmptyStore:
             "No stored transaction that is not history is a cash movement by what a source "
             "states, and none has a description that looks like a cash machine."
         ) in text
-        assert "No stored transaction was sighted by a source that states a coded field." in text
+        assert "No stored transaction was reported by a source that states a coded field." in text
 
 
 class TestTheWordsASourceStates:

@@ -39,6 +39,33 @@ SECTION_STYLES = r"""
  /* The fetch timeline's choices: stacked on a phone, one row where there is width. */
  .timeline-choices { display: grid; gap: var(--s2) var(--s4); margin: var(--s3) 0; }
  .timeline-choices button:not(.button) { margin: 0; }
+ /* Coverage by source: a grid to glance at, then a block for each account. A source far behind is
+    set in the warning colour, bold, on a tint, so it survives greyscale by weight. */
+ .cov-summary { margin: var(--s2) 0 var(--s3); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .cov-grid { table-layout: fixed; font-size: var(--text-xs); }
+ .cov-grid th, .cov-grid td { padding: 2px var(--s1); line-height: 125%; }
+ .cov-grid th[scope="col"] { font-size: .7rem; overflow-wrap: normal; }
+ .cov-grid th:first-child { width: 25%; }
+ .cov-grid th[scope="row"] { font-weight: 400; color: var(--ink); }
+ .cov-grid th.cov-gridspace { padding-left: var(--s3); }
+ .cov-grid tr.cov-gridquiet th[scope="row"] { color: var(--ink-2); }
+ .cov-behind { color: var(--warn); font-weight: 600; }
+ td.cov-behind { background: var(--warn-bg); }
+ .cov-grid a.tap, .cov-bound a.tap { font: inherit; }
+ .cov-gridkey { font-size: var(--text-sm); }
+ .cov-name { margin: var(--s2) 0 0; }
+ .cov-name a.tap { min-height: 0; }
+ .cov-sources th code { white-space: nowrap; }
+ .cov-account p { margin: var(--s1) 0; font: var(--text-sm)/150% var(--sans); }
+ .cov-sources { font-size: var(--text-xs); }
+ .cov-sources code { font-size: 1em; }
+ .cov-account { margin: 0; }
+ .cov-sources th, .cov-sources td { padding: 2px var(--s2) 2px 0; line-height: 130%; }
+ .cov-sources th { font-weight: 400; color: var(--ink); border-bottom-color: var(--rule-2); }
+ .cov-sources td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+ .cov-spaces { margin-left: var(--s2); padding-left: var(--s3); border-left: var(--rule-weight) solid var(--rule); }
+ .cov-bound { list-style: none; margin: 0; padding: 0; font: var(--text-sm)/150% var(--sans); }
+ .cov-bound li { padding: var(--s1) 0; }
  .diag-accounts { margin: var(--s3) 0; }
  .diag-danger { margin: var(--s6) 0 var(--s4); padding: 0 var(--s4) var(--s3); border: var(--edge-weight) solid var(--bad);
                 border-radius: var(--radius); }

@@ -165,7 +165,7 @@ class AccountCashFigures:
             f"Of those, {len(both)} {agree(len(both), 'is')} said by both, "
             f"{len(feed_rows) - len(both)} by the feed alone, and "
             f"{len(aggregator_rows) - len(both)} by the aggregator alone.",
-            "Also sighted by a source that states no kind of payment: "
+            "Also reported by a source that states no kind of payment: "
             f"{sum(1 for r in rows if r.row.entity_id in self.no_kind_sources)}.",
             f"Out of the account: {len(rows) - money_in}. Into the account: {money_in}"
             + (
@@ -212,7 +212,7 @@ class AccountCashFigures:
                 aggregator = sorted(
                     word for name, word in by_kind(r.words)[1] if name == AGGREGATOR_CASH[0]
                 )
-                seen[", ".join(aggregator) if aggregator else "not sighted by the aggregator"] += 1
+                seen[", ".join(aggregator) if aggregator else "not reported by the aggregator"] += 1
             lines.append(
                 f"Of the {_transactions(len(feed_says))} the feed says "
                 f"{agree(len(feed_says), 'is')} a cash machine, the aggregator's category "
@@ -224,7 +224,7 @@ class AccountCashFigures:
             for r in aggregator_says:
                 stated = dict(by_kind(r.words)[0])
                 feed = [stated[name] for name in ("source", "sourceSubType") if name in stated]
-                seen[" ".join(feed) if feed else "not sighted by the feed"] += 1
+                seen[" ".join(feed) if feed else "not reported by the feed"] += 1
             money_in = sum(1 for r in aggregator_says if r.row.amount_minor > 0)
             lines.append(
                 f"Of the {_transactions(len(aggregator_says))} the aggregator says "
@@ -368,12 +368,12 @@ class CashWithdrawalReport:
             )
         lines.append(
             "The words each source states in its coded fields, counted over the stored "
-            "transactions that are not history it sighted, so the word a bank uses is read "
+            "transactions that are not history it reported, so the word a bank uses is read "
             "from here:"
         )
         if not self.vocabulary:
             lines.append(
-                "  No stored transaction was sighted by a source that states a coded field."
+                "  No stored transaction was reported by a source that states a coded field."
             )
         for account, by_field in sorted(self.vocabulary.items()):
             lines.append(f"{account}:")

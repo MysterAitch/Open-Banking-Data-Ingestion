@@ -93,9 +93,9 @@ class IdentityHealth:
         return sum(tally.folded_listed_together for tally in self.tallies)
 
     def describe(self) -> str:
-        lines = ["Rows sharing an identity (content key + occurrence):"]
+        lines = ["Transactions that share an identity (same content and same occurrence):"]
         if not self.shared:
-            lines.append("  no rows share an identity")
+            lines.append("  no transactions share an identity")
         for shared in self.shared:
             lines.append(
                 f"  {shared.account_id}: {plural(shared.identities, 'identity', 'identities')} "

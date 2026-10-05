@@ -56,6 +56,7 @@ from .masking import MASKED_TOTAL, Disclosed
 from .models import BASIS_ID
 from .navigation import page_name
 from .page_words import (
+    ACCOUNT_CHECK_HEADING,
     PROTECTION_REMOVED,
     REMOVE_PROTECTION,
     REMOVE_TYPED_TRANSACTION,
@@ -186,13 +187,14 @@ def _words(items: list[str]) -> str:
 #: line, and over the closed list at the foot of the month. A folded row is a copy of money
 #: counted elsewhere, withheld from Actual so it is not counted twice (`replay.WITHHELD_FOLDED`
 #: gives the two cases), so it is history and not a fault.
-_COPY_CHIP = "copy, not counted"
-_COPIES_WHY = "held under a Space, or itemised by a statement"
+_COPY_CHIP = "counted elsewhere"
+_COPIES_WHY = "held in a Space, or listed by a statement"
 
 
 def _copies(count: int) -> str:
-    """A count of copies with its noun, which names what they are: "3 copies not counted"."""
-    return _plural(count, "copy not counted", "copies not counted")
+    """A count of copies with its noun, which names what they are: "3 transactions counted
+    elsewhere"."""
+    return _plural(count, "transaction counted elsewhere", "transactions counted elsewhere")
 
 
 def _is_copy(row: Any) -> bool:
@@ -230,9 +232,9 @@ def _row_flags(row: Any) -> str:
         )
     if row.one_source and not _is_copy(row):
         flags += _flag(
-            "one source",
+            "one source only",
             "More than one source feeds this account and only one of them has "
-            "reported this row, so nothing else confirms it yet.",
+            "reported this transaction, so no other source confirms it yet.",
             "pill-warn",
         )
     if row.transfer == "confirmed":
@@ -294,8 +296,9 @@ def _status_pill(row: Any) -> str:
     status = row.status
     if _is_copy(row):
         return (
-            f'<span class="pill pill-quiet" title="Actual is not sent this row, and no sum counts '
-            f'it: it is a copy of a payment {_esc(_COPIES_WHY)}.">{_COPY_CHIP}</span>'
+            f'<span class="pill pill-quiet" title="Actual is not sent this transaction, and no '
+            f"sum counts it here: the same payment is already counted, {_esc(_COPIES_WHY)}."
+            f'">{_COPY_CHIP}</span>'
         )
     css = {"booked": "pill-ok", "void": "pill-bad"}.get(status, "pill-quiet")
     implied = " visually-hidden" if status == "booked" and row.cleared_by else ""
@@ -330,16 +333,18 @@ def _line_html(row: Any, line: str) -> str:
     lines = "".join(_sighting_line(sighting) for sighting in row.sightings)
     return (
         f'<details class="t-more"><summary class="t-row">{line}'
-        '<span class="visually-hidden">Dates and joins</span>'
+        '<span class="visually-hidden">What each source reported</span>'
         f"</summary>{lines}</details>"
     )
 
 
 def _joins_html(joins: Any, clock: str = "") -> str:
-    """The account's rows by how they joined, and the guessed ones' dates a click away.
+    """The account's transactions by how sources' reports of them were matched, and the guessed
+    ones' dates a click away.
 
-    `clock` is the sentence about the times a row states, which is about the same detail a row's
-    "Dates and joins" opens, and so is said here rather than in a disclosure of its own.
+    `clock` is the sentence about the times a transaction states, which is about the same detail
+    a transaction's "What each source reported" opens, and so is said here rather than in a
+    disclosure of its own.
     """
     counts = dict(joins.by_basis) if joins is not None else {}
     sentence = count_sentence(counts)
@@ -347,27 +352,27 @@ def _joins_html(joins: Any, clock: str = "") -> str:
         return _disclosure("About the times shown", clock) if clock else ""
     guessed = joins.heuristic_days
     listing = (
-        f"<details><summary>{len(guessed)} joined on a guess from amount, date, and "
+        f"<details><summary>{len(guessed)} matched by a guess from amount, date, and "
         "description: the dates</summary>"
         "<p>" + ", ".join(_mono(day) for day in guessed) + "</p></details>"
         if guessed
-        else '<p class="muted">No row was joined on a guess.</p>'
+        else '<p class="muted">No transaction was matched by a guess.</p>'
     )
     return _disclosure(
-        f"How the rows were joined ({_esc(_joined_gist(counts))})",
+        f"How the sources' reports were matched ({_esc(_joined_gist(counts))})",
         f"<p>{_esc(sentence[0].upper() + sentence[1:])}.</p>{listing}{clock}",
     )
 
 
 def _joined_gist(counts: dict[str, int]) -> str:
-    """The joins worth a glance, said short: those other than by the source's own id."""
+    """The matches worth a glance, said short: those other than by the source's own id."""
     labels = dict(COUNT_LABELS)
     parts = [
-        f"{counts[basis]} {label.removeprefix('joined ')}"
+        f"{counts[basis]} {label.removeprefix('matched ')}"
         for basis, label in labels.items()
         if counts.get(basis) and basis != BASIS_ID
     ]
-    return ", ".join(parts) or "all by id"
+    return ", ".join(parts) or "all matched by id"
 
 
 def _row_rail(row: Any) -> str:
@@ -477,8 +482,8 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
     reader can tell "nothing of that kind" from "not looked for".
     """
     reasons = _pairs(summary.withheld_by_reason)
-    rows = _count("Rows in the month", summary.rows) + _count_html(
-        "Rows per source", _source_pairs(summary.per_source)
+    rows = _count("Transactions in the month", summary.rows) + _count_html(
+        "Transactions per source", _source_pairs(summary.per_source)
     )
     zero: list[str] = []
     for field, label, phrase in _FLAG_COUNTS:
@@ -487,8 +492,8 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
             rows += _count(label, number)
         else:
             zero.append(phrase)
-    rows += _count("Cleared rows", summary.cleared)
-    rows += _count("Uncleared rows", summary.uncleared)
+    rows += _count("Cleared transactions", summary.cleared)
+    rows += _count("Uncleared transactions", summary.uncleared)
     rows += _count("Would be sent to Actual", summary.would_send)
     rows += _count("Withheld from Actual", f"{summary.withheld} ({reasons})")
     if summary.unsendable:
@@ -504,7 +509,7 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
         '<div class="scroll"><table>'
         + rows
         + _count(
-            "Sum of the store's rows (void, folded, and reversed excluded)",
+            "Sum of the transactions counted (void, counted elsewhere, and reversed excluded)",
             _signed(
                 _direction_word(summary.store_direction),
                 summary.store_direction,
@@ -537,10 +542,10 @@ _BASIS_WORDS = {
     "stated": "stated by you",
     "bank": "the bank's own running balance",
     "statement": "a held statement's closing balance",
-    "family": "the whole account's known balance, less its Spaces' own rows",
+    "family": "the whole account's known balance, less its Spaces' own transactions",
     "opened": "the day before the account was created, with its feed held from then",
     "export": "the export's own balance, read as the main account's",
-    "assumed-nil": "assumed, not shown: a Space's rows are taken to start from nil",
+    "assumed-nil": "assumed, not shown: a Space's transactions are taken to start from nil",
 }
 
 
@@ -581,7 +586,7 @@ def _anchor_row(
             _balance_word(line.difference_direction), line.difference_direction, line.difference
         )
         detail = (
-            f' from what the rows predict by <span class="fig{_seal(unmasked)}">'
+            f' from what the transactions add up to, by <span class="fig{_seal(unmasked)}">'
             f"{_esc(difference)}</span>"
         )
     basis = _BASIS_WORDS.get(line.basis, line.basis)
@@ -1033,11 +1038,11 @@ def _lookalike(found: Any) -> str:
         if found.sighted_on == "nothing":
             return f"{lead}, that no stored row carries"
         if found.sighted_on == "this row":
-            return f"{lead}, sighted on this row"
+            return f"{lead}, reported on this row"
         if found.sighted_on == "a row of another account":
-            return f"{lead}, sighted on a row of another account"
+            return f"{lead}, reported on a row of another account"
         other = _row_note(found.other) if found.other is not None else ""
-        return f"{lead}, sighted on another stored row ({other})"
+        return f"{lead}, reported on another stored row ({other})"
     if not found.found:
         return "; the store counts no row of the same size and direction within thirty days"
     listing = (
@@ -1241,10 +1246,11 @@ def _hold_html(change: Any, hold: str) -> str:
     if hold == "row-counts":
         return (
             f"<p>The export lists {change.export_rows} "
-            f"{'row' if change.export_rows == 1 else 'rows'} in the window and the store "
-            f"holds {change.store_sightings} "
-            f"{'sighting' if change.store_sightings == 1 else 'sightings'} of it there: "
-            "identical rows collapsed into one, or a row sighted on a different day.</p>"
+            f"{'transaction' if change.export_rows == 1 else 'transactions'} in the window and "
+            f"the store holds {change.store_sightings} "
+            f"{'report' if change.store_sightings == 1 else 'reports'} of it there: "
+            "identical transactions collapsed into one, or a transaction reported on a "
+            "different day.</p>"
         )
     if hold == "export-opening":
         return (
@@ -1458,11 +1464,11 @@ def _explanations_html(explanation: Any) -> str:
     if facts is not None:
         body += (
             f"<p>The held {'export lists' if facts.exports == 1 else 'exports list'} "
-            f"{_plural(facts.rows, 'row')}. In its own sequence {facts.out_of_order:,} "
+            f"{_plural(facts.rows, 'transaction')}. In its own order {facts.out_of_order:,} "
             f"{'is' if facts.out_of_order == 1 else 'are'} out of date order, "
-            f"{_plural(facts.uncut_days, 'day')} hold a row but have no clean cut and so state "
-            f"no balance, and {facts.unsighted:,} "
-            f"{'has' if facts.unsighted == 1 else 'have'} no sighting in the store.</p>"
+            f"{_plural(facts.uncut_days, 'day')} hold a transaction but have no clean cut and "
+            f"so state no balance, and {facts.unsighted:,} "
+            f"{'is' if facts.unsighted == 1 else 'are'} not held in the store.</p>"
         )
     body += _reversed_html(explanation.reversed)
     body += _feed_statuses_html(explanation.feed_statuses, exports=facts is not None)
@@ -1967,7 +1973,7 @@ def _held_html(agreement: Any, *, boxed: bool) -> str:
 def _verdict_text(own: Any, protection: Any) -> str:
     """The standing sentence, ending in the protection in the page's own words.
 
-    `agreement.standing_line` says "not protected" of an account nothing protects; here a
+    An account nothing protects says nothing of protection (`agreement.standing_line`); here a
     broken protection says so instead of claiming a date it no longer holds.
     """
     if own.state == NONE:
@@ -1978,7 +1984,7 @@ def _verdict_text(own: Any, protection: Any) -> str:
         return f"{line}; protected through {protection.through.isoformat()}."
     if state == "broken":
         return f"{line}; the protection through {protection.through.isoformat()} is broken."
-    return f"{line}; not protected."
+    return f"{line}."
 
 
 def _rail_html(view: Any, own: Any, today: date) -> str:
@@ -2026,7 +2032,7 @@ def _state_html(view: Any, today: date) -> str:
     """The account's state, first on the page: the rail, the verdict, and what holds it back."""
     if view.rebuilding:
         return (
-            '<h2 class="visually-hidden">Verification</h2>'
+            f'<h2 class="visually-hidden">{ACCOUNT_CHECK_HEADING}</h2>'
             f'<p class="warn">{_esc(view.rebuilding)}</p>'
         )
     standing = view.standing
@@ -2037,7 +2043,7 @@ def _state_html(view: Any, today: date) -> str:
     if own.state == "agrees" and own.held is None:
         verdict_css += " clear"
     body = (
-        '<h2 class="visually-hidden">Verification</h2>'
+        f'<h2 class="visually-hidden">{ACCOUNT_CHECK_HEADING}</h2>'
         + _rail_html(view, own, today)
         + f'<p class="{verdict_css}">{_esc(_verdict_text(own, view.protection))}</p>'
         + _held_html(own, boxed=True)
@@ -2155,17 +2161,49 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
     return f'<div class="protect">{body}</div>' if body else ""
 
 
-def _opening_gist(opening: Any, listing_tested: int = 0) -> str:
+def _explained_closing(line: Any, view: Any) -> bool:
+    """True for a statement's closing balance that the page says it took to have closed before a
+    transaction dated that day: it differs by date and is not a difference to look for."""
+    standing = view.standing
+    return (
+        standing is not None
+        and line.verdict == "differs"
+        and line.basis == "statement"
+        and line.day in {claim.day.isoformat() for claim in standing.own.closed_before}
+    )
+
+
+def _opening_gist(
+    opening: Any, listing_tested: int = 0, closed_before_days: frozenset[str] = frozenset()
+) -> str:
     """How the known balances stand, in a few words, for the summary that folds them away. A
-    balance tested by its own statement's listing adds up though it sets the opening."""
+    balance tested by its own statement's listing adds up though it sets the opening.
+
+    A statement's closing balance that the page elsewhere says it took to have closed before a
+    transaction dated that day (`agreement.closed_before_sentence`) is explained, not differing:
+    it is counted under those words, so the heading never says "differ" of a balance the page
+    has already accounted for.
+    """
     if opening.state == "none":
         return "none stated"
-    agree = sum(1 for line in opening.anchors if line.verdict == "agrees") + listing_tested
-    differ = sum(1 for line in opening.anchors if line.verdict == "differs")
+    agrees = sum(1 for line in opening.anchors if line.verdict == "agrees") + listing_tested
+    explained = sum(
+        1
+        for line in opening.anchors
+        if line.verdict == "differs"
+        and line.basis == "statement"
+        and line.day in closed_before_days
+    )
+    differ = sum(1 for line in opening.anchors if line.verdict == "differs") - explained
     family = opening.family
-    if not agree and not differ and family is not None and family.anchors:
-        agree, differ = family.agreeing, family.differing
-    return f"{agree:,} add up, {'none' if not differ else f'{differ:,}'} differ"
+    if not agrees and not differ and not explained and family is not None and family.anchors:
+        agrees, differ = family.agreeing, family.differing
+    parts = [f"{agrees:,} add up"]
+    if differ or not explained:
+        parts.append(f"{'none' if not differ else f'{differ:,}'} {agree(differ, 'differs')}")
+    if explained:
+        parts.append(f"{explained:,} closed before a transaction dated that day")
+    return ", ".join(parts)
 
 
 def _balances_control(
@@ -2248,7 +2286,7 @@ def _opening_html(
             body += (
                 '<p class="muted"><a class="tap" '
                 f'href="/period-reconciliation?ref={_esc(quote(view.ref, safe=""))}">'
-                "Test the rows between the statements, period by period</a></p>"
+                "Test the transactions between the statements, period by period</a></p>"
             )
         if opening.state == "derived":
             figure = _signed(_balance_word(opening.direction), opening.direction, opening.opening)
@@ -2256,10 +2294,10 @@ def _opening_html(
                 f'<p><strong>Opening balance, at the end of {_esc(opening.as_at)}:</strong> '
                 f'<span class="mono">{_esc(figure)}</span>. '
                 + (
-                    "The account opened with nothing, so no row has to be taken on trust."
+                    "The account opened with nothing, so no transaction has to be taken on trust."
                     if opening.anchors and opening.anchors[0].basis == "opened"
                     else "It is the earliest known balance less "
-                    "the rows dated on or before that day."
+                    "the transactions dated on or before that day."
                 )
                 + "</p>"
             )
@@ -2272,17 +2310,21 @@ def _opening_html(
             elif opening.single_anchor and not opening.balance_only:
                 body += (
                     '<p class="warn">An opening worked out from a single known balance absorbs '
-                    "every missing or surplus row before that day into the opening figure, "
-                    "and nothing here can tell. A second known balance turns it into a "
+                    "every missing or surplus transaction before that day into the opening "
+                    "figure, and nothing here can tell. A second known balance turns it into a "
                     "test.</p>"
                 )
-            differing = sum(1 for line in opening.anchors if line.verdict == "differs")
+            differing = sum(
+                1
+                for line in opening.anchors
+                if line.verdict == "differs" and not _explained_closing(line, view)
+            )
             if differing:
                 body += (
                     f'<p class="warn"><strong>{_plural(differing, "later known balance")} '
                     f"{agree(differing, 'differs')}</strong> "
-                    "from what the rows predict: rows are missing, duplicated, or "
-                    "mis-dated between the known balances.</p>"
+                    "from what the transactions add up to. Between the known balances a "
+                    "transaction may be missing, counted twice, or dated on the wrong day.</p>"
                 )
                 body += _own_first_difference(opening.anchors)
                 if opening.own_structure:
@@ -2306,8 +2348,8 @@ def _opening_html(
                     body += (
                         f'<p class="warn"><strong>{_plural(differing, "known balance")} '
                         f"{agree(differing, 'differs')}</strong> "
-                        "from what the rows predict: rows are missing, duplicated, or "
-                        "mis-dated.</p>"
+                        "from what the transactions add up to. A transaction may be missing, "
+                        "counted twice, or dated on the wrong day.</p>"
                     )
             body += (
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
@@ -2340,6 +2382,9 @@ def _opening_html(
         + _opening_gist(
             opening,
             len(view.standing.own.listing_tested) if view.standing is not None else 0,
+            frozenset(claim.day.isoformat() for claim in view.standing.own.closed_before)
+            if view.standing is not None
+            else frozenset(),
         )
         + ")",
         body,
@@ -2490,9 +2535,13 @@ def _position_html(position: Any, *, bound: bool) -> str:
     return _disclosure("Running position", (
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
-        + _count("Rows counted (void, folded, and reversed excluded)", position.rows_counted)
         + _count(
-            "Balance by the store's own rows" + (", plus the opening balance" if included else ""),
+            "Transactions counted (void, counted elsewhere, and reversed excluded)",
+            position.rows_counted,
+        )
+        + _count(
+            "Balance by the transactions held"
+            + (", plus the opening balance" if included else ""),
             _signed(
                 word(position.store_direction), position.store_direction, position.store_balance
             ),
@@ -2506,7 +2555,7 @@ def _position_html(position: Any, *, bound: bool) -> str:
         + "</table></div>"
         f"<p><strong>{_esc(verdict)}</strong> "
         + (
-            "Both figures start from the account's derived opening balance, shown "
+            "Both figures start from the account's opening balance, worked out and shown "
             "above."
             if included
             else "Neither figure includes an opening balance: both start from zero, "
@@ -2714,9 +2763,9 @@ def _head(view: Any) -> str:
         else "not bound to an Actual account, so nothing in it is sent"
     )
     held = (
-        f"Rows held from {_esc(view.oldest_month)} to {_esc(view.newest_month)}."
+        f"Transactions held from {_esc(view.oldest_month)} to {_esc(view.newest_month)}."
         if view.oldest_month
-        else "No rows are held."
+        else "No transactions are held."
     )
     archive = view.archive
     archived = archive is not None and archive.state == "archived"
@@ -2728,10 +2777,10 @@ def _head(view: Any) -> str:
 
 
 def _month_line(view: Any) -> str:
-    """The month in one line: how many rows, and which sources reported them."""
+    """The month in one line: how many transactions, and which sources reported them."""
     summary = view.summary
     rows = summary.rows
-    noun = "row" if str(rows) == "1" else "rows"
+    noun = "transaction" if str(rows) == "1" else "transactions"
     sources = _source_pairs(summary.per_source)
     copies = int(str(summary.folded))
     if not copies:
@@ -2762,8 +2811,8 @@ def _copies_html(rows: list[str]) -> str:
 
 def _statement_cost() -> str:
     return (
-        f'<p class="muted">This page costs {QUERIES_PER_PAGE} statements however '
-        f"many rows the account holds, plus {ANCHOR_QUERIES} to look for opening "
+        f'<p class="muted">This page makes {QUERIES_PER_PAGE} database queries however '
+        f"many transactions the account holds, plus {ANCHOR_QUERIES} to look for opening "
         "known balances and a few more for each held statement or bank record "
         "that has not been read yet. A main account with Spaces adds "
         f"{FAMILY_QUERIES} and one per Space to check the whole account's balances. "

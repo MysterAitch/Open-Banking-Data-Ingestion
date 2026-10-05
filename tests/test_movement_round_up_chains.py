@@ -109,7 +109,7 @@ class TestRoundUpsWhoseArrivalNamesNoAccount:
         assert report.legs_unverifiable == 4, "the four arrivals name no account"
         assert report.leg_faults == []
         assert report.chain_faults == []
-        assert "both sides agree every day" in report.describe()
+        assert "both sides match every day" in report.describe()
 
     def test_Overview_WhenEveryRoundUpIsPaired_RaisesNoMovementItem(self, stores):
         items = [

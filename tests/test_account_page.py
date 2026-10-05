@@ -89,7 +89,7 @@ class TestTheOrderOfTheFirstScreens:
             at(page, "Show values"),
             at(page, f"<h2>{NEWEST_MONTH}</h2>"),
             at(page, "<h2>Transactions, newest first</h2>"),
-            at(page, "How the rows were joined"),
+            at(page, "How the sources' reports were matched"),
             at(page, "Known balances and the opening"),
             at(page, "State a balance"),
             at(page, "Typed transactions"),
@@ -131,13 +131,14 @@ class TestTheVerdictAndTheBox:
     def test_HeldAccount_OpensTheKnownBalancesBecauseTheBoxLinksIntoThem(self, base):
         assert '<details id="opening" open>' in get(base)
 
-    def test_AgreeingAccount_SaysNotProtectedAndLeavesTheKnownBalancesFolded(self, base):
+    def test_AgreeingAccount_SaysNothingOfProtectionAndLeavesTheKnownBalancesFolded(self, base):
         page = html.unescape(get(base, AGREEING))
 
         assert (
-            "The transactions add up to every known balance from 2023-10-31 to 2026-09-30; "
-            "not protected." in page
+            "The transactions add up to every known balance from 2023-10-31 to 2026-09-30."
+            in page
         )
+        assert "not protected" not in page
         assert "protected through nowhere" not in page
         assert '<details id="opening">' in page
         assert "(35 add up, none differ)" in page, "36 month ends, the first sets the opening"
@@ -182,7 +183,7 @@ class TestTheMonthPicker:
 
     def test_MaskedPicker_IsPlainLinksAndNoForm(self, base):
         page = get(base)
-        picker = page[at(page, "Choose a month") : at(page, "50 rows. Sources")]
+        picker = page[at(page, "Choose a month") : at(page, "50 transactions. Sources")]
 
         assert '<a class="tap" href="/ledger?ref=starling-personal&amp;month=2025-03"' in picker
         assert "<form" not in picker and "<button" not in picker
@@ -190,7 +191,7 @@ class TestTheMonthPicker:
     def test_PickerWithValuesShown_IsPostedButtonsAndNeverAnAddress(self, base):
         response = shown(base, month="2026-09")
         page = response.text
-        picker = page[at(page, "Choose a month") : at(page, "50 rows. Sources")]
+        picker = page[at(page, "Choose a month") : at(page, "50 transactions. Sources")]
 
         assert response.status_code == 200
         assert "no-store" in response.headers["cache-control"]
@@ -285,7 +286,8 @@ class TestRowAnchors:
         summaries = re.findall(
             r'<summary class="t-row">(?:(?!</summary>).)*?'
             r'<span class="t-when mono nowrap">(\d{4}-\d{2}-\d{2})[^<]*</span>'
-            r'(?:(?!</summary>).)*?<span class="visually-hidden">Dates and joins</span></summary>',
+            r'(?:(?!</summary>).)*?<span class="visually-hidden">What each source reported</span>'
+            r"</summary>",
             page,
         )
         dates = re.findall(r'<span class="t-when mono nowrap">(\d{4}-\d{2}-\d{2})', page)
@@ -355,6 +357,6 @@ class TestTheRailOnARow:
         # source lists is unproven, which is amber; red is kept for rows that disagree.
         doubtful = page.count('class="txn doubtful"')
         assert 0 < doubtful < NEWEST_MONTH_ROWS
-        assert page.count(">one source<") == doubtful
+        assert page.count(">one source only<") == doubtful
         assert page.count('class="txn flagged"') == 0
         assert page.count('<li class="txn"') == NEWEST_MONTH_ROWS - doubtful

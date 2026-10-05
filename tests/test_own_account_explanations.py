@@ -228,7 +228,7 @@ class TestWhatThePageAndTheChartShow:
 
         assert (
             "starling-statement-pdf lists a row of the same size and direction, to a "
-            "different recipient, 2 days away, sighted on another stored row" in text
+            "different recipient, 2 days away, reported on another stored row" in text
         )
 
     def test_Page_WhenNothingIsListedNearby_SaysTheStatementListsNoneWithinThirtyDays(self, make):

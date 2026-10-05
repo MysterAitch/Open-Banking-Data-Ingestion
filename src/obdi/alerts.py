@@ -265,9 +265,9 @@ def empty_rebuild_finding(
     return Finding(
         key="rebuild:empty",
         message=(
-            f"the derived layer is EMPTY - the rebuild at {finished} wiped it "
-            f"and then failed, replaying nothing ({build}): {reason}. The raw "
-            "artefacts are untouched, so a rebuild that gets past this replays "
+            f"the transactions are EMPTY - the rebuild at {finished} wiped them "
+            f"and then failed, replaying nothing ({build}): {reason}. The stored "
+            "originals are untouched, so a rebuild that gets past this replays "
             "them"
         ),
     )

@@ -175,7 +175,7 @@ GAP_LABELS = {
     "no-balance": "No known balance tests these rows",
     "automatic-only": "No known balance tests these rows",
     "one-balance": "Only one known balance is held",
-    "nothing-before": "Rows before the first known balance are untested",
+    "nothing-before": "Transactions before the first known balance are untested",
     "flag-settle": "A review flag is waiting for a known balance",
 }
 
@@ -241,13 +241,26 @@ class MarkStyle:
     draw: Callable[[float, float], str]
 
 
+#: A day a file or fetch ended may have been cut short, so the next one has to supply what it
+#: lacked. What a person is asked to check is said as "possible cut-offs", where the code says
+#: "seams": one name for the thing on every sentence, count, key, and heading of the timeline.
+CUT_OFF = "possible cut-off"
+
+
+def cut_offs(count: int) -> str:
+    """A count of days a source's file or fetch may have been cut short: "2 possible cut-offs"."""
+    return plural(count, CUT_OFF, f"{CUT_OFF}s")
+
+
 MARKS: dict[str, MarkStyle] = {
     "seam-red": MarkStyle(
-        "A seam where another source holds rows this capture lacks",
+        "A day this source's file or fetch may have been cut short, where another source holds "
+        "transactions it lacks",
         lambda x, y: _diamond("cov-seam-red", x, y),
     ),
     "seam-amber": MarkStyle(
-        "A seam with no other source to compare it with",
+        "A day this source's file or fetch may have been cut short, with no other source to "
+        "compare it with",
         lambda x, y: _diamond("cov-seam-amber", x, y),
     ),
     UNREPRODUCED: MarkStyle(
@@ -264,7 +277,7 @@ MARKS: dict[str, MarkStyle] = {
         lambda x, y: _bar_mark("cov-mark-amber", x, y),
     ),
     UNMATCHED: MarkStyle(
-        "A row another covering source lists and this one does not",
+        "A transaction another covering source lists and this one does not",
         lambda x, y: _circle("cov-mark-amber-hollow", x, y),
     ),
 }
@@ -504,19 +517,19 @@ def _seam_sentence(view: AccountTimeline, seam: Seam) -> str:
     if seam.verdict == MISSING:
         held = " and ".join(_lane_name(view, s).lower() for s in seam.held_by)
         return (
-            f"{plural(seam.missing_rows, 'row')} on {day} "
+            f"{plural(seam.missing_rows, 'transaction')} on {day} "
             f"{'is' if seam.missing_rows == 1 else 'are'} held from the {held} and not from "
-            f"this {who}: the capture ended on {day}"
+            f"this {who}: its file or fetch ended on {day}"
             f"{' part-way through the day' if seam.last_state == PARTIAL else ''}, and no later "
-            "capture supplied them."
+            "one supplied them."
         )
     if seam.last_state == PARTIAL:
         taken = "taken during that day"
     else:
         taken = "taken at a time nobody recorded, so the day may be cut"
     return (
-        f"The {who} capture ending on {day} was {taken}, and no other source covers {day} to "
-        "compare it with. Nothing is shown to be missing."
+        f"The {who} file or fetch ending on {day} was {taken}, and no other source covers {day} "
+        "to compare it with. Nothing is shown to be missing."
     )
 
 
@@ -1073,7 +1086,7 @@ def _key(used: set[str]) -> str:
         swatch(
             _rect("cov-bar", 2, 3, 26, 12, "bar") + '<rect class="cov-listed" x="4" y="10" '
             'width="5" height="5"/><rect class="cov-listed" x="16" y="10" width="5" height="5"/>',
-            "Days on which the source listed rows",
+            "Days on which the source listed transactions",
         )
     if "possible" in used:
         swatch(
@@ -1082,7 +1095,7 @@ def _key(used: set[str]) -> str:
             "A last day that may be cut: when the file was exported is not recorded",
         )
     if "notch" in used:
-        swatch(_line("cov-notch", 15, 1, 15, 17), "Where one capture begins or ends")
+        swatch(_line("cov-notch", 15, 1, 15, 17), "Where one file or fetch begins or ends")
     if "gap" in used:
         swatch(_rect("cov-gap", 2, 3, 26, 12), "Days to fill")
     if "unavailable" in used:
@@ -1124,7 +1137,11 @@ def _key(used: set[str]) -> str:
 
 
 def _entries_html(ref: str, entries: Sequence[_Entry]) -> str:
-    groups = (("fetch", "What to fetch"), ("look", "Where to look"), ("seam", "Seams"))
+    groups = (
+        ("fetch", "What to fetch"),
+        ("look", "Where to look"),
+        ("seam", "Possible cut-offs"),
+    )
     out = ['<div class="cov-entries">']
     for key, title in groups:
         found = [e for e in entries if e.group == key]
@@ -1178,7 +1195,7 @@ def verdict(view: AccountTimeline, drawn: _Drawn, scale: Scale) -> str:
         said = f"{head}: nothing to fetch, nothing to check, and nothing to look at."
     else:
         said = (
-            f"{head}: {plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
+            f"{head}: {plural(gaps, 'gap')} to fill, {cut_offs(seams)} to check, "
             f"{plural(looks, 'thing')} to look at."
         )
     return said + not_to_scale(scale) + expected_sentence(view)
@@ -1506,7 +1523,7 @@ def _household_sentence(view: AccountTimeline) -> str:
         else "Not checked against any known balance"
     )
     todo = (
-        f"{plural(gaps, 'gap')} to fill, {plural(seams, 'seam')} to check, "
+        f"{plural(gaps, 'gap')} to fill, {cut_offs(seams)} to check, "
         f"{plural(looks, 'thing')} to look at"
         if gaps or seams or looks
         else "nothing to fetch and nothing to look at"

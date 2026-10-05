@@ -188,8 +188,9 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
         page = get(served, ref=CURRENT, month="2026-03").text
 
         for expected in (
-            "<th>Rows in the month</th><td>8</td>",
-            "<th>Rows per source</th><td><code>src-a</code>: 7, <code>src-b</code>: 2</td>",
+            "<th>Transactions in the month</th><td>8</td>",
+            "<th>Transactions per source</th>"
+            "<td><code>src-a</code>: 7, <code>src-b</code>: 2</td>",
             "<th>Seen by more than one source</th><td>1</td>",
             "<th>Pending</th><td>1</td>",
             "<th>Void</th><td>1</td>",
@@ -244,7 +245,7 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
         page = get(served, ref=CURRENT, month="2026-03").text
 
         for flag in (
-            ">one source<",
+            ">one source only<",
             ">transfer with savings-account<",
             ">transfer?<",
             ">review<",
@@ -268,7 +269,7 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
     def test_Page_ForASingleSourceAccount_NeverSaysOneSource(self, served):
         page = get(served, ref="savings-account", month="2026-03").text
 
-        assert ">one source<" not in page
+        assert ">one source only<" not in page
         assert ">transfer with current-account<" in page
 
     def test_Page_ForAnUnboundAccount_NamesTheMissingBinding(self, served):
@@ -289,7 +290,7 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
         assert "value date" in page
         from obdi.ledger import QUERIES_PER_PAGE
 
-        assert f"costs {QUERIES_PER_PAGE} statements" in page
+        assert f"makes {QUERIES_PER_PAGE} database queries" in page
 
     def test_Page_LinksToTheShapePageAndHome(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
@@ -328,13 +329,16 @@ class TestTheMonthSummaryShowsOnlyWhatIsNotZero:
         page = get(served, ref="plain", month="2026-03").text
 
         for expected in (
-            "<th>Rows in the month</th><td>2</td>",
-            "<th>Rows per source</th><td><code>src-a</code>: 2</td>",
+            "<th>Transactions in the month</th><td>2</td>",
+            "<th>Transactions per source</th><td><code>src-a</code>: 2</td>",
             "<th>Would be sent to Actual</th><td>2</td>",
             "<th>Withheld from Actual</th><td>0 (none)</td>",
         ):
             assert expected in page, expected
-        assert "<th>Sum of the store&#x27;s rows (void, folded, and reversed excluded)</th>" in page
+        assert (
+            "<th>Sum of the transactions counted (void, counted elsewhere, and reversed "
+            "excluded)</th>"
+        ) in page
         assert "<th>Sum of what would be sent to Actual</th>" in page
 
     def test_Summary_WhenACountIsNotZero_IsNeverNamedAmongTheZeroOnes(self, served):
@@ -351,8 +355,8 @@ class TestANilAmountIsJustNil:
         masked = get(served, ref="balanced", month="2026-03").text
 
         assert (
-            "<th>Sum of the store&#x27;s rows (void, folded, and reversed excluded)</th>"
-            "<td>nil</td>" in masked
+            "<th>Sum of the transactions counted (void, counted elsewhere, and reversed "
+            "excluded)</th><td>nil</td>" in masked
         )
         assert "<th>Sum of what would be sent to Actual</th><td>nil</td>" in masked
         assert "nil £" not in masked
@@ -361,8 +365,8 @@ class TestANilAmountIsJustNil:
         shown = post(served, ref="balanced").text
 
         assert (
-            "<th>Sum of the store&#x27;s rows (void, folded, and reversed excluded)</th>"
-            "<td>nil</td>" in shown
+            "<th>Sum of the transactions counted (void, counted elsewhere, and reversed "
+            "excluded)</th><td>nil</td>" in shown
         )
         assert "nil £" not in shown
         assert "nil 0" not in shown
@@ -370,7 +374,7 @@ class TestANilAmountIsJustNil:
     def test_BalancedMonth_RunningPositionPrintsNilAlone(self, served):
         masked = get(served, ref="balanced", month="2026-03").text
 
-        assert "<th>Balance by the store&#x27;s own rows</th><td>nil</td>" in masked
+        assert "<th>Balance by the transactions held</th><td>nil</td>" in masked
         assert "<th>Balance by what would be sent to Actual</th><td>nil</td>" in masked
 
     def test_UnboundAccount_NothingSent_PrintsNilAloneAtTheSentFigures(self, served):
@@ -392,7 +396,7 @@ class TestANilAmountIsJustNil:
 class TestMonthLinksSitAtTheTop:
     def test_Masked_PreviousAndNextAreOrdinaryLinksBeforeTheSummary(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
-        top = page[: page.index("<th>Rows in the month</th>")]
+        top = page[: page.index("<th>Transactions in the month</th>")]
 
         for month in ("2026-02", "2026-04"):
             link = f'href="/ledger?ref=current-account&amp;month={month}"'
@@ -409,7 +413,7 @@ class TestMonthLinksSitAtTheTop:
 
     def test_Unmasked_StepsStayPostedFormsAndSitBeforeTheSummary(self, served):
         page = post(served).text
-        top = page[: page.index("<th>Rows in the month</th>")]
+        top = page[: page.index("<th>Transactions in the month</th>")]
 
         assert 'name="month" value="2026-02"' in top
         assert 'name="month" value="2026-04"' in top
@@ -452,7 +456,7 @@ class TestMonthNavigation:
 
         assert 'class="warn"' in page
         assert "not a clean result" in page
-        assert "<th>Rows in the month</th>" not in page
+        assert "<th>Transactions in the month</th>" not in page
 
     def test_Month_WhenNotAMonth_Is400(self, served):
         assert get(served, ref=CURRENT, month="2026-13").status_code == 400
@@ -635,12 +639,12 @@ class TestEachTransactionKeepsEverythingTheTableShowed:
         item = _item_holding(post(served).text, "COFFEE QUAGGA CAFE")
 
         assert ">src-a<" in item and ">src-b<" in item
-        assert ">one source<" not in item
+        assert ">one source only<" not in item
 
     def test_Zebra_CarriesItsFlagsAndAnnotationBesideTheRow(self, served):
         item = _item_holding(post(served).text, "ZEBRA " + PRIVATE_REFERENCE)
 
-        assert ">one source<" in item
+        assert ">one source only<" in item
         assert ">absorbed 2 ids<" in item
         assert f"category: {PRIVATE_CATEGORY}" in item
         assert f"payee: {PRIVATE_PAYEE}" in item
@@ -713,7 +717,7 @@ class TestWiring:
         finally:
             httpd.shutdown()
 
-    def test_HomePage_LinksEachHeldAccountToItsLedger_BesideTheShapeLink(self, tmp_path):
+    def test_CoveragePage_LinksEachHeldAccountToItsOwnPage_WhichIsItsLedger(self, tmp_path):
         from obdi.coverage import SourceCoverage
         from obdi.web_sections import render_coverage
 
@@ -731,8 +735,10 @@ class TestWiring:
         ]
         page = render_coverage(holdings=lambda: holdings).decode()
 
-        assert 'href="/account?ref=halifax-current"' in page
+        # The field-by-field shape page is no longer linked from every block of this page: the
+        # account's own page is the one onward link, and holds the archive action.
         assert 'href="/ledger?ref=halifax-current"' in page
+        assert page.count('href="/ledger?ref=halifax-current"') == 1
 
     def test_Hook_BuiltFromTheRealConfiguration_ReadsTheStoreAndTheActualBindings(
         self, tmp_path, monkeypatch

@@ -64,7 +64,7 @@ from .coverage_timeline import AccountTimeline
 from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .errors import DataError
-from .family_anchors import families_of
+from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
@@ -121,6 +121,7 @@ from .standing_data import (
     statement_checks_for,
 )
 from .statement_listing_measure import StatementListingReport
+from .statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .store import Store, StoreIsNewer
 from .valuations import Asset, AssetKind, record_observation
@@ -639,6 +640,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 
 if TYPE_CHECKING:
+    from .balance_anchors import EffectiveOpening
     from .models import Transaction
     from .movement_completeness import MovementCompleteness
     from .parsers.base import StatementParser
@@ -2315,7 +2317,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # also strictly more work on a page that once took 45 seconds.
             merged = store.all_transactions()
             sighted = store.transactions_by_sighting()
-        mark = _timed_phase("sightings", mark)
+        mark = _timed_phase("reports", mark)
         rows = [t for t in merged if t.account_id == ref]
         contributing = sorted({t.source for t in sighted if t.account_id == ref})
         if not rows:
@@ -3067,7 +3069,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if (paused := paused_text()) is not None:
             return paused
         with Store(db_path) as store:
-            return exact_rule_report(store, _account_map(store)).describe()
+            account_map = _account_map(store)
+            return exact_rules_memo.get(
+                store,
+                lambda: exact_rule_report(
+                    store, account_map, statement_openings(store, account_map)
+                ).describe(),
+            )
 
     def statement_listing_report() -> StatementListingReport:
         from .statement_listing_measure import statement_listing_report as measure
@@ -3084,6 +3092,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     store,
                     families_of(store, account_map),
                     sibling_accounts=account_map.accounts_by_source(),
+                    openings=statement_openings(store, account_map),
                 ),
             )
 
@@ -3238,6 +3247,23 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         mark_world_key, name="statements by what they list", epoch=rebuild_epoch
     )
 
+    #: The statement-opening figures are the dearest part of two measurements on Identity health
+    #: (the exact rules and the statements by what they list), each of which read them whole: two
+    #: readings of every account's known balances, per account. Held under the same key as the
+    #: measurements that read them, so one visit works them out once and a later one not at all.
+    statement_openings_memo: KeyedMemo[StatementOpeningReport] = KeyedMemo(
+        mark_world_key, name="statement openings", epoch=rebuild_epoch
+    )
+    exact_rules_memo: KeyedMemo[str] = KeyedMemo(
+        mark_world_key, name="exact rules", epoch=rebuild_epoch
+    )
+
+    def statement_openings(store: Store, account_map: AccountMap) -> StatementOpeningReport:
+        return statement_openings_memo.get(
+            store,
+            lambda: statement_opening_report(store, families_of(store, account_map)),
+        )
+
     def mark_world(store: Store) -> MarkWorld:
         return mark_world_memo.get(
             store,
@@ -3301,6 +3327,41 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with contextlib.suppress(RebuildInProgress):
             account_standings()
 
+    def openings_key(store: Store) -> tuple[object, ...]:
+        """The standings' key, and the provider-request log that a reading's unheld-Space note
+        is drawn from: no standing reads that log (`store.NOT_STANDING_TABLES` says so), but the
+        page that shows the reading does, so a request recorded must show on the next view."""
+        attempts = store.connection.execute(
+            "SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM fetch_attempts"
+        ).fetchone()
+        return (*standings_memo_key(store), *tuple(attempts))
+
+    #: Each account's reading of its known balances, as its own page draws it, held while
+    #: nothing it reads has changed. A main account's reading is a third of its page (measured
+    #: on an invented store of 5,223 rows and five Spaces: 1.9 of 4.5 profiled seconds) and
+    #: depends on the store alone, so every month of the page, and every reload, shares it.
+    openings_memo: KeyedMemo[dict[tuple[str, date | None], EffectiveOpening]] = KeyedMemo(
+        openings_key, name="account openings", epoch=rebuild_epoch
+    )
+
+    def held_opening(
+        store: Store,
+        ref: str,
+        rows: list[Transaction] | None = None,
+        *,
+        families: Families | None = None,
+        explain_after: date | None = None,
+    ) -> EffectiveOpening:
+        from .balance_anchors import effective_opening
+
+        held = openings_memo.get(store, dict)
+        key = (ref, explain_after)
+        if key not in held:
+            held[key] = effective_opening(
+                store, ref, rows, families=families, explain_after=explain_after
+            )
+        return held[key]
+
     def ledger_data(ref: str, month: str) -> Ledger:
         from .ledger import build_ledger
 
@@ -3335,6 +3396,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families=families_of(store, _account_map(store)),
                 movement=movement_report(store),
                 with_protection=True,
+                opening_reader=held_opening,
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:

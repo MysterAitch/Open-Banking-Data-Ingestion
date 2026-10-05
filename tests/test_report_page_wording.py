@@ -113,7 +113,7 @@ class TestTheReviewQueueReportIsMaskedUnlessPostedFor:
         response = self._request(self._config(tmp_path), "POST", "/review-report")
 
         assert "example masked=False" in response.text
-        assert "unmasked rendering" in response.text
+        assert "Showing the real values" in response.text
         assert response.headers["Cache-Control"] == "no-store"
 
     def test_Page_Fetched_IsNotMarkedNoStore(self, tmp_path):

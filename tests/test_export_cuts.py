@@ -986,7 +986,7 @@ class TestWhatTheOtherSideHoldsThatIsLikeAMissingRow:
 
         assert (
             "the export lists a row of the same size and direction (whose recipient could "
-            "not be compared), 10 days away, sighted on another stored row (out row dated"
+            "not be compared), 10 days away, reported on another stored row (out row dated"
         ) in page
         assert "1234" not in page
         assert "12.34" not in page

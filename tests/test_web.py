@@ -993,10 +993,10 @@ class TestEmptyKnownRefsStayBindable:
         from datetime import date
 
         from obdi.coverage import SourceCoverage
-        from obdi.web import _holdings_rows
+        from obdi.web_sections import render_coverage
 
-        rendered = _holdings_rows(
-            lambda: [
+        rendered = render_coverage(
+            holdings=lambda: [
                 SourceCoverage(
                     account_id="halifax-current-account",
                     source="truelayer",
@@ -1013,37 +1013,56 @@ class TestEmptyKnownRefsStayBindable:
             },
         )
 
-        assert 'value="starling:b2cec056"' in rendered
-        assert rendered.count('action="/bind"') == 1
+        page = rendered.decode()
+        assert 'value="starling:b2cec056"' in page
+        assert page.count('action="/bind"') == 1
 
 
 class TestAccountFeeders:
-    def test_SeveralRefsFeedingOneAccount_RenderAsAWarning(self):
+    def test_SeveralAccountsOfOneProviderBoundToOne_AreTheFault(self):
         """The invisible mis-config behind the reassembling blob: three
-        provider refs bound to one Space. The map's edges must be
-        readable where the account is listed."""
-        from obdi.web import _feeder_line
+        provider refs of one provider bound to one Space."""
+        from obdi.web_coverage import faulty_providers
 
-        line = _feeder_line(
-            "starling-space-bills",
-            {
-                "starling-space-bills": [
-                    "starling:343fa965-8bb7",
-                    "starling:b2cec056-b0d8",
-                    "starling:bceb25f1-1fad",
-                ]
-            },
+        found = faulty_providers(
+            ["starling:343fa965-8bb7", "starling:b2cec056-b0d8", "starling:bceb25f1-1fad"]
         )
-        assert "warn" in line
-        assert "several sources feed this one account" in line
 
-        single = _feeder_line(
-            "halifax-current-account", {"halifax-current-account": ["truelayer:e9f8"]}
-        )
-        assert "warn" not in single
-        assert "bound from:" in single
+        assert found == {"starling": ["343fa965-8bb7", "b2cec056-b0d8", "bceb25f1-1fad"]}
 
-        assert _feeder_line("unbound", {}) == ""
+    def test_OneAccountFromEachOfSeveralProviders_IsOrdinaryAndNotAFault(self):
+        from obdi.web_coverage import faulty_providers
+
+        assert faulty_providers(["truelayer:e9f8", "starling:b2cec056"]) == {}
+        assert faulty_providers(["truelayer:e9f8"]) == {}
+        assert faulty_providers([]) == {}
+
+    def test_ARefWithNoProvider_IsNeverAFault(self):
+        from obdi.web_coverage import faulty_providers
+
+        assert faulty_providers(["halifax", "halifax"]) == {}
+
+    def test_ThreeStarlingRefsOnOneSpace_RenderAWarningBesideTheSpaceNamingEachId(self):
+        from datetime import date
+
+        from obdi.coverage import SourceCoverage
+        from obdi.web_sections import render_coverage
+
+        ids = ["343fa965-8bb7", "b2cec056-b0d8", "bceb25f1-1fad"]
+        rendered = render_coverage(
+            holdings=lambda: [
+                SourceCoverage(
+                    account_id="starling-space-bills", source="starling", count=3,
+                    earliest=date(2026, 1, 1), latest=date(2026, 9, 1), inflow_minor=0,
+                    outflow_minor=0, with_durable_id=3,
+                )
+            ],
+            account_feeders=lambda: {"starling-space-bills": [f"starling:{i}" for i in ids]},
+            today=date(2026, 10, 5),
+        ).decode()
+
+        assert '<p class="warn">3 <code>starling</code> accounts are bound to this one' in rendered
+        assert all(f"<code>{i}</code>" in rendered for i in ids)
 
 
 class TestBackfillBanner:
@@ -2163,8 +2182,8 @@ class TestNamesLeadAndDormancySpeaks:
     """The providers told us every name from the first pull; pages use them.
 
     Ids demote to small print, and an account whose latest transaction is
-    over a year old carries a neutral quiet-since chip - the date range
-    matters most exactly when it is old.
+    over a year old is set apart under a "Quiet accounts" heading - the
+    date range matters most exactly when it is old.
     """
 
     def _server(self, tmp_path, holdings, display_labels):
@@ -2226,67 +2245,10 @@ class TestNamesLeadAndDormancySpeaks:
         assert "Main (starling)" in page
         # The id survives as small print, still the link target's query key.
         assert "starling:343fa965-8bb7" in page
-        # One quiet chip: the archived space announces itself; the live
-        # account carries none.
-        assert page.count("quiet since") == 1
-
-
-class TestTimelineSegments:
-    """One comparable axis; segment style is the claim being made.
-
-    Solid only where transactions are HELD; faint where asked and empty
-    (which is how a dormant tail becomes a long pale stretch); dotted before
-    a known provider boundary; dashed where nothing was ever asked; blank
-    future after today.
-    """
-
-    def test_HalifaxShape_TruncatedThenHeldThenFuture(self):
-        from obdi.web import timeline_segments
-
-        segments = timeline_segments(
-            date(2019, 1, 1),
-            date(2026, 9, 1),
-            earliest=date(2020, 8, 7),
-            latest=date(2026, 7, 31),
-            today=date(2026, 8, 2),
-            boundary=date(2020, 8, 1),
-            probed=date(2020, 8, 1),
-            covered=date(2026, 8, 2),
-        )
-
-        kinds = [kind for kind, _ in segments]
-        assert kinds == ["truncated", "empty", "held", "empty", "future"]
-        assert abs(sum(width for _, width in segments) - 100) < 0.5
-
-    def test_ArchivedSpace_DormantTailReadsAsALongEmptyStretch(self):
-        from obdi.web import timeline_segments
-
-        segments = timeline_segments(
-            date(2019, 1, 1),
-            date(2026, 9, 1),
-            earliest=date(2019, 1, 21),
-            latest=date(2022, 9, 27),
-            today=date(2026, 8, 2),
-            covered=date(2026, 8, 2),
-        )
-
-        kinds = dict(segments)
-        # The dormancy tail (2022 -> today) dwarfs everything else.
-        assert kinds["empty"] > kinds["held"] * 0.8
-        assert "truncated" not in kinds
-
-    def test_FutureIsCapped_NotFourYearsOfBlankTape(self):
-        from obdi.web import timeline_segments
-
-        segments = timeline_segments(
-            date(2026, 1, 1),
-            date(2026, 10, 1),
-            earliest=date(2026, 2, 1),
-            latest=date(2026, 8, 1),
-            today=date(2026, 8, 2),
-        )
-
-        assert segments[-1][0] == "future"
+        # The account untouched for years is set apart under its own heading, after the live one.
+        assert page.count("Quiet accounts") == 1
+        assert page.rindex("Main (starling)") < page.index("Quiet accounts")
+        assert page.index("Quiet accounts") < page.rindex("Holiday Fund (starling space)")
 
 
 class TestUploadingAFileFromThePage:

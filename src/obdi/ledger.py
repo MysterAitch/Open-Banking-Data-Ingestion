@@ -46,7 +46,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .accounts import AccountRef
 from .agreement import Standing, standing_of
@@ -71,7 +71,7 @@ from .fault_explanation import WalkExplanation
 from .fault_structure import StructureReport, account_report, walk_report
 from .feed_statuses import FeedStatuses
 from .identity_health import provider_ids_by_row, shared_identity_groups
-from .join_basis import JoinCounts, SightingView, join_counts, sighting_views
+from .join_basis import JoinCounts, SightingView, join_counts_of_bases, sighting_views
 from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
@@ -90,9 +90,11 @@ if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
 #: Statements issued for one account that holds rows: its rows, the pairing
 #: table, the sightings, the provider ids, the shared identities, the open
 #: review flags, the two annotation kinds, the one read of every sighting's basis
-#: and stated dates (`join_basis`), and the one read of the coded words its sources stated.
-#: An account with no rows adds
-#: the registry lookup that tells "declared but empty" from "unknown".
+#: (`join_basis.join_counts_of_bases`, from the read that gives each source's date), and the
+#: two reads of the stated dates and the coded words its sources stated for the month's rows
+#: alone (`Store.sighting_details_of`, which asks in chunks of 400, so a month of more rows adds
+#: two for each chunk beyond the first; a month holding none issues neither). An account with
+#: no rows adds the registry lookup that tells "declared but empty" from "unknown".
 QUERIES_PER_PAGE = 11
 
 #: Statements issued to look for the account's opening-balance anchors when it
@@ -900,6 +902,20 @@ def _empty(
     )
 
 
+class OpeningReader(Protocol):
+    """What `effective_opening` is called with, for a caller that answers it from a held reading."""
+
+    def __call__(
+        self,
+        store: Store,
+        ref: str,
+        rows: list[Transaction] | None = None,
+        *,
+        families: Families | None = None,
+        explain_after: date | None = None,
+    ) -> EffectiveOpening: ...
+
+
 def build_ledger(
     store: Store,
     ref: str,
@@ -912,8 +928,13 @@ def build_ledger(
     movement: MovementCompleteness | None = None,
     explain_after: date | None = None,
     with_protection: bool = False,
+    opening_reader: OpeningReader | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None.
+
+    `opening_reader` stands in for `effective_opening` where the caller holds readings of the
+    account's balances between requests (the page's data hook does: `cli.ledger_data`). It is
+    called with exactly the arguments `effective_opening` would be.
 
     `bound` is whether the account has an Actual destination; it is passed in
     because the bindings live in a file the store does not read. `archive` is
@@ -947,6 +968,7 @@ def build_ledger(
         explain_after=explain_after,
         with_protection=with_protection,
         check=check,
+        opening_reader=opening_reader or effective_opening,
     )
     return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
 
@@ -981,6 +1003,7 @@ def _ledger_for(
     explain_after: date | None,
     with_protection: bool,
     check: Check | None,
+    opening_reader: OpeningReader,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -1013,7 +1036,7 @@ def _ledger_for(
         # A balance-only account holds no rows of its own, and what its stated
         # balances imply is its ledger.
     else:
-        opening = effective_opening(
+        opening = opening_reader(
             store, ref, held, families=families, explain_after=explain_after
         )
         entries = typed_entries(store, ref)
@@ -1022,8 +1045,7 @@ def _ledger_for(
     other_side = _confirmed_other_sides(store, ref)
     rows = [replace(t, transfer_confirmed=t.entity_id in other_side) for t in rows]
 
-    sightings = _sightings(store, ref)
-    details = store.sighting_details(ref)
+    sightings, bases = _sightings(store, ref)
     # A derived row has no source in the sense this list means: nothing fed it.
     account_sources = sorted(
         (
@@ -1055,6 +1077,12 @@ def _ledger_for(
         shown = _label(year, number)
     year, number = parse_month(shown)
     first, last = date(year, number, 1), _month_end(year, number)
+
+    # Only the rows on show are listed with what each sighting stated; every other row is
+    # counted by the basis its sightings joined on, which is all `joins` reads of one.
+    details = store.sighting_details_of(
+        ref, [t.entity_id for t in rows if first <= t.value_date <= last]
+    )
 
     built: list[tuple[Transaction, LedgerRow]] = []
     for t in rows:
@@ -1259,8 +1287,8 @@ def _ledger_for(
             if with_protection
             else None
         ),
-        joins=join_counts(
-            (t.value_date, row.sightings)
+        joins=join_counts_of_bases(
+            (t.value_date, bases.get(t.entity_id, ()))
             for t, row in built
             if not t.status.is_history and row.origin == ""
         ),
@@ -1334,22 +1362,26 @@ def _confirmed_other_sides(store: Store, ref: str) -> dict[str, str]:
     return found
 
 
-def _sightings(store: Store, ref: str) -> dict[str, dict[str, str]]:
-    """entity id -> source -> the earliest date that source gave it, or ''."""
+def _sightings(
+    store: Store, ref: str
+) -> tuple[dict[str, dict[str, str]], dict[str, list[str]]]:
+    """(entity id -> source -> the earliest date that source gave it, or ''; entity id -> the
+    basis each of its sightings joined on), from one read of the account's sightings."""
     seen: dict[str, dict[str, str]] = {}
+    bases: dict[str, list[str]] = {}
     for row in store.connection.execute(
         "SELECT s.entity_id AS entity_id, s.source AS source, "
-        "       MIN(s.observed_date) AS observed_date "
+        "       s.observed_date AS observed_date, s.basis AS basis "
         "FROM transaction_sources s "
         "JOIN transactions t ON t.entity_id = s.entity_id "
-        "WHERE t.account_id = ? "
-        "GROUP BY s.entity_id, s.source",
+        "WHERE t.account_id = ?",
         (ref,),
     ):
-        seen.setdefault(str(row["entity_id"]), {})[str(row["source"])] = str(
-            row["observed_date"] or ""
-        )
-    return seen
+        by_source = seen.setdefault(str(row["entity_id"]), {})
+        source, day = str(row["source"]), str(row["observed_date"] or "")
+        by_source[source] = min(by_source[source], day) if source in by_source else day
+        bases.setdefault(str(row["entity_id"]), []).append(str(row["basis"]))
+    return seen, bases
 
 
 def _absorbed_ids(store: Store, ref: str) -> dict[str, int]:

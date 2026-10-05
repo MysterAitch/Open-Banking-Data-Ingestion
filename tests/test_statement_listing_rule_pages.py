@@ -173,7 +173,7 @@ class TestTheAccountPage:
         said = page_of(served[0], "r-lone", "2026-01").said
 
         assert "Known balances and the opening (1 add up, none differ)" in said
-        assert "absorbs every missing or surplus row" not in said
+        assert "absorbs every missing or surplus transaction" not in said
         assert "is tested by its own statement" in said
         # The days its statement tests (from its first day, 2025-12-11) are not "no known
         # balance"; the days before it, which nothing tests, still are.

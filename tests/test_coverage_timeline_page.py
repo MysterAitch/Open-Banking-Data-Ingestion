@@ -73,7 +73,7 @@ def rects(svg: str, cls: str) -> list[dict[str, str]]:
 class TestPage:
     def test_Page_ForAKnownAccount_LoadsWithItsVerdictCountedByHand(self, page):
         assert (
-            "3 sources, 2026-07-01 to 2026-10-05: 1 gap to fill, 2 seams to check, "
+            "3 sources, 2026-07-01 to 2026-10-05: 1 gap to fill, 2 possible cut-offs to check, "
             "3 things to look at."
         ) in page
 
@@ -150,20 +150,25 @@ class TestMarksAndTheList:
 
     def test_RedSeam_IsSaidInCountsAndAnchoredToItsDay(self, page):
         assert (
-            "1 row on 2026-07-30 is held from the bank feed and aggregator and not from this "
-            "export file"
+            "1 transaction on 2026-07-30 is held from the bank feed and aggregator and not from "
+            "this export file"
         ) in page
 
     def test_Entries_AreGroupedAsTheOwnerWouldAskForThem(self, page):
-        order = [page.index(f"<h3>{t}</h3>") for t in ("What to fetch", "Where to look", "Seams")]
+        order = [
+            page.index(f"<h3>{t}</h3>")
+            for t in ("What to fetch", "Where to look", "Possible cut-offs")
+        ]
         assert order == sorted(order)
 
     def test_Key_ListsExactlyTheMarksDrawn(self, page):
         begins = page.index('class="cov-key"')
         key = page[begins : page.index("</ul>", begins)]
         for label in (
-            "A seam where another source holds rows this capture lacks",
-            "A seam with no other source to compare it with",
+            "A day this source&#x27;s file or fetch may have been cut short, where another "
+            "source holds transactions it lacks",
+            "A day this source&#x27;s file or fetch may have been cut short, with no other "
+            "source to compare it with",
             "A known balance the transactions do not add up to",
             "Days to fill",
         ):
@@ -247,7 +252,7 @@ class TestOppositeScenarios:
                              aggregator=(AGGREGATOR[0], filler, AGGREGATOR[1]))
         with served(db, TODAY) as address:
             text = httpx.get(f"{address}/coverage-timeline?ref=main", timeout=60).text
-        assert "0 gaps to fill, 0 seams to check" in text
+        assert "0 gaps to fill, 0 possible cut-offs to check" in text
         assert 'class="cov-next"' not in text
 
     def test_Page_WhenOnlyTheExportSeamIsOverlapped_TheRedSeamGoes(self, tmp_path):
@@ -256,7 +261,7 @@ class TestOppositeScenarios:
         with served(db, TODAY) as address:
             text = httpx.get(f"{address}/coverage-timeline?ref=main", timeout=60).text
         assert "is held from the bank feed" not in text
-        assert "1 seam to check" in text
+        assert "1 possible cut-off to check" in text
         # The row is still in no export, and the page says so as a row to look at, which the
         # red seam had been saying for it.
         assert "1 row on 2026-07-30 is listed by another source" in text

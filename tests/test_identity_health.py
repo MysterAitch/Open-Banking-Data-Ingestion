@@ -393,7 +393,7 @@ class TestTheReportShowsCountsAndNothingElse:
             _three_payments_months_apart(store)
             text = identity_health(store).describe()
 
-        assert "no rows share an identity" in text
+        assert "no transactions share an identity" in text
         assert "every provider id reported has a row of its own" in text
 
     def test_Describe_OnAnEmptyStore_SaysThereIsNothingToCount(self, tmp_path):

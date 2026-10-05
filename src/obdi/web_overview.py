@@ -21,12 +21,14 @@ EVERY TIME PRINTED IS UTC, and the evidence fold says so once (`TIMES_NOTE`), no
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
 from .account_names import AccountShown
+from .agreement import Standing
 from .fetch_gaps import FetchReport
 from .overview import (
     ALERT_CONDITIONS,
@@ -54,7 +56,7 @@ from .standing_data import (
     not_adding_up_sentence,
     verification_of,
 )
-from .todo import Todo, build_todos, lockable, wanted_days
+from .todo import Todo, build_todos, grouped, lockable, wanted_days
 from .trust import Trust, trust_of
 from .trust_bar import axis_html, bar_html, key_html
 
@@ -211,7 +213,7 @@ def data_line(
             f"{cycle}; {said}.",
         )
     if finished is None:
-        return StatusLine("Data", href, "unproven", "pill-warn", f"{cycle}.")
+        return StatusLine("Data", href, "unknown","pill-warn", f"{cycle}.")
     return StatusLine("Data", href, "current", "pill-ok", f"{cycle}; no feed is stale or silent.")
 
 
@@ -299,24 +301,41 @@ def _names_html(todo: Todo, shown: Callable[[str], AccountShown]) -> str:
     return serial([shown(ref).as_name() for ref in refs])
 
 
+_ISO_DAY = re.compile(r"\d{4}-\d\d-\d\d")
+
+
+def _whole_dates(escaped: str) -> str:
+    """Each date in already-escaped text set so that a line never breaks inside it, at a hyphen."""
+    return _ISO_DAY.sub(lambda found: f'<span class="nowrap">{found.group(0)}</span>', escaped)
+
+
 def _todo_html(todo: Todo, shown: Callable[[str], AccountShown], today: date, *, lead: bool) -> str:
     parts = []
     names = _names_html(todo, shown)
     if names:
         parts.append(f"<b>{names}</b>")
-    parts.append(_esc(todo.why))
+    # A statement wanted says its days and when it fell due; anything else says its one short
+    # reason and, where it is old, how old. The long reason is on the account's page and on What
+    # to fetch next.
+    days = todo.days if todo.kind == "fetch-newer-statement" else None
+    if days is not None:
+        parts.append(f"{days[0].isoformat()} to {days[1].isoformat()}")
+    else:
+        parts.append(_esc(todo.why.rstrip(".")))
     if todo.since is not None:
         day, age = _age_words(todo.since, today)
-        parts.append(
-            f"since {day}" + (f' <span class="age">{_esc(age)}</span>' if age else "")
-        )
+        aged = f' <span class="age">{_esc(age)}</span>' if age else ""
+        if days is not None:
+            parts.append(f"due since {day}{aged}")
+        else:
+            parts[-1] += aged
     named = ("todo", _SEVERITY_CLASS[todo.urgency], "guess" if todo.guess else "")
     classes = " ".join(part for part in named if part)
     button = "button" if lead else "button secondary"
     return (
         f'<li class="{classes}"><div class="todo-text">'
-        f'<p class="todo-what">{_esc(todo.title)}</p>'
-        f'<p class="todo-why">{" &middot; ".join(parts)}</p></div>'
+        f'<p class="todo-what">{_whole_dates(_esc(todo.title))}</p>'
+        f'<p class="todo-why">{_whole_dates(" &middot; ".join(parts))}</p></div>'
         f'<a class="{button}" href="{_esc(todo.control.href)}">{_esc(todo.control.label)}</a></li>'
     )
 
@@ -391,11 +410,11 @@ def row_reading(account: AccountOverview) -> RowReading:
         return RowReading("paused", "pill-warn", "paused while the rebuild runs", 2)
     standing = account.standing
     if account.state == EMPTY:
-        return RowReading("empty", "pill-quiet", "declared, no rows held", 3)
+        return RowReading("empty", "pill-quiet", "declared, no transactions held", 3)
     feed = {SILENT: "; feed silent", NEVER_ASKED: "; provider never asked"}.get(account.state, "")
     if standing is None:
         return RowReading(
-            NOTHING_TO_CHECK_AGAINST, "pill-warn", f"verification not read{feed}", 1
+            NOTHING_TO_CHECK_AGAINST, "pill-warn", f"known balances not read{feed}", 1
         )
     own = standing.standing.own
     if standing.protection_broken:
@@ -469,6 +488,22 @@ def _trust_of(
     )
 
 
+def _family_trust(parent: AccountOverview, today: date) -> Trust:
+    """The stretches of the family a Space is tested with: nothing is locked in or wanted for the
+    Space itself, so only what the family's agreement establishes is drawn."""
+    standing = parent.standing
+    if standing is not None and standing.standing.whole is not None:
+        standing = replace(
+            standing, standing=Standing(standing.standing.whole, None), protected_through=None,
+            protection_broken=False,
+        )
+    elif standing is not None:
+        standing = replace(standing, protected_through=None, protection_broken=False)
+    return trust_of(
+        first=parent.first, newest=parent.newest, standing=standing, wanted=(), today=today
+    )
+
+
 def _flag_html(todo: Todo | None, today: date) -> str:
     """What the account is waiting for, with its age: the one slot that is empty when the account
     asks nothing."""
@@ -491,6 +526,7 @@ def _row_html(
     today: date,
     *,
     space: bool,
+    by_ref: Mapping[str, AccountOverview],
 ) -> str:
     target = _esc(quote(account.ref, safe=""))
     name = shown(account.ref).as_name()
@@ -498,13 +534,23 @@ def _row_html(
         flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', (
             "Paused while the rebuild runs."
         )
+    elif account.balance_only and account.state == EMPTY:
+        # Declared to be tracked by balances stated by hand: holding no transactions is its
+        # design. The date of the last one stated is not carried on the overview, so none is said.
+        flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', (
+            "Its balance is stated by hand."
+        )
     else:
         trust = _trust_of(account, wanted, today)
         flag = _flag_html(first_todo.get(account.ref), today)
-        bar = bar_html(trust, today)
         said = trust.short
-        if account.parent is not None and said.startswith(NOTHING_TO_CHECK_AGAINST.capitalize()):
-            said = f"A Space of {shown(account.parent).name}, tested with it and not on its own."
+        parent = by_ref.get(account.parent) if account.parent is not None else None
+        if parent is not None and said.startswith(NOTHING_TO_CHECK_AGAINST.capitalize()):
+            said = f"A Space of {shown(parent.ref).name}, tested with it and not on its own."
+            # What tests a Space is its family, so its bar is the family's stretches: the
+            # parent's whole-family agreement where there is one, else the parent's own.
+            trust = _family_trust(parent, today)
+        bar = bar_html(trust, today)
     return (
         f'<li{" class=space" if space else ""}>'
         f'<a class="tap arow" href="/ledger?ref={target}"><span class="a-name">{name}</span>'
@@ -546,6 +592,7 @@ def _accounts_html(
     manage = _MANAGE_ACCOUNTS
     if not overview.accounts:
         return f"<p>No account is held or declared yet.</p>{manage}"
+    by_ref = {a.ref: a for a in overview.accounts}
     first_todo: dict[str, Todo] = {}
     for todo in todos:
         if todo.account is not None:
@@ -556,12 +603,16 @@ def _accounts_html(
         if parent.state == ARCHIVED:
             archived.append(parent)
         else:
-            rows.append(_row_html(parent, shown, first_todo, wanted, today, space=False))
+            rows.append(
+                _row_html(parent, shown, first_todo, wanted, today, space=False, by_ref=by_ref)
+            )
         for space in spaces:
             if space.state == ARCHIVED:
                 archived.append(space)
             else:
-                rows.append(_row_html(space, shown, first_todo, wanted, today, space=True))
+                rows.append(
+                    _row_html(space, shown, first_todo, wanted, today, space=True, by_ref=by_ref)
+                )
     live = (
         f'{axis_html(today)}<ul class="alist">{"".join(rows)}</ul>' if rows else ""
     )
@@ -674,7 +725,7 @@ def overview_html(
     def shown(ref: str) -> AccountShown:
         return accounts_shown.get(ref) or AccountShown(ref)
 
-    todos = build_todos(overview, report, lambda ref: shown(ref).name)
+    todos = grouped(build_todos(overview, report, lambda ref: shown(ref).name))
     lede = ""
     if overview.rebuilding is not None:
         verdict = Verdict(overview.rebuilding.sentence(), "warn")

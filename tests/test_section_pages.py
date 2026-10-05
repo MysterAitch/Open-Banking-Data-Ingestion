@@ -185,7 +185,7 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
         [
             ("/connections", "Connections", "Add a bank"),
             ("/actual", "Connections", "Push to Actual now"),
-            ("/coverage", "More", "Held so far"),
+            ("/coverage", "More", "fed by 1 source"),
             ("/import", "Bring in", "Preview import"),
             ("/diagnostics", "More", "Repairs"),
             ("/admin", "More", "Repairs"),
@@ -208,16 +208,17 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
 
         assert fragment in page
         assert current_section(page) == [section]
-        # The Actual page opens with its verdict, which is what the lede is for elsewhere.
-        opening = 'id="verdict"' if path == "/actual" else '<p class="lede">'
+        # The Actual page opens with its verdict and Coverage by source with its counts, which
+        # is what the lede is for elsewhere: a lede above either spent a line before the first fact.
+        openings = {"/actual": 'id="verdict"', "/coverage": 'class="cov-summary"'}
+        opening = openings.get(path, '<p class="lede">')
         assert page.index(opening) < page.index(fragment)
 
-    def test_CoveragePage_SaysInOneSentenceHowItDiffersFromTheAccountCards(self, serve):
+    def test_CoveragePage_OpensWithItsCountsAndLinksTheTwoPagesThatTakeOverTheRest(self, serve):
         page = fetch(serve(holdings=coverage_rows), "/coverage")
 
-        assert "Coverage by source" in page
-        assert "one row for each source feeding an account" in page
-        assert "one card per account" in page
+        assert page.index('class="cov-summary"') < page.index('href="/coverage-timeline"')
+        assert 'href="/gaps"' in page
 
     def test_ImportPage_ExplainsBothDoorsAndLinksTheStatementUpload(self, serve):
         page = fetch(serve(), "/import")

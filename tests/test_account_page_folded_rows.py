@@ -31,8 +31,8 @@ from obdi.store import Store
 from served_store import environment_for, served_store
 from test_space_attribution import AGGREGATOR, BILLS, FEED, MAIN, Household, pay
 
-COPIES_WORDS = "copies not counted (held under a Space, or itemised by a statement)"
-CHIP = "copy, not counted"
+COPIES_WORDS = "transactions counted elsewhere (held in a Space, or listed by a statement)"
+CHIP = "counted elsewhere"
 
 
 def _arrive_household(store: Store) -> None:
@@ -120,14 +120,17 @@ def page(request: pytest.FixtureRequest, base: str) -> str:
 class TestTheMonthsCounts:
     def test_MonthWithCopies_HeaderSaysHowManyRowsAreCountedAndHowManyAreCopies(self, page):
         assert re.search(
-            r'<p class="sub">7 rows: 4 counted, 3 copies not counted\. Sources ', page
+            r'<p class="sub">7 transactions: 4 counted, 3 transactions counted elsewhere\. '
+            r"Sources ",
+            page,
         ), "the count compared with a bank's app is the counted one"
 
     def test_MonthWithoutCopies_HeaderKeepsItsPlainForm(self, base):
         page = masked(base, "2026-08")
 
-        assert '<p class="sub">1 row. Sources ' in page
-        assert "not counted" not in page
+        assert '<p class="sub">1 transaction. Sources ' in page
+        assert "transactions counted elsewhere" not in page
+        assert f">{CHIP}<" not in page
 
     def test_MonthWithCopies_ListsFourCountedRowsAndThreeFolded(self, page):
         assert len(counted_items(page)) == 4
@@ -138,7 +141,7 @@ class TestFoldedCopiesAreQuiet:
     def test_CopyRows_CarryNoRedRailAndNoOneSourceWarning(self, page):
         for item in folded_items(page):
             assert "flagged" not in item and "doubtful" not in item
-            assert "one source" not in item
+            assert "one source only" not in item
             assert "pill-bad" not in item
             assert "withheld from Actual" not in item
 
@@ -177,15 +180,15 @@ class TestTheCollapsedLine:
 
 class TestWhichCountedRowsAreFlaggedAndInWhatColour:
     def test_CountedRowOneSourceListsWhereTwoFeed_IsAmberNotRed(self, page):
-        lone = [item for item in counted_items(page) if ">one source<" in item]
+        lone = [item for item in counted_items(page) if ">one source only<" in item]
         assert len(lone) == 2, "the bakery payment and the unconfirmed transfer"
         bakery = next(item for item in lone if "transfer?" not in item)
         assert bakery.startswith('<li class="txn doubtful"')
-        assert re.search(r'<span class="pill pill-warn"[^>]*>one source</span>', bakery)
+        assert re.search(r'<span class="pill pill-warn"[^>]*>one source only</span>', bakery)
         assert "pill-bad" not in bakery
 
     def test_CountedRowBothFeedsList_CarriesNoWarningAtAll(self, page):
-        plain = [item for item in counted_items(page) if ">one source<" not in item]
+        plain = [item for item in counted_items(page) if ">one source only<" not in item]
         assert len(plain) == 2
         assert all(item.startswith('<li class="txn"') for item in plain)
 

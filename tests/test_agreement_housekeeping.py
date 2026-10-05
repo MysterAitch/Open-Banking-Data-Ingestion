@@ -171,7 +171,10 @@ class TestAnAccountHeldBack:
         assert "its transactions last added up to a known balance on 2026-03-10" in (
             found[0].message
         )
-        assert "The transactions stop adding up at 2026-03-12, because of a movement fault" in (
+        assert (
+            "A check of the money moved found a problem dated 2026-03-12, so the transactions "
+            "cannot be shown to add up from then on"
+        ) in (
             found[0].message
         )
 

@@ -10,7 +10,8 @@ Two halves, so a page that draws the rail and a page that draws forty of them ca
   change of scheme is a change of tokens. The rail also carries its own text alternative
   (`rail_text`), because a bar of colour says nothing to a screen reader or in greyscale.
 
-WHAT EACH KIND OF SEGMENT SAYS:
+WHAT EACH KIND OF SEGMENT SAYS (the sentence for each is `_SENTENCES`, the one place the page's
+words for them are written):
 
 - `agree`: the rows reproduce the known balances here (teal, solid);
 - `break`: the day the rows stop agreeing, where something holds the account back (red, a mark);
@@ -44,10 +45,16 @@ BREAK_PIXELS = 5
 RAIL_HEIGHT = 12
 TICK_OVERHANG = 3
 
-_NAMES = {
-    AGREE: "the transactions add up to the known balances",
-    UNPROVEN: "not yet proven",
-    UNKNOWN: "no known balance",
+#: The sentence for each stretch of the bar, said of the dates it runs between. `{start}` and
+#: `{end}` are the stretch's own dates; the unchecked stretch names the known balance it ends at,
+#: because that is the thing the transactions are not shown to add up to.
+_SENTENCES = {
+    AGREE: "The transactions add up to the known balances from {start} to {end}.",
+    UNPROVEN: (
+        "From {start} to {end} the transactions are not shown to add up to the known balance "
+        "for {end}."
+    ),
+    UNKNOWN: "No known balance from {start} to {end}.",
 }
 
 
@@ -142,18 +149,19 @@ def rail_text(rail: Rail) -> str:
     parts = [f"History from {rail.start.isoformat()} to {rail.end.isoformat()}."]
     for segment in rail.segments:
         if segment.kind == BREAK:
-            parts.append(f"Stops adding up at {segment.start.isoformat()}.")
+            parts.append(f"The transactions stop adding up at {segment.start.isoformat()}.")
         else:
             parts.append(
-                f"{_NAMES[segment.kind][0].upper()}{_NAMES[segment.kind][1:]} from "
-                f"{segment.start.isoformat()} to {segment.end.isoformat()}."
+                _SENTENCES[segment.kind].format(
+                    start=segment.start.isoformat(), end=segment.end.isoformat()
+                )
             )
-    if rail.protected is None:
-        parts.append("Not protected.")
-    elif rail.protected.broken:
-        parts.append(f"Protected through {rail.protected.day.isoformat()}, but broken.")
-    else:
-        parts.append(f"Protected through {rail.protected.day.isoformat()}.")
+    # An account nothing protects says nothing of protection: its absence is not a problem.
+    if rail.protected is not None:
+        if rail.protected.broken:
+            parts.append(f"Protected through {rail.protected.day.isoformat()}, but broken.")
+        else:
+            parts.append(f"Protected through {rail.protected.day.isoformat()}.")
     return " ".join(parts)
 
 

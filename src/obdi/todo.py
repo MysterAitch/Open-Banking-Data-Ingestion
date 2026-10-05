@@ -32,7 +32,7 @@ waiting is split at each expected closing day.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from urllib.parse import quote
 
@@ -76,6 +76,10 @@ class Todo:
     waiting: str = ""
     #: The accounts a to-do names where there are several (a flagged-transaction decision).
     accounts: tuple[str, ...] = ()
+    #: For a file wanted, the days it covers, and how many files this item stands for (more than
+    #: one only after `grouped`).
+    days: tuple[date, date] | None = None
+    files: int = 1
 
 
 def account_page(ref: str, anchor: str = "") -> str:
@@ -259,11 +263,13 @@ def _gap_todos(gap: FetchGap) -> list[Todo]:
             title=_file_title(gap, first, last),
             account=gap.account,
             why=_why(gap),
-            since=first,
+            # A statement the cadence says is waiting fell due on its closing day.
+            since=last if gap.kind is GapKind.NEWER_STATEMENT and len(gap.closings) >= 2 else first,
             urgency=HOUSEKEEPING,
             control=control,
             guess=gap.basis is Basis.INFERRED,
             waiting="Export wanted" if exports else "Statement wanted",
+            days=(first, last),
         )
         for first, last in _periods(gap)
     ]
@@ -294,6 +300,37 @@ def build_todos(
     # Stable: within a band the attention items keep `overview`'s order, then the files and the
     # balances to confirm keep `fetch_report`'s, most urgent account first.
     return tuple(sorted(found, key=lambda todo: todo.urgency))
+
+
+def grouped(todos: Sequence[Todo]) -> tuple[Todo, ...]:
+    """The things to do as rows: consecutive statements wanted for one account, whose days run on
+    from one to the next, are one row that says how many files it stands for; every other item
+    stands alone. The model keeps one item per file, so a count of files is still available.
+
+    The row's age is that of the first file to fall due.
+    """
+    out: list[Todo] = []
+    for todo in todos:
+        previous = out[-1] if out else None
+        if (
+            previous is not None
+            and todo.kind == "fetch-newer-statement"
+            and previous.kind == todo.kind
+            and previous.account == todo.account
+            and previous.days is not None
+            and todo.days is not None
+            and todo.days[0] == previous.days[1] + timedelta(days=1)
+        ):
+            files = previous.files + todo.files
+            out[-1] = replace(
+                previous,
+                title=f"Upload {files} statements",
+                days=(previous.days[0], todo.days[1]),
+                files=files,
+            )
+        else:
+            out.append(todo)
+    return tuple(out)
 
 
 def wanted_days(fetch: FetchReport | None) -> dict[str, list[tuple[date, date]]]:

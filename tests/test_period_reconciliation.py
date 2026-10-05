@@ -789,7 +789,7 @@ class TestThePageIsMaskedUnlessPostedFor:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
         page = response.text
-        assert "unmasked rendering" in page
+        assert "Showing the real values" in page
         assert "surplus -£7.77" in page
         assert "&#x27;Fee One&#x27;" in page
         assert f'href="/period-reconciliation?ref={ACCOUNT}"' in page

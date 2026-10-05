@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import contextlib
 import html
-import itertools
 import json
 import os
 import re
@@ -103,8 +102,6 @@ from .web_accounts import (
     DOUBT_ACK_FIELD,
     NEW_ACCOUNT_FIELD,
     AccountPages,
-    archive_controls,
-    archive_label,
     doubt_token,
     submit_button,
 )
@@ -1122,9 +1119,9 @@ def _breakdown_html(breakdown: dict[str, object]) -> str:
 
     lines = [
         "<h2>Where these transactions came from</h2>",
-        f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'sighting')}, "
+        f"<p>{plural(transactions, 'transaction')}, {plural(sightings, 'report')} from "
         f"{plural(source_count, 'source')}. A transaction that two sources report is one "
-        "transaction and two sightings.</p>",
+        "transaction and two reports.</p>",
         '<div class="row">',
     ]
     for entry in sorted(
@@ -1664,355 +1661,6 @@ def _credential_banner(bank_authorisation: bool = True) -> str:
         "Bank authorisation will fail until this is fixed - the value itself is "
         "never shown here.</p>"
     )
-
-
-#: How each timeline state draws. Style IS meaning here: solid is held
-#: history, faint is asked-and-empty (a dormant tail reads as a long pale
-#: stretch), dotted amber is truncated-by-provider (the bank likely holds
-#: more; the API refuses), dashed grey is simply never-asked.
-_TIMELINE_STYLES = {
-    "held": "background:var(--act)",
-    "empty": "background:color-mix(in srgb,var(--act) 25%,transparent)",
-    "truncated": (
-        "background:repeating-linear-gradient(90deg,var(--warn) 0 3px,"
-        "transparent 3px 7px)"
-    ),
-    "unknown": (
-        "background:repeating-linear-gradient(90deg,var(--edge) 0 6px,"
-        "transparent 6px 12px)"
-    ),
-    "future": "background:transparent",
-}
-
-_TIMELINE_TITLES = {
-    "held": "held transactions",
-    "empty": "asked, nothing there",
-    "truncated": "before the provider's boundary - bank may hold more",
-    "unknown": "never asked",
-    "future": "future",
-}
-
-
-def timeline_segments(
-    axis_start: date,
-    axis_end: date,
-    *,
-    earliest: date | None,
-    latest: date | None,
-    today: date,
-    boundary: date | None = None,
-    probed: date | None = None,
-    covered: date | None = None,
-) -> list[tuple[str, float]]:
-    """Classify the axis into (kind, width-percent) segments.
-
-    Pure and interval-based: collect every meaningful date as a breakpoint,
-    then classify each interval by its midpoint. Precedence: future beats
-    everything right of today; held beats the rest inside the transaction
-    span; asked-and-empty covers probed-before-earliest and the
-    covered-after-latest dormancy tail; a known boundary marks everything
-    before it truncated; what remains was never asked.
-    """
-    span = (axis_end - axis_start).days
-    if span <= 0:
-        return []
-    points = {axis_start, axis_end}
-    for mark in (boundary, probed, earliest, latest, covered, today):
-        if mark is not None and axis_start < mark < axis_end:
-            points.add(mark)
-    ordered = sorted(points)
-
-    def classify(midpoint: date) -> str:
-        if midpoint > today:
-            return "future"
-        if earliest is not None and latest is not None and earliest <= midpoint <= latest:
-            return "held"
-        if (
-            probed is not None
-            and midpoint >= probed
-            and (earliest is None or midpoint < earliest)
-        ):
-            return "empty"
-        if (
-            covered is not None
-            and latest is not None
-            and latest < midpoint <= covered
-        ):
-            return "empty"
-        if boundary is not None and midpoint < boundary:
-            return "truncated"
-        return "unknown"
-
-    segments: list[tuple[str, float]] = []
-    for left, right in itertools.pairwise(ordered):
-        midpoint = left + (right - left) / 2
-        kind = classify(midpoint)
-        width = (right - left).days * 100 / span
-        if segments and segments[-1][0] == kind:
-            segments[-1] = (kind, segments[-1][1] + width)
-        else:
-            segments.append((kind, width))
-    return segments
-
-
-def _timeline_strip(segments: list[tuple[str, float]]) -> str:
-    if not segments:
-        return ""
-    parts = "".join(
-        f'<span title="{html.escape(_TIMELINE_TITLES.get(kind, kind))}" '
-        f'style="width:{width:.2f}%;{_TIMELINE_STYLES.get(kind, "")}"></span>'
-        for kind, width in segments
-    )
-    return (
-        '<div style="display:flex;height:6px;border-radius:3px;'
-        f'overflow:hidden;background:var(--rule-2);margin:.35rem 0">{parts}</div>'
-    )
-
-
-def _feeder_line(
-    account_id: str, feeders: dict[str, list[str]]
-) -> str:
-    """Which provider refs the map binds to this canonical account.
-
-    Shown so a mis-binding is READABLE: three refs feeding one Space was
-    invisible config, and its consequences kept reading as code bugs.
-    More than one feeder can be legitimate (CSV plus API of one real
-    account) - many usually is not, so several feeders render as a
-    warning."""
-    refs = feeders.get(account_id, [])
-    if not refs:
-        return ""
-    shown = ", ".join(code_html(_short_ref(ref)) for ref in refs)
-    css = "warn" if len(refs) > 1 else "muted"
-    note = " - several sources feed this one account" if len(refs) > 1 else ""
-    return f'<br><span class="{css}">bound from: {shown}{note}</span>'
-
-
-def _holdings_rows(
-    holdings: Callable[[], list[SourceCoverage]] | None,
-    account_names: Callable[[], AccountsShown] | None = None,
-    account_timelines: Callable[[], dict[str, dict[str, str]]] | None = None,
-    account_feeders: Callable[[], dict[str, list[str]]] | None = None,
-    source_connections: dict[tuple[str, str], list[str]] | None = None,
-    feed_warnings: Callable[[], list[str]] | None = None,
-    archive_notes: Callable[[], dict[str, ArchiveNote]] | None = None,
-) -> str:
-    """What the store holds, per account and source - or nothing, quietly.
-
-    Failure here must never take down the page that manages connections: the
-    store may legitimately be mid-write during a backfill, which is exactly
-    when someone is refreshing to see how it is going.
-
-    Names lead and ids demote to small print, and a quiet account SAYS so:
-    the date range matters most precisely when it is old, so the old case
-    gets a chip instead of hiding in a run of text. Neutral, not red -
-    dormancy is a fact about the account, not a fault in the fetching.
-    """
-    if holdings is None:
-        return ""
-    try:
-        rows = holdings()
-    except Exception:
-        return ""
-    if not rows:
-        return ""
-    feeders_map: dict[str, list[str]] = {}
-    if account_feeders is not None:
-        try:
-            feeders_map = account_feeders()
-        except Exception:
-            feeders_map = {}
-    names = AccountsShown()
-    if account_names is not None:
-        try:
-            names = account_names()
-        except Exception:
-            names = AccountsShown()
-    marks: dict[str, dict[str, str]] = {}
-    if account_timelines is not None:
-        try:
-            marks = account_timelines()
-        except Exception:
-            marks = {}
-    notes: dict[str, ArchiveNote] = {}
-    if archive_notes is not None:
-        try:
-            notes = archive_notes()
-        except Exception:
-            notes = {}
-
-    def _mark(ref: str, key: str) -> date | None:
-        value = marks.get(ref, {}).get(key)
-        if not value:
-            return None
-        try:
-            return date.fromisoformat(str(value)[:10])
-        except ValueError:
-            return None
-
-    today = datetime.now(UTC).date()
-    # One axis for every account, so the bars are COMPARABLE: the left edge
-    # is the oldest date any account knows anything about, the right edge is
-    # the end of next month - scheduled payments can colonise that sliver
-    # once they are stored; years of future would just be blank tape.
-    starts = [
-        candidate
-        for row in rows
-        for candidate in (
-            _mark(row.account_id, "boundary"),
-            _mark(row.account_id, "probed"),
-            row.earliest,
-        )
-        if candidate is not None
-    ]
-    axis_start = min(starts) if starts else today
-    axis_end = (today.replace(day=1) + timedelta(days=62)).replace(day=1)
-
-    items = []
-    # Living accounts lead; the archive sinks. Same information, but the
-    # eye finds what changed this week without wading through 2022 first.
-    for row in sorted(rows, key=lambda r: r.latest, reverse=True):
-        shown = names.of(row.account_id)
-        title = shown.as_name()
-        sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
-        note = notes.get(row.account_id)
-        quiet = ""
-        if note is not None and note.state == "archived":
-            quiet = f" {archive_label(note)}"
-        elif (today - row.latest).days > 365:
-            quiet = (
-                f' <span class="pill pill-quiet">quiet since '
-                f"{row.latest.isoformat()}</span>"
-            )
-        # The control folds its own occasional forms and leaves a suggestion
-        # from the listings in the open; see `archive_controls`.
-        archive_form = (
-            archive_controls(row.account_id, note) if archive_notes is not None else ""
-        )
-        dormant = (today - row.latest).days > 365
-        strip = _timeline_strip(
-            timeline_segments(
-                axis_start,
-                axis_end,
-                earliest=row.earliest,
-                latest=row.latest,
-                today=today,
-                boundary=_mark(row.account_id, "boundary"),
-                probed=_mark(row.account_id, "probed"),
-                covered=_mark(row.account_id, "covered"),
-            )
-        )
-        row_class = "row dormant" if dormant else "row"
-        feeder_note = ""
-        if ":" not in row.account_id and feeders_map:
-            feeder_note = _feeder_line(row.account_id, feeders_map)
-        bind_form = ""
-        if ":" in row.account_id:
-            # A source-qualified id is an account nobody has NAMED - and
-            # binding must not require the extend section (TrueLayer-only)
-            # or a shell. The provider's display label above makes the row
-            # recognisable; this form makes the name canonical.
-            held_suggestion = _suggest_slug(shown.label, row.account_id)
-            bind_form = (
-                '<form method="post" action="/bind" '
-                'style="display:flex;gap:.4rem;margin:.35rem 0">'
-                f'<input type="hidden" name="account" '
-                f'value="{html.escape(row.account_id)}">'
-                f'<input name="canonical" value="{html.escape(held_suggestion)}" '
-                'placeholder="name this account, '
-                'e.g. starling-personal" style="flex:1">'
-                '<button class="button" style="display:inline-block;'
-                'padding:.5rem .8rem;border:0;cursor:pointer" '
-                'type="submit">Bind</button></form>'
-            )
-        items.append(
-            f'<div class="{row_class}"><div class="row-head"><strong>'
-            f'<a class="tap" href="/account?ref={quote(row.account_id)}">'
-            f"{title}</a></strong> "
-            f'<a class="tap nowrap" href="/ledger?ref={quote(row.account_id, safe="")}">'
-            "Ledger (transactions)</a></div>"
-            "via "
-            + code_html(
-                _via_label(
-                    row.source,
-                    (source_connections or {}).get((row.account_id, row.source)),
-                )
-            )
-            + f"{quiet}{sub}<br>"
-            f"{plural(row.count, 'transaction')}, {row.earliest} .. "
-            f"<strong>{row.latest}</strong>"
-            f"{feeder_note}{bind_form}{strip}{archive_form}</div>"
-        )
-    # Accounts the store KNOWS about but holds nothing for must not vanish:
-    # "this account exists, we asked back to 2020, nothing there" is a
-    # finding, and silence would erase it. They render after the live rows,
-    # strip and all - the strip is entirely faint/dotted, which is the point.
-    held_refs = {row.account_id for row in rows}
-    for ref, _entry in sorted(marks.items()):
-        if ref in held_refs:
-            continue
-        shown = names.of(ref)
-        title = shown.as_name()
-        sub = f'<br><span class="muted">{shown.code()}</span>' if shown.labelled else ""
-        probed = _mark(ref, "probed")
-        covered = _mark(ref, "covered")
-        strip = _timeline_strip(
-            timeline_segments(
-                axis_start,
-                axis_end,
-                earliest=None,
-                latest=None,
-                today=today,
-                boundary=_mark(ref, "boundary"),
-                probed=probed,
-                covered=covered,
-            )
-        )
-        reach = (
-            f"asked back to {probed.isoformat()}" if probed else "never asked"
-        ) + (f", covered to {covered.isoformat()}" if covered else "")
-        # A known-but-empty source-qualified ref still needs a way to be
-        # named - after a consolidating rebuild these rows hold nothing
-        # (their rows live under the map's canonical), and renaming the
-        # map edge is exactly the repair they exist to receive. The bind
-        # moves no rows; the next rebuild applies the new edge.
-        empty_bind = ""
-        if ":" in ref:
-            empty_suggestion = _suggest_slug(shown.label, ref)
-            empty_bind = (
-                '<form method="post" action="/bind" '
-                'style="display:flex;gap:.4rem;margin:.35rem 0">'
-                f'<input type="hidden" name="account" value="{html.escape(ref)}">'
-                f'<input name="canonical" value="{html.escape(empty_suggestion)}" '
-                'placeholder="name this account, '
-                'e.g. starling-personal" style="flex:1">'
-                '<button class="button" style="display:inline-block;'
-                'padding:.5rem .8rem;border:0;cursor:pointer" '
-                'type="submit">Bind</button></form>'
-            )
-        feeder_note = _feeder_line(ref, feeders_map) if feeders_map else ""
-        items.append(
-            f'<div class="row dormant"><strong>{title}</strong>'
-            f'{sub}<br><span class="muted">known account, nothing held yet - '
-            f"{reach}</span>{feeder_note}{empty_bind}{strip}</div>"
-        )
-
-    legend = (
-        '<p class="muted" style="font-size:.85em">timeline: solid = held, '
-        "faint = asked and empty, dotted = truncated by the provider, "
-        f"dashed = never asked; axis {axis_start.isoformat()} .. "
-        f"{axis_end.isoformat()}</p>"
-    )
-    warnings_html = ""
-    if feed_warnings is not None:
-        try:
-            warnings = feed_warnings()
-        except Exception:
-            warnings = []
-        warnings_html = "".join(
-            f'<p class="warn">{html.escape(str(line))}</p>' for line in warnings
-        )
-    return "<h2>Held so far</h2>" + warnings_html + legend + "".join(items)
 
 
 # 1 exists for the endgame: once +7 fails, the boundary is within a week,
@@ -4344,7 +3992,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: net totals, '
+            else '<p class="warn">Showing the real values: net totals, '
             "amounts, and payee descriptions are visible.</p>"
             '<p><a class="button" href="/agreements">'
             "Back to the masked rendering</a></p>"
@@ -4693,7 +4341,7 @@ class ConnectionHandler(
             f'<input type="hidden" name="id" value="{artefact_id}">'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            "Show raw payload (unmasked)</button></p></form>" + HOME_LINK
+            "Show raw payload (real values)</button></p></form>" + HOME_LINK
         )
         self._respond(200, render_page("Artefact", body))
 
@@ -4805,7 +4453,7 @@ class ConnectionHandler(
                 f"<strong>{html.escape(account)}</strong>. The correction is "
                 "recorded in the artefact's provenance.</p>"
                 "<p>Now run <strong>Rebuild from raw</strong> (danger zone) so "
-                "the derived rows follow the corrected filing.</p>" + HOME_LINK,
+                "the transactions follow the corrected filing.</p>" + HOME_LINK,
             ),
         )
 
@@ -6271,7 +5919,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: the '
+            else '<p class="warn">Showing the real values: the '
             "descriptions of the largest flagged clusters are visible.</p>"
             '<p><a class="button" href="/review-report">'
             "Back to the masked rendering</a></p>"
@@ -6390,10 +6038,10 @@ class ConnectionHandler(
             )
         )
         body = (
-            "<p>Two faults the merged layer cannot show from inside: rows "
-            "that share one identity, and payments folded into another "
-            "payment's row. Each source's own count of an account's "
-            "payments is set against the rows that hold them.</p>"
+            "<p>Two faults that are easy to miss: two payments that look identical and "
+            "are held as one transaction, and one payment held as two. Each source's own "
+            "count of an account's payments is set against the transactions that hold "
+            "them.</p>"
             '<p class="muted">Counts and account names only - no amount, '
             "payee or description appears here, so this page can be shown "
             "to somebody who should not see the money.</p>"
@@ -6432,7 +6080,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: balances and '
+            else '<p class="warn">Showing the real values: balances and '
             "differences are visible.</p>"
             '<p><a class="button" href="/balance-reconciliation">'
             "Back to the masked rendering</a></p>"
@@ -6487,7 +6135,7 @@ class ConnectionHandler(
             + '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: figures and the '
+            else '<p class="warn">Showing the real values: figures and the '
             "unmatched rows are visible.</p>"
             f'<p><a class="button" href="{html.escape(back, quote=True)}">'
             "Back to the masked rendering</a></p>"
@@ -6531,7 +6179,7 @@ class ConnectionHandler(
             '<button class="button" type="submit" style="width:100%">'
             "Show values</button></form>"
             if masked
-            else '<p class="warn">Showing the unmasked rendering: balances are visible.</p>'
+            else '<p class="warn">Showing the real values: balances are visible.</p>'
             '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
         )
         body = (
