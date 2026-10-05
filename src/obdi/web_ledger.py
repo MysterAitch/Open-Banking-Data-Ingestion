@@ -2341,10 +2341,10 @@ def _navigation(view: Any, unmasked: bool) -> str:
     Months are stepped from beside the month's own heading, where the rows they change are.
     """
     shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
-    shape += f"{_esc(page_name('/account'))} for this account</a></p>"
+    shape += f"{_esc(page_name('/account'))} for this account</a> "
     shape += (
-        f'<p><a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}">'
-        f"{_esc(page_name('/coverage-timeline'))} for this account</a></p>"
+        f'<a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}">'
+        f"{_esc(page_name('/coverage-timeline'))}</a></p>"
     )
     return f'<div class="foot-links">{shape}{_HOME}</div>'
 

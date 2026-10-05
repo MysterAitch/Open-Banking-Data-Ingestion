@@ -4288,8 +4288,8 @@ class ConnectionHandler(
             f"{pan}"
             + timeline_svg(hook(), days=days, clamp_days=span, now=until)
             + '<p><a class="button" href="/attempts">Fetch attempts ledger</a></p>'
-            + '<p class="muted"><a href="/coverage-timeline">The same history, by day, as a '
-            "chart</a></p>"
+            + '<p class="muted"><a class="tap" href="/coverage-timeline">'
+            "The same history, by day, as a chart</a></p>"
             + HOME_LINK
         )
         self._respond(200, render_page("Fetch timeline", body))

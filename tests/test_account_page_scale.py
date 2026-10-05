@@ -32,7 +32,10 @@ REFLOW = 320
 #: The most screens the whole page may fill, every disclosure closed, for a month of fifty rows.
 #: It was 24 for the held account before the page was rebuilt; a row has to be about 60 px for
 #: fifty of them and everything round them to fit, which is why a row is two lines.
-WHOLE_PAGE_SCREENS = 6
+#: The sixth screen's tenth is the one line the coverage timeline's link adds to the foot of the
+#: page (measured at 390 px: the page was 4821 px with it, 21 px past six screens); nothing else
+#: was allowed to grow.
+WHOLE_PAGE_SCREENS = 6.1
 
 
 @pytest.fixture(scope="module")
