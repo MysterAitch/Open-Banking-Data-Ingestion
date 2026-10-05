@@ -26,6 +26,38 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.316] - 2026-10-05
+
+### Fixed
+- **A review flag over rows of nil amount is settled.** 0.4.314 predicted
+  that seven of the real store's eleven open flags would close on the
+  balances, and none did. The prediction was read from dates and sources on
+  the masked flags page, which shows no amount; the masked account page says
+  "nil", and the nine same-day pairs on one card are two lines of 0.00 under
+  different descriptions on each statement's date. The balance proof refuses
+  a nil amount, rightly, since a nil row moves no balance. For the same
+  reason nothing depends on the answer: nil counted twice is nil. Such a
+  flag is now closed with the others the evidence answers, and both rows are
+  kept. Expected on the real store: nine close, two stay open, each already
+  saying which statement would settle it.
+
+### Decided, and not released
+- **The rule that would join an export row to the payment that settled on
+  its date stays out.** Its exact measurement, read on the real main account
+  in 0.4.315, says it would move 36 rows, re-date 38 transactions, and leave
+  4 days holding a different total of counted transactions. That account's
+  rows reproduce all 1,906 of its known balances as they are dated now, so a
+  rule that changes four days' totals is more likely to break that agreement
+  than to mend anything: the money is right today, and what is wrong is only
+  which of several equal payments carries which export sighting. The rule
+  and its tests are kept on the branch `matcher-rules-2`. It would be worth
+  releasing only with a guard that applies a set of moves where no day's
+  total changes, which is not built.
+
+### Not covered
+- A nil-amount flag raised because two exact rules disagree stays open, as
+  every such flag does; none is known.
+
 ## [0.4.315] - 2026-10-04
 
 ### Added
