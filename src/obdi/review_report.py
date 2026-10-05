@@ -93,6 +93,15 @@ class FlagClass(StrEnum):
     #: deleted and stays so until a rebuild, which raises it again and closes it only if the
     #: proof still holds.
     BALANCES_NEED_BOTH = "balances-need-both"
+    #: The flagged row is of nil amount, and so is every neighbour, since a neighbour is a row
+    #: of the same amount. A flag asks whether a sum is counted once or twice, and nil counted
+    #: twice is nil: no balance, total, or budget figure depends on the answer, so there is
+    #: nothing for a person to decide and no balance that could decide it (the balance proof
+    #: above refuses a nil amount for that reason). Both rows are kept, as every line a source
+    #: lists is. Found on a card whose statements each list two lines of 0.00 under different
+    #: descriptions on the statement's date: nine of the eleven flags open on the real store
+    #: were these, one raised by every statement.
+    NIL_AMOUNT = "nil-amount"
     #: Everything else: a real question for a person.
     OPEN = "open"
 
@@ -105,6 +114,7 @@ SETTLED_CLASSES: tuple[FlagClass, ...] = (
     FlagClass.LISTED_TOGETHER,
     FlagClass.IDS_KEPT_FOR_LIFE,
     FlagClass.BALANCES_NEED_BOTH,
+    FlagClass.NIL_AMOUNT,
 )
 
 #: What a class proved, in words, for the report. Only the proofs that are not obvious from
@@ -112,6 +122,9 @@ SETTLED_CLASSES: tuple[FlagClass, ...] = (
 PROOF_WORDS: dict[FlagClass, str] = {
     FlagClass.BALANCES_NEED_BOTH: (
         "the rows reproduce the known balances before and after with both counted"
+    ),
+    FlagClass.NIL_AMOUNT: (
+        "the rows are of nil amount, so no balance depends on whether they are one or two"
     ),
 }
 
@@ -466,6 +479,8 @@ def assess_flags(store: Store) -> dict[str, FlagAssessment]:
         gap: BalanceGap | None = None
         if not live:
             flag_class = FlagClass.NO_LIVE_NEIGHBOUR
+        elif int(row["amount_minor"]) == 0:
+            flag_class = FlagClass.NIL_AMOUNT
         else:
             proofs = [neighbour_proof(store, entity_id, n) for n, _ in live]
             unproven = [n for (n, _), proof in zip(live, proofs, strict=True) if proof is None]
