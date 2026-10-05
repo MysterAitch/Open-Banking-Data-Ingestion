@@ -64,6 +64,7 @@ from obdi.ledger import (
     FEED_TIME_QUERIES,
     QUERIES_PER_PAGE,
     SPACE_QUERIES,
+    STATEMENT_CHECK_QUERIES,
     build_ledger,
 )
 from obdi.models import TransactionStatus
@@ -1055,6 +1056,7 @@ class TestWhatTheFamilyReadingCosts:
         assert cost == (
             QUERIES_PER_PAGE
             + ANCHOR_QUERIES
+            + STATEMENT_CHECK_QUERIES
             + FAMILY_QUERIES
             + len(found.spaces_of(MAIN))
             + FEED_TIME_QUERIES
@@ -1062,6 +1064,10 @@ class TestWhatTheFamilyReadingCosts:
 
     def test_SpaceAccount_CostsOnlyTheReadOfItsListingsMoreThanItDidWithoutFamilies(self, family):
         found = families(family)
+        # The statement checks are held per store state and per set of Spaces, so each reading is
+        # measured with its own held, as the second page of a process is.
+        self.statements(family.store, BILLS, found)
+        self.statements(family.store, BILLS, None)
 
         assert self.statements(family.store, BILLS, found) == (
             self.statements(family.store, BILLS, None) + SPACE_QUERIES

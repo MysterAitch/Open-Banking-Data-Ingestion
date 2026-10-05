@@ -1,9 +1,10 @@
 """The What to fetch next page: its sentences, order, links, and what it must not show.
 
 The household and every gap in it are decided in `fetch_gaps_world`'s docstring; the page's
-verdict for it is decided here before the first run: 13 things to fetch for 11 accounts, 2 accounts
-needing nothing. The page is drawn from the data (`render_gaps`), and once over HTTP to show
-the route, the hook, and the shared navigation are joined up.
+verdict for it is decided here before the first run: 12 things to fetch for 10 accounts, 3 accounts
+needing nothing (13 and 11 and 2 while a lone statement counted as a known balance that tested
+nothing; `agreement`, R1). The page is drawn from the data (`render_gaps`), and once over HTTP to
+show the route, the hook, and the shared navigation are joined up.
 """
 
 from __future__ import annotations
@@ -59,9 +60,9 @@ def text(markup: str) -> str:
 class TestTheVerdict:
     def test_Page_WhenGapsExist_LeadsWithTheCountOfThingsAndAccounts(self, world):
         assert verdict_sentence(world.report) == (
-            "13 things to fetch for 11 accounts; 2 accounts need nothing."
+            "12 things to fetch for 10 accounts; 3 accounts need nothing."
         )
-        assert "13 things to fetch for 11 accounts; 2 accounts need nothing." in page_of(world)
+        assert "12 things to fetch for 10 accounts; 3 accounts need nothing." in page_of(world)
 
     def test_Verdict_WhenOneOfEachIsCounted_AgreesInNumber(self):
         gap = FetchGap("a", GapKind.NO_BALANCE, D(2026, 8, 1), D(2026, 8, 2), Basis.STATED, "", "")
@@ -75,7 +76,7 @@ class TestTheVerdict:
         quiet = FetchReport(tuple(o for o in repaired.report.accounts if not o.gaps), TODAY)
 
         assert verdict_sentence(quiet) == (
-            "Nothing to fetch for 7 accounts. The next statement is expected about 2026-10-10."
+            "Nothing to fetch for 8 accounts. The next statement is expected about 2026-10-10."
         )
 
     def test_Verdict_WhenNoAccountHoldsRows_SaysThereIsNothingToFetch(self):
@@ -158,11 +159,13 @@ class TestTheSentences:
         automatic = text(block(page_of(world), "Feed-only card"))
         assert "Only the bank's feed and the aggregator supply this account" in automatic
 
-    def test_Account_WhenOneKnownBalanceIsHeld_SaysOnlyOneAndWhatSetsTheOpening(self, world):
-        said = text(block(page_of(world), "Single card"))
+    def test_Account_WhenItsOnlyStatementAddsUpByWhatItLists_IsListedAmongThoseNeedingNothing(
+        self, world
+    ):
+        said = text(page_of(world).split("Needs nothing</h2>")[1])
 
-        assert "Only one known balance is held" in said
-        assert "closing on or before 2026-09-04, or the one after them" in said
+        assert "Single card" in said
+        assert "Only one known balance is held" not in text(page_of(world))
 
     def test_Account_WhenAFlagWouldBeSettled_CarriesTheFlagsWordsAndLinksToTheFlags(self, world):
         section = block(page_of(world), "Card opens-on-day")

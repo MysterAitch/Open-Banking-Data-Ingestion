@@ -54,6 +54,52 @@ stretch can mean without choosing.
 A known balance a person has disregarded (`disregarded_balances`) is not read at all: it takes no
 part in a stretch, in agreement, or in a conflict.
 
+THE LISTING RULE (R1 to R5), stated here once. A statement does not say "the balance on day D was
+X"; it says: from this opening balance, THESE transactions, to this closing balance. Placing its
+opening balance on a calendar day failed on a real store, because card statements list a purchase
+by the day it was made (before the previous statement closed), one account's statements overlap,
+and a purchase pending at one close appears on the next. So a statement is tested by what it
+LISTS, with no date in the question. What it concludes is `statement_listing_measure`'s, read
+here as `StatementCheck`s, and the arithmetic is its one implementation:
+
+  R1  A statement that states an opening balance and adds up by what it lists (its lines found,
+      read whole, every listed transaction held as listed, counted through its fold, tested with
+      its Spaces where it cannot see them) tests its OWN closing balance, whatever known balance
+      does or does not precede it. So an account whose only known balance is such a closing adds
+      up through it, and the days from a first statement's start to its closing are tested. That
+      is claimed only for days where no counting transaction is listed by no statement
+      (`StatementCheck.days_tested`): where another source holds unlisted transactions in the
+      span, the statement is verified and its days are not. A statement that "cannot say"
+      verifies and faults nothing.
+  R2  A statement's closing balance is the balance AFTER THE TRANSACTIONS IT LISTS, not the balance
+      at the end of a calendar day. Where it and another source's balance for the same day differ
+      by exactly ALL the counting transactions dated that day that it does not list, the
+      statement is TAKEN TO HAVE CLOSED BEFORE THEM, which is strong evidence and not proof. It is
+      then taken out of that day's comparison (as a balance stated for a moment is,
+      `Known.instant`), the chain counts it as before them, and the other balance is judged with
+      them counted. ONE hypothesis, all or nothing: a subset that happened to sum to the
+      difference is arithmetic fitted to a hypothesis, and so is taking the other balance to be
+      for another day (tried and withdrawn: the account then said it added up while every balance
+      the page showed was out). Only a statement that itself adds up by what it lists explains a
+      day away. The end-of-day balance may define the opening on such a day, never the
+      statement's, whose closing the opening's count of "dated up to the day" would get wrong: the
+      claim is refused where the statement would define it. `apply_checks` checks the claim
+      against the figures and ignores one they do not bear out.
+  R3  A statement IN USE (its closing is a known balance) whose lines were found and do not sum is
+      a real fault: the account does not add up there (`HELD_STATEMENT`), said with the statement
+      and the check it failed, and its exit is disregarding that statement's closing. One whose
+      lines were not found, that the reader refused, or one of whose lines is held under another
+      account (only the store's own Space fold puts one there) cannot say: it verifies nothing,
+      faults nothing, and moves no verdict. A disregarded statement lists nothing.
+  R4  Consecutive statements are linked by their balances (an opening equal to the previous
+      closing is evidence of it, never proof). Two that share a listed transaction, or where the
+      later starts inside the earlier, OVERLAP and nothing is concluded from their balances; two
+      that do not overlap and do not meet prove a gap by arithmetic.
+  R5  Nothing else changes. No opening balance is placed on a day or tested by date; the chain of
+      closings, `through`, the opening figure the position and chart read, and the push are as
+      before. An account that adds up without the listing checks adds up with them unless a
+      statement is a fault.
+
 DERIVED ON DEMAND from the readings `effective_opening` and the movement report already hold.
 Nothing here walks an account: the ledger reuses the opening it built for its own page, and the
 Overview reads a cached standing.
@@ -63,14 +109,33 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from .balance_anchors import ASSUMED_NIL, EffectiveOpening, FamilyReading, FamilyWalk
+from .balance_anchors import (
+    ASSUMED_NIL,
+    STATEMENT,
+    EffectiveOpening,
+    FamilyReading,
+    FamilyWalk,
+)
 from .family_anchors import OPENED
 from .masking import Structural
+from .plural import agree, plural
+from .statement_checks import (
+    DOES_NOT_REACH,
+    HELD_TWICE,
+    LISTED_TWICE,
+    NO_LONGER_COUNTS,
+    NOT_HELD,
+    OTHER_AMOUNT,
+    ClosedBefore,
+    DateDifference,
+    StatementCheck,
+    StatementChecks,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .movement_completeness import MovementCompleteness
@@ -84,10 +149,12 @@ AGREES = "agrees"
 HELD_UNMET = "unmet"
 HELD_CONFLICT = "conflict"
 HELD_MOVEMENT = "movement"
+HELD_STATEMENT = "statement"
 
 #: Which hold wins when two begin on one day: a disagreement between sources makes the rows' own
-#: verdict at that day meaningless, so it is said first.
-_HOLD_ORDER = (HELD_CONFLICT, HELD_UNMET, HELD_MOVEMENT)
+#: verdict at that day meaningless, so it is said first, and a statement that does not add up by
+#: what it lists is a more specific finding than a balance the transactions do not reproduce.
+_HOLD_ORDER = (HELD_CONFLICT, HELD_STATEMENT, HELD_UNMET, HELD_MOVEMENT)
 
 _NIL_BASES = (OPENED, ASSUMED_NIL)
 
@@ -110,6 +177,39 @@ class Known:
     #: predicted; nil for the balance that defines the opening). None where the reading derived no
     #: opening, and no stretch is then judged. Compared and never shown.
     distance: int | None = None
+    #: How the balance is stated (`balance_anchors.STATEMENT` for a statement's closing), so that
+    #: what the measurement concluded about a statement is attached to it and to no other source's
+    #: balance that happens to state the same figure.
+    basis: str = ""
+    #: Tested by the transactions its own statement lists (R1), whatever balance precedes it.
+    self_tested: bool = False
+    #: How many transactions its statement lists, where `self_tested`.
+    listed: int = 0
+    #: Taken to have closed before some transactions (R2): not compared with another source's
+    #: balance for the same day, which includes them.
+    closed_before: ClosedBefore | None = None
+    #: The first day its statement's listing tests, where `self_tested`.
+    span_start: date | None = None
+
+
+@dataclass(frozen=True)
+class ListingTested:
+    """A known balance tested by its own statement's listing and by nothing before it: the
+    earliest, which no earlier balance can test."""
+
+    day: Structural[date]
+    listed: Structural[int]
+    #: The first day the listing tests: the statement's start, where the days are placed.
+    start: Structural[date | None] = None
+
+
+@dataclass(frozen=True)
+class StatementFault:
+    """A statement in use that does not add up by what it lists, as its own finding: it is said
+    whichever hold is earliest in the account's sentence."""
+
+    day: Structural[date]
+    says: Structural[str]
 
 
 @dataclass(frozen=True)
@@ -168,6 +268,20 @@ class Agreement:
     #: Every stretch between consecutive known-balance days, each judged by its own arithmetic
     #: (module docstring). Empty where a balance carries no distance (`Known.distance`).
     stretches: Structural[tuple[StretchResult, ...]] = ()
+    #: The known balance tested only by its own statement's listing (R1), if any.
+    listing_tested: Structural[tuple[ListingTested, ...]] = ()
+    #: The days a statement is taken to have closed before transactions another source's balance
+    #: counts (R2), where that was applied.
+    closed_before: Structural[tuple[ClosedBefore, ...]] = ()
+    #: The known balances that tested their days. Compared and never shown.
+    tested_known: tuple[Known, ...] = ()
+    #: Every statement in use that does not add up by what it lists (R3), earliest first.
+    statement_faults: Structural[tuple[StatementFault, ...]] = ()
+    #: The days tested as they were before a statement's own listing could test a balance. A
+    #: protection records a figure by date span, and a statement is tested by what it lists, so
+    #: only these days are offered to protection (`protection.tested_days`): the listing rule
+    #: does not widen protection until protection understands it.
+    chain_tested: Structural[tuple[date, ...]] = ()
 
     @property
     def failing(self) -> tuple[StretchResult, ...]:
@@ -187,12 +301,30 @@ class Standing:
 
 
 def derive_agreement(
-    known: Iterable[Known], faults: Iterable[Fault], *, movement_checked: bool = True
+    known: Iterable[Known],
+    faults: Iterable[Fault],
+    *,
+    movement_checked: bool = True,
+    checks: StatementChecks | None = None,
 ) -> Agreement:
-    """The rule above, over known balances and movement faults. Pure."""
-    balances = sorted(known, key=lambda k: (k.day, k.source, k.figure))
+    """The rule above, over known balances, movement faults, and what each statement's own listing
+    concludes (`checks`, None for a reading that has none). Pure."""
+    balances = sorted(apply_checks(known, checks), key=lambda k: (k.day, k.source, k.figure))
+    statement_fault = _first_statement_fault(checks)
     if not balances:
-        return Agreement(NONE, None, None, 0, 0, None, None, movement_checked, ())
+        if statement_fault is None:
+            return Agreement(NONE, None, None, 0, 0, None, None, movement_checked, ())
+        return Agreement(
+            HELD_STATEMENT,
+            None,
+            None,
+            0,
+            0,
+            None,
+            _statement_hold(statement_fault),
+            movement_checked,
+            (),
+        )
     by_day: dict[date, list[Known]] = defaultdict(list)
     for balance in balances:
         by_day[balance.day].append(balance)
@@ -200,7 +332,7 @@ def derive_agreement(
 
     conflicts: dict[date, tuple[str, ...]] = {}
     for day in days:
-        stated = [k for k in by_day[day] if not k.instant]
+        stated = [k for k in by_day[day] if not k.instant and k.closed_before is None]
         if len({k.figure for k in stated}) > 1:
             conflicts[day] = tuple(sorted({k.source for k in stated}))
     unmet = {
@@ -218,6 +350,8 @@ def derive_agreement(
         starts[HELD_UNMET] = min(unmet)
     if first_fault is not None:
         starts[HELD_MOVEMENT] = first_fault.day
+    if statement_fault is not None:
+        starts[HELD_STATEMENT] = statement_fault.day
     blocked_from = min(starts.values(), default=None)
 
     tested = [d for d in days if _tested(d, days[0], by_day[d], conflicts)]
@@ -235,9 +369,17 @@ def derive_agreement(
             held = HeldBack(kind, blocked_from, conflicts[blocked_from], "")
         elif kind == HELD_UNMET:
             held = HeldBack(kind, blocked_from, unmet[blocked_from], "")
+        elif kind == HELD_STATEMENT and statement_fault is not None:
+            held = _statement_hold(statement_fault)
         else:
             held = HeldBack(kind, blocked_from, (), first_fault.says if first_fault else "")
         state = kind
+    elif statement_fault is not None:
+        # A statement that does not add up is a finding in itself, so it is said even where it
+        # closes after the latest known balance and no balance is still to be reached.
+        held = _statement_hold(statement_fault)
+        state = HELD_STATEMENT
+    tested_days = set(tested)
     return Agreement(
         state=state,
         known_from=days[0],
@@ -250,7 +392,143 @@ def derive_agreement(
         conflicts=tuple(Conflict(day, sources) for day, sources in sorted(conflicts.items())),
         tested=tuple(tested),
         stretches=_stretch_chain(balances),
+        statement_faults=_statement_faults(checks),
+        chain_tested=tuple(
+            d for d in days if _tested(d, days[0], by_day[d], conflicts, listing=False)
+        ),
+        listing_tested=tuple(
+            ListingTested(k.day, k.listed, k.span_start)
+            for k in balances
+            if k.self_tested and k.day == days[0] and k.day in tested_days and not k.premised
+        ),
+        closed_before=tuple(
+            sorted(
+                {k.closed_before for k in balances if k.closed_before is not None},
+                key=lambda c: c.day,
+            )
+        ),
+        tested_known=tuple(
+            k
+            for k in balances
+            if k.day in tested_days
+            and (
+                k.verdict == MET
+                or k.self_tested
+                # On a day a statement closed before some transactions, the balance the span
+                # reaches is the end-of-day one, even where it defines the opening.
+                or (
+                    k.verdict == DEFINES
+                    and any(o.closed_before is not None for o in by_day[k.day])
+                )
+            )
+        ),
     )
+
+
+def _first_statement_fault(checks: StatementChecks | None) -> StatementCheck | None:
+    """The earliest statement that does not add up by what it lists (R3), if any."""
+    if checks is None:
+        return None
+    found = [c for c in checks.statements if c.fault]
+    return min(found, key=lambda c: c.day, default=None)
+
+
+def _statement_faults(checks: StatementChecks | None) -> tuple[StatementFault, ...]:
+    if checks is None:
+        return ()
+    return tuple(
+        StatementFault(c.day, statement_fault_sentence(c))
+        for c in sorted((c for c in checks.statements if c.fault), key=lambda c: c.day)
+    )
+
+
+def _statement_hold(check: StatementCheck) -> HeldBack:
+    return HeldBack(HELD_STATEMENT, check.day, (), statement_fault_sentence(check))
+
+
+def apply_checks(known: Iterable[Known], checks: StatementChecks | None) -> list[Known]:
+    """The known balances with what each statement's own listing concludes laid on them.
+
+    R1 marks a statement closing that adds up by what it lists, whose days are tested, as tested
+    by that listing. R2 reads a statement's closing as the balance after the transactions it lists:
+    where the measurement found that another source's balance for the same day differs from it by
+    exactly the counting transactions nobody lists, the statement is shifted by those that the chain
+    counted at its closing, and is taken out of the day's comparison. The measurement's claim is
+    checked here against the figures themselves, and a claim they do not bear out is ignored, so
+    the day stays the conflict it is today.
+    """
+    found = list(known)
+    if checks is None or not checks.statements:
+        return found
+    # A reading with a balance that has no distance has no opening to measure from, and nothing
+    # can be shifted.
+    measurable = all(k.distance is not None for k in found)
+    for check in checks.statements:
+        at = [
+            i
+            for i, k in enumerate(found)
+            if k.basis == STATEMENT and not k.instant and k.day == check.day
+            and k.figure == check.figure
+        ]
+        # Only a statement that itself adds up by what it lists has a balance that is "the balance
+        # after the transactions it lists"; one that cannot say, or whose document clashes with
+        # another's, explains nothing away.
+        if not at or check.adds_up is not True or check.clash:
+            continue
+        # R2 first: whether a closing is MET depends on what it is taken to have closed before.
+        if check.closed_before is not None and measurable:
+            _close_before(found, at, check, check.closed_before)
+        if check.days_tested:
+            for i in at:
+                if found[i].verdict in (DEFINES, MET):
+                    found[i] = replace(
+                        found[i], self_tested=True, listed=check.listed, span_start=check.span_start
+                    )
+    return found
+
+
+def _close_before(
+    found: list[Known], at: Sequence[int], check: StatementCheck, claim: ClosedBefore
+) -> None:
+    """Apply one statement's R2 claim to `found`, in place, if the figures and the chain bear it
+    out; otherwise leave the day exactly the conflict it is.
+
+    The sum is taken HERE from the amounts, so a wrong sum upstream cannot pass. The opening is
+    derived by counting the transactions dated up to and including a day, which is right for a
+    balance stated for the end of that day and wrong for a statement that closed before some of
+    them. So on a day where this applies the end-of-day balance is the one that may define the
+    opening, never the statement's: where the statement would define it the claim is refused and
+    the day stays the conflict it is, because every balance the account then shows would be
+    out by the transactions the statement closed before. Where another balance defines the
+    opening, the statement's distance moves by what the chain counted at its closing, and the
+    claim stands only if every balance of the day is then reproduced.
+    """
+    if any(found[i].verdict == DEFINES for i in at):
+        return
+    others = [
+        i
+        for i, k in enumerate(found)
+        if not k.instant and k.day == claim.day and k.figure != check.figure
+    ]
+    if not others or not claim.that_amounts:
+        return
+    if {found[i].figure - check.figure for i in others} != {sum(claim.that_amounts)}:
+        return
+    counted = sum(claim.counted_amounts)
+    trial = list(found)
+    for i in at:
+        distance = found[i].distance
+        if distance is None:
+            return
+        distance += counted
+        trial[i] = replace(
+            found[i],
+            distance=distance,
+            verdict=MET if distance == 0 else UNMET,
+            closed_before=claim,
+        )
+    if all(trial[i].verdict in (MET, DEFINES) for i in (*at, *others)):
+        found[:] = trial
 
 
 def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
@@ -264,7 +542,8 @@ def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
     for k in day_end:
         if k.distance is not None:
             levels[k.day].add(k.distance)
-        figures[k.day].add(k.figure)
+        if k.closed_before is None:
+            figures[k.day].add(k.figure)
     found = []
     for before, day in pairwise(sorted(levels)):
         conflict = len(figures[day]) > 1
@@ -275,12 +554,21 @@ def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
 
 
 def _tested(
-    day: date, earliest: date, here: Sequence[Known], conflicts: Collection[date]
+    day: date,
+    earliest: date,
+    here: Sequence[Known],
+    conflicts: Collection[date],
+    *,
+    listing: bool = True,
 ) -> bool:
     """Whether the known balances of `day` were tested (rule 2). The earliest day tests nothing
-    however many balances state it, unless the account's nil opening is a premise."""
+    however many balances state it, unless the account's nil opening is a premise. `listing`
+    False reads it as it was read before a statement's own listing could test a balance: the days
+    protection is offered for (`Agreement.chain_tested`)."""
     if day in conflicts:
         return False
+    if listing and any(k.self_tested and k.verdict in (DEFINES, MET) for k in here):
+        return True
     if day == earliest:
         return any(k.premised and k.verdict == MET for k in here)
     return any(k.verdict == MET for k in here)
@@ -304,6 +592,7 @@ def known_of_opening(opening: EffectiveOpening) -> list[Known]:
                 instant=anchor.at is not None,
                 premised=premised,
                 distance=_distance(reading.difference_minor, reading.defines_opening),
+                basis=anchor.basis,
             )
         )
     return found
@@ -362,15 +651,20 @@ def standing_of(
     opening: EffectiveOpening,
     members: Sequence[str],
     movement: MovementCompleteness | None,
+    checks: StatementChecks | None = None,
 ) -> Standing:
     """An account's standing from the opening already built for it.
 
     `members` is the account and its known Spaces, whose movement faults a whole-account reading
-    counts; the account's own reading counts only its own.
+    counts; the account's own reading counts only its own. `checks` is what its statements' own
+    listings conclude (`statement_listing_measure.statement_checks_of`), laid on the account's own
+    reading alone: a whole-account reading is of balances no single statement states.
     """
     checked = movement is not None
     own_faults = faults_of(movement, members[:1]) if movement is not None else []
-    own = derive_agreement(known_of_opening(opening), own_faults, movement_checked=checked)
+    own = derive_agreement(
+        known_of_opening(opening), own_faults, movement_checked=checked, checks=checks
+    )
     whole: Agreement | None = None
     walk = opening.family
     if walk is not None and (walk.readings or walk.bank_readings):
@@ -394,6 +688,8 @@ def held_sentence(agreement: Agreement) -> str:
             )
         return ""
     day = _day(held.day)
+    if held.kind == HELD_STATEMENT:
+        return held.says
     if held.kind == HELD_CONFLICT:
         return (
             f"Two sources state different balances for {day} ({' and '.join(held.sources)}), "
@@ -410,6 +706,81 @@ def held_sentence(agreement: Agreement) -> str:
             by = ""
         return f"The transactions do not add up to the known balance for {day}{by}."
     return f"The transactions stop adding up at {day}, because of a movement fault: {held.says}."
+
+
+#: Which check a statement failed, in the words of the sentence (`StatementCheck.fault`).
+_FAULT_REASONS = {
+    NOT_HELD: "a transaction it lists is not held",
+    OTHER_AMOUNT: (
+        "a transaction it lists is held with a different amount from the one the statement "
+        "prints"
+    ),
+    HELD_TWICE: "a transaction it lists is held twice",
+    LISTED_TWICE: "it lists a transaction twice that is held once",
+    NO_LONGER_COUNTS: "a transaction it lists is held as reversed or void, so it no longer counts",
+    DOES_NOT_REACH: (
+        "the transactions it lists, as held, do not carry its opening balance to its closing "
+        "balance"
+    ),
+}
+
+
+def statement_fault_sentence(check: StatementCheck) -> str:
+    """Which statement does not add up by what it lists, and which check it failed (R3). Said
+    only of a statement in use: one that did not read whole is a fact about the reading and is
+    never a fault of the transactions."""
+    reason = _FAULT_REASONS.get(check.fault, "it does not add up by what it lists")
+    return f"The statement closing on {_day(check.day)} does not add up by what it lists: {reason}."
+
+
+def listing_tested_sentence(tested: ListingTested) -> str:
+    """A known balance tested by its own statement's listing, with the count that tested it."""
+    if tested.listed == 0:
+        return (
+            f"The known balance for {_day(tested.day)} is its statement's opening balance: the "
+            "statement lists no transactions and its two balances are equal."
+        )
+    return (
+        f"The known balance for {_day(tested.day)} is tested by the "
+        f"{plural(tested.listed, 'transaction')} its statement lists."
+    )
+
+
+def date_difference_sentence(day: date, found: DateDifference) -> str:
+    """Why the balance drawn by stored date for a statement's closing day is a different figure
+    from the one the statement states, in counts only (never the size of the difference). A
+    statement is tested by what it lists, not by date, and a statement's closing balance is not the
+    balance at the end of a calendar day."""
+    named = []
+    held = found.pending + found.later
+    if held:
+        named.append(
+            f"{plural(held, 'transaction')} dated on or before it "
+            f"{agree(held, 'is')} not listed by this statement ({found.pending} pending, "
+            f"{found.later} listed by a later statement)"
+        )
+    if found.listed_after:
+        named.append(
+            f"{plural(found.listed_after, 'transaction')} it lists "
+            f"{agree(found.listed_after, 'is')} dated after it"
+        )
+    return (
+        f"By date the balance at the end of {_day(day)} is a different figure, because "
+        + " and ".join(named)
+        + ". The statement is tested by what it lists, not by date."
+    )
+
+
+def closed_before_sentence(claim: ClosedBefore) -> str:
+    """Why two sources' balances for one day are not a conflict (R2), and how it is known."""
+    counted = plural(claim.transactions, "transaction")
+    them = "it" if claim.transactions == 1 else "them"
+    return (
+        f"The statement's balance and another source's for {_day(claim.day)} differ by exactly "
+        f"the {counted} dated that day that this statement does not list, so the statement is "
+        f"taken to have closed before {them}. It is taken so because the two differ by exactly "
+        "that, which is strong evidence and not proof."
+    )
 
 
 #: What a stretch that does not add up can mean, said once and folded on the page: the arithmetic
@@ -459,6 +830,18 @@ def standing_line(
         return "No known balance, so there is nothing to check the transactions against."
     if not agreement.through:
         line = "The transactions do not yet add up to any known balance"
+    elif agreement.through == agreement.known_from and agreement.listing_tested:
+        listed = agreement.listing_tested[0].listed
+        line = (
+            f"The transactions add up to the known balance for {_day(agreement.through)}, "
+            + (
+                f"tested by the {plural(listed, 'transaction')} its statement lists"
+                if listed
+                else "which its statement states as its opening balance: it lists no transactions"
+            )
+        )
+        if agreement.known_to and agreement.known_to != agreement.through:
+            line += f"; the latest known balance is for {_day(agreement.known_to)}"
     else:
         line = (
             "The transactions add up to every known balance from "

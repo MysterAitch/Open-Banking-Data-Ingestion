@@ -118,6 +118,40 @@ JUSTIFIED = {
     ("test_statement_listing_measure.py", "statement_readings"): "a held statement with no "
     "kept reading: the import door keeps one for every statement it reads, so a document "
     "whose lines are unavailable can only be made by taking the reading away afterwards",
+    ("test_statement_listing_rule_accounts.py", "transactions"): "a listed transaction the "
+    "store does not hold, and a held one under another figure than its statement states: "
+    "the faults the listing rule must name, and states the importer, which derives the rows "
+    "and the sightings from the same bytes, cannot produce",
+    ("test_statement_listing_rule_accounts.py", "transaction_sources"): "the sightings of the "
+    "transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_rule_accounts.py", "statement_readings"): "a held statement with "
+    "no kept reading: the import door keeps one for every statement it reads, so a document "
+    "whose lines are unavailable can only be made by taking the reading away afterwards",
+    ("test_statement_listing_rule_review.py", "transactions"): "two errors that cancel: a "
+    "listed transaction the store does not hold, and another held larger by the same amount, "
+    "so that what is held still sums to the statement's closing balance. The importer derives "
+    "the rows and the sightings from the same bytes and cannot produce either, and their "
+    "cancelling is exactly what a check that only sums cannot see",
+    ("test_statement_listing_rule_review.py", "transaction_sources"): "the sightings of the "
+    "transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_rule_review.py", "statement_readings"): "a held statement with "
+    "no kept reading: the import door keeps one for every statement it reads, so a document "
+    "whose lines are unavailable can only be made by taking the reading away afterwards",
+    ("test_statement_listing_rule_random_stores.py", "transactions"): "the tampering the "
+    "oracle knows about: a listed transaction the store does not hold, held with another "
+    "amount, or two errors that cancel. The importer derives the rows and the sightings from "
+    "the same bytes, so none of those states can be produced by a door",
+    ("test_statement_listing_rule_random_stores.py", "transaction_sources"): "the sightings "
+    "of the transaction removed above, so the store holds no trace of the payment at all",
+    ("test_statement_listing_rule_review_two.py", "statement_readings"): "a held statement "
+    "with no kept reading, here of a statement that cannot see its account's Spaces: the import "
+    "door keeps a reading for every statement it reads, so the state can only be made by taking "
+    "the reading away afterwards",
+    ("test_statement_listing_rule_review_two.py", "transactions"): "the subject is the memo's "
+    "key and not the rows: a write that is rolled back, and two copies of one store that reach "
+    "the same standing epoch by different writes. Each needs a write whose only effect is to "
+    "move the epoch, and one that makes a statement's check answer differently (a listed "
+    "transaction held as reversed), which no door writes on request",
     ("test_row_parting.py", "transaction_sources"):"the sightings of the removed row, "
     "so the store holds no trace of the payment at all",
     ("test_aggregator_day_anchors.py", "transactions"): "a stored date a day later than the "

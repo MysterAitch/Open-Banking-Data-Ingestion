@@ -279,120 +279,125 @@ def _span(period: Period) -> str:
 
 def _kind_phrase(period: Period) -> str:
     if period.kind is PeriodKind.FIRST:
-        return "the first statement held, from its own first row"
+        return "the first statement held, from its own first transaction"
     if period.kind is PeriodKind.BETWEEN:
         return "between this statement's closing balance and the previous one's"
     return "inside this statement, from its own opening balance to its closing one"
 
 
 def _leftover_clause(row: HeldRow) -> str:
-    """Whether the row a difference equals is itself one of the period's
-    leftovers, which decides whether the difference is a row only one side
+    """Whether the transaction a difference equals is itself one of the period's
+    leftovers, which decides whether the difference is a transaction only one side
     holds or one both sides hold."""
     if row.leftover == FEED_SIDE:
         return " (one of this period's feed-only leftovers)"
     if row.leftover == STATEMENT_SIDE:
         return " (one of this period's statement-only leftovers)"
     if len(row.holders) > 1:
-        return " (a row both sources hold, so not a leftover)"
+        return " (a transaction both sources hold, so not a leftover)"
     return " (not one of this period's leftovers)"
 
 
 def _locus_sentence(period: Period, locus: Locus) -> str:
     if locus is Locus.SAME_MONEY:
         return (
-            "The statement-only and feed-only rows sum to the same figure: the "
+            "The statement-only and feed-only transactions sum to the same figure: the "
             "leftovers are the same money, described differently."
         )
     if locus is Locus.STATEMENT_ON_TOP:
         return (
-            "The difference equals the sum of the statement-only rows: the store "
+            "The difference equals the sum of the statement-only transactions: the store "
             "holds the statement's leftovers on top of the feed's."
         )
     if locus is Locus.FEED_ONLY_SUM:
-        return "The difference equals the sum of the feed-only rows."
+        return "The difference equals the sum of the feed-only transactions."
     if locus is Locus.SINGLE_ROW:
         named = "; ".join(
             f"dated {row.row_date}, held by {' and '.join(row.holders)}"
             + (_leftover_clause(row) if period.feed else "")
             for row in period.single_rows
         )
-        return f"The difference equals a single row held in this period: {named}."
+        return f"The difference equals a single transaction held in this period: {named}."
     return (
         "None of the above: the difference is not the statement's leftovers, the "
-        "feed's leftovers, or any single row held here."
+        "feed's leftovers, or any single transaction held here."
     )
 
 
 def _period_lines(period: Period, *, masked: bool) -> list[str]:
     lines = [f"  Period {_span(period)} ({_kind_phrase(period)}):"]
-    held = _plural(period.held_rows, "row")
+    held = _plural(period.held_rows, "transaction")
     if period.agrees:
-        lines.append(f"    The {held} the store counts agree with the statement's movement.")
+        lines.append(f"    The {held} the store counts add up to the statement's movement.")
     else:
-        lines.append(f"    The {held} the store counts differ from the statement's movement.")
+        lines.append(f"    The {held} the store counts do not add up to the statement's movement.")
     if not period.feed:
         lines.append(
             "    No other source is compared here: the period is tested against the "
-            "statement's own rows only."
+            "statement's own transactions only."
         )
     else:
         lines.append(
             f"    Unmatched against {period.feed} in this period: "
-            f"{_plural(len(period.statement_only), 'row')} only in the statements, "
-            f"{_plural(len(period.feed_only), 'row')} only in the feed."
+            f"{_plural(len(period.statement_only), 'transaction')} only in the statements, "
+            f"{_plural(len(period.feed_only), 'transaction')} only in the feed."
         )
         if period.statement_only:
             lines.append(
-                f"    Statement-only rows are dated: {_leftover_dates(period.statement_only)}."
+                "    Statement-only transactions are dated: "
+                f"{_leftover_dates(period.statement_only)}."
             )
         if period.feed_only:
-            lines.append(f"    Feed-only rows are dated: {_leftover_dates(period.feed_only)}.")
+            lines.append(
+                f"    Feed-only transactions are dated: {_leftover_dates(period.feed_only)}."
+            )
         if not period.fully_paired:
             lines.append(
-                f"    Some rows counted here lie outside the span {period.feed} and the "
-                "statements were paired over, so the unmatched rows are counted only "
+                f"    Some transactions counted here lie outside the span {period.feed} and the "
+                "statements were paired over, so the unmatched transactions are counted only "
                 "inside it."
             )
     if not masked:
         lines.append(
-            f"    Statement movement {format_amount(period.movement_minor)}; rows held "
+            f"    Statement movement {format_amount(period.movement_minor)}; transactions held "
             f"{format_amount(period.held_minor)}; surplus {format_amount(period.surplus_minor)}."
         )
         if period.feed:
             lines.append(
-                f"    Statement-only rows sum to {format_amount(period.statement_only_minor)}; "
-                f"feed-only rows sum to {format_amount(period.feed_only_minor)}."
+                "    Statement-only transactions sum to "
+                f"{format_amount(period.statement_only_minor)}; "
+                f"feed-only transactions sum to {format_amount(period.feed_only_minor)}."
             )
     if period.folded_feed_rows:
         lines.append(
-            f"    {_plural(period.folded_feed_rows, 'feed row')} "
+            f"    {_plural(period.folded_feed_rows, 'feed transaction')} "
             f"{'was' if period.folded_feed_rows == 1 else 'were'} folded as the same money "
-            f"as {_plural(period.folded_statement_rows, 'statement row')}: a folded row no "
-            "longer counts and is withheld from the push (one already in Actual becomes an "
-            "orphan the removal pass takes out). The statement's rows stay counted."
+            f"as {_plural(period.folded_statement_rows, 'statement transaction')}: a folded "
+            "transaction no longer counts and is withheld from the push (one already in Actual "
+            "becomes an orphan the removal pass takes out). The statement's transactions stay "
+            "counted."
         )
         if not masked:
             lines.append(
-                f"    The folded rows sum to {format_amount(period.folded_minor)}."
+                f"    The folded transactions sum to {format_amount(period.folded_minor)}."
             )
     for locus in period.loci:
         lines.append("    " + _locus_sentence(period, locus))
     if period.leftovers_unequal and not period.agrees:
         lines.append(
-            "    The statement-only and feed-only rows sum to different figures: the "
+            "    The statement-only and feed-only transactions sum to different figures: the "
             "leftovers are not the same money."
         )
     if period.cancelled_by_next is not None:
         lines.append(
             f"    The next period, ending {period.cancelled_by_next}, differs by exactly "
-            "the opposite: a row is dated on the wrong side of the statement date "
+            "the opposite: a transaction is dated on the wrong side of the statement date "
             f"{period.last_day}."
         )
     if period.cancels_previous is not None:
         lines.append(
             f"    The previous period, ending {period.cancels_previous}, differs by exactly "
-            "the opposite: a row is dated on the wrong side of the statement date "
+            "the opposite: a transaction is dated on the wrong side of the statement date "
             f"{period.cancels_previous}."
         )
     if not masked:
@@ -426,8 +431,8 @@ def _account_lines(item: AccountPeriods, *, masked: bool) -> list[str]:
             lines.extend(f"    {sentence}" for sentence in item.same_money)
     else:
         lines.append(
-            "  No source other than the statements holds rows for this account, so "
-            "each period is tested against the statement's own rows only."
+            "  No source other than the statements holds transactions for this account, so "
+            "each period is tested against the statement's own transactions only."
         )
     for feed in item.feeds or ("",):
         if len(item.feeds) > 1:
@@ -827,7 +832,7 @@ def gather_evidence(
                 "exists and nothing can be tested."
             )
         elif any(t.currency != "GBP" for t in counted):
-            withheld = "The rows are not all in GBP, so no sum of them is meaningful."
+            withheld = "The transactions are not all in GBP, so no sum of them is meaningful."
         sightings = [t for t in held if t.account_id == ref]
         feeds = tuple(sorted({t.source for t in sightings} - STATEMENT_SOURCES))
         paired: dict[str, tuple[list[Leftover], date, date] | None] = {}

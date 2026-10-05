@@ -366,7 +366,10 @@ class TestEachWayACardCanDifferFromTheNineStatementOne:
         assert "Plan Charge 2" not in folded(store)
         assert "Genuine Purchase" not in folded(store)
         text = page(store)
-        assert "The 6 rows the store counts differ from the statement's movement." in text
+        assert (
+            "The 6 transactions the store counts do not add up to the statement's movement."
+            in text
+        )
 
     def test_Rule_WhenTheFeedPostsTheChargeTwiceAndTheStatementListsItOnce_FoldsNeither(
         self, store, tmp_path
@@ -406,7 +409,7 @@ class TestEachWayACardCanDifferFromTheNineStatementOne:
             "2026-02-10, 2026-02-10, 2026-02-10): no subset of the feed rows sums to the "
             "period's difference and to some subset of the statement-only rows."
         )
-        assert "Feed-only rows are dated: 2026-01-11 (truelayer)." in text
+        assert "Feed-only transactions are dated: 2026-01-11 (truelayer)." in text
 
 
 class TestTheLeftoversAreListedByDateAndSource:
@@ -419,7 +422,7 @@ class TestTheLeftoversAreListedByDateAndSource:
         text = page(store)
 
         assert (
-            "Statement-only rows are dated: 2026-02-10 (santander-cc-pdf), "
+            "Statement-only transactions are dated: 2026-02-10 (santander-cc-pdf), "
             "2026-02-10 (santander-cc-pdf), 2026-02-10 (santander-cc-pdf)." in text
         )
 
@@ -434,7 +437,7 @@ class TestTheLeftoversAreListedByDateAndSource:
         [listing] = [
             line
             for line in text.splitlines()
-            if line.strip().startswith("Feed-only rows are dated: 2026-02-12")
+            if line.strip().startswith("Feed-only transactions are dated: 2026-02-12")
         ]
         assert listing.endswith(", and 11 more.")
         assert listing.count("(truelayer)") == 20
@@ -482,7 +485,7 @@ class TestAnExcusedStatementRow:
         fold_same_money(store)
 
         assert (
-            "Statement-only rows are dated: 2026-03-10 (santander-cc-pdf), 2026-03-10 "
+            "Statement-only transactions are dated: 2026-03-10 (santander-cc-pdf), 2026-03-10 "
             "(santander-cc-pdf), 2026-03-10 (santander-cc-pdf, excused: a proven internal "
             "transfer)."
         ) in page(store)

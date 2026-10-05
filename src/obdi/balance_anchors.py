@@ -795,8 +795,8 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
     A disregarded balance is left out before anything reads it, so it takes part in no stretch,
     no agreement, and no conflict; it is still found, by `_gather_all`, so a page can show it.
     """
-    gathered = _gather_all(store, ref, families)
     rows = store.disregarded_balance_rows(ref)
+    gathered = _gather_all(store, ref, families, rows)
     if not rows:
         return gathered
     held = {(*anchor_key(a), a.balance_minor) for a in gathered.own if can_be_disregarded(a)}
@@ -820,7 +820,14 @@ def _gather(store: Store, ref: str, families: Families | None) -> _Gathered:
     )
 
 
-def _gather_all(store: Store, ref: str, families: Families | None) -> _Gathered:
+def _gather_all(
+    store: Store,
+    ref: str,
+    families: Families | None,
+    disregards: Sequence[tuple[date, str, str, int]] | None = None,
+) -> _Gathered:
+    """Every balance the account holds, and where the statements place its transactions.
+    `disregards` is the account's disregarded balances where the caller has read them."""
     anchors = stated_anchors(store, ref)
     spaces = families.spaces_of(ref) if families is not None else ()
     blind_bank = (
@@ -857,7 +864,15 @@ def _gather_all(store: Store, ref: str, families: Families | None) -> _Gathered:
             continue
         anchors.append(Anchor(s.day, s.balance_minor, STATEMENT, stated_by=s.source))
         anchoring.append(s)
-    placed = statement_membership(store, ref, anchoring).placed if anchoring else {}
+    # A statement a person disregarded lists nothing, here as everywhere (`_gather`): a transaction
+    # only it lists is placed by its date like any other source's.
+    if disregards is None:
+        disregards = store.disregarded_balance_rows(ref)
+    set_aside = {
+        (day, source, balance) for day, source, basis, balance in disregards if basis == STATEMENT
+    }
+    in_use = [s for s in anchoring if (s.day, s.source, s.balance_minor) not in set_aside]
+    placed = statement_membership(store, ref, in_use).placed if in_use else {}
     bank = _bank_balances(store, ref, families)
     if families is None or not spaces:
         return _Gathered(anchors, unusable, None, placed, bank=bank)

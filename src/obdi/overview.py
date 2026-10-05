@@ -112,6 +112,7 @@ _KIND_ORDER = (
     "scheduler-late-wait",
     "review",
     "known-balances-disagree",
+    "statement-fault",
     "agreement-lapsed",
     "statement-due",
     "spaces",
@@ -212,6 +213,15 @@ _KINDS: dict[str, tuple[int, str]] = {
         SOON,
         "Open the account's ledger and decide which source is right; disregard the known "
         "balance that is wrong, or look at the statement.",
+    ),
+    # Raised at the fault band from the first day: a statement whose own lines were found and do
+    # not reach its closing balance is not a conflict between sources and not a wait for a
+    # statement. It can be relaxed on the evidence of a trend of false alarms.
+    "statement-fault": (
+        NOW,
+        "Open the account's ledger to see which statement it is and which check it failed: a "
+        "transaction missing, held with another amount, held twice, or held under another "
+        "account. If the statement's balance is the wrong thing, disregard it there.",
     ),
     "agreement-lapsed": (
         NOW,
@@ -670,6 +680,21 @@ def standing_items_from(
         if closed_by_today(ref):
             continue
         standing = standings[ref].standing
+        # A statement fault is a fact about the statement, said whichever hold is earliest in
+        # the account's own sentence, and without ending the account's other items.
+        faulted = standing.own.statement_faults
+        if faulted:
+            more = f" And {len(faulted) - 1} more." if len(faulted) > 1 else ""
+            items.append(
+                AttentionItem(
+                    kind="statement-fault",
+                    severity=_KINDS["statement-fault"][0],
+                    message=f"{label_of(ref)}: {faulted[0].says}{more}",
+                    remedy=_KINDS["statement-fault"][1],
+                    href=f"/ledger?ref={quote(ref, safe='')}#opening",
+                    accounts=(ref,),
+                )
+            )
         conflicts = {c.day: c.sources for c in standing.own.conflicts}
         if standing.whole is not None:
             conflicts.update({c.day: c.sources for c in standing.whole.conflicts})
@@ -683,7 +708,12 @@ def standing_items_from(
                         f"{label_of(ref)}: known balances do not match each other on "
                         f"{_plural(len(conflicts), 'day')}, the first {first.isoformat()} "
                         f"({' and '.join(conflicts[first])}). That is a conflict between "
-                        "sources, not a fault in the rows."
+                        + (
+                            "sources; the statement that does not add up is reported "
+                            "separately."
+                            if faulted
+                            else "sources, not a fault in the rows."
+                        )
                     ),
                     remedy=_KINDS["known-balances-disagree"][1],
                     href=f"/ledger?ref={quote(ref, safe='')}#opening",

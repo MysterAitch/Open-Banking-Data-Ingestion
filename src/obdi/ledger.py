@@ -79,6 +79,8 @@ from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
 from .spaces import ArchiveNote
+from .standing_data import statement_checks_for
+from .statement_checks import StatementChecks
 from .store import Store
 from .typed_transactions import TypedEntry, typed_entries
 
@@ -103,6 +105,14 @@ QUERIES_PER_PAGE = 11
 #: statement not yet read, adds statements beyond this, so a page for such an account costs more
 #: and the fixed figure is a floor.
 ANCHOR_QUERIES = 10
+
+#: Statements a page issues to find what an account's statements conclude by what they list
+#: (`standing_data.statement_checks_for`, read by the verdict) once the store's checks are held:
+#: the one read of the standing epoch that says they still are. The checks themselves are worked
+#: out once per store state and shared by every page and account, held or not (see
+#: `standing_data._CHECKS`), so this does not follow the number of statements in the store, which
+#: made the page cost 618 statements instead of 77 on a store of 96 statements.
+STATEMENT_CHECK_QUERIES = 1
 
 #: What asking for the FAMILY reading adds to an account's page, on top of
 #: ANCHOR_QUERIES, once `families_of` has been built (itself FAMILY_DISCOVERY_QUERIES
@@ -573,6 +583,10 @@ class Ledger:
     clearing: Structural[ClearingView | None] = None
     #: How far the account is in agreement, and for a family the whole account too (`agreement`).
     standing: Structural[Standing | None] = None
+    #: What each of the account's statements concludes by what it lists, and how many a
+    #: calendar-day test would have reproduced (`statement_listing_measure.statement_checks`);
+    #: None where the account holds no statement.
+    statements: Structural[StatementChecks | None] = None
     #: The account's protection (`protection`), set by the caller that reads the declared state
     #: so that the ledger proper costs the statements it always did.
     protection: Structural[ProtectionView | None] = None
@@ -982,7 +996,9 @@ def _ledger_for(
         )
         entries = typed_entries(store, ref)
         if not opening.unitemised:
-            standing = standing_of(opening, members, movement)
+            standing = standing_of(
+                opening, members, movement, statement_checks_for(store, ref, families)
+            )
             return replace(
                 empty,
                 opening=opening_view(opening),
@@ -1208,7 +1224,8 @@ def _ledger_for(
             ),
         )
 
-    final_standing = standing_of(opening, members, movement)
+    checks = statement_checks_for(store, ref, families)
+    final_standing = standing_of(opening, members, movement, checks)
     return Ledger(
         ref=ref,
         label=label,
@@ -1236,6 +1253,7 @@ def _ledger_for(
             if not t.status.is_history and row.origin != ORIGIN_UNITEMISED
         ),
         standing=final_standing,
+        statements=checks,
         protection=(
             protection_view(store, ref, opening, held, final_standing, check=check)
             if with_protection

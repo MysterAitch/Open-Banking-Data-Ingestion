@@ -19,10 +19,15 @@ from datetime import date
 from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from .agreement import Standing, held_sentence, standing_line, standing_of
-from .balance_anchors import effective_opening
+from .balance_anchors import EffectiveOpening, effective_opening
 from .family_anchors import Families
+from .models import Transaction
 from .protection import check_span
+from .statement_checks import StatementChecks
 from .store import Store
+
+#: What an account is read with where nothing says which accounts are Spaces: none are.
+NO_FAMILIES = Families({}, {}, {})
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .movement_completeness import MovementCompleteness
@@ -170,6 +175,65 @@ class AccountStanding:
     newest_row: date | None = None
 
 
+#: The statement checks of the whole store, held for as long as nothing they read has changed:
+#: one computation, shared by Today, the Accounts page, and every account page, because the cost
+#: follows the statements of the WHOLE store and not of the account asked about. Keyed by the
+#: store's standing epoch (every write to a table the checks read moves it, in the same
+#: transaction) and by the accounts' Spaces, which the reading depends on. Measured by a review
+#: on 96 statements: re-deriving them on each account page took it from 77 SQL statements to 618.
+_CHECKS_LOCK = threading.Lock()
+_CHECKS: dict[str, tuple[tuple[int, int, int], dict[str, dict[str, StatementChecks]]]] = {}
+
+
+def _checks_of_store(store: Store, families: Families) -> dict[str, StatementChecks]:
+    from .statement_listing_measure import statement_checks_all
+
+    epoch = store.standing_epoch()
+    spaces = repr(
+        (
+            sorted(families.parents.items()),
+            sorted((source, sorted(fed)) for source, fed in families.feeds.items()),
+        )
+    )
+    where = str(store.path)
+    # The file's own identity beside the epoch: another copy of the store put at the same path
+    # has its own modification time. RESIDUE: a copy that keeps the original's time and size
+    # (`copy2`) and reached the same epoch by a different write is not told apart, which needs a
+    # restore without a restart of the process.
+    try:
+        seen = store.path.stat()
+        identity = (epoch, seen.st_mtime_ns, seen.st_size)
+    except OSError:
+        identity = (epoch, 0, 0)
+    with _CHECKS_LOCK:
+        held = _CHECKS.get(where)
+        if held is not None and held[0] == identity and spaces in held[1]:
+            return held[1][spaces]
+    found = statement_checks_all(store, families)
+    # Never stored inside a transaction: a write that is rolled back returns the epoch to what
+    # it was, and checks read inside it would then stand for a store that never held them.
+    if store.connection.in_transaction:
+        return found
+    with _CHECKS_LOCK:
+        held = _CHECKS.get(where)
+        # One entry per reading of the Spaces at this identity (the pages read with and without
+        # the families, and a reading must not evict the other); a new one discards them all.
+        if held is None or held[0] != identity:
+            held = _CHECKS[where] = (identity, {})
+        held[1][spaces] = found
+    return found
+
+
+def statement_checks_for(
+    store: Store, ref: str, families: Families | None
+) -> StatementChecks | None:
+    """What one account's statements conclude by what they list, read by the account page and
+    every other reading of one account, so that all of them lay on the agreement rule the same
+    checks `standings_for` does. None for an account that holds no statement, which costs a
+    lookup in what is already held."""
+    return _checks_of_store(store, families if families is not None else NO_FAMILIES).get(ref)
+
+
 def standings_for(
     store: Store,
     refs: Iterable[str],
@@ -180,23 +244,30 @@ def standings_for(
     """The standing of each account that holds rows, from the same opening its page would build."""
     protections = {str(r["account"]): r for r in store.protection_records()}
     found: dict[str, AccountStanding] = {}
+    built: dict[str, tuple[list[Transaction], EffectiveOpening]] = {}
     for ref in refs:
         rows = store.transactions_for_account(ref)
         record = protections.get(ref)
-        opening = effective_opening(
-            store,
-            ref,
+        built[ref] = (
             rows,
-            families=families,
-            explain_after=(
-                date.fromisoformat(str(record["through"]))
-                if record is not None and check_span(store, record).intact
-                else None
+            effective_opening(
+                store,
+                ref,
+                rows,
+                families=families,
+                explain_after=(
+                    date.fromisoformat(str(record["through"]))
+                    if record is not None and check_span(store, record).intact
+                    else None
+                ),
             ),
         )
+    checks = _checks_of_store(store, families if families is not None else NO_FAMILIES)
+    for ref, (rows, opening) in built.items():
+        record = protections.get(ref)
         members = [ref, *(families.spaces_of(ref) if families is not None else ())]
         found[ref] = AccountStanding(
-            standing_of(opening, members, movement),
+            standing_of(opening, members, movement, checks.get(ref)),
             None if record is None else date.fromisoformat(str(record["through"])),
             record is not None and not check_span(store, record).intact,
             max((r.value_date for r in rows if not r.status.is_history), default=None),
@@ -223,8 +294,10 @@ def verification_of(item: AccountStanding | None) -> str:
     opening has nothing testing its transactions. One whose transactions stop adding up short of
     its latest known balance does not add up, whatever its state up to there.
     """
-    from .agreement import AGREES, NONE, UNTESTED
+    from .agreement import AGREES, HELD_STATEMENT, NONE, UNTESTED
 
+    if item is not None and item.standing.own.state == HELD_STATEMENT:
+        return DOES_NOT_ADD_UP
     if item is None or item.standing.own.state in (NONE, UNTESTED):
         return NOTHING_TO_CHECK_AGAINST
     if item.standing.own.held is not None:

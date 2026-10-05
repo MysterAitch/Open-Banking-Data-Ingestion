@@ -95,14 +95,31 @@ class TestAHealthyOverview:
 
         assert found["/balance-walk"].state == "cannot say"
         assert found["/date-lag"].state == "cannot say"
-        assert found["/period-reconciliation"].state == "cannot say"
         assert "open" in found["/date-lag"].sentence.lower()
 
-    def test_StatementPeriods_WhenAnotherCheckFindsSomething_StillSayCannotSay(self):
+    def test_StatementPeriods_WhenNothingIsWrong_SaysEveryStatementAddsUpByWhatItLists(self):
+        found = results(overview())
+
+        assert found["/period-reconciliation"].state == "in order"
+        assert "by the transactions it lists" in found["/period-reconciliation"].sentence
+
+    def test_StatementPeriods_WhenAnotherCheckFindsSomething_StaysInOrder(self):
         lapsed = item("agreement-lapsed", "A: in agreement through 2026-03-10.")
         found = results(overview(lapsed))
 
-        assert found["/period-reconciliation"].state == "cannot say"
+        assert found["/period-reconciliation"].state == "in order"
+
+    def test_StatementPeriods_WhenAStatementDoesNotAddUpByWhatItLists_LooksAndSaysWhich(self):
+        message = (
+            "A: The transactions do not add up at the statement closing on 2026-02-10: "
+            "a transaction it lists is not held."
+        )
+        found = results(overview(item("statement-fault", message)))
+
+        assert found["/period-reconciliation"].state == "look"
+        assert found["/period-reconciliation"].sentence == message
+        assert found["/period-reconciliation"].tone == "bad"
+        assert [r for r, c in found.items() if c.state == "look"] == ["/period-reconciliation"]
 
     def test_WhenAnAccountsAgreementHasLapsed_TheRowForDaysAddingUpLooks(self):
         message = "A: in agreement through 2026-03-10, more than 45 days ago."
@@ -223,8 +240,8 @@ class TestThePage:
 
         assert page.count("pill-bad") == 1
         assert "A: 1 break." in page
-        assert page.count(">in order<") == 3
-        assert page.count(">cannot say<") == 3
+        assert page.count(">in order<") == 4
+        assert page.count(">cannot say<") == 2
 
     def test_ChecksPage_CallsTheOverviewHookOnceForAllSevenRows(self, serve):
         calls: list[bool] = []

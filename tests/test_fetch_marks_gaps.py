@@ -3,8 +3,9 @@
 Known answers, decided before the first run (over `fetch_marks_world`, TODAY 2026-10-05):
 
   * A supported mark over card-virgin's whole hole (06-05..07-04) takes its one gap out of the
-    list and the account moves to those needing nothing; the household goes from 13 things to
-    fetch for 11 accounts to 12 for 10.
+    list and the account moves to those needing nothing; the household goes from 12 things to
+    fetch for 10 accounts to 11 for 9 (13 for 11 to 12 for 10 while a lone statement still
+    counted as one known balance that tested nothing).
   * The same mark over a hole the feed lists two rows in is contradicted: the gap stays.
   * A mark over card-hole's 03-11..03-31 splits its inferred hole 03-11..04-10: what remains is
     04-01..04-10, which still names the closing day 04-10 and still ends on the inferred day. A
@@ -64,8 +65,8 @@ class TestAGapInsideASupportedMarkLeavesTheList:
 
         after = report_with(db, marks_read(db))
 
-        assert (len(before.gaps), len(before.needing)) == (13, 11)
-        assert (len(after.gaps), len(after.needing)) == (12, 10)
+        assert (len(before.gaps), len(before.needing)) == (12, 10)
+        assert (len(after.gaps), len(after.needing)) == (11, 9)
         assert gaps_of(after, "card-virgin") == []
         (aside,) = after.set_aside
         assert (aside.account, aside.kind, aside.first_day, aside.last_day) == (

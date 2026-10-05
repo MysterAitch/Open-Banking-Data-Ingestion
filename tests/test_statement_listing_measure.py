@@ -784,13 +784,17 @@ class TestTheFirstStatementWithAnotherSourceHoldingEarlierDays:
 
         assert (only.link, only.passes, only.unlisted) == (Link.FIRST, True, 0)
 
-    def test_Account_WhenTheFirstStatementPasses_ItsStretchIsNewlyVerifiedAsTheFirst(self, world):
+    def test_Account_WhenTheFirstStatementPassesButAFeedHoldsEarlierDays_ItsDaysAreNotVerified(
+        self, world
+    ):
         account = world[1]["first"]
+        only = account.statements[0]
 
-        assert [(n.closing, n.link) for n in account.newly_verified] == [
-            (D(2026, 2, 10), Link.FIRST)
-        ]
-        assert account.newly_verified[0].spans == ((D(2026, 1, 10), D(2026, 2, 10)),)
+        # Verified by what it lists, but two feed transactions precede its first day and no
+        # statement lists them, so the days are not claimed (`agreement`, R1).
+        assert only.passes is True
+        assert only.unlisted_before == 2
+        assert account.newly_verified == []
 
 
 class TestAListedTransactionMissingFromTheStore:
@@ -807,13 +811,16 @@ class TestAListedTransactionMissingFromTheStore:
 
 
 class TestAStatementWhoseAmountsDoNotSum:
-    def test_Statement_WhenItsOwnAmountsMissTheClosing_DoesNotReadWholeAndIsAFault(self, world):
+    def test_Statement_WhenItsOwnAmountsMissTheClosing_DoesNotReadWholeAndIsNoFault(self, world):
+        # A statement the reader refused is never a known balance, so a fault of the account
+        # cannot be said of it: it is cannot say, and the page blames the reading (round two).
         account = world[1]["unsummed"]
         february = account.statements[1]
 
         assert [s.closing for s in account.statements] == [D(2026, 1, 10), D(2026, 2, 10)]
         assert (february.read_whole, february.lines_listed, february.held) == (False, 1, None)
-        assert february.fails is True
+        assert (february.fails, february.cannot_say, february.fault) == (False, True, "")
+        assert account.failing == []
         assert account.statements[0].passes is True
 
     def test_Statement_WhenItDoesNotReadWhole_TheLinkStillSaysWhetherTheBalancesMeet(self, world):
@@ -882,7 +889,9 @@ class TestOverlappingStatements:
         assert (short.passes, long.passes) == (True, True)
         assert short.held == Held(2, same=2, also_by_another=2)
         assert long.held == Held(3, same=3, also_by_another=2)
-        assert long.link is Link.DIFFERS
+        # The two share transactions, so they are not consecutive and their balances conclude
+        # nothing about money moving between them (`agreement`, R4).
+        assert (long.link, long.shared) == (Link.OVERLAPS, 2)
 
 
 class TestAStatementWithNoOpeningStated:
@@ -972,12 +981,19 @@ class TestAStatementWhoseReadingWasNeverKept:
 
 
 class TestAListedTransactionFoldedIntoAnother:
-    def test_Statement_WhenALineIsFoldedIntoAnotherThatCounts_IsHeldThroughIt(self, world):
+    def test_Statement_WhenALineIsFoldedIntoAnotherAccountsTransaction_IsCannotSayAndNoFault(
+        self, world
+    ):
+        # The line is folded into a transaction of `folded-pocket`, which is not a Space of
+        # `folded`. Round two called that a fault; the only thing that puts a line there is the
+        # store's own Space fold, so it is not a fault in the owner's data (round three,
+        # decision 1): the statement cannot say.
         (only,) = world[1]["folded"].statements
 
-        assert only.held == Held(3, same=2, folded_through=1)
-        assert (only.as_held, only.through_folds, only.held_verdict) == (False, True, True)
-        assert only.passes is True
+        assert only.held == Held(3, same=2, elsewhere=1)
+        assert (only.as_held, only.through_folds, only.held_verdict) == (False, None, None)
+        assert (only.passes, only.fails, only.cannot_say, only.fault) == (False, False, True, "")
+        assert "held under another account" in only.held_note
         assert world[1]["folded"].failing == []
 
     def test_Statement_WhenAFoldedLinesDestinationIsNotRecorded_IsCannotSayAndNoFault(self, world):
@@ -1034,7 +1050,7 @@ class TestADayTwoSourcesStateDifferentBalancesFor:
         found = only.day_conflict
         assert found is not None
         assert (found.day, found.verdict) == (D(2026, 2, 10), DayReading.SAME_DAY)
-        assert (found.unlisted_that_day, found.unlisted_next_day) == (1, 0)
+        assert found.unlisted_that_day == 1
 
     def test_Closing_WhenTheOtherBalanceDiffersByAnotherAmount_IsNotExplained(self, world):
         (only,) = world[1]["sameday-unexplained"].statements
@@ -1044,15 +1060,17 @@ class TestADayTwoSourcesStateDifferentBalancesFor:
         assert found.verdict is DayReading.NOT_EXPLAINED
         assert found.unlisted_that_day == 1
 
-    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedTheNextDay_SaysSoApart(
+    def test_Closing_WhenTheOtherBalanceDiffersByTheTransactionDatedTheNextDay_IsNotExplained(
         self, world
     ):
+        # Round three: there is one hypothesis (the other balance is for the end of the closing
+        # day), so a purchase dated the next day explains nothing.
         (only,) = world[1]["sameday-nextday"].statements
 
         found = only.day_conflict
         assert found is not None
-        assert found.verdict is DayReading.NEXT_DAY
-        assert (found.unlisted_that_day, found.unlisted_next_day) == (0, 1)
+        assert found.verdict is DayReading.NOT_EXPLAINED
+        assert found.unlisted_that_day == 0
 
     def test_Closing_WhenNoOtherSourceDisagrees_HasNoConflictToExplain(self, world):
         assert column(world, "complete", "day_conflict") == [None] * 4

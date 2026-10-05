@@ -88,9 +88,15 @@ def _link_sentence(item: StatementListing) -> str:
             "two are taken to be consecutive because the balances meet. That is evidence, not "
             "proof: a missing statement whose transactions net to nothing would leave the same."
         )
+    if item.link is Link.OVERLAPS:
+        return (
+            f"It shares {plural(item.shared, 'transaction')} with the statement before it, or "
+            "starts inside it, so the two overlap and nothing is concluded from their balances."
+        )
     return (
-        "Its opening balance differs from the closing balance of the statement before it, so "
-        "money moved that neither statement lists."
+        "Its opening balance differs from the closing balance of the statement before it, and "
+        "the two do not overlap, so money moved that neither statement lists: a gap proven by "
+        "arithmetic."
     )
 
 
@@ -100,6 +106,12 @@ def _conflict_sentence(item: StatementListing) -> str:
         return ""
     on = found.day.isoformat()
     head = f"Another source states a different balance for {on}. "
+    if found.verdict is DayReading.SAME_DAY and found.refused:
+        return (
+            head + "The two differ by exactly the counting transactions dated that day that the "
+            "statement does not list: yes. The account page still holds the day as a conflict "
+            f"between sources, because {found.refused}."
+        )
     if found.verdict is DayReading.SAME_DAY:
         return (
             head + "The two differ by exactly the counting transactions dated that day that the "
@@ -107,21 +119,11 @@ def _conflict_sentence(item: StatementListing) -> str:
             f"{plural(found.unlisted_that_day, 'transaction')} dated that day, so the two "
             "balances are for different moments and do not contradict each other."
         )
-    if found.verdict is DayReading.NEXT_DAY:
-        return (
-            head
-            + "The two differ by exactly the counting transactions dated the next day that the "
-            "statement does not list: yes. "
-            f"The statement closed before {plural(found.unlisted_next_day, 'transaction')} dated "
-            "the next day, so the two balances are for different moments and do not "
-            "contradict each other."
-        )
     if found.verdict is DayReading.NOT_EXPLAINED:
         return (
             head + "The two differ by exactly the counting transactions dated that day that the "
             f"statement does not list: no ({plural(found.unlisted_that_day, 'such transaction')} "
-            "that day and "
-            f"{found.unlisted_next_day} the next)."
+            "that day)."
         )
     return (
         head + f"Whether the statement closing before some transactions explains it: cannot say - "
@@ -264,6 +266,7 @@ def _account_html(listing: AccountListing, shown: AccountShown) -> str:
                 Link.FIRST: "(the first statement held, before the first known balance)",
                 Link.DIFFERS: "(it follows a gap: its opening balance differs from the closing "
                 "balance before it)",
+                Link.OVERLAPS: "(it overlaps the statement before it)",
                 Link.MEETS: "(not verified today)",
                 Link.NO_OPENING: "(not verified today)",
             }[n.link]
