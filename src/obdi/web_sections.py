@@ -257,6 +257,31 @@ def system_strip_html(
 # ---------------------------------------------------------------------- Pages
 
 
+def _destinations_html(
+    actual_status: Callable[[], list[dict[str, object]]] | None,
+    actual_queue: Callable[[], list[dict[str, object]]] | None,
+    actual_heartbeat: Callable[[], str] | None,
+    actual_configured: Callable[[], bool] | None,
+    now: datetime | None,
+) -> str:
+    """The places data is sent out to. There is one: the budgeting tool, in the words of the
+    Actual page's own verdict, which is worked out once (`web_overview.actual_line`)."""
+    from .web_overview import actual_line
+
+    line = actual_line(
+        actual_status,
+        now or datetime.now(UTC),
+        queue=actual_queue,
+        heartbeat=actual_heartbeat,
+        configured=actual_configured,
+    )
+    return (
+        "<h2>Where data goes out</h2>"
+        f'<ul class="hub-list"><li><strong>Actual</strong>: {_esc(line.sentence)} '
+        '<a class="tap" href="/actual">Open the Actual page</a></li></ul>'
+    )
+
+
 def render_connections(
     store: ConnectionStore,
     *,
@@ -268,6 +293,11 @@ def render_connections(
     backfill_status: Callable[[], dict[str, object]] | None = None,
     fetch_now_available: bool = False,
     scheduler_heartbeat: Callable[[], dict[str, object]] | None = None,
+    actual_status: Callable[[], list[dict[str, object]]] | None = None,
+    actual_queue: Callable[[], list[dict[str, object]]] | None = None,
+    actual_heartbeat: Callable[[], str] | None = None,
+    actual_configured: Callable[[], bool] | None = None,
+    now: datetime | None = None,
 ) -> bytes:
     from . import web
 
@@ -275,11 +305,13 @@ def render_connections(
         web._credential_banner(bank_authorisation)
         + web._backfill_running_banner(backfill_status)
         + _lede(
-            "The banks that feed this store, and how long each consent has left. A bank "
-            "makes you reconfirm every ninety days, only you can do that at the bank, and "
-            "the page below says when."
+            "Every place data comes from or goes to: the banks and the aggregator it is "
+            "fetched from, and the budgeting tool it is sent to. A bank makes you reconfirm "
+            "every ninety days, only you can do that at the bank, and the page below says when."
         )
-        + "<h2>Banks and their consent</h2>"
+        + _destinations_html(actual_status, actual_queue, actual_heartbeat, actual_configured, now)
+        + "<h2>Where data comes from</h2>"
+        + "<h3>Banks and their consent</h3>"
         + web._connection_rows(store, rename_available=rename_connection is not None)
         + web._starling_row(starling_status)
         + scheduler_section(scheduler_heartbeat)
@@ -292,7 +324,53 @@ def render_connections(
         + web._extend_rows(extendables, fetch_now=fetch_now_available)
         + web._knowledge_rows(provider_knowledge)
     )
-    return render_page("Bank connections", body)
+    return render_page("Connections", body)
+
+
+#: What More lists: its groups, each with the pages in it and one line of what the page is for.
+#: Everything that is not a destination of the strip is here, so a page is never reachable only
+#: by knowing its address (`tests/test_every_page_is_reachable.py`).
+MORE_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
+    (
+        "Accounts",
+        (
+            ("/accounts", "Accounts", "Every account held, declare or rename one, or archive one."),
+            ("/spaces", "Spaces", "Spaces recovered from the bank, to declare or leave alone."),
+            ("/review", "Categorise", "Give transactions a category, account by account."),
+            ("/coverage", "Coverage by source", "Which source holds which days, for each account."),
+        ),
+    ),
+    (
+        "Checks",
+        (
+            ("/checks", "Checks", "Questions the data can answer about itself."),
+            ("/review-flags", "Review flags", "Transactions flagged for a decision."),
+        ),
+    ),
+    (
+        "Diagnostics",
+        (
+            ("/diagnostics", "Diagnostics", "Why something happened, and the repairs."),
+            ("/attempts", "Fetch attempts", "Every request made to a bank, and what came back."),
+            ("/artefacts", "Stored originals", "The files and responses everything is built from."),
+        ),
+    ),
+)
+
+
+def render_more() -> bytes:
+    """Everything the strip does not name, in plain groups."""
+    groups = "".join(
+        f"<h2>{_esc(title)}</h2>"
+        '<ul class="morelist">'
+        + "".join(
+            f'<li><a class="tap" href="{_esc(href)}">{_esc(label)}</a><p>{_esc(what)}</p></li>'
+            for href, label, what in pages
+        )
+        + "</ul>"
+        for title, pages in MORE_GROUPS
+    )
+    return render_page("More", f"{groups}")
 
 
 def render_actual(
@@ -507,9 +585,16 @@ class SectionPages:
             backfill_status=timer.wrap("backfill_status", config.backfill_status),
             fetch_now_available=config.fetch_now is not None,
             scheduler_heartbeat=timer.wrap("scheduler_heartbeat", config.scheduler_heartbeat),
+            actual_status=timer.wrap("actual_status", config.actual_status),
+            actual_queue=config.actual_queue,
+            actual_heartbeat=config.actual_heartbeat,
+            actual_configured=config.actual_configured,
         )
         timer.report("/connections")
         self._respond(200, page)
+
+    def _more_page(self) -> None:
+        self._respond(200, render_more())
 
     def _actual_page(self) -> None:
         config, timer = self.bound_config, HookTimer()

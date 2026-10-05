@@ -164,11 +164,8 @@ class TestTheCards:
     def test_Card_WhenInAgreement_SaysKnownBalancesAgreementAndProtectionThroughDates(self, store):
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
-        assert (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20."
-            in page
-        )
-        assert "not protected" not in page
+        assert "Adds up to the known balances to 2026-03-20." in page
+        assert "Locked in to" not in page
 
     def test_Card_WhenProtected_SaysProtectedThroughTheDate(self, store):
         opening_standing = standings(store)[ACCOUNT].standing
@@ -181,7 +178,9 @@ class TestTheCards:
 
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
-        assert "known balance from 2026-03-05 to 2026-03-20; protected through 2026-03-10." in page
+        assert (
+            "Locked in to 2026-03-10. Adds up to the known balances to 2026-03-20." in page
+        )
 
     def test_Card_WhenTheProtectionIsBroken_SaysSo(self, store):
         from obdi.balance_anchors import effective_opening
@@ -194,7 +193,7 @@ class TestTheCards:
 
         page = overview_html(lambda fresh: self.overview(store), now=self.NOW)
 
-        assert "The protection is broken: its protected period has changed." in page
+        assert "Locked in to 2026-03-10, but that stretch has changed since." in page
 
     def test_Card_WhenNoKnownBalanceExists_SaysTheRowsCannotBeVerified(self, tmp_path):
         with Store(tmp_path / "card-bare.sqlite3") as bare:
@@ -207,7 +206,7 @@ class TestTheCards:
                 now=self.NOW,
             )
 
-        assert "No known balance, so there is nothing to check the transactions against." in page
+        assert "Nothing to check against." in page
 
 
 @pytest.fixture
@@ -245,9 +244,6 @@ class TestOverTheWire:
     def test_Home_ShowsTheThreeDatesOnTheAccountCard(self, served):
         page = httpx.get(f"{served}/", timeout=30).text
 
-        assert (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-20"
-            in page
-        )
+        assert "Adds up to the known balances to 2026-03-20" in page
         for figure in ("952.00", "95200", "912.50", "91250"):
             assert figure not in page

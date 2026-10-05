@@ -115,24 +115,21 @@ class TestEveryPageCarriesTheStrip:
         for anchor in anchors:
             assert f'id="{anchor}"' in page, anchor
 
-    def test_AccountsDestination_IsTheAccountsPageWhileTheOverviewKeepsItsAccountCards(self, base):
-        hrefs = {key: href for key, _, href in DESTINATIONS}
-
-        assert hrefs["accounts"] == "/accounts"
-        assert 'id="accounts"' in httpx.get(f"{base}/", timeout=20).text, (
-            "other links to /#accounts must keep landing on the cards"
-        )
+    def test_AccountsPage_HasNoTabButStaysReachableFromTodayAndFromMore(self, base):
+        assert "/accounts" not in {href for _, _, href in DESTINATIONS}
+        today = httpx.get(f"{base}/", timeout=20).text
+        assert 'id="accounts"' in today, "other links to /#accounts must keep landing on the list"
+        assert 'href="/accounts"' in today
+        assert 'href="/accounts"' in httpx.get(f"{base}/more", timeout=20).text
 
     def test_Destinations_AreInOrderOfUse_DailyReadingFirstAndFaultFindingLast(self):
         keys = [key for key, _, _ in DESTINATIONS]
 
-        assert keys == [
-            "today", "accounts", "position", "actual", "bring-in", "checks", "diagnostics",
-        ]
+        assert keys == ["today", "bring-in", "position", "connections", "more"]
 
-    def test_Strip_HasSevenWordsInPlainEnglish(self):
+    def test_Strip_HasFiveWordsInPlainEnglish(self):
         assert [label for _, label, _ in DESTINATIONS] == [
-            "Today", "Accounts", "Position", "Actual", "Bring in", "Checks", "Diagnostics",
+            "Today", "Bring in", "Position", "Connections", "More",
         ]
 
     def test_Destinations_EachIsAPageOfItsOwn(self):
@@ -140,19 +137,20 @@ class TestEveryPageCarriesTheStrip:
 
         assert hrefs == {
             "today": "/",
-            "accounts": "/accounts",
-            "position": "/position",
-            "actual": "/actual",
             "bring-in": "/bring-in",
-            "checks": "/checks",
-            "diagnostics": "/diagnostics",
+            "position": "/position",
+            "connections": "/connections",
+            "more": "/more",
         }
 
-    def test_RetiredStripItems_ConnectionsReportsEvidenceAdmin_AreNoLongerInTheStrip(self, base):
+    def test_RetiredStripItems_AccountsActualChecksDiagnosticsAndTheOlderOnes_AreNotInTheStrip(
+        self, base
+    ):
         strip = strip_of(httpx.get(f"{base}/", timeout=20).text)
 
-        for gone in ("Connections", "Reports", "Evidence", "Admin", "Overview"):
+        for gone in ("Accounts", "Actual", "Checks", "Diagnostics", "Reports", "Evidence", "Admin"):
             assert f">{gone}</a>" not in strip, gone
+        assert ">Overview</a>" not in strip
 
     def test_NoPage_LinksToAnAnchorThatNoLongerExists(self, base):
         for route in get_routes():
@@ -175,30 +173,31 @@ class TestTheCurrentSectionIsMarked:
         ("route", "label"),
         [
             ("/", "Today"),
-            ("/accounts", "Accounts"),
-            ("/ledger", "Accounts"),
-            ("/spaces", "Accounts"),
-            ("/coverage", "Accounts"),
-            ("/review", "Accounts"),
+            ("/accounts", "Today"),
+            ("/ledger", "Today"),
+            ("/spaces", "Today"),
+            ("/coverage", "More"),
+            ("/review", "More"),
             ("/position", "Position"),
-            ("/actual", "Actual"),
-            ("/actual-history", "Actual"),
+            ("/actual", "Connections"),
+            ("/actual-history", "Connections"),
             ("/bring-in", "Bring in"),
-            ("/connections", "Bring in"),
+            ("/connections", "Connections"),
             ("/import", "Bring in"),
             ("/statements", "Bring in"),
             ("/statement-shape", "Bring in"),
-            ("/callback", "Bring in"),
-            ("/checks", "Checks"),
-            ("/reports", "Checks"),
-            ("/agreements", "Checks"),
-            ("/identity-health", "Checks"),
-            ("/diagnostics", "Diagnostics"),
-            ("/evidence", "Diagnostics"),
-            ("/admin", "Diagnostics"),
-            ("/attempts", "Diagnostics"),
-            ("/fetch-timeline", "Diagnostics"),
-            ("/account", "Diagnostics"),
+            ("/callback", "Connections"),
+            ("/more", "More"),
+            ("/checks", "More"),
+            ("/reports", "More"),
+            ("/agreements", "More"),
+            ("/identity-health", "More"),
+            ("/diagnostics", "More"),
+            ("/evidence", "More"),
+            ("/admin", "More"),
+            ("/attempts", "More"),
+            ("/fetch-timeline", "More"),
+            ("/account", "More"),
         ],
     )
     def test_Page_InASection_MarksOnlyThatDestinationCurrent(self, base, route, label):
@@ -241,18 +240,16 @@ class TestTheCurrentSectionIsMarked:
     def test_AnswerPageOfAPost_MarksTheSectionOfTheActionThatAnsweredIt(self, base):
         response = httpx.post(f"{base}/save-account", data={}, timeout=20)
 
-        assert re.findall(LABELS, strip_of(response.text)) == ["Accounts"]
+        assert re.findall(LABELS, strip_of(response.text)) == ["Today"]
 
     def test_AnswerPageOfAPost_ForAnotherSection_MarksThatSectionInstead(self, base):
         response = httpx.post(f"{base}/rebuild-derived", data={}, timeout=20)
 
-        assert re.findall(LABELS, strip_of(response.text)) == ["Diagnostics"]
+        assert re.findall(LABELS, strip_of(response.text)) == ["More"]
 
     def test_EveryAliasedAddress_IsMappedToTheSectionItsLandingPageIsIn(self):
-        landing = {href: key for key, _, href in DESTINATIONS}
-
         for alias, target in ALIASES.items():
-            assert SECTION_OF_ROUTE[alias] == landing[target], alias
+            assert SECTION_OF_ROUTE[alias] == SECTION_OF_ROUTE[target], alias
 
     def test_NavigationHtml_ForAHostileRoute_MarksNothingAndInjectsNothing(self):
         strip = navigation_html('/"><script>')
@@ -275,10 +272,10 @@ class TestNavigationLinksAreThumbSizedButNotButtons:
         assert rule
         height = re.search(r"min-height: ([^;]+);", rule.group(0))
         assert height and length_px(css, height.group(1)) >= 44
-        # Seven text tabs in a grid of four columns: two rows on a phone.
+        # Five text tabs in a grid of five columns: one row on a phone.
         grid = re.search(r"\.sitenav ul \{[^}]*\}", css)
         assert grid and "display: grid" in grid.group(0)
-        assert "repeat(4" in grid.group(0)
+        assert "repeat(5" in grid.group(0)
 
     def test_Stylesheet_GivesTapLinksAHitAreaOfAtLeastFortyFourPixelsWithoutGrowingTheLine(self):
         """A pseudo-element carries the hit area, so the link adds nothing to its line:
@@ -324,26 +321,24 @@ class TestTheWayOutUnderTheHeading:
         page = httpx.get(f"{base}/agreements", timeout=20).text
 
         heading = page.index("</h1>")
-        way = page.index('<a class="tap" href="/checks">Back to Checks</a>')
+        way = page.index('<a class="tap" href="/more">Back to More</a>')
         assert heading < way < page.index("</main>")
         assert page[heading : way].count("<p") <= 1
 
     @pytest.mark.parametrize(
         ("route", "words"),
         [
-            ("/spaces", "Back to Accounts"),
-            ("/coverage", "Back to Accounts"),
-            ("/review", "Back to Accounts"),
-            ("/connections", "Back to Bring in"),
+            ("/coverage", "Back to More"),
+            ("/review", "Back to More"),
             ("/import", "Back to Bring in"),
             ("/statements", "Back to Bring in"),
             ("/statement-shape", "Back to Bring in"),
-            ("/actual-history", "Back to Actual"),
-            ("/balance-walk", "Back to Checks"),
-            ("/review-report", "Back to Checks"),
-            ("/artefacts", "Back to Diagnostics"),
-            ("/fetch-timeline", "Back to Diagnostics"),
-            ("/account", "Back to Diagnostics"),
+            ("/actual-history", "Back to Connections"),
+            ("/balance-walk", "Back to More"),
+            ("/review-report", "Back to More"),
+            ("/artefacts", "Back to More"),
+            ("/fetch-timeline", "Back to More"),
+            ("/account", "Back to More"),
         ],
     )
     def test_PageDeepInAFlow_LeavesByItsDestinationWithoutScrolling(self, base, route, words):
@@ -355,10 +350,10 @@ class TestTheWayOutUnderTheHeading:
     @pytest.mark.parametrize(
         ("route", "words"),
         [
-            ("/rebuild-derived", "Back to Diagnostics"),
-            ("/save-account", "Back to Accounts"),
-            ("/push-actual", "Back to Actual"),
-            ("/rename-connection", "Back to Bring in"),
+            ("/rebuild-derived", "Back to More"),
+            ("/review-defer", "Back to More"),
+            ("/push-actual", "Back to Connections"),
+            ("/rename-connection", "Back to Connections"),
         ],
     )
     def test_AnswerPageOfAPost_LeavesByItsDestinationToo(self, base, route, words):
@@ -370,27 +365,29 @@ class TestTheWayOutUnderTheHeading:
         from obdi.navigation import current_route
         from obdi.web_answers import ledger_link
 
-        marked = current_route.set("/ledger-anchor")
+        marked = current_route.set("/review-apply")
         replying = answering.set(True)
         try:
-            page = render_page("Balance stated", ledger_link("a", "A") + "<p>done</p>").decode()
+            page = render_page("Flag answered", ledger_link("a", "A") + "<p>done</p>").decode()
         finally:
             answering.reset(replying)
             current_route.reset(marked)
 
         assert (
             page.index("Open the ledger for A")
-            < page.index("Back to Accounts")
+            < page.index("Back to More")
             < page.index("<p>done</p>")
         )
 
-    def test_PageInAnotherSection_OffersItsOwnDestination_NotChecks(self, base):
-        page = httpx.get(f"{base}/attempts", timeout=20).text
+    def test_PageInAnotherSection_OffersItsOwnDestination_NotMore(self, base):
+        page = httpx.get(f"{base}/actual-history", timeout=20).text
 
-        assert "Back to Diagnostics" in page and "Back to Checks" not in page
+        assert "Back to Connections" in page and "Back to More" not in page
 
-    @pytest.mark.parametrize("route", ["/", "/accounts", "/checks", "/diagnostics", "/bring-in"])
-    def test_DestinationsOwnPage_OffersNoWayOutToItself(self, base, route):
+    @pytest.mark.parametrize(
+        "route", ["/", "/accounts", "/more", "/connections", "/bring-in", "/checks", "/diagnostics"]
+    )
+    def test_DestinationsAndHubsOwnPage_OffersNoWayOutToItself(self, base, route):
         page = httpx.get(f"{base}{route}", timeout=20).text
 
         assert 'class="wayout"' not in page
@@ -406,13 +403,13 @@ class TestTheWayOutUnderTheHeading:
 
         token = answering.set(True)
         try:
-            body = with_way_out(lead + "<p>done</p>", "/ledger-anchor")
+            body = with_way_out(lead + "<p>done</p>", "/review-apply")
         finally:
             answering.reset(token)
 
         assert body.startswith(lead)
-        assert body.index("Back to Accounts") > len(lead) - 1
-        assert body.index("Back to Accounts") < body.index("<p>done</p>")
+        assert body.index("Back to More") > len(lead) - 1
+        assert body.index("Back to More") < body.index("<p>done</p>")
 
     def test_AnswerThatLeadsWithWhatHappened_KeepsThatSentenceFirst(self):
         token = answering.set(True)
@@ -422,7 +419,7 @@ class TestTheWayOutUnderTheHeading:
             answering.reset(token)
 
         assert body.startswith("<p>Nothing queued: not configured.</p>")
-        assert body.index("Back to Actual") < body.index("<p>more</p>")
+        assert body.index("Back to Connections") < body.index("<p>more</p>")
 
     def test_PageThatIsNotAnAnswer_PutsTheWayOutBeforeItsFirstParagraph(self):
         body = with_way_out("<p>Lede.</p>", "/attempts")

@@ -19,8 +19,10 @@ import pytest
 from obdi.alerts import CONSENT_RUNGS
 from obdi.connections import Connection, ConnectionStore
 from obdi.coverage import SourceCoverage
+from obdi.overview import Overview
 from obdi.probing import elapsed_words, sca_note
 from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
+from page_dom import elements, parse
 from stylesheet_support import length_px
 from test_navigation import get_routes
 
@@ -89,6 +91,11 @@ def serve(tmp_path):
     yield start
     for httpd in servers:
         httpd.shutdown()
+
+
+def quiet_overview(fresh: bool) -> Overview:
+    """Today's checks having run and found nothing, so the page's own lines are what is read."""
+    return Overview(datetime.now(UTC), 19, 19, (), ())
 
 
 def fetch(base: str, path: str) -> str:
@@ -176,12 +183,12 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
     @pytest.mark.parametrize(
         ("path", "section", "fragment"),
         [
-            ("/connections", "Bring in", "Add a bank"),
-            ("/actual", "Actual", "Push to Actual now"),
-            ("/coverage", "Accounts", "fed by 1 source"),
+            ("/connections", "Connections", "Add a bank"),
+            ("/actual", "Connections", "Push to Actual now"),
+            ("/coverage", "More", "fed by 1 source"),
             ("/import", "Bring in", "Preview import"),
-            ("/diagnostics", "Diagnostics", "Repairs"),
-            ("/admin", "Diagnostics", "Repairs"),
+            ("/diagnostics", "More", "Repairs"),
+            ("/admin", "More", "Repairs"),
         ],
     )
     def test_Page_WhenFullyWired_RendersItsSectionsAndMarksItsNavigationEntry(
@@ -272,7 +279,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         for action in MOVED_FORM_ACTIONS:
             assert f'action="{action}"' not in page, action
         assert "Everything else, by section" not in page
-        assert 'id="attention"' in page and 'id="accounts"' in page
+        assert 'id="verdict"' in page
 
     def test_Home_CarriesFourSystemFactsEachLinkingToThePageThatOwnsIt(self, serve):
         page = fetch(serve(), "/")
@@ -280,23 +287,26 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         facts = re.findall(r'<li class="fact"><a class="tap" href="([^"]+)"', page)
         assert facts == ["/connections", "/connections", "/admin", "/admin"]
 
-    def test_Home_StatesTheActualFactAsAStatusLineAndNotAsASystemFact(self, serve):
-        page = fetch(serve(), "/")
+    def test_Home_StatesTheActualFactInTheEvidenceAndNotAsASystemFact(self, serve):
+        page = fetch(serve(overview=quiet_overview), "/")
 
-        assert 'class="tap status-row" href="/actual"' in page
+        evidence = page.split('class="evidence"')[1].split('id="system"')[0]
+        assert "Not wired on this instance." in evidence
         assert "<strong>Actual</strong>" not in page.split('id="system"')[1]
 
-    def test_Home_AccountsSection_LinksToCoverageDeclaredImportAndCategorise(self, serve):
-        accounts = fetch(serve(), "/").split('id="accounts"')[1]
+    def test_Home_AccountsSection_LinksToTheAccountsPageAndNoLongerToTheOthers(self, serve):
+        accounts = fetch(serve(overview=quiet_overview), "/").split('id="accounts"')[1]
 
-        for href in ("/coverage", "/accounts", "/import", "/review"):
-            assert f'href="{href}"' in accounts, href
+        assert 'href="/accounts"' in accounts
+        for href in ("/coverage", "/import", "/review"):
+            assert f'href="{href}"' not in accounts, href
 
     def test_SystemStrip_StatesTheFactsFromTheirHooks(self, serve):
         soon = connection("halifax", expires_in=timedelta(days=40))
         later = connection("monzo", expires_in=timedelta(days=80))
         base = serve(
             (later, soon),
+            overview=quiet_overview,
             actual_status=lambda: [
                 {"kind": "push", "ok": False, "finished_at": "2026-10-01T12:00:00Z", "error": "x"}
             ],
@@ -314,7 +324,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         page = fetch(base, "/")
         strip = page.split('id="system"')[1]
 
-        status = page.split('id="status"')[1]
+        status = page.split('class="evidence"')[1]
         assert "The last push failed. The push of 2026-10-01 12:00 failed" in status
         assert "last rebuild FAILED, 2026-09-30 08:00Z" in strip
         assert "2 banks connected" in strip
@@ -323,11 +333,11 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
         assert "scheduler last completed a cycle" in strip
 
     def test_SystemStrip_WithNothingWired_SaysSoRatherThanGoingMissing(self, serve):
-        page = fetch(serve(), "/")
+        page = fetch(serve(overview=quiet_overview), "/")
         strip = page.split('id="system"')[1]
 
         assert "no scheduler cycle recorded" in strip
-        assert "Not wired on this instance." in page.split('id="status"')[1]
+        assert "Not wired on this instance." in page.split('class="evidence"')[1]
         assert "no banks connected" in strip
         assert "no rebuild recorded" in strip
 
@@ -340,7 +350,7 @@ class TestTheHomePageIsTheOverviewAndNothingElse:
             time.sleep(0.05)
             return []
 
-        fetch(serve(actual_status=slow), "/")
+        fetch(serve(overview=quiet_overview, actual_status=slow), "/")
 
         out = capsys.readouterr().out
         assert "web timing: / rendered in" in out and "actual_status" in out
@@ -713,3 +723,59 @@ class TestNavigationCoversTheNewRoutes:
         routes = set(get_routes())
 
         assert {"/connections", "/actual", "/coverage", "/import", "/admin"} <= routes
+
+
+class TestMoreListsEverythingTheStripDoesNotName:
+    def test_More_WhenOpened_ListsItsThreeGroupsInPlainWords(self, serve):
+        page = fetch(serve(), "/more")
+
+        headings = [h.text() for h in elements(parse(page), "h2")]
+        assert headings == ["Accounts", "Checks", "Diagnostics"]
+        assert "<title>More</title>" in page
+
+    def test_More_EveryPageItLists_IsAPageThatAnswers(self, serve):
+        base = serve()
+        page = fetch(base, "/more")
+
+        hrefs = re.findall(r'<a class="tap" href="([^"]+)">', page)
+        assert {"/accounts", "/checks", "/diagnostics", "/coverage", "/review"} <= set(hrefs)
+        for href in hrefs:
+            # A page whose hook this bare instance does not wire says "not wired" with a 404, which
+            # is still an answer; only a failure of the page itself is not.
+            assert httpx.get(f"{base}{href}", timeout=20).status_code in (200, 404), href
+
+    def test_More_MarksItselfCurrentInTheStripAndOffersNoWayBackToItself(self, serve):
+        page = fetch(serve(), "/more")
+
+        assert current_section(page) == ["More"]
+        assert 'class="wayout"' not in page
+
+
+class TestConnectionsHoldsSourcesInAndDestinationsOut:
+    def test_Connections_WhenOpened_SaysWhereDataGoesOutAndWhereItComesFrom(self, serve):
+        page = fetch(serve(), "/connections")
+
+        assert page.index("Where data goes out") < page.index("Where data comes from")
+        assert "<title>Connections</title>" in page
+        assert current_section(page) == ["Connections"]
+
+    def test_Connections_TheDestinationOut_IsActualInItsOwnVerdictWithALinkToItsPage(self, serve):
+        page = fetch(serve(actual_status=lambda: results()), "/connections")
+
+        out = page.split("Where data goes out")[1].split("Where data comes from")[0]
+        assert "<strong>Actual</strong>" in out
+        assert 'href="/actual">Open the Actual page</a>' in out
+
+    def test_Connections_WhenActualIsNotWired_SaysSoAndStillLinksToItsPage(self, serve):
+        out = fetch(serve(), "/connections").split("Where data goes out")[1]
+        out = out.split("Where data comes from")[0]
+
+        assert "Not wired on this instance." in out
+        assert 'href="/actual"' in out
+
+    def test_Connections_TheSourcesIn_AreTheBanksAndTheirConsent(self, serve):
+        base = serve((connection("halifax", expires_in=timedelta(days=60)),))
+
+        page = fetch(base, "/connections").split("Where data comes from")[1]
+
+        assert "Banks and their consent" in page and "halifax" in page

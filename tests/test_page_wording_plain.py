@@ -21,7 +21,7 @@ import httpx
 
 from obdi.page_words import RETIRED_ON_PAGES
 from obdi.plural import agree
-from page_dom import Node, elements, parse
+from page_dom import elements, parse
 from page_walk import household, household_served, invented, served, walked_pages  # noqa: F401
 from test_home_page import clear, page_of, troubled  # noqa: F401
 from test_page_wording_vocabulary import text_of
@@ -60,35 +60,14 @@ class TestTheKnownBalancesHeading:
         assert [agree(n, "differs") for n in (1, 2)] == ["differs", "differ"]
 
 
-def todays_known_balances_line(page: str) -> tuple[Node, Node]:
-    """The status line about known balances and its chip, found by structure."""
-    status = next(e for e in elements(parse(page), "ul") if e.attrs.get("id") == "status")
-    for item in elements(status, "a"):
-        label = next(e for e in elements(item, "span") if "status-label" in e.classes)
-        if label.text() == "Known balances":
-            chip = next(e for e in elements(item, "span") if "pill" in e.classes)
-            return item, chip
-    raise AssertionError("Today has no known-balances line")
-
-
-class TestTodaysKnownBalancesChip:
-    def test_Chip_WhenSomeAccountDoesNotAddUp_IsAmberAndSaysSo(self, troubled):  # noqa: F811
-        line, chip = todays_known_balances_line(page_of(troubled))
-
-        assert chip.text() == "does not add up"
-        assert "pill-warn" in chip.classes
-        assert line.attrs["href"] == "/accounts#needs-a-look"
-
-    def test_Chip_WhenNoAccountFailsAndSomeHaveNothingToCheckAgainst_IsQuietAndCountsWhatAddsUp(
-        self, clear  # noqa: F811
+class TestTodayHasNoKnownBalancesChip:
+    def test_Today_HasNoStatusLineOrChipCountingAccounts_BecauseTheBarsSayItPerAccount(
+        self, troubled  # noqa: F811
     ):
-        line, chip = todays_known_balances_line(page_of(clear))
+        page = parse(page_of(troubled))
 
-        assert chip.text() == "14 add up"
-        assert "pill-quiet" in chip.classes
-        assert "pill-warn" not in chip.classes
-        assert "2 have nothing to check against" in line.text()
-        assert line.attrs["href"] == "/accounts#needs-a-look"
+        assert not [e for e in elements(page, "ul") if e.attrs.get("id") == "status"]
+        assert not [e for e in elements(page, "span") if "pill" in e.classes]
 
 
 class TestNoPageUsesARetiredPhrase:

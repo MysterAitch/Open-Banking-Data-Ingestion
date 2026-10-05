@@ -39,10 +39,6 @@ from page_dom import elements, parse
 from page_walk import household, household_pages, household_served  # noqa: F401
 
 SOURCE = Path(__file__).resolve().parent.parent / "src" / "obdi"
-TODAY_SENTENCE = (
-    "2 of 5 accounts add up to their latest known balance; 1 does not add up; "
-    "2 have nothing to check against."
-)
 ACCOUNTS_SENTENCE = (
     "2 of 4 accounts add up to their latest known balance; 1 does not add up; "
     "1 has nothing to check against."
@@ -97,25 +93,30 @@ def pages(household_pages) -> dict[str, str]:  # noqa: F811
 
 
 class TestThePagesSayItTheSameWay:
-    def test_Today_OverTheHousehold_SaysTheSentenceAndItsChip(
+    def test_Today_OverTheHousehold_SaysEachAccountsVerdictInTheWordsOfStandingData(
         self, household_served  # noqa: F811
     ):
-        today = httpx.get(f"{household_served}/", timeout=60).text
+        today = parse(httpx.get(f"{household_served}/", timeout=60).text)
 
-        assert TODAY_SENTENCE in text_of(today)
-        chips = [e.text() for e in elements(parse(today), "span") if "pill" in e.classes]
-        assert DOES_NOT_ADD_UP in chips
+        said = [e.text() for e in elements(today, "span") if "a-trust" in e.classes]
+        assert sum(s.startswith(DOES_NOT_ADD_UP.capitalize()) for s in said) == 1
+        assert sum(s.startswith(NOTHING_TO_CHECK_AGAINST.capitalize()) for s in said) == 2
+        assert sum(s.startswith(ADDS_UP.capitalize()) for s in said) == 2
+        assert "latest known balance" not in today.text()
 
-    def test_Today_WhenAnAccountDoesNotAddUpAndNoItemNamesIt_DoesNotHeadThePageAllInOrder(
+    def test_Today_WhenAnAccountDoesNotAddUpAndNothingIsRaisedForIt_StillSaysSoOnItsRow(
         self, household_served  # noqa: F811
     ):
         today = parse(httpx.get(f"{household_served}/", timeout=60).text)
 
         headline = next(e for e in elements(today, "p") if "verdict" in e.classes)
-        said = re.sub(r"\s+", " ", headline.text()).strip()
-        assert said == "No faults. 1 account does not add up."
-        assert "warn" in headline.classes
-        assert "ok" not in headline.classes
+        assert "Everything checked is in order" not in headline.text()
+        failing = [
+            e
+            for e in elements(today, "span")
+            if "a-trust" in e.classes and e.text().startswith(DOES_NOT_ADD_UP.capitalize())
+        ]
+        assert len(failing) == 1
 
     def test_Accounts_WhenOneAccountIsHeldButNotDeclared_OffersToDeclareThisAccount(
         self, pages

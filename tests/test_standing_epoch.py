@@ -121,11 +121,11 @@ class TestEditingAnAccountMovesItsStanding:
         assert second == first
 
     def test_Overview_WhenKindEditedToBalanceOnly_SaysTheNewAgreementWithoutWaiting(self, served):
-        assert AGREED_THROUGH_MARCH_20 in card(get(served, "/"))
+        assert adds_up_to(get(served, "/")) == "2026-03-20"
 
         edit_kind(served, "balance-only")
 
-        assert AGREED_THROUGH_MARCH_25 in card(get(served, "/"))
+        assert adds_up_to(get(served, "/")) == "2026-03-25"
 
 
 def _cost_lines(run) -> list[str]:
@@ -310,29 +310,35 @@ class TestTheAccountMapFileIsPartOfTheKey:
         assert account_map_stamp() == ()
 
 
-def known_through(page: str) -> str:
-    """The last date of the account's known balances, as the Overview card states it."""
+def adds_up_to(page: str) -> str:
+    """The last day the account's transactions add up to, as Today's row states it."""
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
-    latest = re.search(r"the latest known balance is for (\d{4}-\d\d-\d\d)", text)
-    through = re.search(r"every known balance from \S+ to (\d{4}-\d\d-\d\d)", text)
-    found = latest or through
-    return found.group(1) if found else "no known-balances sentence"
+    found = re.search(r"Adds up to the known balances to (\d{4}-\d\d-\d\d)", text)
+    return found.group(1) if found else "no sentence saying what it adds up to"
+
+
+def known_state(page: str) -> str:
+    """What Today says of the account: the day it adds up to, and the day it stops adding up."""
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))
+    stops = re.search(r"Does not add up from (\d{4}-\d\d-\d\d)", text)
+    return f"{adds_up_to(page)} / {stops.group(1) if stops else 'never stops'}"
 
 
 class TestTheOverviewIsNotOlderThanTheViewersOwnPress:
     def test_Overview_WhenABalanceIsStatedAfterItWasOpened_ShowsItAtOnce(self, served):
-        assert known_through(get(served, "/")) == "2026-03-25"
+        assert known_state(get(served, "/")) == "2026-03-20 / 2026-03-25"
 
+        # A balance the rows reproduce, stated for a day before the one they do not.
         response = post(
-            served, "/ledger-anchor", ref=ACCOUNT, month="2026-03", day="2026-03-26",
-            amount="2.00",
+            served, "/ledger-anchor", ref=ACCOUNT, month="2026-03", day="2026-03-22",
+            amount="952.00",
         )
         assert response.status_code == 200, response.text
 
-        assert known_through(get(served, "/")) == "2026-03-26"
+        assert known_state(get(served, "/")) == "2026-03-22 / 2026-03-25"
 
     def test_Overview_WhenABalanceIsRemovedAfterItWasOpened_ShowsItAtOnce(self, served):
-        assert known_through(get(served, "/")) == "2026-03-25"
+        assert known_state(get(served, "/")) == "2026-03-20 / 2026-03-25"
 
         response = post(
             served, "/ledger-anchor-remove", ref=ACCOUNT, month="2026-03", day="2026-03-25",
@@ -340,13 +346,13 @@ class TestTheOverviewIsNotOlderThanTheViewersOwnPress:
         )
         assert response.status_code == 200, response.text
 
-        assert known_through(get(served, "/")) == "2026-03-20"
+        assert known_state(get(served, "/")) == "2026-03-20 / never stops"
 
     def test_Overview_WhenNothingWasPressed_IsTheSameHeldPageWithinTheMinute(self, served):
         first = get(served, "/")
         second = get(served, "/")
 
-        assert known_through(first) == known_through(second) == "2026-03-25"
+        assert known_state(first) == known_state(second) == "2026-03-20 / 2026-03-25"
         assert _cost_lines(lambda: get(served, "/")) == []
 
 

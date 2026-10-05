@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 from . import scheduler_status
 from .account_names import AccountsShown, accounts_shown
+from .accounts import is_balance_only
 from .agreement import held_sentence
 from .alerts import Finding
 from .asked_coverage import coverage_by_account, describe_spans
@@ -386,6 +387,9 @@ class AccountOverview:
     #: The date of the first row held, where the proof rail's history begins for an account
     #: with no known balance.
     first: date | None = None
+    #: Declared as an account whose balances are stated by hand (`accounts.is_balance_only`),
+    #: so that holding no transactions is how it is meant to be and not a gap.
+    balance_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -1162,6 +1166,7 @@ def build_overview(
                     str(declared.parent) if declared is not None and declared.parent else None
                 ),
                 first=first_rows.get(ref),
+                balance_only=declared is not None and is_balance_only(declared.kind),
             )
         )
     accounts.sort(

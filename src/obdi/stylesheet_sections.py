@@ -27,6 +27,11 @@ SECTION_STYLES = r"""
  .hub-age { margin-top: var(--s4); }
  .hub-list { list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-md)/150% var(--sans); }
  .hub-list li { padding: var(--s1) 0; }
+ /* More: each page a name and one line of what it is for, in the groups it is listed by. */
+ .morelist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
+ .morelist li { padding: var(--s3) 0; border-bottom: var(--rule-weight) solid var(--rule-2); }
+ .morelist a { font: 600 var(--text-base)/130% var(--serif); }
+ .morelist p { margin: 2px 0 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
  .formerly { margin: 0 0 var(--s3); font: var(--text-sm)/150% var(--sans); }
  /* The way out sits under the heading, so a page deep in a flow can leave without scrolling. */
  .wayout { margin: 0 0 var(--s3); }
@@ -69,9 +74,6 @@ SECTION_STYLES = r"""
  .diag-repair h3 { margin: 0 0 var(--s1); }
  .diag-repair p { margin: var(--s1) 0 var(--s2); }
  @media (min-width: 60rem) {
-  /* Seven destinations fit one row where there is width, so the strip is one line. */
-  .sitenav ul { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-  .sitenav li:nth-child(n+5) a { border-top: 0; }
   .hub-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s6); }
   .timeline-choices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
   .timeline-choices button:not(.button) { width: auto; padding: 0 var(--s5); }

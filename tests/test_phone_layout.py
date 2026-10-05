@@ -377,7 +377,7 @@ def test_LedgerPage_WithValuesShown_At320PixelsWithTextEnlarged_DoesNotScrollSid
         page.close()
 
 
-def test_HomePage_OverTheThreeAccountCorpus_HasAVerdictFourLinesAndARowPerAccountAndIsShort(
+def test_HomePage_OverTheThreeAccountCorpus_HasAVerdictOneEvidenceLineAndARowPerAccountAndIsShort(
     browser: object, corpus_base: str
 ) -> None:
     page = browser.new_page(  # type: ignore[attr-defined]
@@ -386,8 +386,8 @@ def test_HomePage_OverTheThreeAccountCorpus_HasAVerdictFourLinesAndARowPerAccoun
     try:
         page.goto(f"{corpus_base}/", wait_until="load")
         assert page.locator("#verdict").count() == 1
-        assert page.locator("a.status-row").count() == 4
-        assert 3 <= page.locator("a.acct-row").count() <= 6, "the corpus holds a handful"
+        assert page.locator("details.evidence").count() == 1
+        assert 3 <= page.locator("a.arow").count() <= 6, "the corpus holds a handful"
         assert page.evaluate("document.documentElement.scrollHeight") < 3 * 800
         _assert_fits(_measure(page))
     finally:
@@ -810,7 +810,7 @@ def test_PositionPage_ARefusedWindow_DoesNotScrollSidewaysAndShowsItsSentence(
         page.close()
 
 
-def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(
+def test_Navigation_AtPhoneWidth_FitsOneRowOfThumbSizedLinks(
     browser: object, corpus_base: str
 ) -> None:
     page = browser.new_page(  # type: ignore[attr-defined]
@@ -828,12 +828,33 @@ def test_Navigation_AtPhoneWidth_TakesNoMoreThanTwoRowsOfThumbSizedLinks(
         page.close()
     assert len(boxes) == len(DESTINATIONS)
     rows = {top for top, _, _ in boxes}
-    assert len(rows) <= 2, f"navigation wraps to {len(rows)} rows: {boxes}"
+    assert len(rows) == 1, f"navigation wraps to {len(rows)} rows: {boxes}"
     assert all(height >= 40 for _, height, _ in boxes), boxes
 
 
+@pytest.mark.parametrize("width", [360, 390])
+def test_Navigation_AtPhoneWidth_WritesEveryLabelWholeOnOneLine(
+    browser: object, corpus_base: str, width: int
+) -> None:
+    """Five words in one row: a label that does not fit would break mid-word and say less."""
+    page = browser.new_page(viewport={"width": width, "height": PHONE_HEIGHT})  # type: ignore[attr-defined]
+    try:
+        page.goto(f"{corpus_base}/", wait_until="load")
+        lines = page.evaluate(
+            """() => [...document.querySelectorAll('.sitenav a')].map(a => {
+                const range = document.createRange();
+                range.selectNodeContents(a);
+                return [a.textContent, range.getClientRects().length];
+            })"""
+        )
+    finally:
+        page.close()
+    assert [label for label, _ in lines] == [label for _, label, _ in DESTINATIONS]
+    assert all(count == 1 for _, count in lines), lines
+
+
 DESKTOP_WIDTH = 1280
-HUB_ROUTES = ["/bring-in", "/checks", "/diagnostics"]
+HUB_ROUTES =["/bring-in", "/checks", "/diagnostics"]
 
 
 @pytest.mark.parametrize("route", HUB_ROUTES)
@@ -861,7 +882,7 @@ def test_HubPage_AtDesktopWidth_UsesTheWidthAsAGridOfRowsNotAPhoneColumn(
     assert len(set(lefts)) >= 2, f"rows sit in one column: {lefts}"
 
 
-def test_Navigation_AtDesktopWidth_IsOneRowOfSevenLinks(
+def test_Navigation_AtDesktopWidth_IsOneRowOfFiveLinks(
     browser: object, corpus_base: str
 ) -> None:
     page = browser.new_page(  # type: ignore[attr-defined]
@@ -875,7 +896,7 @@ def test_Navigation_AtDesktopWidth_IsOneRowOfSevenLinks(
         )
     finally:
         page.close()
-    assert len(tops) == 7 and len(set(tops)) == 1, tops
+    assert len(tops) == 5 and len(set(tops)) == 1, tops
 
 
 def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(

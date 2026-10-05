@@ -129,11 +129,11 @@ class TestTheFieldStatisticsPageIsNotAnEqualOfTheAccountPage:
         assert page.count("Field statistics") == 1
         assert "Shape of this account" not in page
 
-    def test_HomePage_NamesTheLinkByWhatItIs_NotAsTheAccountPage(self, world):
+    def test_HomePage_NeverNamesALinkAsTheAccountPageWhenItLeadsToFieldStatistics(self, world):
         page = httpx.get(f"{world}/", timeout=60).text
 
         assert ">Account page<" not in page
-        assert ">Field statistics<" in page
+        assert "Shape of this account" not in page
 
 
 class TestEveryGetRouteIsLinkedFromSomewhere:

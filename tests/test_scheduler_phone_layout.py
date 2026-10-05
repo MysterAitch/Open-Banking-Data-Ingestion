@@ -93,6 +93,9 @@ def capture(browser, db, tmp_path) -> Iterator[Callable[[str], dict[str, object]
         for path, label in (("/", "overview"), ("/connections", "connections")):
             page = context.new_page()
             page.goto(f"{base}{path}")
+            # The scheduler's state is said in Today's evidence fold, which is closed until it is
+            # opened; what is read, and what must fit, is the page with every fold open.
+            page.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
             found[f"{label}_overflow"] = page.evaluate(
                 "document.documentElement.scrollWidth - window.innerWidth"
             )
@@ -140,7 +143,9 @@ class TestEachSchedulerStateFitsAPhone:
         found = seen[0]
         _no_sideways_scroll(found)
         assert "waiting for its slot until" in str(found["overview_text"])
-        assert "Needs attention" in str(found["overview_text"])
+        assert "Everything checked is in order." in str(found["overview_text"]), (
+            "waiting for a slot is information, said in the evidence and never a thing to do"
+        )
         assert "Scheduler" in str(found["connections_text"])
 
     def test_Running_WhenAStepHasRunFarTooLong_FitsAndSaysSo(self, db, capture):
