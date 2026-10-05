@@ -1,0 +1,216 @@
+"""The listing rule's third round (19fc7ad): "what adds up is what is shown", asked of EVERY
+known balance of an account said to add up, and not only of a day a statement closed before
+something (`listing_rule_reading.shown_balances_are_the_stated_ones`, which holds on those days).
+
+The balance SHOWN for the end of a day is `ledger.running_balance` over the account's opening
+figure and its rows by their stored dates: the function the ledger's running position and the
+position page both call. The balance STATED is the known balance's own figure. Every account is
+invented, built through the file doors, read through `app_reading`, and its answer was written
+here before the first run. EVERY TEST IN THIS FILE FAILED when it was written, against 19fc7ad.
+
+A statement is tested by what it LISTS, whatever the dates; the position is drawn by DATE. Where
+the two part, the rule says "adds up" of a balance the app does not show. Cards open at 100.00
+owed; the opening figure the app holds is the statement's own in every case below.
+
+NEW WITH THE RULE (each account was "nothing to check against" at f2440eb):
+
+  y-late      A lone statement closing 10 Jan at 117.56 lists purchases made 20 Dec and 9 Jan.
+              The feed then reports the 9 Jan purchase, posted 11 Jan: one transaction, held
+              under the feed's date. Said: adds up through 10 Jan, tested by the 2 transactions
+              its statement lists. Expected: 117.56 owed shown for 10 Jan. Got: 112.37.
+              (Arriving in the other order, the statement's date is kept and it is the same.)
+  y-pending   A lone statement closing 10 Jan at 117.56, and a feed transaction of 4.13 still
+              pending, dated inside its days: not counted towards a statement's balance, counted
+              in the position. Said: adds up through 10 Jan. Expected: 117.56 shown for 10 Jan.
+              Got: 121.69.
+
+THE DAY NEWLY TESTED AND OFFERED TO PROTECTION (the gap itself is older than the rule):
+
+  y-chain     January's statement (104.19 at 10 Jan) and February's, which lists a purchase of
+              3.07 made 8 Jan: pending at January's close, the owner's own case. Without the rule
+              10 Jan sets the opening, is not tested, and is not offered to protection; with it
+              10 Jan is "tested by the 1 transaction its statement lists" and offered.
+              Expected: protection pressed through 10 Jan records a balance its span reaches.
+              Got: records 104.19; the span reaches 107.26.
+
+OLDER THAN THE RULE, and stated here because it is the invariant as asked (it fails at f2440eb
+too, where these accounts already "add up"): over the measurement's own household, the accounts
+`december`, `december-current`, `pending`, and `settled` are shown a balance other than the
+stated one on ten statement closing days, by the purchase a later statement lists.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from listing_rule_reading import app_reading
+from obdi.balance_anchors import effective_opening
+from obdi.identity import content_key
+from obdi.ingest import reconcile_batch
+from obdi.ledger import running_balance
+from obdi.models import SourceTier, Transaction, TransactionStatus
+from obdi.protection import press
+from obdi.protection import tested_days as days_offered
+from obdi.standing_data import ADDS_UP
+from obdi.store import Store
+from statement_span_world import Spend, statement
+from test_statement_listing_measure import FAMILIES, OPENING, chain
+from test_statement_listing_measure import world as listing_world  # noqa: F401 - the fixture
+
+D = date
+MID, JAN, FEB = D(2025, 12, 10), D(2026, 1, 10), D(2026, 2, 10)
+
+
+def _feed(
+    store: Store,
+    ref: str,
+    day: date,
+    payee: str,
+    minor: int,
+    *,
+    source: str = "truelayer-booked",
+    status: TransactionStatus = TransactionStatus.BOOKED,
+) -> None:
+    reconcile_batch(
+        store,
+        [
+            Transaction(
+                account_id=ref,
+                amount_minor=-minor,
+                currency="GBP",
+                value_date=day,
+                booking_date=day,
+                description=payee,
+                source=source,
+                source_id=f"{ref}-{payee}",
+                status=status,
+                tier=SourceTier.AUTHORITATIVE,
+                content_key=content_key(amount_minor=-minor, value_date=day, description=payee),
+            )
+        ],
+        digest=f"{ref}-{payee}",
+    )
+
+
+def _lone(store: Store, root: Path, ref: str, second: date) -> int:
+    return statement(
+        store, root, ref, JAN, OPENING,
+        [Spend(D(2025, 12, 20), f"Alpha {ref}", 1237), Spend(second, f"Bravo {ref}", 519)],
+        received=JAN, previous_close=MID,
+    )
+
+
+def _chain(store: Store, root: Path, ref: str) -> None:
+    chain(
+        store, root, ref, [JAN, FEB],
+        [
+            [Spend(D(2026, 1, 5), f"One {ref}", 419)],
+            [Spend(D(2026, 1, 8), f"Pending {ref}", 307), Spend(D(2026, 2, 2), f"Two {ref}", 709)],
+        ],
+    )
+
+
+@pytest.fixture(scope="module")
+def world(tmp_path_factory):
+    root = tmp_path_factory.mktemp("review3")
+    with Store(root / "store.sqlite3") as store:
+        _lone(store, root, "y-late", D(2026, 1, 9))
+        _feed(store, "y-late", D(2026, 1, 11), "Bravo y-late", 519)
+        _lone(store, root, "y-pending", D(2026, 1, 5))
+        _feed(
+            store, "y-pending", D(2025, 12, 30), "Hold y-pending", 413,
+            source="truelayer-pending", status=TransactionStatus.PENDING,
+        )
+        store.connection.commit()
+        yield store
+
+
+def _shown(store: Store, ref: str, day: date) -> int:
+    """The balance the position shows for the end of `day`."""
+    opening = effective_opening(store, ref, families=FAMILIES)
+    assert opening.opening_minor is not None
+    return running_balance(opening.opening_minor, store.transactions_for_account(ref), day)
+
+
+def _out_of_step(store: Store, ref: str) -> list[tuple[str, int]]:
+    """Each known balance on or before the day the account adds up through whose stated figure is
+    not the balance shown for its day (bar what a statement is taken to have closed before), as
+    (day, shown less stated)."""
+    standing, verdict = app_reading(store, ref, FAMILIES)
+    if verdict != ADDS_UP or standing.own.through is None:
+        return []
+    closed = {c.day: sum(c.that_amounts) for c in standing.own.closed_before}
+    found = []
+    for reading in effective_opening(store, ref, families=FAMILIES).readings:
+        known = reading.anchor
+        if known.at is not None or known.day > standing.own.through:
+            continue
+        stated = known.balance_minor
+        if known.basis == "statement" and known.day in closed:
+            stated += closed[known.day]
+        shown = _shown(store, ref, known.day)
+        if shown != stated:
+            found.append((known.day.isoformat(), shown - stated))
+    return found
+
+
+class TestALoneStatementSaidToAddUp:
+    def test_Position_WhenAListedPurchaseIsHeldUnderTheFeedsLaterDate_ShowsTheClosingBalance(
+        self, world
+    ):
+        now, verdict = app_reading(world, "y-late", FAMILIES)
+        opening = effective_opening(world, "y-late", families=FAMILIES)
+        dated = sorted(t.value_date for t in world.transactions_for_account("y-late"))
+
+        # One transaction for the 9 Jan purchase, under the day the feed posted it.
+        assert dated == [D(2025, 12, 20), D(2026, 1, 11)]
+        assert (verdict, now.own.through, opening.opening_minor) == (ADDS_UP, JAN, -10000)
+        assert _shown(world, "y-late", JAN) == -11756
+
+    def test_Position_WhenAPendingTransactionIsHeldInsideItsDays_ShowsTheClosingBalance(
+        self, world
+    ):
+        now, verdict = app_reading(world, "y-pending", FAMILIES)
+        opening = effective_opening(world, "y-pending", families=FAMILIES)
+
+        assert (verdict, now.own.through, opening.opening_minor) == (ADDS_UP, JAN, -10000)
+        assert _shown(world, "y-pending", JAN) == -11756
+
+
+class TestAFirstStatementNewlyOfferedToProtection:
+    def test_Protection_WhenTheNextStatementListsAPurchaseMadeBeforeTheClose_RecordsWhatItReaches(
+        self, tmp_path
+    ):
+        with Store(tmp_path / "store.sqlite3") as store:
+            _chain(store, tmp_path, "y-chain")
+            before, _ = app_reading(store, "y-chain", FAMILIES, rule=False)
+            now, verdict = app_reading(store, "y-chain", FAMILIES)
+            opening = effective_opening(store, "y-chain", families=FAMILIES)
+            offered_before = days_offered(opening, before)
+            offered = days_offered(opening, now)
+            press(store, "y-chain", JAN.isoformat(), opening=opening, standing=now)
+            record = store.protection_record("y-chain")
+            reached = _shown(store, "y-chain", JAN)
+
+        assert verdict == ADDS_UP
+        assert (offered_before, offered) == ((FEB,), (JAN, FEB))
+        assert record is not None
+        assert int(str(record["verified_minor"])) == reached
+
+
+class TestEveryKnownBalanceOfAnAccountSaidToAddUp:
+    def test_Position_OverTheMeasurementsHousehold_ShowsEachStatedBalanceOnItsDay(
+        self, listing_world  # noqa: F811
+    ):
+        """Fails at f2440eb as well: the gap between a listing and its dates is older than the
+        rule. It is here because the invariant was asked of every known balance."""
+        store = listing_world[0]
+        refs = sorted(
+            str(row[0])
+            for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
+        )
+
+        assert {ref: found for ref in refs if (found := _out_of_step(store, ref))} == {}
