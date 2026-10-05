@@ -241,8 +241,21 @@ class TestThePageDoesNotGrowWithTheBalances:
 
         assert abs(bulk - sparse) < 0.05 * sparse, (bulk, sparse)
 
-    def test_TwoThousandBalances_GiveADefaultPageUnderAHundredKilobytes(self, base):
-        assert len(get(base, BULK).encode()) < 100_000
+    def test_TwoThousandBalances_GiveADefaultPageWhoseOwnContentIsUnderFiftyFiveKilobytes(
+        self, base
+    ):
+        """The bound is on what this page says, not on the stylesheet every page carries.
+
+        It was an absolute hundred kilobytes for the whole page, and failed at 101,008 when
+        two unrelated pages added their styles: the inline stylesheet is one for every page
+        (51,395 bytes then, half of this page), so each new page's rules counted against this
+        one. With the stylesheet taken out the page measured about 49,600 bytes; the bound
+        leaves a tenth above that, and what it guards is unchanged - a page that renders
+        every known balance again would be over a megabyte.
+        """
+        page = re.sub(r"<style>.*?</style>", "", get(base, BULK), flags=re.S)
+
+        assert len(page.encode()) < 55_000
 
     def test_ProtectionDropDown_OffersOnlyTheNewestDatesUntilTheFullListIsAsked(self, base):
         default = get(base, BULK)
