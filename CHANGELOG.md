@@ -26,6 +26,61 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.321] - 2026-10-05
+
+### Fixed
+- **An export row listed on its settlement day joins the payment that
+  settled on it, where that changes no day's total.** The bank's export
+  dates a card payment by the day it settled, and a row was tried against
+  payments MADE on its date first, so in a run of equal payments on
+  consecutive days each export row sat one payment off. 0.4.316 recorded why
+  the rule that mends this stayed out: on the real main account it would
+  have left four days holding a different total, on an account whose rows
+  reproduce every one of its known balances. The measurement in 0.4.319 then
+  split its 36 moves into the chains they form: 16 groups of 32 moves change
+  no day's total, test no known balance against different rows, and touch no
+  protected period; 2 groups of 4 moves would change 2023-05-22, 2023-05-23,
+  2025-04-01, and 2025-04-03. The rule applies a group only when the whole of
+  it is safe, decided before any record of the batch is resolved, and leaves
+  an unsafe group exactly as the existing order of rules leaves it. A file
+  that lists a row again keeps the row its first listing joined.
+- **A chosen window sets the balance chart's width.** With values shown the
+  chart was about 10,000 units wide whatever the window, so "Last 90 days"
+  was drawn at 111 units a day and a phone showed under four days of it. A
+  window is now drawn at 14 units a day, the least at which the axis names a
+  day a week and a one-day offset can be seen: 30 days is 468 units, 90 days
+  1,308, a year 5,158. The page with no window, and a link carrying a range,
+  are drawn exactly as before. The same window can still be drawn very wide,
+  to pan across, in a new tab.
+- A window that starts mid-month named no month or year on its axis; its
+  first day is now named in full.
+
+### Changed
+- The window control's classes are named for the control, not for the
+  Position page that first had it.
+
+### Expected on the real store, to be checked after a deploy
+- The measurement says no safe move remains and the four unsafe ones are
+  unchanged; the main account is still in agreement with every known
+  balance; rows listed still equal rows held.
+- 32 transactions carry another date. Where a swap is between equal payments
+  to one payee the budget sees no difference; where it is not, an audit will
+  show it and bringing Actual into line clears it.
+- The rule resolves a batch with planned moves once more than before. The
+  rebuild has taken 86 to 87 seconds; what it takes now is not known.
+
+### Not covered
+- A month does not fit a phone's chart column at 14 units a day: 30 days is
+  about 1.7 screens and scrolls within the chart. A small difference on a
+  large balance shows in the chart's Difference panel and not in its Balance
+  panel, at any width.
+- The rule does not plan the case where the feed arrives after the export's
+  rows are already placed; thirteen expected failures stay pinned for those
+  arrival orders.
+- 711 of the export's rows sit on transactions the bank's feed never
+  sighted, all dated inside the span the feed covers. What they are is not
+  yet said by a count.
+
 ## [0.4.320] - 2026-10-05
 
 ### Added
