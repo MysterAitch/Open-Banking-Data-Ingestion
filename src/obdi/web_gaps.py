@@ -37,6 +37,14 @@ _esc = html.escape
 #: gap is seen with what holds it in, not at the very edge of the chart.
 TIMELINE_MARGIN_DAYS = 14
 
+#: The line the pages about what is held (coverage, kept statements) carry to send a reader who
+#: is looking for a missing file to the page that lists them.
+FETCH_NEXT_LINE = (
+    '<p class="muted">Missing a statement or an export? '
+    '<a class="tap" href="/gaps">What to fetch next</a> lists them, account by account, '
+    "with the dates to ask for.</p>"
+)
+
 _EXPORT_KINDS = frozenset({GapKind.EXPORT_STOPS, GapKind.EXPORT_MONTHS})
 _BALANCE_KINDS = frozenset({GapKind.NO_BALANCE, GapKind.AUTOMATIC_ONLY, GapKind.ONE_BALANCE})
 

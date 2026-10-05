@@ -26,12 +26,14 @@ from .alerts import consent_rung
 from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .checks_index import CHECKS, CheckResult, result_of
+from .fetch_gaps import FetchReport
 from .namespaces import UNASSIGNED_ACCOUNT
 from .navigation import PAGE_NAMES, page_name
 from .overview import OVERVIEW_CACHE_SECONDS, Overview
 from .page_times import UTC_NOTE, instant_of
 from .plural import plural
 from .pull import STARLING_CONNECTION
+from .web_gaps import verdict_sentence
 from .web_sections import HookTimer
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -314,6 +316,25 @@ def _statements_row(kept: Callable[[], list[dict[str, object]]] | None) -> str:
     )
 
 
+def _fetch_row(report: Callable[[], FetchReport] | None) -> str:
+    """The row that leads the hub: what is still to fetch, in the page's own verdict sentence."""
+    name = page_name("/gaps")
+    if report is None:
+        return ""
+    try:
+        found = report()
+    except Exception:
+        return _row("/gaps", name, "What is still to fetch could not be read just now.")
+    waiting = bool(found.gaps)
+    return _row(
+        "/gaps",
+        name,
+        _esc(verdict_sentence(found)),
+        chip=_chip("to fetch", "warn") if waiting else _chip("nothing due", "ok"),
+        tone="warn" if waiting else "",
+    )
+
+
 def _count_connections(store: ConnectionStore | None) -> int:
     try:
         return len(list(store)) if store is not None else 0
@@ -327,6 +348,7 @@ def render_bring_in(
     last_answered: Callable[[], dict[str, str]] | None = None,
     kept_statements: Callable[[], list[dict[str, object]]] | None = None,
     bank_feed: Callable[[dict[str, str]], BankFeed] | None = None,
+    fetch_report: Callable[[], FetchReport] | None = None,
     now: datetime | None = None,
 ) -> bytes:
     """Every way data enters, each with its state, each linking to the page that does it.
@@ -349,8 +371,10 @@ def render_bring_in(
             feed = bank_feed(answered)
         except Exception:
             unread_feed = True
-    # The bank's own feed leads: it is the most direct way in, and the line above names it first.
+    # What is still to fetch leads, since the owner opens this page to find out; then the bank's
+    # own feed, the most direct way in, which the line above names first.
     rows = [
+        _fetch_row(fetch_report),
         _row(
             "/attempts", "The bank's own feed", _esc("The bank's feed could not be read just now.")
         )
@@ -522,6 +546,7 @@ def render_diagnostics(
 #: The pages an account list leads on to, beside the accounts themselves.
 ACCOUNT_LINKS: tuple[tuple[str, str, str], ...] = (
     ("/coverage", "Coverage by source", "what history each source holds for each account"),
+    ("/gaps", "What to fetch next", "the statements and exports still to fetch, with dates"),
     ("/spaces", "Spaces", "pots recovered from the bank's feed, to declare or leave"),
     ("/review", "Categorise", "payments that have no category yet"),
 )
@@ -571,6 +596,7 @@ class DestinationPages:
         sources = timer.wrap("source_connections", config.source_connections)
         labels = timer.wrap("display_labels", config.display_labels)
         configured = config.starling_probe is not None
+        fetch = timer.wrap("fetch_gaps", config.fetch_gaps)
 
         def feed(answered: dict[str, str]) -> BankFeed:
             return bank_feed_of(
@@ -585,6 +611,9 @@ class DestinationPages:
             last_answered=timer.wrap("connection_last_answered", config.connection_last_answered),
             kept_statements=timer.wrap("kept_statements", config.kept_statements),
             bank_feed=feed,
+            fetch_report=(
+                None if fetch is None else lambda: fetch(datetime.now(UTC).date())
+            ),
         )
         timer.report("/bring-in")
         self._respond(200, page)

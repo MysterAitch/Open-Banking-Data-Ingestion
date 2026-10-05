@@ -112,7 +112,7 @@ from .web_empty import (
     plan_from_audit,
 )
 from .web_flags import FlagPages
-from .web_gaps import GapPages
+from .web_gaps import FETCH_NEXT_LINE, GapPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
 from .web_overview import overview_html
@@ -5659,7 +5659,7 @@ class ConnectionHandler(
                 "Kept statements",
                 body
                 + '<p><a class="button secondary" href="/statement-shape">'
-                "Upload a statement</a></p>" + HOME_LINK,
+                "Upload a statement</a></p>" + FETCH_NEXT_LINE + HOME_LINK,
             ),
         )
 

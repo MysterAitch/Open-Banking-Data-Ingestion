@@ -731,7 +731,7 @@ def standing_items_from(
                 severity=HOUSEKEEPING,
                 message=f"{subject} and none in the last {STALE_AGREEMENT_DAYS} days: {listed}.",
                 remedy=_KINDS["statement-due"][1],
-                href="/accounts",
+                href="/gaps",
                 accounts=tuple(ref for ref, _since in awaiting),
             )
         )

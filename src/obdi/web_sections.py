@@ -29,6 +29,7 @@ from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
+from .web_gaps import FETCH_NEXT_LINE
 from .web_scheduler import scheduler_section
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -367,7 +368,7 @@ def render_coverage(
         "history each source covers. The Accounts cards on the Overview are one card "
         "per account, however many sources feed it; this page is where a source is "
         "named, bound to an account, or archived."
-    ) + (section or _nothing_wired("Coverage"))
+    ) + FETCH_NEXT_LINE + (section or _nothing_wired("Coverage"))
     return render_page("Coverage by source", body)
 
 
