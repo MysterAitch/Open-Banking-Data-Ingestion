@@ -22,7 +22,14 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from .account_names import code_html
-from .agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
+from .agreement import (
+    HELD_MOVEMENT,
+    NONE,
+    STRETCH_MEANINGS,
+    held_sentence,
+    standing_line,
+    stretch_sentences,
+)
 from .balance_anchors import parse_calendar_day
 from .balance_chart import OWN
 from .balance_meaning import READING_THRESHOLD
@@ -594,6 +601,26 @@ _FIGURES_SAID = {
     "differ": "The figures differ.",
     "one": "Only one of them is in use.",
 }
+
+
+def _stretches_html(agreement: Any) -> str:
+    """Where the transactions stop adding up to the known balances, said in days.
+
+    The sentences are `agreement.stretch_sentences`'s. They are plain lines under the verdict:
+    the account's hold above is the one box on the page, and these only locate it. What a failing
+    stretch can mean is listed folded, since the arithmetic cannot choose between the causes.
+    """
+    said = "".join(
+        f'<p class="sub">{_esc(sentence)}</p>' for sentence in stretch_sentences(agreement)
+    )
+    if any(not s.reproduced and not s.conflict and not s.untested for s in agreement.stretches):
+        means = "".join(f"<li>{_esc(item)}</li>" for item in STRETCH_MEANINGS)
+        said += _disclosure(
+            "What a stretch that does not add up can mean",
+            '<p class="muted">The balances and the transactions disagree, and the arithmetic '
+            f"cannot say which of these is why:</p><ul>{means}</ul>",
+        )
+    return said
 
 
 def _balance_form(
@@ -1909,6 +1936,7 @@ def _state_html(view: Any, today: date) -> str:
         + _rail_html(view, own, today)
         + f'<p class="{verdict_css}">{_esc(_verdict_text(own, view.protection))}</p>'
         + _held_html(own, boxed=True)
+        + _stretches_html(own)
     )
     if not own.movement_checked:
         body += (

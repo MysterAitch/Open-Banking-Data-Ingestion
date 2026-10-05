@@ -32,6 +32,28 @@ and the first movement fault. Only a hold with a known balance still to be reach
 a movement fault dated after the latest known balance verifies nothing and refutes nothing about
 the days before it.
 
+STRETCHES. Beside `through`, every stretch between two consecutive days that state a known
+balance is judged by its own arithmetic (`Agreement.stretches`), so a page can say where the
+transactions stop adding up and not only that they do. The later balance is reproduced when the
+earlier one plus the transactions between them gives it, which is exactly when the distance of the
+rows from the balance (`Known.distance`, counted from the one opening) did not change across the
+stretch. Stretches say WHERE; they decide nothing: `through`, `held`, and `state` are exactly what
+the rule above gives, and so is everything that reads them (the protected period, the Overview,
+the push, the timeline). That a later stretch adds up despite an earlier failing one is not
+carried as a conclusion, and no balance is declared "in doubt" from its neighbours: a lone
+mis-stated balance simply fails both stretches it borders, and the page says what a failing
+stretch can mean without choosing.
+
+  - WHILE A CONFLICT STANDS on a day, the stretch beginning there is UNTESTED
+    (`StretchResult.untested`), neither said to add up nor to fail: it would have to match either
+    of two figures, and passing on either would let two disagreeing sources vouch for each other.
+    A stretch ENDING on a conflict is the conflict, said in its own words, and not a failure.
+  - nothing is decided by how plausible a balance looks. A stretch is reproduced, not reproduced,
+    or untested.
+
+A known balance a person has disregarded (`disregarded_balances`) is not read at all: it takes no
+part in a stretch, in agreement, or in a conflict.
+
 DERIVED ON DEMAND from the readings `effective_opening` and the movement report already hold.
 Nothing here walks an account: the ledger reuses the opening it built for its own page, and the
 Overview reads a cached standing.
@@ -43,6 +65,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .balance_anchors import ASSUMED_NIL, EffectiveOpening, FamilyReading, FamilyWalk
@@ -83,6 +106,23 @@ class Known:
     #: than one derived from a balance, and the first known balance is tested by every
     #: transaction since (rule 2).
     premised: bool = False
+    #: How far the figure is from what the rows predict from the one opening (stated minus
+    #: predicted; nil for the balance that defines the opening). None where the reading derived no
+    #: opening, and no stretch is then judged. Compared and never shown.
+    distance: int | None = None
+
+
+@dataclass(frozen=True)
+class StretchResult:
+    """One stretch between consecutive days that state a known balance, and whether it adds up."""
+
+    start: Structural[date]
+    end: Structural[date]
+    reproduced: Structural[bool]
+    #: Two sources state different figures for `end`: a conflict between sources, not a fault.
+    conflict: Structural[bool] = False
+    #: A conflict stands on `start`, so nothing is tested over the stretch (module docstring).
+    untested: Structural[bool] = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +165,17 @@ class Agreement:
     #: The days on which a known balance was tested (rule 2), so that a reader which asks which
     #: days a span may reach (`protection.tested_days`) asks the rule and does not restate it.
     tested: Structural[tuple[date, ...]] = ()
+    #: Every stretch between consecutive known-balance days, each judged by its own arithmetic
+    #: (module docstring). Empty where a balance carries no distance (`Known.distance`).
+    stretches: Structural[tuple[StretchResult, ...]] = ()
+
+    @property
+    def failing(self) -> tuple[StretchResult, ...]:
+        """The stretches the transactions do not reproduce: not a conflict between sources, and
+        not one that began on a conflict and so was never tested."""
+        return tuple(
+            s for s in self.stretches if not s.reproduced and not s.conflict and not s.untested
+        )
 
 
 @dataclass(frozen=True)
@@ -198,7 +249,29 @@ def derive_agreement(
         movement_checked=movement_checked,
         conflicts=tuple(Conflict(day, sources) for day, sources in sorted(conflicts.items())),
         tested=tuple(tested),
+        stretches=_stretch_chain(balances),
     )
+
+
+def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
+    """Each stretch between consecutive days that state a day-end balance, judged by whether the
+    rows' distance from the balance changed across it. Empty where any balance has no distance."""
+    day_end = [k for k in balances if not k.instant]
+    if not day_end or any(k.distance is None for k in day_end):
+        return ()
+    levels: dict[date, set[int]] = defaultdict(set)
+    figures: dict[date, set[int]] = defaultdict(set)
+    for k in day_end:
+        if k.distance is not None:
+            levels[k.day].add(k.distance)
+        figures[k.day].add(k.figure)
+    found = []
+    for before, day in pairwise(sorted(levels)):
+        conflict = len(figures[day]) > 1
+        untested = len(figures[before]) > 1 and not conflict
+        reproduced = not conflict and not untested and levels[day] <= levels[before]
+        found.append(StretchResult(before, day, reproduced, conflict, untested))
+    return tuple(found)
 
 
 def _tested(
@@ -230,6 +303,7 @@ def known_of_opening(opening: EffectiveOpening) -> list[Known]:
                 anchor.balance_minor,
                 instant=anchor.at is not None,
                 premised=premised,
+                distance=_distance(reading.difference_minor, reading.defines_opening),
             )
         )
     return found
@@ -255,7 +329,16 @@ def _known_of_reading(reading: FamilyReading, *, instant: bool, premised: bool) 
         reading.balance_minor,
         instant=instant,
         premised=premised,
+        distance=_distance(reading.difference_minor, reading.defines_opening),
     )
+
+
+def _distance(difference_minor: int | None, defines_opening: bool) -> int | None:
+    """How far a reading is from the rows: nil for the one that defines the opening, and unknown
+    where no opening was derived to measure from."""
+    if difference_minor is not None:
+        return difference_minor
+    return 0 if defines_opening else None
 
 
 def faults_of(report: MovementCompleteness, accounts: Collection[str]) -> list[Fault]:
@@ -327,6 +410,41 @@ def held_sentence(agreement: Agreement) -> str:
             by = ""
         return f"The transactions do not add up to the known balance for {day}{by}."
     return f"The transactions stop adding up at {day}, because of a movement fault: {held.says}."
+
+
+#: What a stretch that does not add up can mean, said once and folded on the page: the arithmetic
+#: says that the transactions and the two balances disagree, and cannot say which of these is why.
+STRETCH_MEANINGS = (
+    "a transaction is missing from those days",
+    "a transaction is counted twice",
+    "a transaction has the wrong amount or sign",
+    "a transaction is dated on the wrong side of either day",
+    "either known balance is mis-stated or was misread",
+)
+
+
+def stretch_sentences(agreement: Agreement) -> list[str]:
+    """Where the transactions stop adding up, and where nothing could be tested, in days only.
+
+    Never a figure. Reads the fields and not `Agreement.failing`: a page holds a masked view of
+    the agreement, which exposes its fields and not its properties.
+    """
+    lines = []
+    for stretch in agreement.stretches:
+        if stretch.reproduced or stretch.conflict:
+            continue
+        if stretch.untested:
+            lines.append(
+                f"Nothing is tested from {_day(stretch.start)} to {_day(stretch.end)}: two "
+                f"known balances differ for {_day(stretch.start)}, so the transactions cannot be "
+                "said to add up from either."
+            )
+            continue
+        lines.append(
+            f"The transactions held between {_day(stretch.start)} and {_day(stretch.end)} do "
+            "not add up to the change between the two known balances."
+        )
+    return lines
 
 
 def standing_line(
