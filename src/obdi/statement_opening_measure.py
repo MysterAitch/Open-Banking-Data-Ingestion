@@ -248,6 +248,9 @@ class OpeningFigures:
     #: Each day the known balances state a figure for (a nil premise and a balance stated for a
     #: moment are left out), with every figure stated, closings of statements among them.
     stated_by_day: dict[date, set[int]] = field(default_factory=dict)
+    #: The account's reading of its known balances today, so a reader can ask what the agreement
+    #: rule makes of them.
+    opening: EffectiveOpening | None = None
     rule_sentence: str = ""
     newly_agreeing: list[tuple[date, date]] = field(default_factory=list)
     newly_not_agreeing: list[tuple[date, date]] = field(default_factory=list)
@@ -449,6 +452,7 @@ def account_figures(
     }
     rows = store.transactions_for_account(ref)
     today = effective_opening(store, ref, rows, families=families)
+    figures.opening = today
     members = families.spaces_of(ref)
     figures.with_spaces = bool(members)
     figures.family_read = today.family is not None and bool(today.family.readings)

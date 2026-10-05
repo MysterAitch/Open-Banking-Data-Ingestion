@@ -53,6 +53,22 @@ class ClosedBefore:
 
 
 @dataclass(frozen=True)
+class DateDifference:
+    """How a statement's closing balance and the balance drawn by each transaction's date for
+    that day part: counts only. A statement is tested by what it lists, and the page's running
+    position is drawn by stored date, so on a closing day the two can differ by transactions
+    dated on or before it that the statement's balance does not hold, and by ones it lists that
+    are dated after it."""
+
+    #: Pending transactions dated on or before the day: in the position, not in a statement's.
+    pending: Structural[int]
+    #: Counting transactions dated on or before the day that a LATER statement lists.
+    later: Structural[int]
+    #: Transactions the statement lists that are dated after the day.
+    listed_after: Structural[int]
+
+
+@dataclass(frozen=True)
 class StatementCheck:
     """One statement's own test: its opening balance plus what it lists equals its closing."""
 
@@ -80,6 +96,13 @@ class StatementCheck:
     clash: Structural[bool] = False
     #: The first day its listing tests, where the days are tested.
     span_start: Structural[date | None] = None
+    #: Where the balance drawn by date for its closing day is not the stated one, because of
+    #: transactions the page names (None where it is the stated one, or the difference is only
+    #: what R2 explains).
+    by_date: Structural[DateDifference | None] = None
+    #: The balance drawn by date for the day, less the stated closing balance, which
+    #: `by_date` and the R2 claim account for exactly. Compared by a test, never rendered.
+    date_gap_minor: int = 0
 
 
 @dataclass(frozen=True)

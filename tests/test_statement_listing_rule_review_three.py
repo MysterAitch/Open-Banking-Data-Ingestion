@@ -60,7 +60,8 @@ from pathlib import Path
 
 import pytest
 
-from listing_rule_reading import app_reading
+from listing_rule_reading import app_reading, shown_balances_are_stated_or_named
+from obdi.agreement import date_difference_sentence
 from obdi.balance_anchors import (
     STATEMENT,
     disregard_balance,
@@ -71,9 +72,9 @@ from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
 from obdi.ledger import running_balance
 from obdi.models import SourceTier, Transaction, TransactionStatus
-from obdi.protection import press
+from obdi.protection import ProtectionRefused, press
 from obdi.protection import tested_days as days_offered
-from obdi.standing_data import ADDS_UP
+from obdi.standing_data import ADDS_UP, statement_checks_for
 from obdi.store import Store
 from statement_span_world import Spend, statement
 from test_statement_listing_measure import FAMILIES, OPENING, chain
@@ -180,23 +181,37 @@ class TestALoneStatementSaidToAddUp:
     def test_Position_WhenAListedPurchaseIsHeldUnderTheFeedsLaterDate_ShowsTheClosingBalance(
         self, world
     ):
+        # Round four, finding 1: ACCEPTED and said. A statement is tested by what it lists and
+        # the position is drawn by stored date, so the shown balance for 10 Jan is not the stated
+        # one; it differs by exactly the purchase the statement lists that is held under the
+        # feed's later date, which the page names in counts (one listed, dated after).
         now, verdict = app_reading(world, "y-late", FAMILIES)
         opening = effective_opening(world, "y-late", families=FAMILIES)
         dated = sorted(t.value_date for t in world.transactions_for_account("y-late"))
+        (check,) = statement_checks_for(world, "y-late", FAMILIES).statements
 
-        # One transaction for the 9 Jan purchase, under the day the feed posted it.
         assert dated == [D(2025, 12, 20), D(2026, 1, 11)]
         assert (verdict, now.own.through, opening.opening_minor) == (ADDS_UP, JAN, -10000)
-        assert _shown(world, "y-late", JAN) == -11756
+        assert _shown(world, "y-late", JAN) == -11756 + 519
+        assert (check.by_date.pending, check.by_date.later, check.by_date.listed_after) == (0, 0, 1)
+        assert check.date_gap_minor == 519
+        assert shown_balances_are_stated_or_named(world, "y-late", FAMILIES, now) == 1
+        assert "1 transaction it lists is dated after it" in date_difference_sentence(
+            JAN, check.by_date
+        )
 
     def test_Position_WhenAPendingTransactionIsHeldInsideItsDays_ShowsTheClosingBalance(
         self, world
     ):
+        # Round four, finding 1: accepted and said, in counts (one pending, dated before).
         now, verdict = app_reading(world, "y-pending", FAMILIES)
         opening = effective_opening(world, "y-pending", families=FAMILIES)
+        (check,) = statement_checks_for(world, "y-pending", FAMILIES).statements
 
         assert (verdict, now.own.through, opening.opening_minor) == (ADDS_UP, JAN, -10000)
-        assert _shown(world, "y-pending", JAN) == -11756
+        assert (check.by_date.pending, check.by_date.later, check.by_date.listed_after) == (1, 0, 0)
+        assert check.date_gap_minor == -413
+        assert shown_balances_are_stated_or_named(world, "y-pending", FAMILIES, now) == 1
 
 
 class TestAFirstStatementNewlyOfferedToProtection:
@@ -210,14 +225,16 @@ class TestAFirstStatementNewlyOfferedToProtection:
             opening = effective_opening(store, "y-chain", families=FAMILIES)
             offered_before = days_offered(opening, before)
             offered = days_offered(opening, now)
-            press(store, "y-chain", JAN.isoformat(), opening=opening, standing=now)
+            with pytest.raises(ProtectionRefused):
+                press(store, "y-chain", JAN.isoformat(), opening=opening, standing=now)
             record = store.protection_record("y-chain")
-            reached = _shown(store, "y-chain", JAN)
 
+        # Round four, finding 2: protection is NOT widened. 10 Jan is tested only by its
+        # statement's own listing, so it is not offered or pressable, and what is offered is
+        # what it was before the rule.
         assert verdict == ADDS_UP
-        assert (offered_before, offered) == ((FEB,), (JAN, FEB))
-        assert record is not None
-        assert int(str(record["verified_minor"])) == reached
+        assert offered_before == offered == (FEB,)
+        assert record is None
 
 
 class TestALaterStatementSetAside:
@@ -259,15 +276,22 @@ class TestALaterStatementSetAside:
 
 
 class TestEveryKnownBalanceOfAnAccountSaidToAddUp:
-    def test_Position_OverTheMeasurementsHousehold_ShowsEachStatedBalanceOnItsDay(
+    def test_Position_OverTheMeasurementsHousehold_ShowsEachStatedBalanceOrWhatThePageNames(
         self, listing_world  # noqa: F811
     ):
-        """Fails at f2440eb as well: the gap between a listing and its dates is older than the
-        rule. It is here because the invariant was asked of every known balance."""
+        """Round four, finding 1: the gap between a listing and its dates is older than the rule
+        (it fails at f2440eb too) and is ACCEPTED, so the invariant is the true one: every known
+        balance on or before `through` of an account that adds up is shown as stated, or differs
+        by exactly the transactions the page names."""
         store = listing_world[0]
         refs = sorted(
             str(row[0])
             for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
         )
 
-        assert {ref: found for ref in refs if (found := _out_of_step(store, ref))} == {}
+        checked = 0
+        for ref in refs:
+            standing, _ = app_reading(store, ref, FAMILIES)
+            checked += shown_balances_are_stated_or_named(store, ref, FAMILIES, standing)
+
+        assert checked > 20

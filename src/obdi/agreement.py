@@ -123,7 +123,7 @@ from .balance_anchors import (
 )
 from .family_anchors import OPENED
 from .masking import Structural
-from .plural import plural
+from .plural import agree, plural
 from .statement_checks import (
     DOES_NOT_REACH,
     HELD_TWICE,
@@ -132,6 +132,7 @@ from .statement_checks import (
     NOT_HELD,
     OTHER_AMOUNT,
     ClosedBefore,
+    DateDifference,
     StatementCheck,
     StatementChecks,
 )
@@ -276,6 +277,11 @@ class Agreement:
     tested_known: tuple[Known, ...] = ()
     #: Every statement in use that does not add up by what it lists (R3), earliest first.
     statement_faults: Structural[tuple[StatementFault, ...]] = ()
+    #: The days tested as they were before a statement's own listing could test a balance. A
+    #: protection records a figure by date span, and a statement is tested by what it lists, so
+    #: only these days are offered to protection (`protection.tested_days`): the listing rule
+    #: does not widen protection until protection understands it.
+    chain_tested: Structural[tuple[date, ...]] = ()
 
     @property
     def failing(self) -> tuple[StretchResult, ...]:
@@ -387,6 +393,9 @@ def derive_agreement(
         tested=tuple(tested),
         stretches=_stretch_chain(balances),
         statement_faults=_statement_faults(checks),
+        chain_tested=tuple(
+            d for d in days if _tested(d, days[0], by_day[d], conflicts, listing=False)
+        ),
         listing_tested=tuple(
             ListingTested(k.day, k.listed, k.span_start)
             for k in balances
@@ -545,13 +554,20 @@ def _stretch_chain(balances: Sequence[Known]) -> tuple[StretchResult, ...]:
 
 
 def _tested(
-    day: date, earliest: date, here: Sequence[Known], conflicts: Collection[date]
+    day: date,
+    earliest: date,
+    here: Sequence[Known],
+    conflicts: Collection[date],
+    *,
+    listing: bool = True,
 ) -> bool:
     """Whether the known balances of `day` were tested (rule 2). The earliest day tests nothing
-    however many balances state it, unless the account's nil opening is a premise."""
+    however many balances state it, unless the account's nil opening is a premise. `listing`
+    False reads it as it was read before a statement's own listing could test a balance: the days
+    protection is offered for (`Agreement.chain_tested`)."""
     if day in conflicts:
         return False
-    if any(k.self_tested and k.verdict in (DEFINES, MET) for k in here):
+    if listing and any(k.self_tested and k.verdict in (DEFINES, MET) for k in here):
         return True
     if day == earliest:
         return any(k.premised and k.verdict == MET for k in here)
@@ -727,6 +743,31 @@ def listing_tested_sentence(tested: ListingTested) -> str:
     return (
         f"The known balance for {_day(tested.day)} is tested by the "
         f"{plural(tested.listed, 'transaction')} its statement lists."
+    )
+
+
+def date_difference_sentence(day: date, found: DateDifference) -> str:
+    """Why the balance drawn by stored date for a statement's closing day is a different figure
+    from the one the statement states, in counts only (never the size of the difference). A
+    statement is tested by what it lists, not by date, and a statement's closing balance is not the
+    balance at the end of a calendar day."""
+    named = []
+    held = found.pending + found.later
+    if held:
+        named.append(
+            f"{plural(held, 'transaction')} dated on or before it "
+            f"{agree(held, 'is')} not listed by this statement ({found.pending} pending, "
+            f"{found.later} listed by a later statement)"
+        )
+    if found.listed_after:
+        named.append(
+            f"{plural(found.listed_after, 'transaction')} it lists "
+            f"{agree(found.listed_after, 'is')} dated after it"
+        )
+    return (
+        f"By date the balance at the end of {_day(day)} is a different figure, because "
+        + " and ".join(named)
+        + ". The statement is tested by what it lists, not by date."
     )
 
 

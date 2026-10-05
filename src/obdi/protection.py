@@ -471,11 +471,14 @@ def recheck(
 def tested_days(opening: EffectiveOpening, standing: Standing) -> tuple[date, ...]:
     """The days a protection may be pressed through: tested known balances the account is in
     agreement through. Pressing for any other date would protect a span nothing has verified, and
-    a day on which balances merely agree with each other is not tested (`agreement`, rule 2)."""
+    a day on which balances merely agree with each other is not tested (`agreement`, rule 2). A
+    day tested ONLY by a statement's own listing is not among them (`Agreement.chain_tested`):
+    protection records a balance by date span, which a statement's listing does not reach."""
     limit = standing.own.through
     if limit is None:
         return ()
-    return tuple(sorted({k.day for k in standing.own.tested_known if k.day <= limit}))
+    reached = set(standing.own.chain_tested)
+    return tuple(sorted({k.day for k in standing.own.tested_known if k.day <= limit} & reached))
 
 
 def press(
@@ -689,6 +692,11 @@ def protection_view(
         not_offered = "an account tracked by its known balances alone has no rows to protect"
     elif standing is not None and standing.own.known_count == 0:
         not_offered = "there is no known balance to verify the account against"
+    elif standing is not None and not allowed and standing.own.listing_tested:
+        not_offered = (
+            "the days its statement tests by what it lists are not offered yet: a protection "
+            "records a balance by date, and a statement is tested by what it lists, not by date"
+        )
     elif standing is None or not allowed:
         not_offered = "the account's transactions do not yet add up to any known balance"
     elif opening.opening_minor is None:

@@ -290,6 +290,10 @@ class TestProtectionRecordsTheBalanceReproduced:
     ):
         with Store(tmp_path / "store.sqlite3") as store:
             closing = _card(store, tmp_path, "w-same-day")
+            # Round four: a day tested only by its statement's own listing is not offered to
+            # protection, so the day is made one the ordinary chain tests, by an earlier typed
+            # balance (the opening, 100.00 owed, before the first purchase).
+            _typed_balance(store, "w-same-day", D(2026, 1, 5), -OPENING)
             feed(store, "w-same-day", [Spend(FEB, "Late w-same-day", 777)], digest="sd")
             _typed_balance(store, "w-same-day", FEB, -closing - 777)
             now, verdict = app_reading(store, "w-same-day", FAMILIES)

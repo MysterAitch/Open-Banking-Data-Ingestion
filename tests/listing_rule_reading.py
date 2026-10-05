@@ -28,30 +28,45 @@ def movement_of(store: Store) -> MovementCompleteness:
     return held[1]
 
 
-def shown_balances_are_the_stated_ones(
+def shown_balances_are_stated_or_named(
     store: Store, ref: str, families: Families, standing: Standing
 ) -> int:
-    """For every day a statement is taken to have closed before some transactions, the balance
-    the account page would show for that moment equals the stated one: the other source's at the
-    end of the day, the statement's before the transactions it closed before. Returns how many
-    days it checked. A rule that says an account adds up over balances the page does not show is
-    the failure this guards against."""
-    from obdi.balance_anchors import effective_opening
-    from obdi.ledger import running_balance
+    """For every known balance on or before the day an account said to add up adds up through, the
+    balance the account page shows for that day (`ledger.running_balance`: the opening and the
+    transactions by stored date) is the stated one, OR a statement's closing that differs from it
+    by exactly what the page names: the transactions dated on or before the day that the
+    statement's balance does not hold, less the ones it lists that are dated after it
+    (`StatementCheck.date_gap_minor`, which the page says in counts), and what it is taken to
+    have closed before. Anything else is a failure. Returns how many balances it checked.
 
+    A statement is tested by what it lists and the position is drawn by date: they are different
+    quantities, which the owner's own correction accepts ("a closing balance is not the balance at
+    the end of a calendar day") and the page must therefore say rather than leave "adds up"
+    beside a different figure."""
+    from obdi.balance_anchors import STATEMENT, effective_opening
+    from obdi.ledger import running_balance
+    from obdi.standing_data import statement_checks_for
+
+    if standing.own.through is None or standing.own.held is not None:
+        return 0
     opening = effective_opening(store, ref, families=families)
     assert opening.opening_minor is not None
     rows = store.transactions_for_account(ref)
+    checks = statement_checks_for(store, ref, families)
+    named = {} if checks is None else {(c.day, c.figure): c for c in checks.statements}
     checked = 0
-    for claim in standing.own.closed_before:
-        end_of_day = running_balance(opening.opening_minor, rows, claim.day)
-        for known in standing.own.tested_known:
-            if known.day != claim.day or known.instant:
-                continue
-            if known.closed_before is None:
-                assert end_of_day == known.figure, (ref, claim.day, known.source)
-            else:
-                assert end_of_day - sum(claim.that_amounts) == known.figure, (ref, claim.day)
+    for reading in opening.readings:
+        known = reading.anchor
+        if known.at is not None or known.day > standing.own.through:
+            continue
+        shown = running_balance(opening.opening_minor, rows, known.day)
+        stated = known.balance_minor
+        check = named.get((known.day, stated)) if known.basis == STATEMENT else None
+        gap = 0 if check is None else check.date_gap_minor
+        assert shown - stated == gap, (ref, known.day, known.basis, shown - stated, gap)
+        if gap:
+            assert check is not None
+            assert check.by_date is not None or check.closed_before is not None, (ref, known.day)
         checked += 1
     return checked
 

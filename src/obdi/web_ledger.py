@@ -28,6 +28,7 @@ from .agreement import (
     NONE,
     STRETCH_MEANINGS,
     closed_before_sentence,
+    date_difference_sentence,
     held_sentence,
     listing_tested_sentence,
     standing_line,
@@ -547,7 +548,9 @@ def _balance_word(direction: str) -> str:
     return _BALANCE_WORDS.get(direction, direction)
 
 
-def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True) -> str:
+def _anchor_row(
+    line: Any, *, balance_only: bool = False, unmasked: bool = True, note: str = ""
+) -> str:
     """One known balance as a list item: its verdict first, then when, what, and whence.
 
     A list and not a table.
@@ -594,8 +597,22 @@ def _anchor_row(line: Any, *, balance_only: bool = False, unmasked: bool = True)
         f"<p>{role}{detail}</p>"
         f'<p>End of <span class="mono nowrap">{_esc(line.day)}</span>: {balance}</p>'
         f'<p class="muted">{_esc(basis)}</p>'
-        "</li>"
+        + (f'<p class="muted">{_esc(note)}</p>' if note else "")
+        + "</li>"
     )
+
+
+def _date_notes(view: Any) -> dict[str, str]:
+    """For each statement closing whose balance by stored date is a different figure from the
+    stated one, the sentence that says so, by day. Counts and dates only: never the size."""
+    checks = view.statements
+    if checks is None:
+        return {}
+    return {
+        s.day.isoformat(): date_difference_sentence(s.day, s.by_date)
+        for s in checks.statements
+        if s.by_date is not None
+    }
 
 
 #: What each way of comparing the balances stated for one day says (`ledger.SharedDay.figures`).
@@ -824,15 +841,24 @@ def _anchors_html(
     unmasked: bool = True,
     everything: bool = False,
     earlier: Callable[[int], str] | None = None,
+    notes: dict[str, str] | None = None,
 ) -> str:
     """The known balances worth listing (`_listed_anchors`), then one line for the earlier ones.
 
     `earlier` makes that line from the count left out, as a link to the full list; without it a
-    long run is simply listed whole.
+    long run is simply listed whole. `notes` are what a statement's balance says of how it parts
+    from the position by date, by day.
     """
     listed, left_out = _listed_anchors(anchors, everything=everything or earlier is None)
+    said = notes or {}
     items = "".join(
-        _anchor_row(line, balance_only=balance_only, unmasked=unmasked) for line in listed
+        _anchor_row(
+            line,
+            balance_only=balance_only,
+            unmasked=unmasked,
+            note=said.get(line.day, "") if line.basis == "statement" else "",
+        )
+        for line in listed
     )
     line = earlier(left_out) if earlier is not None and left_out else ""
     return f'<ul class="anchors">{items}</ul>{line}'
@@ -2216,6 +2242,7 @@ def _opening_html(
             unmasked=unmasked,
             everything=everything,
             earlier=earlier,
+            notes=_date_notes(view),
         )
         if sum(1 for line in opening.anchors if line.basis == "statement") >= 2:
             body += (
@@ -2272,6 +2299,7 @@ def _opening_html(
                     unmasked=unmasked,
                     everything=everything,
                     earlier=earlier,
+                    notes=_date_notes(view),
                 )
                 differing = sum(1 for line in opening.anchors if line.verdict == "differs")
                 if differing:

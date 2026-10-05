@@ -52,7 +52,7 @@ from pathlib import Path
 
 import pytest
 
-from listing_rule_reading import app_reading, shown_balances_are_the_stated_ones
+from listing_rule_reading import app_reading, shown_balances_are_stated_or_named
 from obdi.agreement import (
     HELD_CONFLICT,
     HELD_UNMET,
@@ -310,9 +310,11 @@ class TestAStatementThatDoesNotAddUpByWhatItLists:
 
 
 class TestTheFirstOfSeveralStatements:
-    def test_Protection_WhenTheFirstStatementIsClean_IsOfferedItsClosingAsWellAsTheLater(
+    def test_Protection_WhenTheFirstStatementIsClean_IsOfferedExactlyWhatItWasOffered(
         self, world
     ):
+        # Round four: a day tested ONLY by its statement's own listing is not offered to
+        # protection, which records a balance by date span that a listing does not reach.
         today, _ = read(world, "r-first", rule=False)
         now, _ = read(world, "r-first", rule=True)
         opening = effective_opening(
@@ -320,8 +322,45 @@ class TestTheFirstOfSeveralStatements:
         )
 
         assert today.own.through == now.own.through == D(2026, 3, 10)
-        assert days_offered(opening, today) == (D(2026, 3, 10),)
-        assert days_offered(opening, now) == (D(2026, 2, 10), D(2026, 3, 10))
+        assert now.own.tested == (D(2026, 2, 10), D(2026, 3, 10))
+        assert days_offered(opening, today) == days_offered(opening, now) == (D(2026, 3, 10),)
+
+    def test_Protection_ForEveryAccountTheRuleDoesNotExplainADayFor_IsTheSameWithAndWithoutIt(
+        self, world
+    ):
+        refs = sorted(
+            str(row[0])
+            for row in world.connection.execute("SELECT DISTINCT account_id FROM transactions")
+        )
+        compared = 0
+        for ref in refs:
+            today, _ = read(world, ref, rule=False)
+            now, _ = read(world, ref, rule=True)
+            if now.own.closed_before:
+                continue
+            opening = effective_opening(
+                world, ref, world.transactions_for_account(ref), families=FAMILIES
+            )
+            assert days_offered(opening, today) == days_offered(opening, now), ref
+            compared += 1
+        # Every account the world builds, less those with a day a statement closed before.
+        assert compared == 16
+
+    def test_Protection_WhenOnlyItsOwnStatementTestsTheDay_SaysWhyNothingIsOfferedYet(
+        self, world
+    ):
+        from obdi.protection import protection_view
+
+        now, _ = read(world, "r-lone", rule=True)
+        opening = effective_opening(
+            world, "r-lone", world.transactions_for_account("r-lone"), families=FAMILIES
+        )
+        view = protection_view(
+            world, "r-lone", opening, world.transactions_for_account("r-lone"), now
+        )
+
+        assert view.offer == ()
+        assert "tests by what it lists are not offered yet" in view.not_offered
 
     def test_Account_WhenAFeedHoldsAnUnlistedTransactionInTheFirstDays_NothingIsNewlyTested(
         self, world
@@ -372,7 +411,7 @@ class TestAStatementClosedBeforeTheDaysLastTransaction:
         assert (now.own.state, verdict) == ("agrees", ADDS_UP)
         assert now.own.through == D(2026, 2, 10)
         assert [(c.day, c.transactions) for c in now.own.closed_before] == [(D(2026, 2, 10), 1)]
-        shown_balances_are_the_stated_ones(world, "sd-explained", FAMILIES, now)
+        assert shown_balances_are_stated_or_named(world, "sd-explained", FAMILIES, now) == 2
 
     def test_Account_WhenNothingExplainsTheDifference_StaysAConflict(self, world):
         assert read(world, "sd-unexplained", rule=True)[0].own.state == HELD_CONFLICT

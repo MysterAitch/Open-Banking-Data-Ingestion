@@ -248,7 +248,9 @@ class TestTheCardAShape:
         text = period_reconciliation(store, sibling_accounts={}).describe(masked=True)
 
         assert (
-            text.count("1 feed transaction was folded as the same money as 3 statement transactions")
+            text.count(
+                "1 feed transaction was folded as the same money as 3 statement transactions"
+            )
             == 2
         )
         assert "withheld from the push" in text

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from listing_rule_reading import app_reading, movement_of, shown_balances_are_the_stated_ones
+from listing_rule_reading import app_reading, movement_of, shown_balances_are_stated_or_named
 from obdi.balance_anchors import AnchorRefused, record_stated_anchor
 from obdi.family_anchors import Families
 from obdi.standing_data import ADDS_UP
@@ -200,9 +200,8 @@ def test_Rule_OverWholeStoresBuiltThroughTheStatementDoor_HoldsAgainstTheOracle(
                 counts["same-day purchase explained"] += bool(now.own.closed_before)
             # The balances the page shows are the ones stated, for every day taken as closed
             # before some transactions and in every account the rule says adds up.
-            counts["days checked for shown balances"] += shown_balances_are_the_stated_ones(
-                store, truth.ref, NO_SPACES, now
-            )
+            checked = shown_balances_are_stated_or_named(store, truth.ref, NO_SPACES, now)
+            counts["known balances checked against the position"] += checked
             if truth.merged:
                 counts["twin merged: " + before_verdict + " -> " + verdict] += 1
                 counts["twin merged: transactions held beyond the printed"] += max(

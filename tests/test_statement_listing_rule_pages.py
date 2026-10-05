@@ -20,7 +20,9 @@ day, naming the account and the statement.
 
 from __future__ import annotations
 
+import re
 import threading
+from datetime import date
 from html.parser import HTMLParser
 from http.server import HTTPServer
 from pathlib import Path
@@ -31,6 +33,7 @@ import pytest
 from obdi.account_names import AccountsShown
 from obdi.balance_anchors import effective_opening
 from obdi.cli import build_web_config
+from obdi.models import TransactionStatus
 from obdi.overview import NOW, standing_items_from
 from obdi.standing_data import standings_for
 from obdi.statement_listing_measure import StatementListingReport, statement_listing_report
@@ -39,6 +42,7 @@ from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_statement_listing_measure import FAMILIES
 from test_statement_listing_rule_accounts import build
+from test_statement_listing_rule_review_three import _feed, _lone
 
 FORBIDDEN_WORDS = ("anchor", "in agreement", "held back")
 
@@ -70,6 +74,15 @@ def served(tmp_path_factory):
     path = root / "store.sqlite3"
     with Store(path) as store:
         build(store, Path(root))
+        # Two lone statements whose balance by stored date is a different figure (round four).
+        _lone(store, root, "y-late", date(2026, 1, 9))
+        _feed(store, "y-late", date(2026, 1, 11), "Bravo y-late", 519)
+        _lone(store, root, "y-pending", date(2026, 1, 5))
+        _feed(
+            store, "y-pending", date(2025, 12, 30), "Hold y-pending", 413,
+            source="truelayer-pending", status=TransactionStatus.PENDING,
+        )
+        store.connection.commit()
     mp = pytest.MonkeyPatch()
     mp.setenv("OBDI_CONNECTION_STORE", str(root / "connections.json"))
     mp.delenv("OBDI_ACCOUNT_MAP", raising=False)
@@ -93,6 +106,59 @@ def page_of(base: str, ref: str, month: str) -> Text:
     parsed = Text()
     parsed.feed(response.text)
     return parsed
+
+
+class TestAStatementBalanceThatPartsFromTheBalanceByDate:
+    """Round four, finding 1: said on the balance's own line, in counts and dates only."""
+
+    def test_Page_WhenAPendingTransactionIsDatedInsideItsDays_NamesItWithoutTheSize(self, served):
+        said = page_of(served[0], "y-pending", "2025-12").said
+
+        assert (
+            "By date the balance at the end of 2026-01-10 is a different figure, because "
+            "1 transaction dated on or before it is not listed by this statement "
+            "(1 pending, 0 listed by a later statement). The statement is tested by what it "
+            "lists, not by date."
+        ) in said
+
+    def test_Page_WhenAListedPurchaseIsHeldUnderALaterDate_NamesItWithoutTheSize(self, served):
+        said = page_of(served[0], "y-late", "2026-01").said
+
+        assert (
+            "because 1 transaction it lists is dated after it. The statement is tested by what "
+            "it lists, not by date."
+        ) in said
+
+    def test_Pages_ThatSayTheDifference_HoldNoFigureInTextOrAttributes(self, served):
+        base, _ = served
+        for ref, month in (("y-pending", "2025-12"), ("y-late", "2026-01")):
+            html = httpx.get(f"{base}/ledger", params={"ref": ref, "month": month}, timeout=60).text
+            for figure in ("117.56", "11756", "4.13", "413", "5.19", "519", "121.69", "12169"):
+                assert figure not in html, (ref, figure)
+
+
+class TestNoPageTheRuleTouchesHoldsAFigure:
+    def test_Get_ForTodayAccountsChecksIdentityHealthAndStatementPeriods_HoldsNoStatedFigure(
+        self, served
+    ):
+        base, _ = served
+        figures = (
+            "117.56", "11756", "121.69", "12169", "110.48", "11048", "118.25", "11825",
+            "100.00", "10000", "7.77", "777", "4.13", "5.19", "12.37",
+        )
+        for route in ("/", "/accounts", "/checks", "/identity-health", "/period-reconciliation"):
+            response = httpx.get(f"{base}{route}", timeout=60)
+            assert response.status_code == 200, route
+            visible = Text()
+            visible.feed(response.text)
+            attributes = " ".join(
+                value
+                for tag in re.findall(r"<[^>]+>", response.text)
+                for value in re.findall(r'="([^"]*)"', tag)
+            )
+            for figure in figures:
+                assert figure not in visible.said, (route, figure)
+                assert figure not in attributes, (route, figure, "in an attribute")
 
 
 class TestTheAccountPage:
@@ -179,6 +245,32 @@ class TestTheMeasurementPage:
 
         assert "shares 2 transactions with the statement before it" in page.said
         assert "money moved that neither" not in page.said
+
+    def test_Page_WhenTheRuleDoesNotTakeTheClaim_SaysTheDayIsStillHeldAsAConflict(
+        self, tmp_path_factory
+    ):
+        # The reviewer's `v-cannot-say`: the other balance differs by exactly the unlisted
+        # purchase, but the statement cannot say what it lists, so the account page keeps the
+        # conflict and Identity health must not say the two balances do not contradict.
+        from test_statement_listing_rule_review import build as review_build
+
+        root = tmp_path_factory.mktemp("held-conflict")
+        with Store(root / "s.sqlite3") as store:
+            review_build(store, root)
+            listing = {
+                a.account: a for a in statement_listing_report(store, FAMILIES).accounts
+            }
+        (only,) = listing["v-cannot-say"].statements
+        page = Text()
+        page.feed(
+            statement_listing_html(
+                StatementListingReport([listing["v-cannot-say"]]), AccountsShown()
+            )
+        )
+
+        assert only.day_conflict is not None and only.day_conflict.refused
+        assert "still holds the day as a conflict" in page.said
+        assert "do not contradict each other" not in page.said
 
 
 class TestToday:

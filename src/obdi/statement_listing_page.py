@@ -106,6 +106,12 @@ def _conflict_sentence(item: StatementListing) -> str:
         return ""
     on = found.day.isoformat()
     head = f"Another source states a different balance for {on}. "
+    if found.verdict is DayReading.SAME_DAY and found.refused:
+        return (
+            head + "The two differ by exactly the counting transactions dated that day that the "
+            "statement does not list: yes. The account page still holds the day as a conflict "
+            f"between sources, because {found.refused}."
+        )
     if found.verdict is DayReading.SAME_DAY:
         return (
             head + "The two differ by exactly the counting transactions dated that day that the "
