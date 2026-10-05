@@ -26,6 +26,74 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.323] - 2026-10-05
+
+### Added
+- **A cash machine withdrawal is a transfer to the cash account, and cash
+  paid in is a transfer back.** The owner asked for it. A booked payment the
+  bank's own feed states is at a cash machine (`sourceSubType` ATM), out of
+  an account that is not the cash account, gets a row of the same size into
+  the one account declared `cash-balance-only`, on the same day, and the two
+  are a transfer pair; a payment the feed states is a cash deposit is the
+  mirror. Read on the real store in 0.4.322: "The rule would make 20
+  transfers with the cash account: 19 withdrawals and 1 deposit, dated
+  2019-02-26 to 2026-09-01", with no two sources stating kinds that exclude
+  each other.
+  - The row in the cash account is stored, under a source name of its own
+    that says no source lists it, and is made again on every rebuild; it
+    goes the moment its payment stops qualifying. A row that was never
+    stored was rejected: the pairing, the movement checks, protection, the
+    account page, and the push all join a pair to stored rows.
+  - No row is made for a pending payment, for money back from a cash
+    machine, where two sources state kinds that exclude each other, with no
+    cash account or several, or dated after the cash account's closing day.
+  - Where an account has the bank's own feed, the feed decides and the
+    aggregator's category neither adds nor blocks. An account fed by the
+    aggregator alone would be decided by its CASH category; none exists on
+    the real store.
+  - Between two stated cash balances, what a balance-only account reports
+    as its change is now what was spent in cash, since the withdrawals
+    between them are rows.
+- **"What to fetch next", under Bring in.** The owner asked for a page that
+  flags where a statement or an export is missing. The facts were on six
+  pages and none was a list of what to fetch. `/gaps` says, account by
+  account and most pressing first, the dates to fetch and why: newer
+  statements due (and, where three or more monthly statements show a
+  cadence, how many are probably waiting and about when they closed, said to
+  be an inference), a hole between statements, rows before the first known
+  balance, one known balance or none, an export that stops or lacks a month
+  another source has, and a review flag a statement would settle. Today's
+  line about statements, Bring in, Accounts, Coverage, and Kept statements
+  link to it; Today's item and this page read one function for which
+  accounts await a statement.
+- A statement's own period start is kept where the statement states one
+  (four of the eight layouts read), so a hole between two statements can be
+  a stated fact and not an inference from their closing days.
+
+### Fixed
+- The review flags page's leak check failed once with nothing leaked: it
+  looks for a planted figure without its point, four digits, and found them
+  inside one of the digests the page's forms carry. Digests are now taken
+  out before the search.
+
+### Expected on the real store, to be checked after a deploy
+- The cash account holds 20 rows, 19 in and 1 out, 2019-02-26 to
+  2026-09-01; the main account is still in agreement with every known
+  balance; the measurement says 20 transfers made by the rule are held.
+- A push then carries both sides to Actual and lists the pairs.
+- "What to fetch next" names the four cards Today names, Santander first.
+
+### Not covered
+- The cash account has no known balance, so the Position page does not count
+  it and it only gathers withdrawals until a cash balance is stated.
+- A statement kept before this version has no period start recorded until it
+  is read again on the next pass; until then a hole is inferred from closing
+  days.
+- "What to fetch next" has no test in a real browser; it was looked at over
+  an invented household.
+- The two pieces of work each ran the whole suite on their own (8279 and
+  8226 passed); together, the 901 tests where they meet were run.
+
 ## [0.4.322] - 2026-10-05
 
 ### Added
