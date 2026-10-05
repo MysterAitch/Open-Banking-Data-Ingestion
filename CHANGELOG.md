@@ -26,6 +26,56 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.336] - 2026-10-05
+
+### Changed
+- **The main account's page and Identity health are faster.** Timed on the
+  real deployment the main current account's page took 4.4 to 5.8 seconds on
+  every load and Identity health 13 to 19. On an invented store of the same
+  shape (5,200 transactions reported some 37,000 times by four sources, five
+  Spaces, 570 known balances) the account page went from 193 queries and
+  about 3 seconds to 81 queries and between 1 and 2, and Identity health
+  from 577 queries and 3 to 4.5 seconds to 98 queries and a fraction of a
+  second after its first load. The account page reads the stated moments and
+  words of the month's transactions only, finds a transaction's twin by
+  lookup, and holds the account's reading until the store changes; Identity
+  health holds its measurements the same way and no longer works one of them
+  out twice. Each faster path is tested to return exactly what the slower
+  one did, and the pages rendered are the same. Tests bound the queries
+  each page makes.
+- **Coverage by source lists each account once.** The owner: "Some accounts
+  are repeated and there seem to be lots of words not actually saying
+  anything ... it's lots of scrolling". The page was one block for every
+  source-and-account pair, each with the same archive form, the same line of
+  provider ids, and a bar on a ten-year axis. It opens with a sentence of
+  counts and a grid - an account a row, a kind of source a column, each cell
+  the last day that source reaches with its age where old, amber where one
+  has fallen more than 60 days behind - then one block per account with its
+  sources together, Spaces under their parent, archived accounts folded at
+  the foot. The archive form is on the account's own page only. For an
+  invented household of the real one's size: 9.6 phone screens to 2.98, 967
+  words to 577, 432 words in repeated lines to none, 28 forms to none.
+- The warning that several ids feed one account is kept for what it was
+  written for, two ids of one provider bound to one account; a bank's feed
+  and an aggregator feeding the same account is ordinary and says nothing.
+
+### Added
+- A date can be given with its age where it is old - "2026-08-05 (2 months
+  ago)" - and bare where it is recent, which the owner asked for so that
+  staleness shows. Used on Coverage by source so far.
+- The design the main pages are being built again from, the owner's
+  decisions on it, and what each remaining slice builds, under
+  `docs/design/2026-10-clean-slate/`.
+
+### Not covered
+- The invented store was about half as slow as the real one on the account
+  page and a quarter as slow on Identity health, so something the real store
+  has is not in it; what the real pages now take has not been measured. The
+  target of under a second was not shown for the account page. Its next cost
+  is reading every report for the account on each load. The first load of
+  either page after the store changes is still seconds.
+- Coverage by source is 19 px inside its three-screen bound.
+
 ## [0.4.335] - 2026-10-05
 
 ### Changed
