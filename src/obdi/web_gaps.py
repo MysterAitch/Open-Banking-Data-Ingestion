@@ -201,8 +201,7 @@ def _gap_html(ref: str, gap: FetchGap, today: date) -> str:
     else:
         basis_note = f'<span class="pill">{basis}</span>'
     source = (
-        f'<p class="gaps-source">Expected to be read as <span class="mono">{_esc(gap.source)}'
-        "</span>.</p>"
+        f'<span class="gaps-source">read as <span class="mono">{_esc(gap.source)}</span></span>'
         if gap.source
         else ""
     )
@@ -215,10 +214,11 @@ def _gap_html(ref: str, gap: FetchGap, today: date) -> str:
     links = f'<p class="gaps-links">{timeline}</p>' if timeline else ""
     return (
         f'<li class="gaps-item gaps-{basis}">'
-        f'<p class="gaps-range"><span class="gaps-kind">{_esc(_KIND_WORDS[gap.kind])}</span> '
-        f'<span class="mono gaps-dates">{_esc(dates)}</span> {basis_note}</p>'
+        f'<p class="gaps-head"><span class="gaps-kind">{_esc(_KIND_WORDS[gap.kind])}</span> '
+        f"{source} {basis_note}</p>"
+        f'<p class="gaps-range mono">{_esc(dates)}</p>'
         f'<p class="gaps-do">{_esc(action)}</p>'
-        f'<p class="gaps-why">{_esc(why)}</p>{source}{flag}{links}</li>'
+        f'<p class="gaps-why">{_esc(why)}</p>{flag}{links}</li>'
     )
 
 
@@ -277,7 +277,7 @@ def render_gaps(
     quiet = [outlook for outlook in report.accounts if not outlook.gaps]
     if quiet:
         body += (
-            '<h2 class="gaps-quiet-head">Nothing to fetch</h2>'
+            '<h2 class="gaps-quiet-head">Needs nothing</h2>'
             f'<ul class="gaps-quiet">{"".join(_quiet_line(o, names) for o in quiet)}</ul>'
         )
     body += (

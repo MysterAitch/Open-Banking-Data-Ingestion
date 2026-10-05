@@ -21,11 +21,12 @@ GAPS_STYLES = """
               padding: var(--s3) var(--s4); border-left-width: var(--rail); border-left-color: var(--warn); }
  .gaps-item.gaps-inferred { border-left-style: dashed; }
  .gaps-item p { margin: var(--s1) 0; }
- .gaps-range { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); }
- .gaps-kind { font: 600 var(--text-sm)/150% var(--sans); color: var(--ink-2); }
- .gaps-dates { font-size: var(--text-lg); font-weight: 600; letter-spacing: .01em; overflow-wrap: anywhere; }
+ .gaps-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); }
+ .gaps-kind { font: 600 var(--text-sm)/150% var(--sans); }
+ .gaps-source { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .gaps-item .gaps-range { font-size: var(--text-xl); font-weight: 600; line-height: var(--leading-tight); margin: var(--s2) 0 var(--s1); overflow-wrap: anywhere; }
  .gaps-do { font-size: var(--text-base); line-height: var(--leading-prose); }
- .gaps-why, .gaps-source { font: var(--text-md)/150% var(--sans); color: var(--ink-2); }
+ .gaps-why { font: var(--text-md)/150% var(--sans); color: var(--ink-2); }
  .gaps-actions, .gaps-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
  .gaps-item .gaps-links { margin: var(--s1) 0 0; }
  .gaps-quiet-head { margin: var(--s5) 0 var(--s2); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }

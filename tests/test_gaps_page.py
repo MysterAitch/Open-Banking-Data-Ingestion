@@ -101,7 +101,7 @@ class TestTheSentences:
             "Probably 2 statements are waiting, closing about 2026-08-10 and 2026-09-10. "
             "That is inferred from how regularly the statements held arrive."
         ) in said
-        assert "Expected to be read as santander-cc-pdf." in said
+        assert "Statement read as santander-cc-pdf stated count inferred" in said
 
     def test_Card_WhenOnlyOneStatementIsHeld_SaysNothingAboutHowManyAreWaiting(self, world):
         said = text(block(page_of(world), "Late-one card"))
@@ -135,7 +135,7 @@ class TestTheSentences:
         assert "Export from 2026-08-05 to today." in said
         assert "The export last covers 2026-08-04; other sources hold rows to 2026-10-01." in said
         assert "Export 2026-03-01 to 2026-03-31." in said
-        assert "Expected to be read as starling-csv." in said
+        assert "Export read as starling-csv stated" in said
 
     def test_Card_WhenRowsPrecedeTheFirstStatement_NamesTheDaysAndTheClosingNeeded(self, world):
         said = text(block(page_of(world), "Early card"))
@@ -170,7 +170,7 @@ class TestTheSentences:
 
 class TestWhatNeedsNothing:
     def test_Page_ListsTheQuietAccountsWithWhenTheNextStatementIsExpected(self, world):
-        said = text(page_of(world).split("Nothing to fetch</h2>")[1])
+        said = text(page_of(world).split("Needs nothing</h2>")[1])
 
         assert "Quiet card" in said and "next statement expected about 2026-10-10" in said
 

@@ -70,7 +70,9 @@ class TestTheOtherWaysIn:
         assert due.href == "/gaps"
 
     def test_AccountsPageList_OffersThePage(self):
-        assert re.search(r'<a class="tap" href="/gaps">What to fetch next</a>', accounts_links_html())
+        offered = accounts_links_html()
+
+        assert re.search(r'<a class="tap" href="/gaps">What to fetch next</a>', offered)
 
     def test_CoveragePage_SaysWhereToGoForAMissingFile(self):
         assert FETCH_NEXT_LINE in render_coverage().decode()
