@@ -893,6 +893,15 @@ class BringInPages:
         files and answers with this page (`answer_settled`)."""
         return self._standings()
 
+    def answer_settled_words(self, account: str, before: dict[str, AccountStanding]) -> str:
+        """What a file settled about `account`, in Bring in's own words, for an answer page that
+        is not this one but was reached from it (an import's result)."""
+        return settled_sentence(
+            self._account_names().of(account).name,
+            before.get(account),
+            self._standings().get(account),
+        )
+
     def answer_settled(
         self, artefact: int, account: str, before: dict[str, AccountStanding]
     ) -> None:

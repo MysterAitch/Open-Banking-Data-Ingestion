@@ -955,6 +955,13 @@ def assignment_doubt_page(
         for name, value in {**carried, DOUBT_ACK_FIELD: token}.items()
     )
     evidence = f"<p>{html.escape(report.evidence)}</p>" if report.evidence else ""
+    # A doubt asked of a press made on Bring in walks away to Bring in; its `back` field is
+    # `web.BACK_FIELD`, restated here because web imports this module.
+    away = (
+        '<a class="button" href="/bring-in">Back to Bring in</a>'
+        if carried.get("back") == "/bring-in"
+        else '<a class="button" href="/statements">Back to kept statements</a>'
+    )
     return render_page(
         "Is this the right account?",
         "<h2>Is this the right account?</h2>"
@@ -962,7 +969,7 @@ def assignment_doubt_page(
         + evidence
         + "<p>Nothing has been read in. The statement is still kept, waiting "
         "for an account.</p>"
-        '<p><a class="button" href="/statements">Back to kept statements</a></p>'
+        f"<p>{away}</p>"
         f'<form method="post" action="{html.escape(action)}">{hidden}'
         + submit_button("It is this account's - read it in anyway", secondary=True)
         + "</form>",

@@ -782,6 +782,35 @@ class TestOneUploadTargetOverHttp:
         assert imported.status_code == 200
         done = [a.text() for a in elements(parse(imported.text), "a")]
         assert done.count("Back to Bring in") == 1 and "Back to import" not in done
+        # The export holds no known balance, so what it settled is that nothing checks the
+        # transactions yet, said in Bring in's own words and not the import page's.
+        assert "Up card has nothing to check against." in text_of(imported)
+        assert "Show values" in {b.text() for b in elements(parse(imported.text), "button")}
+
+    def test_Upload_OfAHeldExportFromTheImportPage_SaysItsOldVerificationSentence(self, served):
+        held = httpx.post(
+            f"{served}/bring-in",
+            data={"account": "up-card"},
+            files=[("file", ("transactions.csv", CSV, "text/csv"))],
+            timeout=60,
+        )
+        form = next(f for f in elements(parse(held.text), "form")
+                    if f.attrs.get("action") == "/upload-preview")
+        fields = {i.attrs["name"]: i.attrs["value"] for i in elements(form, "input")}
+        preview = httpx.post(
+            f"{served}/upload-preview",
+            data=fields,
+            headers={"Referer": f"{served}/import"},
+            timeout=60,
+        )
+        confirm = next(f for f in elements(parse(preview.text), "form")
+                       if f.attrs.get("action") == "/upload-confirm")
+        confirming = {i.attrs["name"]: i.attrs["value"] for i in elements(confirm, "input")
+                      if "name" in i.attrs and "value" in i.attrs}
+
+        imported = httpx.post(f"{served}/upload-confirm", data=confirming, timeout=60)
+
+        assert "Up card has nothing to check against." not in text_of(imported)
 
     def test_Upload_OfAHeldExportFromTheImportPage_StillLeadsBackToImport(self, served):
         held = httpx.post(

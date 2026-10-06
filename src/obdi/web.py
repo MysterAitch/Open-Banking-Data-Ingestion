@@ -5214,13 +5214,17 @@ class ConnectionHandler(
                 ),
             )
             return
+        # Where the press came from, read once and carried through the doubt and new-account
+        # pages as a field, because the Referer of the press that follows them is theirs.
+        back = self._answer_back({BACK_FIELD: [fields.get(BACK_FIELD, "")]})
+        carried_back = {BACK_FIELD: back} if back == "/bring-in" else {}
         # Asked before a typed new name is declared, so walking away from the
         # doubt page leaves no account behind.
         review = self.bound_config.review_kept_statement
         acknowledged = self.doubt_acknowledged(
             fields=fields,
             action="/statement-assign",
-            carried=_asked(fields, ("artefact", *_ACCOUNT_FIELDS)),
+            carried={**_asked(fields, ("artefact", *_ACCOUNT_FIELDS)), **carried_back},
             artefact=artefact,
             section="",
             account=typed or picked,
@@ -5235,16 +5239,15 @@ class ConnectionHandler(
             picked=picked,
             confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
             action="/statement-assign",
-            carry=lambda: _asked(fields, ("artefact", DOUBT_ACK_FIELD)),
+            carry=lambda: {**_asked(fields, ("artefact", DOUBT_ACK_FIELD)), **carried_back},
             proceed_label="Declare it and read the statement in",
         )
         if account is None:
             return
         before = self.answer_standing(account)
         # A statement assigned from Bring in is answered by Bring in: what it settled at the top
-        # and what is still wanted beneath. Anywhere else the plain answer page is kept. The
-        # Referer is lost across the doubt page, whose answer is therefore the plain one.
-        from_bring_in = referring_page(self._referer(), "/import") == "/bring-in"
+        # and what is still wanted beneath. Anywhere else the plain answer page is kept.
+        from_bring_in = back == "/bring-in"
         bring_in_before = self.answer_standings() if from_bring_in else {}
         try:
             outcome = hook(int(artefact), account, doubt_acknowledged=acknowledged)
@@ -6787,6 +6790,7 @@ class ConnectionHandler(
             )
             return
         before = self.answer_standing(account)
+        standings_before = self.answer_standings() if back == "/bring-in" else {}
         try:
             summary = hook(payload, filename, account)
         except Exception as exc:
@@ -6799,7 +6803,13 @@ class ConnectionHandler(
             return
         self.uploads.mark_landed(token, filename, account)
         print(f"web import: {filename} -> {account}", file=sys.stderr)
-        verification = self.answer_sentence(account, before)
+        # An import reached from Bring in says what it settled in Bring in's words, as a
+        # statement given its account there does.
+        verification = (
+            self.answer_settled_words(account, standings_before)
+            if back == "/bring-in"
+            else self.answer_sentence(account, before)
+        )
         result_token = self.uploads.keep_result(
             {
                 "summary": summary,

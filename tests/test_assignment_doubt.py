@@ -1017,6 +1017,66 @@ def _post(base: str, path: str, data: dict[str, str]) -> httpx.Response:
     return httpx.post(f"{base}{path}", data=data, headers={"Origin": base}, timeout=30)
 
 
+class TestADoubtAskedFromBringInLeadsBackToBringIn:
+    def test_ThroughTheDoubtPage_TheAnswerIsStillBringIn(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": "4", "account": "acct-new"},
+                headers={"Origin": base, "Referer": f"{base}/bring-in"},
+                timeout=30,
+            )
+            action, fields = _form_with(asked.text, ANYWAY)
+            # The press that follows has no Referer worth the name: the form's own fields carry
+            # where the person came from.
+            answered = _post(base, action, fields)
+        finally:
+            stop()
+
+        assert asked.status_code == 409
+        assert fields["back"] == "/bring-in"
+        assert 'href="/bring-in">Back to Bring in</a>' in asked.text
+        assert "Back to kept statements" not in asked.text
+        assert answered.status_code == 200
+        assert 'action="/bring-in"' in answered.text
+        assert "Read another" not in answered.text
+
+    def test_FromAnyOtherPage_TheDoubtPageCarriesNoBackAndKeepsTheKeptStatementsWay(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            asked = httpx.post(
+                f"{base}/statement-assign",
+                data={"artefact": "4", "account": "acct-new"},
+                headers={"Origin": base, "Referer": f"{base}/statements"},
+                timeout=30,
+            )
+            _, fields = _form_with(asked.text, ANYWAY)
+        finally:
+            stop()
+
+        assert "back" not in fields
+        assert "Back to kept statements" in asked.text
+
+    def test_AForgedBack_IsNeverFollowedToAnywhereButBringIn(self, tmp_path):
+        calls = _Calls()
+        base, stop = _stub_server(tmp_path, calls, doubt=True)
+        try:
+            asked = _post(
+                base,
+                "/statement-assign",
+                {"artefact": "4", "account": "acct-new", "back": "https://evil.example/x"},
+            )
+            _, fields = _form_with(asked.text, ANYWAY)
+        finally:
+            stop()
+
+        assert "back" not in fields
+        assert "evil.example" not in asked.text
+
+
 class TestANewAccountAndADoubtTogether:
     def test_TheDoubtIsAnsweredFirst_ThenTheNewAccount_AndNeitherAnswerIsLost(self, tmp_path):
         calls = _Calls()
