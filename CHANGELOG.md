@@ -26,6 +26,37 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.340] - 2026-10-06
+
+### Changed
+- **An account's page opens on the last 30 days or 50 transactions,
+  whichever is wider, and the window is the owner's to choose and keep.**
+  His words: "defaulting to a relative timeframe ... would be useful, as
+  opposed to anchoring ONLY by calendar month boundaries. This is
+  particularly true the first few days of a month"; then "Make the account
+  window configurable ... 30 days/60 days/90 days/calendar month/etc as the
+  default (I suspect I'll be interested in 60 days)"; then "perhaps, the
+  window could be 'last 30 days or 50 transactions, whichever is wider'". The
+  page used to show one calendar month, a few days on the 6th. The window
+  control the Position chart uses is reused: the two "whichever is wider"
+  forms (30 and 60 days), 30, 60, 90, and 180 days, 12 months, calendar
+  months, a typed length, and two dates. The heading says what the window
+  covered and why ("Last 50 transactions, 2026-05-11 to 2026-10-06 (more
+  than 30 days, so that 50 are shown)"). The window travels in the address
+  and through Show values and the typed entry.
+- **"Use this as the default"** on any named window keeps that choice in the
+  store, where it survives the rebuild from raw (a preferences table; store
+  schema 21). Until he sets one the default is the 30-day "whichever is
+  wider", measured at 4.5 phone screens for a busy account and never an
+  empty page for a quiet one; 90 days would be 8 screens and 180 nearly 14.
+
+### Not covered
+- A typed length or two dates have no cap and are not paged. Calendar month
+  as a default means the newest month only. A control press leaves the
+  control's unused fields in the address.
+- The whole suite ran on the branch, whose tree this is (9461 passed, none
+  failed); it was not run again on main.
+
 ## [0.4.339] - 2026-10-06
 
 ### Changed
