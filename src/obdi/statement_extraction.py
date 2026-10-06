@@ -308,11 +308,16 @@ def serving(store: Store, *, strict: bool) -> Iterator[None]:
     filled what is missing.
     """
     kept: OrderedDict[str, RawExtraction] = OrderedDict()
+    # Documents found to have no row, for this block only: every parser sniffs a document, and
+    # asking the store again for each one was a statement per parser per document.
+    missing: set[str] = set()
 
     def supplier(digest: str) -> RawExtraction | None:
         if digest in kept:
             kept.move_to_end(digest)
             return kept[digest]
+        if digest in missing:
+            return None
         record = store.statement_extraction(digest, pdf_statements.EXTRACTOR_VERSION)
         raw: RawExtraction | None = None
         if record is not None:
@@ -326,6 +331,7 @@ def serving(store: Store, *, strict: bool) -> Iterator[None]:
         if raw is None:
             if strict:
                 raise NotExtracted(digest)
+            missing.add(digest)
             return None
         kept[digest] = raw
         while len(kept) > _SERVED_KEPT:
