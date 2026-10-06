@@ -503,8 +503,11 @@ def _reasons_html(data: BringInData) -> str:
     )
 
 
-def _reason_html(guess: Guess | None, names: AccountsShown) -> str:
-    """Why an account is pre-selected beside a chooser, or why none is where the evidence splits."""
+def reason_html(guess: Guess | None, names: AccountsShown) -> str:
+    """Why an account is pre-selected beside a chooser, or why none is where the evidence splits.
+
+    Said by every chooser of a statement waiting for an account: the one form here and the Kept
+    statements page's own."""
     if guess is None:
         return ""
     if not guess.account:
@@ -577,7 +580,7 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
-            f"{_reason_html(item.guess, names)}{_held_html(item, names)}</li>"
+            f"{reason_html(item.guess, names)}{_held_html(item, names)}</li>"
         )
     guessed = any(item.guess and item.guess.account for item in waiting)
     lead = "Nothing is read in until you press." + (
@@ -934,7 +937,9 @@ class BringInPages:
         )
         extra = quiet_lines(report, names)
         evidence = Evidence(evidence.summary or "Sources", (*evidence.lines, *extra))
-        kept, waiting = self._kept_counts()
+        kept, waiting = self._kept_counts(
+            frozenset(item.artefact for item in results.awaiting()) if results else frozenset()
+        )
         return BringInData(
             today=today,
             report=report,
@@ -951,7 +956,10 @@ class BringInPages:
             kept_waiting=waiting,
         )
 
-    def _kept_counts(self) -> tuple[int | None, int]:
+    def _kept_counts(self, asked_in_form: frozenset[int]) -> tuple[int | None, int]:
+        """How many statements are kept, and how many of them wait for an account without the
+        one form already asking about them (`asked_in_form`: their kept ids): a file is
+        signposted once, where it can be answered."""
         hook = self.bound_config.kept_statements
         if hook is None:
             return None, 0
@@ -962,7 +970,8 @@ class BringInPages:
         waiting = sum(
             1
             for e in entries
-            if e["account_ref"] == UNASSIGNED_ACCOUNT
+            if int(str(e["id"])) not in asked_in_form
+            and e["account_ref"] == UNASSIGNED_ACCOUNT
             and e["parser"]
             and not e.get("refusal")
             and not e.get("sections")

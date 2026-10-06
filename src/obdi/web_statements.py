@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from urllib.parse import quote
 
 from .account_names import AccountsShown
+from .bring_in_guess import guess_account
 from .namespaces import UNASSIGNED_ACCOUNT
 from .plural import plural
 from .web_marks import FETCH_NEXT_LINE
@@ -419,6 +420,7 @@ def statements_body(
     """Everything between the heading and the foot of the kept statements page; with `ref`, the
     one account's documents (`account_statements_body`)."""
     from .web import account_picker
+    from .web_bring_in import reason_html
 
     if ref:
         return account_statements_body(entries, ref, names)
@@ -469,11 +471,15 @@ def statements_body(
         # dozen said the same thing a dozen times.
         if not can_assign or int(str(item["id"])) in covered:
             return ""
+        # The same guess and reason as Bring in's one form: the one `guess_account` and
+        # `reason_html`, so the two doors to one file never disagree about whose it is.
+        guess = guess_account(item, entries)
         return (
             "<details><summary>Give it an account</summary>"
             '<form action="/statement-assign" method="post">'
             f'<input type="hidden" name="artefact" value="{int(str(item["id"]))}">'
-            + picker
+            + account_picker(options, selected=guess.account if guess else "")
+            + reason_html(guess, names)
             + '<p><button type="submit">Assign and read in</button></p>'
             "</form></details>"
         )
