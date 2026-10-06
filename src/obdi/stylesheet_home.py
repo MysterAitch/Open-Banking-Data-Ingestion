@@ -103,6 +103,9 @@ HOME_STYLES = """
  /* The one slot that is empty when the account asks nothing. */
  .a-flag { grid-area: flag; text-align: right; font: 600 var(--text-sm)/130% var(--sans); color: var(--warn); }
  .a-flag.bad { color: var(--bad); font-weight: 700; }
+ /* A note on an account's declared terms is a fact to know and not a thing to do, so it takes the
+    muted ink and the plain weight of the sentence beside it. */
+ .a-flag.quiet { color: var(--ink-2); font-weight: 400; }
  .a-flag.bad::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
  main a.arow > .bar, main a.arow > .a-bars { grid-area: bar; }
  /* An archived account's bar over its own life: its two end dates under it, one at each end. */

@@ -30,6 +30,7 @@ from urllib.parse import quote
 from .account_names import AccountShown
 from .agreement import Standing
 from .fetch_gaps import FetchReport
+from .logs import say
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -555,6 +556,12 @@ def _flag_html(todo: Todo | None, today: date) -> str:
     return f'<span class="a-flag{bad}">{_esc(said)}</span>'
 
 
+def _note_html(note: str) -> str:
+    """What the account's declared terms say worth noting (`account_about.row_notice`), in the
+    row's flag slot and quieter than a flag: it is a fact to know, not a thing to do."""
+    return f'<span class="a-flag quiet">{_esc(note)}</span>'
+
+
 def _row_html(
     account: AccountOverview,
     shown: Callable[[str], AccountShown],
@@ -565,10 +572,14 @@ def _row_html(
     space: bool,
     by_ref: Mapping[str, AccountOverview],
     archived: bool = False,
+    notes: Mapping[str, str] | None = None,
 ) -> str:
     """One account's row. An archived one is the same row, over its own life where it closed
     before the shared twelve months begin (`trust_bar.own_life`), with its two end dates under
-    the bar, and says when it was archived first."""
+    the bar, and says when it was archived first.
+
+    The flag slot holds what the account is waiting for; where it waits for nothing it may hold
+    the note on its declared terms (`notes`), and is empty when there is neither."""
     target = _esc(quote(account.ref, safe=""))
     name = shown(account.ref).as_name()
     # A rebuild marks every account that is not archived, so an account that holds nothing is
@@ -604,6 +615,8 @@ def _row_html(
     if archived:
         when = f"Archived {account.closed.isoformat()}." if account.closed else "Archived."
         said = f"{when} {said}".strip()
+    elif not flag and notes and account.ref in notes:
+        flag = _note_html(notes[account.ref])
     return (
         f'<li{" class=space" if space else ""}>'
         f'<a class="tap arow" href="/ledger?ref={target}"><span class="a-name">{name}</span>'
@@ -646,6 +659,7 @@ def _accounts_html(
     todos: Sequence[Todo],
     wanted: Mapping[str, list[tuple[date, date]]],
     shown: Callable[[str], AccountShown],
+    notes: Mapping[str, str],
 ) -> str:
     today = overview.generated_at.date()
     manage = _MANAGE_ACCOUNTS
@@ -663,14 +677,20 @@ def _accounts_html(
             archived.append(parent)
         else:
             rows.append(
-                _row_html(parent, shown, first_todo, wanted, today, space=False, by_ref=by_ref)
+                _row_html(
+                    parent, shown, first_todo, wanted, today, space=False, by_ref=by_ref,
+                    notes=notes,
+                )
             )
         for space in spaces:
             if space.state == ARCHIVED:
                 archived.append(space)
             else:
                 rows.append(
-                    _row_html(space, shown, first_todo, wanted, today, space=True, by_ref=by_ref)
+                    _row_html(
+                        space, shown, first_todo, wanted, today, space=True, by_ref=by_ref,
+                        notes=notes,
+                    )
                 )
     paused = (
         '<p class="muted paused">'
@@ -753,11 +773,16 @@ def overview_html(
     actual_heartbeat: Callable[[], str] | None = None,
     actual_configured: Callable[[], bool] | None = None,
     fetch: Callable[[date], FetchReport] | None = None,
+    term_notes: Callable[[date], Mapping[str, str]] | None = None,
 ) -> str:
     """Today's body.
 
     Neither an unwired hook nor one that raises is allowed to render as an empty list: both say
     that no checks ran, and the verdict says nothing was checked.
+
+    `term_notes` is each account's note on its declared terms, as of a day. Without it, or when it
+    cannot be read, the rows carry no note: a note is a convenience that must never take down the
+    page the owner reads first, and its absence is logged.
     """
     now = now or datetime.now(UTC)
     if load is None:
@@ -814,6 +839,12 @@ def overview_html(
         ),
     ]
     wanted = wanted_days(report)
+    notes: Mapping[str, str] = {}
+    if term_notes is not None:
+        try:
+            notes = term_notes(today)
+        except Exception as fault:
+            say("overview.term_notes.fault", kind=type(fault).__name__)
     return (
         '<div class="overview home today">'
         '<section class="home-lead" aria-label="What needs you">'
@@ -823,7 +854,7 @@ def overview_html(
         f"{'' if any(t.urgency == NOW for t in todos) else _lock_line(overview.accounts, shown)}"
         "</section>"
         '<section id="accounts" class="home-accounts"><h2>Accounts</h2>'
-        f"{_accounts_html(overview, todos, wanted, shown)}</section>"
+        f"{_accounts_html(overview, todos, wanted, shown, notes)}</section>"
         "</div>"
     )
 

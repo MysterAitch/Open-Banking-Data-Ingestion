@@ -43,6 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from . import values_sitting
+from .account_about import SourceFacts
 from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
@@ -606,6 +607,13 @@ class WebConfig:
     #: How many statements are kept for one account (filed under it, or sections of all-accounts
     #: documents assigned to it): the count on the account's page that leads to its own list.
     kept_statement_count: Callable[[str], int] | None = None
+    #: What the sources state of one account - the rates and names its kept statements print, and
+    #: the name its provider gives it - for the account page's "About this account" fold.
+    account_sources: Callable[[str], SourceFacts] | None = None
+    #: Each account's note on its declared terms as of a day, by account
+    #: (`account_about.row_notice`), for the quiet flag on its row of Today. Accounts with nothing
+    #: to note are absent.
+    account_term_notes: Callable[[date], Mapping[str, str]] | None = None
     #: Which artefact ids are kept statements, without reading any of them.
     kept_statement_ids: Callable[[], set[int]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None
@@ -3537,6 +3545,8 @@ def render_index(
     fresh_overview: bool = False,
     #: The files still to fetch, as of a day: what the things to do about files are made from.
     fetch_gaps: Callable[[date], FetchReport] | None = None,
+    #: The quiet note each account's row may carry about its declared terms.
+    term_notes: Callable[[date], Mapping[str, str]] | None = None,
     #: The Actual page's other hooks, so the home page's line about Actual reads everything
     #: that page's verdict reads and the two cannot say different things.
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
@@ -3572,6 +3582,7 @@ def render_index(
     actual_heartbeat=actual_heartbeat,
     actual_configured=actual_configured,
     fetch=fetch_gaps,
+    term_notes=term_notes,
 )}
 """
     return render_page("Overview", body, wide=True)
@@ -3906,6 +3917,7 @@ class ConnectionHandler(
                 overview=timer.wrap("overview", config.overview),
                 fresh_overview=params.get("fresh", [""])[0] == "1",
                 fetch_gaps=timer.wrap("fetch_gaps", config.fetch_gaps),
+                term_notes=timer.wrap("account_term_notes", config.account_term_notes),
                 actual_queue=config.actual_queue,
                 actual_heartbeat=config.actual_heartbeat,
                 actual_configured=config.actual_configured,

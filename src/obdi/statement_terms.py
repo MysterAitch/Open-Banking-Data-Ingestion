@@ -339,6 +339,45 @@ def kept_pdf_readings(store: Store) -> list[KeptPdf]:
     return found
 
 
+@dataclass(frozen=True)
+class AccountReading:
+    """One statement of one account as its page states it: where it was read, and what it says."""
+
+    #: The parser's source name, or "statement" for a section whose document has no kept reading.
+    source: str
+    reading: StatementReading
+    #: What the document calls the account: its printed name, or the heading an "all accounts"
+    #: statement's section was assigned from. Empty where the format prints none.
+    label: str
+
+
+def account_readings(store: Store, account_ref: str) -> list[AccountReading]:
+    """What the statements kept for one account say, in no particular order.
+
+    A held PDF with a kept reading is here as it is kept; a section of an "all accounts" statement
+    assigned to the account is here as its section reads, which a credit union's loan rate needs
+    since the rate is printed in that section's heading. Neither extracts text for a document
+    whose reading is already kept, so a view of one account does not read every PDF it holds.
+    """
+    found: list[AccountReading] = []
+    for digest, _filed_under in _held_pdfs(store, account_ref):
+        kept = _kept_reading(store, digest)
+        if kept is not None:
+            found.append(AccountReading(kept[0], kept[1], kept[1].account_name))
+    for assignment, section in assigned_sections(store, account_ref):
+        if section is None or section.refusal:
+            continue
+        stored = store.stored_statement_reading(assignment.digest)
+        found.append(
+            AccountReading(
+                stored[0] if stored is not None else "statement",
+                section.reading,
+                assignment.label,
+            )
+        )
+    return found
+
+
 def keep_statement_readings(store: Store) -> int:
     """Read every held PDF that has no usable kept reading, keep what it says,
     and commit; returns how many documents were read.
