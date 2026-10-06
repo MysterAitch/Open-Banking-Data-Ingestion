@@ -279,6 +279,18 @@ door's own work.** On the owner's store the same work is what his first page cos
   carry a `flips_on`. Each is a way to be stale that the epoch cannot see, so each is named
   here and tested (a changed map file refuses until refreshed).
 
+## When this is built, and when it is not
+
+The owner, 2026-10-06, after the inventory: "I don't necessarily want us to overreact. While
+pages aren't instantaneous, they aren't insufferable ... This is a single user system on a
+single instance, with relatively small amounts of data. Pages taking a second or two to load
+is not the end of the world, and if it becomes insufferable we can address the problems at
+that point." So: S0 and S1a ship (S1a is the ETL rule, wanted regardless of speed). S1 to S5
+wait for a measured trigger - a page over about five seconds warm on the real store, or a
+post-deploy first load the owner notices - and are not scheduled. The per-page statement
+budgets in `tests/test_ledger_speed.py` stay as the ratchet meanwhile, so nothing regresses
+quietly; a new reading on a page that cannot fit them is the other trigger.
+
 ## Order of slices
 
 Each is shippable alone, smallest first; the first removes the first-load cliff. Each would
