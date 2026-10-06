@@ -593,6 +593,9 @@ class WebConfig:
     #: Every kept statement, with no cap: id, origin (file name), fetched_at,
     #: account_ref, and the name of the parser that reads it (None when none does).
     kept_statements: Callable[[], list[dict[str, object]]] | None = None
+    #: How many statements are kept for one account (filed under it, or sections of all-accounts
+    #: documents assigned to it): the count on the account's page that leads to its own list.
+    kept_statement_count: Callable[[str], int] | None = None
     #: Which artefact ids are kept statements, without reading any of them.
     kept_statement_ids: Callable[[], set[int]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None

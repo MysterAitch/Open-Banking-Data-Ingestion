@@ -33,9 +33,9 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from urllib.parse import quote
 
 from .fetch_gaps import Basis, FetchGap, FetchReport, GapKind
+from .navigation import account_address
 from .overview import HOUSEKEEPING, NOW, SOON, AttentionItem, Overview
 from .protection import tested_days_of
 from .standing_data import AccountStanding
@@ -44,7 +44,7 @@ from .standing_data import AccountStanding
 def upload_page(ref: str) -> str:
     """Bring in, scoped to an account: a statement or an export read in from it lands at once,
     because nothing a bank prints says which account it is for and here the person already has."""
-    return f"/bring-in?account={quote(ref, safe='')}"
+    return account_address("bring-in-upload", ref)
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ class Todo:
 
 def account_page(ref: str, anchor: str = "") -> str:
     """An account's page, the one that carries its balances, transactions, and locking in."""
-    return f"/ledger?ref={quote(ref, safe='')}{anchor}"
+    return account_address("ledger", ref) + anchor
 
 
 #: Attention kind -> (title, control label, what the account row says). The control's label says

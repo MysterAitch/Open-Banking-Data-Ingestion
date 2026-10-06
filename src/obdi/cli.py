@@ -4075,6 +4075,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 )
         return listing
 
+    def kept_statement_count(ref: str) -> int:
+        with Store(db_path) as store:
+            filed = store.connection.execute(
+                "SELECT COUNT(DISTINCT digest) FROM raw_artefacts "
+                "WHERE source = 'statement' AND account_ref = ?",
+                (ref,),
+            ).fetchone()[0]
+            sections = sum(
+                1 for item in store.statement_section_assignments() if item.account_ref == ref
+            )
+        return int(filed) + sections
+
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
 
@@ -4366,6 +4378,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         review_kept_statement=review_kept_statement,
         review_statement_section=review_statement_section,
         kept_statements=kept_statements,
+        kept_statement_count=kept_statement_count,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,
         refile_artefact=(lambda artefact_id, account: _refile(db_path, artefact_id, account)),

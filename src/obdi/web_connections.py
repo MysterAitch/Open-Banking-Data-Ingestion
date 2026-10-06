@@ -36,6 +36,7 @@ from .account_names import AccountShown, AccountsShown
 from .alerts import consent_rung
 from .bank_balances import BANK_SOURCE
 from .connections import Connection, ConnectionStore
+from .navigation import account_address
 from .overview import NOW, SOON
 from .page_times import UTC_NOTE, date_with_age
 from .plural import plural
@@ -163,7 +164,10 @@ def _fed_by(
     )
     if not refs:
         return "Feeds no account yet"
-    named = [names.of(ref).as_name() for ref in refs[:_NAMED_ACCOUNTS]]
+    named = [
+        f'<a href="{_esc(account_address("ledger", ref))}">{names.of(ref).as_name()}</a>'
+        for ref in refs[:_NAMED_ACCOUNTS]
+    ]
     if len(refs) > _NAMED_ACCOUNTS:
         named.append(f"{len(refs) - _NAMED_ACCOUNTS} more")
     return f"Feeds {serial(named)}"

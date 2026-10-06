@@ -77,7 +77,7 @@ from .logs import say
 from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
 from .models import BASIS_ID
-from .navigation import page_name
+from .navigation import account_address, page_name
 from .page_words import (
     ACCOUNT_CHECK_HEADING,
     PROTECTION_REMOVED,
@@ -2335,7 +2335,7 @@ def _opening_html(
         if sum(1 for line in opening.anchors if line.basis == "statement") >= 2:
             body += (
                 '<p class="muted"><a class="tap" '
-                f'href="/period-reconciliation?ref={_esc(quote(view.ref, safe=""))}">'
+                f'href="{_esc(account_address("periods", view.ref))}">'
                 "Test the transactions between the statements, period by period</a></p>"
             )
         if opening.state == "derived":
@@ -2810,7 +2810,7 @@ def _bars_html(view: Any) -> str:
     return _disclosure(
         "What the bars show, and the full timeline",
         key_html()
-        + f'<p><a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}" '
+        + f'<p><a class="tap" href="{_esc(account_address("timeline", view.ref))}" '
         f'target="_blank" rel="noopener">{_esc(page_name("/coverage-timeline"))}, in a new '
         "tab</a></p>",
     )
@@ -2871,8 +2871,10 @@ def _archive_html(view: Any, *, archive_wired: bool) -> str:
         else ""
     )
     rename = (
-        '<p>Change the name shown for this account on <a class="tap" href="/accounts">'
-        "the declared accounts page</a>.</p>"
+        '<p>Change the name shown for this account in <a class="tap" '
+        f'href="{_esc(account_address("edit", view.ref))}">its own form</a>, or see it among '
+        f'<a class="tap" href="{_esc(account_address("list", view.ref))}">the declared '
+        "accounts</a>.</p>"
     )
     return _disclosure("Rename or archive", rename + archive, css="ledger-danger")
 
@@ -2989,7 +2991,9 @@ def _state_html(
     )
 
 
-def _how_checked_html(view: Any, unmasked: bool, *, with_counts: bool) -> str:
+def _how_checked_html(
+    view: Any, unmasked: bool, *, with_counts: bool, kept_statements: int | None = None
+) -> str:
     """The fold that says how this was checked: how the sources' reports were matched, which of
     the statements add up by what they list, what is cleared, the month's counts, what this page
     does not check, and what masked means. Parts of one fold, so the page keeps five."""
@@ -3015,13 +3019,20 @@ def _how_checked_html(view: Any, unmasked: bool, *, with_counts: bool) -> str:
         f"What this page does not check ({_LIMITS.count('<li>')})", _LIMITS + _statement_cost()
     )
     fields = (
-        f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
+        f'<p><a class="tap" href="{_esc(account_address("account", view.ref))}">'
         f"{_esc(page_name('/account'))} for this account</a></p>"
+    )
+    kept = (
+        f'<p><a class="tap" href="{_esc(account_address("statements", view.ref))}">'
+        f"{_esc(_plural(kept_statements, 'statement'))} kept for this account</a></p>"
+        if kept_statements is not None
+        else ""
     )
     return _disclosure(
         "How this was checked",
         _joins_html(view.joins, clock)
         + _statements_score_html(view)
+        + kept
         + _clearing_html(view.clearing)
         + counts
         + position
@@ -3043,8 +3054,12 @@ def render_ledger(
     window: WindowChoice | None = None,
     window_default: str = DEFAULT_KEY,
     can_set_default: bool = False,
+    kept_statements: int | None = None,
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
+
+    `kept_statements` is how many statements are kept for the account, for the line that leads to
+    the account's own list of them; without it the line is not drawn.
 
     `window` is the window as the request's control read it, which the control is set to and
     which says why a choice was refused; without it the control is set to the default window.
@@ -3094,7 +3109,9 @@ def render_ledger(
             held_said=hold_is_said(reading, hold),
         )
         + _locking_html(view, unmasked, all_balances)
-        + _how_checked_html(view, unmasked, with_counts=view.state == "ok")
+        + _how_checked_html(
+            view, unmasked, with_counts=view.state == "ok", kept_statements=kept_statements
+        )
         + _archive_html(view, archive_wired=archive_wired)
     )
     typed = _typed_html(view, ref=view.ref, month=_scope(view))
@@ -3192,6 +3209,17 @@ class LedgerPages(AnswerPages):
 
     def _respond(self, status: int, body: bytes, *, no_store: bool = False) -> None:
         raise NotImplementedError
+
+    def _kept_statement_count(self, ref: str) -> int | None:
+        """How many statements are kept for an account, or None where that is not wired or
+        cannot be read: the page then draws no line rather than a false count."""
+        hook = self.bound_config.kept_statement_count
+        if hook is None:
+            return None
+        try:
+            return hook(ref)
+        except Exception:
+            return None
 
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
         # Nothing in the query string can unmask: only `ref`, `month`, the window's fields, and
@@ -3779,6 +3807,7 @@ class LedgerPages(AnswerPages):
                 window=scope.choice,
                 window_default=default,
                 can_set_default=self.bound_config.window_default_set is not None,
+                kept_statements=self._kept_statement_count(ref),
             ),
             no_store=unmasked or no_store,
         )
