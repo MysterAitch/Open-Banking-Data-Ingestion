@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -39,6 +39,7 @@ import pytest
 
 from coverage_page_world import repeated_lines
 from fetch_gaps_world import MONTHS, _declare, _pounds, feed, ordinal
+from obdi import values_sitting
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
 from page_dom import Node, elements, parse
@@ -346,5 +347,81 @@ class TestShowValues:
         )
 
         assert response.status_code == 400
+        for planted in (*PAYEES, *AMOUNTS):
+            assert planted not in response.text, planted
+
+
+def in_sitting() -> dict[str, str]:
+    return {"Cookie": f"{values_sitting.COOKIE}={values_sitting.issue(datetime.now(UTC))}"}
+
+
+def upload_in(base: str, headers: dict[str, str]) -> httpx.Response:
+    return httpx.post(
+        f"{base}/bring-in",
+        files=[("file", ("Dry-new-2026-09.pdf", uploaded(), "application/pdf"))],
+        headers=headers,
+        timeout=300,
+    )
+
+
+class TestTheFoldFollowsTheSitting:
+    """While the owner has chosen to show values for the sitting, the fold says what it would do
+    with the descriptions and amounts as they are, exactly as the one-time press does; without
+    the sitting it is masked and carries the press."""
+
+    def test_Fold_InASitting_ShowsEveryPayeeAndAmountAndTheAnswerIsNotKept(self, served):
+        base, _ = served
+
+        response = upload_in(base, in_sitting())
+        fold = fold_of(row_of(response))
+        said = flat(fold)
+
+        assert response.headers["cache-control"] == "no-store"
+        for planted in (*PAYEES, *AMOUNTS):
+            assert planted in said, planted
+        assert "already held - matches a truelayer-booked row" in said
+
+    def test_Fold_InASitting_LeavesOutItsOwnShowValuesButton(self, served):
+        base, _ = served
+
+        fold = fold_of(row_of(upload_in(base, in_sitting())))
+
+        assert [b.text() for b in elements(fold, "button")] == []
+
+    def test_Fold_InASitting_SaysTheSameListTheOneTimePressDoes(self, served):
+        base, root = served
+        upload_in(base, in_sitting())
+        ident = kept_id(root, "Dry-new-2026-09.pdf")
+
+        pressed = httpx.post(
+            f"{base}/statement-dry-run",
+            data={"values-for": str(ident), f"account-{ident}": DRY},
+            timeout=300,
+        )
+        fold = lines_of(row_of(upload_in(base, in_sitting())))
+        listed = [flat(li) for ul in elements(parse(pressed.text), "ul")
+                  if "bi-dry-list" in ul.classes for li in elements(ul, "li")]
+
+        assert fold == listed
+        assert len(fold) == 5
+
+    def test_Fold_WithoutASitting_ShowsNeitherPayeeNorAmountAndHasTheButton(self, served):
+        base, _ = served
+
+        response = upload_in(base, {})
+        fold = fold_of(row_of(response))
+
+        assert response.headers["cache-control"] == "no-store"
+        for planted in (*PAYEES, *AMOUNTS):
+            assert planted not in response.text, planted
+        assert [b.text() for b in elements(fold, "button")] == ["Show values"]
+
+    def test_Fold_WithAnExpiredSitting_IsMaskedAgain(self, served):
+        base, _ = served
+        stale = {"Cookie": f"{values_sitting.COOKIE}="
+                 f"{values_sitting.issue(datetime.now(UTC) - timedelta(hours=13))}"}
+
+        response = upload_in(base, stale)
+
         for planted in (*PAYEES, *AMOUNTS):
             assert planted not in response.text, planted

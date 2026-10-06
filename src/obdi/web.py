@@ -3577,12 +3577,6 @@ def render_index(
     return render_page("Overview", body, wide=True)
 
 
-#: Typed by hand to disclose a statement's real contents. A phrase costs
-#: a deliberate keystroke sequence; a checkbox costs one field in one
-#: request, which is what an automated caller sends without meaning to.
-DISCLOSURE_PHRASE = "SHOW REAL VALUES"
-
-
 class ConnectionHandler(
     AccountPages,
     LedgerPages,
@@ -3598,10 +3592,6 @@ class ConnectionHandler(
 ):
     config: WebConfig | None = None
     session: AuthorisationSession | None = None
-    #: Statements awaiting an explicit disclosure confirmation. Same
-    #: single-use, expiring shape as the upload stash, holding bytes only
-    #: for the walk between the two requests.
-    disclosures: UploadSession = UploadSession()
 
     @property
     def bound_config(self) -> WebConfig:
@@ -4720,20 +4710,27 @@ class ConnectionHandler(
         "opening and closing balances, and - for accounts with no feed at "
         "all - the transactions themselves. Writing a parser for a bank's "
         "format needs its LAYOUT, not its contents.</p>"
-        "<p>This page reads a PDF and shows its shape with every value "
-        "masked: digits become 9s, other words become Xs of the same "
-        "length and casing, and spacing, headers and punctuation survive. "
-        "The masked output is safe to share; the real contents are not.</p>"
+        # What the shape shows. Left out of a sitting that shows values
+        # (`values_sitting`), whose banner already says what is shown.
+        "{masking}"
         "<p>The file is KEPT as evidence, before any account is chosen - "
         "the exports worth keeping most are the ones that cannot be "
         "fetched twice. Nothing is imported until it is assigned to an "
         "account.</p>"
     )
+    STATEMENT_SHAPE_MASKING = (
+        "<p>This page reads a PDF and shows its shape with every value "
+        "masked: digits become 9s, other words become Xs of the same "
+        "length and casing, and spacing, headers and punctuation survive. "
+        "The masked output is safe to share; the real contents are not.</p>"
+    )
 
     def _statement_shape_form(self, note: str = "") -> None:
         body = (
             "<h2>Statement shape</h2>"
-            + self.STATEMENT_SHAPE_BLURB
+            + self.STATEMENT_SHAPE_BLURB.format(
+                masking=values_sitting.unless_sitting(self.STATEMENT_SHAPE_MASKING)
+            )
             + note
             + '<form action="/statement-shape" method="post" '
             'enctype="multipart/form-data">'
@@ -4759,9 +4756,6 @@ class ConnectionHandler(
             "and the count of what was left out is reported. Files already "
             "held are recognised before they are sent, so choosing the same "
             "folder twice costs almost nothing the second time.</p>"
-            '<p><label><input type="checkbox" name="show_values" value="1"> '
-            "Show the REAL contents instead of the masked shape - this "
-            "discloses transactions, balances and names</label></p>"
             '<p><label><input type="checkbox" name="force" value="1" '
             'id="force"> Send every file even if this statement is already '
             "held - slower, and the way to replace a stored copy you "
@@ -4799,7 +4793,7 @@ class ConnectionHandler(
         handling_began = time.perf_counter()
         received_began = handling_began
         try:
-            uploaded, fields = _parse_multipart_files(
+            uploaded, _fields = _parse_multipart_files(
                 self.headers.get("Content-Type") or "", self.rfile.read(length)
             )
         except Exception as exc:
@@ -4817,11 +4811,13 @@ class ConnectionHandler(
             )
             return
 
-        # This request NEVER discloses, whatever it asked for. Disclosure
-        # is a second request carrying a single-use token and a typed
-        # phrase, because one request with one extra field is exactly the
-        # shape an automated caller produces by accident - and these pages
-        # are read programmatically as well as by a person.
+        # What this request asks for in its own fields never discloses:
+        # one request with one extra field is exactly the shape an
+        # automated caller produces by accident, and these pages are read
+        # programmatically as well as by a person. Real contents come with
+        # the values sitting only (`values_sitting`), the one rule every
+        # other page follows, and the answer is then not kept.
+        in_sitting = values_sitting.shown()
         keeper = self.bound_config.keep_statement
         # Name, shape, kept id, and what that file cost. The cost travels
         # per file because an aggregate cannot say WHICH one was slow.
@@ -4845,7 +4841,7 @@ class ConnectionHandler(
             shape = self._read_shape(
                 payload,
                 filename,
-                mask=True,
+                mask=not in_sitting,
                 columns=want_columns,
                 timings=per_file,
             )
@@ -4861,7 +4857,6 @@ class ConnectionHandler(
             timings.merge(per_file)
             read.append((filename, shape, artefact_id, per_file, was_new))
 
-        payload, filename = uploaded[0]
         shape = read[0][1]
         rows = "".join(
             "<tr><td>"
@@ -4940,9 +4935,9 @@ class ConnectionHandler(
                 if already_held
                 else ""
             )
-            + ". Each masked shape stays at its own address, so it can be "
-            "read again without uploading anything again, and assigned to "
-            "an account later.</p>"
+            + f". Each {'shape' if in_sitting else 'masked shape'} stays at its own "
+            "address, so it can be read again without uploading anything again, "
+            "and assigned to an account later.</p>"
             "<table><tr><th>File</th><th>Statement</th><th>Size</th>"
             f"<th>Outcome</th><th>Took</th><th>Breakdown</th></tr>{rows}</table>"
             + (
@@ -4984,26 +4979,11 @@ class ConnectionHandler(
                 f'<pre class="scroll" style="white-space:pre">'
                 f"{html.escape(shape.describe())}</pre>"
             )
-        if fields.get("show_values") and shape.readable and shape.line_count:
-            token = self.disclosures.stash(payload, filename)
-            body += (
-                '<h3>Show the real contents?</h3><p class="alarm">This '
-                "names payees, amounts and balances. Type "
-                f"<strong>{DISCLOSURE_PHRASE}</strong> to confirm - the "
-                "phrase and this one-time token are both required, and the "
-                "token works once.</p>"
-                '<form action="/statement-shape-disclose" method="post">'
-                f'<input type="hidden" name="disclose_token" value="{token}">'
-                '<p><input type="text" name="confirm" size="24" '
-                'autocomplete="off" required></p>'
-                '<p><button type="submit">Show values</button>'
-                "</p></form>"
-            )
         body += (
             '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
-        self._respond(200, render_page("Statement shape", body))
+        self._respond(200, render_page("Statement shape", body), no_store=in_sitting)
 
     def _read_shape(
         self,
@@ -5030,11 +5010,12 @@ class ConnectionHandler(
             )
 
     def _kept_statement_shape(self, artefact_id: int) -> None:
-        """A kept statement's masked shape, at an address that stays put.
+        """A kept statement's shape, at an address that stays put.
 
-        Masked ONLY. A fetchable URL that returned real contents would be a
-        standing bypass of the two-step disclosure, and a link that exists
-        at all is a link something can follow.
+        Masked unless the request is inside a values sitting (`values_sitting`), which is
+        a deliberate act of its own, never a link, and then the real shape is answered with
+        `no-store`. An address that returned real contents to any request would be a standing
+        bypass of that act, and a link that exists at all is a link something can follow.
         """
         hook = self.bound_config.statement_payload
         if hook is None:
@@ -5048,10 +5029,12 @@ class ConnectionHandler(
             )
             return
         filename, payload = held
-        shape = self._read_shape(payload, filename, mask=True)
+        in_sitting = values_sitting.shown()
+        shape = self._read_shape(payload, filename, mask=not in_sitting)
+        values = "values shown for this sitting" if in_sitting else "values masked"
         body = (
             f"<h2>Statement shape</h2><p class=\"muted\">Kept statement "
-            f"{artefact_id}, values masked. This address stays put, so the "
+            f"{artefact_id}, {values}. This address stays put, so the "
             "shape can be read again without uploading the file again.</p>"
             f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
@@ -5060,7 +5043,7 @@ class ConnectionHandler(
             + '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
-        self._respond(200, render_page("Statement shape", body))
+        self._respond(200, render_page("Statement shape", body), no_store=in_sitting)
 
     def _reader_found_html(self, artefact_id: int, payload: bytes) -> str:
         """What the reader concluded from a kept statement, beneath its masked shape.
@@ -5511,53 +5494,6 @@ class ConnectionHandler(
                 "statements</a></p>" + HOME_LINK,
             ),
         )
-
-    def _statement_shape_disclose(self) -> None:
-        """The second half of the deliberate walk to real contents."""
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length).decode("utf-8", "replace")
-        fields = {
-            key: values[0] for key, values in parse_qs(raw, keep_blank_values=True).items()
-        }
-        if fields.get("confirm", "").strip().upper() != DISCLOSURE_PHRASE:
-            self._respond(
-                400,
-                error_page(
-                    "Not disclosed",
-                    "<p>The confirmation phrase did not match, so nothing was "
-                    "shown. Read the shape again if you meant to disclose.</p>"
-                    + HOME_LINK,
-                ),
-            )
-            return
-        try:
-            payload, filename, _ = self.disclosures.claim(
-                fields.get("disclose_token", "")
-            )
-        except KeyError:
-            self._respond(
-                400,
-                error_page(
-                    "Not disclosed",
-                    "<p>That confirmation is spent or expired - a token works "
-                    "once. Read the shape again if you meant to disclose.</p>"
-                    + HOME_LINK,
-                ),
-            )
-            return
-
-        shape = self._read_shape(payload, filename, mask=False)
-        body = (
-            "<h2>Statement contents</h2>"
-            '<p class="alarm"><strong>Real values shown.</strong> This output '
-            "names payees, amounts and balances - do not paste it anywhere "
-            "you would not paste the statement itself.</p>"
-            f'<pre class="scroll" style="white-space:pre">'
-            f"{html.escape(shape.describe())}</pre>"
-            '<p><a class="button" href="/statement-shape">Read another</a></p>'
-            + HOME_LINK
-        )
-        self._respond(200, render_page("Statement contents", body))
 
     def _review_page(self, note: str = "", *, masked: bool = False) -> None:
         """The worklist, with the evidence needed to judge each group.
@@ -6287,9 +6223,6 @@ class ConnectionHandler(
             return
         if route == "/statement-shape":
             self._statement_shape()
-            return
-        if route == "/statement-shape-disclose":
-            self._statement_shape_disclose()
             return
         if route == "/declare-spaces":
             self._declare_spaces()

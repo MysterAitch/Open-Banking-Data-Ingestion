@@ -136,7 +136,7 @@ class TestAFileNamedByAGuid:
         row = rows_of(assign_form(parse(response.text)))[GUID_B]
         said = flat(preview_of(row))
 
-        assert "No reader reads this file yet" in said
+        assert "Cannot be read in yet - no reader for this layout." in said
         assert "adds up" not in said
         assert "transaction" not in said
 

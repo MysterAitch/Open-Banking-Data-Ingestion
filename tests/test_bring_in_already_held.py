@@ -137,7 +137,7 @@ class TestAStatementThatWouldAddNothing:
             "Notes-a.pdf"
         ]
 
-        assert chosen(item) == ""
+        assert list(elements(item, "select")) == []
         assert held_lines(item) == []
 
     def test_Statement_ForAnAccountThatHoldsNoneOfItsTransactions_SaysNothingOfWhatIsHeld(
