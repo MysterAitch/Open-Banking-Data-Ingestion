@@ -28,7 +28,7 @@ beside the chart. The sums are `position.chart_series`.
 from __future__ import annotations
 
 import html
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
@@ -48,7 +48,7 @@ from .date_window import (
 )
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
-from .plural import agree
+from .overview import AccountOverview
 from .plural import plural as _plural
 from .position import (
     ChartSeries,
@@ -62,6 +62,8 @@ from .position import (
 )
 from .web_accounts import submit_button
 from .web_ledger import _balance_word
+from .web_position_trust import UNREAD, figure_lines, list_html
+from .web_position_trust import read as read_trust
 from .window_control import (
     DEFAULT_KEY,
     KEEP,
@@ -120,93 +122,42 @@ def _fact(name: str, value: str) -> str:
     return f"<div><dt>{name}</dt><dd>{value}</dd></div>"
 
 
-def _ref_line(view: Any) -> str:
-    """The reference beneath a label, unless the label is the reference."""
-    shown = AccountShown.named(view.ref, view.label)
-    return f'<span class="muted">{shown.code()}</span>' if shown.labelled else ""
+def _subtotals(view: Any) -> str:
+    """Each direction's subtotal on one line: the counted accounts are listed by trust, not by
+    which way their balance sits, so what the groups said is kept here."""
+    items = "".join(
+        f"<li>{_esc(_GROUP_TITLES[g.key])} ({len(g.accounts)}): subtotal "
+        f"{_figure(_balance_word(g.direction), g.subtotal)}</li>"
+        for g in view.groups
+    )
+    return f'<ul class="keylist">{items}</ul>'
 
 
-def _account_card(view: Any) -> str:
-    archived = (
-        '<span class="pill pill-quiet">archived</span> ' if view.archived else ""
+def _plain_list(view: Any) -> str:
+    """The counted accounts by name, for when their trust could not be read."""
+    items = "".join(
+        f'<li><a class="tap" href="{_ledger_href(a.ref)}">'
+        f"{AccountShown.named(a.ref, a.label).as_name()}</a></li>"
+        for g in view.groups
+        for a in g.accounts
     )
-    kind = f'<span class="muted">{_esc(view.kind)}</span><br>' if view.kind else ""
-    through = (
-        f"{_esc(view.rows_through)} ({_esc(_days(view.rows_through_age_days))})"
-        if view.rows_through
-        else '<span class="muted">no rows held</span>'
-    )
-    if view.checks_differ:
-        checks = (
-            f'<a class="tap bad" href="{_ledger_href(view.ref)}">'
-            f"{_plural(view.checks_differ, 'check')} {agree(view.checks_differ, 'differs')}</a>"
-        )
-    elif view.checks_agree:
-        checks = (
-            f"{_plural(view.checks_agree, 'later check')} "
-            f"{'adds' if view.checks_agree == 1 else 'add'} up"
-        )
+    return f'<ul class="keylist">{items}</ul>'
+
+
+def _left_out(view: Any) -> str:
+    """An account the figure leaves out: its name linking to where a balance is stated, why, and
+    how far it has moved since its history began (a movement, never a balance)."""
+    name = AccountShown.named(view.ref, view.label).as_name()
+    if view.state == "withheld":
+        why = f"no opening balance could be derived: {_esc(view.withheld)}"
     else:
-        checks = (
-            '<span class="muted">none: one known balance, so the transactions cannot '
-            "be checked</span>"
-        )
-    if view.family_anchors:
-        # The known balances are the whole account's (main plus its Spaces), so
-        # a difference is located against the family's rows, not main's alone.
-        if view.family_first_differing:
-            checks += (
-                '<br><span class="warn">The transactions first stop adding up to the whole '
-                f"account's known balances ({_esc(str(view.family_anchors))}) on "
-                f"{_esc(view.family_first_differing)}; the difference is "
-                f"{_esc(view.family_pattern)} after that.</span>"
-            )
-        else:
-            checks += (
-                '<br><span class="muted">Checked against the whole account '
-                f"(main plus its Spaces): {_esc(str(view.family_anchors))} known "
-                "balances, and the transactions add up to all of them.</span>"
-            )
-        checks += f'<br><span class="muted">{_esc(view.family_opening_note)}</span>'
-    flag = (
-        '<p class="warn">The rows between its known balances do not add up, so this '
-        "balance may be wrong. It is still counted. "
-        f'<a class="tap" href="{_ledger_href(view.ref)}">See its ledger</a> or '
-        f'<a class="tap" href="{_periods_href(view.ref)}">where, period by period</a></p>'
-        if view.checks_differ
+        why = "no known balance has been stated for it"
+    moved = (
+        f"; moved {_figure(view.moved_direction, view.moved)} since {_esc(view.first_row)}"
+        if view.first_row
         else ""
     )
-    return (
-        '<li class="account">'
-        f'<p class="account-name">{archived}'
-        f"<strong>{AccountShown.named(view.ref, view.label).as_name()}</strong></p>"
-        f"{kind}{_ref_line(view)}"
-        f'<p class="figure">{_figure(_balance_word(view.direction), view.balance)}</p>'
-        '<dl class="facts">'
-        + _fact("Rows through", through)
-        + _fact("Rows held", _esc(f"{int(view.rows):,}"))
-        + _fact("Later balance checks", checks)
-        + "</dl>"
-        + flag
-        + f'<p class="account-links"><a class="tap" href="{_ledger_href(view.ref)}">Ledger</a></p>'
-        "</li>"
-    )
-
-
-def _group_html(group: Any) -> str:
-    members = group.accounts
-    cards = '<ul class="accounts">' + "".join(_account_card(a) for a in members) + "</ul>"
-    subtotal = (
-        f'<p>Subtotal: <strong>{_figure(_balance_word(group.direction), group.subtotal)}'
-        "</strong></p>"
-    )
-    title = f"{_esc(_GROUP_TITLES[group.key])} ({len(members)})"
-    if group.key == "archived":
-        return (
-            f"<details><summary><strong>{title}</strong>&nbsp;- counted like any other "
-            f"account, folded away</summary>{subtotal}{cards}</details>"
-        )
-    return f"<h3>{title}</h3>{subtotal}{cards}"
+    return f'<li><a class="tap" href="{_ledger_href(view.ref)}">{name}</a> - {why}{moved}.</li>'
 
 
 def _asset_card(view: Any) -> str:
@@ -242,50 +193,7 @@ def _entitlement_card(view: Any) -> str:
     )
 
 
-def _uncounted_card(view: Any) -> str:
-    if view.state == "withheld":
-        reason = f"No opening balance could be derived: {_esc(view.withheld)}."
-    else:
-        reason = (
-            "No known balance has been stated for it, and neither the bank's records nor a "
-            "held statement supplies one."
-        )
-        if not int(view.rows):
-            # A feedless account is the usual cause, and the two ways out differ.
-            reason += (
-                " It holds no rows, so it may be an account obdi has no feed for: "
-                "state a balance on its ledger, or declare its kind as "
-                f"{BALANCE_ONLY_KIND} on its account page to have it counted from "
-                "its first known balance."
-            )
-    through = (
-        f"{_esc(_plural(int(view.rows), 'row'))} held, through {_esc(view.rows_through)}"
-        if view.rows_through
-        else "no rows held"
-    )
-    moved = (
-        # "in", "out" or "nil", never "in credit": a movement is not a balance.
-        f"<p>Moved: {_figure(view.moved_direction, view.moved)} since "
-        f"{_esc(view.first_row)} (its first row here). Its balance is this plus an "
-        "opening balance that is not known.</p>"
-        if view.first_row
-        else ""
-    )
-    return (
-        '<li class="account">'
-        f'<p class="account-name"><span class="pill pill-bad">not counted</span> '
-        f"<strong>{AccountShown.named(view.ref, view.label).as_name()}</strong></p>"
-        f"{_ref_line(view)}"
-        f"<p>{reason}</p>"
-        f"{moved}"
-        f'<p class="muted">{through}</p>'
-        f'<p class="account-links"><a class="tap" href="{_ledger_href(view.ref)}">'
-        "State a balance on its ledger</a></p>"
-        "</li>"
-    )
-
-
-def _headline(view: Any) -> str:
+def _headline(view: Any, trust_lines: str = "") -> str:
     counted = (
         f"Counts {_plural(int(view.accounts_counted), 'account')} of "
         f"{view.accounts_total} and {_plural(int(view.assets_counted), 'asset')}."
@@ -312,7 +220,7 @@ def _headline(view: Any) -> str:
         body = (
             "<h2>Net worth</h2>"
             f'<p class="figure">{_figure(_balance_word(view.net_direction), view.net_worth)}</p>'
-            f"<p>{_esc(counted)} As at {_esc(view.as_of)}.</p>"
+            f"<p>{_esc(counted)} As at {_esc(view.as_of)}.</p>{trust_lines}"
         )
     uncounted = int(view.accounts_uncounted)
     if uncounted:
@@ -1236,8 +1144,8 @@ _LIMITS = (
     "whatever makes that balance true, so transactions missing before it cannot be detected. "
     "A second known balance makes the first a test, and a later known balance that differs "
     "is flagged.</li>"
-    "<li>Pending rows are included, as the ledger's running position includes them; "
-    "void rows and folded copies of Space payments never are.</li>"
+    "<li>Pending transactions are included, as the ledger's running position includes them; "
+    "void transactions and folded copies of Space payments never are.</li>"
     "<li>An asset is worth what it was last observed to be worth, as of the date shown, "
     "and no newer. Its age is stated and nothing here revalues it.</li>"
     "<li>Only pounds are added up. Anything in another currency is left out.</li>"
@@ -1251,6 +1159,8 @@ def render_position(
     chart_in: Collection[str] | None = None,
     window: WindowSpec | None = None,
     window_fields: Mapping[str, str] | None = None,
+    accounts: Sequence[AccountOverview] | None = None,
+    today: date | None = None,
 ) -> bytes:
     """The page; `chart_in` names the items the chart is drawn from, None for all.
 
@@ -1258,6 +1168,10 @@ def render_position(
     sends them (`window_choice` reads them), or `window` where code gives a ready-made one;
     neither means everything held. Names that match no item are ignored. The masked
     rendering reads none of these.
+
+    `accounts` are the Overview's, from which each counted account's trust is read
+    (`web_position_trust`); None says the trust could not be read and the page says so once.
+    `today` is the day the bars end on, the position's own day where none is given.
     """
     if unmasked and window_fields is not None:
         choice = window_choice(position, window_fields)
@@ -1270,9 +1184,40 @@ def render_position(
             {},
         )
     view = Disclosed(position, unmasked=unmasked)
-    body = _mode(unmasked) + _headline(view)
+    counted = [(a.ref, a.label) for g in view.groups for a in g.accounts]
+    # The Overview's name for an account is the one Today shows, so the two pages name it alike.
+    shown = {ref: AccountShown.named(ref, label) for ref, label in counted}
+    shown.update({a.ref: AccountShown.named(a.ref, a.label) for a in accounts or ()})
+
+    def shown_of(ref: str) -> AccountShown:
+        return shown.get(ref) or AccountShown(ref)
+
+    today = today or date.fromisoformat(str(view.as_of))
+    lines = unread = ""
+    reading = None
+    if counted:
+        if accounts is None:
+            unread = UNREAD
+        else:
+            reading = read_trust(counted, accounts, today)
+            lines = figure_lines(reading, today, shown_of)
+    body = _mode(unmasked) + _headline(view, lines)
     if view.groups:
-        body += "<h2>Accounts</h2>" + "".join(_group_html(g) for g in view.groups)
+        balances = (
+            {
+                a.ref: _figure(_balance_word(a.direction), a.balance)
+                for g in view.groups
+                for a in g.accounts
+            }
+            if unmasked
+            else {}
+        )
+        archived = frozenset(a.ref for g in view.groups if g.key == "archived" for a in g.accounts)
+        body += "<h2>Counted accounts</h2>" + _subtotals(view)
+        if reading is not None:
+            body += list_html(reading, today, shown_of, balances, archived)
+        else:
+            body += unread + _plain_list(view)
     if view.assets:
         body += (
             "<h2>Observed assets</h2>"
@@ -1283,14 +1228,14 @@ def render_position(
         )
     if view.uncounted:
         body += (
-            "<h2>Not counted: no opening balance</h2>"
+            "<h2>Left out: no opening balance</h2>"
             "<p>Their balances are unknown, which is not the same as nothing. They are in "
-            "no balance, subtotal, or net worth. What is known of each is how far it has "
-            "moved since its history began.</p>"
-            "<p>Stating a balance for a date fixes the balance at that date, so importing "
-            "older statements later does not make it wrong: the opening balance moves back "
-            "in time and is worked out again from the same known balance.</p>"
-            '<ul class="accounts">' + "".join(_uncounted_card(a) for a in view.uncounted) + "</ul>"
+            "no balance, subtotal, or net worth. Open one to state a balance for a date; "
+            "importing older statements later does not make it wrong. An account that holds "
+            "no transactions may have no feed: declare its kind as "
+            f"{BALANCE_ONLY_KIND} on its account page to have it counted from its first known "
+            "balance.</p>"
+            '<ul class="pos-left-out">' + "".join(_left_out(a) for a in view.uncounted) + "</ul>"
         )
     if view.entitlements:
         body += (
@@ -1363,10 +1308,23 @@ class PositionPages:
             say("position.fault", kind=type(fault).__name__)
             self._respond(500, _page("Position failed", "The position could not be built."))
             return
+        # The Overview is the one place each account's trust is read from. One that cannot be
+        # read leaves the figure and the chart whole and the page says the trust is missing.
+        accounts: tuple[AccountOverview, ...] | None = None
+        overview = self.bound_config.overview
+        if overview is not None:
+            try:
+                accounts = overview(False).accounts
+            except Exception as fault:
+                say("position.overview-fault", kind=type(fault).__name__)
         self._respond(
             200,
             render_position(
-                position, unmasked=unmasked, chart_in=chart_in, window_fields=window_fields
+                position,
+                unmasked=unmasked,
+                chart_in=chart_in,
+                window_fields=window_fields,
+                accounts=accounts,
             ),
             no_store=unmasked,
         )

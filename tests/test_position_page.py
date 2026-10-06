@@ -30,6 +30,7 @@ from obdi.store import Store
 from obdi.valuations import Asset, AssetKind, record_observation
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_position import render_position
+from page_dom import elements, parse
 from test_position import household
 
 #: Every figure the household makes, in pounds and pence and in minor units, so
@@ -259,10 +260,10 @@ class TestWhatIsNotCounted:
     def test_AccountWithNoOpening_HasItsOwnHeadingAndALinkToStateABalance(self, lab):
         page = lab.get().text
 
-        assert "Not counted: no opening balance" in page
+        assert "Left out: no opening balance" in page
         assert "unanchored" in page
         assert 'href="/ledger?ref=unanchored"' in page
-        assert "State a balance on its ledger" in page
+        assert "Open one to state a balance for a date" in page
 
     def test_Headline_SaysHowManyAccountsAreNotCounted(self, lab):
         page = lab.get().text
@@ -277,7 +278,7 @@ class TestWhatIsNotCounted:
         assert 'in credit <span class="mono nowrap">£269,359.87</span>' in headline
         assert "£270,248.75" not in headline.split("Provisional")[0]
         assert page.count("£269,359.87") >= 1
-        accounts = page.split("<h2>Accounts</h2>")[1].split("<h2>Not counted")[0]
+        accounts = page.split("<h2>Counted accounts</h2>")[1].split("<h2>Left out")[0]
         assert "£888.88" not in accounts and "£270,248.75" not in accounts
 
     def test_StatingABalanceForIt_MovesItIntoTheTotalAndRemovesTheHeading(self, lab):
@@ -288,15 +289,21 @@ class TestWhatIsNotCounted:
         shown = lab.show_values().text
 
         assert "Counts 5 accounts of 5 and 2 assets." in masked
-        assert "Not counted: no opening balance" not in masked
+        assert "Left out: no opening balance" not in masked
         assert "are not counted" not in masked and "is not counted" not in masked
         assert "£270,359.87" in shown, "26,935,987 + 100,000"
 
     def test_ADifferingLaterAnchor_IsFlaggedOnTheAccountThatStaysCounted(self, lab):
-        page = lab.get().text
+        root = parse(lab.get().text)
 
-        assert "1 check differ" in page
-        assert "balance may be wrong. It is still counted." in page
+        drifter = [
+            li
+            for li in elements(root, "li")
+            if any("arow" in a.classes for a in elements(li, "a")) and "drifter" in li.text()
+        ]
+        assert len(drifter) == 1
+        assert "Does not add up" in drifter[0].text()
+        assert "Counts 4 accounts of 5" in root.text()
 
     def test_StateAndDefinedBenefitPensions_AreListedAsIncomeAndNotAsWealth(self, lab):
         page = lab.get().text
@@ -328,11 +335,12 @@ class TestTheBalanceMatchesTheLedger:
 
 class TestArchivedAccounts:
     def test_ArchivedAccount_IsCountedAndFoldedIntoItsOwnGroup(self, lab):
-        page = lab.get().text
+        root = parse(lab.get().text)
 
-        assert re.search(r"<details><summary><strong>Archived accounts \(1\)", page)
-        assert page.index("Archived accounts") < page.index("Old saver")
-        assert 'class="pill pill-quiet">archived' in page
+        said = "1 archived, counted like any other"
+        folds = [d for d in elements(root, "details") if said in d.text()]
+        assert len(folds) == 1
+        assert "Old saver" in folds[0].text() or "oldsaver" in folds[0].text()
 
     def test_ArchivedAccount_IsInTheNetWorth(self, lab):
         # 26,935,987 includes oldsaver's 170,000; without it: 26,765,987.
@@ -492,19 +500,15 @@ def every_account_counted(store: Store) -> None:
 class TestWhatAnUncountedAccountHasMoved:
     def test_Post_ShowsTheMovementWordedSoItCannotBeReadAsABalance(self, lab):
         page = lab.show_values().text
-        card = page.split("<h2>Not counted: no opening balance</h2>")[1].split("<h2>")[0]
+        card = page.split("<h2>Left out: no opening balance</h2>")[1].split("<h2>")[0]
 
-        assert (
-            'Moved: in <span class="mono nowrap">£888.88</span> since 2026-03-01 '
-            "(its first row here). Its balance is this plus an opening balance that is "
-            "not known." in card
-        )
+        assert 'moved in <span class="mono nowrap">£888.88</span> since 2026-03-01' in card
         assert "in credit" not in card and "Balance" not in card
 
     def test_Get_MasksTheMovementToTheFixedTokenAndKeepsTheDate(self, lab):
-        card = lab.get().text.split("<h2>Not counted: no opening balance</h2>")[1].split("<h2>")[0]
+        card = lab.get().text.split("<h2>Left out: no opening balance</h2>")[1].split("<h2>")[0]
 
-        assert f'Moved: in <span class="mono nowrap">{MASKED_TOTAL}</span> since 2026-03-01' in card
+        assert f'moved in <span class="mono nowrap">{MASKED_TOTAL}</span> since 2026-03-01' in card
 
     def test_AnAccountWithNoRows_ShowsNoMovementLine(self, tmp_path, monkeypatch):
         def dormant(store: Store) -> None:
@@ -517,7 +521,7 @@ class TestWhatAnUncountedAccountHasMoved:
         finally:
             httpd.shutdown()
 
-        assert page.count("Moved: ") == 1, "only unanchored has moved"
+        assert page.count("; moved ") == 1, "only unanchored has moved"
         assert "2 accounts are not counted" in page
         assert "2 unknown opening balances" in provisional_paragraph(page)
 
@@ -646,9 +650,8 @@ class TestTheLimitsAndTheAnswerAboutOlderStatements:
         page = lab.get().text
 
         assert (
-            "Stating a balance for a date fixes the balance at that date, so importing older "
-            "statements later does not make it wrong: the opening balance moves back in time "
-            "and is worked out again from the same known balance." in page
+            "Open one to state a balance for a date; importing older statements later does "
+            "not make it wrong." in page
         )
 
 
