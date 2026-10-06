@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.344] - 2026-10-06
+
+### Changed
+- **A range of dates says how long it is**, in quiet small words after it:
+  "2026-07-11 to 2026-08-10 (a month)", "(2 months, 2 statements)" where
+  the statement cadence is known, "(1 year 9 months)". The owner asked for
+  durations as an affordance, "subtle/deemphasised/small ... no need for
+  bold or orange", rounded to the largest unit ("62 days might be better
+  shown as approximated 'two months'"). On Bring in's rows, the upload
+  lines on Today and the account page, the "adds up from X to Y" sentences,
+  the window heading, and the timeline's fetch list. Attributes and chart
+  titles do not carry it.
+- **Archived accounts on Today draw their bars** inside their fold, over
+  their own life where they closed before the twelve months, with their end
+  dates - the owner asked for consistency with the live rows.
+- **The masked statement-shape page says what the reader concluded**, per
+  section: the period found, the opening and closing found and under which
+  label, the lines listed, what the section was taken for and what decided
+  it, and whether the arithmetic gate passed or why not, in words. Built so
+  that a reader fault on a real document can be seen without values.
+- After stating a balance the answer no longer describes how the account
+  stood before the save; after a doubt page the way back leads to Bring in;
+  an import confirmed from Bring in says what it settled.
+
+### Not covered
+- Bring in has no row of several statements, so the statement count shows
+  on Today only. The same stale sentence may remain after removing a
+  balance or saving a typed transaction.
+- The reader report explains nothing by itself: the credit union loan
+  section's balances are read (its "adds up by what it lists" shows that)
+  and still do not become known balances; the report on the real document
+  is what will say where that stops.
+
 ## [0.4.343] - 2026-10-06
 
 ### Changed
