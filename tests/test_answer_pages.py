@@ -184,16 +184,17 @@ class TestEditingAnAccountEndsOnItsLedger:
 
 
 class TestStatedBalancesEndOnTheLedger:
-    def test_StateABalance_SaysTheAgreementAsBefore(self, served):
+    def test_StateABalance_DoesNotRestateTheStandingHeldBeforeTheSave(self, served):
         saved = post(
             served, "/ledger-anchor", ref=ACCOUNT, month="2026-03", day="2026-03-26",
             amount="2.00",
         )
 
         assert saved.status_code == 200
-        assert "Everyday adds up to every known balance up to 2026-03-20, as before." in text_of(
-            saved.text
-        )
+        said = text_of(saved.text)
+        assert "Saved: a known balance for the end of 2026-03-26. Nothing else changed." in said
+        assert "Everyday adds up to every known balance up to 2026-03-20" not in said
+        assert ", as before." not in said
 
     def test_StateABalance_WhenRefused_StillOffersTheLedger(self, served):
         refused = post(

@@ -3276,7 +3276,6 @@ class LedgerPages(AnswerPages):
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
         day = (form.get("day", [""])[0] or "").strip()
-        before = self.answer_standing(ref)
         try:
             hook(
                 ref,
@@ -3302,11 +3301,11 @@ class LedgerPages(AnswerPages):
             ref,
             month,
             unmasked=False,
-            notice=self.answer_notice(
-                f"Saved: a known balance for the end of {day}. Nothing else changed.",
-                ref,
-                before,
-            ),
+            # No sentence on how the account stands: the standing readable in the same request
+            # as the save is the one held before it (`account_standings` is held until the
+            # derived layer moves), so a clause here said the old state as if it were the new.
+            # The page beneath is where the new standing is said.
+            notice=f"Saved: a known balance for the end of {day}. Nothing else changed.",
             no_store=True,
         )
 

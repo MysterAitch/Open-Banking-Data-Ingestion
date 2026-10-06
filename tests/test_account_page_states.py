@@ -117,7 +117,7 @@ class TestAddsUpWithStatementsDue:
 
         assert titles_of(page) == [
             f"Upload the statement covering {ago(79)} to {TODAY.isoformat()}",
-            f"Upload an earlier statement covering {ago(200)} to {ago(140)}",
+            f"Upload an earlier statement covering {ago(200)} to {ago(140)} (2 months)",
             f"Lock in to {ago(80)}",
         ]
         hrefs = [
@@ -210,6 +210,24 @@ class TestNothingToCheckAgainst:
 
         assert response.status_code == 200
         assert f"Saved: a known balance for the end of {ago(30)}." in words(response.text)
+
+    def test_ConfirmingABalance_AnswerSaysNothingOfHowTheAccountStoodBeforeTheSave(self, base):
+        response = httpx.post(
+            f"{base}/ledger-anchor",
+            data={
+                "ref": HOLIDAY, "month": "", "currency": "GBP",
+                "day": ago(30), "amount": "25.00",
+            },
+            timeout=60,
+        )
+
+        said = words(response.text)
+        # The standing read in the same breath as the save is the one held before it, so the
+        # answer would have described the state before the save as the state after it. The
+        # page beneath the answer is where the new standing is said.
+        assert "as before" not in said
+        assert "does not yet add up to any known balance" not in said
+        assert f"Saved: a known balance for the end of {ago(30)}. Nothing else changed." in said
 
 
 class TestLockedInWithNothingDue:
