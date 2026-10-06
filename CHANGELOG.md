@@ -26,6 +26,30 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.338] - 2026-10-06
+
+### Fixed
+- **A flagged transaction no longer asks for a statement the account already
+  has.** "A flagged transaction needs a known balance near this day" was
+  raised from the known balances alone, so an account whose one statement
+  adds up by what it lists (0.4.333) was still told to upload one. The gap
+  is dropped where the account adds up and a statement's own listing tests
+  that day. The "earlier statement" and "one known balance" gaps already
+  read the standing with the statement checks; read on the real store they
+  appeared on Today beside this one, and whether they are right there is
+  not yet shown.
+- "Confirm the balance for D" gave the age of the account's first
+  transaction, not of D.
+- During a rebuild Today says once, above the account list, that the checks
+  on these accounts are paused; the rows said it fifteen times. A declared
+  account holding nothing keeps its own sentence during a rebuild, which is
+  the one way found that a balance-only account could be hidden - what hid
+  the mortgage on the real store is not proven.
+
+### Not covered
+- The whole suite was not run on the final tree (9334 passed with one test
+  then made stale and corrected; the build runs the whole suite).
+
 ## [0.4.337] - 2026-10-06
 
 ### Changed
