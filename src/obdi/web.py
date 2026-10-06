@@ -83,6 +83,7 @@ from .navigation import answering, current_route, page_name
 from .overview import Overview
 from .page_times import UTC_NOTE, instant_of
 from .page_words import ARTEFACT_MOVED, ARTEFACT_REBUILT, MOVE_ARTEFACT, REBUILD_ARTEFACT
+from .period_reconciliation import PeriodReport
 from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
@@ -743,6 +744,11 @@ class WebConfig:
     #: figures (False only when the viewer asked) and the account reference to
     #: limit to, "" for every account.
     period_reconciliation_text: Callable[[bool, str], str] | None = None
+    #: The same report as DATA, which the page words itself (`web_period_reconciliation`): the
+    #: argument is the account reference to limit to, "" for every account, and a string is the
+    #: sentence a report gives instead of findings while a rebuild holds the layer. Where it is
+    #: wired the page prefers it to the text.
+    period_report: Callable[[str], PeriodReport | str] | None = None
     #: One account's ledger for a month ("" for the newest), or for a window of days where one
     #: is given, as DATA, real values included. Returning data rather than text is what lets
     #: the page decide, in one place, whether a reader may see the values.
@@ -6052,12 +6058,22 @@ class ConnectionHandler(
         be kept. The account reference travels in the query on a fetch and in
         a hidden field on the post, and is only ever a name.
         """
+        report_hook = self.bound_config.period_report
         hook = self.bound_config.period_reconciliation_text
-        if hook is None:
+        if hook is None and report_hook is None:
             self._respond(404, error_page("Not available", "<p>No report wired.</p>"))
             return
+        text = ""
+        report: PeriodReport | None = None
         try:
-            text = hook(masked, ref)
+            if report_hook is not None:
+                found = report_hook(ref)
+                if isinstance(found, str):
+                    text = found
+                else:
+                    report = found
+            elif hook is not None:
+                text = hook(masked, ref)
         except Exception as exc:
             self._respond(
                 500, error_page("Report failed", f"<p>{html.escape(str(exc))}</p>")
@@ -6085,17 +6101,27 @@ class ConnectionHandler(
             f'<p><a class="button" href="{html.escape(back, quote=True)}">'
             "Back to the masked rendering</a></p>"
         )
-        body = (
-            "<p>Between each pair of known balances from consecutive statements, the "
-            "rows the store counts are set against the statement's own movement. "
-            "Where they differ, the rows each source holds that the "
-            "source comparison page could not match are used to say whether the "
-            "same money is held twice, and whether the difference is undone "
-            "by the next period.</p>"
-            f"{showing}"
-            f'<pre class="scroll" style="white-space:pre-wrap">'
-            f"{self._named(text)}</pre>" + HOME_LINK
-        )
+        if report is not None:
+            from .web_period_reconciliation import period_reconciliation_body
+
+            body = (
+                period_reconciliation_body(
+                    report, masked=masked, names=self._account_names(), control=showing
+                )
+                + HOME_LINK
+            )
+        else:
+            body = (
+                "<p>Between each pair of known balances from consecutive statements, the "
+                "rows the store counts are set against the statement's own movement. "
+                "Where they differ, the rows each source holds that the "
+                "source comparison page could not match are used to say whether the "
+                "same money is held twice, and whether the difference is undone "
+                "by the next period.</p>"
+                f"{showing}"
+                f'<pre class="scroll" style="white-space:pre-wrap">'
+                f"{self._named(text)}</pre>" + HOME_LINK
+            )
         self._respond(
             200, render_page(page_name("/period-reconciliation"), body), no_store=not masked
         )

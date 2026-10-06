@@ -34,14 +34,17 @@ from pathlib import Path
 import httpx
 import pytest
 
+from coverage_page_world import repeated_lines
 from obdi.cli import build_web_config
+from obdi.connections import ConnectionStore
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
 from obdi.models import SourceTier, Transaction
 from obdi.period_reconciliation import Locus, PeriodKind, period_reconciliation
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
-from obdi.web import AuthorisationSession, ConnectionHandler
+from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+from page_dom import elements, parse
 
 ACCOUNT = "card"
 
@@ -71,14 +74,41 @@ P3 = "2026-03-12 to 2026-04-11"
 
 #: Every figure a masked rendering must not state, as it would be formatted.
 PRIVATE_FIGURES = (
-    "12.37", "20.19", "5.43", "15.61", "40.73", "8.29", "7.77", "2.11", "2.50",
-    "3.16", "3.33", "6.66", "32.56", "1.11", "2.22", "9.99",
+    "12.37",
+    "20.19",
+    "5.43",
+    "15.61",
+    "40.73",
+    "8.29",
+    "7.77",
+    "2.11",
+    "2.50",
+    "3.16",
+    "3.33",
+    "6.66",
+    "32.56",
+    "1.11",
+    "2.22",
+    "9.99",
 )
 PRIVATE_PAYEES = (
-    "Alpha Grocer", "Bravo Fuel", "Charlie Cafe", "Delta Books", "Echo Rail",
-    "Foxtrot Gym", "Annual Card Fee", "Fee One", "Fee Two", "Fee Three",
-    "Surprise Charge", "Late Fee", "Gift Shop", "Book Shop", "Hotel Stay",
-    "Lodging Booking", "Round Up",
+    "Alpha Grocer",
+    "Bravo Fuel",
+    "Charlie Cafe",
+    "Delta Books",
+    "Echo Rail",
+    "Foxtrot Gym",
+    "Annual Card Fee",
+    "Fee One",
+    "Fee Two",
+    "Fee Three",
+    "Surprise Charge",
+    "Late Fee",
+    "Gift Shop",
+    "Book Shop",
+    "Hotel Stay",
+    "Lodging Booking",
+    "Round Up",
 )
 MONEY_FIGURE = re.compile(r"[£€$]\s*[-\d]|\d[\d,]*\.\d\d(?![\d%a-z])")
 
@@ -93,6 +123,7 @@ class World:
         ]
     )
     feed: list[FeedRow] | None = field(default_factory=lambda: [*FEED_S1, *FEED_S2, *FEED_S3])
+
 
 def _pounds(minor: int) -> str:
     return f"{minor / 100:,.2f}"
@@ -174,9 +205,7 @@ def block(text: str, span: str) -> str:
 
 
 class TestEverythingAgrees:
-    def test_Periods_WhenBothSourcesHoldTheSameRows_AllAgreeWithNoLeftovers(
-        self, store, tmp_path
-    ):
+    def test_Periods_WhenBothSourcesHoldTheSameRows_AllAgreeWithNoLeftovers(self, store, tmp_path):
         """Expected, per period: the rows held equal the statement's movement
         (P1 -32.56, P2 -21.04, P3 -49.02), and nothing is unmatched either way."""
         report = report_for(store, tmp_path, World())
@@ -201,9 +230,7 @@ class TestEverythingAgrees:
             )
         assert "differ" not in text
 
-    def test_Movement_IsTheDifferenceOfTheTwoClosingsAndTheRowsAreTheirSum(
-        self, store, tmp_path
-    ):
+    def test_Movement_IsTheDifferenceOfTheTwoClosingsAndTheRowsAreTheirSum(self, store, tmp_path):
         periods = periods_of(report_for(store, tmp_path, World()))
 
         assert periods[P1].movement_minor == -3256
@@ -426,9 +453,7 @@ class TestThePairingIsTheAgreementsPagesOwn:
         world.feed.append((date(2026, 2, 22), -999, "Lodging Booking"))
         return world
 
-    def test_Leftovers_AreExactlyTheRowsTheAgreementsReportLeavesUnmatched(
-        self, store, tmp_path
-    ):
+    def test_Leftovers_AreExactlyTheRowsTheAgreementsReportLeavesUnmatched(self, store, tmp_path):
         from obdi.coverage import agreements
 
         report = report_for(store, tmp_path, self._world())
@@ -569,9 +594,7 @@ class TestAStatementWhoseOpeningIsNotThePreviousClosing:
         assert [p.kind for p in every].count(PeriodKind.INSIDE) == 1
         inside = next(p for p in every if p.kind is PeriodKind.INSIDE)
         between = next(
-            p
-            for p in every
-            if p.kind is PeriodKind.BETWEEN and p.last_day == inside.last_day
+            p for p in every if p.kind is PeriodKind.BETWEEN and p.last_day == inside.last_day
         )
         assert between.movement_minor - inside.movement_minor == -500
         assert (inside.first_day, inside.last_day) == (between.first_day, between.last_day)
@@ -624,9 +647,7 @@ class TestAStatementWhoseSpanStartsBeforeThePreviousClosing:
             ],
         )  # fmt: skip
 
-    def test_InsidePeriod_RunsFromTheStatementsOwnFirstRowOverTheRowsItLists(
-        self, store, tmp_path
-    ):
+    def test_InsidePeriod_RunsFromTheStatementsOwnFirstRowOverTheRowsItLists(self, store, tmp_path):
         self._built(store, tmp_path)
 
         [item] = period_reconciliation(store, sibling_accounts={}).accounts
@@ -727,9 +748,7 @@ def lab(tmp_path: Path, monkeypatch):
         monkeypatch.delenv(variable, raising=False)
     config = build_web_config(db)
     assert config is not None
-    handler = type(
-        "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
-    )
+    handler = type("H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()})
     httpd = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
@@ -782,9 +801,7 @@ class TestThePageIsMaskedUnlessPostedFor:
         assert 'href="/period-reconciliation"' not in response.text
 
     def test_Page_WhenPostedFor_ShowsFiguresAndLeftoversAndIsNotKept(self, lab):
-        response = httpx.post(
-            f"{lab}/period-reconciliation", data={"ref": ACCOUNT}, timeout=60
-        )
+        response = httpx.post(f"{lab}/period-reconciliation", data={"ref": ACCOUNT}, timeout=60)
 
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
@@ -800,11 +817,102 @@ class TestThePageIsMaskedUnlessPostedFor:
         assert "0 accounts with a held statement" in page
 
     def test_Page_WithAMarkupReference_EscapesItWhereverItIsPrinted(self, lab):
-        page = httpx.get(
-            f"{lab}/period-reconciliation", params={"ref": '"><b>x'}, timeout=60
-        ).text
+        page = httpx.get(f"{lab}/period-reconciliation", params={"ref": '"><b>x'}, timeout=60).text
 
         assert "<b>x" not in page
+
+
+class TestThePageIsASummaryAndARecordByAccount:
+    """The lab's known answer: one account, `card`, three statements and so three periods. P2
+    holds a statement-only fee the feed lacks (7.77) and three feed-only fees it does not match
+    (2.11, 2.50, and 3.16, which sum to the same 7.77). The surplus equals each of those sums and
+    the single fee row, so P2 does not add up and all four explanations hold at once - the module
+    says more than one can - which the first run showed and the arithmetic confirms. P1 and P3
+    add up."""
+
+    def test_Summary_SaysHowManyPeriodsWereTestedAndHowManyDoNotAddUp(self, lab):
+        page = parse(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
+
+        assert "1 account with a held statement; 3 periods tested, 2 add up and 1 do not." in (
+            page.text()
+        )
+
+    def test_Summary_NamesTheAccountThatDoesNotAddUpWithTheExplanationThatHolds(self, lab):
+        page = parse(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
+        needs = [li for li in elements(page, "li") if "bad" in li.classes]
+
+        assert needs[0].text().replace(" :", ":") == (
+            "card: 1 of 3 periods do not add up - same money, statement leftovers on top, "
+            "feed leftovers, one transaction"
+        )
+
+    def test_Detail_ListsTheDifferingPeriodAndGathersThePeriodsThatAddUpOnOneLine(self, lab):
+        page = parse(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
+        card = next(d for d in elements(page, "details") if "card" in d.text()[:40])
+        lines = [
+            " ".join(li.text().split())
+            for li in elements(card, "li")
+            if "diag-lines" not in li.classes
+        ]
+        lines = [line for line in lines if line.startswith(("Period", "Add up"))]
+
+        assert lines[0].startswith(f"Period {P2} (between this statement's closing balance")
+        assert "1 transaction only in the statements, 3 transactions only in the feed" in lines[0]
+        assert lines[-1] == f"Add up: {P3}; {P1}."
+
+    def test_Detail_SaysWhatEachExplanationMeansOnceWhateverNumberOfPeriodsDiffer(self, lab):
+        page = httpx.get(f"{lab}/period-reconciliation", timeout=60).text
+
+        assert (
+            html.unescape(page).count("holds the statement's leftovers on top of the feed's") == 1
+        )
+
+    def test_Page_RepeatsNoLineOfThreeWordsMoreThanTwice(self, lab):
+        page = parse(httpx.get(f"{lab}/period-reconciliation", timeout=60).text)
+
+        assert repeated_lines(page) == {}
+
+    def test_Page_WhenPostedFor_FoldsTheFiguresAndTheUnmatchedTransactionsUnderTheirPeriod(
+        self, lab
+    ):
+        page = parse(httpx.post(f"{lab}/period-reconciliation", data={"ref": ACCOUNT}).text)
+        folds = [
+            d
+            for d in elements(page, "details")
+            if next(elements(d, "summary")).text() == "Figures and transactions"
+        ]
+
+        assert len(folds) == 1
+        assert "surplus -£7.77" in folds[0].text()
+        assert "Fee One" in folds[0].text()
+
+    def test_Page_WhenMasked_HasNoFoldOfFigures(self, lab):
+        page = httpx.get(f"{lab}/period-reconciliation", timeout=60).text
+
+        assert "Figures and transactions" not in page
+
+    def test_Page_WhileARebuildHoldsTheLayer_SaysSoInsteadOfClaimingNothingToTest(self, tmp_path):
+        sentence = "A rebuild is running, so this report is paused."
+        config = WebConfig(
+            client_id="c",
+            client_secret="secret-value-long-enough-1234",
+            redirect_uri="https://obdi.example.com/callback",
+            connection_store=ConnectionStore(tmp_path / "c.json"),
+            period_report=lambda ref: sentence,
+        )
+        handler = type(
+            "H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()}
+        )
+        httpd = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            page = httpx.get(f"http://127.0.0.1:{httpd.server_port}/period-reconciliation").text
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+        assert sentence in page
+        assert "0 accounts with a held statement" not in page
 
 
 class TestTheCommandLine:

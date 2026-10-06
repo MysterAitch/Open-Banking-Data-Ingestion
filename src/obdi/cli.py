@@ -645,6 +645,7 @@ if TYPE_CHECKING:
     from .movement_completeness import MovementCompleteness
     from .parsers.base import StatementParser
     from .parsers.pdf_statements import SectionReading
+    from .period_reconciliation import PeriodReport
     from .rebuild import RebuildReport
     from .statement_sections import AssignmentCheck
 
@@ -3118,6 +3119,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 account=ref or None,
             ).describe(masked=masked, unmask_hint="press the Show values button on this page")
 
+    def period_report(ref: str) -> PeriodReport | str:
+        from .period_reconciliation import period_reconciliation
+
+        if (paused := paused_text()) is not None:
+            return paused
+        with Store(db_path) as store:
+            return period_reconciliation(
+                store,
+                sibling_accounts=_account_map(store).accounts_by_source(),
+                account=ref or None,
+            )
+
     def archive_notes_for(store: Store, *, only: str | None = None) -> dict[str, ArchiveNote]:
         from .spaces import archive_notes as read_archive_notes
 
@@ -4472,6 +4485,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statement_listing_report=statement_listing_report,
         balance_reconciliation_text=balance_reconciliation_text,
         period_reconciliation_text=period_reconciliation_text,
+        period_report=period_report,
         ledger_data=ledger_data,
         balance_chart_data=balance_chart_data,
         coverage_timeline_data=coverage_timeline_data,
