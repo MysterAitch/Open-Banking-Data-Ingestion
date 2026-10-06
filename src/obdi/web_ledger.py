@@ -618,6 +618,20 @@ def _balance_word(direction: str) -> str:
     return _BALANCE_WORDS.get(direction, direction)
 
 
+def _balance_figure(direction: str, amount: str, unmasked: bool) -> str:
+    """A balance, a difference, or an opening figure as the page prints it.
+
+    Masked, every one is the same sealed slot with no direction word: a nil used to print as
+    the word "nil", which told the reader the figure exactly, and "in credit" or "overdrawn"
+    beside a sealed slot told them its sign. Shown, the direction word and the figure, or "nil".
+    """
+    if not unmasked:
+        return f'<span class="mono nowrap fig sealed">{_esc(MASKED_TOTAL)}</span>'
+    if direction == "nil":
+        return "nil"
+    return f'{_esc(_balance_word(direction))} <span class="mono nowrap fig">{_esc(amount)}</span>'
+
+
 def _anchor_row(
     line: Any, *, balance_only: bool = False, unmasked: bool = True, note: str = ""
 ) -> str:
@@ -647,21 +661,11 @@ def _anchor_row(
         detail = ": the transactions add up to it"
     else:
         role = '<span class="pill pill-bad">differs</span>'
-        difference = _signed(
-            _balance_word(line.difference_direction), line.difference_direction, line.difference
-        )
-        detail = (
-            f' from what the transactions add up to, by <span class="fig{_seal(unmasked)}">'
-            f"{_esc(difference)}</span>"
+        detail = " from what the transactions add up to, by " + _balance_figure(
+            line.difference_direction, line.difference, unmasked
         )
     basis = _BASIS_WORDS.get(line.basis, line.basis)
-    if line.balance_direction == "nil":
-        balance = "nil"
-    else:
-        balance = (
-            f"{_esc(_balance_word(line.balance_direction))} "
-            f'<span class="mono nowrap fig{_seal(unmasked)}">{_esc(line.balance)}</span>'
-        )
+    balance = _balance_figure(line.balance_direction, line.balance, unmasked)
     return (
         "<li>"
         f"<p>{role}{detail}</p>"
@@ -2335,10 +2339,10 @@ def _opening_html(
                 "Test the transactions between the statements, period by period</a></p>"
             )
         if opening.state == "derived":
-            figure = _signed(_balance_word(opening.direction), opening.direction, opening.opening)
+            figure = _balance_figure(opening.direction, opening.opening, unmasked)
             body += (
                 f'<p><strong>Opening balance, at the end of {_esc(opening.as_at)}:</strong> '
-                f'<span class="mono">{_esc(figure)}</span>. '
+                f"{figure}. "
                 + (
                     "The account opened with nothing, so no transaction has to be taken on trust."
                     if opening.anchors and opening.anchors[0].basis == "opened"
@@ -2591,10 +2595,17 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
     )
 
 
-def _position_html(position: Any, *, bound: bool) -> str:
+def _position_html(position: Any, *, bound: bool, unmasked: bool) -> str:
     included = position.opening_included
-    word = _balance_word if included else _direction_word
     verdict = _NOTHING_SENT if not bound else f"The two positions {_differ(position.differs)}."
+
+    def figure(direction: str, amount: str) -> str:
+        # With the opening included the figure is a balance, sealed whole when masked like
+        # every balance on the page; without it, a net movement, whose direction is shown.
+        if included:
+            return _balance_figure(direction, amount, unmasked)
+        return _esc(_signed(_direction_word(direction), direction, amount))
+
     return _part("Running position", (
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
@@ -2602,18 +2613,14 @@ def _position_html(position: Any, *, bound: bool) -> str:
             "Transactions counted (void, counted elsewhere, and reversed excluded)",
             position.rows_counted,
         )
-        + _count(
+        + _count_html(
             "Balance by the transactions held"
             + (", plus the opening balance" if included else ""),
-            _signed(
-                word(position.store_direction), position.store_direction, position.store_balance
-            ),
+            figure(position.store_direction, position.store_balance),
         )
-        + _count(
+        + _count_html(
             "Balance by what would be sent to Actual",
-            _signed(
-                word(position.sent_direction), position.sent_direction, position.sent_balance
-            ),
+            figure(position.sent_direction, position.sent_balance),
         )
         + "</table></div>"
         f"<p><strong>{_esc(verdict)}</strong> "
@@ -2992,7 +2999,9 @@ def _how_checked_html(view: Any, unmasked: bool, *, with_counts: bool) -> str:
         else ""
     )
     position = (
-        _position_html(view.position, bound=view.actual_bound) if view.position is not None else ""
+        _position_html(view.position, bound=view.actual_bound, unmasked=unmasked)
+        if view.position is not None
+        else ""
     )
     counts = ""
     if with_counts:

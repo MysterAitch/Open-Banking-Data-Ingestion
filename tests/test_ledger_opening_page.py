@@ -215,7 +215,12 @@ class TestTwoAnchors:
         assert_no_secret(masked)
         assert "£489.89" in shown
         assert "£4,000.00" in shown
-        assert "overdrawn or owed £489.89" in shown, "the anchor is BELOW the prediction"
+        assert re.search(r"overdrawn or owed <span[^>]*>£489\.89</span>", shown), (
+            "the anchor is BELOW the prediction"
+        )
+        assert not re.search(r"(overdrawn or owed|in credit) <span", masked), (
+            "masked, a balance carries no sign"
+        )
 
 
 #: With the opening at the end of 03-10, no row falls after 03-20, so a balance
@@ -279,7 +284,7 @@ class TestALongRunOfAgreeingAnchorsIsCutToTheNewest:
         assert page.count(IN_AGREEMENT) == LISTED
         assert "and 2 earlier known balances, all add up" in page
         assert "1 later known balance differs" in page
-        assert "overdrawn or owed £489.89" in shown
+        assert re.search(r"overdrawn or owed <span[^>]*>£489\.89</span>", shown)
         assert_no_secret(page)
 
     def test_FullList_ListsEveryAgreeingAnchorAndOffersTheWayBack(self, lab):
@@ -310,9 +315,14 @@ class TestANilBalanceIsJustNil:
         opening of nothing."""
         lab.seed("2026-03-10", "67.50")
 
-        for page in (lab.get().text, lab.show_values().text):
-            assert 'at the end of 2026-03-01:</strong> <span class="mono">nil</span>.' in page
-            assert "nil £" not in page
+        shown = lab.show_values().text
+        assert "at the end of 2026-03-01:</strong> nil." in shown
+        assert "nil £" not in shown
+        # Masked, a nil is a sealed slot like any other balance: the owner saw "nil" printed
+        # where every other figure was sealed, which told him the figure exactly.
+        masked = lab.get().text
+        assert "at the end of 2026-03-01:</strong> nil" not in masked
+        assert re.search(r'at the end of 2026-03-01:</strong> <span class="[^"]*sealed"', masked)
 
 
 class TestOnlyShowValuesIsAPrimaryButton:

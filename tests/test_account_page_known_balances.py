@@ -38,6 +38,7 @@ SPARSE = "starling-sparse"
 FAULTY = "starling-faulty"
 NOTHING = "starling-nothing"
 FEW = "starling-few"
+NIL = "starling-nil"
 
 DAYS = 2000
 FIRST_DAY = date(2020, 1, 1)
@@ -83,6 +84,10 @@ def _build(store: Store) -> None:
     build_account(store, FAULTY, every=10, fault=True)
     build_account(store, FEW, every=250)
     build_account(store, NOTHING, every=0)
+    # A loan paid off: one transaction, and a balance of nil stated for its last day, so the
+    # page has a nil to print (the owner saw "nil" printed where every other figure is sealed).
+    land(store, f"{NIL}-0", txn(NIL, FEED, f"{NIL}-1", _day(1), 5000, "Paid off"))
+    record_stated_anchor(store, NIL, _day(1).isoformat(), "0.00", today=_day(DAYS))
 
 
 @pytest.fixture(scope="module")
@@ -172,6 +177,35 @@ class TestTheDefaultPage:
 
         assert "earlier known balance" not in page
         assert "Known balances (none stated)" in page
+
+
+class TestAMaskedPageHidesANilAndASign:
+    """The owner saw "End of 2025-04-30: nil" on a masked page: a nil balance printed as the
+    word, which tells the reader the figure exactly, where every other balance is a sealed
+    slot; and "in credit" or "overdrawn or owed" beside a sealed slot told them its sign."""
+
+    def test_NilBalance_Masked_IsASealedSlotLikeAnyOther(self, base):
+        page = get(base, NIL)
+        balances = re.findall(
+            r"End of <span[^>]*>\d{4}-\d\d-\d\d</span>: ([^<]*<[^>]*>[^<]*)", page
+        )
+
+        assert balances, "the stated balance is listed"
+        assert all("nil" not in found and "sealed" in found for found in balances), balances
+
+    def test_Balances_Masked_CarryNoDirectionWord(self, base):
+        for ref in (NIL, FAULTY, SPARSE):
+            page = get(base, ref)
+
+            # A direction word followed by a figure's slot is a signed balance; the words also
+            # appear in the state-a-balance form's own label, which names no figure.
+            assert not re.search(r"(in credit|overdrawn or owed) <span", page), ref
+
+    def test_NilBalance_WithValuesShown_ReadsNilAndOthersReadTheirDirection(self, base):
+        assert ": nil" in shown(base, NIL).text
+        assert "overdrawn or owed" in shown(base, SPARSE).text or (
+            "in credit" in shown(base, SPARSE).text
+        )
 
 
 class TestABalanceThatDiffersIsAlwaysShown:
