@@ -155,6 +155,18 @@ class AccountOutlook:
     #: statement or export of its own to fetch: it is tested with its main account as a whole.
     space_of: str = ""
 
+    def due(self, today: date) -> date | None:
+        """The day the next statement is expected, where the account needs nothing fetched and
+        that day has not passed; None otherwise.
+
+        The one statement of when a statement is "not yet due": Bring in says it as "Next
+        statement" and the account page says it where its trust sentence would otherwise warn
+        that the rows since the last statement cannot be tested yet.
+        """
+        if self.gaps or self.next_expected is None or self.next_expected < today:
+            return None
+        return self.next_expected
+
 
 @dataclass(frozen=True)
 class FetchReport:
@@ -179,7 +191,7 @@ class FetchReport:
     @property
     def next_expected(self) -> date | None:
         """The earliest day a statement is expected among the accounts that need nothing."""
-        days = [a.next_expected for a in self.accounts if not a.gaps and a.next_expected]
+        days = [due for a in self.accounts if (due := a.due(self.today)) is not None]
         return min(days) if days else None
 
 

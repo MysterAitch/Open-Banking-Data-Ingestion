@@ -75,6 +75,10 @@ class AccountReading:
     timeline: AccountTimeline | None
     #: Sentences for what could not be read just now, said on the page and never swallowed.
     unread: tuple[str, ...] = ()
+    #: The day the next statement is due where Bring in holds one as expected and it has not
+    #: passed (`AccountOutlook.due`): the days since the last statement cannot be tested before
+    #: it, so the trust sentence says so instead of warning.
+    next_due: date | None = None
 
 
 def _month_start(month: str) -> date | None:
@@ -127,7 +131,9 @@ def read_account(config: object, ledger: Ledger, today: date) -> AccountReading:
         everyone = grouped(build_todos(overview, report, _name_in(overview)))
         todos = tuple(t for t in everyone if t.account == ref or ref in t.accounts)
     timeline = _timeline(config, ref, today, unread)
-    return AccountReading(trust, standing, todos, timeline, tuple(unread))
+    outlook = next((o for o in report.accounts if o.account == ref), None) if report else None
+    due = outlook.due(today) if outlook is not None else None
+    return AccountReading(trust, standing, todos, timeline, tuple(unread), due)
 
 
 def _name_in(overview: Overview) -> Callable[[str], str]:
@@ -193,13 +199,24 @@ def head_html(shown: AccountShown, *, sent: bool, archived: str = "") -> str:
 # -------------------------------------------------------------------------- The trust sentence
 
 
-def _waiting_marked(text: str) -> str:
+def _waiting_marked(text: str, due: date | None = None) -> str:
     """The sentence escaped, with the clause that asks something of the reader set apart, since an
-    old date is the one thing in a quiet line that is not quiet."""
+    old date is the one thing in a quiet line that is not quiet.
+
+    Where the next statement is `due` and has not passed, that clause asks nothing: the days
+    since the last statement cannot be tested before it is issued, so it is replaced by when it
+    is due, in the ordinary colour.
+    """
     phrase = f"{NOTHING_TO_CHECK_AGAINST.capitalize()} since"
     at = text.find(phrase)
     if at < 0:
         return _whole_dates(_esc(text))
+    if due is not None:
+        end = text.find(". ", at)
+        rest = "" if end < 0 else text[end + 1 :]
+        return _whole_dates(
+            _esc(f"{text[:at]}Next statement due about {due.isoformat()}.{rest}")
+        )
     return (
         _whole_dates(_esc(text[:at]))
         + f'<span class="age">{_whole_dates(_esc(text[at:]))}</span>'
@@ -219,25 +236,25 @@ def trust_html(reading: AccountReading, *, held_transactions: int, span: tuple[s
     if broken:
         stop = text.find(". ") + 1 or len(text)
         head, sub = text[:stop], text[stop:].strip()
-        return _headline("bad", head, sub)
+        return _headline("bad", head, sub, reading.next_due)
     if verdict == DOES_NOT_ADD_UP:
         at = text.find(DOES_NOT_ADD_UP.capitalize())
         head, sub = (text[at:], text[:at].strip()) if at >= 0 else (text, "")
-        return _headline("bad", head, sub)
+        return _headline("bad", head, sub, reading.next_due)
     if trust.adds_up_to is None and trust.locked_to is None:
         held = (
             f"{plural(held_transactions, 'transaction')} held, from {span[0]} to {span[1]}."
             if held_transactions
             else ""
         )
-        return _headline("none", text, held)
-    return f'<p class="trust">{_waiting_marked(text)}</p>'
+        return _headline("none", text, held, reading.next_due)
+    return f'<p class="trust">{_waiting_marked(text, reading.next_due)}</p>'
 
 
-def _headline(kind: str, head: str, sub: str) -> str:
+def _headline(kind: str, head: str, sub: str, due: date | None = None) -> str:
     said = f'<p class="trust {kind}">{_whole_dates(_esc(head))}'
     if sub:
-        said += f'<span class="sub">{_waiting_marked(sub)}</span>'
+        said += f'<span class="sub">{_waiting_marked(sub, due)}</span>'
     return said + "</p>"
 
 

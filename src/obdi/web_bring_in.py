@@ -48,13 +48,22 @@ from .bring_in import (
     upload_kind,
     wanted_heading,
 )
+from .bring_in_dry_run import (
+    VALUES_BUTTON,
+    decision_line,
+    dry_run_fold,
+    values_page_body,
+)
 from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
+from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
+from .bring_in_preview import preview_html
 from .callback import render_page
 from .connections import Connection, ConnectionStore
 from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
 from .fetch_gaps import FetchReport, GapKind
 from .fetch_marks import AGGREGATOR
 from .fetch_reasons import gap_lines
+from .ingest import MatcherPreview
 from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import AccountOverview, Overview
 from .page_times import UTC_NOTE, instant_of, span_phrase
@@ -149,6 +158,19 @@ class FileResult:
     #: label it prints (digits masked), or "" for a whole document.
     section: str = ""
     section_label: str = ""
+    #: What the document is, as markup (`bring_in_preview`), for a statement waiting for an
+    #: account; "" where the kept listing could not say.
+    preview: str = ""
+    #: What reading a statement in counted, in the importer's own words (`ingest`): shown folded,
+    #: and never the lead of an answer.
+    counted: str = ""
+    #: What reading it in did for what the owner wanted, as markup (`_outcome_html`).
+    outcomes: str = ""
+    #: What reading a statement in to the account guessed for it would do, a transaction at a
+    #: time (`bring_in_dry_run`), as markup, and the sentence beside its chooser that it would
+    #: ask for decisions; "" where no account is guessed or the dry run could not be made.
+    dry_run: str = ""
+    decision: str = ""
 
     @property
     def placed_in(self) -> tuple[str, ...]:
@@ -499,8 +521,11 @@ def _reasons_html(data: BringInData) -> str:
     )
 
 
-def _reason_html(guess: Guess | None, names: AccountsShown) -> str:
-    """Why an account is pre-selected beside a chooser, or why none is where the evidence splits."""
+def reason_html(guess: Guess | None, names: AccountsShown) -> str:
+    """Why an account is pre-selected beside a chooser, or why none is where the evidence splits.
+
+    Said by every chooser of a statement waiting for an account: the one form here and the Kept
+    statements page's own."""
     if guess is None:
         return ""
     if not guess.account:
@@ -569,10 +594,11 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
         rows.append(
             '<li class="bi-assign-file">'
             f'<p class="bi-assign-name">{_called(item)}</p>'
+            f"{item.preview}{item.dry_run}"
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
-            f"{_reason_html(item.guess, names)}{_held_html(item, names)}</li>"
+            f"{reason_html(item.guess, names)}{_held_html(item, names)}{item.decision}</li>"
         )
     guessed = any(item.guess and item.guess.account for item in waiting)
     lead = "Nothing is read in until you press." + (
@@ -615,12 +641,27 @@ def _results_html(data: BringInData) -> str:
     ]
     held = "".join(f"<li>{_called(item)}: {_says(item, names)}.</li>" for item in results.files)
     received = len({(item.filename, item.artefact or item.token) for item in results.files})
+    outcomes = "".join(
+        f"<li>{_called(item)}: {item.outcomes}</li>" for item in results.files if item.outcomes
+    )
+    counted = "".join(
+        f"<li>{_called(item)}: {_esc(item.counted)}</li>"
+        for item in results.files
+        if item.counted
+    )
     return (
         f"<h2>{_esc(plural(received, 'file'))} received</h2>{settled}"
+        + (f'<ul class="bi-outcomes">{outcomes}</ul>' if outcomes else "")
         + _assign_html(results, names)
         + (f'<ul class="todos bi-ask">{"".join(rows)}</ul>' if rows else "")
         + f'<details class="evidence"><summary>What each file held</summary><ul>{held}</ul>'
         "</details>"
+        + (
+            '<details class="evidence"><summary>What was counted</summary>'
+            f"<ul>{counted}</ul></details>"
+            if counted
+            else ""
+        )
     )
 
 
@@ -776,9 +817,9 @@ def quiet_lines(report: FetchReport | None, names: AccountsShown) -> tuple[str, 
         return ()
     lines: list[str] = []
     coming = [
-        f"{names.of(o.account).as_name()} about {o.next_expected.isoformat()}"
+        f"{names.of(o.account).as_name()} about {due.isoformat()}"
         for o in report.accounts
-        if not o.gaps and o.next_expected is not None
+        if (due := o.due(report.today)) is not None
     ]
     if coming:
         lines.append("Next statement: " + "; ".join(coming) + ".")
@@ -929,7 +970,9 @@ class BringInPages:
         )
         extra = quiet_lines(report, names)
         evidence = Evidence(evidence.summary or "Sources", (*evidence.lines, *extra))
-        kept, waiting = self._kept_counts()
+        kept, waiting = self._kept_counts(
+            frozenset(item.artefact for item in results.awaiting()) if results else frozenset()
+        )
         return BringInData(
             today=today,
             report=report,
@@ -946,7 +989,10 @@ class BringInPages:
             kept_waiting=waiting,
         )
 
-    def _kept_counts(self) -> tuple[int | None, int]:
+    def _kept_counts(self, asked_in_form: frozenset[int]) -> tuple[int | None, int]:
+        """How many statements are kept, and how many of them wait for an account without the
+        one form already asking about them (`asked_in_form`: their kept ids): a file is
+        signposted once, where it can be answered."""
         hook = self.bound_config.kept_statements
         if hook is None:
             return None, 0
@@ -957,7 +1003,8 @@ class BringInPages:
         waiting = sum(
             1
             for e in entries
-            if e["account_ref"] == UNASSIGNED_ACCOUNT
+            if int(str(e["id"])) not in asked_in_form
+            and e["account_ref"] == UNASSIGNED_ACCOUNT
             and e["parser"]
             and not e.get("refusal")
             and not e.get("sections")
@@ -1021,25 +1068,119 @@ class BringInPages:
             )
             return
         before = self._standings()
+        wanted_before = self._wanted_statements()
         results = [self._place(payload, filename, account) for payload, filename in files]
         guess_note = ""
         if not account:
             results, guess_note = self._with_guesses(results)
-        summary = self._summarise(results, before, guess_note=guess_note)
+        summary = self._summarise(
+            results, before, wanted_before=wanted_before, guess_note=guess_note
+        )
         self._respond(
             200, self._answer(self._data(scoped=account, results=summary)), no_store=True
         )
+
+    def _wanted_statements(self) -> tuple[WantedFile, ...] | None:
+        """The statements wanted now, or None where that cannot be worked out."""
+        hook = self.bound_config.fetch_gaps
+        if hook is None:
+            return None
+        try:
+            report = hook(datetime.now(UTC).date())
+        except Exception:
+            return None
+        return tuple(item for item in files_wanted(report) if not item.export)
+
+    def _open_flags(self) -> Mapping[str, int] | None:
+        """How many open flags each account has now: none where flags are not wired here, and
+        None where the queue could not be read (a rebuild holds it, say)."""
+        hook = self.bound_config.review_flags_data
+        if hook is None:
+            return {}
+        try:
+            return open_flags_by_account(hook().cards)
+        except Exception:
+            return None
+
+    def _listed_days(
+        self, listing: Mapping[int, Mapping[str, object]], result: FileResult
+    ) -> tuple[date, date] | None:
+        """The first and last day a placed statement (or its account of a document of several)
+        lists, from the kept listing; None where it lists none or the listing has no word."""
+        entry = listing.get(result.artefact)
+        if entry is None:
+            return None
+        source: Mapping[str, object] = entry
+        if result.section:
+            parts = entry.get("sections")
+            source = next(
+                (
+                    p for p in parts
+                    if isinstance(p, Mapping) and str(p.get("token")) == result.section
+                ),
+                {},
+            ) if isinstance(parts, list) else {}
+        days = source.get("listed_days")
+        if isinstance(days, list) and len(days) == 2 and days[0]:
+            try:
+                return date.fromisoformat(str(days[0])), date.fromisoformat(str(days[1]))
+            except ValueError:
+                return None
+        return None
+
+    def _with_outcomes(
+        self,
+        results: Sequence[FileResult],
+        wanted_before: tuple[WantedFile, ...] | None,
+        names: AccountsShown,
+    ) -> list[FileResult]:
+        """Each statement read in, with what that did for what was wanted, how many of its
+        transactions are new, and how many still need a decision (the open flags read now,
+        after every import of this press has settled what it can)."""
+        placed = [r for r in results if r.outcome is Outcome.PLACED and r.account]
+        if not placed:
+            return list(results)
+        wanted_after = self._wanted_statements()
+        flags = self._open_flags()
+        listing: Mapping[int, Mapping[str, object]] = {}
+        hook = self.bound_config.kept_statements
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                listing = {int(str(item["id"])): item for item in hook()}
+        found: list[FileResult] = []
+        for item in results:
+            if item not in placed:
+                found.append(item)
+                continue
+            covered = (
+                None
+                if wanted_before is None or wanted_after is None
+                else coverage(
+                    wanted_before, wanted_after, item.account, self._listed_days(listing, item)
+                )
+            )
+            lines = sentences(
+                covered,
+                new_transactions(item.counted),
+                None if flags is None else flags.get(item.account, 0),
+                account=item.account,
+                names=names,
+            )
+            found.append(replace(item, outcomes=" ".join(lines)))
+        return found
 
     def _summarise(
         self,
         results: Sequence[FileResult],
         before: dict[str, AccountStanding],
         *,
+        wanted_before: tuple[WantedFile, ...] | None,
         guess_note: str = "",
     ) -> UploadResults:
         """What the files settled, in the trust sentence's terms, and what is still asked."""
         after = self._standings()
         names = self._account_names()
+        results = self._with_outcomes(results, wanted_before, names)
         placed = sorted(
             {ref for r in results if r.outcome is Outcome.PLACED for ref in r.placed_in}
         )
@@ -1074,6 +1215,7 @@ class BringInPages:
             if r.outcome is Outcome.KEPT and r.kind is UploadKind.STATEMENT and not r.account
         ]
         hook = self.bound_config.kept_statements
+        names = self._account_names()
         if not waiting or hook is None:
             return results, ""
         try:
@@ -1089,29 +1231,38 @@ class BringInPages:
                 resolved.append(item)
             elif not isinstance(parts, list) or not parts:
                 guess = guess_account(entry, listing)
+                dry = self._dry_run(item.artefact, guess)
                 resolved.append(
-                    replace(item, guess=guess, all_held=self._all_held(item.artefact, guess))
+                    replace(
+                        item,
+                        guess=guess,
+                        all_held=0 if dry is None else (dry.total if dry.new == 0 else 0),
+                        preview=preview_html(entry),
+                        dry_run="" if dry is None else dry_run_fold(dry, names, item.artefact),
+                        decision="" if dry is None else decision_line(dry),
+                    )
                 )
             else:
-                resolved.extend(self._section_results(item, parts))
+                resolved.extend(self._section_results(item, entry, parts))
         return resolved, ""
 
-    def _all_held(self, artefact: int, guess: Guess | None) -> int:
-        """How many transactions a statement lists where the account guessed for it already holds
-        every one, by the matcher's dry run; 0 for no guess, for a statement with new
-        transactions, or where the count could not be made (nothing is then said, as of any
-        statement the account does not hold in full)."""
+    def _dry_run(self, artefact: int, guess: Guess | None) -> MatcherPreview | None:
+        """What the matcher would do with a statement's transactions against the account guessed
+        for it, one pass that writes nothing; None for no guess, or where it could not be made
+        (nothing is then said). It gives the "already held" line and the per-transaction fold
+        both, so the statement is resolved once."""
         hook = self.bound_config.preview_kept_statement
         if hook is None or guess is None or not guess.account:
-            return 0
+            return None
         try:
-            preview = hook(artefact, guess.account)
+            return hook(artefact, guess.account)
         except Exception:
-            return 0
-        return preview.total if preview is not None and preview.new == 0 else 0
+            return None
 
     @staticmethod
-    def _section_results(item: FileResult, parts: list[object]) -> list[FileResult]:
+    def _section_results(
+        item: FileResult, entry: Mapping[str, object], parts: list[object]
+    ) -> list[FileResult]:
         """One result for each account of a document of several that still needs one; a
         document with none left says it is already held."""
         sections = [part for part in parts if isinstance(part, Mapping)]
@@ -1130,7 +1281,7 @@ class BringInPages:
             else:
                 found.append(replace(
                     item, section=str(part["token"]), section_label=label,
-                    guess=section_guess(part),
+                    guess=section_guess(part), preview=preview_html(entry, part),
                 ))
         return found
 
@@ -1185,14 +1336,49 @@ class BringInPages:
             self._respond(400, self._answer(self._data(notice=refusal)), no_store=True)
             return True
         before = self._standings()
+        wanted_before = self._wanted_statements()
         results = [
             self._assigned_or_kept(listing[ident], ident, section, account)
             for ident, section, account in sorted(asked)
         ]
-        self._respond(
-            200, self._answer(self._data(results=self._summarise(results, before))), no_store=True
-        )
+        summary = self._summarise(results, before, wanted_before=wanted_before)
+        self._respond(200, self._answer(self._data(results=summary)), no_store=True)
         return True
+
+    def statement_dry_run(self, form: Mapping[str, list[str]]) -> None:
+        """Answer the press of "Show values" under a statement of the one form with that
+        statement's per-transaction list, values shown, for the account chosen for it.
+
+        The press submits the whole form of choosers, so the account is the one chosen beside
+        the statement at the moment of pressing. Nothing is read in, and the answer is marked
+        as showing values and not kept by the browser.
+        """
+        asked = (form.get(VALUES_BUTTON) or [""])[0].strip()
+        account = (form.get(f"account-{asked}") or [""])[0].strip() if asked.isdigit() else ""
+        hook = self.bound_config.preview_kept_statement
+        listing_hook = self.bound_config.kept_statements
+        if not asked.isdigit() or hook is None or listing_hook is None:
+            notice = "That statement could not be found."
+        elif not account or account not in self._account_names():
+            notice = "Choose an account for that statement first; its list is read against it."
+        else:
+            try:
+                dry = hook(int(asked), account)
+                entries = {int(str(e["id"])): e for e in listing_hook()}
+            except Exception:
+                dry, entries = None, {}
+            entry = entries.get(int(asked))
+            if dry is None or entry is None or not dry.rows:
+                notice = "What reading it in would do could not be worked out for that account."
+            else:
+                body = values_page_body(
+                    dry, self._account_names(), str(entry["origin"]), account
+                )
+                self._respond(
+                    200, render_page("What reading it in would do", body), no_store=True
+                )
+                return
+        self._respond(400, self._answer(self._data(notice=notice)), no_store=True)
 
     def _assigned_or_kept(
         self, entry: Mapping[str, object], ident: int, section: str, account: str
@@ -1235,13 +1421,23 @@ class BringInPages:
             self._standings().get(account),
         )
 
+    def answer_wanted(self) -> tuple[WantedFile, ...] | None:
+        """The statements wanted now, for a door outside this page that settles one of its
+        files and answers with this page (`answer_settled`)."""
+        return self._wanted_statements()
+
     def answer_settled(
-        self, artefact: int, account: str, before: dict[str, AccountStanding]
+        self,
+        artefact: int,
+        account: str,
+        before: dict[str, AccountStanding],
+        counted: str,
+        wanted_before: tuple[WantedFile, ...] | None,
     ) -> None:
         """Answer a kept statement given its account, from this page's own form, with this page:
-        what it settled in the results at the top and what is still wanted beneath, so the next
-        file is one press away and the old answer page is not where the person ends up."""
-        names = self._account_names()
+        what it settled and covered in the results at the top and what is still wanted beneath,
+        so the next file is one press away and the old answer page is not where the person ends
+        up. `counted` is the importer's own words for what it read."""
         filename = f"statement {artefact}"
         hook = self.bound_config.kept_statements
         if hook is not None:
@@ -1249,14 +1445,11 @@ class BringInPages:
                 for entry in hook():
                     if int(str(entry["id"])) == artefact:
                         filename = str(entry.get("origin") or filename)
-        after = self._standings()
-        sentence = settled_sentence(names.of(account).name, before.get(account), after.get(account))
-        summary = UploadResults(
-            (FileResult(filename, UploadKind.STATEMENT, Outcome.PLACED, account=account,
-                        artefact=artefact),),
-            (sentence,) if sentence else (),
-            newly_lockable(before, after),
+        placed = FileResult(
+            filename, UploadKind.STATEMENT, Outcome.PLACED, account=account, artefact=artefact,
+            counted=counted,
         )
+        summary = self._summarise([placed], before, wanted_before=wanted_before)
         self._respond(200, self._answer(self._data(results=summary)), no_store=True)
 
     def _place(self, payload: bytes, filename: str, account: str) -> FileResult:
@@ -1333,7 +1526,7 @@ class BringInPages:
             return replace(base, outcome=Outcome.REFUSED, note=_mask(str(exc)))
         if " read by " not in outcome:
             return replace(base, outcome=Outcome.REFUSED, note=_mask(outcome))
-        return replace(base, outcome=Outcome.PLACED)
+        return replace(base, outcome=Outcome.PLACED, counted=outcome)
 
     def _held_under(self, artefact: int) -> str:
         """The account a statement already held is filed under, "" where it waits for one."""

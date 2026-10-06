@@ -5353,6 +5353,7 @@ class ConnectionHandler(
         # and what is still wanted beneath. Anywhere else the plain answer page is kept.
         from_bring_in = back == "/bring-in"
         bring_in_before = self.answer_standings() if from_bring_in else {}
+        bring_in_wanted = self.answer_wanted() if from_bring_in else None
         try:
             outcome = hook(int(artefact), account, doubt_acknowledged=acknowledged)
         except Exception as exc:
@@ -5385,7 +5386,7 @@ class ConnectionHandler(
             )
             return
         if from_bring_in:
-            self.answer_settled(int(artefact), account, bring_in_before)
+            self.answer_settled(int(artefact), account, bring_in_before, outcome, bring_in_wanted)
             return
         verification = self.answer_sentence(account, before)
         self._respond(
@@ -6340,6 +6341,9 @@ class ConnectionHandler(
             return
         if route == "/statement-section-assign":
             self._statement_section_assign()
+            return
+        if route == "/statement-dry-run":
+            self.statement_dry_run(self._read_form())
             return
 
         if route == "/save-account":

@@ -16,10 +16,11 @@ only, as on every GET.
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from urllib.parse import quote
 
 from .account_names import AccountsShown
+from .bring_in_guess import guess_account
 from .namespaces import UNASSIGNED_ACCOUNT
 from .plural import plural
 from .web_marks import FETCH_NEXT_LINE
@@ -44,7 +45,9 @@ def _reader(item: dict[str, object]) -> str:
     return _esc(str(parser)) if parser else "no parser for this layout yet"
 
 
-def _names_found(item: dict[str, object]) -> str:
+def names_found_words(item: Mapping[str, object]) -> str:
+    """The issuer names found in a kept statement, each with its count, as the Kept statements
+    page and Bring in's preview both say them."""
     found = item.get("names")
     return (
         ", ".join(f"{_esc(str(name))} {count}" for name, count in found)
@@ -88,7 +91,7 @@ def _card(
     elif reads:
         facts.append(f"<dt>Reading</dt><dd>{reads}</dd>")
     if not shared_names:
-        facts.append(f"<dt>Names found</dt><dd>{_names_found(item)}</dd>")
+        facts.append(f"<dt>Names found</dt><dd>{names_found_words(item)}</dd>")
     return (
         "<li><details>"
         f"<summary><span>{_esc(str(item['origin']))} - kept {_esc(_kept_at(item))}</span></summary>"
@@ -113,7 +116,7 @@ def _group(
         return ""
     ordered = sorted(items, key=_order)
     reader = _shared(ordered, _reader)
-    shared_names = _shared(ordered, _names_found)
+    shared_names = _shared(ordered, names_found_words)
     said = []
     if not show_whose:
         said.append("No account yet.")
@@ -417,6 +420,7 @@ def statements_body(
     """Everything between the heading and the foot of the kept statements page; with `ref`, the
     one account's documents (`account_statements_body`)."""
     from .web import account_picker
+    from .web_bring_in import reason_html
 
     if ref:
         return account_statements_body(entries, ref, names)
@@ -467,11 +471,15 @@ def statements_body(
         # dozen said the same thing a dozen times.
         if not can_assign or int(str(item["id"])) in covered:
             return ""
+        # The same guess and reason as Bring in's one form: the one `guess_account` and
+        # `reason_html`, so the two doors to one file never disagree about whose it is.
+        guess = guess_account(item, entries)
         return (
             "<details><summary>Give it an account</summary>"
             '<form action="/statement-assign" method="post">'
             f'<input type="hidden" name="artefact" value="{int(str(item["id"]))}">'
-            + picker
+            + account_picker(options, selected=guess.account if guess else "")
+            + reason_html(guess, names)
             + '<p><button type="submit">Assign and read in</button></p>'
             "</form></details>"
         )

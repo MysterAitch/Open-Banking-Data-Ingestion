@@ -24,6 +24,8 @@ BRING_IN_STYLES = """
  .bi-scoped { font: 600 var(--text-md)/130% var(--sans); color: var(--ink); }
  .bi-notice { margin: var(--s2) 0; padding: var(--s1) 0 var(--s1) var(--s3); border-left: var(--rail) solid var(--warn); font: var(--text-md)/140% var(--sans); }
  .bi-settled { margin: var(--s1) 0; }
+ .bi-outcomes { list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-sm)/140% var(--sans); }
+ .bi-outcomes li { margin: var(--s1) 0; overflow-wrap: anywhere; }
  .bi-ask { margin: var(--s3) 0; }
  .bi-ask .todo-form { grid-template-columns: minmax(0, 1fr); }
  .bi-ask .todo-form p { margin: 0; }
@@ -38,6 +40,13 @@ BRING_IN_STYLES = """
  .bi-assign-name { margin: 0 0 var(--s1); font: var(--text-sm)/130% var(--sans); overflow-wrap: anywhere; }
  .bi-assign-file select { width: 100%; min-height: var(--hit); }
  .bi-guess { margin: var(--s1) 0 0; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .bi-preview { margin: 0 0 var(--s1); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ .bi-dry { margin: 0 0 var(--s1); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ .bi-dry > summary { min-height: var(--hit); display: flex; align-items: center; cursor: pointer; }
+ .bi-dry-says { margin: var(--s1) 0 0; }
+ .bi-dry-list { list-style: none; margin: var(--s1) 0; padding: 0; }
+ .bi-dry-list li { margin: var(--s1) 0; overflow-wrap: anywhere; }
+ .bi-dry button.button { width: 100%; margin: var(--s1) 0; }
  .bi-assign-bar { position: sticky; bottom: 0; padding: var(--s2) 0; background: var(--paper); border-top: var(--rule-weight) solid var(--rule); }
  .bi-assign-bar button.button { width: 100%; margin: 0; }
  .bi-fold { margin: var(--s3) 0; }

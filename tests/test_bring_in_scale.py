@@ -31,7 +31,9 @@ from test_phone_layout import sync_api
 
 WIDTH, SCREEN = 390, 800
 WANTED_SCREENS = 3.15
-AFTER_UPLOAD_SCREENS = 3.6
+# Measured 3.65 screens (2918 px) once an answer led with what a statement covered and folded the
+# importer's counts beneath it (2026-10-06); it was under 3.6 before.
+AFTER_UPLOAD_SCREENS = 3.8
 
 
 @pytest.fixture(scope="module")
@@ -144,9 +146,13 @@ class TestTenStatementsWaitingForAnAccount:
     """Measured at 390 px (2026-10-06) over the household above, ten statements and no account:
     the results page is about 1820 px (2.3 screens) with the wanted list folded, the first chooser
     ends at about 295 px, and the one control sits in a bar fixed to the foot of the screen
-    (it is on the first screen without any scrolling, and at the end of the list on the last)."""
+    (it is on the first screen without any scrolling, and at the end of the list on the last).
 
-    TEN_SCREENS = 3.0
+    Each row then gained its preview of what the document is (2026-10-06): the page is 2457 px
+    (3.07 screens), about 64 px a row, which is the price of a GUID-named file saying what it is.
+    The allowance is 3.2 screens."""
+
+    TEN_SCREENS = 3.2
 
     def _upload(self, browser: object, base: str, tmp_path: Path) -> object:
         from datetime import date

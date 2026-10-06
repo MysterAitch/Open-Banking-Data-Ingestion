@@ -3846,7 +3846,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             except (DataError, ValueError):
                 return None
             return preview_reconcile(
-                store, incoming, space_blind=families_of(store, _account_map(store)).blind_in
+                store,
+                incoming,
+                space_blind=families_of(store, _account_map(store)).blind_in,
+                transfers=True,
             )
 
     def review_statement_section(
