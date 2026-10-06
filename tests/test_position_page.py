@@ -330,7 +330,8 @@ class TestTheBalanceMatchesTheLedger:
         ledger = lab.ledger_values(ref).text
         position = lab.show_values().text
 
-        assert f"{words} £{figure.removeprefix('£')}" in ledger
+        # The ledger sets a shown balance as the direction word and the figure in its own slot.
+        assert re.search(rf"{words} <span[^>]*>{re.escape(figure)}</span>", ledger)
         assert f'{words} <span class="mono nowrap">{figure}</span>' in position
 
 

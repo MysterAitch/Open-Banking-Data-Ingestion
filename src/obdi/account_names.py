@@ -55,10 +55,10 @@ class AccountShown:
 
     @property
     def name(self) -> str:
-        """The label where one exists, else the reference; "label (reference)" where the label
-        is shared with another account."""
-        if self.ambiguous:
-            return f"{self.label} ({self.ref})"
+        """The label where one exists, else the reference: plain words for a sentence or an
+        attribute. A label shared with another account is told apart only where the reference
+        can be set as code (`as_name`, `heading`): written into plain text the reference would
+        sit outside code on the page, which the identifiers test refuses."""
         return self.label or self.ref
 
     @property
@@ -66,7 +66,10 @@ class AccountShown:
         return bool(self.label)
 
     def heading(self) -> str:
-        """The name alone, escaped, for the content of a heading."""
+        """The name for the content of a heading: the label escaped, with the reference as code
+        beside it where the label is shared with another account."""
+        if self.ambiguous:
+            return f"{html.escape(self.label)} {code_html(self.ref)}"
         return html.escape(self.name)
 
     def as_name(self) -> str:

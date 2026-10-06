@@ -97,9 +97,16 @@ class TestTwoAccountsThatWouldReadTheSame:
         assert self.SHARED.of("halifax-a").as_name() == ("Mr Roger Howell <code>halifax-a</code>")
         assert self.SHARED.of("halifax-b").as_name() == ("Mr Roger Howell <code>halifax-b</code>")
 
-    def test_PlainNameAndHeading_ForEachOfTheTwo_CarryTheReference(self):
-        assert self.SHARED.of("halifax-a").name == "Mr Roger Howell (halifax-a)"
-        assert self.SHARED.of("halifax-b").heading() == "Mr Roger Howell (halifax-b)"
+    def test_HeadingAndName_ForEachOfTheTwo_CarryTheReferenceAsCode(self):
+        """The reference tells the two apart only where it can be set as code: written into
+        the plain name it reached pages as text, which the identifiers test refuses."""
+        assert self.SHARED.of("halifax-a").heading() == (
+            "Mr Roger Howell <code>halifax-a</code>"
+        )
+        assert self.SHARED.of("halifax-b").as_name() == (
+            "Mr Roger Howell <code>halifax-b</code>"
+        )
+        assert self.SHARED.of("halifax-a").name == "Mr Roger Howell"
 
     def test_TheDifferentlyNamedAccount_IsUnchanged(self):
         assert self.SHARED.of("halifax-cc").as_name() == "Halifax CC"
