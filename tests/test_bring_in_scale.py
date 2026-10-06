@@ -17,6 +17,7 @@ its browser is not installed, as `test_phone_layout` is.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -135,6 +136,70 @@ class TestTheWideLayout:
             assert target is not None and first is not None
             assert target["x"] + target["width"] <= first["x"], "the target is in its own column"
             assert abs(target["y"] - first["y"]) < SCREEN / 2, "and beside the list's head"
+        finally:
+            page.close()
+
+
+class TestTenStatementsWaitingForAnAccount:
+    """Measured at 390 px (2026-10-06) over the household above, ten statements and no account:
+    the results page is about 1820 px (2.3 screens) with the wanted list folded, the first chooser
+    ends at about 295 px, and the one control sits in a bar fixed to the foot of the screen
+    (it is on the first screen without any scrolling, and at the end of the list on the last)."""
+
+    TEN_SCREENS = 3.0
+
+    def _upload(self, browser: object, base: str, tmp_path: Path) -> object:
+        from datetime import date
+
+        from test_bring_in_assign import santander
+
+        paths = []
+        for index in range(10):
+            path = tmp_path / f"Statement-{index}.pdf"
+            path.write_bytes(santander(date(2026, 9, 10), 1000 + index))
+            paths.append(str(path))
+        page = _open(browser, f"{base}/bring-in")
+        page.set_input_files("input[type=file]", paths)  # type: ignore[attr-defined]
+        page.click("text=Read these files")  # type: ignore[attr-defined]
+        page.wait_for_load_state("load")  # type: ignore[attr-defined]
+        return page
+
+    def test_Page_WithTenStatementsWaiting_IsUnderThreeScreensBeforeThePress(
+        self, browser: object, base: str, tmp_path: Path
+    ) -> None:
+        page = self._upload(browser, base, tmp_path)
+        try:
+            height = page.evaluate("document.documentElement.scrollHeight")  # type: ignore[attr-defined]
+            assert page.locator(".bi-assign-file").count() == 10  # type: ignore[attr-defined]
+            assert height < self.TEN_SCREENS * SCREEN, f"{height / SCREEN:.2f} screens"
+        finally:
+            page.close()
+
+    def test_FirstScreen_HoldsTheFirstChooserAndTheOneControl(
+        self, browser: object, base: str, tmp_path: Path
+    ) -> None:
+        page = self._upload(browser, base, tmp_path)
+        try:
+            assert _bottom(page, ".bi-assign-file select") < SCREEN
+            assert _bottom(page, ".bi-assign-bar button") <= SCREEN
+        finally:
+            page.close()
+
+    def test_Control_AfterScrollingToTheLastFile_IsStillOnScreen(
+        self, browser: object, base: str, tmp_path: Path
+    ) -> None:
+        page = self._upload(browser, base, tmp_path)
+        try:
+            page.locator(".bi-assign-file").last.scroll_into_view_if_needed()  # type: ignore[attr-defined]
+            assert _bottom(page, ".bi-assign-bar button") <= SCREEN
+            # The suite clears every OBDI_ variable, so the folder is named without the prefix.
+            shots = os.environ.get("SCALE_SHOT_DIR")
+            if shots:
+                page.evaluate("window.scrollTo(0, 0)")  # type: ignore[attr-defined]
+                page.screenshot(path=str(Path(shots) / "ten-390-top.png"))  # type: ignore[attr-defined]
+                page.screenshot(  # type: ignore[attr-defined]
+                    path=str(Path(shots) / "ten-390-full.png"), full_page=True
+                )
         finally:
             page.close()
 
