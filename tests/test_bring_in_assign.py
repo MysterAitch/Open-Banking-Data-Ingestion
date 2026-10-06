@@ -415,9 +415,8 @@ class TestPressingOnceForAMixOfFiles:
 
         page = parse(self.press(base, root, everything).text)
 
-        assert not [
-            f for f in elements(page, "form") if f.attrs.get("action") == "/statements-assign"
-        ]
+        # What no reader reads stays listed, and says so; every file a reader reads is settled.
+        assert sorted(rows_of(assign_form(page))) == ["Notes-a.pdf", "Notes-b.pdf"]
         assert "7 files received" in flat(page)
 
     def test_Press_WithNoFileChosen_ReadsNothingInAndKeepsAllOfThem(self, served):

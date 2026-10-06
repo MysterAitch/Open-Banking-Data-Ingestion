@@ -84,6 +84,7 @@ from .web_marks import (
     verdict_clauses,
 )
 from .web_overview import _age_words, _whole_dates
+from .web_statements import names_found_words
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .statement_shape import ShapeReport
@@ -171,6 +172,11 @@ class FileResult:
     #: ask for decisions; "" where no account is guessed or the dry run could not be made.
     dry_run: str = ""
     decision: str = ""
+    #: A kept statement no reader reads yet, and the issuer names found in it as markup
+    #: (`names_found_words`). It is kept and nothing more can be done with it, so it is never
+    #: offered an account and the answer leads with it.
+    unreadable: bool = False
+    names: str = ""
 
     @property
     def placed_in(self) -> tuple[str, ...]:
@@ -440,6 +446,8 @@ def _called(result: FileResult) -> str:
 
 
 def _says(result: FileResult, names: AccountsShown) -> str:
+    if result.unreadable:
+        return "not read in: no reader for its layout yet"
     if result.outcome is Outcome.PLACED:
         return f"read in to {_named(result.placed_in, names)}"
     if result.outcome is Outcome.ALREADY:
@@ -449,6 +457,38 @@ def _says(result: FileResult, names: AccountsShown) -> str:
     if result.outcome is Outcome.HELD and result.account:
         return f"held, ready to check against {names.of(result.account).as_name()}"
     return _esc(_FILE_SAYS[result.outcome])
+
+
+def _not_read_in_html(results: UploadResults, names: AccountsShown) -> str:
+    """What the answer says FIRST: each file that was not read in, with why, never inside a fold.
+
+    A file no reader reads, one whose reading in was refused, and one whose account is doubted
+    are each a line of their own above every success, so that a file left out is not found only
+    by opening a fold. The fold of what each file held may repeat it.
+    """
+    lines = []
+    for item in results.files:
+        called = _called(item)
+        if item.unreadable:
+            shape = (
+                f'<a class="tap" href="/statement-shape?artefact={item.artefact}">Masked shape</a>'
+            )
+            why = (
+                "no reader for its layout yet. "
+                f"Names found: {item.names or 'none of the issuer names looked for'}. "
+                f"It stays kept; {shape} is what a reader is written from."
+            )
+        elif item.outcome is Outcome.REFUSED:
+            why = f"{_esc(item.note)}"
+        elif item.outcome is Outcome.CONFIRM:
+            why = (
+                f"it may not be {names.of(item.account).as_name()}'s, so it stays kept until you "
+                "have seen why."
+            )
+        else:
+            continue
+        lines.append(f'<p class="warn bi-not-read">Not read in: {called} - {why}</p>')
+    return "".join(lines)
 
 
 def _ask_html(result: FileResult, picker: str, names: AccountsShown) -> str:
@@ -650,7 +690,8 @@ def _results_html(data: BringInData) -> str:
         if item.counted
     )
     return (
-        f"<h2>{_esc(plural(received, 'file'))} received</h2>{settled}"
+        f"<h2>{_esc(plural(received, 'file'))} received</h2>{_not_read_in_html(results, names)}"
+        f"{settled}"
         + (f'<ul class="bi-outcomes">{outcomes}</ul>' if outcomes else "")
         + _assign_html(results, names)
         + (f'<ul class="todos bi-ask">{"".join(rows)}</ul>' if rows else "")
@@ -1229,6 +1270,15 @@ class BringInPages:
             parts = entry.get("sections") if entry is not None else None
             if entry is None:
                 resolved.append(item)
+            elif not entry.get("parser"):
+                resolved.append(
+                    replace(
+                        item,
+                        unreadable=True,
+                        names=names_found_words(entry),
+                        preview=preview_html(entry),
+                    )
+                )
             elif not isinstance(parts, list) or not parts:
                 guess = guess_account(entry, listing)
                 dry = self._dry_run(item.artefact, guess)
@@ -1397,6 +1447,11 @@ class BringInPages:
             return FileResult(
                 name, kind, Outcome.ALREADY, account=held, artefact=ident,
                 section=section, section_label=label,
+            )
+        if not entry.get("parser"):
+            return FileResult(
+                name, kind, Outcome.KEPT, artefact=ident, unreadable=True,
+                names=names_found_words(entry),
             )
         if not account:
             return FileResult(
