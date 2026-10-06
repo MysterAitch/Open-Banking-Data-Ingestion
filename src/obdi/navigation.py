@@ -123,7 +123,6 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/upload-result": "bring-in",
     "/statements": "bring-in",
     "/statement-shape": "bring-in",
-    "/statement-shape-disclose": "bring-in",
     "/statement-held": "bring-in",
     "/statement-assign": "bring-in",
     "/statements-assign": "bring-in",
