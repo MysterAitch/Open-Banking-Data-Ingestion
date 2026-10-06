@@ -26,6 +26,40 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.353] - 2026-10-06
+
+### Added
+- **"About this account" on the account page**: everything declared - kind,
+  parent (linked), opened and closed with how they were known, and every
+  limit and rate window in date order with "current" marked and "ends in N
+  days" where one ends within the month - beside what the sources state: the
+  rate each kept statement prints, set against the declared window its date
+  falls in ("as declared", "differs: the statement of D prints R", or
+  "stated, not declared") and the account label a statement prints, each
+  with its source as code and its day. The owner asked for the dated terms
+  the store already held (promotional rates that expire, limits that
+  change) to be surfaced, then widened it to all of it. Figures are sealed
+  on a GET like every figure. Nothing declared beyond the name says so and
+  links to the edit page, which now lists the windows and takes a new one.
+  The fold is read in a fixed number of statements, inside the page's
+  budgets; the issuer names printed in a statement and the provider's own
+  name for the account are left out, since each would cost a scan per page.
+- **Today's row says "Rate ends D", "Limit ends D", or "Statement rate
+  differs"**, quietly, in the slot a thing to do would use, and nothing
+  otherwise.
+
+### Changed
+- **An archived account's own life begins at its stated opening day.** A
+  calendar-year statement's printed period had stretched the closed loan's
+  bar back to 1 January for an account opened in May; coverage of days
+  before the account existed is coverage of nothing, not life.
+
+### Fixed
+- **Editing a declared account no longer turns inferred dates into stated
+  ones.** The edit form posted both dates and never carried their basis, so
+  any edit, including a rename, said the dates had been stated. The basis is
+  kept while both dates are unchanged and cleared when one moves.
+
 ## [0.4.352] - 2026-10-06
 
 ### Changed
