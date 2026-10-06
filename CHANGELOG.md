@@ -26,6 +26,63 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.343] - 2026-10-06
+
+### Changed
+- **Reconnect is offered on every bank connection at any time**, as a quiet
+  link on its line; the prominent row stays for a consent's last fortnight
+  and after it ends. The owner: "if there are 14 days remaining I am likely
+  to renew/replace the connection early to keep continuous connection. This
+  is no different to cycling certs before they actually expire."
+- **The long diagnostic pages are a summary with the detail folded.**
+  Measured on invented data at phone width, folds closed: Actual history
+  116 screens to 1.2 (and 39,646 words to 702), fetch attempts 28 to 2.2,
+  "Do the statements add up?" 51 to 2.4, Statements kept 1.6. Nothing said
+  twice; every control kept.
+- **Links lead to the thing, not the list.** The owner asked for deep
+  linking: the account page's "Rename or archive" opens its own edit form
+  and its own row on Accounts; its timeline, period, and chart links are
+  scoped to it; "N statements kept for this account" opens its own
+  documents, each with its period, how many transactions it listed, whether
+  it adds up by what it lists, and its shape. One place knows an account's
+  address on each page, and a test walks every account page and Today row.
+- **Upload from Today or an account opens Bring in for that account**, so a
+  file read in there lands at once; assigning a kept file from Bring in
+  returns there with what it settled.
+- **A hole between statements is found from their stated periods** where the
+  statements give no balance. A loan fed by two "all accounts" documents had
+  a two-year gap between them that nothing named, because holes were found
+  by chaining closing balances; Bring in now lists the statement to fetch.
+- **The credit union reader recognises a loan section** by the "Closing Loan
+  Position" its foot prints; without a rate in its name it was read as a
+  saver, its balances took the wrong sign, and the arithmetic gate refused
+  them, so the loan had no known balance from its own statements. Built from
+  the documents' masked shape; the real document's reading is to be
+  confirmed on the deployment.
+- **Two accounts that share a name are told apart** by the reference set as
+  code beside it; a declared name removes the need.
+- **An account closed before the shared twelve months draws its strip over
+  its own life** on its page, with its end dates and "Closed D; the bars
+  span its whole life".
+
+### Fixed
+- An archived account's page printed the markup of its "archived" pill as
+  text under the heading.
+- **A masked page no longer prints "nil" for a balance of nothing**, nor a
+  direction word ("in credit", "overdrawn or owed") beside a sealed balance:
+  both told the reader what the slot hid. Masked, every balance, difference,
+  and opening figure is the same sealed slot; shown, the words and figures
+  return.
+
+### Not covered
+- Archived accounts on Today have no bars yet; the owner has asked for them
+  for consistency, drawn over each one's own life.
+- The loan's reading and the found hole are proven on invented statements
+  only. After a doubt page the return to Bring in is lost; an import
+  confirmed from Bring in ends on the import result page.
+- The "Saved" sentence after stating a balance describes the state before
+  the save.
+
 ## [0.4.342] - 2026-10-06
 
 ### Changed
