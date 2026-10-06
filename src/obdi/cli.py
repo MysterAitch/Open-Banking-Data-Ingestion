@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from . import fingerprint
-from .account_about import SourceFacts, StatedText, facts_from_readings
+from .account_about import facts_from_readings, read_about
 from .account_names import AccountsShown, accounts_shown
 from .accounts import (
     AccountBinding,
@@ -86,7 +86,6 @@ from .known_accounts import (
     set_space_parents,
 )
 from .ledger import Ledger, LedgerWindow
-from .logs import say
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .outbound import install_if_requested as install_outbound_refusal_if_requested
@@ -3331,8 +3330,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     window=window,
                     names=names,
                 )
-                return replace(built, standing=None, protection=None, rebuilding=hold.sentence())
-            return build_ledger(
+                return replace(
+                    built,
+                    standing=None,
+                    protection=None,
+                    rebuilding=hold.sentence(),
+                    about=read_about(store, ref, names) if built.state != "unknown" else None,
+                )
+            built = build_ledger(
                 store,
                 ref,
                 month or None,
@@ -3346,6 +3351,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 window=window,
                 names=names,
             )
+            if built.state == "unknown":
+                return built
+            return replace(built, about=read_about(store, ref, names))
 
     def balance_chart_data(ref: str) -> BalanceChart:
         from .balance_chart import build_balance_chart  # deferred like the other data hooks
@@ -4186,54 +4194,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         return int(filed) + sections
 
-    def account_sources(ref: str) -> SourceFacts:
-        """What the account's sources state, for its page's "About this account" fold.
-
-        The rates and labels its kept statements print, the issuer names found in those
-        statements' text (`kept_statements`, which holds each document's names once read), and the
-        name its provider gives it. A part that cannot be read is said by a sentence and does not
-        take the others with it.
-        """
-        from .statement_terms import account_readings
-
-        with Store(db_path) as store:
-            found = facts_from_readings(account_readings(store, ref))
-        texts = list(found.texts)
-        unread = list(found.unread)
-        issuers: dict[tuple[str, str], StatedText] = {}
-        try:
-            for entry in kept_statements():
-                if str(entry["account_ref"]) != ref:
-                    continue
-                listed = entry["listed_days"]
-                last = str(listed[-1]) if isinstance(listed, list) and listed else ""
-                if last:
-                    day, words = date.fromisoformat(last), "statement to"
-                else:
-                    day, words = date.fromisoformat(str(entry["fetched_at"])[:10]), "kept on"
-                names = entry["names"]
-                for name, _count in names if isinstance(names, list) else []:
-                    source = str(entry["parser"] or "statement")
-                    held = issuers.get((str(name), source))
-                    if held is None or (held.day is not None and day > held.day):
-                        issuers[(str(name), source)] = StatedText(
-                            "Issuer named", str(name), source, day, words
-                        )
-        except Exception as fault:
-            say("account_sources.names.fault", kind=type(fault).__name__)
-            unread.append("The names printed in its kept statements could not be read just now.")
-        texts.extend(issuers.values())
-        try:
-            named = provider_labels().get(ref)
-        except Exception as fault:
-            say("account_sources.provider.fault", kind=type(fault).__name__)
-            named = None
-            unread.append("The name its provider gives it could not be read just now.")
-        if named:
-            source = "starling" if "(starling" in named else "truelayer"
-            texts.append(StatedText("Name its provider gives", named, source, None, private=True))
-        return SourceFacts(rates=found.rates, texts=tuple(texts), unread=tuple(unread))
-
     def account_term_notes(today: date) -> dict[str, str]:
         """The note each account's row of Today carries about its declared terms.
 
@@ -4553,7 +4513,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         review_statement_section=review_statement_section,
         kept_statements=kept_statements,
         kept_statement_count=kept_statement_count,
-        account_sources=account_sources,
         account_term_notes=account_term_notes,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,

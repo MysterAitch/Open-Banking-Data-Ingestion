@@ -48,6 +48,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
+from .account_about import AccountAbout
 from .account_names import AccountsShown
 from .accounts import AccountRef
 from .agreement import Standing, standing_of
@@ -610,6 +611,10 @@ class Ledger:
     #: has left. Handed in rather than read here, so a page still costs
     #: QUERIES_PER_PAGE statements for the ledger proper.
     archive: Structural[ArchiveNote | None] = None
+    #: What the "About this account" fold is drawn from (`account_about.read_about`), handed in by
+    #: the caller that holds the store open, like `archive`; None where it was not read. A rate or
+    #: a limit in it is a figure and is sealed by the page, not by this field.
+    about: Structural[AccountAbout | None] = None
     #: Absent only for an account nothing is known about.
     opening: Structural[OpeningView | None] = None
     #: What a person has typed into the account; empty for one that is unknown.

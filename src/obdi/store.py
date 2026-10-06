@@ -1725,9 +1725,48 @@ class Store:
         None means "nobody declared an account under that name", which is
         a different statement from an account with nothing filled in, and
         both are ordinary.
+
+        Two reads however large the registry is: the account's own row, then
+        its limit and rate windows together. Listing the whole registry to
+        pick one out cost a statement per window table on every page view.
         """
-        return next(
-            (record for record in self.declared_accounts() if record.ref == ref), None
+        row = self.connection.execute(
+            "SELECT stable_id, ref, kind, label, parent, opened, closed, date_basis "
+            "FROM declared_accounts WHERE ref = ?",
+            (str(ref),),
+        ).fetchone()
+        if row is None:
+            return None
+        limits: list[LimitWindow] = []
+        rates: list[RateWindow] = []
+        for window in self.connection.execute(
+            "SELECT 'limit' AS term, position, kind, window_from, window_to, "
+            "amount_minor AS figure FROM declared_account_limits WHERE stable_id = ? "
+            "UNION ALL "
+            "SELECT 'rate', position, kind, window_from, window_to, annual_percent "
+            "FROM declared_account_rates WHERE stable_id = ? ORDER BY 1, 2",
+            (row["stable_id"], row["stable_id"]),
+        ):
+            first, last = _read_date(window["window_from"]), _read_date(window["window_to"])
+            if window["term"] == "limit":
+                limits.append(
+                    LimitWindow(str(window["kind"]), first, last, int(window["figure"]))
+                )
+            else:
+                rates.append(
+                    RateWindow(str(window["kind"]), first, last, float(window["figure"]))
+                )
+        return AccountRecord(
+            ref=AccountRef(str(row["ref"])),
+            kind=str(row["kind"]),
+            label=str(row["label"]),
+            parent=AccountRef(str(row["parent"])) if row["parent"] is not None else None,
+            opened=_read_date(row["opened"]),
+            closed=_read_date(row["closed"]),
+            date_basis=str(row["date_basis"] or ""),
+            limits=tuple(limits),
+            rates=tuple(rates),
+            stable_id=AccountId(str(row["stable_id"])),
         )
 
     def declared_kind(self, ref: str) -> str:
