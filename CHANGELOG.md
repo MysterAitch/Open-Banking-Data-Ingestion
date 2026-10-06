@@ -26,6 +26,44 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.339] - 2026-10-06
+
+### Changed
+- **An account's page leads with what it needs.** The owner, of the page as
+  it was: "where is the call to action to upload statements etc. to fill in
+  gaps?" - it said "3 gaps to fill" inside a fold and offered nothing. The
+  page is now the name and one muted line of identity; the trust sentence
+  (locked in to, adds up to the known balances to, nothing to check against
+  since, with an age); a small timeline, the trust lane over a lane per
+  source on the shared twelve months, linking to the full one; then this
+  account's things to do, each with its one control - upload the statements
+  wanted, confirm a balance for a day (the form opens in place with the day
+  filled and never the amount), find what stops it adding up; then the
+  month's transactions, one line each with a cleared mark; then five folds
+  where there were about a dozen: what the bars show, known balances,
+  locking in, how this was checked, rename or archive.
+- **Locking in is offered here, with the transactions in view**, as the
+  owner decided: a quiet row saying how many transactions over which months
+  it would cover, that values can be shown first, and that a later change
+  inside a locked stretch is reported loudly and never applied quietly. It
+  is withheld while the account does not add up. "Protected" is "locked in"
+  on the page.
+- An account that does not add up says what stops it once, with its one
+  control, and no longer opens every known balance by itself; that page was
+  14.7 phone screens.
+
+### Not covered
+- The bank's name is not shown: no account records its institution. "Set
+  aside" for a wanted file stays on What to fetch next until Bring in is
+  rebuilt. The source lanes of the small timeline draw only where fetch
+  records exist.
+- The change sentences a lock reports still say "row" and "protected period".
+- The page apart from the month's transactions is under two phone screens
+  with its folds closed; with a month of fifty transactions it is 4.5 to 4.8.
+- Read on the real store, two "upload an earlier statement" items on Today
+  remain for days a first statement should test by what it lists; which is
+  right is not yet shown.
+
 ## [0.4.338] - 2026-10-06
 
 ### Fixed
