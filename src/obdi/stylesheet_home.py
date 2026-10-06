@@ -83,7 +83,16 @@ HOME_STYLES = """
  .b-held { background: repeating-linear-gradient(135deg, var(--edge) 0 1.5px, var(--paper) 1.5px 5px); }
  .b-bad { background: var(--bad); min-width: 5px; }
  .b-want { background: var(--paper); border: 1.5px dashed var(--warn); min-width: 5px; }
- .bar > i.b-edge { left: 0; width: 3px; background: var(--ink-2); }
+ /* The edge is an arrow, not a slice: a slice at the edge reads as a very narrow stretch of
+    some rung, where what it means is that history lies beyond the edge. A square showing two
+    of its sides, turned so the corner points out of the bar. */
+ .bar > i.b-edge { left: 0; width: .6rem; background: none; }
+ .bar > i.b-edge::before { content: ""; position: absolute; top: 50%; left: 3px; width: .3rem;
+         height: .3rem; border-left: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2);
+         transform: translateY(-50%) rotate(45deg); }
+ .key.b-edge::before { content: ""; position: absolute; top: 50%; left: 3px; width: .3rem;
+         height: .3rem; border-left: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2);
+         transform: translateY(-50%) rotate(45deg); }
  .alist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-weight) solid var(--rule); }
  .alist li { border-bottom: var(--rule-weight) solid var(--rule-2); }
  main a.arow { display: grid; grid-template-columns: minmax(0, 1fr) auto;

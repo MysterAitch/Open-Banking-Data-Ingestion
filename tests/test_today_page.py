@@ -389,6 +389,21 @@ class TestAnOrdinaryDay:
             "history before the twelve months is held"
         )
 
+    def test_Bars_HistoryBeyondTheLeftEdge_IsAnArrowNotASlice(self) -> None:
+        """A vertical slice at the edge reads as a very narrow stretch of some rung; an arrow
+        says something lies beyond the edge. The key names it as an arrow, and the stylesheet
+        draws the edge cell as a chevron rather than a filled bar."""
+        from obdi.stylesheet import SERVED_STYLESHEET
+        from obdi.trust_bar import key_html
+
+        assert "An arrow at the left edge" in key_html()
+        assert "tick" not in key_html()
+        edge_rules = [
+            rule for rule in SERVED_STYLESHEET.split("}") if "b-edge" in rule and "::before" in rule
+        ]
+        assert edge_rules, "the edge cell has no chevron drawn on it"
+        assert any("rotate(45deg)" in rule and "border-left" in rule for rule in edge_rules)
+
     def test_Bars_TwoAccountsWithTheSameDatesButDifferentHistories_DrawTheSameWidths(self) -> None:
         both = (
             account("long", "Long history", first="2020-01-01", held=EVERYDAY),

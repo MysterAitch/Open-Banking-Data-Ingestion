@@ -7,8 +7,8 @@ words (a bar of fill says nothing to a screen reader or in greyscale).
 
 The classes, one rung more solid than the one before, so the ladder reads without colour:
 `b-held` a hatch, `b-adds` an outline, `b-lock` a solid. `b-bad` is the red mark, `b-want` the
-dashed block for a file wanted, and `b-edge` the tick at the left edge for history older than the
-twelve months drawn.
+dashed block for a file wanted, and `b-edge` the arrow at the left edge for history older than the
+twelve months drawn (an arrow, because a slice there reads as a very narrow stretch).
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _cell(css: str, left: float, width: float) -> str:
 
 def bar_html(trust: Trust, today: date, span: tuple[date, date] | None = None) -> str:
     """One account's bar on the shared scale, or on the `span` it is given. On a span nothing lies
-    earlier than the bar's left edge, so no tick says so."""
+    earlier than the bar's left edge, so no arrow says so."""
     cells: list[str] = []
     if trust.earlier and span is None:
         cells.append('<i class="b-edge"></i>')
@@ -130,7 +130,7 @@ def key_html() -> str:
             "The transactions stop adding up here, or a locked stretch changed.",
         ),
         ("b-want", "A dashed block", "A file is wanted for these days."),
-        ("b-edge", "A tick at the left edge", "History from before these twelve months is held."),
+        ("b-edge", "An arrow at the left edge", "History from before these twelve months is held."),
     )
     items = "".join(
         f'<li><span class="key {css}"></span><b>{html.escape(name)}</b>: {html.escape(means)}</li>'
