@@ -79,6 +79,50 @@ class TestTheNameShown:
         assert code_html("<i>") == "<code>&lt;i&gt;</code>"
 
 
+class TestTwoAccountsThatWouldReadTheSame:
+    """Two undeclared accounts carry the one label their provider gave both ("Mr Roger Howell"),
+    and a third is named differently. The two are told apart by their references, as code,
+    wherever a name is given; the third reads as it always did."""
+
+    SHARED = accounts_shown(
+        {
+            "halifax-a": "Mr Roger Howell",
+            "halifax-b": "Mr Roger Howell",
+            "halifax-cc": "Halifax CC",
+        },
+        [],
+    )
+
+    def test_AsName_ForEachOfTheTwo_HasTheReferenceBesideTheLabelAsCode(self):
+        assert self.SHARED.of("halifax-a").as_name() == ("Mr Roger Howell <code>halifax-a</code>")
+        assert self.SHARED.of("halifax-b").as_name() == ("Mr Roger Howell <code>halifax-b</code>")
+
+    def test_PlainNameAndHeading_ForEachOfTheTwo_CarryTheReference(self):
+        assert self.SHARED.of("halifax-a").name == "Mr Roger Howell (halifax-a)"
+        assert self.SHARED.of("halifax-b").heading() == "Mr Roger Howell (halifax-b)"
+
+    def test_TheDifferentlyNamedAccount_IsUnchanged(self):
+        assert self.SHARED.of("halifax-cc").as_name() == "Halifax CC"
+        assert self.SHARED.of("halifax-cc").name == "Halifax CC"
+
+    def test_ADeclaredLabel_RemovesTheNeedForTheReference(self):
+        declared = accounts_shown(
+            {"halifax-a": "Mr Roger Howell", "halifax-b": "Mr Roger Howell"},
+            [AccountRecord(ref=AccountRef("halifax-b"), label="Halifax Saver")],
+        )
+
+        assert declared.of("halifax-a").as_name() == "Mr Roger Howell"
+        assert declared.of("halifax-b").as_name() == "Halifax Saver"
+
+    def test_TwoAccountsWithNoLabelAtAll_AreNotAmbiguousBecauseEachReadsAsItsReference(self):
+        bare = AccountsShown([AccountShown("a"), AccountShown("b")])
+
+        assert bare.of("a").as_name() == "<code>a</code>"
+
+    def test_InText_ForEachOfTheTwo_WritesLabelAndReference(self):
+        assert self.SHARED.in_text("halifax-a: ok") == "Mr Roger Howell (halifax-a): ok"
+
+
 class TestAReportsPlainText:
     def test_InText_WhenAReferenceIsLabelled_WritesLabelThenReference(self):
         said = NAMES.in_text("starling-personal via monzo-csv: 3 rows")
@@ -138,7 +182,10 @@ class TestAReportsPlainText:
 
 class TestThePagesUseIt:
     def test_IdentityHealth_WhenAnAccountIsDeclaredWithALabel_NamesItByLabelFirst(
-        self, served, invented, tmp_path  # noqa: F811
+        self,
+        served,
+        invented,
+        tmp_path,  # noqa: F811
     ):
         db, _ = invented
         with Store(db) as store:

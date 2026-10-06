@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import html
 import re
+from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .accounts import AccountRecord
 
@@ -40,6 +41,11 @@ class AccountShown:
 
     ref: str
     label: str = ""
+    #: Another account is shown under this same label (`AccountsShown` decides), so the label
+    #: alone would read as the one account twice: a feed that "feeds Halifax CC, Mr Roger Howell,
+    #: and Mr Roger Howell" cannot be told from one that feeds a single account. Where it is set
+    #: the reference goes beside the label wherever the name is given.
+    ambiguous: bool = False
 
     @classmethod
     def named(cls, ref: str, label: str) -> AccountShown:
@@ -49,7 +55,10 @@ class AccountShown:
 
     @property
     def name(self) -> str:
-        """The label where one exists, else the reference."""
+        """The label where one exists, else the reference; "label (reference)" where the label
+        is shared with another account."""
+        if self.ambiguous:
+            return f"{self.label} ({self.ref})"
         return self.label or self.ref
 
     @property
@@ -62,7 +71,10 @@ class AccountShown:
 
     def as_name(self) -> str:
         """The name alone as a phrase or link text: the label as text, and where nothing names
-        the account but its reference, that reference as code (it is an identifier, not a word)."""
+        the account but its reference, that reference as code (it is an identifier, not a word).
+        A label shared with another account has the reference as code beside it."""
+        if self.ambiguous:
+            return f"{html.escape(self.label)} {code_html(self.ref)}"
         return html.escape(self.label) if self.label else code_html(self.ref)
 
     def inline(self) -> str:
@@ -84,7 +96,16 @@ class AccountsShown:
     """Every account a page may name, by reference. An account not held reads as its reference."""
 
     def __init__(self, shown: Iterable[AccountShown] = ()) -> None:
-        self._by_ref = {account.ref: account for account in shown}
+        held = list(shown)
+        shared = {
+            label
+            for label, count in Counter(a.label for a in held if a.label).items()
+            if count > 1
+        }
+        self._by_ref = {
+            account.ref: replace(account, ambiguous=True) if account.label in shared else account
+            for account in held
+        }
 
     def of(self, ref: str) -> AccountShown:
         return self._by_ref.get(ref) or AccountShown(ref)

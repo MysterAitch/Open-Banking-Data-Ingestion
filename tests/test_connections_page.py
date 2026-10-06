@@ -121,9 +121,7 @@ def todo_reconnects(root: Node) -> list[str]:
 
 
 def row_of(root: Node, name: str) -> Node:
-    return next(
-        li for li in elements(root, "li") if "source" in li.classes and name in li.text()
-    )
+    return next(li for li in elements(root, "li") if "source" in li.classes and name in li.text())
 
 
 class TestWhenEverythingIsConnected:
@@ -182,7 +180,27 @@ class TestWhenEverythingIsConnected:
         assert "halifax-current" in codes
 
 
-class TestWhenAConsentIsRunningOut:
+class TestTwoAccountsSharingALabel:
+    def test_Connections_AFeedOfTwoAccountsWithTheSameProviderLabel_TellsThemApartByReference(
+        self, tmp_path
+    ):
+        names = AccountsShown(
+            [
+                AccountShown.named("halifax-a", "Mr Roger Howell"),
+                AccountShown.named("halifax-b", "Mr Roger Howell"),
+                AccountShown.named("halifax-cc", "Halifax CC"),
+            ]
+        )
+        fed = {(ref, "truelayer"): ["halifax"] for ref in ("halifax-a", "halifax-b", "halifax-cc")}
+        root = page_of(
+            store_of(tmp_path, FINE), account_names=lambda: names, source_connections=lambda: fed
+        )
+
+        row = row_of(root, "halifax")
+        codes = [c.text() for c in elements(row, "code")]
+        assert codes == ["halifax-a", "halifax-b"]
+        assert "Halifax CC" in row.text()
+
     def test_Connections_WhenOneConsentEndsInTwoDays_OffersItsReconnectAmongWhatNeedsYou(
         self, tmp_path
     ):
