@@ -196,8 +196,6 @@ KINDS: dict[str, tuple[str, str, str]] = {
 }
 
 _SOURCE_COLOURS = ("#1F6FB2", "#B8590B", "#5B6770")
-_STATED_DASHES = ("", "14 4", "3 3")
-_PREDICTED_DASHES = ("6 5", "1 6", "10 3 2 3")
 
 
 def _mono(day: object) -> str:
@@ -940,14 +938,12 @@ def nice_ticks(low: int, high: int, target: int = 5) -> list[int]:
     return ticks
 
 
-def _held_series(
-    days: Sequence[date], values: Sequence[int], scale: Scale
-) -> list[tuple[date, int]]:
-    """The points to draw: the balance held at the start of the range, then those
-    inside it. A balance holds until the next is stated."""
+def _running_in(running: Sequence[tuple[date, int]], scale: Scale) -> list[tuple[date, int]]:
+    """The running balance's points to draw: its level at the start of the range (it holds
+    from its last movement), then each movement inside the range."""
     before: tuple[date, int] | None = None
     inside: list[tuple[date, int]] = []
-    for day, value in zip(days, values, strict=True):
+    for day, value in running:
         if day <= scale.start:
             before = (day, value)
         elif day <= scale.end:
@@ -956,14 +952,15 @@ def _held_series(
 
 
 def _step_path(series: Sequence[tuple[date, int]], scale: Scale, y: Any) -> str:
-    """One path for a whole line: a balance holds until the next one is stated."""
+    """One path for the running balance: each day's movements move it at that day, and it
+    holds until the next day that has one. Ends at the range's last day."""
     if not series:
         return ""
     first_day, first_value = series[0]
     parts = [f"M{scale.x(first_day):.1f},{y(first_value):.1f}"]
     for day, value in series[1:]:
         parts.append(f"H{scale.x(day):.1f}V{y(value):.1f}")
-    parts.append(f"H{scale.x(scale.end) + scale.per_day:.1f}")
+    parts.append(f"H{scale.x(scale.end):.1f}")
     return "".join(parts)
 
 
@@ -1013,17 +1010,19 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
     p2 = (p1[1] + gap, p1[1] + gap + bottom_h)
     height = p2[1] + foot
 
-    drawn: list[tuple[SourceLine, list[tuple[date, int]], list[tuple[date, int]]]] = [
-        (
-            line,
-            _held_series(line.days, line.stated, scale),
-            _held_series(line.days, line.predicted, scale),
-        )
-        for line in chart.lines
-    ]
-    levels = [value for _, a, b in drawn for _, value in (*a, *b)] or [0]
+    running = _running_in(chart.running, scale)
+    known = [_known_in(line, scale) for line in chart.lines]
+    levels = [
+        *(value for _, value in running),
+        *(value for points in known for _, stated, predicted, _ in points
+          for value in (stated, predicted)),
+    ] or [0]
     ticks1 = nice_ticks(min(levels), max(levels))
-    diffs = _held_series(chart.days, chart.differences, scale)
+    diffs = [
+        (day, value)
+        for day, value in zip(chart.days, chart.differences, strict=True)
+        if scale.start <= day <= scale.end
+    ]
     flat = [value for _, value in diffs] or [0]
     ticks2 = nice_ticks(min(0, *flat), max(0, *flat), target=3)
     whole_pounds = all(t % 100 == 0 for t in (*ticks1, *ticks2))
@@ -1056,24 +1055,47 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
                 f'<line x1="{x:.1f}" y1="{panel[0]}" x2="{x:.1f}" y2="{panel[1]}" '
                 f'stroke="currentColor" stroke-opacity="{".28" if month.month == 1 else ".07"}"/>'
             )
-    for index, (line, stated, predicted) in enumerate(drawn):
-        colour = _SOURCE_COLOURS[index % len(_SOURCE_COLOURS)]
-        sdash = _STATED_DASHES[index % len(_STATED_DASHES)]
-        pdash = _PREDICTED_DASHES[index % len(_PREDICTED_DASHES)]
-        sd = f' stroke-dasharray="{sdash}"' if sdash else ""
+    if running:
         body.append(
-            f'<path data-series="stated" data-source="{_esc(line.source)}" '
-            f'd="{_step_path(stated, scale, y1)}" fill="none" stroke="{colour}" '
-            f'stroke-width="2.5"{sd}><title>Stated by {_esc(line.source)}</title></path>'
-            f'<path data-series="predicted" data-source="{_esc(line.source)}" '
-            f'd="{_step_path(predicted, scale, y1)}" fill="none" stroke="{colour}" '
-            f'stroke-width="1.5" stroke-dasharray="{pdash}">'
-            f"<title>Predicted by the rows at the days {_esc(line.source)} states</title></path>"
+            f'<path data-series="running" d="{_step_path(running, scale, y1)}" fill="none" '
+            'stroke="currentColor" stroke-width="2">'
+            "<title>The running balance, from the account's transactions</title></path>"
         )
-    body.append(
-        f'<path data-series="difference" d="{_step_path(diffs, scale, y2)}" fill="none" '
-        'stroke="currentColor" stroke-width="2"><title>Stated minus predicted</title></path>'
-    )
+    for index, (line, points) in enumerate(zip(chart.lines, known, strict=True)):
+        colour = _SOURCE_COLOURS[index % len(_SOURCE_COLOURS)]
+        source = _esc(line.source)
+        for day, stated, predicted, _ in points:
+            x = scale.x(day)
+            if stated != predicted:
+                body.append(
+                    f'<line class="gap" data-day="{day}" x1="{x:.1f}" y1="{y1(stated):.1f}" '
+                    f'x2="{x:.1f}" y2="{y1(predicted):.1f}" stroke="{colour}" stroke-width="2"/>'
+                )
+        # One group per kind of mark, carrying what its marks share: a page may hold
+        # thousands of them, so each circle carries only its day and place.
+        for statement, look in (
+            (False, f'fill="{colour}" stroke="currentColor" stroke-width="1"'),
+            (True, f'fill="none" stroke="{colour}" stroke-width="2.5"'),
+        ):
+            circles = "".join(
+                f'<circle data-day="{day}" cx="{scale.x(day):.1f}" cy="{y1(stated):.1f}" r="5"/>'
+                for day, stated, _, is_statement in points
+                if is_statement == statement
+            )
+            if circles:
+                body.append(
+                    f'<g class="known" data-kind="{"statement" if statement else "stated"}" '
+                    f'data-source="{source}" {look}>{circles}</g>'
+                )
+    if diffs:
+        body.append(
+            '<g class="difference" fill="currentColor">'
+            + "".join(
+                f'<circle data-day="{day}" cx="{scale.x(day):.1f}" cy="{y2(value):.1f}" r="3.5"/>'
+                for day, value in diffs
+            )
+            + "</g>"
+        )
     if structure is not None:
         for step in structure.steps:
             if scale.start <= step.day <= scale.end:
@@ -1087,10 +1109,10 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
     desc = (
         f"From {scale.start} to {scale.end}. "
         + " ".join(
-            f"{line.source}: known balances from {_pounds(min(line.stated))} to "
-            f"{_pounds(max(line.stated))}."
-            for line in chart.lines
-            if line.stated
+            f"{line.source}: known balances from {_pounds(min(s for _, s, _, _ in points))} to "
+            f"{_pounds(max(s for _, s, _, _ in points))}."
+            for line, points in zip(chart.lines, known, strict=True)
+            if points
         )
         + f" The difference ranges from {_pounds(min(0, *flat))} to {_pounds(max(0, *flat))}."
     )
@@ -1100,26 +1122,86 @@ def _values_svgs(chart: BalanceChart, scale: Scale) -> tuple[str, str, str]:
     )
     chart_svg = _svg(
         scale.width, height, "bc-values",
-        "Stated balances, the balances the rows predict, and their difference", desc,
+        "Known balances, the running balance, and their difference", desc,
         "".join(body),
     )
     return figure_svg, chart_svg, desc
 
 
-def _values_legend(chart: BalanceChart, kinds: Sequence[str]) -> str:
+def _known_in(line: SourceLine, scale: Scale) -> list[tuple[date, int, int, bool]]:
+    """A source's known balances inside the range, each as (day, stated, predicted, whether a
+    held statement states it). A known balance is a point at its day and is held for nothing
+    after it."""
+    statements = line.statement or (False,) * len(line.days)
+    return [
+        (day, stated, predicted, statement)
+        for day, stated, predicted, statement in zip(
+            line.days, line.stated, line.predicted, statements, strict=True
+        )
+        if scale.start <= day <= scale.end
+    ]
+
+
+def _legend_mark(colour: str, *, hollow: bool) -> str:
+    look = (
+        f'fill="none" stroke="{colour}" stroke-width="2.5"'
+        if hollow
+        else f'fill="{colour}" stroke="currentColor" stroke-width="1"'
+    )
+    return (
+        '<svg width="16" height="16" aria-hidden="true" style="vertical-align:middle">'
+        f'<circle cx="8" cy="8" r="5" {look}/></svg>'
+    )
+
+
+def _legend_tick(colour: str) -> str:
+    return (
+        '<svg width="16" height="16" aria-hidden="true" style="vertical-align:middle">'
+        f'<line x1="8" y1="1" x2="8" y2="15" stroke="{colour}" stroke-width="2"/></svg>'
+    )
+
+
+def _legend_difference() -> str:
+    return (
+        '<svg width="16" height="16" aria-hidden="true" style="vertical-align:middle">'
+        '<circle cx="8" cy="8" r="3.5" fill="currentColor"/></svg>'
+    )
+
+
+def _values_legend(chart: BalanceChart, scale: Scale, kinds: Sequence[str]) -> str:
+    """What the values chart draws, and only that: the legend names a mark where one is in
+    the range drawn."""
     items = []
+    if _running_in(chart.running, scale):
+        items.append(
+            f"<li>{_legend_line('', 'currentColor', 2)} The <strong>running balance</strong>: "
+            "what the account's transactions add up to, day by day.</li>"
+        )
+    differing = False
     for index, line in enumerate(chart.lines):
         colour = _SOURCE_COLOURS[index % len(_SOURCE_COLOURS)]
+        points = _known_in(line, scale)
+        differing = differing or any(stated != predicted for _, stated, predicted, _ in points)
+        if any(not statement for *_, statement in points):
+            items.append(
+                f"<li>{_legend_mark(colour, hollow=False)} A balance "
+                f"<strong>{_esc(line.source)}</strong> states, at its own day (a filled mark)."
+                "</li>"
+            )
+        if any(statement for *_, statement in points):
+            items.append(
+                f"<li>{_legend_mark(colour, hollow=True)} A statement's closing balance from "
+                f"<strong>{_esc(line.source)}</strong>, at its own day (a hollow mark).</li>"
+            )
+    if differing:
         items.append(
-            f"<li>{_legend_line(_STATED_DASHES[index % 3], colour, 2.5)} The balance "
-            f"<strong>{_esc(line.source)}</strong> states, held until its next one.</li>"
-            f"<li>{_legend_line(_PREDICTED_DASHES[index % 3], colour, 1.5)} The balance the rows "
-            f"predict at the same days, for <strong>{_esc(line.source)}</strong>.</li>"
+            f"<li>{_legend_tick('currentColor')} A short vertical bar from a known balance to "
+            "the running balance, where they differ.</li>"
         )
     items.append(
-        f"<li>{_legend_line('', 'currentColor', 2)} The difference: stated minus predicted, "
-        "in the lower panel. A flat line away from nil is a constant offset; a bump that "
-        "returns is a timing fault.</li>"
+        f"<li>{_legend_difference()} A difference: the known balance minus the running "
+        "balance at that balance's own day, in the lower panel. Marks level away from nil are "
+        "a constant offset; a mark that returns to nil is a timing fault.</li>"
     )
     items.extend(
         f"<li>{_legend_shape(kind)} <strong>{_esc(KINDS[kind][0])}</strong>: "
@@ -1127,6 +1209,24 @@ def _values_legend(chart: BalanceChart, kinds: Sequence[str]) -> str:
         for kind in kinds
     )
     return f'<ul class="legend" style="list-style:none;padding-left:0">{"".join(items)}</ul>'
+
+
+def _differing_sentence(chart: BalanceChart, scale: Scale) -> str:
+    """Where a known balance is not on the running balance, said in words: how many, and the
+    latest with its size. Nothing where every known balance in the range is on the line."""
+    off = [
+        (day, difference)
+        for day, difference in zip(chart.days, chart.differences, strict=True)
+        if scale.start <= day <= scale.end and difference != 0
+    ]
+    if not off:
+        return ""
+    day, difference = max(off)
+    side = "above" if difference > 0 else "below"
+    return (
+        f"<p>The running balance differs from {_plural(len(off), 'known balance')}. "
+        f"The latest, on {_mono(day)}, is {_esc(_pounds(abs(difference)))} {side} it.</p>"
+    )
 
 
 def _change_links(ref: str, changes: Sequence[Change]) -> str:
@@ -1267,9 +1367,12 @@ def _window_words(spec: WindowSpec, window: Window, *, today: date, held: Balanc
             "it is shown to today."
         )
     if window.ended_after_held and held.last_day is not None:
-        sentence += (
-            f" The last known balance is on {held.last_day.isoformat()}, so the window ends there."
+        why = (
+            f"The account closed on {held.last_day.isoformat()}"
+            if held.closed == held.last_day
+            else f"The last known balance is on {held.last_day.isoformat()}"
         )
+        sentence += f" {why}, so the window ends there."
     if window.began_before_held:
         sentence += (
             f" No balance is known before {window.first.isoformat()}, so the window starts there."
@@ -1479,7 +1582,14 @@ def render_balance_chart(
             _scope_note(view)
             + _mode(view, unmasked, start, end, chosen)
             + f"<p>Drawn from {_mono(scale.start)} to {_mono(scale.end)} at "
-            f"{scale.per_day:.2f} pixels a day.</p>"
+            f"{scale.per_day:.2f} pixels a day."
+            + (
+                f" The account closed on {_mono(chart.closed)}, so the chart ends there."
+                if chart.closed is not None and chart.closed == scale.end
+                else ""
+            )
+            + "</p>"
+            + _differing_sentence(chart, scale)
             + (_scale_switch(view.ref, chosen, wide=wide) if chosen.windowed else "")
             + everything
             + _range_summary(changes, scale.start, scale.end, noun)
@@ -1492,7 +1602,7 @@ def render_balance_chart(
         body += (
             f"<p>The present difference is <strong>{_esc(_pounds(structure.present_minor))}"
             f"</strong>, the sum of {_plural(len(structure.permanent), 'permanent change')}.</p>"
-            + _values_legend(chart, kinds)
+            + _values_legend(chart, scale, kinds)
             + _scroller(figures, drawing, "Balances and their difference")
             + "<h3>The steps, with their figures</h3>"
             + _steps_table(structure, scale, noun)

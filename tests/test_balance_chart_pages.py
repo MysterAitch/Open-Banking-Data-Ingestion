@@ -210,31 +210,30 @@ class TestTheTimelineScale:
 
 
 class TestTheValuesChart:
-    def test_Values_WhenShown_DrawsOnePathPerLineAndNothingPerPoint(self):
+    # Changed from the plateau drawing: a stated and a predicted line, each held until the next
+    # known balance, no longer exist (the owner saw a paid-off loan still owing between two
+    # balances). One running line is drawn, and each known balance is a mark at its day;
+    # `test_balance_chart_known_balances` holds the scenarios.
+    def test_Values_WhenShown_DrawsOneRunningLineAndNoLineHeldFromAKnownBalance(self):
         page = Parsed(shown(mixed()))
 
         series = [a["data-series"] for a in page.find("path") if "data-series" in a]
-        assert sorted(series) == ["difference", "predicted", "stated"]
+        assert series == ["running"]
 
-    def test_Values_WhenShown_StatedAndPredictedLinesDifferByDashPatternNotColourAlone(self):
-        page = Parsed(shown(mixed()))
+    def test_Values_WhenShown_EveryKnownBalanceIsAMarkAndNoneIsHeldAsALine(self):
+        chart = mixed()
+        page = Parsed(shown(chart))
 
-        (stated,) = page.find("path", data_series="stated")
-        (predicted,) = page.find("path", data_series="predicted")
-        assert stated["stroke"] == predicted["stroke"]
-        assert "stroke-dasharray" not in stated
-        assert predicted["stroke-dasharray"]
+        known = [a for t, a in page.elements if t == "circle" and "data-day" in a]
+        differences = len([a for a in known if a["r"] == "3.5"])
+        assert len(known) - differences == len(chart.days) == differences
 
-    def test_Values_WhenTwoSourcesState_EachHasItsOwnPairedLinesWithDistinctPatterns(self):
+    def test_Values_WhenTwoSourcesState_EachHasItsOwnColourOfMark(self):
         page = Parsed(shown(mixed(second_source=True)))
 
-        stated = page.find("path", data_series="stated")
-        predicted = page.find("path", data_series="predicted")
-        assert len(stated) == len(predicted) == 2
-        assert stated[0]["stroke"] != stated[1]["stroke"]
-        assert {p["stroke-dasharray"] for p in predicted} == {"6 5", "1 6"}
-        assert "stroke-dasharray" not in stated[0] and stated[1]["stroke-dasharray"]
-        assert {s["data-source"] for s in stated} == {corpus.CSV_SOURCE, corpus.SECOND_SOURCE}
+        groups = [a for t, a in page.elements if t == "g" and a.get("class") == "known"]
+        assert {g["data-source"] for g in groups} == {corpus.CSV_SOURCE, corpus.SECOND_SOURCE}
+        assert len({g["fill"] for g in groups}) == 2
 
     def test_Values_WhenShown_MarksEveryStepByKindWithAShapeAsWellAsAColour(self):
         page = Parsed(shown(mixed()))
@@ -365,9 +364,12 @@ class TestCostAndSizeAtScale:
         # Coverage by source grid and blocks added about 1.6 kilobytes more (253,579 bytes
         # measured against 252,000).
         assert len(timeline) < 255_000, len(timeline)
-        assert len(values) < 500_000, len(values)
+        # Raised from 500,000 (723,913 measured): each of the 2,000 known balances is now a
+        # mark, a difference mark, and where it differs a tick (about 60, 60, and 130 bytes), in
+        # place of two step lines. Every balance here differs, which no real account does.
+        assert len(values) < 800_000, len(values)
         page = Parsed(values.decode())
-        assert len([a for a in page.find("path") if "data-series" in a]) == 3
+        assert len([a for a in page.find("path") if "data-series" in a]) == 1
 
 
 @pytest.fixture

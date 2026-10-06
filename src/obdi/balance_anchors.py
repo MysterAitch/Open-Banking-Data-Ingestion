@@ -939,6 +939,18 @@ def _counted_through(
     return through
 
 
+def counted_by_day(rows: Iterable[Transaction], basis: str) -> list[tuple[date, int]]:
+    """The running sum of the rows an anchor of `basis` counts, one entry per day that holds
+    any: that day and the sum through its end. The same counting and dating as the prediction
+    at an anchor (`derive_opening`, `walk_family`) with rows on their stored dates, so a line
+    drawn from it passes through the predictions of anchors counted that way."""
+    per_day: dict[date, int] = {}
+    for row in rows:
+        if _counts_toward(basis, row):
+            per_day[row.value_date] = per_day.get(row.value_date, 0) + row.amount_minor
+    return list(zip(sorted(per_day), accumulate(per_day[d] for d in sorted(per_day)), strict=True))
+
+
 def family_main_anchors(
     anchors: Iterable[FamilyAnchor],
     space_rows: Mapping[str, Sequence[Transaction]],
