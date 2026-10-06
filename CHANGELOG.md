@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.349] - 2026-10-06
+
+### Added
+- **Values can be shown for a sitting.** "Show values" was a press on every
+  page, and hard to find on the ledger (an outlined button among the window
+  controls). The owner asked for a persistent toggle with a banner. Now
+  "Show values on every page" (beside each per-page press, and under More)
+  sets a cookie for a twelve-hour sitting, and every page that has an
+  unmasked rendering - the ledger, Position, the balance chart, Categorise,
+  the review report, agreements, the balance walk, both reconciliation
+  pages, and the review flags - renders unmasked on a plain GET, served
+  `no-store`, down the same code its press used. A banner on every page
+  says values are shown until when, with Hide values in it. The cookie is a
+  session cookie, signed per process, refused after twelve hours or from
+  another run; HttpOnly, SameSite=Strict, Secure except on loopback. A
+  request without it gets exactly what it got before - the masked-GET tests
+  run without cookies and pass unchanged - so a pasted link, a bookmark,
+  and every tool reading the site still see nothing. The statement-shape
+  disclosure, the raw artefact payload, and the upload result's reveal stay
+  one-time presses.
+
+### Changed
+- **The bar's edge marker is an arrow.** The three-pixel slice at a bar's
+  left edge, meaning history before these twelve months is held, read as a
+  very narrow stretch of some rung. It is now a chevron pointing out of the
+  bar, in the key too.
+
 ## [0.4.348] - 2026-10-06
 
 ### Changed
