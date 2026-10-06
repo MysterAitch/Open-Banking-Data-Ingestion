@@ -290,6 +290,17 @@ carry its own measurement and a new budget.
   renders each page two ways (readings, stored rows) for comparison. Ships nothing a person
   sees; makes every later slice's claim checkable. Not strictly required for S1's page numbers,
   required for its rebuild numbers.
+- **S1a. A document is extracted once (independent of S1).** The owner, 2026-10-06: a PDF is
+  read as part of a one-off import; its extracted text, the names found in it, its sections,
+  and its masked shape "only need to be created once from pdf reading and this result can be
+  stored. It only changes if the extractor changes." The reading itself already is
+  (`statement_readings`, by digest, re-read when a field is newer than the kept reading); the
+  text lines, `names_found`, the sections of an "all accounts" document, and the shape are
+  process memos (`_lines`, `_grid_and_pages`, `_SECTIONS_BY_DIGEST`, the listing's name scan)
+  and are re-extracted on every restart. Store each by (digest, extractor version), fill them
+  when a document is kept and in the rebuild's parse phase, re-extract only when the version
+  changes, and have no page call an extractor. Measured goal: the kept-statements listing and
+  Bring in's preview issue no PDF read.
 - **S1. No page computes a reading (the cliff).** The `rm_` tables for the readings in the
   table above; `read_model.refresh(store, ALL)` as the one filler; a last rebuild phase; ALL
   at every door and once per scheduler cycle; Today, the account page, and the card page read
