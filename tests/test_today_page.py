@@ -84,6 +84,7 @@ def account(
     state: str = CURRENT,
     closed: str | None = None,
     balance_only: bool = False,
+    opened: str | None = None,
 ) -> AccountOverview:
     return AccountOverview(
         ref=ref,
@@ -101,6 +102,7 @@ def account(
         parent=parent,
         first=d(first) if first else None,
         balance_only=balance_only,
+        opened=d(opened) if opened else None,
     )
 
 
@@ -661,6 +663,23 @@ class TestArchivedAccountsDrawTheirBars:
         archived = self.archived_row(self.root(), "ancient")
 
         assert texts(archived, "span", "a-trust")[0].startswith("Archived 2024-10-05.")
+
+    def test_AccountWithAStatedOpening_LifeBeginsThere_NotAtAStatementsEarlierPeriod(self) -> None:
+        """A closed loan's first document printed a period beginning four months before the
+        loan was opened (a calendar-year statement), so its bar began on 1 January though the
+        account opened in May. Where an opening day is stated, the life begins there."""
+        of, fetch = ordinary()
+        accounts = (
+            *of.accounts,
+            account(
+                "loan", "Old loan", first="2022-01-01", newest="2024-10-05",
+                state="archived", closed="2024-10-05", opened="2022-05-04",
+            ),
+        )
+        archived = self.archived_row(page(replace(of, accounts=accounts), fetch), "loan")
+
+        ends = by_class(archived, "span", "a-ends")
+        assert [e.text() for e in ends] == ["2022-05-04 2024-10-05"]
 
 
 class TestNoFigureReachesToday:

@@ -390,6 +390,9 @@ class AccountOverview:
     #: Declared as an account whose balances are stated by hand (`accounts.is_balance_only`),
     #: so that holding no transactions is how it is meant to be and not a gap.
     balance_only: bool = False
+    #: The day the account opened, where declared: where an archived account's own life begins
+    #: (`trust_bar.own_life`), whatever earlier days a statement's printed period covers.
+    opened: date | None = None
 
 
 @dataclass(frozen=True)
@@ -1167,6 +1170,7 @@ def build_overview(
                 ),
                 first=first_rows.get(ref),
                 balance_only=declared is not None and is_balance_only(declared.kind),
+                opened=declared.opened if declared is not None else None,
             )
         )
     accounts.sort(

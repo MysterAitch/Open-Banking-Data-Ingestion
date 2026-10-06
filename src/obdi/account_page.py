@@ -279,18 +279,25 @@ def _headline(kind: str, head: str, sub: str, due: date | None = None) -> str:
 # -------------------------------------------------------------------------------- The strip
 
 
-def _own_life(reading: AccountReading, closed: date, today: date) -> tuple[date, date] | None:
-    """`trust_bar.own_life` over the days this account's timeline says a source holds."""
+def _own_life(
+    reading: AccountReading, closed: date, today: date, opened: date | None = None
+) -> tuple[date, date] | None:
+    """`trust_bar.own_life` over the days this account's timeline says a source holds, from
+    the day it opened where that is stated."""
     held = (
         [run.first for lane in reading.timeline.lanes for run in lane.runs]
         if reading.timeline is not None
         else []
     )
-    return own_life(reading.trust, closed, today, held)
+    return own_life(reading.trust, closed, today, held, opened=opened)
 
 
 def strip_html(
-    reading: AccountReading, ref: str, today: date, closed: date | None = None
+    reading: AccountReading,
+    ref: str,
+    today: date,
+    closed: date | None = None,
+    opened: date | None = None,
 ) -> str:
     """The trust lane over one lane per source, on the shared twelve months, wanted files dashed.
 
@@ -303,7 +310,7 @@ def strip_html(
     drawn by the same bars over its own life, from its first held day to the day it closed, with
     the two dates under it and a line saying so. One closed inside the twelve months keeps them.
     """
-    span = None if closed is None else _own_life(reading, closed, today)
+    span = None if closed is None else _own_life(reading, closed, today, opened)
     if span is None:
         axis = "".join(
             f'<span style="left:{left:.2f}%">{_esc(name)}</span>'

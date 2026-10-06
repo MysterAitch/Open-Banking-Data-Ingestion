@@ -647,6 +647,8 @@ class ArchiveNote:
     #: None when it could not be counted; `final_movements_unavailable` says why.
     final_movements: Structural[int | None]
     final_movements_unavailable: Structural[str]
+    #: The day the account opened where declared, "" where not: where its own life begins.
+    opened: Structural[str] = ""
 
 
 def _is_archived(record: AccountRecord | None, today: date) -> bool:
@@ -737,6 +739,7 @@ def archive_notes(
             ref=ref,
             state="archived" if archived else "suggested",
             closed=record.closed.isoformat() if archived and record and record.closed else "",
+            opened=record.opened.isoformat() if record and record.opened else "",
             inferred=bool(archived and record and record.date_basis),
             suggested_closed=suggestion.last_listed.isoformat() if suggestion else "",
             suggested_basis=suggestion.basis_text() if suggestion else "",

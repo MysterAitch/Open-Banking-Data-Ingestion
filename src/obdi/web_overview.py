@@ -593,7 +593,11 @@ def _row_html(
             # What tests a Space is its family, so its bar is the family's stretches: the
             # parent's whole-family agreement where there is one, else the parent's own.
             trust = _family_trust(parent, today)
-        span = own_life(trust, account.closed, today) if archived and account.closed else None
+        span = (
+            own_life(trust, account.closed, today, opened=account.opened)
+            if archived and account.closed
+            else None
+        )
         bar = bar_html(trust, today, span)
         if span is not None:
             bar = f'<span class="a-bars">{bar}{ends_html(span, "a-ends")}</span>'

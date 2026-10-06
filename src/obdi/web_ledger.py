@@ -2973,6 +2973,17 @@ def _closed_on(view: Any) -> date | None:
     return closed_on(view.archive)
 
 
+def _opened_on(view: Any) -> date | None:
+    """The day the account opened, where declared; None otherwise."""
+    archive = view.archive
+    if archive is None or not getattr(archive, "opened", ""):
+        return None
+    try:
+        return date.fromisoformat(str(archive.opened))
+    except ValueError:
+        return None
+
+
 def _head(view: Any) -> str:
     """Under the name, one muted line: the reference as code, and whether it is sent to Actual."""
     archive = view.archive
@@ -3079,7 +3090,9 @@ def _state_html(
         + trust_html(
             reading, held_transactions=held, span=(view.oldest_month, view.newest_month)
         )
-        + strip_html(reading, view.ref, today, closed=_closed_on(view))
+        + strip_html(
+            reading, view.ref, today, closed=_closed_on(view), opened=_opened_on(view)
+        )
         + todos
         + cannot_lock_yet_html(view.protection, reading.trust.adds_up_to)
     )
