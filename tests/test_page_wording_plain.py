@@ -30,7 +30,7 @@ from test_statement_listing_rule_pages import served as rule_served  # noqa: F40
 
 def heading_of(page: str) -> str:
     for node in elements(parse(page), "summary"):
-        if node.text().startswith("Known balances and the opening"):
+        if node.text().startswith("Known balances ("):
             return node.text()
     raise AssertionError("the page has no known balances section")
 

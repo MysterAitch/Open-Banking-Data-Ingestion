@@ -431,7 +431,7 @@ class TestAnswersThatMustNotLand:
 
         assert response.status_code == 409
         assert "protected through 2026-09-15" in response.text
-        assert "Remove protection&quot; on the account page first" in response.text
+        assert "Remove the lock&quot; on the account page first" in response.text
         assert rows(db, TICKETS) == before
 
 

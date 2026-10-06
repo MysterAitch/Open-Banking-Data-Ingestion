@@ -902,7 +902,7 @@ def test_Navigation_AtDesktopWidth_IsOneRowOfFiveLinks(
 def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(
     browser: object, corpus_base: str
 ) -> None:
-    """Show values is the filled control; archiving and hiding are outlined."""
+    """The thing to do is the filled control; showing values, archiving, and hiding are outlined."""
     page = browser.new_page(  # type: ignore[attr-defined]
         viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT}
     )
@@ -922,6 +922,14 @@ def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(
     try:
         page.goto(f"{corpus_base}/ledger?ref=synthetic-current", wait_until="load")
         show = background("Show values")
+        lead = str(
+            page.evaluate(
+                """() => {
+                    const hit = document.querySelector('.todo a.button, .todo button.button');
+                    return hit ? getComputedStyle(hit).backgroundColor : 'absent';
+                }"""
+            )
+        )
         archive = background("Archive this account")
         page.get_by_role("button", name="Show values").first.click()
         page.wait_for_load_state("load")
@@ -929,6 +937,9 @@ def test_LedgerPage_PrimaryAction_IsHeavierThanArchiveAndHide(
     finally:
         page.close()
     transparent = "rgba(0, 0, 0, 0)"
-    assert show not in {transparent, "absent"}, show
+    # The account has something to do, so that is the page's one filled control and showing
+    # values is outlined like archiving and hiding.
+    assert lead not in {transparent, "absent"}, lead
+    assert show == transparent, show
     assert archive in {transparent, "absent"}, archive
     assert hide == transparent, hide

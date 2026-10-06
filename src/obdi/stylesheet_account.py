@@ -50,8 +50,8 @@ ACCOUNT_STYLES = """
  /* Things to do, on this page: the words, then the control under them. An offer is quieter. */
  .acct-state .todo { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--s2); align-items: start; }
  .acct-state .todo a.button, .acct-state .todo button.button { min-height: var(--tap); font-size: 1rem; white-space: normal; }
- .todo.offer { border-left-color: var(--rule); }
- .todo.offer .todo-what { font-weight: 400; }
+ .acct-state .todo.offer { border-left-color: var(--rule); }
+ .acct-state .todo.offer .todo-what { font-weight: 400; }
  .acct-state .todo form { margin: 0; }
  .acct-state .todo form button:not(.button) { margin: 0; }
  .todo-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2) var(--s3); }

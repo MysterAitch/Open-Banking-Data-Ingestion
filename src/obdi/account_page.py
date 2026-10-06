@@ -340,6 +340,14 @@ def _row(todo: Todo, ref: str, month: str, today: date, *, lead: bool) -> str:
     return todo_row_html(todo, unnamed, today, lead=lead, named=False, control=control, css=css)
 
 
+def hold_is_said(reading: AccountReading, hold: tuple[str, str, str] | None) -> bool:
+    """Whether the standing's own sentence about what stops the account adding up is already on
+    the page, as the thing to do (`todos_html`) or inside the message of the one that says it
+    with that sentence: the known balances then do not say it again."""
+    kinds = {t.kind for t in reading.todos}
+    return (hold is not None and not kinds & _FAULT_KINDS) or "agreement-lapsed" in kinds
+
+
 def hold_row_html(sentence: str, href: str, label: str) -> str:
     """What stops the account adding up, as a to-do, where no to-do already says it."""
     return (

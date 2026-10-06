@@ -143,13 +143,15 @@ class TestAnAccountsOwnPageIsHeadedByItsName:
         assert "Card agreeing" in text_of(heading)
         assert text_of(heading) != "agreeing"
 
-    def test_Reference_UnderTheHeading_IsSetAsCode(self, page):
-        assert '<p class="ref"><code>agreeing</code></p>' in page
+    def test_Reference_UnderTheHeading_IsSetAsCodeInTheOneMutedLine(self, page):
+        assert re.search(r'<p class="meta"><code>agreeing</code> &middot; ', page)
 
-    def test_SourcesThatFeedTheAccount_AreSetAsCode(self, page):
-        fed = page.split("Fed by:")[1].split(".")[0]
+    def test_SourcesThatFeedTheAccount_AreSetAsCodeWhereTheyAreSaid(self, page):
+        """The sources are the strip's lanes and, as evidence, the matching in "How this was
+        checked"; wherever a source is named it is code."""
+        named = re.findall(r"<code>([^<]+)</code>", page)
 
-        assert re.findall(r"<code>([^<]+)</code>", fed) == ["s"]
+        assert "agreeing" in named and "s" in named
 
 
 class TestTheSummary:

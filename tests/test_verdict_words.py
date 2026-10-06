@@ -145,10 +145,7 @@ class TestThePagesSayItTheSameWay:
     def test_AccountPage_ForAnAccountThatAddsUp_SaysSoWithBothThingsCompared(self, pages):
         said = text_of(pages["/ledger?ref=pocket-money&month=2026-09"])
 
-        assert (
-            "The transactions add up to every known balance from 2026-09-10 to 2026-09-20"
-            in said
-        )
+        assert f"{ADDS_UP.capitalize()} to the known balances to 2026-09-20" in said
 
     def test_AccountPage_ForOneKnownBalanceOnly_SaysASecondIsNeeded(self, pages):
         said = text_of(pages["/ledger?ref=starling:uid-pots&month=2026-09"])
@@ -162,7 +159,7 @@ class TestThePagesSayItTheSameWay:
     def test_AccountPage_ForNoKnownBalance_SaysThereIsNothingToCheckAgainst(self, pages):
         said = text_of(pages["/ledger?ref=plain-ref-7&month=2026-09"])
 
-        assert "No known balance, so there is nothing to check the transactions against." in said
+        assert f"{NOTHING_TO_CHECK_AGAINST.capitalize()}." in said
 
 
 class TestTheWordsAreWrittenOnceInTheirOwnModule:

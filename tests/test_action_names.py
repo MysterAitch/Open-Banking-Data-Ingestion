@@ -107,13 +107,13 @@ class TestTheResultsSayTheVerbOfTheirButton:
 
 class TestTheLabelsAreDeclaredOnce:
     def test_Labels_AreTheOnesThePagesShow(self):
-        assert page_words.REMOVE_PROTECTION == "Remove protection"
+        assert page_words.REMOVE_PROTECTION == "Remove the lock"
         assert page_words.REMOVE_TYPED_TRANSACTION == "Remove typed transaction"
         assert page_words.MOVE_ARTEFACT == "Move to another account"
         assert page_words.REBUILD_ARTEFACT == "Rebuild this artefact's transactions"
 
     def test_ResultTitles_ReadTheSameVerbAsTheirButton(self):
-        assert page_words.PROTECTION_REMOVED == "Protection removed"
+        assert page_words.PROTECTION_REMOVED == "Lock removed"
         assert page_words.TYPED_TRANSACTION_REMOVED == "Typed transaction removed"
         assert page_words.ARTEFACT_MOVED.startswith("Artefact moved")
         assert page_words.ARTEFACT_REBUILT.endswith("rebuilt")

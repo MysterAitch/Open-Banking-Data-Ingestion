@@ -250,7 +250,10 @@ class TestMaskingAWrappedRecord:
 #: Bounds. The measured numbers are in the module's docstring; the bounds leave room for a slower
 #: machine and for a page that grows by a few statements, and not for one that grows by a
 #: statement per row.
-FIRST_LEDGER_STATEMENTS = 700
+#: The first load was 700 at most until the page read the overview and the files still to fetch
+#: for its things to do; measured then (2026-10-06) 780 statements first and 119 later. The first
+#: pays for assembling what Today shares, held for later loads by the same cache.
+FIRST_LEDGER_STATEMENTS = 800
 LEDGER_STATEMENTS = 260
 FIRST_LEDGER_SECONDS = 60.0
 LEDGER_SECONDS = 8.0

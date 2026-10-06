@@ -172,13 +172,12 @@ class TestTheAccountPage:
     def test_Page_WhenALoneStatementAddsUp_TellsOneStoryAndNotTheOldWarnings(self, served):
         said = page_of(served[0], "r-lone", "2026-01").said
 
-        assert "Known balances and the opening (1 add up, none differ)" in said
+        assert "Known balances (1 add up, none differ)" in said
         assert "absorbs every missing or surplus transaction" not in said
         assert "is tested by its own statement" in said
-        # The days its statement tests (from its first day, 2025-12-11) are not "no known
-        # balance"; the days before it, which nothing tests, still are.
-        assert "No known balance from 2025-12-01 to 2025-12-11" in said
-        assert "add up to the known balances from 2025-12-11 to 2026-01-10" in said
+        # The days its statement tests count as adding up, to its closing day; the trust
+        # sentence says that, and the strip draws the days before the statement as held only.
+        assert "Adds up to the known balances to 2026-01-10" in said
 
     def test_Page_WhenAStatementIsTakenToHaveClosedBeforeATransaction_SaysWhyAndHowItIsKnown(
         self, served

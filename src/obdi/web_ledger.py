@@ -27,6 +27,7 @@ from .account_page import (
     AccountReading,
     cannot_lock_yet_html,
     head_html,
+    hold_is_said,
     lock_offer_html,
     read_account,
     strip_html,
@@ -760,7 +761,6 @@ def _listing_html(own: Any) -> str:
     return faults + "".join(
         f'<p class="sub">{_esc(listing_tested_sentence(tested))}</p>'
         for tested in own.listing_tested
-        if own.through != own.known_from
     ) + "".join(
         f'<p class="sub">{_esc(closed_before_sentence(claim))}</p>' for claim in own.closed_before
     )
@@ -2025,17 +2025,18 @@ def _month_end(month: str) -> date | None:
     return date.fromordinal(following.toordinal() - 1)
 
 
-def _standing_detail_html(view: Any) -> str:
+def _standing_detail_html(view: Any, *, held_said: bool) -> str:
     """What the standing says in detail, at the head of the known balances: where the
-    transactions stop adding up and what that can mean, the balances a statement's own listing
-    tests, and the whole account with its Spaces."""
+    transactions stop adding up and what that can mean, what holds the account back unless a
+    thing to do has said so already (`held_said`), the balances a statement's own listing tests,
+    and the whole account with its Spaces."""
     standing = view.standing
     if standing is None:
         return ""
     own = standing.own
     body = (
         _stretches_html(own)
-        + (_held_html(own) if own.held is None else "")
+        + (_held_html(own) if own.held is None or not held_said else "")
         + _listing_html(own)
         + (
             ""
@@ -2251,7 +2252,12 @@ def _earlier_balances(view: Any, count: int, *, unmasked: bool, balance_only: bo
 
 
 def _opening_html(
-    view: Any, unmasked: bool, *, everything: bool = False, state_form: bool = True
+    view: Any,
+    unmasked: bool,
+    *,
+    everything: bool = False,
+    state_form: bool = True,
+    held_said: bool = False,
 ) -> str:
     """The "Known balances" fold, and the forms that edit them: stating a balance (unless a thing
     to do holds that form already), removing one, and the ones removed.
@@ -2270,7 +2276,7 @@ def _opening_html(
     def earlier(count: int) -> str:
         return _earlier_balances(view, count, unmasked=unmasked, balance_only=opening.balance_only)
 
-    body = _standing_detail_html(view)
+    body = _standing_detail_html(view, held_said=held_said)
     if everything and _listed_anchors(opening.anchors, everything=False)[1]:
         body += _balances_control(
             view,
@@ -2959,7 +2965,13 @@ def render_ledger(
     pressing = bool(reading.todos) or hold is not None or offering
     more = (
         _bars_html(view)
-        + _opening_html(view, unmasked, everything=all_balances, state_form=not confirming)
+        + _opening_html(
+            view,
+            unmasked,
+            everything=all_balances,
+            state_form=not confirming,
+            held_said=hold_is_said(reading, hold),
+        )
         + _locking_html(view, unmasked, all_balances)
         + _how_checked_html(view, unmasked, with_counts=view.state == "ok")
         + _archive_html(view, archive_wired=archive_wired)

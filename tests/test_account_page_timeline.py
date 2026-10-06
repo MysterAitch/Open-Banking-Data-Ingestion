@@ -149,9 +149,9 @@ class TestTheLanes:
 
         assert main[2] == where(date(2026, 7, 1), date(2026, 8, 20))[1]
         assert month_marks[0] == ("0.00", "Oct"), "the window begins part-way through October"
-        assert [name for _, name in month_marks] == [
-            "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"
-        ]
+        assert [name for _, name in month_marks] == ["Oct", "Dec", "Feb", "Apr", "Jun", "Aug"], (
+            "every other month is named, since the strip is narrower than a list's bars"
+        )
 
 
 class TestTheStripIsTheWayToTheFullTimeline:
