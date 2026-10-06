@@ -30,6 +30,7 @@ from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
+from .values_sitting import more_line_html
 from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE
 
@@ -349,7 +350,7 @@ def render_more() -> bytes:
         + "</ul>"
         for title, pages in MORE_GROUPS
     )
-    return render_page("More", f"{groups}")
+    return render_page("More", f"{groups}{more_line_html()}")
 
 
 def render_actual(

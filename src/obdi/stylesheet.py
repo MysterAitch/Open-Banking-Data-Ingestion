@@ -55,6 +55,7 @@ from .stylesheet_flags import FLAGS_STYLES
 from .stylesheet_home import HOME_STYLES
 from .stylesheet_position import POSITION_STYLES
 from .stylesheet_sections import SECTION_STYLES
+from .stylesheet_sitting import SITTING_STYLES
 from .stylesheet_timeline import TIMELINE_STYLES
 from .stylesheet_window import WINDOW_STYLES
 
@@ -334,7 +335,7 @@ SHARED_STYLES = """
 STYLESHEET = (
     SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
     + WINDOW_STYLES + POSITION_STYLES + BRING_IN_STYLES + TIMELINE_STYLES + CONNECTIONS_STYLES
-    + DIAGNOSTICS_STYLES
+    + DIAGNOSTICS_STYLES + SITTING_STYLES
 )
 
 

@@ -559,7 +559,9 @@ class TestShowingValuesTakesAPost:
     def test_MaskedPage_OffersOneButton_PostingTheRefAndMonth(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert page.count("Show values") == 1
+        # The one-page press, and beside it the quieter press that shows values on every page.
+        assert page.count("Show values") == 2
+        assert page.count("Show values on every page") == 1
         assert '<form method="post" action="/ledger">' in page
         assert 'name="ref" value="current-account"' in page
         assert 'name="month" value="2026-03"' in page
