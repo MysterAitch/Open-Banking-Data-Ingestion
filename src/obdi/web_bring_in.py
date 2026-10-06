@@ -805,9 +805,9 @@ def quiet_lines(report: FetchReport | None, names: AccountsShown) -> tuple[str, 
         return ()
     lines: list[str] = []
     coming = [
-        f"{names.of(o.account).as_name()} about {o.next_expected.isoformat()}"
+        f"{names.of(o.account).as_name()} about {due.isoformat()}"
         for o in report.accounts
-        if not o.gaps and o.next_expected is not None
+        if (due := o.due(report.today)) is not None
     ]
     if coming:
         lines.append("Next statement: " + "; ".join(coming) + ".")
