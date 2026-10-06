@@ -158,15 +158,13 @@ def serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 def _post(base: str, route: str, data: dict[str, str]) -> httpx.Response:
-    return httpx.post(
-        f"{base}{route}", data=data, headers={"Origin": base}, timeout=60
-    )
+    return httpx.post(f"{base}{route}", data=data, headers={"Origin": base}, timeout=60)
 
 
 def _group(page: str, heading: str) -> str:
     """The text of one group, from its heading to the next heading."""
     start = page.index(heading)
-    following = re.search(r"<h3", page[start + len(heading):])
+    following = re.search(r'<details class="kept-group"', page[start + len(heading) :])
     end = start + len(heading) + following.start() if following else len(page)
     return page[start:end]
 
@@ -187,13 +185,11 @@ class TestTheKeptStatementsPage:
         page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60)
 
         assert page.status_code == 200
-        assert "1 waiting only for an account, 1 with no parser yet, 1 assigned" in (
-            page.text
-        )
+        assert "1 waiting only for an account, 1 with no parser yet, 1 assigned" in (page.text)
         waiting = _group(page.text, "Waiting only for an account (1)")
         assert "2026.05 - Example Card.pdf" in waiting
         assert "santander-cc-pdf" in waiting
-        assert "no account yet" in waiting
+        assert "No account yet." in waiting
         nowhere = _group(page.text, "No parser yet (1)")
         assert "2026.05 - Other Bank.pdf" in nowhere
         assert "no parser for this layout yet" in nowhere
@@ -203,9 +199,7 @@ class TestTheKeptStatementsPage:
         assert page.text.index("Waiting only") < page.text.index("No parser yet")
         assert page.text.index("No parser yet") < page.text.index("Assigned (1)")
 
-    def test_KeptStatements_EachEntry_SaysWhichIssuerNamesItsTextHolds(
-        self, serve, one_of_each
-    ):
+    def test_KeptStatements_EachEntry_SaysWhichIssuerNamesItsTextHolds(self, serve, one_of_each):
         """The masked shape hides every name, so a statement with no parser
         could not be told from any other. The May statement names Santander
         twice: its registered-office line and its card fee."""
@@ -225,9 +219,7 @@ class TestTheKeptStatementsPage:
             "2026.05 - Other Bank.pdf",
             "2026.04 - Example Card.pdf",
         ):
-            assert (
-                f'href="/statement-shape?artefact={_id_of(one_of_each, name)}"' in page
-            ), name
+            assert f'href="/statement-shape?artefact={_id_of(one_of_each, name)}"' in page, name
 
     def test_KeptStatements_OnlyReadableUnassignedOnesOfferAnAssignControl(
         self, serve, one_of_each
@@ -250,9 +242,7 @@ class TestTheKeptStatementsPage:
         assert "No statements have been kept yet" in page.text
         assert "Waiting only for an account" not in page.text
 
-    def test_KeptStatements_WithSixHundredLaterArtefacts_StillListsEveryOne(
-        self, serve, db
-    ):
+    def test_KeptStatements_WithSixHundredLaterArtefacts_StillListsEveryOne(self, serve, db):
         kept_at = datetime.now(UTC) - timedelta(days=30)
         names = [f"2026.0{month} - Example Card.pdf" for month in (3, 4, 5)]
         with Store(db) as store:
@@ -273,9 +263,7 @@ class TestTheKeptStatementsPage:
             assert name in page, name
         assert "2 waiting only for an account, 1 with no parser yet, 0 assigned" in page
 
-    def test_KeptStatements_WhenViewed_ShowsNoFigureAndNoStatementText(
-        self, serve, db
-    ):
+    def test_KeptStatements_WhenViewed_ShowsNoFigureAndNoStatementText(self, serve, db):
         with Store(db) as store:
             _keep(store, DISTINCTIVE, "2026.08 - Example Card.pdf")
         page = httpx.get(f"{serve(db)}/statements", timeout=60).text
@@ -307,14 +295,58 @@ class TestTheKeptStatementsPage:
         assert first == 3, "each of the three statements is asked about once"
         assert len(calls) == first, "a second view re-read the statements"
 
-    def test_KeptStatements_WhenNavigatedTo_MarksTheBringInSection(
+    def test_KeptStatements_WhenNavigatedTo_MarksTheBringInSection(self, serve, one_of_each):
+        page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60).text
+
+        assert re.search(r'<a href="/bring-in" aria-current="page">Bring in</a>', page)
+
+
+class TestTheDocumentsKeptForOneAccount:
+    """From an account's own page: only that account's documents, newest first, each opening its
+    masked shape and saying its listed days, how many transactions, and whether it adds up by
+    what it lists. Known answer over `one_of_each`: the April statement is the one kept for
+    `santander-cc`, it lists 2 transactions from 2026-06-02 to 2026-06-04, and it adds up."""
+
+    def test_AccountView_ListsOnlyThatAccountsDocumentWithItsPeriodCountAndVerdict(
+        self, serve, one_of_each
+    ):
+        from page_dom import elements, parse
+
+        page = parse(httpx.get(f"{serve(one_of_each)}/statements?ref={ACCOUNT}", timeout=60).text)
+        lines = [" ".join(li.text().split()) for li in elements(page, "li")]
+        kept = [line for line in lines if "Example Card.pdf" in line]
+
+        assert len(kept) == 1
+        assert kept[0].startswith("2026.04 - Example Card.pdf")
+        assert "lists 2026-06-02 to 2026-06-04, 2 transactions, adds up by what it lists" in kept[0]
+        assert "Other Bank" not in page.text() and "2026.05" not in page.text()
+
+    def test_AccountView_LinksEachDocumentToItsShape(self, serve, one_of_each):
+        page = httpx.get(f"{serve(one_of_each)}/statements?ref={ACCOUNT}", timeout=60).text
+
+        assert (
+            f'href="/statement-shape?artefact={_id_of(one_of_each, "2026.04 - Example Card.pdf")}"'
+            in page
+        )
+
+    def test_AccountView_ForAnAccountWithNothingKept_SaysSo(self, serve, one_of_each):
+        page = httpx.get(f"{serve(one_of_each)}/statements?ref=nobody", timeout=60).text
+
+        assert "No statement is kept for this account yet." in page
+
+    def test_AccountView_WithAMarkupReference_EscapesIt(self, serve, one_of_each):
+        page = httpx.get(
+            f"{serve(one_of_each)}/statements", params={"ref": '"><b>x'}, timeout=60
+        ).text
+
+        assert "<b>x" not in page
+
+    def test_FullPage_GroupsTheAssignedByAccountWithALinkToEachAccountsOwnList(
         self, serve, one_of_each
     ):
         page = httpx.get(f"{serve(one_of_each)}/statements", timeout=60).text
 
-        assert re.search(
-            r'<a href="/bring-in" aria-current="page">Bring in</a>', page
-        )
+        assert f'href="/statements?ref={ACCOUNT}"' in page
 
 
 class TestAssigningManyAtOnce:
@@ -334,23 +366,21 @@ class TestAssigningManyAtOnce:
     def _ids(self, db: Path, *names: str) -> str:
         return ",".join(str(_id_of(db, name)) for name in names)
 
-    def test_PageOffersOneBulkForm_PerParserReadingTwoOrMore(
-        self, serve, three_months
-    ):
+    def test_PageOffersOneBulkForm_PerParserReadingTwoOrMore(self, serve, three_months):
         """March and May read; April is recognised and refused, so it is not
         offered: a form that names it would promise a reading that fails."""
         page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
 
         assert page.count('action="/statements-assign"') == 1
         assert "Give these 2 statements to" in page
-        form = page[page.index('action="/statements-assign"'):].split("</form>")[0]
+        form = page[page.index('action="/statements-assign"') :].split("</form>")[0]
         for name in ("2026.03 - Example Card.pdf", "2026.05 - Example Card.pdf"):
-            assert f'{_id_of(three_months, name)}' in form
+            assert f"{_id_of(three_months, name)}" in form
         ids = re.search(r'name="artefacts" value="([^"]*)"', form)
         assert ids is not None
-        assert str(_id_of(three_months, "2026.04 - Example Card.pdf")) not in ids.group(
-            1
-        ).split(",")
+        assert str(_id_of(three_months, "2026.04 - Example Card.pdf")) not in ids.group(1).split(
+            ","
+        )
 
     def test_KeptStatements_AStatementItsParserRefuses_IsListedApartWithTheReason(
         self, serve, three_months
@@ -368,9 +398,7 @@ class TestAssigningManyAtOnce:
         waiting = _group(page, "Waiting only for an account (2)")
         assert "2026.04 - Example Card.pdf" not in waiting
 
-    def test_KeptStatements_ARefusedStatementsReason_CarriesNoFigure(
-        self, serve, three_months
-    ):
+    def test_KeptStatements_ARefusedStatementsReason_CarriesNoFigure(self, serve, three_months):
         """The gate's message states the discrepancy; on a GET it is masked.
         April is out by 1,137.57 (1,234.56 brought forward, 3.00 spent, 99.99
         stated)."""
@@ -379,9 +407,7 @@ class TestAssigningManyAtOnce:
         assert "113757" not in page and "1,137.57" not in page
         assert "1,234.56" not in page and "123456" not in page
 
-    def test_KeptStatements_AReadableStatement_SaysHowManyRowsItReads(
-        self, serve, three_months
-    ):
+    def test_KeptStatements_AReadableStatement_SaysHowManyRowsItReads(self, serve, three_months):
         page = httpx.get(f"{serve(three_months)}/statements", timeout=60).text
 
         waiting = _group(page, "Waiting only for an account (2)")
@@ -444,9 +470,7 @@ class TestAssigningManyAtOnce:
         assert _transactions(three_months) == []
         assert _account_of(three_months, "2026.03 - Example Card.pdf") == UNASSIGNED
 
-    def test_BulkAssign_WithNoAccount_IsRefusedAndAssignsNothing(
-        self, serve, three_months
-    ):
+    def test_BulkAssign_WithNoAccount_IsRefusedAndAssignsNothing(self, serve, three_months):
         response = _post(
             serve(three_months),
             "/statements-assign",
@@ -473,9 +497,7 @@ class TestAssigningManyAtOnce:
         assert _account_of(three_months, "2026.03 - Example Card.pdf") == UNASSIGNED
 
     def test_BulkAssign_WithNoIds_IsRefused(self, serve, three_months):
-        response = _post(
-            serve(three_months), "/statements-assign", {"account": ACCOUNT}
-        )
+        response = _post(serve(three_months), "/statements-assign", {"account": ACCOUNT})
 
         assert response.status_code == 400
 
@@ -522,9 +544,7 @@ class TestOnlyKeptStatementsAreServedAndAssigned:
         assert "No kept statement with that id" in page.text
         assert "/statement-assign" not in page.text
 
-    def test_StatementShape_ForAKeptStatement_StillOffersTheAssignForm(
-        self, serve, mixed
-    ):
+    def test_StatementShape_ForAKeptStatement_StillOffersTheAssignForm(self, serve, mixed):
         page = httpx.get(
             f"{serve(mixed)}/statement-shape"
             f"?artefact={_id_of(mixed, '2026.05 - Example Card.pdf')}",
@@ -560,9 +580,7 @@ class TestOnlyKeptStatementsAreServedAndAssigned:
         assert bulk.status_code == 400
         assert _transactions(db) == [ACCOUNT] * 7, "nothing was refiled or re-read"
 
-    def test_SingleAssign_OfAnArtefactThatIsNotAStatement_FilesNothing(
-        self, serve, mixed
-    ):
+    def test_SingleAssign_OfAnArtefactThatIsNotAStatement_FilesNothing(self, serve, mixed):
         feed = self._feed_id(mixed)
 
         response = _post(
@@ -576,9 +594,7 @@ class TestOnlyKeptStatementsAreServedAndAssigned:
             ).fetchone()
         assert row["account_ref"] == "starling-current"
 
-    def test_SingleAssign_OfAStatementTheGateRefuses_LeavesItWaitingForAnAccount(
-        self, serve, db
-    ):
+    def test_SingleAssign_OfAStatementTheGateRefuses_LeavesItWaitingForAnAccount(self, serve, db):
         with Store(db) as store:
             _keep(store, BROKEN, "2026.04 - Example Card.pdf")
 

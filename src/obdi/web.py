@@ -119,7 +119,6 @@ from .web_empty import (
 from .web_flags import FlagPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
-from .web_marks import FETCH_NEXT_LINE
 from .web_overview import overview_html
 from .web_position import PositionPages
 from .web_prune import (
@@ -3783,7 +3782,7 @@ class ConnectionHandler(
             self._statement_shape_form()
             return
         if route == "/statements":
-            self._statements_page()
+            self._statements_page(parse_qs(parsed.query).get("ref", [""])[0].strip())
             return
         if route == "/review":
             self._review_page(masked=True)
@@ -5016,8 +5015,9 @@ class ConnectionHandler(
         return hook is None or artefact_id in hook()
 
 
-    def _statements_page(self) -> None:
-        """Every kept statement, grouped by what it is waiting for.
+    def _statements_page(self, ref: str = "") -> None:
+        """Every kept statement, grouped by what it is waiting for, or with `ref` the statements
+        kept for that one account, newest first.
 
         Served on a GET, so file names, dates, account labels, parser names
         and counts only: nothing a statement says.
@@ -5031,238 +5031,21 @@ class ConnectionHandler(
         options = self.picker_account_options()
         can_assign = self.bound_config.assign_kept_statement is not None
         can_section_assign = self.bound_config.assign_statement_section is not None
-        # Recognised is not readable: a parser may claim a statement and then
-        # refuse it because its rows do not carry its own balances.
-        # A document of several accounts is never assigned whole; each of its
-        # accounts is, so it is listed on its own with a control per account.
-        sectioned = [
-            item for item in entries
-            if item["account_ref"] == UNASSIGNED_ACCOUNT and item.get("sections")
-        ]
-        waiting = [
-            item for item in entries
-            if item["account_ref"] == UNASSIGNED_ACCOUNT
-            and item["parser"]
-            and not item.get("refusal")
-            and not item.get("sections")
-        ]
-        refused = [
-            item for item in entries
-            if item["account_ref"] == UNASSIGNED_ACCOUNT
-            and item["parser"]
-            and item.get("refusal")
-        ]
-        no_parser = [
-            item for item in entries
-            if item["account_ref"] == UNASSIGNED_ACCOUNT and not item["parser"]
-        ]
-        assigned = [item for item in entries if item["account_ref"] != UNASSIGNED_ACCOUNT]
-        if not entries:
-            body = (
-                "<p>No statements have been kept yet.</p>"
-                '<p><a class="button" href="/statement-shape">Upload a statement</a></p>'
-            )
-        else:
-            picker = account_picker(options)
+        from .web_statements import statements_body
 
-            def file_order(item: dict[str, object]) -> tuple[str, int]:
-                return str(item["origin"]), int(str(item["id"]))
-
-            def card(item: dict[str, object], *, assignable: bool) -> str:
-                ident = int(str(item["id"]))
-                ref = str(item["account_ref"])
-                whose = (
-                    "no account yet" if ref == UNASSIGNED_ACCOUNT else names.of(ref).inline()
-                )
-                parser = item["parser"]
-                reader = (
-                    html.escape(str(parser)) if parser else "no parser for this layout yet"
-                )
-                rows_read = item.get("rows")
-                refusal = str(item.get("refusal") or "")
-                if refusal:
-                    reader += f'<br><span class="warn">refused: {html.escape(refusal)}</span>'
-                elif isinstance(rows_read, int) and ref == UNASSIGNED_ACCOUNT:
-                    noun = "row" if rows_read == 1 else "rows"
-                    reader += f", reads {rows_read} {noun} and its balances carry"
-                kept = str(item["fetched_at"])[:16].replace("T", " ")
-                # Counts of listed issuer names only; see `statement_names`.
-                found = item.get("names")
-                named = (
-                    ", ".join(
-                        f"{html.escape(str(name))} {count}"
-                        for name, count in found
-                    )
-                    if isinstance(found, list) and found
-                    else "none of the issuer names looked for"
-                )
-                form = (
-                    "<details><summary>Give it an account</summary>"
-                    '<form action="/statement-assign" method="post">'
-                    f'<input type="hidden" name="artefact" value="{ident}">'
-                    + picker
-                    + '<p><button type="submit">Assign and read in</button></p>'
-                    "</form></details>"
-                    if assignable and can_assign
-                    else ""
-                )
-                return (
-                    '<li class="account">'
-                    f'<p class="account-name"><strong>{html.escape(str(item["origin"]))}'
-                    "</strong></p>"
-                    '<dl class="facts">'
-                    f"<dt>Kept</dt><dd>{html.escape(kept)}</dd>"
-                    f"<dt>Whose</dt><dd>{whose}</dd>"
-                    f"<dt>Read by</dt><dd>{reader}</dd>"
-                    f"<dt>Names found</dt><dd>{named}</dd>"
-                    "</dl>"
-                    '<p class="account-links"><a class="tap" '
-                    f'href="/statement-shape?artefact={ident}">Masked shape</a></p>'
-                    f"{form}</li>"
-                )
-
-            def group(title: str, items: list[dict[str, object]], *, assignable: bool,
-                      lead: str = "") -> str:
-                if not items:
-                    return ""
-                ordered = sorted(items, key=file_order)
-                return (
-                    f"<h3>{html.escape(title)} ({len(items)})</h3>{lead}"
-                    '<ul class="accounts">'
-                    + "".join(card(item, assignable=assignable) for item in ordered)
-                    + "</ul>"
-                )
-
-            by_parser: dict[str, list[dict[str, object]]] = {}
-            for item in waiting:
-                by_parser.setdefault(str(item["parser"]), []).append(item)
-            bulk = ""
-            if can_assign:
-                for parser_name, items in sorted(by_parser.items()):
-                    if len(items) < 2:
-                        continue
-                    ids = ",".join(str(item["id"]) for item in sorted(items, key=file_order))
-                    bulk += (
-                        '<div class="account"><form action="/statements-assign" method="post">'
-                        f'<input type="hidden" name="artefacts" value="{ids}">'
-                        f"<p><strong>Give these {len(items)} statements to</strong> "
-                        f'<span class="muted">(all read by {html.escape(parser_name)}, '
-                        "in file-name order)</span></p>"
-                        + picker
-                        + '<p><button type="submit">Assign them all and read in</button></p>'
-                        "</form></div>"
-                    )
-            refused_count = (
-                f"{len(refused)} recognised but refused, " if refused else ""
-            )
-            several_count = (
-                f"{len(sectioned)} covering several accounts, " if sectioned else ""
-            )
-
-            def section_card(item: dict[str, object]) -> str:
-                """A document of several accounts: one control for each account.
-
-                Served on a GET, so a label is shown with its digits masked and
-                a section's refusal likewise; no row, figure, or payee appears.
-                """
-                ident = int(str(item["id"]))
-                kept_at = str(item["fetched_at"])[:16].replace("T", " ")
-                raw_sections = item.get("sections")
-                parts = raw_sections if isinstance(raw_sections, list) else []
-                items = []
-                for part in parts:
-                    if not isinstance(part, dict):
-                        continue
-                    key = html.escape(str(part["token"]))
-                    label = html.escape(str(part["label"]))
-                    count = int(str(part["rows"]))
-                    held = str(part.get("account") or "")
-                    refusal = str(part.get("refusal") or "")
-                    suggested = str(part.get("suggested") or "")
-                    noun = "row" if count == 1 else "rows"
-                    if held:
-                        status = (
-                            f'<span class="ok">assigned to {names.of(held).inline()}</span>'
-                        )
-                        form = ""
-                    elif refusal:
-                        status = (
-                            f'<span class="warn">refused: {html.escape(refusal)}</span>'
-                        )
-                        form = ""
-                    else:
-                        status = f"reads {count} {noun} and its balances carry"
-                        hint = (
-                            "<p class=\"muted\">The same account in another "
-                            "statement was given the account chosen below.</p>"
-                            if suggested
-                            else ""
-                        )
-                        form = (
-                            "<details><summary>Give it an account</summary>"
-                            '<form action="/statement-section-assign" method="post">'
-                            f'<input type="hidden" name="artefact" value="{ident}">'
-                            f'<input type="hidden" name="section" value="{key}">'
-                            + hint
-                            + account_picker(options, selected=suggested)
-                            + '<p><button type="submit">Assign and read in</button></p>'
-                            "</form></details>"
-                            if can_section_assign
-                            else ""
-                        )
-                    items.append(
-                        '<li class="section">'
-                        f'<p class="account-name"><strong>{label}</strong></p>'
-                        f"<p>{status}</p>{form}</li>"
-                    )
-                return (
-                    '<li class="account">'
-                    f'<p class="account-name"><strong>{html.escape(str(item["origin"]))}'
-                    "</strong></p>"
-                    '<dl class="facts">'
-                    f"<dt>Kept</dt><dd>{html.escape(kept_at)}</dd>"
-                    f"<dt>Read by</dt><dd>{html.escape(str(item['parser']))}, which "
-                    f"found {len(items)} accounts in it</dd>"
-                    "</dl>"
-                    f'<ul class="sections">{"".join(items)}</ul>'
-                    '<p class="account-links"><a class="tap" '
-                    f'href="/statement-shape?artefact={ident}">Masked shape</a></p>'
-                    "</li>"
-                )
-
-            several = (
-                f"<h3>Covers several accounts ({len(sectioned)})</h3>"
-                '<p class="muted">Each account in these documents is given its '
-                "own account. The document itself stays kept as it is.</p>"
-                '<ul class="accounts">'
-                + "".join(
-                    section_card(item) for item in sorted(sectioned, key=file_order)
-                )
-                + "</ul>"
-                if sectioned
-                else ""
-            )
-            body = (
-                f'<p class="muted">{len(waiting)} waiting only for an account, '
-                f"{refused_count}{several_count}"
-                f"{len(no_parser)} with no parser yet, {len(assigned)} assigned.</p>"
-                + group(
-                    "Waiting only for an account", waiting, assignable=True, lead=bulk
-                )
-                + several
-                + group(
-                    "Recognised, but the reading is refused", refused, assignable=False
-                )
-                + group("No parser yet", no_parser, assignable=False)
-                + group("Assigned", assigned, assignable=False)
-            )
         self._respond(
             200,
             render_page(
                 "Kept statements",
-                body
-                + '<p><a class="button secondary" href="/statement-shape">'
-                "Upload a statement</a></p>" + FETCH_NEXT_LINE + HOME_LINK,
+                statements_body(
+                    entries,
+                    names=names,
+                    options=options,
+                    can_assign=can_assign,
+                    can_section_assign=can_section_assign,
+                    ref=ref,
+                )
+                + HOME_LINK,
             ),
         )
 

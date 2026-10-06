@@ -563,8 +563,11 @@ def queue_actual_push(db_path: Path) -> str:
     if waiting.identical is not None:
         return NothingQueued(
             "\n".join(
-                [*lines, f"Nothing queued: an identical push ({waiting.identical}) is already "
-                 "waiting for the applier."]
+                [
+                    *lines,
+                    f"Nothing queued: an identical push ({waiting.identical}) is already "
+                    "waiting for the applier.",
+                ]
             )
         )
     if waiting.names:
@@ -830,9 +833,7 @@ def start_background_rebuild(db_path: Path) -> str:
                 _record_run(store, None, ok=False, started_at=started_at, error=str(exc))
         finally:
             leases.release(locks, "rebuild-derived")
-        payload.update(
-            {"state": "done", "started_at": started_at, "finished_at": _stamp()}
-        )
+        payload.update({"state": "done", "started_at": started_at, "finished_at": _stamp()})
         status_path.write_text(json.dumps(payload), encoding="utf-8")
 
     threading.Thread(target=run, daemon=True, name="rebuild-derived").start()
@@ -1114,9 +1115,7 @@ def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
             )
         token = read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=True)
         with Store(db_path) as store:
-            return probe_starling_changes(
-                store, token, cutoff, account_map=_account_map(store)
-            )
+            return probe_starling_changes(store, token, cutoff, account_map=_account_map(store))
 
     return run
 
@@ -1191,9 +1190,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
             raise ValueError(f"no artefact with id {artefact_id}")
         source = str(row["source"])
         if source in _READS_NO_ROWS:
-            raise ValueError(
-                f"{source} artefacts carry no transactions to replay"
-            )
+            raise ValueError(f"{source} artefacts carry no transactions to replay")
         if source == "truelayer-pending":
             # Complete-set snapshots are order-sensitive in both directions:
             # replaying an old one without the resolution pass resurrects
@@ -1207,8 +1204,7 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
             )
         defaults = _starling_defaults(
             store.connection.execute(
-                "SELECT source, payload FROM raw_artefacts "
-                "WHERE source = 'starling-accounts'"
+                "SELECT source, payload FROM raw_artefacts WHERE source = 'starling-accounts'"
             ).fetchall()
         )
         account_ref = resolve_artefact_ref(row, _account_map(store), defaults)
@@ -1501,9 +1497,7 @@ def queue_actual_audit(db_path: Path) -> str:
         )
         account_ids = {
             str(row[0])
-            for row in store.connection.execute(
-                "SELECT DISTINCT account_id FROM transactions"
-            )
+            for row in store.connection.execute("SELECT DISTINCT account_id FROM transactions")
         }
     waiting = waiting_of_kind(envelope, _actual_dir(db_path), "audit")
     if waiting.identical is not None:
@@ -1519,9 +1513,7 @@ def queue_actual_audit(db_path: Path) -> str:
     # the whole picture. Named-but-unprovisioned accounts gain an Actual
     # counterpart on the next push; unnamed ones need a name first.
     bound = {binding.canonical_id for binding in bindings}
-    awaiting = len(
-        (named | {a for a in account_ids if ":" not in a}) - bound
-    )
+    awaiting = len((named | {a for a in account_ids if ":" not in a}) - bound)
     unnamed = len({a for a in account_ids if ":" in a})
     return (
         f"queued {queued.name}: auditing {plural(count, 'Actual-bound account')}; "
@@ -1536,11 +1528,11 @@ def _alert(db_path: Path) -> int:
     began_held = hold_for(db_path)
     findings = collect_alert_findings(db_path)
     state_path = Path(
-        os.getenv("OBDI_ALERT_STATE", "").strip()
-        or Path(db_path).with_name("alert-state.json")
+        os.getenv("OBDI_ALERT_STATE", "").strip() or Path(db_path).with_name("alert-state.json")
     )
     ntfy_url = read_secret("OBDI_NTFY_URL", required=False)
     if ntfy_url:
+
         def deliver(message: str) -> bool:
             return send_ntfy(ntfy_url, message)
     else:
@@ -1549,6 +1541,7 @@ def _alert(db_path: Path) -> int:
         def deliver(message: str) -> bool:
             print(f"alert (no OBDI_NTFY_URL configured): {message}")
             return True
+
     # Asked on both sides of the collection: a rebuild that began or ended while it ran leaves
     # the findings of one side missing, and a missing finding must not read as a cleared one.
     hold = began_held or hold_for(db_path)
@@ -1715,18 +1708,13 @@ def _evidence_aliases(ref: str) -> list[str]:
                 if not isinstance(binding, dict):
                     continue
                 canonical = str(binding.get("canonical_id", ""))
-                qualified = (
-                    f"{binding.get('source', '')}:"
-                    f"{binding.get('provider_account_id', '')}"
-                )
+                qualified = f"{binding.get('source', '')}:{binding.get('provider_account_id', '')}"
                 if ref in (canonical, qualified):
                     aliases.update({canonical, qualified})
     return sorted(alias for alias in aliases if alias and alias != ":")
 
 
-def _recorded_boundary(
-    store: Store, connection_id: str, canonical: str
-) -> date | None:
+def _recorded_boundary(store: Store, connection_id: str, canonical: str) -> date | None:
     """The provider's history wall for this account, under any label it wore.
 
     A boundary is knowledge a refused probe PAID a provider request for, and
@@ -1738,13 +1726,9 @@ def _recorded_boundary(
     vintages carry a boundary, the one recorded under today's name is the
     better-informed answer.
     """
-    aliases = [canonical] + [
-        alias for alias in _evidence_aliases(canonical) if alias != canonical
-    ]
+    aliases = [canonical] + [alias for alias in _evidence_aliases(canonical) if alias != canonical]
     for alias in aliases:
-        value = store.provider_fact(
-            "truelayer", connection_id, f"history_boundary:{alias}"
-        )
+        value = store.provider_fact("truelayer", connection_id, f"history_boundary:{alias}")
         if value:
             return date.fromisoformat(value)
     return None
@@ -1851,9 +1835,7 @@ def _holes_of(asked: Mapping[str, Coverage], canonical: str) -> tuple[Hole, ...]
     return found.holes if found is not None else ()
 
 
-def extend_bounds(
-    earliest: date | None, days: int, *, today: date
-) -> tuple[date, date]:
+def extend_bounds(earliest: date | None, days: int, *, today: date) -> tuple[date, date]:
     """The window one extend press asks for.
 
     Walks back `days` from the earliest held transaction (or from today on a
@@ -1960,9 +1942,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             while leases.held(locks, "pull-cycle") and waited < 60:
                 time.sleep(5)
                 waited += 5
-            if not leases.acquire_exclusive(
-                locks, "post-auth-backfill", "obdi-web", 900
-            ):
+            if not leases.acquire_exclusive(locks, "post-auth-backfill", "obdi-web", 900):
                 _status(
                     state="done",
                     outcome="skipped: another post-auth backfill holds the "
@@ -1987,9 +1967,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             f"reconnect drift on {name}: {finding}",
                             file=sys.stderr,
                         )
-                        store.record_provider_fact(
-                            "truelayer", name, "reconnect_drift", finding
-                        )
+                        store.record_provider_fact("truelayer", name, "reconnect_drift", finding)
                 # The five-minute window races from the moment of
                 # authorisation, and a machine races better than thumbs on
                 # a phone: walk EVERY account and card to its boundary NOW,
@@ -2003,12 +1981,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 # buttons remain for continuing after the cap or a re-auth.
                 with Store(db_path) as store:
                     ladder_targets = [
-                        account["account_id"]
-                        for account in store.accounts_for_connection(name)
-                    ] + [
-                        card["account_id"]
-                        for card in store.cards_for_connection(name)
-                    ]
+                        account["account_id"] for account in store.accounts_for_connection(name)
+                    ] + [card["account_id"] for card in store.cards_for_connection(name)]
                 _status(
                     state="running",
                     stage="ladder",
@@ -2098,9 +2072,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
             for connection_id in sorted(connections):
                 target = connections[connection_id]
-                window_fact = store.provider_fact(
-                    "truelayer", connection_id, "sca_window_minutes"
-                )
+                window_fact = store.provider_fact("truelayer", connection_id, "sca_window_minutes")
                 refusal_seen = (
                     store.connection.execute(
                         "SELECT COUNT(*) FROM fetch_attempts "
@@ -2112,9 +2084,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 )
                 note = sca_note(
                     authorised_at=(
-                        datetime.fromisoformat(target.created_at)
-                        if target.created_at
-                        else None
+                        datetime.fromisoformat(target.created_at) if target.created_at else None
                     ),
                     window_minutes=int(window_fact) if window_fact else None,
                     refusal_seen=refusal_seen,
@@ -2136,9 +2106,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
                             auth_note=note,
-                            boundary=_recorded_boundary(
-                                store, connection_id, canonical
-                            ),
+                            boundary=_recorded_boundary(store, connection_id, canonical),
                             canonical=canonical,
                             unbound=canonical.startswith("truelayer:"),
                             covered_to=covered_to,
@@ -2161,8 +2129,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     ]
                     covered_to, last_landed = _latest_asked(store, canonical)
                     suffix = (
-                        f"{card['card_type'] or 'card'} card "
-                        f"...{card['partial_card_number']}"
+                        f"{card['card_type'] or 'card'} card ...{card['partial_card_number']}"
                         if card["partial_card_number"]
                         else f"{card['card_type'] or 'card'} card"
                     )
@@ -2174,9 +2141,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             earliest=min(dates) if dates else None,
                             probed_back_to=_earliest_asked(store, canonical),
                             auth_note=note,
-                            boundary=_recorded_boundary(
-                                store, connection_id, canonical
-                            ),
+                            boundary=_recorded_boundary(store, connection_id, canonical),
                             canonical=canonical,
                             unbound=canonical.startswith("truelayer:"),
                             covered_to=covered_to,
@@ -2214,9 +2179,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             held = store.transactions_by_sighting()
             probed = _earliest_asked(store, canonical)
         dates = [
-            t.value_date
-            for t in held
-            if t.account_id == canonical and t.source == "truelayer"
+            t.value_date for t in held if t.account_id == canonical and t.source == "truelayer"
         ]
         # The anchor is the further-back of held data and already-asked
         # windows, so an empty account still walks backward press by press.
@@ -2365,9 +2328,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             breakdown = store.source_breakdown(ref)
             mark = _timed_phase("source-breakdown", mark)
-            feeder_labels = collect_feeder_labels(
-                store, sorted(ConnectionStore(store_path).load())
-            )
+            feeder_labels = collect_feeder_labels(store, sorted(ConnectionStore(store_path).load()))
         mark = _timed_phase("feeder-labels", mark)
         feeders = breakdown.get("by_feeder")
         for entry in feeders if isinstance(feeders, list) else []:
@@ -2388,9 +2349,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             "breakdown": breakdown,
             "summary": shape_summary,
             "details": details,
-            "timings": [
-                f"{name} {seconds:.2f}s" for name, seconds in timings
-            ],
+            "timings": [f"{name} {seconds:.2f}s" for name, seconds in timings],
         }
 
     def account_feeders() -> dict[str, list[str]]:
@@ -2438,12 +2397,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 with contextlib.suppress(OSError, ValueError):
                     for connection_id in sorted(ConnectionStore(store_path_env).load()):
                         for account in store.accounts_for_connection(connection_id):
-                            canonical = account_map.resolve(
-                                "truelayer", account["account_id"]
-                            )
-                            labels[canonical] = (
-                                f"{account['display_name']} ({connection_id})"
-                            )
+                            canonical = account_map.resolve("truelayer", account["account_id"])
+                            labels[canonical] = f"{account['display_name']} ({connection_id})"
             row = store.connection.execute(
                 "SELECT payload FROM raw_artefacts WHERE source = 'starling-accounts' "
                 "ORDER BY fetched_at DESC LIMIT 1"
@@ -2464,29 +2419,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             # feed, so it inherits the account's name.
                             default_cat = str(account.get("defaultCategory", ""))
                             if default_cat:
-                                labels[
-                                    account_map.resolve("starling", default_cat)
-                                ] = f"{name} (starling)"
+                                labels[account_map.resolve("starling", default_cat)] = (
+                                    f"{name} (starling)"
+                                )
             for row in store.connection.execute(
                 "SELECT payload FROM raw_artefacts WHERE source = 'starling-spaces' "
                 "ORDER BY fetched_at ASC"
             ).fetchall():
                 with contextlib.suppress(ValueError):
                     decoded = json.loads(row["payload"])
-                    raw = (
-                        decoded.get("savingsGoals")
-                        if isinstance(decoded, dict)
-                        else None
-                    )
+                    raw = decoded.get("savingsGoals") if isinstance(decoded, dict) else None
                     for goal in raw if isinstance(raw, list) else []:
                         if not isinstance(goal, dict):
                             continue
                         uid = str(goal.get("savingsGoalUid", ""))
                         name = str(goal.get("name", "") or "space")
                         if uid:
-                            labels[
-                                account_map.resolve("starling", uid)
-                            ] = f"{name} (starling space)"
+                            labels[account_map.resolve("starling", uid)] = (
+                                f"{name} (starling space)"
+                            )
         return labels
 
     def account_names(store: Store | None = None) -> AccountsShown:
@@ -2526,9 +2477,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return ids.pop()
         return None
 
-    def preview_upload(
-        payload: bytes, filename: str, account: str
-    ) -> dict[str, object]:
+    def preview_upload(payload: bytes, filename: str, account: str) -> dict[str, object]:
         """Parse without landing: what IS this file, before anything commits.
 
         The preview must not write - a wrong file inspected costs nothing.
@@ -2564,19 +2513,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             sightings = store.transactions_by_sighting()
             account_map = _account_map(store)
-        own_held = [
-            t
-            for t in sightings
-            if t.account_id == account and t.source == parser.source
-        ]
-        held = [
-            t
-            for t in sightings
-            if not (t.account_id == account and t.source == parser.source)
-        ]
-        found = agreements(
-            held + rows, sibling_accounts=account_map.accounts_by_source()
-        )
+        own_held = [t for t in sightings if t.account_id == account and t.source == parser.source]
+        held = [t for t in sightings if not (t.account_id == account and t.source == parser.source)]
+        found = agreements(held + rows, sibling_accounts=account_map.accounts_by_source())
         agreement_preview: list[object] = [
             agreement.outline()
             for agreement in found
@@ -2629,9 +2568,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 earliest=min((r.value_date for r in rows), default=None),
                 latest=max((r.value_date for r in rows), default=None),
             ),
-            "destination_doubt": (
-                {"message": doubt.describe()} if doubt is not None else None
-            ),
+            "destination_doubt": ({"message": doubt.describe()} if doubt is not None else None),
             "lifecycle_doubt": ({"message": breach} if breach else None),
         }
 
@@ -2676,12 +2613,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             boundaries: dict[str, str] = {}
             for fact_row in store.connection.execute(
-                "SELECT fact, value FROM provider_facts "
-                "WHERE fact LIKE 'history_boundary:%'"
+                "SELECT fact, value FROM provider_facts WHERE fact LIKE 'history_boundary:%'"
             ).fetchall():
-                boundaries[str(fact_row["fact"]).split(":", 1)[1]] = str(
-                    fact_row["value"]
-                )
+                boundaries[str(fact_row["fact"]).split(":", 1)[1]] = str(fact_row["value"])
             refs = [
                 str(r[0])
                 for r in store.connection.execute(
@@ -2770,8 +2704,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             counts = {
                 str(row[0]): int(row[1])
                 for row in store.connection.execute(
-                    "SELECT account_id, COUNT(*) FROM transactions"
-                    " GROUP BY account_id"
+                    "SELECT account_id, COUNT(*) FROM transactions GROUP BY account_id"
                 )
             }
             declared = set(declared_to_create(store))
@@ -2926,8 +2859,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             rows = [
                 json.loads(r[0])
                 for r in store.connection.execute(
-                    "SELECT raw FROM transactions WHERE source = 'starling' "
-                    "AND raw IS NOT NULL"
+                    "SELECT raw FROM transactions WHERE source = 'starling' AND raw IS NOT NULL"
                 )
                 if r[0]
             ]
@@ -2953,10 +2885,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         month = int(str(report["month_crossings"]))
         lines += [
             "",
-            f"  crossing an ISO-week boundary: {week} "
-            f"({week / measured * 100:.1f}%)",
-            f"  crossing a month boundary: {month} "
-            f"({month / measured * 100:.1f}%)",
+            f"  crossing an ISO-week boundary: {week} ({week / measured * 100:.1f}%)",
+            f"  crossing a month boundary: {month} ({month / measured * 100:.1f}%)",
             "",
             "If only settlement dates were recorded, those crossings are "
             "the payments week-to-week and month-boundary reporting would "
@@ -3137,9 +3067,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         account_map = _account_map(store)
         return read_archive_notes(
             store,
-            resolve=lambda source, provider_id: str(
-                account_map.resolve(source, provider_id)
-            ),
+            resolve=lambda source, provider_id: str(account_map.resolve(source, provider_id)),
             today=datetime.now(UTC).date(),
             only=only,
         )
@@ -3148,9 +3076,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return archive_notes_for(store)
 
-    def archive_account_hook(
-        ref: str, closed: date | None, basis: str
-    ) -> ArchiveOutcome:
+    def archive_account_hook(ref: str, closed: date | None, basis: str) -> ArchiveOutcome:
         """Archive one account, naming it as the pages already do if it is new."""
         from .accounts import archive_account
 
@@ -3201,9 +3127,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         account_map = _account_map(store)
         return movement_memo.get(
             store,
-            lambda: movement_completeness(
-                store, lambda ref: _canonical_for_ref(account_map, ref)
-            ),
+            lambda: movement_completeness(store, lambda ref: _canonical_for_ref(account_map, ref)),
         )
 
     def account_standings(store: Store | None = None) -> Mapping[str, AccountStanding]:
@@ -3397,9 +3321,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     with_protection=False,
                     window=window,
                 )
-                return replace(
-                    built, standing=None, protection=None, rebuilding=hold.sentence()
-                )
+                return replace(built, standing=None, protection=None, rebuilding=hold.sentence())
             return build_ledger(
                 store,
                 ref,
@@ -3678,9 +3600,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         from .actual_push import latest_results_with_totals
 
-        results, total, unreadable = latest_results_with_totals(
-            _actual_dir(db_path), limit=200
-        )
+        results, total, unreadable = latest_results_with_totals(_actual_dir(db_path), limit=200)
         return {"results": results, "total": total, "unreadable": unreadable}
 
     def actual_heartbeat() -> str:
@@ -3696,9 +3616,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def auth_lease_take() -> None:
         from . import leases
 
-        leases.acquire(
-            leases.locks_dir(db_path), "bank-auth", "obdi-web", ttl_seconds=600
-        )
+        leases.acquire(leases.locks_dir(db_path), "bank-auth", "obdi-web", ttl_seconds=600)
 
     def auth_lease_release() -> None:
         from . import leases
@@ -3745,9 +3663,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             ).fetchall()
         return {"rows": rows, "last_day": [dict(r) for r in last_day]}
 
-    def extend_max(
-        *, connection: str, provider_ref: str, psu_ip: str | None
-    ) -> str:
+    def extend_max(*, connection: str, provider_ref: str, psu_ip: str | None) -> str:
         """One press, walked as far as the provider allows.
 
         Attended because the person IS present: the loop runs while they
@@ -3767,9 +3683,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     trigger="web-extend-max",
                 )
             except Exception as exc:
-                raise StepRefused(
-                    str(getattr(exc, "code", "") or "error"), str(exc)
-                ) from exc
+                raise StepRefused(str(getattr(exc, "code", "") or "error"), str(exc)) from exc
 
         transcript, outcome = walk_history(one_step)
         endings = {
@@ -3964,9 +3878,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
             void_declined_items(store)
             summary.folded += fold_space_copies(store, _account_map(store)).newly_folded
-            summary.same_money_folded += fold_same_money(
-                store, _account_map(store)
-            ).newly_folded
+            summary.same_money_folded += fold_same_money(store, _account_map(store)).newly_folded
             settle_review_flags(store)
             recheck_protections(store)
         return (
@@ -4031,7 +3943,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     #: A parser that recognises a statement may still refuse it, so
     #: "recognised" alone told a person a statement was ready when its own
     #: balances did not carry.
-    reading_by_digest: dict[str, tuple[int | None, str]] = {}
+    #: Each is (rows it lists or None, why it is refused, first and last day it lists).
+    reading_by_digest: dict[str, tuple[int | None, str, tuple[str, str]]] = {}
     #: Which issuer names each statement's text holds; see `statement_names`.
     names_by_digest: dict[str, list[tuple[str, int]]] = {}
     #: A multi-account statement's sections; absent for a statement read whole,
@@ -4039,17 +3952,23 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     #: Keyed by digest for the same reason.
     sections_by_digest: dict[str, list[SectionReading]] = {}
 
-    def _trial_reading(parser: StatementParser, payload: bytes) -> tuple[int | None, str]:
+    def _trial_reading(
+        parser: StatementParser, payload: bytes
+    ) -> tuple[int | None, str, tuple[str, str]]:
         import re
 
         from .errors import DataError
 
         try:
-            return sum(1 for _ in parser.parse(payload, account_id=UNASSIGNED_ACCOUNT)), ""
+            days = sorted(
+                item.value_date.isoformat()
+                for item in parser.parse(payload, account_id=UNASSIGNED_ACCOUNT)
+            )
         except (DataError, ValueError) as exc:
             # Shown on a GET: a refusal states a discrepancy in figures, so
             # every digit is masked and the words are kept.
-            return None, re.sub(r"\d", "9", str(exc))[:300]
+            return None, re.sub(r"\d", "9", str(exc))[:300], ("", "")
+        return len(days), "", (days[0], days[-1]) if days else ("", "")
 
     def kept_statements() -> list[dict[str, object]]:
         """Every kept statement, however old and however many.
@@ -4090,15 +4009,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         parser = detect(payload)
                     except (DataError, ValueError):
                         parser_by_digest[digest] = None
-                        reading_by_digest[digest] = (None, "")
+                        reading_by_digest[digest] = (None, "", ("", ""))
                     else:
                         parser_by_digest[digest] = parser.source
                         divided = trial_sections(parser, payload)
                         if isinstance(divided, list):
                             sections_by_digest[digest] = divided
-                            reading_by_digest[digest] = (None, "")
+                            reading_by_digest[digest] = (None, "", ("", ""))
                         elif isinstance(divided, str):
-                            reading_by_digest[digest] = (None, divided)
+                            reading_by_digest[digest] = (None, divided, ("", ""))
                         else:
                             reading_by_digest[digest] = _trial_reading(parser, payload)
                     try:
@@ -4107,7 +4026,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         # Not readable as a PDF at all: no names, and the
                         # parser column already says nothing reads it.
                         names_by_digest[digest] = []
-                rows_read, refusal = reading_by_digest[digest]
+                rows_read, refusal, listed_days = reading_by_digest[digest]
                 divided_sections = sections_by_digest.get(digest)
                 listing.append(
                     {
@@ -4118,6 +4037,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         "parser": parser_by_digest[digest],
                         "rows": rows_read,
                         "refusal": refusal,
+                        "listed_days": list(listed_days),
                         "names": names_by_digest[digest],
                         # Per account of a multi-account statement, shown on a
                         # GET: so the label and the reason are digit-masked and
@@ -4127,6 +4047,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                                 "token": section_token(item.key),
                                 "label": masked(item.label),
                                 "rows": item.rows,
+                                "listed_days": [
+                                    min(
+                                        (
+                                            r.value_date.isoformat()
+                                            for r in item.reading.transactions
+                                        ),
+                                        default="",
+                                    ),
+                                    max(
+                                        (
+                                            r.value_date.isoformat()
+                                            for r in item.reading.transactions
+                                        ),
+                                        default="",
+                                    ),
+                                ],
                                 "refusal": masked(item.refusal)[:300],
                                 "account": held_by.get((digest, item.key), ""),
                                 "suggested": offered_for.get(item.key, ""),
@@ -4173,9 +4109,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         return listing
 
-    def artefact_detail(
-        artefact_id: int, with_payload: bool = False
-    ) -> dict[str, object] | None:
+    def artefact_detail(artefact_id: int, with_payload: bool = False) -> dict[str, object] | None:
         import json as _json
 
         from .rawview import summarise
@@ -4214,9 +4148,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             # Pretty at DISPLAY time only - the stored bytes stay verbatim, so
             # the digest keeps verifying them.
             try:
-                detail["payload_pretty"] = _json.dumps(
-                    _json.loads(row["payload"]), indent=2
-                )
+                detail["payload_pretty"] = _json.dumps(_json.loads(row["payload"]), indent=2)
             except (ValueError, UnicodeDecodeError):
                 detail["payload_pretty"] = row["payload"].decode("utf-8", "replace")
         return detail
@@ -4268,12 +4200,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             held = store.transactions_by_sighting()
             account_map = _account_map(store)
         by_account: dict[str, list[object]] = {}
-        for agreement in agreements(
-            held, sibling_accounts=account_map.accounts_by_source()
-        ):
-            by_account.setdefault(agreement.account_id, []).append(
-                agreement.outline()
-            )
+        for agreement in agreements(held, sibling_accounts=account_map.accounts_by_source()):
+            by_account.setdefault(agreement.account_id, []).append(agreement.outline())
         missing = [
             f"{gap.account_id} / {gap.source}: {gap.month} missing - "
             f"{', '.join(gap.seen_in)} has data for it"
@@ -4321,9 +4249,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def declare_known(refs: list[str]) -> DeclareOutcome:
         with Store(db_path) as store:
-            return declare_known_accounts(
-                store, _account_map(store), account_names(store), refs
-            )
+            return declare_known_accounts(store, _account_map(store), account_names(store), refs)
 
     def set_parents(spaces: list[str]) -> ParentOutcome:
         with Store(db_path) as store:
@@ -4442,9 +4368,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         kept_statements=kept_statements,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,
-        refile_artefact=(
-            lambda artefact_id, account: _refile(db_path, artefact_id, account)
-        ),
+        refile_artefact=(lambda artefact_id, account: _refile(db_path, artefact_id, account)),
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,
@@ -4525,9 +4449,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         recent_attempts=lambda: _recent_attempts(db_path),
         connection_last_answered=lambda: _last_landed_by_connection(db_path),
         source_connections=lambda: _source_connections(db_path),
-        starling_probe=(
-            _starling_probe_runner(db_path) if _starling_token_present() else None
-        ),
+        starling_probe=(_starling_probe_runner(db_path) if _starling_token_present() else None),
         probe_suggestions=lambda: _probe_suggestions(db_path),
         forget_actual=forget_actual,
         update_in_progress=update_in_progress,
@@ -4607,9 +4529,7 @@ def _serve(host: str, port: int, db_path: Path) -> int:
             file=sys.stderr,
         )
     if config.warm is not None:
-        threading.Thread(
-            target=_warm, args=(config.warm,), name="warm-memos", daemon=True
-        ).start()
+        threading.Thread(target=_warm, args=(config.warm,), name="warm-memos", daemon=True).start()
     serve_web(config, host=host, port=port)
     return 0
 
@@ -4693,7 +4613,7 @@ def _export_raw(db_path: Path, out_dir: Path, step: StepHandle | None = None) ->
     for position, row in enumerate(rows, start=1):
         if step is not None:
             step.working_on("artefact", position, source=str(row["source"]), total=len(rows))
-        stamp =row["fetched_at"][:16].replace(":", "").replace("T", "T")
+        stamp = row["fetched_at"][:16].replace(":", "").replace("T", "T")
         name = f"{stamp}_{row['digest'][:8]}"
         extension = _MEDIA_EXTENSIONS.get(row["media_type"], ".bin")
         folder = out_dir / row["source"]
@@ -4741,9 +4661,9 @@ def _persist_binding(map_file: Path, source: str, provider_ref: str, canonical: 
     if map_file.is_file():
         payload = json.loads(map_file.read_text(encoding="utf-8"))
     raw_bindings = payload.get("bindings", [])
-    bindings = [b for b in raw_bindings if isinstance(b, dict)] if isinstance(
-        raw_bindings, list
-    ) else []
+    bindings = (
+        [b for b in raw_bindings if isinstance(b, dict)] if isinstance(raw_bindings, list) else []
+    )
 
     replaced = False
     for binding in bindings:
@@ -4795,9 +4715,7 @@ def _bind(source: str, provider_ref: str, canonical: str, db_path: Path) -> int:
     return 0
 
 
-def scheduled_pull_skip_reason(
-    db_path: Path, now: datetime | None = None
-) -> str | None:
+def scheduled_pull_skip_reason(db_path: Path, now: datetime | None = None) -> str | None:
     """Two gates before a scheduled cycle spends bank quota.
 
     The compose loop runs a pull immediately on container start, so every
@@ -4932,10 +4850,7 @@ def _await_scheduled_clearance(
                     budget_seconds=wait_seconds,
                 )
             if not announced:
-                print(
-                    f"{reason} - waiting up to {wait_seconds // 60} min "
-                    "for it to clear"
-                )
+                print(f"{reason} - waiting up to {wait_seconds // 60} min for it to clear")
                 announced = True
             sleep(poll_seconds)
             waited += poll_seconds
@@ -4966,9 +4881,7 @@ def _await_scheduled_clearance(
         sleep(min(spacing.remaining_seconds, SLOT_POLL_SECONDS))
 
 
-def _connection_record(
-    db_path: Path, name: str, before: int, exit_code: int
-) -> dict[str, object]:
+def _connection_record(db_path: Path, name: str, before: int, exit_code: int) -> dict[str, object]:
     """What one connection's pull asked, landed, and was refused, from the ledger rows it added.
 
     The wording of a refusal is the provider's, cut by `short_reason` as the Connections page's
@@ -5000,9 +4913,7 @@ def _connection_record(
     }
 
 
-def _pull_everything(
-    db_path: Path, since: date | None, step: StepHandle | None = None
-) -> int:
+def _pull_everything(db_path: Path, since: date | None, step: StepHandle | None = None) -> int:
     """Pull every stored connection, plus Starling if a token is configured.
 
     Keeps going after a failure rather than stopping at the first. One expired
@@ -5054,9 +4965,7 @@ def _pull_everything(
     # Held for the whole cycle so a stack update never recreates the
     # container mid-fetch - a killed scheduled pull wastes quota that
     # does not come back until tomorrow.
-    with leases.lease(
-        leases.locks_dir(db_path), "pull-cycle", "obdi-pull", ttl_seconds=1800
-    ):
+    with leases.lease(leases.locks_dir(db_path), "pull-cycle", "obdi-pull", ttl_seconds=1800):
         for position, name in enumerate(names, start=1):
             step.working_on("connection", position, total=len(names))
             print(f"--- {name}")
@@ -5315,8 +5224,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rebuild_command = subcommands.add_parser(
         "rebuild",
-        help="wipe the derived layers and replay every raw artefact through "
-        "the current rules",
+        help="wipe the derived layers and replay every raw artefact through the current rules",
     )
     rebuild_command.add_argument(
         "--yes",
@@ -5507,8 +5415,7 @@ def main(argv: list[str] | None = None) -> int:
     propagate_command.add_argument(
         "--kind",
         default="category",
-        help="annotation kind to propagate (default: category; e.g. payee, "
-        "comment)",
+        help="annotation kind to propagate (default: category; e.g. payee, comment)",
     )
     propagate_command.add_argument(
         "--tolerance",
@@ -5662,8 +5569,7 @@ def main(argv: list[str] | None = None) -> int:
         from .categorise import apply_rules, load_rules, uncategorised_summary
 
         rules_path = args.rules or Path(
-            os.getenv("OBDI_RULES", "").strip()
-            or Path(db_path).with_name("rules.json")
+            os.getenv("OBDI_RULES", "").strip() or Path(db_path).with_name("rules.json")
         )
         rules: dict[str, list[dict[str, str]]] = {}
         if rules_path.is_file():
@@ -5676,9 +5582,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         with Store(db_path) as store:
             if rules:
-                sweep = apply_rules(
-                    store, rules, dry_run=args.dry_run, prune=args.prune
-                )
+                sweep = apply_rules(store, rules, dry_run=args.dry_run, prune=args.prune)
                 prefix = "DRY RUN - " if args.dry_run else ""
                 print(prefix + sweep.describe())
                 for sample in sweep.samples:
@@ -5734,9 +5638,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.path.is_file():
             print(f"No such file: {args.path}", file=sys.stderr)
             return 2
-        shape = shape_report(
-            args.path, mask=not args.show_values, limit=args.limit
-        )
+        shape = shape_report(args.path, mask=not args.show_values, limit=args.limit)
         print(shape.describe())
         return 0 if shape.readable else 1
 
@@ -5755,29 +5657,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         from .money import format_amount
 
-        tolerance = (
-            args.tolerance
-            if args.tolerance is not None
-            else PROPAGATION_AMOUNT_TOLERANCE
-        )
+        tolerance = args.tolerance if args.tolerance is not None else PROPAGATION_AMOUNT_TOLERANCE
         with Store(db_path) as store:
-            propagation = propagation_proposals(
-                store, kind=args.kind, tolerance=tolerance
-            )
+            propagation = propagation_proposals(store, kind=args.kind, tolerance=tolerance)
             written = apply_propagation(store, propagation, dry_run=args.dry_run)
         prefix = "DRY RUN - " if args.dry_run else ""
         print(prefix + propagation.describe())
         for proposal in propagation.proposals:
             band = format_amount(proposal.amount_low, currency=proposal.currency)
             if proposal.amount_high != proposal.amount_low:
-                band += " .. " + format_amount(
-                    proposal.amount_high, currency=proposal.currency
-                )
-            state = (
-                f"{len(proposal.targets)} row(s)"
-                if proposal.targets
-                else "no rows reached"
-            )
+                band += " .. " + format_amount(proposal.amount_high, currency=proposal.currency)
+            state = f"{len(proposal.targets)} row(s)" if proposal.targets else "no rows reached"
             print(
                 f"  {state} <- {args.kind} '{proposal.value}' from "
                 f"{proposal.seed_count} seed(s) in '{proposal.group}'; "
@@ -6035,10 +5925,7 @@ def main(argv: list[str] | None = None) -> int:
                 CheckResult(
                     name="last rebuild",
                     ok=False,
-                    detail=(
-                        f"could not be checked, which is not the same as fine: "
-                        f"{exc}"
-                    ),
+                    detail=(f"could not be checked, which is not the same as fine: {exc}"),
                 )
             )
         if getattr(args, "live", False):
@@ -6112,10 +5999,7 @@ def main(argv: list[str] | None = None) -> int:
         except BackupRefused as refusal:
             print(f"BACKUP NOT TRUSTWORTHY: {refusal}", file=sys.stderr)
             return 1
-        print(
-            f"verified {len(counts)} tables, {sum(counts.values())} rows, "
-            f"against {db_path}"
-        )
+        print(f"verified {len(counts)} tables, {sum(counts.values())} rows, against {db_path}")
         return 0
 
     if args.command == "inspect-backup":
@@ -6145,9 +6029,7 @@ def main(argv: list[str] | None = None) -> int:
         # then moving the file by hand is where the sidecars get left behind.
         target = Path(args.destination) if args.destination else db_path
         try:
-            outcome = restore_backup(
-                Path(args.backup), target, replace=bool(args.replace)
-            )
+            outcome = restore_backup(Path(args.backup), target, replace=bool(args.replace))
         except BackupRefused as refusal:
             print(f"RESTORE REFUSED: {refusal}", file=sys.stderr)
             return 1
