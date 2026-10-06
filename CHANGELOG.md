@@ -26,6 +26,28 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.348] - 2026-10-06
+
+### Changed
+- **The balance chart draws what the account did, and marks each known
+  balance at its own day.** On a closed loan with a stated balance at each
+  end and one statement closing a year, the chart held every known balance
+  flat "until its next one": the stated line sat at the opening figure for
+  three years and dropped to nil at the close, and the statement line held
+  each January's closing through the following year - past the close, so
+  the loan read as still owing after it was paid off, on days nobody stated
+  a balance for. The owner expected monthly steps, a final double payment,
+  a small clearing payment, and the stated nil meeting the running total on
+  the same day; the rows held all of that and the page never drew them. Now
+  one running line is built from the transactions, by the same counting the
+  prediction at a known balance uses; a stated balance is a filled mark and
+  a statement closing a hollow one, each at its day; a short bar joins a
+  mark to the line where they differ, the difference panel shows marks at
+  those days only, and a sentence says how many known balances differ and
+  by how much the latest does - nothing when they all agree. An archived
+  account's chart ends at its close, whatever a later document's period
+  says. The legend names what is drawn.
+
 ## [0.4.347] - 2026-10-06
 
 The build of 0.4.346 failed its gate: a test cleared the word grid's cache by
