@@ -31,7 +31,9 @@ from test_phone_layout import sync_api
 
 WIDTH, SCREEN = 390, 800
 WANTED_SCREENS = 3.15
-AFTER_UPLOAD_SCREENS = 3.6
+# Measured 3.65 screens (2918 px) once an answer led with what a statement covered and folded the
+# importer's counts beneath it (2026-10-06); it was under 3.6 before.
+AFTER_UPLOAD_SCREENS = 3.8
 
 
 @pytest.fixture(scope="module")

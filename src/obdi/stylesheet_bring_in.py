@@ -24,6 +24,8 @@ BRING_IN_STYLES = """
  .bi-scoped { font: 600 var(--text-md)/130% var(--sans); color: var(--ink); }
  .bi-notice { margin: var(--s2) 0; padding: var(--s1) 0 var(--s1) var(--s3); border-left: var(--rail) solid var(--warn); font: var(--text-md)/140% var(--sans); }
  .bi-settled { margin: var(--s1) 0; }
+ .bi-outcomes { list-style: none; margin: var(--s2) 0; padding: 0; font: var(--text-sm)/140% var(--sans); }
+ .bi-outcomes li { margin: var(--s1) 0; overflow-wrap: anywhere; }
  .bi-ask { margin: var(--s3) 0; }
  .bi-ask .todo-form { grid-template-columns: minmax(0, 1fr); }
  .bi-ask .todo-form p { margin: 0; }
