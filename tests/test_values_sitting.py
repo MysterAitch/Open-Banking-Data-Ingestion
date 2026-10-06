@@ -21,6 +21,7 @@ import httpx
 import pytest
 
 from obdi import values_sitting
+from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest import import_file
 from obdi.store import Store
@@ -64,6 +65,10 @@ def served(tmp_path_factory: pytest.TempPathFactory):
     db = root / "store.sqlite3"
     with Store(db) as store:
         import_file(store, csv, account_id=ACCOUNT)
+        # The balance chart compares the rows with stated balances, so it draws nothing without
+        # them and carries no values control.
+        record_stated_anchor(store, ACCOUNT, "2026-09-01", "1000.00")
+        record_stated_anchor(store, ACCOUNT, "2026-09-05", "1234.56")
     mp = pytest.MonkeyPatch()
     environment(mp, root)
     config = build_web_config(db)
@@ -180,13 +185,10 @@ class TestAPageIsMaskedUnlessTheSittingShowsValues:
         assert BANNER not in response.text, path
         assert not shows_values(response.text), path
 
-    @pytest.mark.parametrize(
-        "path", [p for p in UNMASKED_PAGES if not p.startswith("/balance-chart")]
-    )
+    @pytest.mark.parametrize("path", UNMASKED_PAGES)
     def test_PageWithAShowValuesPress_WithNoCookie_OffersTheSittingPressBesideIt(
         self, served, path
     ):
-        """The balance chart's own control is left to the build that is changing that page."""
         page = parse(get(served, path).text)
 
         presses = [

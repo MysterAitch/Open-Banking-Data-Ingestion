@@ -61,6 +61,7 @@ from math import floor, log10
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
+from . import values_sitting
 from .account_names import AccountShown
 from .balance_chart import OWN, WHOLE, BalanceChart, SourceLine
 from .balance_chart_bins import (
@@ -1444,7 +1445,7 @@ def _mode(
     ref = view.ref
     if unmasked:
         back = _href(ref, None, None, chosen.fields) if chosen.windowed else _href(ref, start, end)
-        return (
+        return values_sitting.unless_sitting(
             '<p class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
@@ -1474,6 +1475,7 @@ def _mode(
         f'<form method="post" action="/balance-chart" target="_blank">{fields}'
         + buttons
         + "</form>"
+        + values_sitting.show_everywhere_press()
     )
 
 
