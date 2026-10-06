@@ -26,6 +26,67 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.350] - 2026-10-06
+
+### Added
+- **Bring in's form shows what each file is before the press.** Each row
+  carries a masked preview - the reader that read it, the days it lists
+  with their duration, how many transactions, whether it adds up by what it
+  lists, the names printed in it, and a credit union document's printed
+  account label - with a link to the masked shape. The owner uploaded a
+  sensibly named file and noted that with a bank's default file name there
+  would have been nothing on screen to say whether the chosen account was
+  right. Beneath, a closed fold "What reading it in would do" lists the
+  dry run per transaction - already held (and by which source), new, one
+  leg of a transfer with which account, or would need a decision and why -
+  with a summary line, and the row says beforehand how many decisions
+  reading it in will ask for. The dry run is the same matcher pass the
+  assignment check makes; nothing is written by looking.
+- **The ledger shows the running balance after each transaction**, muted
+  beside the amount, from the same counting as the balance chart's line;
+  sealed when masked; absent, with one line saying why, where no known
+  balance anchors the account.
+- **A ledger transaction opens to everything the store knows of it**: the
+  booked day where it differs, the sources that witness it with the capture
+  and artefact each came from, an open review flag with a link to decide
+  it, and for a transfer the other account, linking to that ledger at the
+  other leg's month with the row opened. The closed row reads as before,
+  with a chevron; the owner asked that the page stay quiet, and the fold is
+  closed by default.
+
+### Changed
+- **Bring in's answer leads with outcomes.** After "Read it in" it says
+  which wanted period the file covered and whether anything more is wanted
+  for the account, how many transactions are new, and how many decisions
+  remain after the import has settled what it can - read from the open
+  flags afterwards, not from a mid-process count, which had reported "for
+  review 1" for a flag the same import then closed. The counts line is
+  folded under "What was counted".
+- **One signpost, not two.** While the form lists a kept file, the "N kept
+  statements are waiting for an account" line leaves it out, and the Kept
+  statements page's chooser carries the same guess and reason as the form.
+- **The account page says "Next statement due about D."** in the ordinary
+  colour, where Bring in expects one and the day has not passed, instead of
+  the warning "Nothing to check against since X" - the two pages had
+  disagreed in tone about the same account. Once the day passes the warning
+  returns.
+- **An archived account whose latest known balance is dated after its
+  close says so.** "Adds up to the known balances to 2026-08-10" beside bars
+  ending at a 2025 close read as a date muddle; it was a document issued
+  later still printing the account's balance. The sentence now reads "Adds
+  up to every known balance through its close on D, and to one stated after
+  it, on E."
+
+### Fixed
+- **The statements lane no longer breaks at the turn of each year.** A
+  section of an "all accounts" document was listed with no start and no
+  rows (its period was read from the whole document's kept reading, which a
+  divided document has none of), so each was drawn on its closing day alone
+  and the lane showed only the days the rows are sighted - a gap between one
+  document's last payment in December and the next's first in January. A
+  section's period now carries the section's own start, rows, and opening
+  balance.
+
 ## [0.4.349] - 2026-10-06
 
 ### Added
