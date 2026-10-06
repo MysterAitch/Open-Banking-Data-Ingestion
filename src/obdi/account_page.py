@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import html
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from .account_names import AccountShown
+from .account_names import AccountShown, AccountsShown
 from .coverage_timeline import (
     ASK_HOLE,
     KIND_NAMES,
@@ -47,6 +47,7 @@ from .standing_data import (
 from .todo import Todo, account_page, build_todos, grouped, wanted_days
 from .trust import Trust, month_marks, trust_of
 from .trust_bar import bar_html, source_lane_html
+from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
 
 _esc = html.escape
@@ -130,8 +131,8 @@ def read_account(config: object, ledger: Ledger, today: date) -> AccountReading:
 
 
 def _name_in(overview: Overview) -> Callable[[str], str]:
-    names = {a.ref: AccountShown.named(a.ref, a.label).name for a in overview.accounts}
-    return lambda ref: names.get(ref, ref)
+    shown = AccountsShown(AccountShown.named(a.ref, a.label) for a in overview.accounts)
+    return lambda ref: shown.of(ref).name
 
 
 def _own(overview: Overview | None, ref: str) -> AccountOverview | None:
@@ -250,7 +251,8 @@ def strip_html(reading: AccountReading, ref: str, today: date) -> str:
     readers are one lane of statements).
     """
     axis = "".join(
-        f'<span style="left:{left:.2f}%">{_esc(name)}</span>' for name, left in month_marks(today)
+        f'<span style="left:{left:.2f}%">{_esc(name)}</span>'
+        for name, left in month_marks(today)[::2]
     )
     rows = (
         f'<span></span><span class="axis" aria-hidden="true">{axis}</span>'
@@ -260,7 +262,8 @@ def strip_html(reading: AccountReading, ref: str, today: date) -> str:
     if timeline is not None:
         by_kind: dict[str, list[tuple[date, date]]] = {}
         for lane in timeline.lanes:
-            by_kind.setdefault(lane.kind, []).extend((run.first, run.last) for run in lane.runs)
+            if lane.runs:
+                by_kind.setdefault(lane.kind, []).extend((run.first, run.last) for run in lane.runs)
         for kind in (*LANE_ORDER, *sorted(set(by_kind) - set(LANE_ORDER))):
             if kind not in by_kind:
                 continue
@@ -309,13 +312,17 @@ def _balance_form(todo: Todo, ref: str, month: str) -> str:
         f'<label>On this day<input type="date" name="day" required{day}></label>'
         '<label>The balance was, in pounds and pence'
         '<input name="amount" inputmode="decimal" autocomplete="off" required></label>'
-        '<button class="button" type="submit">Confirm this balance</button></form>'
+        + submit_button("Confirm this balance")
+        + "</form>"
     )
 
 
 def _row(todo: Todo, ref: str, month: str, today: date, *, lead: bool) -> str:
     def unnamed(ref_: str) -> AccountShown:
         return AccountShown(ref_)
+
+    # A sentence an alert wrote leads with the account's reference, which the page is about.
+    todo = replace(todo, why=todo.why.removeprefix(f"{ref}: "))
 
     css = "lead"
     if todo.kind == "confirm-balance":

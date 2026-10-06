@@ -171,7 +171,7 @@ class TestTheDefaultPage:
         page = get(base, NOTHING)
 
         assert "earlier known balance" not in page
-        assert "Known balances and the opening (none stated)" in page
+        assert "Known balances (none stated)" in page
 
 
 class TestABalanceThatDiffersIsAlwaysShown:
@@ -202,7 +202,8 @@ class TestTheFullList:
 
         assert agreeing_listed(page) == 1999
         assert "earlier known balances" not in page
-        assert '<details id="opening" open>' in page
+        assert "<details open><summary>Known balances (" in page, "asked for, so it is open"
+        assert '<div id="opening">' in page
 
     def test_FullList_WithValuesShown_IsAPostAndStillHoldsEveryOne(self, base):
         response = shown(base, BULK, everything=True)
@@ -231,7 +232,7 @@ class TestTheFullList:
         assert default.count(words) == SHOWN_AGREEING + 1, "the shown ones and the opening's"
 
     def test_FullListOfAnAccountWithNoBalances_IsTheDefaultPage(self, base):
-        assert "Known balances and the opening (none stated)" in get(base, NOTHING, everything=True)
+        assert "Known balances (none stated)" in get(base, NOTHING, everything=True)
 
 
 class TestThePageDoesNotGrowWithTheBalances:
@@ -252,10 +253,15 @@ class TestThePageDoesNotGrowWithTheBalances:
         one. With the stylesheet taken out the page measured about 49,600 bytes; the bound
         leaves a tenth above that, and what it guards is unchanged - a page that renders
         every known balance again would be over a megabyte.
+
+        Measured 55,539 bytes after the page was rebuilt around the trust sentence and the
+        things to do: each of the month's fifty transactions is a line with a mark and, behind
+        it, a disclosure holding its sources and flags, which is the rise. The bound is again a
+        tenth above the measurement.
         """
         page = re.sub(r"<style>.*?</style>", "", get(base, BULK), flags=re.S)
 
-        assert len(page.encode()) < 55_000
+        assert len(page.encode()) < 61_000
 
     def test_ProtectionDropDown_OffersOnlyTheNewestDatesUntilTheFullListIsAsked(self, base):
         default = get(base, BULK)

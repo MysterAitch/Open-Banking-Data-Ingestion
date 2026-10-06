@@ -213,7 +213,9 @@ class TestABreakOnThePage:
         assert "Locked in to 2026-03-20, but that stretch has changed since." in said(page), (
             "the sentence says so too"
         )
-        assert "Locked in to 2026-03-20." not in said(page), "a changed stretch is not claimed intact"
+        assert "Locked in to 2026-03-20." not in said(page), (
+            "a changed stretch is not claimed intact"
+        )
         assert_no_secret(page)
 
     def test_Ledger_WhenBroken_SaysSoInTheSentenceAndInAThingToDoThatLeadsToTheFold(self, lab):

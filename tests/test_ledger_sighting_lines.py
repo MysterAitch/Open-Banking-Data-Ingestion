@@ -169,7 +169,7 @@ class TestTheAccountsCountOfJoins:
             )
 
         sentence = re.search(
-            r"How the sources' reports were matched \([^)]*\)</summary><p>(.*?)\.</p>",
+            r"How the sources' reports were matched \([^)]*\)</h3><p>(.*?)\.</p>",
             page_of(bare),
         )
         assert sentence is not None

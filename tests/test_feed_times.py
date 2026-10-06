@@ -147,10 +147,14 @@ class TestThePageShowsTheFeedsTime:
 
     def test_Ledger_WhenARowHasNoFeedItem_ShowsOnlyItsDate(self, make):
         untimed = Row("Cheque", -1111, 9, 9)
-        page = plain(render(make(morning(), export_extra=(TOP_UP_LISTED, untimed))))
+        store = make(morning(), export_extra=(TOP_UP_LISTED, untimed))
+        page = render(store)
 
-        # A row's date is followed by its chips, the status first.
-        assert re.search(r"2026-09-09(?! \d\d:\d\d)booked", page), "a row with no time shows none"
+        # The time a feed stated is said when a transaction is opened, and only for those that
+        # have one: a transaction no feed item reports has the date alone.
+        timed = [row for row in ledger_of(store).rows if row.feed_at is not None]
+        assert len(timed) < len(ledger_of(store).rows), "the cheque has no feed item"
+        assert page.count('class="muted t-time"') == len(timed), "a row with no time shows none"
 
     def test_Explanation_WhenARowIsNamed_SaysTheFeedTimeBesideTheDayTheFeedGave(self, make):
         page = plain(render(listed_morning(make)))
@@ -164,7 +168,7 @@ class TestThePageShowsTheFeedsTime:
 
         assert page.count(CLOCK_NOTE) == 1
         assert "The bank's feed states UTC" in page
-        assert "the row keeps the feed's own (UTC) date and counts toward that day" in page
+        assert "the transaction keeps the feed's own (UTC) date and counts toward that day" in page
 
     def test_Page_WhenNoRowIsFedByTheBank_SaysNothingOfTheClockAndShowsNoTime(self, tmp_path):
         from obdi.store import Store

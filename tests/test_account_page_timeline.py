@@ -1,30 +1,22 @@
-"""The coverage timeline in miniature on an account's own page, over the household of
-`coverage_timeline_world`, served by the real application with the day fixed at 2026-10-05.
+"""The strip of lanes on an account's own page, over the household of `coverage_timeline_world`,
+served by the real application with the day fixed at 2026-10-05.
 
-The span is the twelve months ending with the month shown, cut at the first day anything is held
-(2026-07-01) and at today. The drawing is 300 units wide with a 68 unit label column and a 6 unit
-margin, so the days are drawn in 226 units. Where nothing is collapsed (this household has no
-stretch in which nothing changes) a day is 226 / days units wide, and a cell is a week.
+The strip is the trust lane over one lane per way in, on the shared twelve months ending today
+(2025-10-06 to 2026-10-05, 365 days). A day is 100 / 365 percent of a lane, from the window's
+first day. The household's own docstring says, before any run, what each way in holds:
 
-  MONTH 2026-09   window 2026-07-01 to 2026-09-30, 92 days, 226 / 92 = 2.4565 units a day.
-                  The bracket is the month: 2026-09-01 is day 62, so it begins at
-                  68 + 62 * 2.4565 = 220.3 and ends at the right edge, 294.0.
-  MONTH 2026-07   window 2026-07-01 to 2026-07-31, 31 days, 7.4839 a day: the bracket is the
-                  whole drawing, 68.0 to 294.0.
-  FEED LANE       the feed's asks reach 07-01 to 08-20. In week cells from 07-01 (a cell is the
-                  days 7k to 7k + 6 from 07-01) that is full through the cell ending 08-18 (7 cells,
-                  49 days) and part in the one holding 08-19 and 08-20, then nothing.
-  AGGREGATOR LANE asks reach 07-01 to 08-10 and 08-20 to 09-10, so, by week cell k from 07-01:
-                  k0 to k4 full (to 08-04), k5 part (08-05 to 08-11 holds 08-11, which no ask
-                  reached), k6 nothing, k7 part (08-19 is not reached), k8 and k9 full, k10 part
-                  (09-09 and 09-10), then nothing.
+  FEED         the bank's feed covers 2026-07-01 to 2026-08-20 (two asks that overlap: one run).
+  AGGREGATOR   asked for 07-01 to 08-10 and 08-20 to 09-10, with 08-11 to 08-19 never asked.
+  EXPORT       files cover 07-02 to 08-25 (four that abut or overlap) and 09-12 to 09-28.
+  CARD         statements cover 05-15 to 07-11 and 08-12 to 09-11; the one for 07-12 to 08-11
+               is missing, which is a file wanted, drawn dashed.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 
 import httpx
@@ -40,13 +32,21 @@ from coverage_timeline_world import (
     build_main,
     land_long,
 )
+from obdi.account_page import read_account, strip_html
+from obdi.ledger import build_ledger
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
 from served_store import environment_for, served_store
 
-PER_DAY_SEP = 226 / 92
-LEFT = 68.0
-BRACKET = r'<rect class="cov-month" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"'
+WINDOW_START = TODAY - timedelta(days=364)
+
+
+def where(first: date, last: date) -> tuple[str, str]:
+    """Where days `first` to `last` are drawn on the shared scale, as the page writes them."""
+    return (
+        f"{(first - WINDOW_START).days / 365 * 100:.2f}%",
+        f"{((last - first).days + 1) / 365 * 100:.2f}%",
+    )
 
 
 class _Fixed(datetime):
@@ -92,144 +92,135 @@ def page(base: str, ref: str, month: str = "") -> str:
     return response.text
 
 
-def block_of(text: str) -> str:
-    start = text.index('<div class="cov-compact"')
-    return text[start : text.index("</div>", text.index("Open the coverage timeline")) + 6]
+def strip_of(text: str) -> str:
+    return re.search(r'<a class="tap strip".*?</a>', text, re.S).group(0)  # type: ignore[union-attr]
 
 
-def rects_in_row(block: str, row: int) -> list[dict[str, str]]:
-    """The cell rectangles of the lane in row `row` (0 is verification): y = 16 + 17 row + 3."""
-    y = f"{16 + 17 * row + 3:.1f}"
-    found = []
-    for tag in re.findall(r"<rect [^>]*>", block):
-        attrs = dict(re.findall(r'([\w-]+)="([^"]*)"', tag))
-        if attrs.get("y") == y and attrs["class"] in ("cov-bar", "cov-unavailable"):
-            found.append({"fill-opacity": "", **attrs})
+def lanes_of(strip: str) -> dict[str, list[tuple[str, str, str]]]:
+    """Each lane's name and the cells in it as (class, left, width)."""
+    found: dict[str, list[tuple[str, str, str]]] = {}
+    for name, bar in re.findall(
+        r'<span class="lane(?: first)?">([^<]*)</span>'
+        r'<span class="bar" aria-hidden="true">(.*?)</span>',
+        strip,
+    ):
+        found[name] = re.findall(r'<i class="([^"]*)" style="left:([\d.]+%);width:([\d.]+%)"', bar)
     return found
 
 
-class TestTheLine:
-    def test_Main_SaysWhereEachWayInReachesAndWhatIsToFill(self, base):
-        block = block_of(page(base, MAIN))
-        line = re.search(r"<summary>([^<]*)</summary>", block)
-        assert line is not None
-        assert line.group(1) == (
-            "The export reaches 2026-09-28; the bank feed reaches 2026-08-20; "
-            "the aggregator reaches 2026-09-10; 1 gap to fill."
-        )
+class TestTheLanes:
+    def test_Main_HasTheTrustLaneOverOneLanePerWayInAndNoLaneForANoWayThatHoldsNothing(self, base):
+        lanes = lanes_of(strip_of(page(base, MAIN)))
 
-    def test_Card_SaysWhenTheNextStatementIsExpected(self, base):
-        block = block_of(page(base, CARD))
-        assert (
-            "Statements reach 2026-09-11; 1 gap to fill; next statement expected about "
-            "2026-10-11." in block
-        )
+        assert list(lanes) == ["Trust", "Feed", "Aggregator", "Export file"]
 
-    def test_LongAccount_WithOneSourceAndNoGaps_SaysNothingNeedsFetching(self, tmp_path):
-        with served_store(
-            tmp_path, lambda store: land_long(tmp_path, store), bound=[LONG]
-        ) as address:
-            text = httpx.get(f"{address}/ledger", params={"ref": LONG}, timeout=120).text
-        assert "The export reaches 2026-09-15; nothing needs fetching." in text
+    def test_Main_DrawsEachWayInOverTheDaysItHolds(self, base):
+        lanes = lanes_of(strip_of(page(base, MAIN)))
 
+        def cells(name: str) -> list[tuple[str, str, str]]:
+            return [cell for cell in lanes[name] if cell[0] == "b-src"]
 
-class TestPlacement:
-    def test_Block_SitsUnderTheVerdictAndIsFoldedWithTheLineAsItsSummary(self, base):
-        text = page(base, MAIN)
-        assert text.index('class="verdict') < text.index('class="cov-compact"')
-        assert text.index('class="cov-compact"') < text.index("Transactions, newest first")
-        block = block_of(text)
-        assert "<details><summary>" in block
-        assert "<details open" not in block
-
-    def test_Block_HasTheLinkToTheFullPage(self, base):
-        assert "Open the coverage timeline" in block_of(page(base, MAIN))
-
-
-class TestTheShownMonth:
-    def test_NewestMonth_IsBracketedAndLabelledAtTheRightEnd(self, base):
-        block = block_of(page(base, MAIN, "2026-09"))
-        bracket = re.search(BRACKET, block)
-        assert bracket is not None
-        assert float(bracket.group(1)) == pytest.approx(LEFT + 62 * PER_DAY_SEP, abs=0.2)
-        assert float(bracket.group(1)) + float(bracket.group(2)) == pytest.approx(294.0, abs=0.2)
-        assert ">2026-09</text>" in block
-
-    def test_EarlierMonth_IsBracketedOverTheWholeOfItsOwnShortWindow(self, base):
-        block = block_of(page(base, MAIN, "2026-07"))
-        bracket = re.search(BRACKET, block)
-        assert bracket is not None
-        assert float(bracket.group(1)) == pytest.approx(LEFT, abs=0.2)
-        assert float(bracket.group(1)) + float(bracket.group(2)) == pytest.approx(294.0, abs=0.2)
-        assert ">2026-07</text>" in block
-
-    def test_MonthShown_IsNeverTheSameBracketAsAnotherMonth(self, base):
-        newest = block_of(page(base, MAIN, "2026-09"))
-        earlier = block_of(page(base, MAIN, "2026-07"))
-        assert newest != earlier
-
-
-class TestCells:
-    def test_FeedLane_IsFullThroughItsLastWholeWeekThenPartThenNothing(self, base):
-        cells = rects_in_row(block_of(page(base, MAIN, "2026-09")), 1)
-        assert [(c["class"], c["fill-opacity"]) for c in cells] == [
-            ("cov-bar", ".3"), ("cov-bar", ".12")
+        assert cells("Feed") == [("b-src", *where(date(2026, 7, 1), date(2026, 8, 20)))]
+        assert cells("Aggregator") == [
+            ("b-src", *where(date(2026, 7, 1), date(2026, 8, 10))),
+            ("b-src", *where(date(2026, 8, 20), date(2026, 9, 10))),
         ]
-        full, part = cells
-        assert float(full["x"]) == pytest.approx(LEFT, abs=0.2)
-        assert float(full["width"]) == pytest.approx(49 * PER_DAY_SEP, abs=0.3)
-        assert float(part["x"]) == pytest.approx(LEFT + 49 * PER_DAY_SEP, abs=0.3)
-        assert float(part["width"]) == pytest.approx(7 * PER_DAY_SEP, abs=0.3)
+        assert cells("Export file") == [
+            ("b-src", *where(date(2026, 7, 2), date(2026, 8, 25))),
+            ("b-src", *where(date(2026, 9, 12), date(2026, 9, 28))),
+        ]
 
-    def test_AggregatorLane_ShowsItsUnaskedDaysAsNothingBetweenPartCells(self, base):
-        cells = rects_in_row(block_of(page(base, MAIN, "2026-09")), 2)
-        assert [c["fill-opacity"] for c in cells] == [".3", ".12", ".12", ".3", ".12"]
-        starts = [round((float(c["x"]) - LEFT) / PER_DAY_SEP) for c in cells]
-        widths = [round(float(c["width"]) / PER_DAY_SEP) for c in cells]
-        assert starts == [0, 35, 49, 56, 70]
-        assert widths == [35, 7, 7, 14, 7]
+    def test_Card_DrawsItsStatementsAndDashesTheOneThatIsWanted(self, base):
+        lanes = lanes_of(strip_of(page(base, CARD)))
+
+        assert list(lanes) == ["Trust", "Statements"]
+        assert lanes["Statements"] == [
+            ("b-src", *where(date(2026, 5, 15), date(2026, 7, 11))),
+            ("b-src", *where(date(2026, 8, 12), date(2026, 9, 11))),
+            ("b-want", *where(date(2026, 7, 12), date(2026, 8, 11))),
+        ]
+        assert ("b-want", *where(date(2026, 7, 12), date(2026, 8, 11))) in lanes["Trust"]
+
+    def test_Trust_UsesTheSharedScaleSoTwoAccountsWithTheSameDatesDrawTheSameWidths(self, base):
+        main = lanes_of(strip_of(page(base, MAIN)))["Feed"][0]
+        month_marks = re.findall(
+            r'<span style="left:([\d.]+)%">(\w+)</span>', strip_of(page(base, MAIN))
+        )
+
+        assert main[2] == where(date(2026, 7, 1), date(2026, 8, 20))[1]
+        assert month_marks[0] == ("0.00", "Oct"), "the window begins part-way through October"
+        assert [name for _, name in month_marks] == [
+            "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"
+        ]
 
 
-class TestMarksLinkToTheFullPage:
-    def test_EveryMark_LandsOnAnAnchorThatExistsOnTheFullPage(self, base):
-        block = block_of(page(base, MAIN, "2026-09"))
-        links = re.findall(r'<a class="tap" href="([^"]*)"><title>', block)
-        assert len(links) >= 3
-        for link in links:
-            address = link.replace("&amp;", "&")
-            path, _, fragment = address.partition("#")
-            assert fragment.startswith("e-"), address
-            full = httpx.get(f"{base}{path}", timeout=120).text
-            assert f'id="{fragment}"' in full, address
+class TestTheStripIsTheWayToTheFullTimeline:
+    def test_Strip_IsALinkToTheFullTimelineOfThisAccountNamedForAReaderWhoCannotSeeIt(self, base):
+        strip = strip_of(page(base, MAIN))
 
-    def test_OpenLink_GoesToTheFullPageOverTheSameSpan(self, base):
-        block = block_of(page(base, MAIN, "2026-09"))
-        href = re.search(r'<a class="tap" href="([^"]*)">Open the coverage timeline', block)
-        assert href is not None
-        assert "window_from=2026-07-01" in href.group(1)
-        assert "window_to=2026-09-30" in href.group(1)
+        assert strip.startswith('<a class="tap strip" href="/coverage-timeline?ref=main">')
+        assert "The full timeline, source by source" in strip
+        assert "visually-hidden" in strip
+
+    def test_Strip_SitsBetweenTheTrustSentenceAndTheThingsToDo(self, base):
+        text = page(base, CARD)
+
+        assert text.index('class="trust') < text.index('class="tap strip"')
+        assert text.index('class="tap strip"') < text.index('class="todos"')
+        assert text.index('class="todos"') < text.index(">Show values</button>")
 
 
 class TestMasking:
-    def test_Block_IsIdenticalMaskedAndWithValuesShown(self, base):
-        masked = block_of(page(base, MAIN, "2026-09"))
+    def test_Strip_IsIdenticalMaskedAndWithValuesShown(self, base):
+        masked = strip_of(page(base, MAIN, "2026-09"))
         shown = httpx.post(
             f"{base}/ledger", data={"ref": MAIN, "month": "2026-09"}, timeout=120
         )
-        assert shown.status_code == 200
-        assert block_of(shown.text) == masked
 
-    def test_Block_HoldsNoAmountAndNoDescription(self, base):
-        block = block_of(page(base, MAIN, "2026-09"))
+        assert shown.status_code == 200
+        assert strip_of(shown.text) == masked
+
+    def test_Strip_HoldsNoAmountAndNoDescription(self, base):
+        strip = strip_of(page(base, MAIN, "2026-09"))
+
         for private in ("Alpha", "Charlie", "Kilo", "792.00", "925.00", "700.00"):
-            assert private not in block
-        assert not re.search(r"\d[\d,]*\.\d\d(?!\d)", block)
+            assert private not in strip
+        positions_removed = re.sub(r' style="[^"]*"', "", strip)
+        assert not re.search(r"\d[\d,]*\.\d\d(?!\d)", positions_removed)
+
+
+class TestWhenTheTimelineCannotBeRead:
+    def test_Reading_WhenTheTimelineHookFails_SaysSoAndKeepsTheTrustLane(self, base, root):
+        class Config:
+            @staticmethod
+            def coverage_timeline_compact(ref: str, today: date) -> None:
+                raise RuntimeError("the store went away")
+
+        with Store(root / "store.sqlite3") as store:
+            ledger = build_ledger(store, MAIN, None, bound=True)
+        reading = read_account(Config(), ledger, TODAY)
+
+        assert reading.timeline is None
+        assert reading.unread == ("The timeline by source could not be built just now.",)
+        assert list(lanes_of(strip_html(reading, MAIN, TODAY))) == ["Trust"], (
+            "a lane that could not be read is not drawn as an empty one"
+        )
+
+    def test_Reading_WithNoTimelineWired_DrawsTheTrustLaneAloneAndSaysNothingWentWrong(
+        self, base, root
+    ):
+        with Store(root / "store.sqlite3") as store:
+            ledger = build_ledger(store, CARD, None, bound=True)
+        reading = read_account(None, ledger, TODAY)
+
+        assert reading.unread == ()
+        assert list(lanes_of(strip_html(reading, CARD, TODAY))) == ["Trust"]
 
 
 class TestCost:
-    def test_Block_IsASmallFixedSize(self, base):
-        assert len(block_of(page(base, MAIN, "2026-09")).encode()) < 9000
-        assert len(block_of(page(base, CARD)).encode()) < 9000
+    def test_Strip_IsASmallFixedSize(self, base):
+        assert len(strip_of(page(base, MAIN, "2026-09")).encode()) < 3000
+        assert len(strip_of(page(base, CARD)).encode()) < 3000
 
     def test_HookStatements_WhenWarm_AreTheSameFewForEveryAccount(self, base, root):
         from obdi.cli import build_web_config
@@ -258,6 +249,15 @@ class TestCost:
             monkey.undo()
         assert first == second
         assert first <= 20, f"{first} statements when warm"
+
+
+def test_AccountWithOneWayInAndNothingWanted_DrawsOneLaneBesideTheTrustLane(tmp_path) -> None:
+    with served_store(tmp_path, lambda store: land_long(tmp_path, store), bound=[LONG]) as address:
+        text = httpx.get(f"{address}/ledger", params={"ref": LONG}, timeout=120).text
+
+    lanes = lanes_of(strip_of(text))
+    assert list(lanes) == ["Trust", "Export file"]
+    assert not any(cell[0] == "b-want" for cells in lanes.values() for cell in cells)
 
 
 def test_Fixture_Date_IsAsTheDocstringSays() -> None:

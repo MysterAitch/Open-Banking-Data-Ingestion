@@ -73,7 +73,7 @@ from .page_words import (
 )
 from .plural import agree, word
 from .plural import plural as _plural
-from .standing_data import ADDS_UP
+from .standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .trust_bar import key_html
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_answers import AnswerPages
@@ -352,12 +352,11 @@ def _line_html(row: Any, line: str, more: str) -> str:
 def _mark_html(row: Any) -> str:
     """The one mark at the end of a transaction's line: cleared (a statement, an export, or the
     bank's own feed lists it), not cleared yet, or counted elsewhere. The word is said to a screen
-    reader and as the mark's title, and the sources that cleared it are named in the title."""
+    reader and as the mark's title, and the sources that cleared it are named in the title. A copy
+    carries no mark: it is listed under the disclosure that says what it is, and its chip says so
+    again when it is opened."""
     if _is_copy(row):
-        return (
-            '<span class="mk" title="counted elsewhere">&middot;'
-            '<span class="visually-hidden">counted elsewhere</span></span>'
-        )
+        return '<span class="mk" aria-hidden="true">&middot;</span>'
     if row.cleared_by:
         named = ", ".join(row.cleared_by)
         return (
@@ -477,8 +476,13 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
         f"{_mark_html(row)}"
     )
     kind = " folded" if _is_copy(row) else ""
+    stated = (
+        f'<p class="muted t-time">{_esc(row.dated.isoformat())}{at}</p>'
+        if row.feed_at is not None
+        else ""
+    )
     more = (
-        f'<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
+        f'{stated}<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
         f"{counterparty}{dates}{annotation}"
     )
     return (
@@ -954,7 +958,7 @@ _CLOCK_NOTE = (
     "Times are London time, as the bank's app shows them. The bank's feed states UTC, which "
     "is an hour behind London from the last Sunday of March to the last Sunday of October. "
     "A time past midnight in London but before it in UTC is shown with its London date; "
-    "the row keeps the feed's own (UTC) date and counts toward that day."
+    "the transaction keeps the feed's own (UTC) date and counts toward that day."
 )
 
 
@@ -1785,7 +1789,7 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         '<p><label>Balance at the end of that day, in pounds and pence<br>'
         f'<span class="muted">{way_round}</span><br>'
         '<input name="amount" inputmode="decimal" autocomplete="off" required>'
-        "</label></p>" + submit_button("Save known balance") + "</form>"
+        "</label></p>" + submit_button("Save known balance", secondary=True) + "</form>"
     )
     return _part(
         "State a balance",
@@ -1967,11 +1971,11 @@ def _clearing_html(clearing: Any) -> str:
     )
     return _part(
         f"Cleared and uncleared by month ({clearing.cleared} cleared, {clearing.uncleared} not)",
-        f"<p>Across the account, {_plural(clearing.cleared, 'row')} "
+        f"<p>Across the account, {_plural(clearing.cleared, 'transaction')} "
         f"{agree(clearing.cleared, 'is')} cleared and {clearing.uncleared} "
-        f"{agree(clearing.uncleared, 'is')} not. A row is cleared when a statement, an "
+        f"{agree(clearing.uncleared, 'is')} not. A transaction is cleared when a statement, an "
         "export, or the bank's own feed lists "
-        "it; the aggregator alone does not clear a row, and a pending row is never cleared."
+        "it; the aggregator alone does not clear one, and a pending transaction is never cleared."
         f'</p><ul class="plain">{months}</ul>',
     )
 
@@ -2851,7 +2855,10 @@ def _state_html(
     if view.rebuilding:
         return heading + f'<p class="warn">{_esc(view.rebuilding)}</p>'
     held = sum(count for _, count in view.month_counts)
-    lock = lock_offer_html(view.protection, _lock_offer_form(view))
+    # An account that does not add up is asked to be fixed first: locking in what is checked is
+    # offered again once nothing fails, and the earlier-day choice stays in the locking fold.
+    failing = verification_of(reading.standing) == DOES_NOT_ADD_UP
+    lock = "" if failing else lock_offer_html(view.protection, _lock_offer_form(view))
     todos = todos_html(reading, view.ref, view.month, today, hold=hold, lock=lock)
     return (
         heading

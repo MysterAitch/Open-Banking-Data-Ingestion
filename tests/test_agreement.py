@@ -268,26 +268,30 @@ class TestThePage:
         )
         return render_ledger(ledger, unmasked=unmasked).decode("utf-8")
 
-    def test_Page_WhenBalancesAreMet_SaysKnownBalancesAgreementAndProtectionInTheOwnersWords(
-        self, store
-    ):
+    @staticmethod
+    def words(page: str) -> str:
+        """The page's words: no tags (a date is set in a span that never breaks), entities read."""
+        import html
+        import re
+
+        return html.unescape(re.sub(r"<[^>]+>", "", page))
+
+    def test_Page_WhenBalancesAreMet_SaysWhatAddsUpToWhichKnownBalances(self, store):
         everyday(store)
         stated(store, ("2026-03-05", "1000.00"), ("2026-03-10", "980.00"))
 
         page = self.page(store)
 
-        assert (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10"
-            in page
-        )
+        assert "Adds up to the known balances to 2026-03-10." in self.words(page)
+        assert 'class="trust bad"' not in page and 'class="trust none"' not in page
 
     def test_Page_WhenNoBalanceIsKnown_SaysThereIsNothingToCheckAgainst(self, store):
         everyday(store)
 
-        assert (
-            "No known balance, so there is nothing to check the transactions against."
-            in self.page(store)
-        )
+        page = self.page(store)
+
+        assert 'class="trust none"' in page
+        assert "Nothing to check against." in self.words(page)
 
     def test_Page_WhenABalanceIsUnmet_NamesWhatHoldsBackAndLinksItsExplanation(self, store):
         everyday(store)
@@ -297,9 +301,15 @@ class TestThePage:
 
         page = self.page(store)
 
-        assert "The transactions do not add up to the known balance for 2026-03-15" in page
+        assert (
+            "The transactions do not add up to the known balance for 2026-03-15"
+            in self.words(page)
+        )
         assert 'href="#opening"' in page, "the explanation is on this page"
-        assert '<details id="opening" open>' in page, "it does not add up, so it is open to read"
+        assert "<details><summary>Known balances (" in page, (
+            "a fold the thing to do opens at the explanation, and not one that opens itself"
+        )
+        assert '<div id="opening">' in page
 
     def test_Page_WhenAMovementFaultHoldsAgreementBack_LinksTheMovementChecks(self, store):
         everyday(store)
@@ -313,7 +323,7 @@ class TestThePage:
         assert (
             "A check of the money moved found a problem dated 2026-03-08, so the transactions "
             "cannot be shown to add up from then on"
-        ) in page
+        ) in self.words(page)
         assert 'href="/identity-health"' in page
 
     def test_Page_ShowsWhichSourceClearedARowAndTheCounts(self, store):
@@ -324,7 +334,7 @@ class TestThePage:
 
         assert "cleared by <code>starling-csv</code>" in page
         assert page.count(">cleared by ") == 1, "the aggregator-only row carries no mark"
-        assert "1 row is cleared and 1 is not" in page
+        assert "1 transaction is cleared and 1 is not" in page
 
     def test_Page_WhenMasked_NeverShowsAStatedFigureOrTheOpening(self, store):
         everyday(store)

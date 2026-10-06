@@ -121,11 +121,13 @@ def _walk(base: str) -> dict[str, set[str]]:
 class TestTheFieldStatisticsPageIsNotAnEqualOfTheAccountPage:
     """It was "Shape", linked beside an account's own page as if it were one."""
 
-    def test_AccountsLedgerPage_LinksFieldStatisticsOnlyFromItsFoot(self, world):
+    def test_AccountsLedgerPage_LinksFieldStatisticsOnlyFromTheFoldThatSaysHowItWasChecked(
+        self, world
+    ):
         page = httpx.get(f"{world}/ledger?ref=agree-1", timeout=60).text
 
-        foot = page.split('<div class="foot-links">', 1)[1]
-        assert "Field statistics for this account" in foot
+        fold = page.split("<summary>How this was checked</summary>", 1)[1].split("</details>")[0]
+        assert "Field statistics for this account" in fold
         assert page.count("Field statistics") == 1
         assert "Shape of this account" not in page
 

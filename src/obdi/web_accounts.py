@@ -1045,7 +1045,9 @@ def archive_controls(
             + hidden
             + (
                 _date_field(
-                    "closed", None, "Archived on (optional - the newest row's date if empty)"
+                    "closed",
+                    None,
+                    "Archived on (optional - the newest transaction's date if empty)",
                 )
                 if with_date
                 else ""

@@ -80,7 +80,7 @@ def said(page: str) -> str:
 
 
 class TestTheOrderOfTheFirstScreens:
-    def test_HeldAccount_MaskedPage_RunsNameTrustStripThingsToDoValuesMonthTransactionsThenTheFiveFolds(
+    def test_HeldAccount_MaskedPage_RunsNameTrustStripToDoValuesMonthThenTheFiveFolds(
         self, base
     ):
         page = get(base)

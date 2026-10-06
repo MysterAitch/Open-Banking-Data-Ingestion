@@ -1,5 +1,5 @@
-"""The compact timeline on an account's page at phone widths: the page never scrolls sideways
-with it folded or open, and the drawing is fitted to the page's width (skipped where no browser).
+"""The strip of lanes on an account's page at phone widths: the page never scrolls sideways with
+every fold shut or open, and no lane runs past the strip (skipped where no browser).
 """
 
 from __future__ import annotations
@@ -63,21 +63,25 @@ def _environment(base: str, root: Path, monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.parametrize("width", WIDTHS)
 @pytest.mark.parametrize("ref", [MAIN, CARD])
 @pytest.mark.parametrize("open_it", [False, True])
-def test_AccountPage_WithTheCompactTimeline_NeverScrollsSideways(
+def test_AccountPage_WithTheStripOfLanes_NeverScrollsSideways(
     browser: object, base: str, width: int, ref: str, open_it: bool
 ) -> None:
     page = browser.new_page(viewport={"width": width, "height": 800})  # type: ignore[attr-defined]
     page.goto(f"{base}/ledger?ref={ref}", wait_until="load")
     if open_it:
-        page.evaluate("document.querySelector('.cov-compact > details').open = true")
+        page.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
     seen = page.evaluate(
         """() => {
-          const svg = document.querySelector('.cov-compact-svg').getBoundingClientRect();
-          const box = document.querySelector('.cov-compact').getBoundingClientRect();
+          const strip = document.querySelector('a.strip').getBoundingClientRect();
+          const bars = [...document.querySelectorAll('a.strip .bar')]
+            .map(e => e.getBoundingClientRect());
           return {page: document.documentElement.scrollWidth - window.innerWidth,
-                  svgRight: svg.right, boxRight: box.right};
+                  stripRight: strip.right, width: window.innerWidth,
+                  widest: Math.max(...bars.map(b => b.right)), lanes: bars.length};
         }"""
     )
     assert seen["page"] <= 0
-    assert seen["svgRight"] <= seen["boxRight"] + 1
+    assert seen["stripRight"] <= seen["width"]
+    assert seen["widest"] <= seen["stripRight"] + 1, "no lane runs past the strip"
+    assert seen["lanes"] >= 2, "the trust lane and at least one way in"
     page.close()

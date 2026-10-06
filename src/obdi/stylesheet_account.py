@@ -42,6 +42,7 @@ ACCOUNT_STYLES = """
     strip is the link to the full timeline. */
  main a.strip { display: grid; grid-template-columns: 5.25rem minmax(0, 1fr); gap: var(--s2);
          align-items: center; margin: var(--s2) 0 var(--s3); color: inherit; text-decoration: none; }
+ .strip .axis { overflow: hidden; }
  .strip .lane { font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
  .strip .lane.first { color: var(--ink); font-weight: 600; }
  .b-src { background: var(--ink-2); }
@@ -55,7 +56,7 @@ ACCOUNT_STYLES = """
  .acct-state .todo form button:not(.button) { margin: 0; }
  .todo-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2) var(--s3); }
  .todo-form label { display: block; }
- .todo-form button.button { grid-column: 1 / -1; }
+ .todo-form p { grid-column: 1 / -1; margin: 0; }
  .acct-state details { margin: var(--s1) 0; }
 
  /* The month: its heading and the steps beside it, then one line of what it holds. */
@@ -85,15 +86,14 @@ ACCOUNT_STYLES = """
     something has cleared it. The line is the summary of the transaction's own disclosure, so its
     hit area is the whole line and everything else is a tap away. */
  .txns li.txn { padding: 0; }
- .t-row, .txns li.txn summary.t-row { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto 1rem;
-                gap: 0 var(--s2); align-items: center; padding: var(--s1) 0; min-height: var(--hit);
-                color: inherit; font: inherit; }
+ .t-row, .txns li.txn summary.t-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s2);
+                padding: var(--s1) 0; min-height: var(--hit); color: inherit; font: inherit; }
  .txns li.txn summary.t-row::before { display: none; }
- .t-when.mono { color: var(--ink-2); font-size: var(--text-xs); }
- .t-desc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+ .t-when.mono { flex: none; color: var(--ink-2); font-size: var(--text-xs); }
+ .t-desc { flex: 1 1 7rem; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
  details[open] > summary .t-desc { white-space: normal; overflow-wrap: anywhere; }
- .t-fig { font-weight: 600; font-size: var(--text-sm); text-align: right; }
- .mk { font: 700 var(--text-sm)/1 var(--sans); text-align: center; color: var(--ink-2); }
+ .t-fig { flex: none; font-weight: 600; font-size: var(--text-sm); text-align: right; }
+ .mk { flex: none; width: 1rem; font: 700 var(--text-sm)/1 var(--sans); text-align: center; color: var(--ink-2); }
  .mk.c { color: var(--ok); }
  .mk.u { color: var(--warn); }
  .t-extra { padding: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
@@ -142,6 +142,7 @@ ACCOUNT_STYLES = """
  }
  @media (min-width: 76rem) {
   body.ledger-page { max-width: 76rem; }
-  .t-row, .txns li.txn summary.t-row { grid-template-columns: 5rem minmax(0, 1fr) 8rem 1rem; column-gap: var(--s4); }
+  .t-row, .txns li.txn summary.t-row { column-gap: var(--s4); }
+  .t-fig { min-width: 8rem; }
  }
 """

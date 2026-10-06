@@ -120,15 +120,14 @@ def page(request: pytest.FixtureRequest, base: str) -> str:
 class TestTheMonthsCounts:
     def test_MonthWithCopies_HeaderSaysHowManyRowsAreCountedAndHowManyAreCopies(self, page):
         assert re.search(
-            r'<p class="sub">7 transactions: 4 counted, 3 transactions counted elsewhere\. '
-            r"Sources ",
+            r'<p class="txcount">7 transactions: 4 counted, 3 transactions counted elsewhere\.',
             page,
         ), "the count compared with a bank's app is the counted one"
 
     def test_MonthWithoutCopies_HeaderKeepsItsPlainForm(self, base):
         page = masked(base, "2026-08")
 
-        assert '<p class="sub">1 transaction. Sources ' in page
+        assert '<p class="txcount">1 transaction.' in page
         assert "transactions counted elsewhere" not in page
         assert f">{CHIP}<" not in page
 

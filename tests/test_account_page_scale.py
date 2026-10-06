@@ -29,19 +29,21 @@ SCREEN = 800
 PHONE = 390
 REFLOW = 320
 
-#: The most screens the whole page may fill, every disclosure closed, for a month of fifty rows.
-#: It was 24 for the held account before the page was rebuilt; a row has to be about 60 px for
-#: fifty of them and everything round them to fit, which is why a row is two lines.
-#: The sixth screen's tenth is the one line the coverage timeline's link adds to the foot of the
-#: page (measured at 390 px: the page was 4821 px with it, 21 px past six screens); nothing else
-#: was allowed to grow.
-#: The page's own compact coverage timeline, folded under the verdict, adds a summary line (its
-#: one sentence) and a link row, measured at 390 px as 86 px (the page was 4907 px with it, 27 px
-#: past 6.1 screens): 6.2 screens is that and nothing more.
-#: An account that does not add up says which stretch fails, in one sentence, with what that can
-#: mean folded beneath it (measured at 390 px: the page was 5034 px with them, 74 px past 6.2
-#: screens). An account that adds up shows neither, so only the failing page uses the allowance.
-WHOLE_PAGE_SCREENS = 6.35
+#: THE PAGE'S BUDGET at 390 px, every disclosure closed, for a month of fifty transactions.
+#: It was 24 screens for the held account before the page was first rebuilt and 6.35 after; with a
+#: transaction one line of about 45 px it is, measured with the strip, the things to do, and the
+#: five folds (2026-10-06):
+#:
+#:   held account    3858 px, 4.82 screens: 1247 px before the first transaction, 2250 px of
+#:                   transactions, 361 px for the entry by hand and the five folds
+#:   agreeing        3611 px, 4.51 screens
+#:
+#: The fifty transactions are most of it, so the bound that holds the redesign's target ("under
+#: two phone screens for an ordinary month") is on the page APART FROM the month's list of
+#: transactions, `FURNITURE_SCREENS`; the whole page is bound by `WHOLE_PAGE_SCREENS`, a tenth of
+#: a screen above the held account's measurement.
+WHOLE_PAGE_SCREENS = 4.95
+FURNITURE_SCREENS = 2.0
 
 
 @pytest.fixture(scope="module")
@@ -103,25 +105,16 @@ def bottom_of(page: object, selector: str) -> float:
 
 
 class TestTheFirstScreen:
-    def test_HeldAccount_At390By800_HoldsTheNameTheRailTheVerdictAndTheBox(
-        self, browser, base
+    @pytest.mark.parametrize("ref", [HELD, AGREEING])
+    def test_Account_At390By800_HoldsTheNameTheTrustSentenceAndTheFirstThingToDoWithItsControl(
+        self, browser, base, ref
     ):
-        page = opened(browser, base, HELD)
+        page = opened(browser, base, ref)
         try:
-            assert top_of(page, "h1") >= 0
-            for selector in ("h1", "svg.rail", ".verdict", ".held"):
+            control = ".todo a.button, .todo button.button, .todo form button"
+            for selector in ("h1", "p.trust", ".todo", control):
                 assert 0 < bottom_of(page, selector) <= SCREEN, f"{selector} is below the fold"
-        finally:
-            page.close()
-
-    def test_AgreeingAccount_At390By800_HoldsTheNameTheRailAndTheVerdictAndNoBox(
-        self, browser, base
-    ):
-        page = opened(browser, base, AGREEING)
-        try:
-            for selector in ("h1", "svg.rail", ".verdict"):
-                assert 0 < bottom_of(page, selector) <= SCREEN, f"{selector} is below the fold"
-            assert top_of(page, ".held") == -1
+            assert top_of(page, ".held") == -1, "no tinted box: the thing to do says it"
         finally:
             page.close()
 
@@ -183,10 +176,8 @@ class TestBetweenAPhoneAndADesk:
     ):
         page = opened(browser, base, AGREEING, width=width, height=900)
         try:
-            gap = top_of(page, ".acct-month") - bottom_of(page, ".acct-state")
-            assert gap <= 48, f"{gap:.0f} px of nothing between the state and the month"
-            below = top_of(page, ".ledger-more") - bottom_of(page, ".acct-month")
-            assert below <= 48, f"{below:.0f} px of nothing under the month"
+            gap = top_of(page, ".ledger-more") - bottom_of(page, ".acct-state")
+            assert 0 <= gap <= 48, f"{gap:.0f} px between the state and the folds"
         finally:
             page.close()
 
@@ -206,25 +197,39 @@ class TestTheWholePage:
         finally:
             page.close()
 
-    def test_HeldAccount_LeavesTheKnownBalancesOpenWhichIsTheOneThingThatMakesItLonger(
-        self, browser, base
+    @pytest.mark.parametrize("ref", [AGREEING, HELD])
+    def test_PageApartFromTheMonthsTransactions_FillsUnderTwoPhoneScreens(
+        self, browser, base, ref
     ):
-        page = opened(browser, base, HELD)
+        page = opened(browser, base, ref)
         try:
-            opened_total = float(page.evaluate("document.documentElement.scrollHeight"))
             page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
-            closed_total = float(page.evaluate("document.documentElement.scrollHeight"))
-            assert opened_total > closed_total + SCREEN, "the explanation is open for the reader"
+            total = float(page.evaluate("document.documentElement.scrollHeight"))
+            listed = float(
+                page.evaluate(
+                    "(() => { const e = document.querySelector('ul.txns'); "
+                    "return e ? e.getBoundingClientRect().height : 0; })()"
+                )
+            )
+            assert listed > 40 * 40, "the month's fifty transactions are what was taken out"
+            assert (total - listed) < FURNITURE_SCREENS * SCREEN, (
+                f"{(total - listed) / SCREEN:.2f} screens beside the transactions"
+            )
         finally:
             page.close()
-        calm = opened(browser, base, AGREEING)
+
+    @pytest.mark.parametrize("ref", [AGREEING, HELD])
+    def test_Account_OpensNothingByItself_AnAccountThatDoesNotAddUpIncluded(
+        self, browser, base, ref
+    ):
+        page = opened(browser, base, ref)
         try:
-            as_loaded = float(calm.evaluate("document.documentElement.scrollHeight"))
-            calm.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
-            closed = float(calm.evaluate("document.documentElement.scrollHeight"))
-            assert as_loaded == closed, "an account in agreement opens nothing"
+            as_loaded = float(page.evaluate("document.documentElement.scrollHeight"))
+            page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
+            closed = float(page.evaluate("document.documentElement.scrollHeight"))
+            assert as_loaded == closed, "thirty-five known balances are not opened by the page"
         finally:
-            calm.close()
+            page.close()
 
 
 class TestNoSidewaysScroll:

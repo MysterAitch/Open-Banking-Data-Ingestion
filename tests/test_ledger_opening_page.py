@@ -138,7 +138,7 @@ class TestAnAccountWithNoAnchor:
     def test_Page_SaysThereIsNoOpeningBalanceAndThatTheFiguresStartFromZero(self, lab):
         page = lab.get().text
 
-        assert "Known balances and the opening (none stated)" in page
+        assert "Known balances (none stated)" in page
         assert "No opening balance: the figures on this page start from zero." in page
         assert "Opening balance, at the end of" not in page
 
@@ -316,21 +316,21 @@ class TestANilBalanceIsJustNil:
 
 
 class TestOnlyShowValuesIsAPrimaryButton:
-    def test_Masked_AnAccountWithNoAnchor_HasShowValuesAndSaveAsItsOnlyPrimaryButtons(self, lab):
+    def test_Masked_AnAccountWithNoAnchor_HasConfirmThisBalanceAsItsOnlyPrimaryButton(self, lab):
         page = lab.get().text
         primary = re.findall(r'<(?:a|button)[^>]*class="button"[^>]*>([^<]*)<', page)
 
-        # Archiving is consequential and done once in an account's life, so it
-        # is outlined (`secondary`) and never competes with the page's action.
-        assert sorted(primary) == ["Save known balance", "Show values"]
-        assert 'class="button secondary" type="submit"' in page
+        # The thing to do is the page's one filled control, so showing values is outlined, and
+        # archiving, consequential and done once in an account's life, never competes either.
+        assert primary == ["Confirm this balance"]
+        assert re.search(r'class="button secondary" type="submit"[^>]*>Show values<', page)
         assert "Archive this account</button>" in page
 
     def test_Masked_MonthLinksAreOrdinaryLinksAtTheTop(self, lab):
         page = lab.get(month="2026-04").text
 
         assert 'class="tap" href="/ledger?ref=everyday&amp;month=2026-03"' in page
-        assert page.index("Previous month") < page.index("Known balances and the opening")
+        assert page.index("Previous month") < page.index("<summary>Known balances (")
 
 
 class TestMaskingHoldsWhateverTheQueryString:
