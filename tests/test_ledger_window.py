@@ -180,7 +180,13 @@ def count_line(page: str) -> str:
 
 
 def forms_holding(page: str, text: str) -> list[Node]:
-    return [form for form in elements(parse(page), "form") if text in form.text()]
+    """The forms whose own button says exactly `text`: "Show values" is the one-page press, and
+    "Show values on every page" beside it is the sitting's, which these tests never press."""
+    return [
+        form
+        for form in elements(parse(page), "form")
+        if any(button.text().strip() == text for button in elements(form, "button"))
+    ]
 
 
 def submitted(form: Node, *, pressing: str = "") -> dict[str, str]:

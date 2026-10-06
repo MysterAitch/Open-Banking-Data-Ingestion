@@ -404,6 +404,15 @@ class TestReturnAddressesInTheControls:
 
         assert f'name="return_to" value="/ledger?ref={ACCOUNT}&amp;month=2026-09"' in page
 
+    def test_Controls_DropAFieldNoPageReads_SoAStrayFieldIsNeverEchoed(self, served):
+        """The address a control returns to is rebuilt from the fields the site's pages read.
+        Carried verbatim, a query field nobody reads came straight back in the page, which is
+        what every page's own "never echoes an unknown field" test exists to refuse."""
+        page = get(served, f"/ledger?ref={ACCOUNT}&month=2026-09&note=zz9").text
+
+        assert "zz9" not in page
+        assert f'name="return_to" value="/ledger?ref={ACCOUNT}&amp;month=2026-09"' in page
+
     def test_Controls_NeverCarryAnAddressThatIsNotAPathOnThisSite(self, served):
         """The request line is whatever the client sent; only a local path reaches a form."""
         response = httpx.get(

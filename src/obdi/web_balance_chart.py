@@ -231,12 +231,22 @@ def _href(
     window: Mapping[str, str] | None = None,
 ) -> str:
     """The masked page's address, for a range (`from`/`to`) or a window's fields, or neither."""
+    return _esc(_address(ref, start, end, window))
+
+
+def _address(
+    ref: str,
+    start: date | None = None,
+    end: date | None = None,
+    window: Mapping[str, str] | None = None,
+) -> str:
+    """`_href` unescaped, for a field that escapes it itself."""
     query = f"ref={quote(ref, safe='')}"
     if window:
         query += "&" + urlencode(window)
     elif start is not None and end is not None:
         query += f"&from={start.isoformat()}&to={end.isoformat()}"
-    return _esc(f"/balance-chart?{query}")
+    return f"/balance-chart?{query}"
 
 
 # ---------------------------------------------------------------------------
@@ -1443,6 +1453,10 @@ def _mode(
     view: Any, unmasked: bool, start: date | None, end: date | None, chosen: _Chosen
 ) -> str:
     ref = view.ref
+    # The page's own address, built from what it read: where the sitting's controls return to.
+    values_sitting.page_address(
+        _address(ref, None, None, chosen.fields) if chosen.windowed else _address(ref, start, end)
+    )
     if unmasked:
         back = _href(ref, None, None, chosen.fields) if chosen.windowed else _href(ref, start, end)
         return values_sitting.unless_sitting(

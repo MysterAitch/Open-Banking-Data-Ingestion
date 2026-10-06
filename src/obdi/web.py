@@ -3671,7 +3671,7 @@ class ConnectionHandler(
         until = values_sitting.sitting_end(self.headers.get("Cookie"), datetime.now(UTC))
         return (
             values_sitting.sitting.set(until),
-            values_sitting.address.set(values_sitting.local_address(where) if where else ""),
+            values_sitting.address.set(values_sitting.path_only(where) if where else ""),
         )
 
     @staticmethod

@@ -138,6 +138,22 @@ def local_address(candidate: str | None) -> str:
     return where
 
 
+def path_only(request_path: str) -> str:
+    """The address the controls return to unless the page states its own: the request's path
+    with no query. Carried verbatim, a query field nobody reads came straight back in the page's
+    own markup, which every page's "never echoes an unknown field" test exists to refuse; and a
+    page whose window travels by POST holds nothing in its address at all. A page that does
+    address its view (the ledger's month or window) says so with `page_address`."""
+    return local_address(urlparse(request_path).path)
+
+
+def page_address(canonical: str) -> str:
+    """Record the page's own canonical address for this request's controls, and return it. The
+    page builds it from what it read, never from the request line, so nothing unread is echoed."""
+    address.set(local_address(canonical))
+    return address.get()
+
+
 def shown() -> bool:
     """Is the request being served inside a sitting that shows values?"""
     return sitting.get() is not None

@@ -156,9 +156,14 @@ def _part(summary: str, body: str) -> str:
     return f'<section class="part"><h3>{summary}</h3>{body}</section>'
 
 
-def _url(path: str, **params: str) -> str:
+def _address(path: str, **params: str) -> str:
+    """An address on this site, unescaped: for a field that escapes it itself."""
     query = "&".join(f"{key}={quote(value, safe='')}" for key, value in params.items())
-    return _esc(f"{path}?{query}")
+    return f"{path}?{query}"
+
+
+def _url(path: str, **params: str) -> str:
+    return _esc(_address(path, **params))
 
 
 def _scope(view: Any) -> str:
@@ -2828,14 +2833,16 @@ def _mode(view: Any, unmasked: bool, everything: bool = False, *, pressing: bool
         else ""
     )
     around = {BALANCES_PARAM: BALANCES_ALL} if everything else {}
+    # The page's own address, built from what it read: where the sitting's controls return to.
+    own = values_sitting.page_address(
+        _address("/ledger", ref=view.ref, **query_of(_scope(view)), **around)
+    )
     if unmasked:
         return values_sitting.unless_sitting(
             '<p class="bad shown">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
-            f'<p><a class="button secondary" '
-            f'href="{_url("/ledger", ref=view.ref, **query_of(_scope(view)), **around)}">'
-            "Hide values</a></p>"
+            f'<p><a class="button secondary" href="{_esc(own)}">Hide values</a></p>'
         )
     # The sealed slots are the state; what masked means is said once, in "How this was checked".
     return (
