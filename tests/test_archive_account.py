@@ -507,6 +507,16 @@ class TestTheLabelWhereTheAccountIsNamed:
         assert "archived 2026-06-30 (stated)" in page
         assert "/unarchive-account" in page and 'action="/archive-account"' not in page
 
+    def test_Ledger_WhenArchived_SetsTheArchivedWordsAsAPillAndNeverAsMarkupText(self, lab):
+        """The owner saw '<span class="pill pill-quiet">archived ... (stated)</span>' printed
+        under the heading: a ready-made pill had been escaped onto the page as text."""
+        lab.archive(BILLS, closed="2026-06-30")
+
+        page = lab.get("/ledger", ref=BILLS, month="2026-05").text
+
+        assert "&lt;span" not in page and "&lt;/span" not in page
+        assert '<span class="pill pill-quiet">archived 2026-06-30 (stated)</span>' in page
+
     def test_Ledger_WhenArchivedWithAnInferredDate_HeaderSaysInferred(self, lab):
         lab.archive(BILLS, closed="2026-07-15", date_basis=f"{ARCHIVE_BASIS_PREFIX}2026-07-15")
 

@@ -89,7 +89,7 @@ from .plural import agree, word
 from .plural import plural as _plural
 from .standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .trust_bar import key_html
-from .web_accounts import archive_controls, archive_label, submit_button
+from .web_accounts import archive_controls, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
 from .web_standing import _post, _through, line_html
@@ -2877,7 +2877,11 @@ def _head(view: Any) -> str:
     return head_html(
         AccountShown.named(view.ref, view.label),
         sent=bool(view.actual_bound),
-        archived=archive_label(archive).strip() if archived else "",
+        archived=(
+            f"archived {archive.closed} ({'inferred' if archive.inferred else 'stated'})"
+            if archived
+            else ""
+        ),
     )
 
 

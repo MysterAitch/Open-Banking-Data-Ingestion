@@ -181,7 +181,9 @@ def head_html(shown: AccountShown, *, sent: bool, archived: str = "") -> str:
     the account is sent to Actual, and that it is archived where it is."""
     bits = []
     if archived:
-        bits.append(_esc(archived))
+        # Plain words in, a pill out: the caller once passed the Accounts page's ready-made pill
+        # and the markup was escaped onto the page as text.
+        bits.append(f'<span class="pill pill-quiet">{_esc(archived)}</span>')
     if shown.labelled:
         bits.append(shown.code())
     bits.append("sent to Actual" if sent else "not sent to Actual")
