@@ -2906,8 +2906,8 @@ class Store:
             self.connection.execute(
                 "UPDATE raw_artefacts SET request_meta = ? WHERE rowid = ?",
                 (
-                    f"{survivor['request_meta']} | absorbed a duplicate of these "
-                    f"bytes misfiled under {old_ref}, refiled {stamp}",
+                    f"{survivor['request_meta']}{PROVENANCE_SEPARATOR}absorbed a duplicate "
+                    f"of these bytes misfiled under {old_ref}, refiled {stamp}",
                     survivor["rowid"],
                 ),
             )
@@ -2920,7 +2920,7 @@ class Store:
                 "WHERE rowid = ?",
                 (
                     new_account_ref,
-                    f"{row['request_meta']} | refiled from {old_ref} at {stamp}",
+                    f"{row['request_meta']}{PROVENANCE_SEPARATOR}refiled from {old_ref} at {stamp}",
                     artefact_id,
                 ),
             )
@@ -4528,3 +4528,32 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         is_internal_transfer=bool(row["is_internal_transfer"]),
         raw=json.loads(row["raw"]),
     )
+
+
+#: What `refile_artefact` puts between an artefact's request circumstances and each filing
+#: note it appends, and between one note and the next.
+PROVENANCE_SEPARATOR = " | "
+
+
+def request_meta_and_provenance(column: str) -> tuple[dict[str, object], list[str]]:
+    """An artefact's request circumstances and its filing notes, from the one column.
+
+    `refile_artefact` appends each move as plain text after `PROVENANCE_SEPARATOR`, so the
+    column of a moved artefact is its JSON (or nothing) followed by one note per move. Read
+    as JSON whole, that column fails, and it did: the artefact page could not be built for
+    any artefact that had ever been moved - the page holding the only form that moves one.
+    Circumstances that are not JSON at all are kept as a note too, never dropped.
+    """
+    head, *notes = column.split(PROVENANCE_SEPARATOR)
+    meta: dict[str, object] = {}
+    if head.strip():
+        try:
+            decoded = json.loads(head)
+        except ValueError:
+            notes.insert(0, head.strip())
+        else:
+            if isinstance(decoded, dict):
+                meta = decoded
+            else:
+                notes.insert(0, head.strip())
+    return meta, [note.strip() for note in notes if note.strip()]

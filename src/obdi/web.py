@@ -4221,6 +4221,16 @@ class ConnectionHandler(
             f"<td>{html.escape(str(value))}</td></tr>"
             for key, value in meta.items()
         )
+        raw_provenance = detail.get("provenance")
+        # Where the filing has been changed: one line per move, oldest first, so a page that
+        # offers to move the artefact again also says it has been moved before.
+        filing = (
+            "<h2>Filing</h2><ul>"
+            + "".join(f"<li>{html.escape(str(note))}</li>" for note in raw_provenance)
+            + "</ul>"
+            if isinstance(raw_provenance, list) and raw_provenance
+            else ""
+        )
         raw_summary = detail.get("summary")
         summary: dict[str, object] = raw_summary if isinstance(raw_summary, dict) else {}
         # Declared accounts included: an account with no feed is invisible
@@ -4258,7 +4268,8 @@ class ConnectionHandler(
             )
             + "<h2>Request circumstances</h2>"
             f'<table><tr><th>key</th><th>value</th></tr>{meta_rows or ""}</table>'
-            "<h2>Computed shape</h2>"
+            + filing
+            + "<h2>Computed shape</h2>"
             + _shape_html(summary)
             + self._layout_offer(artefact_id, str(detail.get("media_type", "")))
             + (

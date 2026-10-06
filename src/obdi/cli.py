@@ -123,7 +123,7 @@ from .standing_data import (
 from .statement_listing_measure import StatementListingReport
 from .statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
-from .store import Store, StoreIsNewer
+from .store import Store, StoreIsNewer, request_meta_and_provenance
 from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
 from .web import serve as serve_web
@@ -4182,6 +4182,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             origins = store.origins_for_artefact(
                 str(row["digest"]), str(row["account_ref"]), str(row["source"])
             )
+        meta, provenance = request_meta_and_provenance(str(row["request_meta"] or ""))
         detail: dict[str, object] = {
             "id": row["rowid"],
             "source": row["source"],
@@ -4189,7 +4190,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             "fetched_at": row["fetched_at"],
             "origin": row["origin"],
             "origins": origins,
-            "request_meta": _json.loads(row["request_meta"]) if row["request_meta"] else {},
+            "request_meta": meta,
+            "provenance": provenance,
             # Carried as well as summarised, because `summarise` reports
             # fields only for JSON: the media type is the one fact on this
             # detail that can tell a page a document has a LAYOUT worth
