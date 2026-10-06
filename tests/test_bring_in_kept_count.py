@@ -64,20 +64,17 @@ class TestTheKeptCountIsTheStatementsPagesCount:
 
         assert link_count(answer) == summary_count(base)
 
-    def test_Link_WhenThePressFilesACopyOfAStatementAlreadyHeld_FallsByOneAndStillEqualsTheSummary(
+    def test_Link_WhenACopyOfAStatementAlreadyHeldIsUploaded_NeverMovesAndEqualsTheSummary(
         self, served
     ):
-        base, root = served
+        base, _ = served
         copy = santander(D(2025, 9, 10), 950)
         before = summary_count(base)
+
         answer = parse(httpx.post(
             f"{base}/bring-in", files=[part("Copy-of-up-card.pdf", copy)], timeout=300
         ).text)
-        between = summary_count(base)
 
-        pressed = press(base, answer, root, {"Copy-of-up-card.pdf": "up-card"})
-
-        # The copy is kept beside the statement it repeats until the press files it, when the
-        # store folds it into that statement: one more kept in the answer, none more after.
-        assert link_count(answer) == between == before + 1
-        assert link_count(pressed) == summary_count(base) == before
+        # Identical bytes are not landed again (`test_bring_in_same_bytes`), so there is no
+        # second row to be folded by a press, and the count has nothing to fall by.
+        assert link_count(answer) == summary_count(base) == before

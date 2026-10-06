@@ -14,10 +14,10 @@ masks, because the first view of a page is always masked.
 from __future__ import annotations
 
 import html
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 
-from .account_names import code_html
+from .account_names import AccountsShown, code_html
 from .page_times import range_with_span
 from .plural import plural
 from .web_statements import names_found_words
@@ -83,4 +83,56 @@ def preview_html(
     return f'<p class="bi-preview">{said}{names}{prints} {shape}</p>'
 
 
-__all__ = ["preview_html", "unreadable_html"]
+def _listed(source: Mapping[str, object]) -> tuple[str, str] | None:
+    days = source.get("listed_days")
+    if isinstance(days, list) and len(days) == 2 and days[0] and days[1]:
+        return str(days[0]), str(days[1])
+    return None
+
+
+def second_witness_html(
+    listing: Sequence[Mapping[str, object]],
+    entry: Mapping[str, object],
+    part: Mapping[str, object] | None,
+    account: str,
+    names: AccountsShown,
+) -> str:
+    """The sentence that a kept document adds only a second witness, or "" where it does not.
+
+    It is said where another kept statement, filed under `account` (whole, or one account of a
+    document of several), lists exactly the first and last day this one lists: the same statement
+    in another copy, such as a certified and a plain one, or a monthly statement and an export of
+    the same days. The bytes differ, so both are kept as evidence; what the second adds is its own
+    balances. Statements whose days differ, even where every transaction is held, are said by the
+    "already held" line instead (`web_bring_in._held_html`). Found from the kept listing alone.
+    """
+    source = part if part is not None else entry
+    days = _listed(source)
+    rows = source.get("rows")
+    if days is None or not isinstance(rows, int) or isinstance(rows, bool):
+        return ""
+    ident = entry.get("id")
+    for other in listing:
+        if other.get("id") == ident:
+            continue
+        held: list[Mapping[str, object]] = []
+        if other.get("account_ref") == account and not other.get("sections"):
+            held.append(other)
+        parts = other.get("sections")
+        if isinstance(parts, list):
+            held.extend(p for p in parts if isinstance(p, Mapping) and p.get("account") == account)
+        for item in held:
+            if _listed(item) != days:
+                continue
+            label = f", account {item['label']}" if item is not other and item.get("label") else ""
+            return (
+                '<p class="bi-guess bi-witness">A statement for '
+                f"{names.of(account).inline()} covering {_esc(days[0])} to {_esc(days[1])} "
+                f"is already held ({code_html(str(other.get('origin')) + label)}); reading this "
+                f"one in adds a second witness to its {plural(rows, 'transaction')} and its own "
+                "balances, nothing new.</p>"
+            )
+    return ""
+
+
+__all__ = ["preview_html", "second_witness_html", "unreadable_html"]

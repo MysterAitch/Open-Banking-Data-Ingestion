@@ -56,7 +56,7 @@ from .bring_in_dry_run import (
 )
 from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
 from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
-from .bring_in_preview import preview_html, unreadable_html
+from .bring_in_preview import preview_html, second_witness_html, unreadable_html
 from .callback import render_page
 from .connections import Connection, ConnectionStore
 from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
@@ -177,6 +177,14 @@ class FileResult:
     #: offered an account and the answer leads with it.
     unreadable: bool = False
     names: str = ""
+    #: Where these very bytes were already held (identical bytes are one statement, and nothing
+    #: is landed for them): the name the held copy was kept under and the day it was kept, as
+    #: ISO text. "" for a statement this press kept for the first time.
+    twin_name: str = ""
+    twin_day: str = ""
+    #: Where another statement of the account guessed for it lists the same days, the sentence
+    #: that this one adds only a second witness to it, as markup (`bring_in_preview`); "".
+    witness: str = ""
 
     @property
     def placed_in(self) -> tuple[str, ...]:
@@ -199,14 +207,17 @@ class UploadResults:
     guess_note: str = ""
 
     def awaiting(self) -> tuple[FileResult, ...]:
-        """The statements kept and waiting for an account: the ones the one form asks about."""
-        return tuple(
-            item
-            for item in self.files
-            if item.outcome is Outcome.KEPT
-            and item.kind is UploadKind.STATEMENT
-            and not item.account
-        )
+        """The statements kept and waiting for an account: the ones the one form asks about,
+        each once however many uploaded files were the same bytes."""
+        asked: dict[tuple[int, str], FileResult] = {}
+        for item in self.files:
+            if (
+                item.outcome is Outcome.KEPT
+                and item.kind is UploadKind.STATEMENT
+                and not item.account
+            ):
+                asked.setdefault((item.artefact, item.section), item)
+        return tuple(asked.values())
 
 
 # ----------------------------------------------------------------------------------- What it reads
@@ -491,6 +502,31 @@ def _not_read_in_html(results: UploadResults, names: AccountsShown) -> str:
     return "".join(lines)
 
 
+def _already_html(results: UploadResults, names: AccountsShown) -> str:
+    """What the answer says of each file whose bytes were already held, before anything else
+    about it: it is not landed again, so there is nothing to ask and nothing to fold later.
+
+    Where the held copy is filed, whose it is; where it waits for an account, that it does and
+    that the one form lists it once (`UploadResults.awaiting`).
+    """
+    lines = []
+    for item in results.files:
+        if not item.twin_name:
+            continue
+        held = code_html(item.twin_name)
+        if item.outcome is Outcome.ALREADY:
+            said = (
+                f"Already held - read in to {_named(item.placed_in, names)} "
+                f"on {_esc(item.twin_day)} as {held}"
+            )
+        elif item.outcome is Outcome.KEPT and not item.account:
+            said = f"Already kept, waiting for an account, as {held}"
+        else:
+            continue
+        lines.append(f'<p class="bi-already">{code_html(item.filename)}: {said}.</p>')
+    return "".join(lines)
+
+
 def _ask_html(result: FileResult, picker: str, names: AccountsShown) -> str:
     """The question a file waiting for an account asks, with its control, for that file alone."""
     name = _called(result)
@@ -642,14 +678,16 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
         aria = f"Account for {item.filename}" + (
             f", {item.section_label}" if item.section_label else ""
         )
+        listed = replace(item, filename=item.twin_name) if item.twin_name else item
         rows.append(
             '<li class="bi-assign-file">'
-            f'<p class="bi-assign-name">{_called(item)}</p>'
+            f'<p class="bi-assign-name">{_called(listed)}</p>'
             f"{item.preview}{item.dry_run}"
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
-            f"{reason_html(item.guess, names)}{_held_html(item, names)}{item.decision}</li>"
+            f"{reason_html(item.guess, names)}{item.witness}{_held_html(item, names)}"
+            f"{item.decision}</li>"
         )
     if not readable:
         # Nothing here can be pressed for: the rows say so, with no lead and no control.
@@ -709,7 +747,7 @@ def _results_html(data: BringInData) -> str:
     )
     return (
         f"<h2>{_esc(plural(received, 'file'))} received</h2>{_not_read_in_html(results, names)}"
-        f"{settled}"
+        f"{_already_html(results, names)}{settled}"
         + (f'<ul class="bi-outcomes">{outcomes}</ul>' if outcomes else "")
         + _assign_html(results, names)
         + (f'<ul class="todos bi-ask">{"".join(rows)}</ul>' if rows else "")
@@ -1312,7 +1350,40 @@ class BringInPages:
                 )
             else:
                 resolved.extend(self._section_results(item, entry, parts))
-        return resolved, ""
+        return [self._with_witness(item, listing, by_id, names) for item in resolved], ""
+
+    @staticmethod
+    def _with_witness(
+        item: FileResult,
+        listing: Sequence[Mapping[str, object]],
+        by_id: Mapping[int, Mapping[str, object]],
+        names: AccountsShown,
+    ) -> FileResult:
+        """`item` with the sentence that it adds only a second witness, where the account
+        guessed for it already holds a statement listing the same days."""
+        entry = by_id.get(item.artefact)
+        if (
+            entry is None
+            or item.outcome is not Outcome.KEPT
+            or item.unreadable
+            or item.guess is None
+            or not item.guess.account
+        ):
+            return item
+        parts = entry.get("sections")
+        part = (
+            next(
+                (p for p in parts if isinstance(p, Mapping) and p.get("token") == item.section),
+                None,
+            )
+            if isinstance(parts, list) and item.section
+            else None
+        )
+        if item.section and part is None:
+            return item
+        return replace(
+            item, witness=second_witness_html(listing, entry, part, item.guess.account, names)
+        )
 
     def _dry_run(self, artefact: int, guess: Guess | None) -> MatcherPreview | None:
         """What the matcher would do with a statement's transactions against the account guessed
@@ -1548,14 +1619,20 @@ class BringInPages:
         artefact, was_new = keeper(payload, name)
         if not artefact:
             return FileResult(name, kind, Outcome.REFUSED, note="It could not be kept.")
-        if not was_new:
-            held_under = self._held_under(artefact)
-            if held_under:
-                return FileResult(
-                    name, kind, Outcome.ALREADY, account=held_under, artefact=artefact
-                )
+        twin: Mapping[str, object] = {} if was_new else self._kept_entry(artefact)
+        twin_name = str(twin.get("origin") or "")
+        twin_day = str(twin.get("fetched_at") or "")[:10]
+        held_under = str(twin.get("account_ref") or UNASSIGNED_ACCOUNT)
+        if twin_name and held_under != UNASSIGNED_ACCOUNT:
+            return FileResult(
+                name, kind, Outcome.ALREADY, account=held_under, artefact=artefact,
+                twin_name=twin_name, twin_day=twin_day,
+            )
         if not account:
-            return FileResult(name, kind, Outcome.KEPT, artefact=artefact)
+            return FileResult(
+                name, kind, Outcome.KEPT, artefact=artefact,
+                twin_name=twin_name, twin_day=twin_day,
+            )
         return self._read_in(name, artefact, account)
 
     def _read_in(
@@ -1601,19 +1678,16 @@ class BringInPages:
             return replace(base, outcome=Outcome.REFUSED, note=_mask(outcome))
         return replace(base, outcome=Outcome.PLACED, counted=outcome)
 
-    def _held_under(self, artefact: int) -> str:
-        """The account a statement already held is filed under, "" where it waits for one."""
+    def _kept_entry(self, artefact: int) -> Mapping[str, object]:
+        """A kept statement's line in the kept listing, or nothing where the listing cannot say."""
         hook = self.bound_config.kept_statements
         if hook is None:
-            return ""
+            return {}
         try:
             entries = hook()
         except Exception:
-            return ""
-        for entry in entries:
-            if int(str(entry["id"])) == artefact and entry["account_ref"] != UNASSIGNED_ACCOUNT:
-                return str(entry["account_ref"])
-        return ""
+            return {}
+        return next((e for e in entries if int(str(e["id"])) == artefact), {})
 
     def _hold_export(self, payload: bytes, name: str, account: str) -> FileResult:
         kind = UploadKind.EXPORT

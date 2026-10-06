@@ -3739,22 +3739,33 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         turns a document you are still trying to read into one you cannot
         keep, so the account is assigned later, by the same refile the
         misfile recovery uses.
+
+        Identical bytes are one statement under any account: where they are
+        already held, filed or waiting, nothing is landed and the held row's
+        id comes back with False. Landing them unassigned beside a copy
+        already filed made a second row that a later press folded into the
+        first, so the count of what is kept fell with no word said. A filed
+        copy is preferred to one waiting, because it says whose the bytes are.
         """
         from .identity import artefact_digest
         from .models import RawArtefact
 
         digest = artefact_digest(payload)
         with Store(db_path) as store:
-            # Asked BEFORE landing, because landing is idempotent on the
-            # digest: afterwards there is no way to tell a statement that
-            # was already held from one this upload created.
             held = store.connection.execute(
-                "SELECT rowid FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+                "SELECT rowid, account_ref FROM raw_artefacts "
+                "WHERE digest = ? AND source = 'statement' "
+                "ORDER BY account_ref = ?, rowid LIMIT 1",
+                (digest, UNASSIGNED_ACCOUNT),
             ).fetchone()
+            twin_ref = str(held["account_ref"]) if held is not None else UNASSIGNED_ACCOUNT
+            # A name never seen for these bytes is evidence about them, so it is
+            # recorded against the held row's own key; the landing stores no
+            # second payload (`Store.land_artefact`).
             store.land_artefact(
                 RawArtefact(
                     source="statement",
-                    account_ref=UNASSIGNED_ACCOUNT,
+                    account_ref=twin_ref,
                     fetched_at=datetime.now().astimezone(),
                     media_type="application/pdf",
                     digest=digest,
@@ -3763,7 +3774,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 )
             )
             row = store.connection.execute(
-                "SELECT rowid FROM raw_artefacts WHERE digest = ? LIMIT 1", (digest,)
+                "SELECT rowid FROM raw_artefacts "
+                "WHERE digest = ? AND source = 'statement' AND account_ref = ?",
+                (digest, twin_ref),
             ).fetchone()
         return (int(row["rowid"]) if row else 0, held is None)
 
