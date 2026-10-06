@@ -67,7 +67,7 @@ class Extractions:
         statement_terms._USABLE_BY_DIGEST.clear()
         statement_terms._SECTIONS_BY_DIGEST.clear()
         pdf_statements._lines.cache_clear()
-        pdf_statements._grid.cache_clear()
+        pdf_statements._grid_and_pages.cache_clear()
         pdf_statements._table.cache_clear()
         self.count = 0
 

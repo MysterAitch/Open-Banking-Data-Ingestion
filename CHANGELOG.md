@@ -26,7 +26,12 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
-## [0.4.346] - 2026-10-06
+## [0.4.347] - 2026-10-06
+
+The build of 0.4.346 failed its gate: a test cleared the word grid's cache by
+the name the section-cut change had moved it from. Its tag exists and nothing
+was published under it; this version is the same change with that test
+corrected, and the whole suite run on the tree before the release.
 
 ### Added
 - **A statement given the wrong account is moved from the Statements page**,
