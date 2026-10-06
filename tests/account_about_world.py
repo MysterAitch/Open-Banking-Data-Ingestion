@@ -5,6 +5,8 @@ DECIDED BEFORE THE FIRST RUN (dates relative to the day the page is served on):
 - `bare` is declared with a name and nothing else.
 - `busy` declares a rate that ends in 10 days but states no known balance, so its row already
   carries a thing to do.
+- `inferred-kept` and `inferred-changed` are opened 2020-01-01 and close 2031-06-01 with both dates
+  inferred; the edit tests rename one without touching its dates and move a date of the other.
 - `dated` is opened 2019-05-01 and closes 2031-02-01, both stated.
 - `terms` is a credit card under `main`, opened 2020-03-01 with that date stated, closed
   2031-01-01 with that date inferred from its first and last movement. It declares a promotional
@@ -62,9 +64,11 @@ OLD_DIFFERS = "old-differs"
 ISSUER_NAMED = "issuer-named"
 DATED = "dated"
 BUSY = "busy"
+INFERRED_KEPT = "inferred-kept"
+INFERRED_CHANGED = "inferred-changed"
 ACCOUNTS = [
     MAIN, BARE, TERMS, DIFFERS, SAME, BARE_RATE, ENDING, FAR, QUIET, OLD_DIFFERS, ISSUER_NAMED,
-    DATED, BUSY,
+    DATED, BUSY, INFERRED_KEPT, INFERRED_CHANGED,
 ]
 
 
@@ -149,6 +153,16 @@ def build(store: Store) -> None:
             limits=(LimitWindow("credit", ahead(-400), None, 432100),),
         )
     )
+    for ref in (INFERRED_KEPT, INFERRED_CHANGED):
+        store.declare_account(
+            AccountRecord(
+                ref=AccountRef(ref),
+                label=ref.title(),
+                opened=date(2020, 1, 1),
+                closed=date(2031, 6, 1),
+                date_basis="inferred from the first and last movement in the feed",
+            )
+        )
     store.declare_account(
         AccountRecord(
             ref=AccountRef(DATED),

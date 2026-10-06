@@ -25,6 +25,7 @@ asks first, and names the closest account it can see.
 from __future__ import annotations
 
 import html
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -39,6 +40,8 @@ from .accounts import (
     AccountRecord,
     AccountRef,
     ArchiveOutcome,
+    LimitWindow,
+    RateWindow,
     UnknownAccountError,
     closing_problem,
 )
@@ -48,6 +51,7 @@ from .coverage import DoubtReport
 from .errors import DataError
 from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .logs import say
+from .money import AmountParseError, parse_amount
 from .namespaces import validate_canonical_name
 from .navigation import NEEDS_A_LOOK
 from .overview import ARCHIVED
@@ -63,6 +67,7 @@ from .standing_data import (
     verification_of,
     verification_sentence,
 )
+from .web_account_about import windows_html
 from .web_answers import UNREAD, AnswerPages, ledger_href, ledger_link
 from .web_destinations import accounts_links_html
 from .web_sections import back_link, referring_page
@@ -251,13 +256,72 @@ def _datalist(identifier: str, values: Iterable[str]) -> str:
     return f'<datalist id="{html.escape(identifier)}">{options}</datalist>'
 
 
-def account_form(record: AccountRecord | None, declared: list[AccountRecord]) -> str:
+def _select_field(name: str, label: str, options: Iterable[tuple[str, str]]) -> str:
+    chosen = "".join(
+        f'<option value="{html.escape(value)}">{html.escape(text)}</option>'
+        for value, text in options
+    )
+    return (
+        f'<p><label>{html.escape(label)}<br>'
+        f'<select name="{html.escape(name)}" style="width:100%;padding:.6rem">{chosen}</select>'
+        "</label></p>"
+    )
+
+
+def _windows_section(record: AccountRecord | None, today: date) -> str:
+    """The account's limit and rate windows as the account page lists them (figures sealed, since
+    this is a page served on a GET), and the one row that adds a window. A window is added here
+    and nowhere else; the figures of existing windows are not editable, only listed."""
+    listed = windows_html(record, today, unmasked=False) if record is not None else ""
+    add = (
+        '<fieldset class="add-window"><legend>Add a window</legend>'
+        '<p class="muted">A rate or a limit that held over some days: leave the row empty to add '
+        "nothing. A window with no end date has no end.</p>"
+        + _select_field(
+            "window_term",
+            "What it is",
+            [("", "(nothing to add)"), ("rate", "An interest rate"), ("limit", "A limit")],
+        )
+        + _text_field(
+            "window_kind",
+            "",
+            "Kind",
+            note="e.g. promotional, purchases, cash, credit, overdraft",
+        )
+        + _text_field(
+            "window_figure",
+            "",
+            "Figure",
+            note="a rate as a percentage, a limit in pounds and pence",
+        )
+        + _date_field("window_from", None, "From")
+        + _date_field("window_to", None, "To")
+        + "</fieldset>"
+    )
+    return (
+        '<h3>Rates and limits</h3>'
+        + (listed or '<p class="muted">None are declared.</p>')
+        + add
+    )
+
+
+def account_form(
+    record: AccountRecord | None,
+    declared: list[AccountRecord],
+    *,
+    today: date | None = None,
+) -> str:
     """The declare form and the edit form, which are one form.
+
+    The windows already declared are listed with their figures sealed, and a row adds one more
+    (`window_from_form`); changing or removing one is not offered here.
 
     The stable id appears nowhere - not as a field, not as small print.
     Nobody types it and nothing displays it, so an edit identifies its
     account by the name it arrived under and the store carries the
     identity across whatever the names become.
+
+    `today` is the day the account's windows are marked current against; without it, the clock's.
     """
     editing = record is not None
     original = (
@@ -290,6 +354,7 @@ def account_form(record: AccountRecord | None, declared: list[AccountRecord]) ->
         + _parent_field(record.parent if record else None, parents)
         + _date_field("opened", record.opened if record else None, "Opened")
         + _date_field("closed", record.closed if record else None, "Closed")
+        + _windows_section(record, today or datetime.now(UTC).date())
         + submit_button("Save changes" if editing else "Declare account")
         + "</form>"
     )
@@ -861,6 +926,47 @@ def account_from_form(fields: dict[str, str]) -> AccountRecord:
     )
 
 
+def window_from_form(fields: dict[str, str]) -> LimitWindow | RateWindow | None:
+    """The one window the form's "Add a window" row describes, None where the row is empty, or a
+    refusal saying which field is wrong.
+
+    A row with anything in it must say what it is and give a figure: a figure with no term is
+    refused and not guessed to be a rate, since a limit read as a percentage would be wrong
+    silently. A rate is a finite, non-negative percentage; a limit is pounds and pence.
+    """
+    term = fields.get("window_term", "").strip()
+    kind = fields.get("window_kind", "").strip()
+    figure = fields.get("window_figure", "").strip()
+    first = _form_date(fields.get("window_from", ""), "window from")
+    last = _form_date(fields.get("window_to", ""), "window to")
+    if not (term or kind or figure or first or last):
+        return None
+    if term not in ("rate", "limit"):
+        raise ValueError("say whether the window to add is a rate or a limit")
+    if not figure:
+        raise ValueError("a window to add needs a figure")
+    if first and last and last < first:
+        raise ValueError(
+            f"the window ends ({last.isoformat()}) before it begins ({first.isoformat()}) - "
+            "one of the two dates is wrong"
+        )
+    if term == "rate":
+        try:
+            percent = float(figure.removesuffix("%"))
+        except ValueError as exc:
+            raise ValueError(f"the rate is not a number this can read: {figure!r}") from exc
+        if not math.isfinite(percent) or percent < 0:
+            raise ValueError(f"the rate must be a percentage of nil or more: {figure!r}")
+        return RateWindow(kind=kind, window_from=first, window_to=last, annual_percent=percent)
+    try:
+        minor = parse_amount(figure)
+    except AmountParseError as exc:
+        raise ValueError(f"the limit is not an amount this can read: {figure!r}") from exc
+    if minor < 0:
+        raise ValueError(f"the limit must be an amount of nil or more: {figure!r}")
+    return LimitWindow(kind=kind, window_from=first, window_to=last, amount_minor=minor)
+
+
 @dataclass(frozen=True)
 class TypedAccount:
     """What is known about a name somebody typed into the free-text box."""
@@ -1329,9 +1435,10 @@ class AccountPages(AnswerPages):
         """Declare a new account, or edit one already declared.
 
         Declaring is a CREATE act, so a reference already in the registry
-        refuses rather than quietly editing: the form does not carry the
-        limit and rate windows, and a silent edit would overwrite an
-        account the person never had on screen.
+        refuses rather than quietly editing: a silent edit would overwrite an
+        account the person never had on screen. The form carries no existing
+        window, only the one row that adds a window, so every window already
+        declared is carried across and the added one is appended to them.
         """
         hook = self.bound_config.declare_account
         if hook is None:
@@ -1342,6 +1449,7 @@ class AccountPages(AnswerPages):
         fields = {name: values[0] for name, values in form.items() if values}
         try:
             record = account_from_form(fields)
+            added = window_from_form(fields)
         except ValueError as exc:
             self._respond(400, refusal("Not declared", str(exc)))
             return
@@ -1374,16 +1482,25 @@ class AccountPages(AnswerPages):
                 return
             # The windows are not on the form, and declaring replaces them:
             # carried across explicitly so editing a label cannot silently
-            # discard an account's limits and rates.
+            # discard an account's limits and rates. So is the note on how the
+            # dates came to be known, while both dates are as they were: the
+            # form cannot say it, and "stated" written over an inference by an
+            # edit that touched neither date would be a false record.
+            same_dates = (record.opened, record.closed) == (existing.opened, existing.closed)
             record = replace(
                 record,
                 stable_id=existing.stable_id,
                 limits=existing.limits,
                 rates=existing.rates,
+                date_basis=existing.date_basis if same_dates else "",
             )
         elif str(record.ref) in declared:
             self._respond(409, already_declared(str(record.ref)))
             return
+        if isinstance(added, RateWindow):
+            record = replace(record, rates=(*record.rates, added))
+        elif isinstance(added, LimitWindow):
+            record = replace(record, limits=(*record.limits, added))
         before = self.answer_standing(original) if original else UNREAD
         try:
             stored = hook(record)
