@@ -291,6 +291,16 @@ post-deploy first load the owner notices - and are not scheduled. The per-page s
 budgets in `tests/test_ledger_speed.py` stay as the ratchet meanwhile, so nothing regresses
 quietly; a new reading on a page that cannot fit them is the other trigger.
 
+The budgets are not an objective. They are measured counts plus headroom, kept because a
+statement count detects a change of shape (an N+1) deterministically where wall-clock cannot.
+The objective is stated in the owner's terms, on the real store, read after each deploy:
+
+- a warm page under 2 s (measured 2026-10-06: the main account page 1.1 to 1.2 s);
+- the first page after a deploy under 10 s (measured 2026-10-06: 14 to 20 s - the one
+  figure outside the objective today, and the trigger for S1).
+
+There is no SLA: a single owner, no second party, no consequence beyond tolerance.
+
 ## Order of slices
 
 Each is shippable alone, smallest first; the first removes the first-load cliff. Each would
