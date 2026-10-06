@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.346] - 2026-10-06
+
+### Added
+- **A statement given the wrong account is moved from the Statements page**,
+  in a "Move it" fold beside the line that says which account holds it. The
+  only form that moved an artefact lived on the artefact's own page, which
+  nothing links to by name; the one statement read in to the wrong account
+  today had to be moved by hand from outside the site. The form is drawn
+  once and the artefact page uses the same one. A section of a divided
+  document still cannot be moved: nothing in the store re-assigns one.
+- **Bring in says when a statement would add nothing.** Beside a guessed
+  account, where every transaction the statement lists is already held by
+  that account, a quiet line says so and that reading it in adds only the
+  statement's own balances. Five of today's ten uploads were exactly that -
+  single-account statements whose rows the "all accounts" documents already
+  carried - and nothing said so before the press. Judged by the same dry run
+  the assignment check uses; nothing is written to find out.
+
+### Fixed
+- **Every section of an "all accounts" credit union document keeps its own
+  period.** The reader report of 0.4.344 showed the cause of the loan's
+  hole on the real store: the first section had a period and the loan
+  section had none, in every document, though the file prints the same
+  Period line on both pages. The cut between sections was made at the
+  "Page 1 of N" marker, and the issuer prints the period and the date of
+  issue above the page-number box, so each later section's were handed to
+  the account before it; a closing balance with no period cannot be dated
+  and never became a known balance. The word reader has always known which
+  page a row is on; the grid now keeps it, and a section begins at the first
+  row of its page. Fixtures can now lay a page out as the real file does and
+  draw a document on real pages. Whether the loan's balances now become
+  known balances on the real store is read after the deploy.
+
 ## [0.4.345] - 2026-10-06
 
 ### Changed
