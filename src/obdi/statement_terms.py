@@ -356,14 +356,37 @@ def account_readings(store: Store, account_ref: str) -> list[AccountReading]:
 
     A held PDF with a kept reading is here as it is kept; a section of an "all accounts" statement
     assigned to the account is here as its section reads, which a credit union's loan rate needs
-    since the rate is printed in that section's heading. Neither extracts text for a document
-    whose reading is already kept, so a view of one account does not read every PDF it holds.
+    since the rate is printed in that section's heading. A held PDF is read from its kept reading
+    and never extracted; a section is read only for an account that has one assigned.
     """
     found: list[AccountReading] = []
-    for digest, _filed_under in _held_pdfs(store, account_ref):
-        kept = _kept_reading(store, digest)
-        if kept is not None:
-            found.append(AccountReading(kept[0], kept[1], kept[1].account_name))
+    # One read for every kept reading of the account, so a page's cost does not grow with the
+    # statements it holds.
+    sectioned = False
+    # The same read says whether any section is assigned to the account ('section' rows), so a
+    # page of an account with none does not ask again.
+    for row in store.connection.execute(
+        "SELECT 'pdf' AS part, r.digest AS digest, s.source AS source, s.reading AS reading "
+        "FROM raw_artefacts r JOIN statement_readings s ON s.digest = r.digest "
+        "WHERE r.media_type = 'application/pdf' AND r.account_ref = ? "
+        "UNION SELECT 'section', digest, section_key, label FROM statement_sections "
+        "WHERE account_ref = ?",
+        (account_ref, account_ref),
+    ).fetchall():
+        if row["part"] == "section":
+            sectioned = True
+            continue
+        try:
+            reading = reading_from_json(str(row["reading"]))
+        except (ValueError, KeyError, TypeError) as exc:
+            print(
+                f"artefact {str(row['digest'])[:12]}: stored reading is unusable ({exc})",
+                file=sys.stderr,
+            )
+            continue
+        found.append(AccountReading(str(row["source"]), reading, reading.account_name))
+    if not sectioned:
+        return found
     for assignment, section in assigned_sections(store, account_ref):
         if section is None or section.refusal:
             continue

@@ -13,9 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from .account_names import AccountShown
-from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, LimitWindow, RateWindow
-from .statement_terms import AccountReading
+from .account_names import AccountShown, AccountsShown
+from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef, LimitWindow, RateWindow
+from .logs import say
+from .statement_terms import AccountReading, account_readings
+from .store import Store
 
 #: How near a window's end has to be to be worth saying: the next month.
 ENDS_SOON_DAYS = 30
@@ -117,6 +119,25 @@ def facts_from_readings(readings: list[AccountReading]) -> SourceFacts:
                 "Account label", label, item.source, day, private=True
             )
     return SourceFacts(rates=tuple(rates), texts=tuple(labels.values()))
+
+
+def read_about(store: Store, ref: str, names: AccountsShown) -> AccountAbout:
+    """The declared record and what the kept statements state of one account, from a store the
+    caller already holds open, in a fixed number of reads however many statements it holds.
+
+    What is not read is deliberate: the issuer names found in statement text need every document
+    extracted, and a provider's name for the account needs every connection scanned, which a page
+    view must not do. A read that fails is said in the answer and the log, never as an account
+    with nothing declared.
+    """
+    try:
+        record = store.declared_account(AccountRef(ref))
+        facts = facts_from_readings(account_readings(store, ref))
+    except Exception as fault:
+        say("account_about.fault", kind=type(fault).__name__)
+        return AccountAbout(None, unread="What is declared could not be read just now.")
+    parent = names.of(str(record.parent)) if record is not None and record.parent else None
+    return AccountAbout(record, parent, facts=facts)
 
 
 def _same_rate(first: float, second: float) -> bool:

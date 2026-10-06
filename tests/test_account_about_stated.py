@@ -153,8 +153,8 @@ class TestNamesAStatementPrints:
         assert "CARD 1234" not in masked(base, BARE_RATE)
         assert "Account label CARD 1234" in words(shown(base, BARE_RATE))
 
-    def test_Fold_TheIssuerNameAStatementPrints_IsShown(self, base):
+    def test_Fold_AStatementsPrintedLabel_IsShownAndNoIssuerNameIsScannedForOnThePage(self, base):
         said = words(masked(base, ISSUER_NAMED))
 
-        assert "Issuer named Santander" in said
         assert "Account label EVERYDAY SAVER 9999" in said
+        assert "Issuer named" not in said

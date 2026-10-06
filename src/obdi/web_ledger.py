@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from . import values_sitting
-from .account_about import AccountAbout, SourceFacts
+from .account_about import AccountAbout
 from .account_names import AccountShown, code_html
 from .account_page import (
     LOCKING_ANCHOR,
@@ -3357,31 +3357,6 @@ class LedgerPages(AnswerPages):
         except Exception:
             return None
 
-    def _about(self, ref: str) -> AccountAbout | None:
-        """What the account's "About this account" fold is drawn from, or None where declared
-        accounts are not wired. A declared record that cannot be read is said on the page and in
-        the log: a fold that read as "nothing declared" would be a false statement."""
-        hook = self.bound_config.declared_accounts
-        if hook is None:
-            return None
-        try:
-            record = next((item for item in hook() if str(item.ref) == ref), None)
-        except Exception as fault:
-            say("account_about.fault", kind=type(fault).__name__)
-            return AccountAbout(None, unread="What is declared could not be read just now.")
-        parent = None
-        if record is not None and record.parent is not None:
-            parent = self._account_names().of(str(record.parent))
-        facts = SourceFacts()
-        sources = self.bound_config.account_sources
-        if sources is not None:
-            try:
-                facts = sources(ref)
-            except Exception as fault:
-                say("account_about.sources.fault", kind=type(fault).__name__)
-                facts = SourceFacts(unread=("What the sources state could not be read just now.",))
-        return AccountAbout(record, parent, facts=facts)
-
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
         # Nothing in the query string can unmask: only `ref`, `month`, the window's fields, and
         # which known balances to list are read, and the rendering is chosen by which method
@@ -3969,7 +3944,7 @@ class LedgerPages(AnswerPages):
                 window_default=default,
                 can_set_default=self.bound_config.window_default_set is not None,
                 kept_statements=self._kept_statement_count(ref),
-                about=self._about(ref) if ledger.state != "unknown" else None,
+                about=ledger.about,
             ),
             no_store=unmasked or no_store,
         )
