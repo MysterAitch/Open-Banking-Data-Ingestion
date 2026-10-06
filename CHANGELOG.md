@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.345] - 2026-10-06
+
+### Changed
+- **Statements uploaded together are asked about in one form.** Ten credit
+  union PDFs went up at once today: five single-account statements, five
+  "all accounts" documents of two sections each. Bring in asked about each
+  file in its own form, the "give these N statements to" form reached only
+  the whole single-account files, and every section of a multi-account
+  document needed its own fold and press - fourteen presses for ten files.
+  Now every kept file and every section of a divided document is one row
+  with its own chooser, pre-selected where the store can say why, and one
+  "Read them all in" control (sticky on a phone) reads them all; a refusal
+  or a doubt on one row never stops the rest, a chooser left empty leaves
+  that file kept, and a row already held is reported and never moved. The
+  scoped upload on an account's page accepts several files.
+- **Whose a kept statement probably is, led by what the document prints.**
+  The pre-selection follows the account heading a credit union document
+  prints ("Regular Saver", "Personal") wherever that heading has been given
+  an account before; a heading given two accounts pre-selects nothing and
+  names both. Before, a document whose siblings had been split between two
+  accounts was pre-selected to whichever of them was chosen last: the 2026
+  "all accounts" document held only the saver (the loan had closed) and
+  was offered the loan, and eighteen saver rows were read in to a closed
+  loan on one press. Other formats keep the reader-and-file-name match,
+  which gives no guess when the two disagree. The guess is pure code with
+  its own tests (`bring_in_guess.py`); nothing is ever read in by a guess.
+
+### Fixed
+- **An artefact that has been moved still has a page.** Moving an artefact
+  (and assigning a kept statement, which files it the same way) appends the
+  move to its request circumstances as plain text; the artefact page decoded
+  that column as JSON and failed to build for every artefact ever moved - the
+  page holding the only "Landed under the wrong account?" form, so the one
+  statement that needed moving was the one whose page would not open. The
+  column's format is now stated once in the store, and the page lists the
+  filing notes under "Filing".
+
 ## [0.4.344] - 2026-10-06
 
 ### Changed

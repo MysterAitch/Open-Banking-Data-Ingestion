@@ -71,7 +71,9 @@ line of evidence that it was looked at. The design and its decisions are under
   response.
 - Run targeted tests as you go (`-n 4` at most; the machine is shared). The whole suite is run
   ONCE per change, by whoever merges, and again by the build as the gate for the image; do not
-  run it twice yourself, and never two suites at once.
+  run it twice yourself, and never two suites at once. Do not edit the tree while the whole
+  suite runs on it: several tests read a source file as text (the dispatcher's route list, the
+  stylesheet), and an edit landing mid-run fails them with an empty set that is not a fault.
 - `ruff check .` over the whole repository (the release lints everything, not only `src` and
   `tests`) and `mypy` strict over `src`, both clean; no `# type: ignore`, no null-forgiving
   shortcuts.
