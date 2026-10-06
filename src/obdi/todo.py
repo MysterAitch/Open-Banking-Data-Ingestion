@@ -245,7 +245,9 @@ def _gap_todos(gap: FetchGap) -> list[Todo]:
                     "Nothing yet checks these transactions: read the balance from the bank and "
                     "state it, or upload a statement."
                 ),
-                since=gap.first_day,
+                # The to-do names the day to confirm, so that is the day it has waited since;
+                # the account's first transaction can be years earlier.
+                since=gap.last_day,
                 urgency=HOUSEKEEPING,
                 control=Control(
                     "Confirm a balance", account_page(gap.account, "#opening"), prescoped=True

@@ -19,6 +19,7 @@ from obdi.overview import (
     AttentionItem,
     Overview,
 )
+from obdi.page_times import date_with_age
 from obdi.standing_data import AccountStanding
 from obdi.todo import (
     EXPORT_UPLOAD,
@@ -157,6 +158,20 @@ class TestAnOrdinaryDay:
         assert confirm.control.label == "Confirm a balance"
         assert confirm.control.href == "/ledger?ref=holiday#opening"
         assert confirm.control.prescoped is True
+
+    def test_BalanceToConfirm_WhenFirstTransactionIsYearsBeforeTheDayNamed_AgeIsFromTheDayNamed(
+        self,
+    ) -> None:
+        """The account's first transaction is 2022-03-01, the day to confirm 2025-05-01: "Confirm
+        the balance for 2025-05-01" has waited since that day, 17 months, and not four years."""
+        (confirm,) = build_todos(
+            overview(),
+            report(gap("holiday", GapKind.NO_BALANCE, "2022-03-01", "2025-05-01")),
+            label_of,
+        )
+        assert confirm.title == "Confirm the balance for 2025-05-01"
+        assert confirm.since == d("2025-05-01")
+        assert date_with_age(confirm.since, TODAY) == "2025-05-01 (over a year ago)"
 
     def test_OrdinaryDay_EveryToDo_HasAControlThatSaysWhatItDoes(self) -> None:
         todos = self.todos()
