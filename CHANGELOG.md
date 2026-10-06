@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.351] - 2026-10-06
+
+### Changed
+- **A file that was not read in leads Bring in's answer.** Two PDFs went up
+  together; one had no reader for its layout, and the answer led with the
+  other file's outcome and put "not read in: no parser for this layout yet"
+  inside a closed fold - "I had to expand this to find out one of the pdf
+  files wasn't ingested". Now any file not read in, refused, or doubted
+  leads the answer, above every success, with why, the names it prints,
+  and its masked shape (which a reader is written from). The form's row for
+  such a file says "Cannot be read in yet - no reader for this layout" and
+  offers no chooser, where before it offered one the press then ignored.
+- **One way to show values, everywhere.** The statement shape page showed
+  the sitting's banner above a masked shape, because it had a mechanism of
+  its own - a "show the real contents" tick on the upload form, a one-time
+  token, and a typed confirmation phrase - and a kept statement's shape page
+  had no way at all. Both now follow the sitting, and so does Bring in's
+  per-transaction dry run; the tick, token, phrase, and their route are
+  removed. The masked-GET tests pass unchanged.
+- **"N files kept" and the Statements summary are one count.** The number
+  fell from 47 to 46 across a press that read one file in and kept the
+  other: a kept copy of bytes already filed under an account sits as its own
+  row until the press files it, when the store folds it into the statement
+  already held - the count was true both times. The two numbers now come
+  from one function. Not yet said: that a copy was folded in, which is why
+  the count fell.
+
 ## [0.4.350] - 2026-10-06
 
 ### Added
