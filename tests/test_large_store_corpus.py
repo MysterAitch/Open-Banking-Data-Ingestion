@@ -95,3 +95,53 @@ class TestTheLargeStoreHoldsTheShapeItClaims:
         sightings = scalar(large, "SELECT COUNT(*) FROM transaction_sources")
 
         assert sightings > 4 * rows
+
+
+class TestTheFaithfulLargeStoreHoldsTheSameShapeOnRawArtefacts:
+    """The faithful form states the same distinct payments, so the same counts follow, except
+    for the pairs: it also pairs the other accounts' transfers (36 of them), which the default
+    form leaves unmade."""
+
+    @pytest.fixture(scope="class")
+    def faithful(self) -> LargeStore:
+        return cached_large_store(faithful=True)
+
+    def test_MainAccountAndSpaces_HoldTheRowsTheDefaultFormHolds(self, faithful):
+        booked = scalar(
+            faithful,
+            "SELECT COUNT(*) FROM transactions WHERE account_id = ? AND status = 'booked'",
+            MAIN,
+        )
+        folded = scalar(
+            faithful,
+            "SELECT COUNT(*) FROM transactions WHERE account_id = ? AND status = 'folded'",
+            MAIN,
+        )
+
+        assert (booked, folded) == (5223, 352)
+        assert faithful.faithful
+
+    def test_EveryFeedAndAggregatorAndExportRow_StandsOnARawArtefact(self, faithful):
+        unbacked = scalar(
+            faithful,
+            "SELECT COUNT(*) FROM transaction_sources s WHERE s.source IN "
+            "('starling', 'truelayer', 'starling-csv') AND NOT EXISTS ("
+            "SELECT 1 FROM raw_artefacts a WHERE a.digest = s.artefact_digest)",
+        )
+        backed = scalar(
+            faithful,
+            "SELECT COUNT(*) FROM raw_artefacts WHERE source IN "
+            "('starling-feed', 'truelayer-booked', 'csv')",
+        )
+
+        assert unbacked == 0
+        assert backed > 1000
+
+    def test_TransferPairs_AreTheDefaultFormsPlusTheOtherAccountsOwn(self, faithful):
+        assert scalar(faithful, "SELECT COUNT(*) FROM transfer_pairs") == 412 + 36
+
+    def test_Sightings_AreStillManyPerRow(self, faithful):
+        rows = scalar(faithful, "SELECT COUNT(*) FROM transactions")
+        sightings = scalar(faithful, "SELECT COUNT(*) FROM transaction_sources")
+
+        assert sightings > 4 * rows

@@ -315,3 +315,51 @@ class TestTheAccountPagesOverTheLargeStore:
         assert (first.status, later.status) == (200, 200)
         assert later.statements <= TODAY_STATEMENTS, later.statements
         assert later.seconds <= TODAY_SECONDS, later.seconds
+
+
+@pytest.fixture(scope="module")
+def faithful_pages(tmp_path_factory):
+    with serving(cached_large_store(faithful=True), tmp_path_factory.mktemp("faithful")) as served:
+        yield served
+
+
+class TestTheAccountPagesOverTheFaithfulLargeStore:
+    """The same budgets over the store whose rows all sit on raw artefacts, so that the readings
+    that look at artefacts (their origins, their windows, the files still to fetch) have their
+    real amount to read. The statement counts are measured here and asserted against the budgets
+    above, which stay as they are.
+
+    MEASURED 2026-10-06 (statements): main account first 794, later 132; card first 219, later
+    129; Today first 50, later 50. The main account's first load is 6 under its budget, so the
+    faithful store leaves that budget with no room."""
+
+    def test_MainAccountPage_LoadedTwice_StaysWithinTheBudgetsOfTheDefaultStore(
+        self, faithful_pages
+    ):
+        first = faithful_pages.get(LEDGER)
+        later = faithful_pages.get(LEDGER)
+        print(f"faithful main account: first {first.statements}, later {later.statements}")
+
+        assert (first.status, later.status) == (200, 200)
+        assert first.statements <= FIRST_LEDGER_STATEMENTS, first.statements
+        assert later.statements <= LEDGER_STATEMENTS, later.statements
+        assert first.seconds <= FIRST_LEDGER_SECONDS, first.seconds
+        assert later.seconds <= LEDGER_SECONDS, later.seconds
+
+    def test_CardPage_LoadedTwice_StaysWithinTheBudgetsOfTheDefaultStore(self, faithful_pages):
+        first = faithful_pages.get(CARD)
+        later = faithful_pages.get(CARD)
+        print(f"faithful card: first {first.statements}, later {later.statements}")
+
+        assert (first.status, later.status) == (200, 200)
+        assert later.statements <= CARD_STATEMENTS, later.statements
+        assert later.seconds <= CARD_SECONDS, later.seconds
+
+    def test_Today_LoadedTwice_StaysWithinTheBudgetsOfTheDefaultStore(self, faithful_pages):
+        first = faithful_pages.get(TODAY)
+        later = faithful_pages.get(TODAY)
+        print(f"faithful Today: first {first.statements}, later {later.statements}")
+
+        assert (first.status, later.status) == (200, 200)
+        assert later.statements <= TODAY_STATEMENTS, later.statements
+        assert later.seconds <= TODAY_SECONDS, later.seconds
