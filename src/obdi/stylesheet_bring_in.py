@@ -29,6 +29,7 @@ BRING_IN_STYLES = """
  .bi-ask .todo-form p { margin: 0; }
  .bi-ask .todo-form select, .bi-ask .todo-form input { width: 100%; }
  .bi-ask .todo { flex-direction: column; align-items: stretch; }
+ .bi-ask .todo-text { flex: none; }
  .bi-wanted h2 { margin: var(--s4) 0 var(--s2); font-size: var(--text-lg); }
  .bi-account { margin: var(--s3) 0 var(--s4); padding-top: var(--s2); border-top: var(--rule-weight) solid var(--rule-2); }
  .bi-who { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--s3); margin: 0; font: 600 var(--text-base)/130% var(--serif); }
@@ -45,6 +46,7 @@ BRING_IN_STYLES = """
  .bi-what { flex: 1 1 100%; margin: 0; font: var(--text-md)/130% var(--sans); }
  .bi-why { flex: 1 1 auto; margin: 0; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
  .bi-aside { font: var(--text-sm)/130% var(--sans); }
+ .bi-door { display: flex; align-items: center; min-height: var(--hit); }
  .bi-links { margin: var(--s2) 0; font: var(--text-sm)/150% var(--sans); }
  @media (min-width: 60rem) {
   .bi { grid-template-columns: minmax(0, 24rem) minmax(0, 1fr); gap: 0 var(--s6); align-items: start; }

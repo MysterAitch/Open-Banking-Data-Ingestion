@@ -218,8 +218,8 @@ def _evidence_html(evidence: Evidence, data: BringInData) -> str:
     if data.decided:
         lines.append(_esc("Set aside by you: " + "; ".join(data.decided) + "."))
     lines.append(
-        'The two doors behind the one target, to use alone: <a class="tap" href="/statement-shape">'
-        'a statement</a>, <a class="tap" href="/import">an export</a>.'
+        '<a class="tap bi-door" href="/statement-shape">A statement, on its own</a>'
+        '<a class="tap bi-door" href="/import">An export, on its own</a>'
     )
     lines.append(_esc(UTC_NOTE))
     items ="".join(f"<li>{line}</li>" for line in lines)

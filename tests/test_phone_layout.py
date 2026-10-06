@@ -854,7 +854,9 @@ def test_Navigation_AtPhoneWidth_WritesEveryLabelWholeOnOneLine(
 
 
 DESKTOP_WIDTH = 1280
-HUB_ROUTES =["/bring-in", "/checks", "/diagnostics"]
+#: Bring in left this list when it stopped being a hub of rows: its own layout is held by
+#: `test_bring_in_scale`.
+HUB_ROUTES = ["/checks", "/diagnostics"]
 
 
 @pytest.mark.parametrize("route", HUB_ROUTES)
