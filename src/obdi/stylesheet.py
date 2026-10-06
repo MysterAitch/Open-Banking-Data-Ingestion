@@ -50,6 +50,7 @@ from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
 from .stylesheet_bring_in import BRING_IN_STYLES
 from .stylesheet_connections import CONNECTIONS_STYLES
+from .stylesheet_diagnostics import DIAGNOSTICS_STYLES
 from .stylesheet_flags import FLAGS_STYLES
 from .stylesheet_home import HOME_STYLES
 from .stylesheet_position import POSITION_STYLES
@@ -331,6 +332,7 @@ SHARED_STYLES = """
 STYLESHEET = (
     SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
     + WINDOW_STYLES + POSITION_STYLES + BRING_IN_STYLES + TIMELINE_STYLES + CONNECTIONS_STYLES
+    + DIAGNOSTICS_STYLES
 )
 
 

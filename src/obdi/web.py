@@ -4657,18 +4657,9 @@ class ConnectionHandler(
         except Exception:
             payload = []
         history = _read_history(payload)
-        body = (
-            "<h2>Actual sync history</h2>"
-            "<p>Recorded outcomes, newest first - the Actual page shows "
-            "only the newest audit and the few results before it. Times are UTC (marked Z).</p>"
-            + "".join(_result_row(result) for result in history.results)
-            + (
-                _history_summary(history)
-                if history.results or history.total or history.unreadable_count
-                else "<p>Nothing recorded yet.</p>"
-            )
-            + HOME_LINK
-        )
+        from .web_actual_history import actual_history_body
+
+        body = actual_history_body(history) + HOME_LINK
         self._respond(200, render_page("Actual sync history", body))
 
     def _artefact_account(self, artefact_id: int) -> str:
