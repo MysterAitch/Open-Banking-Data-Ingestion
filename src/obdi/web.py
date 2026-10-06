@@ -70,7 +70,7 @@ from .doctor import shape_problems
 from .fetch_gaps import FetchReport
 from .fetch_marks import MarkSet, MarkWorld
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
-from .ledger import Ledger
+from .ledger import LedgerData
 from .logs import say
 from .masking import MASKED_TOTAL, mask_text
 from .namespaces import (
@@ -730,10 +730,10 @@ class WebConfig:
     #: figures (False only when the viewer asked) and the account reference to
     #: limit to, "" for every account.
     period_reconciliation_text: Callable[[bool, str], str] | None = None
-    #: One account's ledger for a month ("" for the newest) as DATA, real
-    #: values included. Returning data rather than text is what lets the page
-    #: decide, in one place, whether a reader may see the values.
-    ledger_data: Callable[[str, str], Ledger] | None = None
+    #: One account's ledger for a month ("" for the newest), or for a window of days where one
+    #: is given, as DATA, real values included. Returning data rather than text is what lets
+    #: the page decide, in one place, whether a reader may see the values.
+    ledger_data: LedgerData | None = None
     #: One account's stated balances against its rows, as DATA with real values,
     #: for the timeline and the values chart (`balance_chart`).
     balance_chart_data: Callable[[str], BalanceChart] | None = None
@@ -764,6 +764,11 @@ class WebConfig:
     #: Read a disregarded balance again: (ref, day, source, basis, which); whether it was
     #: disregarded. `which` is the balance's place among those under one key.
     balance_use_again: Callable[[str, str, str, str, int], bool] | None = None
+    #: The window every account's page opens on when the address names none, as its key
+    #: (`ledger_scope.DEFAULTABLE`); the owner's setting, or the page's own where none is set.
+    window_default: Callable[[], str] | None = None
+    #: Keep a window as that default. Raises a DataError for a key that is not one offered.
+    window_default_set: Callable[[str], None] | None = None
     #: Type a transaction into an account: (ref, day, direction, amount,
     #: description), all as typed. Raises a DataError that never quotes any of them.
     typed_save: Callable[[str, str, str, str, str], None] | None = None
@@ -6364,6 +6369,9 @@ class ConnectionHandler(
             return
         if route == "/ledger-balance-use-again":
             self._balance_use_again_post(self._read_form())
+            return
+        if route == "/ledger-window-default":
+            self._window_default_post(self._read_form())
             return
         if route == "/ledger-typed":
             self._typed_save_post(self._read_form())

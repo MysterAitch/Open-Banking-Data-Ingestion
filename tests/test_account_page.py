@@ -90,7 +90,7 @@ class TestTheOrderOfTheFirstScreens:
             at(page, 'class="trust bad"'),
             at(page, 'class="tap strip"'),
             at(page, 'class="todos"'),
-            at(page, f"<h2>{NEWEST_MONTH}</h2>"),
+            at(page, "<h2>Last 30 days, 2026-09-01 to 2026-09-30</h2>"),
             at(page, ">Show values</button>"),
             at(page, '<li class="txn'),
             at(page, "Add a transaction by hand"),
@@ -175,7 +175,7 @@ class TestTheMonthPicker:
     def test_Page_GivesEachMonthItsRowCountAsSmallText_AgreeingWithTheLedgerItself(
         self, base, db
     ):
-        page = get(base)
+        page = get(base, month=NEWEST_MONTH)
         with Store(db) as store:
             for month in ("2024-02", "2025-03", NEWEST_MONTH):
                 held = len(build_ledger(store, HELD, month, bound=True).rows)
@@ -186,11 +186,16 @@ class TestTheMonthPicker:
         assert NEWEST_MONTH_ROWS == 50
 
     def test_Page_MarksTheMonthOnShow(self, base):
-        page = get(base)
+        page = get(base, month=NEWEST_MONTH)
         body = page[at(page, "<body"):]
 
         assert body.count('aria-current="true"') == 1
         assert 'month=2026-09" aria-label="Sep 2026, 50 transactions" aria-current="true"' in body
+
+    def test_Page_OnAWindowOfDays_MarksNoMonthAsTheOneOnShow(self, base):
+        page = get(base)
+
+        assert 'aria-current="true"' not in page[at(page, "<body"):]
 
     def test_MaskedPicker_IsPlainLinksAndNoForm(self, base):
         page = get(base)

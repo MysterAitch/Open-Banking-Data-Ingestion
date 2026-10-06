@@ -88,9 +88,11 @@ def served(tmp_path):
         build_household(store)
         _plain_and_markup(store)
 
-    def ledger_data(ref: str, month: str):
+    def ledger_data(ref: str, month: str, window=None):
         with Store(path) as store:
-            return build_ledger(store, ref, month or None, bound=ref in BOUND, label="")
+            return build_ledger(
+                store, ref, month or None, bound=ref in BOUND, label="", window=window
+            )
 
     config = WebConfig(
         client_id="client-1",
@@ -437,10 +439,17 @@ class TestMonthLinksSitAtTheTop:
 
 
 class TestMonthNavigation:
-    def test_NoMonth_ShowsTheNewestMonthWithRows(self, served):
+    def test_NoMonth_ShowsTheLastDaysOrTransactionsWhicheverIsWiderIncludingTheNewestRow(
+        self, served
+    ):
         page = get(served, ref=CURRENT).text
 
-        assert "<h2>2026-05</h2>" in page
+        assert re.search(
+            r"<h2>Last \d+ transactions, 2026-\d\d-\d\d to \d{4}-\d\d-\d\d "
+            r"\(more than 30 days, so that \d+ are shown\)</h2>",
+            page,
+        )
+        assert "2026-05-" in page, "the newest month's row is among them"
 
     def test_Navigation_StepsThroughAnEmptyMonthInBothDirections(self, served):
         page = get(served, ref=CURRENT, month="2026-04").text
@@ -480,9 +489,9 @@ class TestAccountsThatAreNotHealthyEmptyOnes:
         with Store(path) as store:
             store.declare_account(AccountRecord(ref=AccountRef("empty-isa"), label="Empty ISA"))
 
-        def ledger_data(ref, month):
+        def ledger_data(ref, month, window=None):
             with Store(path) as store:
-                return build_ledger(store, ref, month or None, bound=False)
+                return build_ledger(store, ref, month or None, bound=False, window=window)
 
         base, httpd = _serve(tmp_path, ledger_data)
         try:
@@ -707,7 +716,7 @@ class TestWiring:
     def test_Page_WhenTheHookFails_NamesTheFailureRatherThanShowingAnEmptyLedger(
         self, tmp_path
     ):
-        def broken(ref, month):
+        def broken(ref, month, window=None):
             raise RuntimeError("the store would not open")
 
         base, httpd = _serve(tmp_path, broken)

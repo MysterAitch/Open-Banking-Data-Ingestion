@@ -45,6 +45,26 @@ REFLOW = 320
 WHOLE_PAGE_SCREENS = 4.95
 FURNITURE_SCREENS = 2.0
 
+#: THE WINDOWS' BUDGET. The page opens on the last 30 days or 50 transactions, whichever is wider,
+#: and the day is fixed at the corpus's last day (`served_corpus`), so the 30 days are 2026-09-01
+#: to 2026-09-30, the corpus's newest month, which holds exactly 50: the days win. With the day
+#: moved to 2027-03-01 (the same account quiet for five months, measured with the same method)
+#: the 50 win and the page is the newest 50 transactions: 3684 px, 4.61 screens, against 4.54.
+#: Measured at 390 px, every disclosure closed (2026-10-06), in px and screens:
+#:
+#:                  held account                agreeing
+#:   30 days    50 transactions  3635, 4.54     50  3558, 4.45     the default
+#:   90 days   116              6605, 8.26     122  6798, 8.50
+#:   180 days  215             11060, 13.82    215 10983, 13.73
+#:
+#: The invented account holds 1.7 transactions a day and the owner's main account about 2.3, so 30
+#: days is about 70 of his: a page of some six screens. 90 days of his would be twelve or more,
+#: which is why 90 is a tap away and not where the page opens. The "choose another window" fold
+#: closed costs 44 px, one thumb-height line (page without it: 3591 and 3514 px).
+WINDOW_FOLD_PX = 44
+NINETY_DAYS_MAX_SCREENS = 9.0
+NINETY_DAYS_TRANSACTIONS = (100, 135)
+
 
 @pytest.fixture(scope="module")
 def browser() -> Iterator[object]:
@@ -228,6 +248,76 @@ class TestTheWholePage:
             page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
             closed = float(page.evaluate("document.documentElement.scrollHeight"))
             assert as_loaded == closed, "thirty-five known balances are not opened by the page"
+        finally:
+            page.close()
+
+
+class TestTheWindowAtAPhone:
+    @pytest.mark.parametrize("ref", [HELD, AGREEING])
+    def test_Page_OpeningOnTheDefault_IsTheThirtyDaysAndNothingLonger(self, browser, base, ref):
+        default = opened(browser, base, ref)
+        chosen = browser.new_page(viewport={"width": PHONE, "height": SCREEN})  # type: ignore[attr-defined]
+        try:
+            chosen.goto(f"{base}/ledger?ref={ref}&window=d30", wait_until="load")
+            heading = default.evaluate("document.querySelector('.txhead h2').textContent")
+            assert heading == "Last 30 days, 2026-09-01 to 2026-09-30"
+            assert default.evaluate("document.querySelectorAll('li.txn').length") == (
+                NEWEST_MONTH_ROWS
+            )
+            assert default.evaluate("document.documentElement.scrollHeight") == chosen.evaluate(
+                "document.documentElement.scrollHeight"
+            )
+        finally:
+            default.close()
+            chosen.close()
+
+    @pytest.mark.parametrize("ref", [HELD, AGREEING])
+    def test_NinetyDays_AreAboutThreeMonthsOfTransactionsAndUnderNineScreens(
+        self, browser, base, ref
+    ):
+        page = browser.new_page(viewport={"width": PHONE, "height": SCREEN})  # type: ignore[attr-defined]
+        try:
+            page.goto(f"{base}/ledger?ref={ref}&window=d90", wait_until="load")
+            page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
+            count = page.evaluate("document.querySelectorAll('li.txn').length")
+            total = float(page.evaluate("document.documentElement.scrollHeight"))
+            low, high = NINETY_DAYS_TRANSACTIONS
+            assert low <= count <= high, f"{count} transactions in 90 days"
+            assert total < NINETY_DAYS_MAX_SCREENS * SCREEN, f"{total / SCREEN:.2f} screens"
+            assert total > WHOLE_PAGE_SCREENS * SCREEN, "90 days would not have fitted the budget"
+        finally:
+            page.close()
+
+    @pytest.mark.parametrize("ref", [HELD, AGREEING])
+    def test_WindowChoice_WhenClosed_CostsOneThumbHeightLine(self, browser, base, ref):
+        page = opened(browser, base, ref)
+        try:
+            page.evaluate("() => document.querySelectorAll('details').forEach(d => d.open = false)")
+            height = bottom_of(page, "details.windows") - top_of(page, "details.windows")
+            assert height == pytest.approx(WINDOW_FOLD_PX, abs=2)
+        finally:
+            page.close()
+
+    def test_WindowChoice_WhenOpen_HoldsEveryChipAtThumbHeightAndFitsThePhone(self, browser, base):
+        page = opened(browser, base, HELD)
+        try:
+            page.evaluate("() => document.querySelector('details.windows').open = true")
+            chips = page.evaluate(
+                "() => [...document.querySelectorAll('details.windows button.window-chip')]"
+                ".filter(e => e.getClientRects().length > 0)"
+                ".map(e => [e.textContent, e.getBoundingClientRect().height])"
+            )
+            assert [name for name, _ in chips[:7]] == [
+                "Last 30 days or 50 transactions, whichever is wider",
+                "Last 60 days or 50 transactions, whichever is wider",
+                "Last 30 days",
+                "Last 60 days",
+                "Last 90 days",
+                "Last 180 days",
+                "Last 12 months",
+            ]
+            assert all(height >= 44 for _, height in chips), chips
+            _assert_fits(_measure(page))
         finally:
             page.close()
 

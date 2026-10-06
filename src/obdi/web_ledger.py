@@ -16,7 +16,8 @@ to show unmasked is shown unmasked because the VIEW was built with
 from __future__ import annotations
 
 import html
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -60,6 +61,18 @@ from .ledger import (
     Ledger,
     LedgerRequestError,
 )
+from .ledger_scope import (
+    DEFAULT_KEY,
+    DEFAULTABLE,
+    EXTRA_CHIPS,
+    FIRST_TAP,
+    MONTH_KEY,
+    OMITTED,
+    is_window_token,
+    label_of,
+    query_of,
+    read_scope,
+)
 from .logs import say
 from .london_clock import london
 from .masking import MASKED_TOTAL, Disclosed
@@ -80,6 +93,7 @@ from .web_accounts import archive_controls, archive_label, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
 from .web_standing import _post, _through, line_html
+from .window_control import WINDOW_FIELDS, WindowChoice, window_controls
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # Only the annotation is needed, and importing the handler's module at
@@ -142,6 +156,13 @@ def _part(summary: str, body: str) -> str:
 def _url(path: str, **params: str) -> str:
     query = "&".join(f"{key}={quote(value, safe='')}" for key, value in params.items())
     return _esc(f"{path}?{query}")
+
+
+def _scope(view: Any) -> str:
+    """The value of the hidden `month` field every form on the page carries, which says which
+    days are on show (`ledger_scope`). A ledger that was not built for a request holds none, and
+    is on show by its month."""
+    return str(view.scope if view.scope or view.window_words else view.month)
 
 
 def _count(label: str, value: object) -> str:
@@ -512,15 +533,16 @@ _FLAG_COUNTS = (
 )
 
 
-def _summary_html(summary: Any, *, bound: bool) -> str:
-    """The month's counts: the always-meaningful rows, then only the non-zero flags.
+def _summary_html(summary: Any, *, bound: bool, span: str = "month") -> str:
+    """The counts of what is listed, a `span` of "month" or "window": the always-meaningful rows,
+    then only the non-zero flags.
 
     A zero is not dropped silently.
     The sentence after the table names every flag count that is zero, so a
     reader can tell "nothing of that kind" from "not looked for".
     """
     reasons = _pairs(summary.withheld_by_reason)
-    rows = _count("Transactions in the month", summary.rows) + _count_html(
+    rows = _count(f"Transactions in the {span}", summary.rows) + _count_html(
         "Transactions per source", _source_pairs(summary.per_source)
     )
     zero: list[str] = []
@@ -541,7 +563,7 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
     verdict = (
         _NOTHING_SENT
         if not bound
-        else f"The two month sums {_differ(summary.sums_differ)}."
+        else f"The two {span} sums {_differ(summary.sums_differ)}."
     )
     return (
         '<div class="scroll"><table>'
@@ -563,7 +585,12 @@ def _summary_html(summary: Any, *, bound: bool) -> str:
             ),
         )
         + "</table></div>"
-        + (f'<p class="muted">None this month: {_words(zero)}.</p>' if zero else "")
+        + (
+            f'<p class="muted">None {"in this window" if span == "window" else "this month"}: '
+            f"{_words(zero)}.</p>"
+            if zero
+            else ""
+        )
         + f"<p><strong>{_esc(verdict)}</strong></p>"
         + (
             '<p class="warn">The rows are in more than one currency, so these sums '
@@ -811,7 +838,7 @@ def _shared_days_html(view: Any) -> str:
     opening = view.opening
     if not opening.shared_days and not opening.disregarded:
         return ""
-    ref, month = view.ref, view.month
+    ref, month = view.ref, _scope(view)
     standing = view.standing
     explained = (
         {claim.day.isoformat(): claim for claim in standing.own.closed_before}
@@ -2061,7 +2088,7 @@ def _lock_offer_form(view: Any) -> str:
     protection = view.protection
     if protection is None or view.rebuilding or not protection.offer:
         return ""
-    return _post("/protect", view.ref, view.month, _through(protection.offer[-1]), "Lock in")
+    return _post("/protect", view.ref, _scope(view), _through(protection.offer[-1]), "Lock in")
 
 
 def _locking_html(view: Any, unmasked: bool = False, everything: bool = False) -> str:
@@ -2079,7 +2106,7 @@ def _locking_html(view: Any, unmasked: bool = False, everything: bool = False) -
     protection = view.protection
     if protection is None or view.rebuilding:
         return ""
-    ref, month = view.ref, view.month
+    ref, month = view.ref, _scope(view)
     body = f'<div id="{LOCKING_ANCHOR}">'
     state = protection.state
     gist = "nothing yet"
@@ -2230,10 +2257,10 @@ def _balances_control(
         return (
             '<form method="post" action="/ledger">'
             f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
-            f'<input type="hidden" name="month" value="{_esc(view.month)}">'
+            f'<input type="hidden" name="month" value="{_esc(_scope(view))}">'
             f"{extra if everything else ''}" + submit_button(label, secondary=True) + "</form>"
         )
-    params = {"ref": view.ref, "month": view.month}
+    params = {"ref": view.ref, **query_of(_scope(view))}
     if everything:
         params[BALANCES_PARAM] = BALANCES_ALL
     return f'<p><a class="tap" href="{_url("/ledger", **params)}{fragment}">{_esc(label)}</a></p>'
@@ -2391,13 +2418,15 @@ def _opening_html(
     )
     stale = any(entry.stale for entry in opening.disregarded)
     body += (
-        (_anchor_forms(view, view.ref, view.month) if state_form else "")
-        + _removed_balances_html(view, view.ref, view.month, unmasked)
+        (_anchor_forms(view, view.ref, _scope(view)) if state_form else "")
+        + _removed_balances_html(view, view.ref, _scope(view), unmasked)
         + _unitemised_html(view)
         + (
             _part(
                 "Remove a known balance you stated",
-                _remove_forms(view, view.ref, view.month, unmasked=unmasked, everything=everything),
+                _remove_forms(
+                    view, view.ref, _scope(view), unmasked=unmasked, everything=everything
+                ),
             )
             if opening.stated_days
             else ""
@@ -2530,10 +2559,14 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
         )
     notes = ""
     if typed.live_elsewhere:
+        where = (
+            "dated outside this window: choose a window or a month that holds it to remove one"
+            if view.window_first
+            else "dated in other months: step to that month to remove one"
+        )
         notes += (
             f"<p class=\"muted\">{_plural(typed.live_elsewhere, 'more typed transaction')} "
-            f"{agree(typed.live_elsewhere, 'is')} dated in other months: step to that "
-            "month to remove one.</p>"
+            f"{agree(typed.live_elsewhere, 'is')} {where}.</p>"
         )
     if typed.withdrawn_total:
         notes += (
@@ -2542,7 +2575,11 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
         )
     return _disclosure(
         "Add a transaction by hand"
-        + (f" ({len(typed.lines)} typed this month)" if typed.lines else ""),
+        + (
+            f" ({len(typed.lines)} typed {'in this window' if view.window_first else 'this month'})"
+            if typed.lines
+            else ""
+        ),
         '<p class="muted">For an account no feed reports, such as a mortgage at another '
         "bank. Each one is kept as evidence and counted like any other transaction, and "
         "becomes one transaction with the bank's if a feed later reports the same payment. "
@@ -2633,7 +2670,7 @@ def _month_links(view: Any, unmasked: bool) -> str:
         steps.append(step(f"Previous month, {view.previous_month}", view.previous_month))
     if view.next_month:
         steps.append(step(f"Next month, {view.next_month}", view.next_month))
-    if view.newest_month and view.newest_month != view.month:
+    if view.month and view.newest_month and view.newest_month != view.month:
         steps.append(step(f"Newest month with rows, {view.newest_month}", view.newest_month))
     return f'<div class="monthnav">{"".join(steps)}</div>' if steps else ""
 
@@ -2696,6 +2733,70 @@ def _month_picker(view: Any, unmasked: bool) -> str:
     )
 
 
+def _default_html(view: Any, key: str, default: str, *, can_set: bool) -> str:
+    """What the default is, said quietly, and the one button that makes the window on show the
+    default. A decision, so a POST that asks before it acts (`LedgerPages._window_default_post`).
+
+    The newest calendar month is offered only while it is the one on show, since a month stepped
+    back to is not what "the newest" means.
+    """
+    if key == MONTH_KEY and view.month != view.newest_month:
+        key = ""
+    said = f'<p class="muted">The default is: {_esc(label_of(default).lower())}.'
+    if key == default:
+        return said + " It is the one on show.</p>"
+    said += "</p>"
+    if not can_set or key not in DEFAULTABLE:
+        return said
+    return said + (
+        '<form method="post" action="/ledger-window-default">'
+        f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
+        f'<input type="hidden" name="month" value="{_esc(_scope(view))}">'
+        f'<input type="hidden" name="default" value="{_esc(key)}">'
+        + submit_button("Use this as the default", secondary=True)
+        + "</form>"
+    )
+
+
+def _window_html(
+    view: Any,
+    unmasked: bool,
+    window: WindowChoice | None,
+    today: date,
+    default: str,
+    *,
+    can_set: bool,
+) -> str:
+    """The fold that chooses which days are listed: the windows in one tap, a length to type, and
+    two dates; the calendar months are the picker's, beside it.
+
+    The control is the shared one (`window_control`), in a form of its own: a link-able GET while
+    values are masked, and a POST while they are shown, so choosing a window never drops the
+    values and no address that holds them exists. It opens by itself where a choice was refused,
+    so the sentence saying why is read.
+    """
+    choice = window if window is not None else read_scope({}, today=today, default=default).choice
+    controls = window_controls(
+        choice,
+        today=today.isoformat(),
+        legend="Days listed",
+        first_tap=FIRST_TAP,
+        omit=OMITTED,
+        show_now=False,
+        extra=EXTRA_CHIPS,
+    )
+    form = (
+        f'<form method="{"post" if unmasked else "get"}" action="/ledger">'
+        f'<input type="hidden" name="ref" value="{_esc(view.ref)}">{controls}</form>'
+    )
+    return _disclosure(
+        "Choose another window, or your own dates",
+        form + _default_html(view, choice.key, default, can_set=can_set),
+        open=bool(choice.refusal),
+        css="windows",
+    )
+
+
 def _bars_html(view: Any) -> str:
     """The fold that says what the bars show, with the way to the full timeline, which stays on
     its own page and opens beside this one."""
@@ -2723,14 +2824,14 @@ def _mode(view: Any, unmasked: bool, everything: bool = False, *, pressing: bool
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
             f'<p><a class="button secondary" '
-            f'href="{_url("/ledger", ref=view.ref, month=view.month, **around)}">'
+            f'href="{_url("/ledger", ref=view.ref, **query_of(_scope(view)), **around)}">'
             "Hide values</a></p>"
         )
     # The sealed slots are the state; what masked means is said once, in "How this was checked".
     return (
         '<form method="post" action="/ledger">'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
-        f'<input type="hidden" name="month" value="{_esc(view.month)}">'
+        f'<input type="hidden" name="month" value="{_esc(_scope(view))}">'
         + kept
         + submit_button("Show values", secondary=pressing)
         + "</form>"
@@ -2865,7 +2966,7 @@ def _state_html(
     # offered again once nothing fails, and the earlier-day choice stays in the locking fold.
     failing = verification_of(reading.standing) == DOES_NOT_ADD_UP
     lock = "" if failing else lock_offer_html(view.protection, _lock_offer_form(view))
-    todos = todos_html(reading, view.ref, view.month, today, hold=hold, lock=lock)
+    todos = todos_html(reading, view.ref, _scope(view), today, hold=hold, lock=lock)
     return (
         heading
         + trust_html(
@@ -2891,9 +2992,10 @@ def _how_checked_html(view: Any, unmasked: bool, *, with_counts: bool) -> str:
     )
     counts = ""
     if with_counts:
+        span = "window" if view.window_first else "month"
         counts = _part(
-            f"This month's counts and sums ({_plural(view.summary.rows, 'transaction')})",
-            _summary_html(view.summary, bound=view.actual_bound) + position,
+            f"This {span}'s counts and sums ({_plural(view.summary.rows, 'transaction')})",
+            _summary_html(view.summary, bound=view.actual_bound, span=span) + position,
         )
         position = ""
     limits = _part(
@@ -2925,8 +3027,14 @@ def render_ledger(
     today: date | None = None,
     all_balances: bool = False,
     reading: AccountReading | None = None,
+    window: WindowChoice | None = None,
+    window_default: str = DEFAULT_KEY,
+    can_set_default: bool = False,
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
+
+    `window` is the window as the request's control read it, which the control is set to and
+    which says why a choice was refused; without it the control is set to the default window.
 
     `reading` is what the account's trust and things to do are drawn from
     (`account_page.read_account`). Without it the page reads the account from this ledger alone,
@@ -2976,7 +3084,7 @@ def render_ledger(
         + _how_checked_html(view, unmasked, with_counts=view.state == "ok")
         + _archive_html(view, archive_wired=archive_wired)
     )
-    typed = _typed_html(view, ref=view.ref, month=view.month)
+    typed = _typed_html(view, ref=view.ref, month=_scope(view))
     if view.state == "no-rows":
         return _frame(
             view,
@@ -2992,16 +3100,37 @@ def render_ledger(
             more=more,
         )
 
+    windowed = bool(view.window_first)
+    words = view.window_words or "Window"
+    if view.window_widened:
+        taken = view.window_widened
+        title = (
+            f"Last {_plural(taken, 'transaction')}, {view.window_first} to {view.window_last} "
+            f"(more than {words.removeprefix('Last ')}, so that {taken} "
+            f"{agree(taken, 'is')} shown)"
+        )
+    elif windowed:
+        title = f"{words}, {view.window_first} to {view.window_last}"
+    else:
+        title = view.month
     month = (
         '<div class="acct-month"><div class="txhead">'
-        f"<h2>{_esc(view.month)}</h2>{_month_links(view, unmasked)}</div>"
+        f"<h2>{_esc(title)}</h2>{_month_links(view, unmasked)}</div>"
+        f"{_window_html(view, unmasked, window, end, window_default, can_set=can_set_default)}"
         f"{_month_picker(view, unmasked)}</div>"
     )
-    if view.state == "empty-month":
+    if view.window_fell_back:
         month += (
-            '<p class="warn"><strong>No transactions are dated in this month.</strong> '
+            '<p class="muted">Nothing is dated in the '
+            f"{_esc(view.window_words.lower())}, so this is the newest month with "
+            "transactions.</p>"
+        )
+    if view.state == "empty-month":
+        what = "window" if windowed else "month"
+        month += (
+            f'<p class="warn"><strong>No transactions are dated in this {what}.</strong> '
             f"The account holds transactions from {_esc(view.oldest_month)} to "
-            f"{_esc(view.newest_month)}, so a quiet month here is a gap to explain, "
+            f"{_esc(view.newest_month)}, so a quiet {what} here is a gap to explain, "
             "not a clean result.</p>"
         )
     else:
@@ -3027,6 +3156,11 @@ def render_ledger(
     )
 
 
+def _window_fields(fields: Mapping[str, list[str]]) -> dict[str, str]:
+    """The window's own fields from a query or a form, and no others (`WINDOW_FIELDS`)."""
+    return {name: fields[name][0] for name in WINDOW_FIELDS if fields.get(name)}
+
+
 def _asks_for_all_balances(fields: dict[str, list[str]]) -> bool:
     return (fields.get(BALANCES_PARAM, [""])[0] or "").strip() == BALANCES_ALL
 
@@ -3047,13 +3181,15 @@ class LedgerPages(AnswerPages):
         raise NotImplementedError
 
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
-        # Nothing in the query string can unmask: only `ref`, `month`, and which known balances
-        # to list are read, and the rendering is chosen by which method was used.
+        # Nothing in the query string can unmask: only `ref`, `month`, the window's fields, and
+        # which known balances to list are read, and the rendering is chosen by which method
+        # was used.
         self._ledger(
             (params.get("ref", [""])[0] or "").strip(),
             (params.get("month", [""])[0] or "").strip(),
             unmasked=False,
             all_balances=_asks_for_all_balances(params),
+            window_fields=_window_fields(params),
         )
 
     def _ledger_post(self, form: dict[str, list[str]]) -> None:
@@ -3062,6 +3198,7 @@ class LedgerPages(AnswerPages):
             (form.get("month", [""])[0] or "").strip(),
             unmasked=True,
             all_balances=_asks_for_all_balances(form),
+            window_fields=_window_fields(form),
         )
 
     def _anchor_refusal(self, status: int, title: str, message: str, *, ref: str = "") -> None:
@@ -3289,6 +3426,60 @@ class LedgerPages(AnswerPages):
             asks=False,
         )
 
+    def _window_default_post(self, form: dict[str, list[str]]) -> None:
+        """Make the window on show the one every account's page opens on.
+
+        Asks first, since it changes every account's page and not this one alone; the key is
+        checked before it asks, so a value that is not a window is refused at once. Nothing
+        but a window's name is kept or shown.
+        """
+        hook = self.bound_config.window_default_set
+        if hook is None:
+            self._respond(404, _page("Not available", "Setting the default is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        key = (form.get("default", [""])[0] or "").strip()
+        if key not in DEFAULTABLE:
+            self._anchor_refusal(
+                400,
+                "Default window not set",
+                "Nothing was changed. That is not a window the page can open on.",
+                ref=ref,
+            )
+            return
+        if (form.get("confirmed", [""])[0] or "") != "yes":
+            self._confirm_page(
+                "/ledger-window-default",
+                ref,
+                month,
+                f"Open every account's page on {label_of(key).lower()}, whenever the address "
+                "names no window?",
+                "Use this as the default",
+                f'<input type="hidden" name="default" value="{_esc(key)}">',
+            )
+            return
+        try:
+            hook(key)
+        except DataError as exc:
+            self._anchor_refusal(400, "Default window not set", f"Nothing was changed. {exc}.")
+            return
+        except Exception as fault:
+            say("ledger.window_default.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                "Default window not set",
+                "Nothing was changed, because of an unexpected fault.",
+            )
+            return
+        self._ledger(
+            ref,
+            month,
+            unmasked=False,
+            notice=f"Saved: every account's page now opens on {label_of(key).lower()}.",
+            no_store=True,
+        )
+
     def _confirm_page(
         self, action: str, ref: str, month: str, question: str, label: str, extra: str = ""
     ) -> None:
@@ -3298,7 +3489,7 @@ class LedgerPages(AnswerPages):
         carries `confirmed`, acts. Every protection press goes through it, because what the
         owner's manual flow asked for was a lock whose release is behind an are-you-sure.
         """
-        back = _url("/ledger", ref=ref, month=month)
+        back = _url("/ledger", ref=ref, **query_of(month))
         self._respond(
             200,
             render_page(
@@ -3432,9 +3623,10 @@ class LedgerPages(AnswerPages):
 
         The figure and the description go to the hook and no further: not into
         the confirmation, not into a refusal, and not into the page that follows.
-        The page that follows is shown at the month the transaction is dated in,
-        which is the only part of it that is echoed, and only once the hook has
-        accepted it as a real date.
+        The page that follows is shown on the window it was typed from, or at the month
+        the transaction is dated in where it was typed from a month; that date is the only
+        part of the entry that is echoed, and only once the hook has accepted it as a real
+        date.
         """
         hook = self.bound_config.typed_save
         if hook is None:
@@ -3465,9 +3657,12 @@ class LedgerPages(AnswerPages):
                 ref=ref,
             )
             return
+        asked = (form.get("month", [""])[0] or "").strip()
         self._ledger(
             ref,
-            day[:7],
+            # A page on a window stays on it, and one on a month goes to the month the entry is
+            # dated in; the entry's date is echoed only once the hook has accepted it.
+            asked if is_window_token(asked) else day[:7],
             unmasked=False,
             notice=self.answer_notice(
                 f"Saved: a typed transaction dated {day}. Nothing else changed.", ref, before
@@ -3523,7 +3718,11 @@ class LedgerPages(AnswerPages):
         notice: str = "",
         no_store: bool = False,
         all_balances: bool = False,
+        window_fields: Mapping[str, str] | None = None,
     ) -> None:
+        """`month` is the scope token the page's forms carry (`ledger_scope`): a month, nothing,
+        or a window; `window_fields` are the window's fields where the request gave them
+        directly, as the control and an address do."""
         hook = self.bound_config.ledger_data
         if hook is None:
             self._respond(404, _page("Not available", "No ledger is wired."))
@@ -3531,15 +3730,25 @@ class LedgerPages(AnswerPages):
         if not ref:
             self._respond(400, _page("No account named", "Say which account with ?ref=."))
             return
+        today = datetime.now(UTC).date()
+        default = DEFAULT_KEY
+        if self.bound_config.window_default is not None:
+            try:
+                default = self.bound_config.window_default()
+            except Exception as exc:
+                self._respond(500, _page("Default window failed", str(exc)))
+                return
+        scope = read_scope({"month": month, **(window_fields or {})}, today=today, default=default)
         try:
-            ledger = hook(ref, month)
+            window = scope.window_for(today)
+            ledger = hook(ref, scope.month) if window is None else hook(ref, "", window)
         except LedgerRequestError as exc:
             self._respond(400, _page("Not a month", str(exc)))
             return
         except Exception as exc:
             self._respond(500, _page("Ledger failed", str(exc)))
             return
-        today = datetime.now(UTC).date()
+        ledger = replace(ledger, scope=scope.token, window_words=scope.words(today))
         self._respond(
             404 if ledger.state == "unknown" else 200,
             render_ledger(
@@ -3554,6 +3763,9 @@ class LedgerPages(AnswerPages):
                     if ledger.state != "unknown"
                     else None
                 ),
+                window=scope.choice,
+                window_default=default,
+                can_set_default=self.bound_config.window_default_set is not None,
             ),
             no_store=unmasked or no_store,
         )

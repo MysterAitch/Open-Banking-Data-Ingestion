@@ -84,7 +84,7 @@ class TestTheControl:
         chips = re.findall(
             r'<button type="submit" name="window" value="([^"]+)" class="window-chip"', form
         )
-        assert len(chips) == 20 and len(set(chips)) == 20
+        assert len(chips) == 22 and len(set(chips)) == 22
 
     def test_TheFirstButtonInTheForm_KeepsTheWindowSoABareEnterNeverPicksAnother(self, held):
         form = form_of(render_position(held, unmasked=True).decode())

@@ -78,7 +78,7 @@ from .known_accounts import (
     read_known_accounts,
     set_space_parents,
 )
-from .ledger import Ledger
+from .ledger import Ledger, LedgerWindow
 from .money import parse_amount
 from .namespaces import UNASSIGNED_ACCOUNT
 from .outbound import install_if_requested as install_outbound_refusal_if_requested
@@ -3362,7 +3362,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         return held[key]
 
-    def ledger_data(ref: str, month: str) -> Ledger:
+    def ledger_data(ref: str, month: str, window: LedgerWindow | None = None) -> Ledger:
         from .ledger import build_ledger
 
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
@@ -3382,6 +3382,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     families=families_of(store, _account_map(store)),
                     movement=None,
                     with_protection=False,
+                    window=window,
                 )
                 return replace(
                     built, standing=None, protection=None, rebuilding=hold.sentence()
@@ -3397,6 +3398,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 movement=movement_report(store),
                 with_protection=True,
                 opening_reader=held_opening,
+                window=window,
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:
@@ -3567,6 +3569,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 families=families_of(store, _account_map(store)),
                 which=which,
             )
+
+    def window_default() -> str:
+        from .ledger_scope import default_key
+
+        with Store(db_path) as store:
+            return default_key(store)
+
+    def window_default_set(key: str) -> None:
+        from .ledger_scope import set_default_key
+
+        with Store(db_path) as store:
+            set_default_key(store, key)
 
     def balance_use_again(ref: str, day: str, source: str, basis: str, which: int) -> bool:
         from .balance_anchors import use_balance_again
@@ -4469,6 +4483,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         anchor_remove=anchor_remove,
         balance_disregard=balance_disregard,
         balance_use_again=balance_use_again,
+        window_default=window_default,
+        window_default_set=window_default_set,
         typed_save=typed_save,
         typed_withdraw=typed_withdraw,
         account_standings=account_standings,

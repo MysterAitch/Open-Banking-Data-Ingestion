@@ -25,7 +25,7 @@ import random
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 
 from obdi.accounts import AccountRecord, AccountRef
@@ -172,10 +172,23 @@ def corpus_environment(root: Path) -> dict[str, str]:
 
 @contextmanager
 def served_corpus(root: Path) -> Iterator[str]:
-    """The real application over the corpus, in this process, on a free port; yields its address."""
+    """The real application over the corpus, in this process, on a free port; yields its address.
+
+    The page's day is fixed at the corpus's last day, so the 30 days the account page opens on
+    (2026-09-01 to 2026-09-30) are exactly its newest month of `NEWEST_MONTH_ROWS`, whenever
+    the suite runs.
+    """
+    from obdi import web_ledger
     from obdi.cli import build_web_config
     from obdi.web import AuthorisationSession, ConnectionHandler
 
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            return datetime(LAST_DAY.year, LAST_DAY.month, LAST_DAY.day, 12, tzinfo=UTC)
+
+    clock = web_ledger.datetime
+    web_ledger.datetime = Fixed  # type: ignore[misc]
     saved = {name: os.environ.get(name) for name in _ENV}
     os.environ.update(corpus_environment(root))
     os.environ.pop("TRUELAYER_CLIENT_ID", None)
@@ -192,6 +205,7 @@ def served_corpus(root: Path) -> Iterator[str]:
     try:
         yield f"http://127.0.0.1:{httpd.server_port}"
     finally:
+        web_ledger.datetime = clock  # type: ignore[misc]
         httpd.shutdown()  # type: ignore[attr-defined]
         httpd.server_close()  # type: ignore[attr-defined]
         for name, value in saved.items():

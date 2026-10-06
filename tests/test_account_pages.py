@@ -64,6 +64,10 @@ def assert_tap_targets_are_thumb_sized(markup: str) -> None:
         if 'class="tap"' in tag:
             # A link-styled button, as thumb-tall as the `tap` links beside it.
             continue
+        if 'name="window"' in tag:
+            # A button of the shared window control, which sizes its own (`stylesheet_window`);
+            # that a phone reaches each one is measured in a browser, in test_account_page_scale.
+            continue
         assert 'class="button"' in tag or 'class="button secondary"' in tag, (
             f"not styled as a tap target: {tag}"
         )

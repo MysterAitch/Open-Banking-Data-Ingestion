@@ -145,7 +145,7 @@ class TestTheDefaultPage:
         )
         assert link is not None
         assert re.fullmatch(
-            rf"/ledger\?ref={BULK}&amp;month=\d{{4}}-\d{{2}}&amp;balances=all#opening",
+            rf"/ledger\?ref={BULK}(&amp;month=\d{{4}}-\d{{2}})?&amp;balances=all#opening",
             link.group(1),
         )
         assert page.count("balances=all") == 3, (
@@ -258,10 +258,15 @@ class TestThePageDoesNotGrowWithTheBalances:
         things to do: each of the month's fifty transactions is a line with a mark and, behind
         it, a disclosure holding its sources and flags, which is the rise. The bound is again a
         tenth above the measurement.
+
+        Measured 87,084 bytes once the page opened on the last 30 days or 50 transactions,
+        whichever is wider: this account's newest transactions are years old, so it lists the
+        newest 50 where the month it opened on listed about thirty, and the window's control
+        (some 29 buttons and two small forms) is on the page. The bound is again a tenth above.
         """
         page = re.sub(r"<style>.*?</style>", "", get(base, BULK), flags=re.S)
 
-        assert len(page.encode()) < 61_000
+        assert len(page.encode()) < 96_000
 
     def test_ProtectionDropDown_OffersOnlyTheNewestDatesUntilTheFullListIsAsked(self, base):
         default = get(base, BULK)

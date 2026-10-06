@@ -174,6 +174,31 @@ class LedgerRequestError(ValueError):
 
 
 @dataclass(frozen=True)
+class LedgerWindow:
+    """The days, both included, a ledger lists in place of a calendar month.
+
+    `fall_back` is for a window nobody chose, the page's default: where the account holds
+    nothing dated in it, the newest month is shown instead (and the ledger says so,
+    `Ledger.window_fell_back`), since an account whose feed went quiet would otherwise open on
+    a page of nothing. A window somebody chose is shown as chosen however empty it is.
+    """
+
+    first: date
+    last: date
+    fall_back: bool = False
+    #: Where above 0, `first` moves back to the day the newest `at_least` transactions begin
+    #: on, if that is earlier (`Ledger.window_widened`).
+    at_least: int = 0
+
+
+class LedgerData(Protocol):
+    """What the page's data hook is called with: an account, a month ("" for the newest), and the
+    window to list in place of the month where there is one."""
+
+    def __call__(self, ref: str, month: str, window: LedgerWindow | None = None) -> Ledger: ...
+
+
+@dataclass(frozen=True)
 class Money:
     """An amount's magnitude as a person writes it. Direction is kept apart.
 
@@ -600,6 +625,20 @@ class Ledger:
     #: Rows held in each month, oldest first, (ISO "YYYY-MM", count): what a month picker needs
     #: and read from the rows already in hand, so it costs no statement.
     month_counts: Structural[tuple[tuple[str, int], ...]] = ()
+    #: The first and last day listed, ISO, when the rows are a window of days and not a calendar
+    #: month (`LedgerWindow`); both empty for a month, whose `month` is then set instead.
+    window_first: Structural[str] = ""
+    window_last: Structural[str] = ""
+    #: The default window held nothing, so the newest month is listed (`LedgerWindow.fall_back`).
+    window_fell_back: Structural[bool] = False
+    #: The window was widened past its days to take in this many transactions
+    #: (`LedgerWindow.at_least`); 0 where its days held that many, or it was not asked to.
+    window_widened: Structural[int] = 0
+    #: What the page says the window is, such as "Last 30 days", set by the caller that read the
+    #: request, and the one form field that carries the span on show into the next request
+    #: (`ledger_scope`). Both are empty for a ledger built without a request.
+    window_words: Structural[str] = ""
+    scope: Structural[str] = ""
 
 
 def family_view(walk: FamilyWalk | None) -> FamilyView | None:
@@ -929,8 +968,10 @@ def build_ledger(
     explain_after: date | None = None,
     with_protection: bool = False,
     opening_reader: OpeningReader | None = None,
+    window: LedgerWindow | None = None,
 ) -> Ledger:
-    """The account's ledger for one month, or the newest month when `month` is None.
+    """The account's ledger for one month, or the newest month when `month` is None, or for a
+    window of days when `window` is given (which `month` is then ignored for).
 
     `opening_reader` stands in for `effective_opening` where the caller holds readings of the
     account's balances between requests (the page's data hook does: `cli.ledger_data`). It is
@@ -969,6 +1010,7 @@ def build_ledger(
         with_protection=with_protection,
         check=check,
         opening_reader=opening_reader or effective_opening,
+        window=window,
     )
     return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
 
@@ -1004,6 +1046,7 @@ def _ledger_for(
     with_protection: bool,
     check: Check | None,
     opening_reader: OpeningReader,
+    window: LedgerWindow | None,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -1070,13 +1113,35 @@ def _ledger_for(
 
     per_month = Counter(_month_of(t.value_date) for t in rows)
     months_held = sorted(per_month)
-    if month is None or not month.strip():
-        shown = months_held[-1]
+    span = window
+    fell_back = False
+    widened = 0
+    if span is not None and span.at_least:
+        dated = sorted((t.value_date for t in rows if t.value_date <= span.last), reverse=True)
+        if dated:
+            taken = min(span.at_least, len(dated))
+            if dated[taken - 1] < span.first:
+                span, widened = replace(span, first=dated[taken - 1]), taken
+    if span is not None and span.fall_back and not any(
+        span.first <= t.value_date <= span.last for t in rows
+    ):
+        span, fell_back = None, True
+    shown, previous_month, next_month = "", "", ""
+    if span is not None:
+        first, last = span.first, span.last
     else:
-        year, number = parse_month(month)
-        shown = _label(year, number)
-    year, number = parse_month(shown)
-    first, last = date(year, number, 1), _month_end(year, number)
+        if month is None or not month.strip():
+            shown = months_held[-1]
+        else:
+            year, number = parse_month(month)
+            shown = _label(year, number)
+        year, number = parse_month(shown)
+        first, last = date(year, number, 1), _month_end(year, number)
+        # A step is offered only towards months that could hold something.
+        # Offering "next" from the newest month led to a page saying the month
+        # was empty, which reads as a gap and is only the future.
+        previous_month = _neighbour(year, number, -1) if shown > months_held[0] else ""
+        next_month = _neighbour(year, number, 1) if shown < months_held[-1] else ""
 
     # Only the rows on show are listed with what each sighting stated; every other row is
     # counted by the basis its sightings joined on, which is all `joins` reads of one.
@@ -1261,11 +1326,12 @@ def _ledger_for(
         sources=tuple(account_sources),
         actual_bound=bound,
         month=shown,
-        # A step is offered only towards months that could hold something.
-        # Offering "next" from the newest month led to a page saying the month
-        # was empty, which reads as a gap and is only the future.
-        previous_month=_neighbour(year, number, -1) if shown > months_held[0] else "",
-        next_month=_neighbour(year, number, 1) if shown < months_held[-1] else "",
+        previous_month=previous_month,
+        next_month=next_month,
+        window_first=span.first.isoformat() if span is not None else "",
+        window_last=span.last.isoformat() if span is not None else "",
+        window_fell_back=fell_back,
+        window_widened=widened,
         oldest_month=months_held[0],
         newest_month=months_held[-1],
         month_counts=tuple((month, per_month[month]) for month in months_held),
@@ -1273,7 +1339,7 @@ def _ledger_for(
         position=position,
         rows=tuple(row for _, row in in_month),
         opening=opening_view(opening),
-        typed=typed_lines(entries, shown),
+        typed=typed_lines(entries, shown, (first, last) if span is not None else None),
         unitemised=unitemised_lines(opening),
         clearing=clearing_counts(
             (_month_of(t.value_date), bool(row.cleared_by))
@@ -1295,7 +1361,9 @@ def _ledger_for(
     )
 
 
-def typed_lines(entries: Iterable[TypedEntry], month: str) -> TypedLines:
+def typed_lines(
+    entries: Iterable[TypedEntry], month: str, window: tuple[date, date] | None = None
+) -> TypedLines:
     """The typed entries of one month as the page lists them, and the rest as counts.
 
     Only the month on show is listed, so a mortgage typed into for years does
@@ -1308,7 +1376,11 @@ def typed_lines(entries: Iterable[TypedEntry], month: str) -> TypedLines:
     for entry in sorted(entries, key=lambda e: (e.day, e.entry_id), reverse=True):
         if entry.withdrawn:
             withdrawn += 1
-        if month and _month_of(entry.day) == month:
+        if (
+            window[0] <= entry.day <= window[1]
+            if window is not None
+            else month and _month_of(entry.day) == month
+        ):
             shown.append(
                 TypedLine(
                     entry_id=entry.entry_id,

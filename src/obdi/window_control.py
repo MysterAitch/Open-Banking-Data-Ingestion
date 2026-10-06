@@ -48,7 +48,9 @@ _esc = html.escape
 PRESETS: tuple[tuple[str, str, WindowSpec], ...] = (
     ("all", "Everything", everything()),
     ("d30", "Last 30 days", length(30, Unit.DAYS)),
+    ("d60", "Last 60 days", length(60, Unit.DAYS)),
     ("d90", "Last 90 days", length(90, Unit.DAYS)),
+    ("d180", "Last 180 days", length(180, Unit.DAYS)),
     ("m3", "Last 3 months", length(3, Unit.MONTHS)),
     ("m6", "Last 6 months", length(6, Unit.MONTHS)),
     ("m12", "Last 12 months", length(12, Unit.MONTHS)),
@@ -223,23 +225,39 @@ def _field(name: str, label: str, value: str, *, kind: str = "text") -> str:
     )
 
 
-def window_controls(choice: WindowChoice, *, today: str, note: str = "") -> str:
+def window_controls(
+    choice: WindowChoice,
+    *,
+    today: str,
+    note: str = "",
+    legend: str = "Chart window",
+    first_tap: tuple[str, ...] = FIRST_TAP,
+    omit: tuple[str, ...] = (),
+    show_now: bool = True,
+    extra: tuple[tuple[str, str], ...] = (),
+) -> str:
     """The window's controls: common windows in one tap, and a length or two days to type.
 
     `note` is a sentence the page adds under the window in force, for what choosing does
     there. Every control is shown, since the page has no script to reveal one; the less
     common are folded into a disclosure that is open when the window in force is one of
     them, or when a choice was refused.
+
+    A page that is not a chart names its own `legend`, chooses which windows take the one
+    tap (`first_tap`), leaves out those it cannot offer (`omit`), may say the window in
+    force elsewhere than here (`show_now`), and may offer windows of its own beside the shared
+    ones (`extra`: key and label, each given the first taps ahead of the shared ones). Reading
+    what an `extra` key asks is the page's.
     """
     current = choice.key or DEFAULT_KEY
     names = {key: label for key, label, _ in PRESETS}
-    shown = "".join(
-        _chip(key, names[key], pressed=key == current) for key in FIRST_TAP
+    shown = "".join(_chip(key, label, pressed=key == current) for key, label in extra) + "".join(
+        _chip(key, names[key], pressed=key == current) for key in first_tap
     )
     rest = "".join(
         _chip(key, label, pressed=key == current)
         for key, label, _ in PRESETS
-        if key not in FIRST_TAP
+        if key not in first_tap and key not in omit
     )
     fields = choice.fields
     unit = fields.get("window_unit", "months")
@@ -288,17 +306,17 @@ def window_controls(choice: WindowChoice, *, today: str, note: str = "") -> str:
         "</fieldset>"
     )
     more_open = bool(choice.refusal) or current in (
-        {OTHER_LENGTH, BETWEEN} | {key for key in names if key not in FIRST_TAP}
+        {OTHER_LENGTH, BETWEEN} | {key for key in names if key not in first_tap}
     )
     spec = choice.spec if choice.spec is not None else everything()
     now = (
         f'<p class="window-now" data-window-now>Window: '
         f"{_esc(spec.describe(today=date.fromisoformat(today)))}</p>"
-        if not choice.refusal
+        if show_now and not choice.refusal
         else ""
     )
     return (
-        '<fieldset class="window-control"><legend>Chart window</legend>'
+        f'<fieldset class="window-control"><legend>{_esc(legend)}</legend>'
         + now
         + note
         + f'<div class="window-chips" role="group" aria-label="Common windows">{shown}</div>'
