@@ -121,3 +121,26 @@ Seen on the real store the first time the rebuilt Today was read there (0.4.337,
 - "Artefact" as a page word is undecided; "rows" remains in some reports.
 - Today shows times in UTC.
 - Whether to state a balance for the cash account and the credit union loan is the owner's.
+
+## Roadmap - not next, but queued
+
+- **Everything known about an account, on its page** (asked 2026-10-06; widened the same day
+  from "interest rates" to all of it). A declared account already carries more than any page
+  shows: its kind, parent, opened and closed dates with how they came to be known
+  (`date_basis`), and its terms as dated windows - `LimitWindow` and `RateWindow` in
+  `accounts.py`, stored in `declared_account_limits` and `declared_account_rates` with
+  `window_from`/`window_to`, so a promotional rate that expires or a limit that changes is a
+  sequence of windows. Sources state more again: statement readers lift the rate a document
+  prints (`StatementReading.rates` - a credit union loan's rate in its label, a card's rates
+  table), the issuer's name and account label, and the period; providers state product names,
+  currencies, and identifiers (`keep-and-show-everything-a-source-states`). None of it reaches
+  a page except the archive pill and the head line. The slice, in the spirit of the
+  transaction's fold (0.4.350): a quiet "About this account" fold on the account page listing
+  what is declared (each term window in date order, kind, figure, from, to, "current" marked;
+  the dates and their basis; the parent) and, beside each, what the sources state - the rate a
+  statement printed shown against the declared window it falls in, a difference named where
+  they disagree, a fact a source states that nothing declares shown as "stated, not declared".
+  Today says nothing unless a window ends within the next month or a source disagrees with a
+  declaration. Masked: a rate or a limit is a term, not a balance, but still a figure, so sealed
+  on a GET like every figure; names and dates are shown. Entry stays in the account's edit
+  page, which should gain the same list so a window can be added where it is seen.
