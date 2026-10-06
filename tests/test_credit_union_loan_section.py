@@ -14,8 +14,8 @@ its foot prints is what only a loan prints, and now decides too.
 
 Known answers, written first (store convention, money owed negative; the loan is repaid):
 
-    saver   opening  80,000   one deposit +2,500           closing  82,500, period 2022-05-04 to 2023-03-27
-    loan    opening -120,000  one repayment +10,000        closing -110,000, same period, named with no rate
+    saver   opening  80,000 and one deposit +2,500 close at 82,500; period 2022-05-04 to 2023-03-27
+    loan    opening -120,000 and one repayment +10,000 close at -110,000; same period, no rate named
 """
 
 from __future__ import annotations
