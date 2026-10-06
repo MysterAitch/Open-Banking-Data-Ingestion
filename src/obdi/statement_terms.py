@@ -21,10 +21,11 @@ from .account_observations import Observation
 from .london_clock import london
 from .parsers.base import ParseError
 from .parsers.pdf_statements import (
+    NotExtracted,
     PdfStatementParser,
     SectionReading,
-    _lines,
     pdf_parser_for,
+    statement_lines,
 )
 from .parsers.statement_reading import (
     READING_FORMAT,
@@ -73,7 +74,9 @@ def _read_with_source(payload: bytes, digest: str) -> tuple[str, StatementReadin
         # text at all is a document nothing downstream can use, and
         # finding that out here keeps the reason attached to the
         # artefact it belongs to.
-        _lines(payload)
+        statement_lines(payload)
+    except NotExtracted:
+        raise
     except Exception as exc:
         # Said aloud rather than skipped quietly: a statement that
         # contributes nothing looks exactly like a statement with
@@ -88,6 +91,8 @@ def _read_with_source(payload: bytes, digest: str) -> tuple[str, StatementReadin
         # only legible by coordinate reads the page for itself, and the
         # parser is the one that knows which reading its document needs.
         return parser.source, parser.read(payload)
+    except NotExtracted:
+        raise
     except Exception as exc:
         print(
             f"artefact {digest}: {parser.source} could not read it - {exc}",

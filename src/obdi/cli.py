@@ -3759,6 +3759,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         from .identity import artefact_digest
         from .models import RawArtefact
+        from .statement_extraction import is_kept as extraction_is_kept
+        from .statement_extraction import keep_extraction
 
         digest = artefact_digest(payload)
         with Store(db_path) as store:
@@ -3788,6 +3790,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 "WHERE digest = ? AND source = 'statement' AND account_ref = ?",
                 (digest, twin_ref),
             ).fetchone()
+            # Read here, once, so that no page ever reads this document: bytes already held
+            # were extracted when first kept, and are read again only if the extractor moved.
+            if row is not None and not extraction_is_kept(store, digest):
+                keep_extraction(store, digest, payload)
+                store.connection.commit()
         return (int(row["rowid"]) if row else 0, held is None)
 
     def _checked_statement(

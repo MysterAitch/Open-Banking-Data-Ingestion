@@ -205,6 +205,10 @@ JUSTIFIED = {
     "BEFORE the statement_readings table existed, for the same reason as the "
     "statement_sections entry above: only a rewound marker shows that opening an old "
     "store grows the table the first pass needs",
+    ("test_statement_extraction_stored.py", "obdi_meta"): "stamps a store with the version "
+    "BEFORE the statement_extractions table existed, and one NEWER than the code, for the "
+    "same reason as the entries above: only a rewound or advanced marker shows that an old "
+    "store grows the table and a newer one is refused",
     ("test_same_money_outcomes.py", "obdi_meta"): "stamps a store with the version BEFORE "
     "the same_money_outcomes table existed, for the same reason as the entries above",
     ("test_protection.py", "obdi_meta"): "stamps a store with the version BEFORE the "
