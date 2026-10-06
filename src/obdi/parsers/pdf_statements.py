@@ -31,6 +31,7 @@ from .capital_one_pdf import read_statement as read_capital_one
 from .card_statement_pdf import read_statement as read_card_statement
 from .credit_union_pdf import StatementSection
 from .credit_union_pdf import read_document as read_credit_union_document
+from .credit_union_pdf import read_heading as read_credit_union_heading
 from .credit_union_pdf import read_statement as read_credit_union
 from .halifax_account_pdf import read_statement as read_halifax_account
 from .nationwide_pdf import read_statement as read_nationwide
@@ -238,6 +239,11 @@ class PdfStatementParser(StatementParser):
             )
         return ""
 
+    def heading(self, payload: bytes) -> str:
+        """The account label a one-account document prints, or "" where the format prints none
+        that names the account (every format but the credit union's)."""
+        return ""
+
     def sections(self, payload: bytes) -> list[SectionReading] | None:
         """The accounts of a document that covers several, or None.
 
@@ -325,6 +331,11 @@ class ColumnPdfStatementParser(PdfStatementParser):
     document_reader: Callable[
         [list[list[str]]], list[StatementSection] | None
     ] | None = None
+    #: The account label a one-account document prints, "" where it prints none.
+    heading_reader: Callable[[list[list[str]]], str] | None = None
+
+    def heading(self, payload: bytes) -> str:
+        return "" if self.heading_reader is None else self.heading_reader(_grid(payload))
 
     def read(self, payload: bytes) -> StatementReading:
         return self.grid_reader(_grid(payload))
@@ -388,6 +399,7 @@ class CreditUnionStatementPdfParser(ColumnPdfStatementParser):
     requires = ("Payee", "Source")
     grid_reader = staticmethod(read_credit_union)
     document_reader = staticmethod(read_credit_union_document)
+    heading_reader = staticmethod(read_credit_union_heading)
 
 
 class StarlingStatementPdfParser(PdfStatementParser):

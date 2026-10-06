@@ -30,7 +30,7 @@ import contextlib
 import html
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -48,6 +48,7 @@ from .bring_in import (
     upload_kind,
     wanted_heading,
 )
+from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
 from .callback import render_page
 from .connections import Connection, ConnectionStore
 from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
@@ -89,6 +90,19 @@ UPLOAD_LIMIT = 200 * 1024 * 1024
 
 _LANES = ((STATEMENT, "Statements"), (EXPORT, "Exports"))
 
+#: The name of a chooser in the one form of statements waiting for an account: a whole statement
+#: by its kept id, or one account of a document of several by its kept id and section token.
+_CHOOSER = re.compile(r"^(?:account-(\d+)|section-(\d+)-([0-9a-f]+))$")
+
+
+def _section_tokens(entry: Mapping[str, object]) -> set[str]:
+    parts = entry.get("sections")
+    return (
+        {str(part["token"]) for part in parts if isinstance(part, Mapping)}
+        if isinstance(parts, list)
+        else set()
+    )
+
 
 # ------------------------------------------------------------------------------ What an upload did
 
@@ -122,6 +136,20 @@ class FileResult:
     token: str = ""
     #: Why it was refused, with every digit masked.
     note: str = ""
+    #: The accounts a document of several accounts was read in to (or is held under), where
+    #: `account` cannot say it.
+    accounts: tuple[str, ...] = ()
+    #: The account a statement waiting for one is probably for, pre-selected in its chooser.
+    guess: Guess | None = None
+    #: Which account of a document of several accounts this result is for: its token and the
+    #: label it prints (digits masked), or "" for a whole document.
+    section: str = ""
+    section_label: str = ""
+
+    @property
+    def placed_in(self) -> tuple[str, ...]:
+        """Every account this file was read in to."""
+        return self.accounts or ((self.account,) if self.account else ())
 
 
 @dataclass(frozen=True)
@@ -131,8 +159,22 @@ class UploadResults:
     settled: tuple[str, ...] = ()
     #: The accounts that have days to lock in after this and had none before.
     lockable: tuple[str, ...] = ()
-    #: The account chooser for a file waiting for one: markup, since one component draws it.
+    #: The account chooser for an export waiting for one: markup, since one component draws it.
     picker: str = ""
+    #: Each account's words in a statement's chooser, by reference.
+    options: Mapping[str, str] = field(default_factory=dict)
+    #: Said above the statements' chooser when no account could be suggested for them.
+    guess_note: str = ""
+
+    def awaiting(self) -> tuple[FileResult, ...]:
+        """The statements kept and waiting for an account: the ones the one form asks about."""
+        return tuple(
+            item
+            for item in self.files
+            if item.outcome is Outcome.KEPT
+            and item.kind is UploadKind.STATEMENT
+            and not item.account
+        )
 
 
 # ----------------------------------------------------------------------------------- What it reads
@@ -327,7 +369,7 @@ def _account_html(
     )
 
 
-def _wanted_html(data: BringInData, *, still: bool) -> str:
+def _wanted_html(data: BringInData, *, still: bool, fold: bool = False) -> str:
     if data.report is None:
         said = data.unread or "What is wanted could not be worked out just now."
         return f'<p class="warn">{_esc(said)}</p>'
@@ -335,10 +377,13 @@ def _wanted_html(data: BringInData, *, still: bool) -> str:
     if not files:
         return "" if still else '<p class="quiet-ok bi-clear">Nothing is wanted.</p>'
     groups = by_account(files)
-    return (
-        f"<h2>{_esc(wanted_heading(files, still=still))}</h2>{_axis_html(data.today)}"
-        + "".join(_account_html(ref, items, data) for ref, items in groups.items())
+    heading = _esc(wanted_heading(files, still=still))
+    body = _axis_html(data.today) + "".join(
+        _account_html(ref, items, data) for ref, items in groups.items()
     )
+    if fold:
+        return f'<details class="bi-fold"><summary>{heading}</summary>{body}</details>'
+    return f"<h2>{heading}</h2>{body}"
 
 
 def _mask(text: str) -> str:
@@ -353,11 +398,26 @@ _FILE_SAYS = {
 }
 
 
+def _named(refs: Sequence[str], names: AccountsShown) -> str:
+    """Accounts as a phrase: "A", "A and B", or "A, B, and C"."""
+    shown = [names.of(ref).as_name() for ref in refs]
+    if len(shown) <= 2:
+        return " and ".join(shown)
+    return f"{', '.join(shown[:-1])}, and {shown[-1]}"
+
+
+def _called(result: FileResult) -> str:
+    """A file as a line names it: its name as code, then the account of it that is meant where
+    the document holds several."""
+    label = f", account {_esc(result.section_label)}" if result.section_label else ""
+    return f"{code_html(result.filename)}{label}"
+
+
 def _says(result: FileResult, names: AccountsShown) -> str:
     if result.outcome is Outcome.PLACED:
-        return f"read in to {names.of(result.account).as_name()}"
+        return f"read in to {_named(result.placed_in, names)}"
     if result.outcome is Outcome.ALREADY:
-        return f"already held, under {names.of(result.account).as_name()}"
+        return f"already held, under {_named(result.placed_in, names)}"
     if result.outcome is Outcome.REFUSED:
         return f"not read in: {_esc(result.note)}"
     if result.outcome is Outcome.HELD and result.account:
@@ -367,27 +427,24 @@ def _says(result: FileResult, names: AccountsShown) -> str:
 
 def _ask_html(result: FileResult, picker: str, names: AccountsShown) -> str:
     """The question a file waiting for an account asks, with its control, for that file alone."""
-    name = code_html(result.filename)
+    name = _called(result)
     if result.outcome is Outcome.CONFIRM:
         what = "Confirm which account this statement is for"
         why = (
             f"{name} may not be {names.of(result.account).as_name()}'s. It is kept; nothing "
             "is read in until you have seen why."
         )
+        door = "/statement-section-assign" if result.section else "/statement-assign"
+        section = (
+            f'<input type="hidden" name="section" value="{_esc(result.section)}">'
+            if result.section
+            else ""
+        )
         form = (
-            '<form class="todo-form one" method="post" action="/statement-assign">'
-            f'<input type="hidden" name="artefact" value="{result.artefact}">'
+            f'<form class="todo-form one" method="post" action="{door}">'
+            f'<input type="hidden" name="artefact" value="{result.artefact}">{section}'
             f'<input type="hidden" name="account" value="{_esc(result.account)}">'
             '<button class="button" type="submit">See why</button></form>'
-        )
-    elif result.kind is UploadKind.STATEMENT:
-        what = "Say which account this statement is for"
-        why = f"{name} is kept; nothing is read in until you say."
-        form = (
-            '<form class="todo-form one" method="post" action="/statement-assign">'
-            f'<input type="hidden" name="artefact" value="{result.artefact}">'
-            f'{picker}<button class="button" type="submit">Read it in to this account</button>'
-            "</form>"
         )
     else:
         what = "Say which account this export is for"
@@ -438,6 +495,82 @@ def _reasons_html(data: BringInData) -> str:
     )
 
 
+def _reason_html(guess: Guess | None, names: AccountsShown) -> str:
+    """Why an account is pre-selected beside a chooser, or why none is where the evidence splits."""
+    if guess is None:
+        return ""
+    if not guess.account:
+        return (
+            f'<p class="bi-guess">Earlier statements with this heading went to '
+            f"{_named(guess.candidates, names)}, so none is chosen for you.</p>"
+        )
+    whose = names.of(guess.account).as_name()
+    if guess.basis is GuessBasis.HEADING:
+        return (
+            f'<p class="bi-guess">Printed with the heading every earlier statement of it went '
+            f"to {whose}.</p>"
+        )
+    like = f"the {guess.match_year} statement" if guess.match_year else "an earlier statement"
+    how = {
+        GuessBasis.READER: "Read like",
+        GuessBasis.NAME: "Named like",
+        GuessBasis.BOTH: "Read and named like",
+    }[guess.basis]
+    return (
+        f'<p class="bi-guess">{how} {like} {code_html(guess.match_origin)}, '
+        f"which went to {whose}.</p>"
+    )
+
+
+def _assign_html(results: UploadResults, names: AccountsShown) -> str:
+    """The one form for every kept statement that needs an account: a chooser for each, and the
+    one control at its foot.
+
+    The control sits in a bar that stays at the foot of the screen while the form is on it, so
+    it is reachable from the first file's chooser without scrolling past the rest. An account
+    already chosen is a guess, with its reason beside it, and is never read in until the press.
+    """
+    from .web import account_options
+
+    waiting = results.awaiting()
+    if not waiting:
+        return ""
+    one = len(waiting) == 1
+    texts = dict(results.options)
+    rows = []
+    for item in waiting:
+        field = f"section-{item.artefact}-{item.section}" if item.section else (
+            f"account-{item.artefact}"
+        )
+        selected = item.guess.account if item.guess else ""
+        aria = f"Account for {item.filename}" + (
+            f", {item.section_label}" if item.section_label else ""
+        )
+        rows.append(
+            '<li class="bi-assign-file">'
+            f'<p class="bi-assign-name">{_called(item)}</p>'
+            f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
+            '<option value="">choose an account...</option>'
+            f"{account_options(texts, selected=selected)}</select>"
+            f"{_reason_html(item.guess, names)}</li>"
+        )
+    guessed = any(item.guess and item.guess.account for item in waiting)
+    lead = "Nothing is read in until you press." + (
+        " An account already chosen is a guess from earlier statements, with its reason beside it."
+        if guessed
+        else ""
+    )
+    return (
+        '<form class="bi-assign" method="post" action="/statements-assign">'
+        f"<h3>Say which account {'this statement is' if one else 'each statement is'} for</h3>"
+        f'<p class="bi-assign-lead">{_esc(lead)}</p>'
+        + (f'<p class="warn">{_esc(results.guess_note)}</p>' if results.guess_note else "")
+        + f'<ul class="bi-assign-list">{"".join(rows)}</ul>'
+        '<div class="bi-assign-bar"><button class="button" type="submit">'
+        f"{'Read it in' if one else 'Read them all in'}</button></div></form>"
+    )
+
+
 def _results_html(data: BringInData) -> str:
     results = data.results
     if results is None:
@@ -457,13 +590,14 @@ def _results_html(data: BringInData) -> str:
     rows += [
         _ask_html(item, results.picker, names)
         for item in results.files
-        if item.outcome in (Outcome.KEPT, Outcome.HELD, Outcome.CONFIRM)
+        if item.outcome is Outcome.CONFIRM
+        or (item.outcome is Outcome.HELD and item.kind is UploadKind.EXPORT)
     ]
-    held = "".join(
-        f"<li>{code_html(item.filename)}: {_says(item, names)}.</li>" for item in results.files
-    )
+    held = "".join(f"<li>{_called(item)}: {_says(item, names)}.</li>" for item in results.files)
+    received = len({(item.filename, item.artefact or item.token) for item in results.files})
     return (
-        f"<h2>{_esc(plural(len(results.files), 'file'))} received</h2>{settled}"
+        f"<h2>{_esc(plural(received, 'file'))} received</h2>{settled}"
+        + _assign_html(results, names)
         + (f'<ul class="todos bi-ask">{"".join(rows)}</ul>' if rows else "")
         + f'<details class="evidence"><summary>What each file held</summary><ul>{held}</ul>'
         "</details>"
@@ -474,7 +608,10 @@ def render_bring_in(data: BringInData) -> bytes:
     """The page: the target, what an upload settled, the one evidence line, then what is wanted."""
     after = data.results is not None
     notice = f'<p class="bi-notice">{_esc(data.notice)}</p>' if data.notice else ""
-    wanted = _wanted_html(data, still=after)
+    # Folded while two or more statements wait for an account, so that choosing them is the
+    # page and the long list of what is wanted is one press away, not three screens beneath.
+    several_wait = data.results is not None and len(data.results.awaiting()) > 1
+    wanted = _wanted_html(data, still=after, fold=several_wait)
     drop = (
         f"{_results_html(data)}{notice}{_target_html(data)}{_kept_line(data)}"
         + (wanted if not after and wanted.startswith('<p class="quiet-ok') else "")
@@ -865,25 +1002,184 @@ class BringInPages:
             return
         before = self._standings()
         results = [self._place(payload, filename, account) for payload, filename in files]
+        guess_note = ""
+        if not account:
+            results, guess_note = self._with_guesses(results)
+        summary = self._summarise(results, before, guess_note=guess_note)
+        self._respond(
+            200, self._answer(self._data(scoped=account, results=summary)), no_store=True
+        )
+
+    def _summarise(
+        self,
+        results: Sequence[FileResult],
+        before: dict[str, AccountStanding],
+        *,
+        guess_note: str = "",
+    ) -> UploadResults:
+        """What the files settled, in the trust sentence's terms, and what is still asked."""
         after = self._standings()
         names = self._account_names()
-        placed = sorted({r.account for r in results if r.outcome is Outcome.PLACED})
+        placed = sorted(
+            {ref for r in results if r.outcome is Outcome.PLACED for ref in r.placed_in}
+        )
         settled = tuple(
             text
             for ref in placed
             if (text := settled_sentence(names.of(ref).name, before.get(ref), after.get(ref)))
         )
         picker = ""
-        if any(r.outcome in (Outcome.KEPT, Outcome.HELD) and not r.account for r in results):
+        if any(r.outcome is Outcome.HELD and not r.account for r in results):
             from .web import account_picker
 
             picker = account_picker(self.picker_account_options())
-        summary = UploadResults(
-            tuple(results), settled, newly_lockable(before, after), picker
+        return UploadResults(
+            tuple(results),
+            settled,
+            newly_lockable(before, after),
+            picker,
+            self.picker_account_options(),
+            guess_note,
         )
+
+    def _with_guesses(self, results: list[FileResult]) -> tuple[list[FileResult], str]:
+        """The statements kept and waiting for an account, with what is known about whose each
+        is: a row of the one form for each, or for each account of a document of several.
+
+        Nothing is read in here. Where the kept listing cannot be read the files stay kept with
+        an empty chooser and the page says that no account could be suggested.
+        """
+        waiting = [
+            r for r in results
+            if r.outcome is Outcome.KEPT and r.kind is UploadKind.STATEMENT and not r.account
+        ]
+        hook = self.bound_config.kept_statements
+        if not waiting or hook is None:
+            return results, ""
+        try:
+            listing = hook()
+        except Exception:
+            return results, "No account could be suggested for these statements just now."
+        by_id = {int(str(item["id"])): item for item in listing}
+        resolved: list[FileResult] = []
+        for item in results:
+            entry = by_id.get(item.artefact) if item in waiting else None
+            parts = entry.get("sections") if entry is not None else None
+            if entry is None:
+                resolved.append(item)
+            elif not isinstance(parts, list) or not parts:
+                resolved.append(replace(item, guess=guess_account(entry, listing)))
+            else:
+                resolved.extend(self._section_results(item, parts))
+        return resolved, ""
+
+    @staticmethod
+    def _section_results(item: FileResult, parts: list[object]) -> list[FileResult]:
+        """One result for each account of a document of several that still needs one; a
+        document with none left says it is already held."""
+        sections = [part for part in parts if isinstance(part, Mapping)]
+        held = tuple(sorted({str(part["account"]) for part in sections if part.get("account")}))
+        waiting = [part for part in sections if not part.get("account")]
+        if not waiting:
+            return [replace(item, outcome=Outcome.ALREADY, accounts=held)]
+        found = []
+        for part in waiting:
+            label = str(part.get("label") or "")
+            if part.get("refusal"):
+                found.append(replace(
+                    item, outcome=Outcome.REFUSED, section=str(part["token"]),
+                    section_label=label, note=_mask(str(part["refusal"])),
+                ))
+            else:
+                found.append(replace(
+                    item, section=str(part["token"]), section_label=label,
+                    guess=section_guess(part),
+                ))
+        return found
+
+    def statements_assign_each(self, form: Mapping[str, list[str]]) -> bool:
+        """Read in each kept statement, or account of one, to the account its own chooser says.
+
+        The press of the one form `_assign_html` draws. A chooser left empty keeps its file and
+        asks about it again; one file refused, or doubted, never stops the others. Everything is
+        checked before anything is read in, so a field naming a statement that is not kept or an
+        account nobody declared reads nothing. A statement or an account of a document that
+        already has an account is reported as held, never moved, because a second press (or a
+        stale page) must not refile what was filed on purpose.
+
+        Returns False where `form` has none of this form's fields, so the older single-account
+        bulk door can answer it.
+        """
+        asked = [
+            (int(found[1] or found[2]), found[3] or "", (values[0] if values else "").strip())
+            for key, values in form.items()
+            if (found := _CHOOSER.match(key)) is not None
+        ]
+        if not asked:
+            return False
+        listing_hook = self.bound_config.kept_statements
+        if listing_hook is None or self.bound_config.assign_kept_statement is None:
+            self._respond(
+                404, self._answer(self._data(notice="Reading statements in is not wired here.")),
+                no_store=True,
+            )
+            return True
+        try:
+            listing = {int(str(item["id"])): item for item in listing_hook()}
+        except Exception as exc:
+            self._respond(
+                400,
+                self._answer(self._data(
+                    notice=f"The kept statements could not be read, so nothing was read in: "
+                    f"{_mask(str(exc))}"
+                )),
+                no_store=True,
+            )
+            return True
+        known = self._account_names()
+        for ident, section, account in asked:
+            entry = listing.get(ident)
+            if entry is None or (section and section not in _section_tokens(entry)):
+                refusal = f"No kept statement {ident} holds that. Nothing was read in."
+            elif account and account not in known:
+                refusal = "That is not an account obdi knows. Nothing was read in."
+            else:
+                continue
+            self._respond(400, self._answer(self._data(notice=refusal)), no_store=True)
+            return True
+        before = self._standings()
+        results = [
+            self._assigned_or_kept(listing[ident], ident, section, account)
+            for ident, section, account in sorted(asked)
+        ]
         self._respond(
-            200, self._answer(self._data(scoped=account, results=summary)), no_store=True
+            200, self._answer(self._data(results=self._summarise(results, before))), no_store=True
         )
+        return True
+
+    def _assigned_or_kept(
+        self, entry: Mapping[str, object], ident: int, section: str, account: str
+    ) -> FileResult:
+        name = str(entry["origin"])
+        kind = UploadKind.STATEMENT
+        parts = entry.get("sections")
+        part = next(
+            (p for p in parts if isinstance(p, Mapping) and p["token"] == section), None
+        ) if isinstance(parts, list) and section else None
+        label = str(part["label"]) if part is not None else ""
+        filed = str(entry["account_ref"])
+        whole = "" if filed == UNASSIGNED_ACCOUNT else filed
+        held = str(part.get("account") or "") if part is not None else whole
+        if held:
+            return FileResult(
+                name, kind, Outcome.ALREADY, account=held, artefact=ident,
+                section=section, section_label=label,
+            )
+        if not account:
+            return FileResult(
+                name, kind, Outcome.KEPT, artefact=ident, section=section, section_label=label
+            )
+        return self._read_in(name, ident, account, section=section, label=label)
 
     def _answer(self, data: BringInData) -> bytes:
         return render_bring_in(data)
@@ -957,32 +1253,50 @@ class BringInPages:
                 )
         if not account:
             return FileResult(name, kind, Outcome.KEPT, artefact=artefact)
-        review = config.review_kept_statement
+        return self._read_in(name, artefact, account)
+
+    def _read_in(
+        self, name: str, artefact: int, account: str, *, section: str = "", label: str = ""
+    ) -> FileResult:
+        """Read a kept statement, or one account of a kept document of several, in to `account`,
+        unless assigning it raises a doubt the owner has to see first. One refusal is that file's
+        alone: it is reported against it and stays kept, waiting for an account."""
+        config = self.bound_config
+        kind = UploadKind.STATEMENT
+        base = FileResult(
+            name, kind, Outcome.KEPT, account=account, artefact=artefact,
+            section=section, section_label=label,
+        )
+        if section:
+            review_section = config.review_statement_section
+            assign_section = config.assign_statement_section
+            review = (
+                (lambda: review_section(artefact, section, account)) if review_section else None
+            )
+            assign = (
+                (lambda: assign_section(artefact, section, account)) if assign_section else None
+            )
+        else:
+            review_whole = config.review_kept_statement
+            assign_whole = config.assign_kept_statement
+            review = (lambda: review_whole(artefact, account)) if review_whole else None
+            assign = (lambda: assign_whole(artefact, account)) if assign_whole else None
         if review is not None:
             try:
-                doubt = review(artefact, account)
+                doubt = review()
             except Exception:
                 doubt = None
             if doubt is not None:
-                return FileResult(
-                    name, kind, Outcome.CONFIRM, account=account, artefact=artefact
-                )
-        assign = config.assign_kept_statement
+                return replace(base, outcome=Outcome.CONFIRM)
         if assign is None:
-            return FileResult(name, kind, Outcome.KEPT, account=account, artefact=artefact)
+            return base
         try:
-            outcome = assign(artefact, account)
+            outcome = assign()
         except Exception as exc:
-            return FileResult(
-                name, kind, Outcome.REFUSED, account=account, artefact=artefact,
-                note=_mask(str(exc)),
-            )
+            return replace(base, outcome=Outcome.REFUSED, note=_mask(str(exc)))
         if " read by " not in outcome:
-            return FileResult(
-                name, kind, Outcome.REFUSED, account=account, artefact=artefact,
-                note=_mask(outcome),
-            )
-        return FileResult(name, kind, Outcome.PLACED, account=account, artefact=artefact)
+            return replace(base, outcome=Outcome.REFUSED, note=_mask(outcome))
+        return replace(base, outcome=Outcome.PLACED)
 
     def _held_under(self, artefact: int) -> str:
         """The account a statement already held is filed under, "" where it waits for one."""

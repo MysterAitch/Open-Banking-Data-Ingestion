@@ -615,6 +615,14 @@ def served(tmp_path):
         yield base
 
 
+def _kept_id(page: str) -> str:
+    """The kept id of the one statement a results page asks about, from its chooser's name."""
+    form = next(
+        f for f in elements(parse(page), "form") if f.attrs.get("action") == "/statements-assign"
+    )
+    return next(elements(form, "select")).attrs["name"].removeprefix("account-")
+
+
 def text_of(response: httpx.Response) -> str:
     return flat(parse(response.text))
 
@@ -674,11 +682,15 @@ class TestOneUploadTargetOverHttp:
         )
         root = parse(response.text)
         asks = [li for li in elements(root, "li") if "Say which account" in li.text()]
+        statements = [
+            f for f in elements(root, "form") if f.attrs.get("action") == "/statements-assign"
+        ]
 
-        assert [a.text().split(" ")[4] for a in asks] == ["statement", "export"]
-        assert {next(elements(a, "form")).attrs["action"] for a in asks} == {
-            "/statement-assign", "/upload-preview",
-        }
+        assert [a.text().split(" ")[4] for a in asks] == ["export"]
+        assert {next(elements(a, "form")).attrs["action"] for a in asks} == {"/upload-preview"}
+        assert len(statements) == 1 and "Say which account this statement is for" in (
+            statements[0].text()
+        )
         assert "kept, waiting for an account" in root.text()
 
     def test_Upload_OfAKeptStatementThroughTheAskedForm_IsReadInByTheExistingDoor(self, served):
@@ -688,13 +700,11 @@ class TestOneUploadTargetOverHttp:
                              "application/pdf"))],
             timeout=60,
         )
-        form = next(f for f in elements(parse(kept.text), "form")
-                    if f.attrs.get("action") == "/statement-assign")
-        artefact = next(i for i in elements(form, "input") if i.attrs.get("name") == "artefact")
+        artefact = _kept_id(kept.text)
 
         answer = httpx.post(
             f"{served}/statement-assign",
-            data={"artefact": artefact.attrs["value"], "account": "up-card"},
+            data={"artefact": artefact, "account": "up-card"},
             timeout=60,
         )
 
@@ -710,13 +720,11 @@ class TestOneUploadTargetOverHttp:
                              "application/pdf"))],
             timeout=60,
         )
-        form = next(f for f in elements(parse(kept.text), "form")
-                    if f.attrs.get("action") == "/statement-assign")
-        artefact = next(i for i in elements(form, "input") if i.attrs.get("name") == "artefact")
+        artefact = _kept_id(kept.text)
 
         answer = httpx.post(
             f"{served}/statement-assign",
-            data={"artefact": artefact.attrs["value"], "account": "up-card"},
+            data={"artefact": artefact, "account": "up-card"},
             headers={"Referer": f"{served}/bring-in"},
             timeout=60,
         )
@@ -737,13 +745,11 @@ class TestOneUploadTargetOverHttp:
                              "application/pdf"))],
             timeout=60,
         )
-        form = next(f for f in elements(parse(kept.text), "form")
-                    if f.attrs.get("action") == "/statement-assign")
-        artefact = next(i for i in elements(form, "input") if i.attrs.get("name") == "artefact")
+        artefact = _kept_id(kept.text)
 
         answer = httpx.post(
             f"{served}/statement-assign",
-            data={"artefact": artefact.attrs["value"], "account": "up-card"},
+            data={"artefact": artefact, "account": "up-card"},
             headers={"Referer": f"{served}/statements"},
             timeout=60,
         )

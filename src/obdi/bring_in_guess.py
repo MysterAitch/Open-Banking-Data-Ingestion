@@ -1,20 +1,20 @@
 """What obdi can tell about whose a freshly kept statement is, before it asks.
 
-Two kinds of knowledge, kept apart because they are trusted differently.
+THE HEADING LEADS. Where a document prints the label of an account (a credit union section, or
+a whole document that covers the one account still open), the label is what an earlier
+assignment was made on, so the account every earlier assignment of that label chose is the guess
+(`GuessBasis.HEADING`). A label given two accounts makes no guess and names both, and a
+document's siblings (same reader, same issuer) are never consulted for it: a sibling is a
+document of some other account of the issuer's as often as of this one, and a guess made from
+it filed a year's rows of one account under a closed loan.
 
-A DOCUMENT OF SEVERAL ACCOUNTS (the credit union's "all accounts" export) is divided by its own
-reader into sections, and each section carries the label the issuer prints. A label an earlier
-document's section was assigned under names the same account again: that is a recorded decision
-of the owner's about the same label, not a resemblance, so `plan_sections` plans those
-assignments and the caller makes them without asking. A section nobody has ever assigned, or one
-the reader refuses, leaves the whole document for the owner.
+A STATEMENT WITH NO HEADING is guessed from a kept statement already filed under an account: the
+same reader that names the same issuers (`GuessBasis.READER`), or a file name that is an
+earlier file's with the year changed (`GuessBasis.NAME`). Where the evidence points at two
+accounts, or the reader and the name point at different ones, there is no guess.
 
-A SINGLE STATEMENT is only ever GUESSED (`guess_account`), from a kept statement already filed
-under an account: the same reader that names the same issuers (`GuessBasis.READER`), or a file
-name that is an earlier file's with the year changed (`GuessBasis.NAME`). A guess selects an
-account in a chooser and says why; it never reads anything in, because two accounts at one
-issuer read alike and a name is a habit, not a fact. Where the evidence points at two accounts,
-or the reader and the name point at different ones, there is no guess: the chooser stays empty.
+A guess selects an account in a chooser and says why; it never reads anything in, because a name
+is a habit, not a fact. An unreadable evidence listing is the caller's to say, not a guess.
 
 Nothing here reads a figure. The inputs are the kept-statement listing's file names, reader
 names, issuer names, days listed, and section tokens.
@@ -41,31 +41,22 @@ class GuessBasis(StrEnum):
     READER = "reader"
     NAME = "name"
     BOTH = "both"
+    HEADING = "heading"
 
 
 @dataclass(frozen=True)
 class Guess:
     """An account a statement is probably for, and the earlier statement that says so."""
 
+    #: The account to pre-select; "" where the heading was given several (`candidates`).
     account: str
     basis: GuessBasis
     #: The file name of the earlier statement that was matched (the newest, where several are).
-    match_origin: str
+    match_origin: str = ""
     #: The year the earlier statement lists up to, or its file name's year, or "".
-    match_year: str
-
-
-@dataclass(frozen=True)
-class SectionPlan:
-    """What can be done about a document of several accounts without asking."""
-
-    #: (section token, account) for each section an earlier document's label names.
-    to_assign: tuple[tuple[str, str], ...]
-    #: The accounts sections of it are already assigned to, sorted.
-    held_accounts: tuple[str, ...]
-    #: Whether every section is, or would be after `to_assign`, assigned. A document with a
-    #: section nobody has assigned or one the reader refuses is not complete, and plans nothing.
-    complete: bool
+    match_year: str = ""
+    #: Where a heading was given more than one account: all of them, sorted.
+    candidates: tuple[str, ...] = ()
 
 
 def file_shape(origin: str) -> str:
@@ -123,11 +114,15 @@ def guess_account(entry: Entry, kept: Sequence[Entry]) -> Guess | None:
         and str(item["account_ref"]) != UNASSIGNED_ACCOUNT
         and not _sections(item)
     ]
+    headed = bool(entry.get("heading"))
+    if headed and (guess := _by_heading(entry.get("heading_given"))) is not None:
+        return guess
     parser = entry.get("parser")
     names = _names(entry)
+    # A document with a heading is never matched on its reader: see the module's note.
     by_reader = (
         [item for item in filed if item.get("parser") == parser and _names(item) == names]
-        if parser and names
+        if parser and names and not headed
         else []
     )
     shape = file_shape(str(entry.get("origin") or ""))
@@ -155,28 +150,25 @@ def guess_account(entry: Entry, kept: Sequence[Entry]) -> Guess | None:
     return Guess(account, basis, str(example["origin"]), _year_of(example))
 
 
-def plan_sections(entry: Entry) -> SectionPlan | None:
-    """What can be assigned without asking in a document of several accounts, or None where
-    `entry` is not one."""
-    parts = _sections(entry)
-    if not parts:
-        return None
-    held = sorted({str(part["account"]) for part in parts if part.get("account")})
-    waiting = [part for part in parts if not part.get("account")]
-    known = [
-        (str(part["token"]), str(part["suggested"]))
-        for part in waiting
-        if part.get("suggested") and not part.get("refusal")
-    ]
-    complete = len(known) == len(waiting)
-    return SectionPlan(tuple(known) if complete else (), tuple(held), complete)
+def _by_heading(given: object) -> Guess | None:
+    """The guess from the accounts a heading was given: one account, or all of them unchosen."""
+    accounts = sorted({str(item) for item in given}) if isinstance(given, list) else []
+    if len(accounts) == 1:
+        return Guess(accounts[0], GuessBasis.HEADING)
+    if accounts:
+        return Guess("", GuessBasis.HEADING, candidates=tuple(accounts))
+    return None
+
+
+def section_guess(part: Entry) -> Guess | None:
+    """The guess for one section of a document of several accounts, from its heading alone."""
+    return _by_heading(part.get("given"))
 
 
 __all__ = [
     "Guess",
     "GuessBasis",
-    "SectionPlan",
     "file_shape",
     "guess_account",
-    "plan_sections",
+    "section_guess",
 ]

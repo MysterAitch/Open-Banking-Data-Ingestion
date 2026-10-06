@@ -696,6 +696,21 @@ def _numbering_is_whole(marks: list[tuple[int, int, int]]) -> bool:
     )
 
 
+def read_heading(grid: list[list[str]]) -> str:
+    """The account label a document of ONE account prints, or "" where it prints none, prints
+    several, or covers several accounts (`read_document` names those).
+
+    A year in which only one of an owner's accounts was open yields a document that is read
+    whole, so nothing else names the account it is for: its label is the one fact that does,
+    and the same label printed in earlier documents is what an earlier assignment was made on.
+    """
+    parts = sections(grid)
+    if len(parts) != 1:
+        return ""
+    names = _read_one(parts[0])[1]
+    return names[0] if names and len({section_key(name) for name in names}) == 1 else ""
+
+
 def read_document(grid: list[list[str]]) -> list[StatementSection] | None:
     """The document's accounts, one section each, or None for a single account.
 

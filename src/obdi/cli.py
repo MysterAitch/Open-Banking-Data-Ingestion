@@ -3951,6 +3951,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     #: and for one whose sections cannot be told apart (that is its refusal).
     #: Keyed by digest for the same reason.
     sections_by_digest: dict[str, list[SectionReading]] = {}
+    #: The account label a document read whole prints ("" where none), by digest.
+    heading_by_digest: dict[str, str] = {}
 
     def _trial_reading(
         parser: StatementParser, payload: bytes
@@ -3977,7 +3979,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statements under newer feed payloads, which is why this exists.
         """
         from .errors import DataError
-        from .parsers.pdf_statements import statement_lines
+        from .parsers.credit_union_pdf import section_key
+        from .parsers.pdf_statements import PdfStatementParser, statement_lines
         from .parsers.uk_banks import detect
         from .statement_names import names_found
         from .statement_sections import masked, section_token, trial_sections
@@ -4020,6 +4023,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             reading_by_digest[digest] = (None, divided, ("", ""))
                         else:
                             reading_by_digest[digest] = _trial_reading(parser, payload)
+                            try:
+                                heading_by_digest[digest] = (
+                                    parser.heading(payload)
+                                    if isinstance(parser, PdfStatementParser)
+                                    else ""
+                                )
+                            except (DataError, ValueError):
+                                heading_by_digest[digest] = ""
                     try:
                         names_by_digest[digest] = names_found(statement_lines(payload))
                     except (DataError, ValueError, OSError):
@@ -4066,13 +4077,43 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                                 "refusal": masked(item.refusal)[:300],
                                 "account": held_by.get((digest, item.key), ""),
                                 "suggested": offered_for.get(item.key, ""),
+                                "given": [],
                             }
                             for item in divided_sections
                         ]
                         if divided_sections
                         else [],
+                        # A document read whole that prints the label of the one account it
+                        # covers: the token stands for the label as a section's does.
+                        "heading": (
+                            section_token(section_key(heading_by_digest[digest]))
+                            if heading_by_digest.get(digest)
+                            else ""
+                        ),
+                        "heading_label": masked(heading_by_digest.get(digest, "")),
+                        "heading_given": [],
                     }
                 )
+        # What each heading has been given, from every earlier decision about it: a section
+        # assigned under that label, and a document read whole that prints it and was filed.
+        # Every account is kept, not the latest, because a heading given two accounts is a
+        # question for the owner and a guess made from the newest of them is a wrong answer.
+        given_by_token: dict[str, set[str]] = {}
+        for item in assignments:
+            given_by_token.setdefault(section_token(item.section_key), set()).add(
+                item.account_ref
+            )
+        for entry in listing:
+            if entry["heading"] and entry["account_ref"] != UNASSIGNED_ACCOUNT:
+                given_by_token.setdefault(str(entry["heading"]), set()).add(
+                    str(entry["account_ref"])
+                )
+        for entry in listing:
+            if entry["heading"]:
+                entry["heading_given"] = sorted(given_by_token.get(str(entry["heading"]), ()))
+            parts = entry["sections"]
+            for part in parts if isinstance(parts, list) else []:
+                part["given"] = sorted(given_by_token.get(str(part["token"]), ()))
         return listing
 
     def kept_statement_count(ref: str) -> int:

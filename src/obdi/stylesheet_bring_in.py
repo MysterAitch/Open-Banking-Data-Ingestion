@@ -30,6 +30,18 @@ BRING_IN_STYLES = """
  .bi-ask .todo-form select, .bi-ask .todo-form input { width: 100%; }
  .bi-ask .todo { flex-direction: column; align-items: stretch; }
  .bi-ask .todo-text { flex: none; }
+ .bi-assign { margin: var(--s3) 0; }
+ .bi-assign h3 { margin: var(--s2) 0 var(--s1); font: 600 var(--text-md)/130% var(--sans); }
+ .bi-assign-lead { margin: 0 0 var(--s2); }
+ .bi-assign-list { list-style: none; margin: 0; padding: 0; }
+ .bi-assign-file { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .bi-assign-name { margin: 0 0 var(--s1); font: var(--text-sm)/130% var(--sans); overflow-wrap: anywhere; }
+ .bi-assign-file select { width: 100%; min-height: var(--hit); }
+ .bi-guess { margin: var(--s1) 0 0; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .bi-assign-bar { position: sticky; bottom: 0; padding: var(--s2) 0; background: var(--paper); border-top: var(--rule-weight) solid var(--rule); }
+ .bi-assign-bar button.button { width: 100%; margin: 0; }
+ .bi-fold { margin: var(--s3) 0; }
+ .bi-fold > summary { min-height: var(--hit); display: flex; align-items: center; font: 600 var(--text-md)/130% var(--sans); cursor: pointer; }
  .bi-wanted h2 { margin: var(--s4) 0 var(--s2); font-size: var(--text-lg); }
  .bi-account { margin: var(--s3) 0 var(--s4); padding-top: var(--s2); border-top: var(--rule-weight) solid var(--rule-2); }
  .bi-who { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--s3); margin: 0; font: 600 var(--text-base)/130% var(--serif); }

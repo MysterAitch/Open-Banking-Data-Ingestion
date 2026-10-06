@@ -5098,6 +5098,10 @@ class ConnectionHandler(
         form = parse_qs(
             self.rfile.read(length).decode("utf-8", "replace"), keep_blank_values=True
         )
+        # Bring in's one form, a chooser for each statement or account of one, is answered
+        # there; the fields below are the older form of one account for several statements.
+        if self.statements_assign_each(form):
+            return
         wanted = [
             part.strip()
             for value in form.get("artefacts", []) + form.get("artefact", [])
