@@ -237,7 +237,9 @@ class TestAStoreFromBeforeThePreferencesTable:
             version = store.connection.execute(
                 "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
             ).fetchone()
-            assert str(version[0]) == str(SCHEMA_VERSION) == "21"
+            # Grown to whatever the current version is, which has moved on since 21.
+            assert str(version[0]) == str(SCHEMA_VERSION)
+            assert SCHEMA_VERSION >= 21
             set_default_key(store, "d60")
             assert default_key(store) == "d60"
 
