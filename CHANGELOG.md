@@ -26,6 +26,34 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.352] - 2026-10-06
+
+### Changed
+- **Identical bytes are refused at upload, not folded at the press.** The
+  upload already hashed a file and knew its bytes were held, but landed a
+  second row anyway because a waiting row and a filed row with the same
+  digest are different keys, then folded it into its twin when an account
+  was chosen - so the owner was asked to choose an account for a file the
+  store would discard, and the kept count fell by one with no sentence.
+  "Presumably the duplication should be caught as part of the upload ... if
+  the file is being dropped then drop it as part of the upload process."
+  Now such an upload lands nothing and the answer leads with "Already held -
+  read in to <account> on <day> as <file>" (or "Already kept, waiting for an
+  account, as <file>"), with no row, chooser, or dry run; a new file name
+  for held bytes is still recorded. The kept count cannot fall across a
+  press. The absorb on refile stays for stores that already hold twins.
+- **A same-period twin is named before the press.** Two different files of
+  one statement (a certified and a plain copy; a monthly statement and a
+  date-range export over the same days) are both kept as evidence, and the
+  form now says so above the "already held" line: "A statement for
+  <account> covering <first> to <last> is already held (<file>); reading
+  this one in adds a second witness to its N transactions and its own
+  balances, nothing new." The outcome and the rule then match: identical
+  bytes are one artefact; different bytes are two witnesses. Several files
+  sent again while still waiting are said once ("N files were already kept,
+  waiting for an account; they are the rows below"), not once per file -
+  ten such lines had pushed the form's first chooser off a phone's screen.
+
 ## [0.4.351] - 2026-10-06
 
 ### Changed
