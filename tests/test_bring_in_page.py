@@ -693,6 +693,109 @@ class TestOneUploadTargetOverHttp:
         assert answer.status_code == 200
         assert "Read in" in text_of(answer)
 
+    def test_Upload_OfAKeptStatementThroughTheAskedForm_AnswersWithBringInAndWhatItSettled(
+        self, served
+    ):
+        kept = httpx.post(
+            f"{served}/bring-in",
+            files=[("file", ("s.pdf", _statement_pdf(D(2026, 9, 10), "Up Zeppelin", 1500),
+                             "application/pdf"))],
+            timeout=60,
+        )
+        form = next(f for f in elements(parse(kept.text), "form")
+                    if f.attrs.get("action") == "/statement-assign")
+        artefact = next(i for i in elements(form, "input") if i.attrs.get("name") == "artefact")
+
+        answer = httpx.post(
+            f"{served}/statement-assign",
+            data={"artefact": artefact.attrs["value"], "account": "up-card"},
+            headers={"Referer": f"{served}/bring-in"},
+            timeout=60,
+        )
+
+        root = parse(answer.text)
+        said = flat(root)
+        assert answer.status_code == 200
+        assert answer.headers["cache-control"] == "no-store"
+        assert "1 file received" in said
+        assert "read in to Up card." in said
+        assert any(f.attrs.get("action") == "/bring-in" for f in elements(root, "form"))
+        assert "Read another" not in {a.text() for a in elements(root, "a")}
+
+    def test_Upload_OfAKeptStatementThroughTheKeptStatementsPage_KeepsTheOldAnswer(self, served):
+        kept = httpx.post(
+            f"{served}/bring-in",
+            files=[("file", ("s.pdf", _statement_pdf(D(2026, 9, 10), "Up Zeppelin", 1500),
+                             "application/pdf"))],
+            timeout=60,
+        )
+        form = next(f for f in elements(parse(kept.text), "form")
+                    if f.attrs.get("action") == "/statement-assign")
+        artefact = next(i for i in elements(form, "input") if i.attrs.get("name") == "artefact")
+
+        answer = httpx.post(
+            f"{served}/statement-assign",
+            data={"artefact": artefact.attrs["value"], "account": "up-card"},
+            headers={"Referer": f"{served}/statements"},
+            timeout=60,
+        )
+
+        assert "Read another" in {a.text() for a in elements(parse(answer.text), "a")}
+
+    def test_Upload_OfAHeldExportThroughTheAskedForm_PreviewsAndImportsAndLeadsBackToBringIn(
+        self, served
+    ):
+        held = httpx.post(
+            f"{served}/bring-in",
+            data={"account": "up-card"},
+            files=[("file", ("transactions.csv", CSV, "text/csv"))],
+            timeout=60,
+        )
+        form = next(f for f in elements(parse(held.text), "form")
+                    if f.attrs.get("action") == "/upload-preview")
+        fields = {i.attrs["name"]: i.attrs["value"] for i in elements(form, "input")}
+
+        preview = httpx.post(
+            f"{served}/upload-preview",
+            data=fields,
+            headers={"Referer": f"{served}/bring-in"},
+            timeout=60,
+        )
+
+        previewed = parse(preview.text)
+        back = [a.text() for a in elements(previewed, "a")]
+        assert back.count("Back to Bring in") == 1 and "Back to import" not in back
+        confirm = next(f for f in elements(previewed, "form")
+                       if f.attrs.get("action") == "/upload-confirm")
+        confirming = {i.attrs["name"]: i.attrs["value"] for i in elements(confirm, "input")
+                      if "name" in i.attrs and "value" in i.attrs}
+        imported = httpx.post(f"{served}/upload-confirm", data=confirming, timeout=60)
+
+        assert imported.status_code == 200
+        done = [a.text() for a in elements(parse(imported.text), "a")]
+        assert done.count("Back to Bring in") == 1 and "Back to import" not in done
+
+    def test_Upload_OfAHeldExportFromTheImportPage_StillLeadsBackToImport(self, served):
+        held = httpx.post(
+            f"{served}/bring-in",
+            data={"account": "up-card"},
+            files=[("file", ("transactions.csv", CSV, "text/csv"))],
+            timeout=60,
+        )
+        form = next(f for f in elements(parse(held.text), "form")
+                    if f.attrs.get("action") == "/upload-preview")
+        fields = {i.attrs["name"]: i.attrs["value"] for i in elements(form, "input")}
+
+        preview = httpx.post(
+            f"{served}/upload-preview",
+            data=fields,
+            headers={"Referer": f"{served}/import"},
+            timeout=60,
+        )
+
+        said = [a.text() for a in elements(parse(preview.text), "a")]
+        assert "Back to import" in said
+
     def test_Upload_OfAHeldExportThroughTheAskedForm_IsPreviewedByTheExistingDoor(self, served):
         held = httpx.post(
             f"{served}/bring-in",

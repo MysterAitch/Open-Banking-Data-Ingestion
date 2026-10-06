@@ -123,7 +123,8 @@ class TestAddsUpWithStatementsDue:
         hrefs = [
             [n.attrs.get("href") for n in controls_of(todo)] for todo in todos_of(page)[:2]
         ]
-        assert hrefs == [["/statement-shape"], ["/statement-shape"]]
+        scoped = f"/bring-in?account={EVERYDAY}"
+        assert hrefs == [[scoped], [scoped]]
 
     def test_FirstThingToDo_IsTheOnePrimaryControlAndTheRestAreOutlined(self, base):
         page = get(base, EVERYDAY)

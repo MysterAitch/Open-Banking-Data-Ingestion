@@ -15,10 +15,9 @@ what a person is told to do is the thing the page is for.
 WHICH CONTROLS ARE PRE-SCOPED. A control is pre-scoped when the page it leads to opens already
 about the account (and, where it can, the days) the to-do is for. Those leading to an account's
 page (`/ledger?ref=`, with `#opening` for the form that states a balance) are pre-scoped to the
-account. The upload pages (`/statement-shape`, `/import`) take no account or period in their
-address, so an upload control is NOT pre-scoped: the person picks the account there, and the
-to-do's own line says which and for which days. `Control.prescoped` records this, so a page
-and a test can tell, and so that making the upload pages take an address becomes one change here.
+account. An upload control leads to Bring in scoped to the account (`/bring-in?account=`), so a
+file read in from it lands at once; the period is not in the address, and the to-do's own line
+says for which days. `Control.prescoped` records this, so a page and a test can tell.
 
 AGES. `Todo.since` is the first day the thing has been waiting where the source knows it (every
 file wanted and every balance to confirm), and None where the source says only that it is so (a
@@ -41,9 +40,11 @@ from .overview import HOUSEKEEPING, NOW, SOON, AttentionItem, Overview
 from .protection import tested_days_of
 from .standing_data import AccountStanding
 
-#: Where a statement or an export is uploaded. Neither takes an account or period in its address.
-STATEMENT_UPLOAD = "/statement-shape"
-EXPORT_UPLOAD = "/import"
+
+def upload_page(ref: str) -> str:
+    """Bring in, scoped to an account: a statement or an export read in from it lands at once,
+    because nothing a bank prints says which account it is for and here the person already has."""
+    return f"/bring-in?account={quote(ref, safe='')}"
 
 
 @dataclass(frozen=True)
@@ -183,7 +184,7 @@ def _due_todos(item: AttentionItem) -> list[Todo]:
             why="Transactions are held after its last known balance, and none for some weeks.",
             since=None,
             urgency=HOUSEKEEPING,
-            control=Control("Upload", STATEMENT_UPLOAD),
+            control=Control("Upload", upload_page(ref), prescoped=True),
             waiting="Statement wanted",
         )
         for ref in item.accounts
@@ -259,7 +260,7 @@ def gap_todos(gap: FetchGap) -> list[Todo]:
         ]
     exports = gap.kind in _EXPORT_KINDS
     control = Control(
-        "Import" if exports else "Upload", EXPORT_UPLOAD if exports else STATEMENT_UPLOAD
+        "Import" if exports else "Upload", upload_page(gap.account), prescoped=True
     )
     return [
         Todo(

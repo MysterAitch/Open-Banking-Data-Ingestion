@@ -22,8 +22,6 @@ from obdi.overview import (
 from obdi.page_times import date_with_age
 from obdi.standing_data import AccountStanding
 from obdi.todo import (
-    EXPORT_UPLOAD,
-    STATEMENT_UPLOAD,
     Todo,
     build_todos,
     lockable,
@@ -181,12 +179,30 @@ class TestAnOrdinaryDay:
             assert todo.control.label not in ("", "Open")
         assert {t.control.label for t in todos if t.kind.startswith("fetch-")} == {"Upload"}
 
-    def test_OrdinaryDay_UploadControls_AreNotPrescopedBecauseTheUploadPagesTakeNoAddress(
+    def test_OrdinaryDay_UploadControls_OpenBringInScopedToTheAccountTheFileIsFor(self) -> None:
+        uploads = [t for t in self.todos() if t.kind.startswith("fetch-")]
+        assert uploads
+        for todo in uploads:
+            assert todo.account is not None
+            assert todo.control.href == f"/bring-in?account={todo.account}"
+            assert todo.control.prescoped is True
+
+    def test_UploadControl_ForAnAccountWhoseReferenceNeedsEncoding_NamesTheSameAccount(
         self,
     ) -> None:
-        uploads = [t for t in self.todos() if t.kind.startswith("fetch-")]
-        assert {t.control.href for t in uploads} == {STATEMENT_UPLOAD}
-        assert not any(t.control.prescoped for t in uploads)
+        (todo,) = build_todos(
+            overview(),
+            report(gap("joint & co #1", GapKind.NEWER_STATEMENT, "2026-09-01", "2026-09-30")),
+            label_of,
+        )
+        assert todo.control.href == "/bring-in?account=joint%20%26%20co%20%231"
+
+    def test_StatementsDue_WhereTheGapsCannotBeRead_AlsoOpenBringInForThatAccount(self) -> None:
+        todos = build_todos(overview(statements_due("everyday", "joint")), None, label_of)
+        assert [t.control.href for t in todos] == [
+            "/bring-in?account=everyday",
+            "/bring-in?account=joint",
+        ]
 
     def test_OrdinaryDay_TheWhyLine_NamesNoAccountAndNoFigure(self) -> None:
         for todo in self.todos():
@@ -296,7 +312,7 @@ class TestOtherThingsATodoIsMadeOf:
         )
         assert todo.title == "Import the export from 2026-08-20"
         assert todo.control.label == "Import"
-        assert todo.control.href == EXPORT_UPLOAD
+        assert todo.control.href == "/bring-in?account=everyday"
 
     def test_AHoleKnownOnlyFromTheRhythmOfStatements_IsDrawnAsAGuess(self) -> None:
         (guess,) = build_todos(

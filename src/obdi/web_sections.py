@@ -56,6 +56,7 @@ WAY_BACK_PAGES: dict[str, str] = {
     "/coverage": "Back to coverage by source",
     "/diagnostics": "Back to Diagnostics",
     "/import": "Back to import",
+    "/bring-in": "Back to Bring in",
 }
 
 

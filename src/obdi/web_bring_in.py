@@ -26,6 +26,7 @@ served in reply to a POST, and it shows no figure either: a refusal's digits are
 
 from __future__ import annotations
 
+import contextlib
 import html
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -885,6 +886,35 @@ class BringInPages:
 
     def _answer(self, data: BringInData) -> bytes:
         return render_bring_in(data)
+
+    def answer_standings(self) -> dict[str, AccountStanding]:
+        """The accounts' standings now, for a door outside this page that settles one of its
+        files and answers with this page (`answer_settled`)."""
+        return self._standings()
+
+    def answer_settled(
+        self, artefact: int, account: str, before: dict[str, AccountStanding]
+    ) -> None:
+        """Answer a kept statement given its account, from this page's own form, with this page:
+        what it settled in the results at the top and what is still wanted beneath, so the next
+        file is one press away and the old answer page is not where the person ends up."""
+        names = self._account_names()
+        filename = f"statement {artefact}"
+        hook = self.bound_config.kept_statements
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                for entry in hook():
+                    if int(str(entry["id"])) == artefact:
+                        filename = str(entry.get("origin") or filename)
+        after = self._standings()
+        sentence = settled_sentence(names.of(account).name, before.get(account), after.get(account))
+        summary = UploadResults(
+            (FileResult(filename, UploadKind.STATEMENT, Outcome.PLACED, account=account,
+                        artefact=artefact),),
+            (sentence,) if sentence else (),
+            newly_lockable(before, after),
+        )
+        self._respond(200, self._answer(self._data(results=summary)), no_store=True)
 
     def _place(self, payload: bytes, filename: str, account: str) -> FileResult:
         name = filename or "upload"

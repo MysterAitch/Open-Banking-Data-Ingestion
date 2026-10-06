@@ -486,6 +486,17 @@ class AssignStatementSection(Protocol):
 #: The fields a request names its account by: the picked one, and the typed one.
 _ACCOUNT_FIELDS = ("account", "account_other", NEW_ACCOUNT_FIELD)
 
+#: The field that carries the page an upload came from, from press to press, so the answer at the
+#: end leads back there (`_answer_back`).
+BACK_FIELD = "back"
+
+
+def _back_field(back: str) -> str:
+    """The hidden input that carries `back` onward, nothing where it is the default."""
+    return f'<input type="hidden" name="{BACK_FIELD}" value="{html.escape(back)}">' if (
+        back != "/import"
+    ) else ""
+
 
 def _asked(fields: Mapping[str, str], names: tuple[str, ...]) -> dict[str, str]:
     """The named fields a request actually carried, to be posted back as asked."""
@@ -936,6 +947,13 @@ BACK_TO_CONNECTIONS = way_back("/connections")
 BACK_TO_ACTUAL = way_back("/actual")
 BACK_TO_ADMIN = way_back("/diagnostics")
 BACK_TO_IMPORT = way_back("/import")
+
+
+def _onward(back: str) -> str:
+    """The way on from an upload's answer. From Bring in the page's own way out (the link under
+    the heading) already leads back there, so only the Overview is added; from the import page
+    its own way back is."""
+    return HOME_LINK if back == "/bring-in" else BACK_TO_IMPORT
 
 #: What the provider's own OAuth codes mean, in words. Deliberately
 #: describes the CLASS of cause rather than asserting which one occurred -
@@ -5520,6 +5538,11 @@ class ConnectionHandler(
         if account is None:
             return
         before = self.answer_standing(account)
+        # A statement assigned from Bring in is answered by Bring in: what it settled at the top
+        # and what is still wanted beneath. Anywhere else the plain answer page is kept. The
+        # Referer is lost across the doubt page, whose answer is therefore the plain one.
+        from_bring_in = referring_page(self._referer(), "/import") == "/bring-in"
+        bring_in_before = self.answer_standings() if from_bring_in else {}
         try:
             outcome = hook(int(artefact), account, doubt_acknowledged=acknowledged)
         except Exception as exc:
@@ -5550,6 +5573,9 @@ class ConnectionHandler(
                     + HOME_LINK,
                 ),
             )
+            return
+        if from_bring_in:
+            self.answer_settled(int(artefact), account, bring_in_before)
             return
         verification = self.answer_sentence(account, before)
         self._respond(
@@ -6696,6 +6722,7 @@ class ConnectionHandler(
                 )
             )
             return
+        back = self._answer_back({BACK_FIELD: [fields.get(BACK_FIELD, "")]})
         # Destination FIRST: the preview verifies the file against what
         # this account already holds, which is impossible to do after the
         # fact - and it makes the confirm page a single honest button.
@@ -6721,12 +6748,12 @@ class ConnectionHandler(
             picked=picked,
             confirmed=fields.get(NEW_ACCOUNT_FIELD, ""),
             action="/upload-preview",
-            carry=lambda: {"token": self.uploads.stash(payload, filename)},
+            carry=lambda: {"token": self.uploads.stash(payload, filename), BACK_FIELD: back},
             proceed_label="Declare it and preview the import",
         )
         if account is None:
             return
-        self._preview_import(payload, filename, account)
+        self._preview_import(payload, filename, account, back=back)
 
     def _resume_upload(self, form: dict[str, list[str]]) -> None:
         """Preview a file already held, once its destination is settled.
@@ -6774,6 +6801,7 @@ class ConnectionHandler(
                 no_store=True,
             )
             return
+        back = self._answer_back(form)
         account = self.chosen_account(
             typed=typed,
             picked=picked,
@@ -6781,17 +6809,31 @@ class ConnectionHandler(
             action="/upload-preview",
             # Claiming consumed the stash, so asking again re-stashes: the
             # file survives however many times the destination is queried.
-            carry=lambda: {"token": self.uploads.stash(payload, filename)},
+            carry=lambda: {"token": self.uploads.stash(payload, filename), BACK_FIELD: back},
             proceed_label="Declare it and preview the import",
         )
         if account is None:
             return
         self._preview_import(
-            payload, filename, account, show_values=form.get("show_values") == ["yes"]
+            payload, filename, account, show_values=form.get("show_values") == ["yes"], back=back
         )
 
+    def _answer_back(self, form: dict[str, list[str]]) -> str:
+        """Where an upload's answers lead back to: Bring in where the file came from there (the
+        press carries it from step to step, and the first press shows it by its Referer), and
+        the import page otherwise. Only these two are ever chosen, whatever a request says."""
+        said = (form.get(BACK_FIELD, [""])[0] or "").strip()
+        came = said or referring_page(self._referer(), "/import")
+        return "/bring-in" if came == "/bring-in" else "/import"
+
     def _preview_import(
-        self, payload: bytes, filename: str, account: str, *, show_values: bool = False
+        self,
+        payload: bytes,
+        filename: str,
+        account: str,
+        *,
+        show_values: bool = False,
+        back: str = "/import",
     ) -> None:
         """Parse without landing, and offer the single confirm button.
 
@@ -6882,6 +6924,7 @@ class ConnectionHandler(
             f'<input type="hidden" name="token" value="{token}">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
             f'<input type="hidden" name="show_values" value="{"no" if show_values else "yes"}">'
+            + _back_field(back)
             + submit_button("Hide values" if show_values else "Show values", secondary=True)
             + "</form>"
         )
@@ -6922,6 +6965,7 @@ class ConnectionHandler(
             '<form method="post" action="/upload-confirm">'
             f'<input type="hidden" name="token" value="{token}">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
+            + _back_field(back)
             + (
                 '<label class="tick">'
                 '<input type="checkbox" name="override" value="yes" required> '
@@ -6931,7 +6975,7 @@ class ConnectionHandler(
             )
             + '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-            f"Import into {html.escape(account)}</button></p></form>" + BACK_TO_IMPORT
+            f"Import into {html.escape(account)}</button></p></form>" + _onward(back)
         )
         self._respond(200, render_page("Preview import", body), no_store=True)
 
@@ -6986,6 +7030,7 @@ class ConnectionHandler(
                 ),
             )
             return
+        back = self._answer_back(form)
         try:
             payload, filename, doubted = self.uploads.claim(token)
         except KeyError:
@@ -7007,13 +7052,14 @@ class ConnectionHandler(
                     '<form method="post" action="/upload-confirm">'
                     f'<input type="hidden" name="token" value="{fresh}">'
                     f'<input type="hidden" name="account" value="{html.escape(account)}">'
-                    '<label class="tick">'
+                    + _back_field(back)
+                    + '<label class="tick">'
                     '<input type="checkbox" name="override" value="yes" required> '
                     "Import here anyway - I have checked the destination</label>"
                     '<p><button class="button" type="submit" '
                     'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
                     f"Import into {html.escape(account)}</button></p></form>"
-                    + BACK_TO_IMPORT,
+                    + _onward(back),
                 ),
             )
             return
@@ -7032,12 +7078,17 @@ class ConnectionHandler(
         print(f"web import: {filename} -> {account}", file=sys.stderr)
         verification = self.answer_sentence(account, before)
         result_token = self.uploads.keep_result(
-            {"summary": summary, "account": account, "verification": verification}
+            {
+                "summary": summary,
+                "account": account,
+                "verification": verification,
+                BACK_FIELD: back,
+            }
         )
         self._respond(
             200,
             self._import_result_page(
-                summary, account, verification, result_token, show_values=False
+                summary, account, verification, result_token, show_values=False, back=back
             ),
             no_store=True,
         )
@@ -7050,6 +7101,7 @@ class ConnectionHandler(
         result_token: str,
         *,
         show_values: bool,
+        back: str = "/import",
     ) -> bytes:
         """What an import did, with the comparison against other sources masked by default.
 
@@ -7082,7 +7134,8 @@ class ConnectionHandler(
             f"<h2>Import another into {html.escape(account)}</h2>"
             '<form action="/upload" method="post" enctype="multipart/form-data">'
             f'<input type="hidden" name="account" value="{html.escape(account)}">'
-            '<p><input type="file" name="statement" aria-label="Statement file" required></p>'
+            + _back_field(back)
+            + '<p><input type="file" name="statement" aria-label="Statement file" required></p>'
             '<p><button class="button" type="submit" '
             'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
             "Preview import</button></p></form>"
@@ -7094,7 +7147,7 @@ class ConnectionHandler(
             + (f"<p>{html.escape(verification)}</p>" if verification else "")
             + values_form
             + another
-            + BACK_TO_IMPORT,
+            + _onward(back),
         )
 
     def _upload_result(self, form: dict[str, list[str]]) -> None:
@@ -7123,6 +7176,7 @@ class ConnectionHandler(
                 str(held["verification"]),
                 token,
                 show_values=form.get("show_values") == ["yes"],
+                back="/bring-in" if held.get(BACK_FIELD) == "/bring-in" else "/import",
             ),
             no_store=True,
         )
