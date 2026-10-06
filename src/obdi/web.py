@@ -4136,89 +4136,9 @@ class ConnectionHandler(
         if hook is None:
             self._respond(404, error_page("Not available", "<p>No ledger wired.</p>"))
             return
-        ledger = hook()
-        raw_day = ledger.get("last_day")
-        day_rows = "".join(
-            f'<tr><td>{html.escape(str(r.get("connection_id")))}</td>'
-            f'<td>{html.escape(_short_ref(str(r.get("account_ref", ""))))}</td>'
-            f'<td>{r.get("count")}</td></tr>'
-            for r in (raw_day if isinstance(raw_day, list) else [])
-            if isinstance(r, dict)
-        )
-        raw_rows = ledger.get("rows")
-        rows = "".join(
-            f'<div class="row"><strong>'
-            f'{html.escape(str(r.get("attempted_at", ""))[:19].replace("T", " "))}'
-            "</strong> "
-            + (
-                '<span class="pill pill-quiet">range refused - narrowing</span>'
-                if _is_range_refusal(r)
-                else f'<span class="pill pill-bad">refused {r.get("http_status")} '
-                f'{html.escape(str(r.get("error_code", "")))}</span>'
-                if r.get("outcome") == "refused"
-                else f'<span class="pill pill-ok">'
-                f'{html.escape(str(r.get("outcome", "")))}</span>'
-            )
-            + f'<br><span class="muted">'
-            f'{code_html(_short_ref(str(r.get("account_ref", ""))))} - '
-            f'{code_html(str(r.get("source", "")).removeprefix("truelayer-"))} - '
-            f"{html.escape(_trigger_of(r.get('request_meta')))}</span>"
-            f'<br><span class="mono">{html.escape(str(r.get("asked", "")))}</span>'
-            + (
-                '<details><summary class="muted">provider detail</summary>'
-                f'<span class="mono">{html.escape(str(r.get("detail", "")))}</span>'
-                "</details>"
-                if r.get("outcome") == "refused" and r.get("detail")
-                else ""
-            )
-            + (
-                f' <a href="/artefact?id={r.get("artefact_id")}">view artefact</a>'
-                if r.get("artefact_id")
-                else ""
-            )
-            + "</div>"
-            for r in (raw_rows if isinstance(raw_rows, list) else [])
-            if isinstance(r, dict)
-        )
-        body = (
-            "<p>Every ask made of a provider, newest first - refused or "
-            "landed. Refusals are the valuable rows: what was asked and what "
-            "the provider answered is the raw material of the quota model "
-            "and the ceiling probes.</p>"
-            "<p>A deep-ladder row may cover several provider calls, so deep "
-            "rows are a known under-count of quota spend.</p>"
-            + (
-                '<p class="muted">Refusals marked <strong>range refused - '
-                "narrowing</strong> are the Starling pull asking for the "
-                "widest window first and narrowing it step by step until the "
-                "provider accepts one; the accepted window then lands in the "
-                "row after it. They need no action. The pull does not "
-                "remember the answer, so the same refusal comes back each "
-                "time it asks for the full history again.</p>"
-                if any(
-                    _is_range_refusal(r)
-                    for r in (raw_rows if isinstance(raw_rows, list) else [])
-                    if isinstance(r, dict)
-                )
-                else ""
-            )
-            + (
-                "<h2>Calls in the last 24 hours</h2>"
-                "<table><tr><th>connection</th><th>account</th><th>calls</th>"
-                f"</tr>{day_rows}</table>"
-                if day_rows
-                else ""
-            )
-            + "<h2>Attempts (UTC)</h2>"
-            + (
-                rows
-                if rows
-                else "<p>No attempts are recorded yet. That is expected until the next pull "
-                "runs: each pull records one.</p>"
-            )
-            + HOME_LINK
-        )
-        self._respond(200, render_page("Fetch attempts", body))
+        from .web_attempts import attempts_body
+
+        self._respond(200, render_page("Fetch attempts", attempts_body(hook()) + HOME_LINK))
 
     @staticmethod
     def _as_count(value: object) -> int:
