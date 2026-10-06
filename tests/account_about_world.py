@@ -3,6 +3,8 @@
 DECIDED BEFORE THE FIRST RUN (dates relative to the day the page is served on):
 
 - `bare` is declared with a name and nothing else.
+- `busy` declares a rate that ends in 10 days but states no known balance, so its row already
+  carries a thing to do.
 - `dated` is opened 2019-05-01 and closes 2031-02-01, both stated.
 - `terms` is a credit card under `main`, opened 2020-03-01 with that date stated, closed
   2031-01-01 with that date inferred from its first and last movement. It declares a promotional
@@ -36,6 +38,7 @@ import httpx
 import pytest
 
 from obdi.accounts import AccountRecord, AccountRef, LimitWindow, RateWindow
+from obdi.balance_anchors import record_stated_anchor
 from obdi.identity import artefact_digest, content_key
 from obdi.ingest import reconcile_batch
 from obdi.models import RawArtefact, SourceTier, Transaction, TransactionStatus
@@ -58,9 +61,10 @@ QUIET = "quiet"
 OLD_DIFFERS = "old-differs"
 ISSUER_NAMED = "issuer-named"
 DATED = "dated"
+BUSY = "busy"
 ACCOUNTS = [
     MAIN, BARE, TERMS, DIFFERS, SAME, BARE_RATE, ENDING, FAR, QUIET, OLD_DIFFERS, ISSUER_NAMED,
-    DATED,
+    DATED, BUSY,
 ]
 
 
@@ -89,6 +93,12 @@ def _rows(store: Store, ref: str) -> None:
         for number in range(1, 6)
     ]
     reconcile_batch(store, items, digest=f"rows-{ref}")
+    if ref == BUSY:
+        return
+    # Two known balances that the five rows carry from one to the other, so that the account asks
+    # nothing of the owner and its row on Today has a free slot for a note on its terms.
+    record_stated_anchor(store, ref, ahead(-6).isoformat(), "1000.00", today=TODAY)
+    record_stated_anchor(store, ref, TODAY.isoformat(), "974.85", today=TODAY)
 
 
 def statement(
@@ -155,6 +165,7 @@ def build(store: Store) -> None:
         (FAR, "Far", 90, 5.5, -100),
         (QUIET, "Quiet", 200, 8.8, -100),
         (OLD_DIFFERS, "Old Differs", 200, 8.8, -400),
+        (BUSY, "Busy", 10, 5.5, -100),
     ):
         store.declare_account(
             AccountRecord(

@@ -4234,6 +4234,30 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             texts.append(StatedText("Name its provider gives", named, source, None, private=True))
         return SourceFacts(rates=found.rates, texts=tuple(texts), unread=tuple(unread))
 
+    def account_term_notes(today: date) -> dict[str, str]:
+        """The note each account's row of Today carries about its declared terms.
+
+        Statements are read only for an account that declares a rate, since a rate that differs
+        can only be found against one.
+        """
+        from .account_about import row_notice
+        from .statement_terms import account_readings
+
+        notes: dict[str, str] = {}
+        with Store(db_path) as store:
+            for record in store.declared_accounts():
+                if not (record.rates or record.limits):
+                    continue
+                rates = (
+                    facts_from_readings(account_readings(store, str(record.ref))).rates
+                    if record.rates
+                    else ()
+                )
+                note = row_notice(record, rates, today)
+                if note:
+                    notes[str(record.ref)] = note
+        return notes
+
     def artefact_index() -> list[dict[str, object]]:
         import json as _json
 
@@ -4530,6 +4554,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         kept_statements=kept_statements,
         kept_statement_count=kept_statement_count,
         account_sources=account_sources,
+        account_term_notes=account_term_notes,
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,
         refile_artefact=(lambda artefact_id, account: _refile(db_path, artefact_id, account)),
