@@ -220,7 +220,7 @@ def _page_marks(grid: list[list[str]]) -> list[tuple[int, int, int]]:
     ]
 
 
-def sections(grid: list[list[str]]) -> list[list[list[str]]]:
+def sections(grid: list[list[str]], pages: list[int] | None = None) -> list[list[list[str]]]:
     """One grid per account section of an export covering several accounts.
 
     The page numbering restarts at each account: a section spanning two
@@ -232,24 +232,34 @@ def sections(grid: list[list[str]]) -> list[list[list[str]]]:
     followed by a restart, so a statement covering one account is never cut
     up by its own footer, and trailing furniture stays where it is.
 
+    `pages` is the page each row of the grid was printed on, where the
+    reader knows it. A section then begins at the FIRST ROW of the page its
+    restart marker is on, because the marker is not the first thing on the
+    page: the issuer prints the period and the date of issue above the
+    page-number box, and a cut at the marker hands them to the account
+    before. On the real store that left every loan section with no period,
+    so its closing balance could not be dated and never became a known
+    balance; the loan's whole life read as a hole. Without `pages`, or where
+    two restarts share a page, the cut is at the marker as before.
+
     Nothing here reads a statement. It exists so that a multi-account
     export becomes a loop over sections rather than a rewrite of the reader
     - and so the single-account case stays exactly what it is today: one
     section, read whole.
     """
     marks = _page_marks(grid)
-    # BEFORE a restart, not after a completion. The page number is printed
-    # in the page HEADER, above the account name box, so a marker opens the
-    # page it numbers - and a section therefore begins AT its "Page 1 of N"
-    # rather than after the previous section's last marker. Cut the other
-    # way and each account's first page is handed to the account before it,
-    # which then reconciles for neither.
-    #
     # Keyed on the restart alone rather than on a completion followed by a
     # restart, so a section whose final page is missing, or whose total is
     # misprinted, still begins where it says it begins.
     restarts = [position for position, page, _total in marks if page == 1]
-    cuts = restarts[1:]
+    cuts: list[int] = []
+    for marker in restarts[1:]:
+        start = marker
+        if pages is not None and len(pages) == len(grid):
+            first_on_page = pages.index(pages[marker])
+            if first_on_page > (cuts[-1] if cuts else 0):
+                start = first_on_page
+        cuts.append(start)
     if not cuts:
         return [grid]
     split = [grid[start:end] for start, end in zip([0, *cuts], [*cuts, len(grid)], strict=True)]
@@ -711,8 +721,12 @@ def read_heading(grid: list[list[str]]) -> str:
     return names[0] if names and len({section_key(name) for name in names}) == 1 else ""
 
 
-def read_document(grid: list[list[str]]) -> list[StatementSection] | None:
+def read_document(
+    grid: list[list[str]], pages: list[int] | None = None
+) -> list[StatementSection] | None:
     """The document's accounts, one section each, or None for a single account.
+
+    `pages` is the page each row was printed on, where known (see `sections`).
 
     HOW A SECTION IS FOUND. The page numbering restarts at each account (see
     `sections`), and the account's own label sits beneath "Account Name" on
@@ -736,7 +750,7 @@ def read_document(grid: list[list[str]]) -> list[StatementSection] | None:
     A single-account document returns None, and is read by `read_statement`
     exactly as it always was.
     """
-    parts = sections(grid)
+    parts = sections(grid, pages)
     if len(parts) < 2:
         return None
     found: list[tuple[str, str, StatementReading]] = []

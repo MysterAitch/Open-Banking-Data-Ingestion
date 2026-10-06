@@ -17,6 +17,8 @@ reader with no space inside, because the word grid delivers them that way.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from credit_union_documents import (
@@ -27,6 +29,7 @@ from credit_union_documents import (
     document,
     grid,
     nine_accounts,
+    pages,
     pdf,
     section,
 )
@@ -99,6 +102,74 @@ class TestANineAccountDocument:
         assert [item.label for item in found] == ["Regular Saver", "Christmas Club"]
         assert len(found[0].reading.transactions) == 1
         assert found[0].reading.reconciles
+
+
+class TestASectionBeginsWhereItsPageDoes:
+    """The issuer prints the period and the date of issue ABOVE the page-number
+    box. A cut made at the page marker hands those lines to the account before,
+    whose closing balance then has a period and whose neighbour's has none - and
+    a closing balance with no period cannot be dated, so on the real store a
+    loan's balances never became known balances and its whole life read as a
+    hole.
+    """
+
+    LOAN = ("Personal -9.50%", -400000, [Move("04/06/2025", "DD Lodgement", 15500)])
+
+    def _document(self) -> list[str]:
+        return document(
+            section(*SAVER, period="01/05/2025 to 31/05/2025", header_above_marker=True),
+            section(
+                *self.LOAN, period="01/06/2025 to 30/06/2025", loan=True, header_above_marker=True
+            ),
+        )
+
+    def test_EverySection_FindsItsOwnPeriod_WhenTheHeaderIsAboveTheMarker(self):
+        lines = self._document()
+
+        found = read_document(grid(lines), pages(lines))
+
+        assert found is not None
+        assert [item.label for item in found] == ["Regular Saver", "Personal -9.50%"]
+        assert [(item.reading.period_start, item.reading.statement_date) for item in found] == [
+            (date(2025, 5, 1), date(2025, 5, 31)),
+            (date(2025, 6, 1), date(2025, 6, 30)),
+        ], "a section's period must be its own page's, not its neighbour's"
+        assert all(item.reading.produced == date(2026, 10, 6) for item in found)
+
+    def test_ThroughTheParser_ARealPagedFile_DatesEverySection(self):
+        payload = pdf(self._document(), paged=True)
+
+        found = CreditUnionStatementPdfParser().sections(payload)
+
+        assert found is not None
+        assert [item.reading.statement_date for item in found] == [
+            date(2025, 5, 31),
+            date(2025, 6, 30),
+        ]
+        assert all(item.reading.reconciles for item in found)
+
+    def test_TheEarlierLayout_WithTheMarkerOpeningThePage_StillReadsEverySection(self):
+        lines = document(
+            section(*SAVER, period="01/05/2025 to 31/05/2025"),
+            section(*self.LOAN, period="01/06/2025 to 30/06/2025", loan=True),
+        )
+
+        found = read_document(grid(lines), pages(lines))
+
+        assert found is not None
+        assert [item.reading.statement_date for item in found] == [
+            date(2025, 5, 31),
+            date(2025, 6, 30),
+        ]
+
+    def test_WithoutPages_TheMarkerStillCuts_SoAOnePageFixtureReadsAsBefore(self):
+        lines = self._document()
+
+        found = read_document(grid(lines))
+
+        assert found is not None
+        assert [len(item.reading.transactions) for item in found] == [1, 1]
+        assert all(item.reading.reconciles for item in found)
 
 
 class TestEachSectionIsGatedOnItsOwn:

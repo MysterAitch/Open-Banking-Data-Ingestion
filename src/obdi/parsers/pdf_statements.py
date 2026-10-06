@@ -86,8 +86,9 @@ def statement_lines(payload: bytes) -> list[str]:
 
 
 @lru_cache(maxsize=_READINGS_KEPT)
-def _grid(payload: bytes) -> list[list[str]]:
-    """The document's TABLE, read by coordinate rather than by spacing.
+def _grid_and_pages(payload: bytes) -> tuple[list[list[str]], list[int]]:
+    """The document's TABLE, read by coordinate rather than by spacing, and
+    the page each of its rows was printed on.
 
     The second of the two readings of a page. Costlier than the text - a
     word has no position until the page's fonts have been parsed - and the
@@ -96,7 +97,10 @@ def _grid(payload: bytes) -> list[list[str]]:
 
     Cached for the same reason as the text, and it matters more here: this
     is the expensive reading, and where several parsers claim a document
-    they are all run and compared, so it happens once per claimant.
+    they are all run and compared, so it happens once per claimant. The
+    pages are kept beside the grid because a reader that divides a document
+    into its accounts needs to know where a page begins, and the grid alone
+    cannot say.
     """
     import tempfile
     from pathlib import Path
@@ -106,7 +110,13 @@ def _grid(payload: bytes) -> list[list[str]]:
     with tempfile.TemporaryDirectory() as scratch:
         temporary = Path(scratch) / "statement.pdf"
         temporary.write_bytes(payload)
-        return aligned(rows(temporary))
+        table = rows(temporary)
+        return aligned(table), [row.page for row in table]
+
+
+def _grid(payload: bytes) -> list[list[str]]:
+    """The document's table alone; see `_grid_and_pages`."""
+    return _grid_and_pages(payload)[0]
 
 
 @lru_cache(maxsize=_READINGS_KEPT)
@@ -327,9 +337,10 @@ class ColumnPdfStatementParser(PdfStatementParser):
 
     grid_reader: Callable[[list[list[str]]], StatementReading]
     #: Reads a document that may cover several accounts, one section each,
-    #: or returns None for one account; see `read_document`.
+    #: or returns None for one account; see `read_document`. Given the grid
+    #: and the page each row was printed on.
     document_reader: Callable[
-        [list[list[str]]], list[StatementSection] | None
+        [list[list[str]], list[int]], list[StatementSection] | None
     ] | None = None
     #: The account label a one-account document prints, "" where it prints none.
     heading_reader: Callable[[list[list[str]]], str] | None = None
@@ -343,7 +354,7 @@ class ColumnPdfStatementParser(PdfStatementParser):
     def sections(self, payload: bytes) -> list[SectionReading] | None:
         if self.document_reader is None:
             return None
-        found = self.document_reader(_grid(payload))
+        found = self.document_reader(*_grid_and_pages(payload))
         if found is None:
             return None
         return [

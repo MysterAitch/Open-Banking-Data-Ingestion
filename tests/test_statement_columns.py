@@ -250,18 +250,35 @@ def build_positioned_pdf(placements: list[tuple[float, float, str]]) -> bytes:
     fixture shaped unlike any real document proves nothing about real
     documents.
     """
-    placed = "\n".join(
-        f"1 0 0 1 {x:.2f} {y:.2f} Tm ({text}) Tj" for x, y, text in placements
-    )
-    drawn = (f"BT /F1 10 Tf\n{placed}\nET" if placements else "").encode("latin-1")
-    objects = [
+    return build_positioned_pages([placements])
+
+
+def build_positioned_pages(pages: list[list[tuple[float, float, str]]]) -> bytes:
+    """The same file with one page per list of placements, in that order.
+
+    A document of several accounts is several PAGES, and where a page begins
+    is a fact the word reader reports; a fixture drawn on one page cannot
+    carry it.
+    """
+    font_number = 3 + 2 * len(pages)
+    objects: list[bytes] = [
         b"<</Type/Catalog/Pages 2 0 R>>",
-        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 1684 792]/Contents 4 0 R"
-        b"/Resources<</Font<</F1 5 0 R>>>>>>",
-        b"<</Length %d>>stream\n%s\nendstream" % (len(drawn), drawn),
-        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+        b"<</Type/Pages/Kids["
+        + b" ".join(b"%d 0 R" % (3 + 2 * index) for index in range(len(pages)))
+        + b"]/Count %d>>" % len(pages),
     ]
+    for index, placements in enumerate(pages):
+        placed = "\n".join(
+            f"1 0 0 1 {x:.2f} {y:.2f} Tm ({text}) Tj" for x, y, text in placements
+        )
+        drawn = (f"BT /F1 10 Tf\n{placed}\nET" if placements else "").encode("latin-1")
+        page_number = 3 + 2 * index
+        objects.append(
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 1684 792]/Contents %d 0 R"
+            b"/Resources<</Font<</F1 %d 0 R>>>>>>" % (page_number + 1, font_number)
+        )
+        objects.append(b"<</Length %d>>stream\n%s\nendstream" % (len(drawn), drawn))
+    objects.append(b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>")
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):

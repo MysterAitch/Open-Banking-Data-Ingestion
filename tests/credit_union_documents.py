@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from test_statement_columns import build_positioned_pdf
+from test_statement_columns import build_positioned_pages
 
 #: Where each of the ten columns sits on the page: a margin the dates sit in,
 #: then the nine headings. Far apart on purpose, as on the real page.
@@ -86,6 +86,7 @@ def section(
     pages: int = 1,
     fused: bool = False,
     printed_closing_minor: int | None = None,
+    header_above_marker: bool = False,
 ) -> list[str]:
     """One account's pages.
 
@@ -93,6 +94,11 @@ def section(
     owed); the figures PRINTED are what the issuer prints, which for a loan is
     the amount outstanding as a positive number. `printed_closing_minor`
     overrides the closing figure - the way a section is made a penny out.
+
+    `header_above_marker` lays the page out as the issuer's statement really
+    does: the period and the date of issue are printed in the page header
+    ABOVE the page-number box, so they precede the page marker in the grid.
+    The default keeps the earlier layout, in which the marker opens the page.
     """
     sign = -1 if loan else 1
     closing = closing_of(opening_minor, moves)
@@ -104,16 +110,32 @@ def section(
     stated_period = period.replace(" to ", f"{gap}to{gap}")
     for page in range(1, pages + 1):
         chunk = moves[(page - 1) * per_page : page * per_page] if per_page else []
-        lines += [
-            FIRM,
-            f"|||||||Page{gap}{page}{gap}of{gap}{pages}",
-            f"||{_label('Account Name', fused)}|||||{_label('Opening Balance', fused)}",
-            f"|{label}",
-            f"||||||||{_money(sign * opening_minor)}",
-            f"|Period{gap}{stated_period}",
-            HEADER,
-            CONTINUATION,
-        ]
+        marker = f"|||||||Page{gap}{page}{gap}of{gap}{pages}"
+        period_line = f"|Period{gap}{stated_period}"
+        if header_above_marker:
+            lines += [
+                FIRM,
+                "|Private & Confidential||||||Member Statement",
+                f"|||||||{period_line.lstrip('|')}",
+                "|||||||Date of Issue|06/10/2026",
+                marker,
+                f"||{_label('Account Name', fused)}|||||{_label('Opening Balance', fused)}",
+                f"|{label}",
+                f"||||||||{_money(sign * opening_minor)}",
+                HEADER,
+                CONTINUATION,
+            ]
+        else:
+            lines += [
+                FIRM,
+                marker,
+                f"||{_label('Account Name', fused)}|||||{_label('Opening Balance', fused)}",
+                f"|{label}",
+                f"||||||||{_money(sign * opening_minor)}",
+                period_line,
+                HEADER,
+                CONTINUATION,
+            ]
         for move in chunk:
             balance += move.minor
             lines.append(_row(move, sign * balance))
@@ -147,18 +169,38 @@ def grid(lines: list[str]) -> list[list[str]]:
     ]
 
 
-def pdf(lines: list[str], *, step: float = 20.0) -> bytes:
+def pages(lines: list[str]) -> list[int]:
+    """Which page each line is printed on, as the word grid knows it: every
+    page of an invented document opens with the firm's name."""
+    found: list[int] = []
+    page = 0
+    for line in lines:
+        if line == FIRM:
+            page += 1
+        found.append(page)
+    return found
+
+
+def pdf(lines: list[str], *, step: float = 20.0, paged: bool = False) -> bytes:
     """The lines as a real wide page, each cell at its column's point.
 
     `step` is the gap between lines: a nine-account document has well over a
     hundred, and at the default spacing the tail would be drawn below the page.
+
+    `paged` draws each page of the document (see `pages`) on a page of its own,
+    as the issuer's file is - so where a page begins is known to the reader.
     """
-    placements = []
-    for index, line in enumerate(lines):
+    sheets: list[list[tuple[float, float, str]]] = []
+    rows_on_sheet = 0
+    for line, page in zip(lines, pages(lines), strict=True):
+        if not sheets or (paged and page != len(sheets)):
+            sheets.append([])
+            rows_on_sheet = 0
         for column, cell in enumerate(line.split("|")):
             if cell.strip():
-                placements.append((REAL_X[column], 780.0 - index * step, cell.strip()))
-    return build_positioned_pdf(placements)
+                sheets[-1].append((REAL_X[column], 780.0 - rows_on_sheet * step, cell.strip()))
+        rows_on_sheet += 1
+    return build_positioned_pages(sheets)
 
 
 # ---------------------------------------------------------------------------
