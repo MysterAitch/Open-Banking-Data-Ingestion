@@ -44,6 +44,7 @@ from .plural import plural
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import category_resolver, fold_space_copies
+from .statement_extraction import serving_extractions
 from .store import Store
 
 #: Whether a source cannot see Spaces in an account, as (source, account).
@@ -279,8 +280,12 @@ def import_file(
     # rather than needing to be fetched from the bank again.
     is_new_artefact = store.land_artefact(artefact).payload_stored
 
-    parser = detect(payload)
-    incoming = list(parser.parse(payload, account_id=account_id))
+    # A PDF is read here once and kept (`statement_extraction`): the parsers below and every page
+    # afterwards read that, so the artefact page's masked shape is there the moment the import
+    # ends and not after the next rebuild.
+    with serving_extractions(store, artefact.media_type, digest, payload):
+        parser = detect(payload)
+        incoming = list(parser.parse(payload, account_id=account_id))
     offered = getattr(parser, "rows_offered", None)
 
     if dates_cannot_confirm_format([item.value_date for item in incoming]):

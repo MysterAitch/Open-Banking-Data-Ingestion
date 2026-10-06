@@ -23,6 +23,7 @@ from .account_names import AccountsShown
 from .bring_in_guess import guess_account
 from .namespaces import UNASSIGNED_ACCOUNT
 from .plural import plural
+from .statement_extraction import not_yet_extracted_words
 from .web_marks import FETCH_NEXT_LINE
 
 _esc = html.escape
@@ -49,13 +50,17 @@ def _order(item: dict[str, object]) -> tuple[str, int]:
 
 
 def _reader(item: dict[str, object]) -> str:
+    if item.get("not_extracted"):
+        return not_yet_extracted_words()
     parser = item["parser"]
     return _esc(str(parser)) if parser else "no parser for this layout yet"
 
 
 def names_found_words(item: Mapping[str, object]) -> str:
     """The issuer names found in a kept statement, each with its count, as the Kept statements
-    page and Bring in's preview both say them."""
+    page and Bring in's preview both say them; for one with no extraction yet, that it has none."""
+    if item.get("not_extracted"):
+        return not_yet_extracted_words()
     found = item.get("names")
     return (
         ", ".join(f"{_esc(str(name))} {count}" for name, count in found)
@@ -128,10 +133,14 @@ def _group(
     said = []
     if not show_whose:
         said.append("No account yet.")
-    if reader is not None:
-        said.append(f"Read by {reader}.")
-    if shared_names is not None:
-        said.append(f"Names found in each: {shared_names}.")
+    if all(item.get("not_extracted") for item in ordered):
+        # What a reader or a name would be said of is not known yet, so neither is said.
+        said.append(f"Each is {not_yet_extracted_words()}.")
+    else:
+        if reader is not None:
+            said.append(f"Read by {reader}.")
+        if shared_names is not None:
+            said.append(f"Names found in each: {shared_names}.")
     cards = "".join(
         _card(
             item,
@@ -245,15 +254,24 @@ def _kept_line(
     section: str = "",
     whose: str = "",
     move: str = "",
+    awaiting: bool = False,
 ) -> str:
-    """One kept document, or one section of one, on one line that opens its masked shape."""
+    """One kept document, or one section of one, on one line that opens its masked shape.
+
+    `awaiting` is a document with no extraction yet, of which nothing else can be said."""
     count = (
         f"{plural(rows, 'transaction')}"
         if isinstance(rows, int) and not isinstance(rows, bool)
         else ""
     )
-    said = ", ".join(
-        part for part in (_days_said(days), count, _says_adds_up(rows, refusal, readable)) if part
+    said = (
+        not_yet_extracted_words()
+        if awaiting
+        else ", ".join(
+            part
+            for part in (_days_said(days), count, _says_adds_up(rows, refusal, readable))
+            if part
+        )
     )
     part = f" (section {_esc(section)})" if section else ""
     owner = f" - {whose}" if whose else ""
@@ -343,6 +361,7 @@ def _lines_for(
                         str(item.get("refusal") or ""),
                         bool(item["parser"]),
                         move=_move_fold(ident, move_options) if move_options is not None else "",
+                        awaiting=bool(item.get("not_extracted")),
                     ),
                 )
             )
@@ -445,7 +464,8 @@ def statements_body(
         i for i in unassigned if i["parser"] and not i.get("refusal") and not i.get("sections")
     ]
     refused = [i for i in unassigned if i["parser"] and i.get("refusal")]
-    no_parser = [i for i in unassigned if not i["parser"]]
+    awaiting = [i for i in unassigned if i.get("not_extracted")]
+    no_parser = [i for i in unassigned if not i["parser"] and not i.get("not_extracted")]
     assigned = [i for i in entries if i["account_ref"] != UNASSIGNED_ACCOUNT]
 
     picker = account_picker(options)
@@ -494,10 +514,11 @@ def statements_body(
 
     refused_count = f"{len(refused)} recognised but refused, " if refused else ""
     several_count = f"{len(sectioned)} covering several accounts, " if sectioned else ""
+    awaiting_count = f"{len(awaiting)} not yet extracted, " if awaiting else ""
     summary = (
         '<section class="diag-summary"><h2>Summary</h2>'
         f"<p>{kept_count(entries)} kept: {len(waiting)} waiting only for an account, "
-        f"{refused_count}{several_count}{len(no_parser)} with no parser yet, "
+        f"{refused_count}{several_count}{awaiting_count}{len(no_parser)} with no parser yet, "
         f"{len(assigned)} assigned.</p>"
         f"{bulk}{upload}</section>"
     )
@@ -524,6 +545,7 @@ def statements_body(
         )
         + several
         + _group("Recognised, but the reading is refused", refused, names=names)
+        + _group("Not yet extracted", awaiting, names=names)
         + _group("No parser yet", no_parser, names=names)
         + _assigned_by_account(assigned, entries, names, options if can_move else None)
     )

@@ -24,6 +24,7 @@ import pytest
 from obdi.cli import build_web_config
 from obdi.identity import artefact_digest
 from obdi.models import RawArtefact
+from obdi.statement_extraction import keep_extraction
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_pdf_import import BROKEN, SANTANDER_AS_WRITTEN, UNKNOWN_BANK
@@ -64,7 +65,8 @@ def _keep(
     account: str = UNASSIGNED,
     at: datetime | None = None,
 ) -> None:
-    """Land a statement the way the statement-shape page keeps one."""
+    """Land a statement the way the statement-shape page keeps one, and extract it as keeping does
+    (a page never reads a PDF, so the listing says only what was extracted)."""
     store.land_artefact(
         RawArtefact(
             source="statement",
@@ -76,6 +78,8 @@ def _keep(
             origin=name,
         )
     )
+    keep_extraction(store, artefact_digest(payload), payload)
+    store.connection.commit()
 
 
 def _land_other(store: Store, count: int, *, after: datetime) -> None:

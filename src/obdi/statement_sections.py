@@ -42,7 +42,6 @@ from .errors import DataError
 from .ingest import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
 from .models import Transaction
 from .namespaces import validate_canonical_name
-from .parsers.base import StatementParser
 from .parsers.pdf_statements import PdfStatementParser, SectionReading
 from .parsers.uk_banks import detect
 from .plural import agree, plural
@@ -74,22 +73,6 @@ def section_token(key: str) -> str:
     key (a test, a script) needs no token.
     """
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-
-
-def trial_sections(
-    parser: StatementParser, payload: bytes
-) -> list[SectionReading] | str | None:
-    """A document's sections for a listing, or why they cannot be told apart.
-
-    None is a document read whole. A string is the refusal of a document whose
-    boundaries are ambiguous, digit-masked because it is shown on a GET.
-    """
-    if not isinstance(parser, PdfStatementParser):
-        return None
-    try:
-        return parser.sections(payload)
-    except (DataError, ValueError) as exc:
-        return masked(str(exc))[:300]
 
 
 @dataclass(frozen=True)

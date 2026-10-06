@@ -4191,6 +4191,17 @@ class Store:
             masked_shape=str(row["masked_shape"]),
         )
 
+    def statement_extraction_sections(self, digest: str, version: int) -> tuple[str, str] | None:
+        """(sections JSON, why they cannot be told apart) from the extraction made by `version`,
+        or None. The columns alone, because a document's text and cells are most of a row and a
+        caller that wants its sections should not decode them."""
+        row = self.connection.execute(
+            "SELECT sections, sections_error FROM statement_extractions "
+            "WHERE digest = ? AND extractor_version = ?",
+            (digest, version),
+        ).fetchone()
+        return None if row is None else (str(row["sections"]), str(row["sections_error"]))
+
     def extracted_digests(self, version: int) -> set[str]:
         """The digests that have an extraction made by extractor `version`."""
         return {

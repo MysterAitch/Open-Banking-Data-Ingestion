@@ -35,6 +35,7 @@ from .parsers.statement_reading import (
     reading_to_json,
 )
 from .plural import plural
+from .statement_extraction import not_yet_extracted_words, serving, stored_sections
 from .store import SectionAssignment, Store
 
 
@@ -142,7 +143,10 @@ def _reading_of(
     kept = _kept_reading(store, digest)
     if kept is not None:
         return kept
-    return _read_with_source(_payload_of(store, digest, account_ref), digest[:12])
+    # From the stored extraction where there is one, so a document with no kept reading is
+    # parsed without being opened; only a document with neither is read from its bytes.
+    with serving(store, strict=False):
+        return _read_with_source(_payload_of(store, digest, account_ref), digest[:12])
 
 
 def _kept_reading(store: Store, digest: str) -> tuple[str, StatementReading] | None:
@@ -416,45 +420,36 @@ def keep_statement_readings(store: Store) -> int:
     said aloud each time, as it was before readings were kept.
     """
     read = 0
-    for digest, account in _held_pdfs(store, None):
-        if _kept_reading(store, digest) is not None and _keeps_period(store, digest):
-            continue
-        found = _read_with_source(_payload_of(store, digest, account), digest[:12])
-        read += 1
-        if found is not None:
-            store.keep_statement_reading(digest, found[0], reading_to_json(found[1]))
+    # From each document's stored extraction where it has one (`serving`): this pass runs after
+    # every pull and assignment, and a document without a kept reading is parsed, not reopened.
+    with serving(store, strict=False):
+        for digest, account in _held_pdfs(store, None):
+            if _kept_reading(store, digest) is not None and _keeps_period(store, digest):
+                continue
+            found = _read_with_source(_payload_of(store, digest, account), digest[:12])
+            read += 1
+            if found is not None:
+                store.keep_statement_reading(digest, found[0], reading_to_json(found[1]))
     store.connection.commit()
     return read
 
 
-#: Artefact digest -> the sections of that statement, for a multi-account one.
-#: Same reason as `_BALANCE_BY_DIGEST`: the bytes never change, and re-reading a
-#: wide page's geometry on every view of a ledger would make it unusable.
-_SECTIONS_BY_DIGEST: dict[str, list[SectionReading]] = {}
-
-
 def _sections_of(store: Store, digest: str) -> list[SectionReading]:
-    """The sections of a held multi-account statement, empty when it has none
-    or cannot be read - said aloud on stderr, like every other unreadable one."""
-    if digest not in _SECTIONS_BY_DIGEST:
-        found: list[SectionReading] = []
-        row = store.connection.execute(
-            "SELECT payload FROM raw_artefacts "
-            "WHERE digest = ? AND media_type = 'application/pdf' LIMIT 1",
-            (digest,),
-        ).fetchone()
-        parser = None if row is None else _parser_for(bytes(row["payload"]))
-        if row is not None and parser is not None:
-            try:
-                found = parser.sections(bytes(row["payload"])) or []
-            except Exception as exc:
-                print(
-                    f"artefact {digest[:12]}: {parser.source} could not read its "
-                    f"sections - {exc}",
-                    file=sys.stderr,
-                )
-        _SECTIONS_BY_DIGEST[digest] = found
-    return _SECTIONS_BY_DIGEST[digest]
+    """The sections of a held multi-account statement, from its stored extraction: empty when it
+    has none, cannot be told apart, or has not been extracted - the last said aloud on stderr,
+    because a section that is missing for that reason is not a section the statement lost.
+
+    Never reads the PDF: a page that asks for balances must not wait on a document, and the
+    rebuild fills the extraction before any pass that asks.
+    """
+    found = stored_sections(store, digest)
+    if found is None:
+        print(
+            f"artefact {digest[:12]}: sections {not_yet_extracted_words()}",
+            file=sys.stderr,
+        )
+        return []
+    return found
 
 
 def assigned_sections(
@@ -463,17 +458,18 @@ def assigned_sections(
     """Each assigned section of a held statement, with its reading if it can be found.
 
     None means the declared assignment names a section the statement no longer
-    holds, which a caller counts as unusable rather than skipping.
+    holds, or one whose document has not been extracted yet, which a caller counts
+    as unusable rather than skipping.
     """
+    # One decode for each document however many of its sections are assigned.
+    read: dict[str, list[SectionReading]] = {}
     for assignment in store.statement_section_assignments():
         if account_ref is not None and assignment.account_ref != account_ref:
             continue
+        if assignment.digest not in read:
+            read[assignment.digest] = _sections_of(store, assignment.digest)
         found = next(
-            (
-                item
-                for item in _sections_of(store, assignment.digest)
-                if item.key == assignment.section_key
-            ),
+            (item for item in read[assignment.digest] if item.key == assignment.section_key),
             None,
         )
         yield assignment, found

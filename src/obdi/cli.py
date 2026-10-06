@@ -656,6 +656,7 @@ if TYPE_CHECKING:
     from .parsers.base import StatementParser
     from .parsers.pdf_statements import SectionReading
     from .period_reconciliation import PeriodReport
+    from .reader_findings import Findings
     from .rebuild import RebuildReport
     from .statement_sections import AssignmentCheck
 
@@ -3998,6 +3999,49 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return None
         return str(row["origin"]), bytes(row["payload"])
 
+    def kept_statement_view(
+        artefact_id: int,
+        mask: bool,
+        account_of: Callable[[str], str],
+        whole_account: str,
+    ) -> tuple[str, Findings] | None:
+        """A kept statement's shape and what its reader found, from its stored extraction.
+
+        The shape is the stored masked one when `mask` is set, so a page as first served shows
+        nothing it did not show before; the real text is only laid out when the caller is in a
+        values sitting. None where the statement has no extraction at the current version, and
+        the document is never read.
+        """
+        from .reader_findings import findings_of
+        from .statement_extraction import serving
+        from .statement_extraction import stored as stored_extraction
+        from .statement_shape import shape_of_extraction
+
+        with Store(db_path) as store, serving(store, strict=True):
+            row = store.connection.execute(
+                "SELECT digest, payload FROM raw_artefacts WHERE rowid = ? "
+                "AND (source = 'statement' OR media_type = 'application/pdf')",
+                (artefact_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            extraction = stored_extraction(store, str(row["digest"]))
+            if extraction is None:
+                return None
+            description = (
+                extraction.masked_shape
+                if mask
+                else shape_of_extraction(
+                    extraction.raw.lines,
+                    extraction.raw.table,
+                    extraction.raw.page_count,
+                ).describe()
+            )
+            found = findings_of(
+                bytes(row["payload"]), account_of=account_of, whole_account=whole_account
+            )
+        return description, found
+
     def kept_statement_ids() -> set[int]:
         """The ids that are kept statements - cheap, unlike `kept_statements`."""
         with Store(db_path) as store:
@@ -4053,12 +4097,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         from .errors import DataError
         from .parsers.credit_union_pdf import section_key
-        from .parsers.pdf_statements import PdfStatementParser, statement_lines
+        from .parsers.pdf_statements import PdfStatementParser
         from .parsers.uk_banks import detect
-        from .statement_names import names_found
-        from .statement_sections import masked, section_token, trial_sections
+        from .statement_extraction import Extracted, serving
+        from .statement_extraction import stored as stored_extraction
+        from .statement_sections import masked, section_token
 
-        with Store(db_path) as store:
+        def divided_by(
+            parser: StatementParser, extraction: Extracted
+        ) -> list[SectionReading] | str | None:
+            """What a document divides into, from its stored extraction: its sections, or
+            why they cannot be told apart (digit-masked, because it is shown on a GET), or
+            None for a document read whole."""
+            if not isinstance(parser, PdfStatementParser):
+                return None
+            if extraction.sections is not None:
+                return extraction.sections
+            if extraction.sections_error:
+                return masked(extraction.sections_error)[:300]
+            return None
+
+        # Strict: a page never reads a PDF, so a document without a stored extraction raises
+        # where a parser would have read it, and is listed as not yet extracted instead.
+        with Store(db_path) as store, serving(store, strict=True):
             rows = store.connection.execute(
                 "SELECT rowid, digest, origin, fetched_at, account_ref "
                 "FROM raw_artefacts WHERE source = 'statement' ORDER BY rowid"
@@ -4076,6 +4137,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             for row in rows:
                 digest = str(row["digest"])
                 if digest not in parser_by_digest:
+                    extraction = stored_extraction(store, digest)
+                    if extraction is None:
+                        # Not remembered: the rebuild fills the row, and the next view says
+                        # what the document is. A page never reads the document itself.
+                        listing.append(
+                            {
+                                "id": int(row["rowid"]),
+                                "origin": str(row["origin"]),
+                                "fetched_at": str(row["fetched_at"]),
+                                "account_ref": str(row["account_ref"]),
+                                "parser": None,
+                                "rows": None,
+                                "refusal": "",
+                                "listed_days": ["", ""],
+                                "names": [],
+                                "sections": [],
+                                "heading": "",
+                                "heading_label": "",
+                                "heading_given": [],
+                                "not_extracted": True,
+                            }
+                        )
+                        continue
                     held = store.connection.execute(
                         "SELECT payload FROM raw_artefacts WHERE rowid = ?",
                         (row["rowid"],),
@@ -4088,7 +4172,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         reading_by_digest[digest] = (None, "", ("", ""))
                     else:
                         parser_by_digest[digest] = parser.source
-                        divided = trial_sections(parser, payload)
+                        divided = divided_by(parser, extraction)
                         if isinstance(divided, list):
                             sections_by_digest[digest] = divided
                             reading_by_digest[digest] = (None, "", ("", ""))
@@ -4104,12 +4188,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                                 )
                             except (DataError, ValueError):
                                 heading_by_digest[digest] = ""
-                    try:
-                        names_by_digest[digest] = names_found(statement_lines(payload))
-                    except (DataError, ValueError, OSError):
-                        # Not readable as a PDF at all: no names, and the
-                        # parser column already says nothing reads it.
-                        names_by_digest[digest] = []
+                    # A document not readable as a PDF at all has no names, and the parser
+                    # column already says nothing reads it.
+                    names_by_digest[digest] = extraction.names
                 rows_read, refusal, listed_days = reading_by_digest[digest]
                 divided_sections = sections_by_digest.get(digest)
                 listing.append(
@@ -4165,6 +4246,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         ),
                         "heading_label": masked(heading_by_digest.get(digest, "")),
                         "heading_given": [],
+                        "not_extracted": False,
                     }
                 )
         # What each heading has been given, from every earlier decision about it: a section
@@ -4513,6 +4595,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         keep_statement=keep_statement,
         statement_digests_held=statement_digests_held,
         statement_payload=statement_payload,
+        kept_statement_view=kept_statement_view,
         assign_kept_statement=assign_kept_statement,
         assign_statement_section=assign_statement_section,
         review_kept_statement=review_kept_statement,

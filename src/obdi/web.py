@@ -90,13 +90,14 @@ from .period_reconciliation import PeriodReport
 from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
-from .reader_findings import findings_html, findings_of
+from .reader_findings import Findings, findings_html, findings_of
 from .review_flags import FlagQueue, Outcome
 from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
 from .space_windows import RANGE_REFUSAL_MARK
 from .spaces import RECOVERY_BOUND, ArchiveNote
 from .standing_data import AccountStanding
+from .statement_extraction import not_yet_extracted_words
 from .statement_listing_measure import StatementListingReport
 from .statement_listing_page import statement_listing_html
 from .statement_sections import section_token
@@ -584,6 +585,15 @@ class WebConfig:
     statement_digests_held: Callable[[set[str]], set[str]] | None = None
     #: A kept statement's filename and bytes, by artefact id.
     statement_payload: Callable[[int], tuple[str, bytes] | None] | None = None
+    #: A kept statement's shape and what its reader found, from its stored extraction, never
+    #: from the file: (artefact id, whether to mask, the account a section key is assigned to,
+    #: the account a document read whole is filed under) to the shape's description without a
+    #: file name and the reader's findings, or None where the statement has no extraction at the
+    #: current version yet. Unwired, the shape page reads the bytes, as it did before extractions
+    #: were stored.
+    kept_statement_view: (
+        Callable[[int, bool, Callable[[str], str], str], tuple[str, Findings] | None] | None
+    ) = None
     #: Give a kept statement its account and read it in. Separate from
     #: keeping, because deciding whose a document is and deciding what
     #: it says are different acts, and only one of them can be undone.
@@ -5038,28 +5048,40 @@ class ConnectionHandler(
             return
         filename, payload = held
         in_sitting = values_sitting.shown()
-        shape = self._read_shape(payload, filename, mask=not in_sitting)
         values = "values shown for this sitting" if in_sitting else "values masked"
+        view = self.bound_config.kept_statement_view
+        if view is None:
+            shape = self._read_shape(payload, filename, mask=not in_sitting)
+            shape_text = shape.describe()
+            found_html = self._reader_found_html(artefact_id, payload)
+        else:
+            by_token, whole = self._section_accounts(artefact_id)
+            stored = view(
+                artefact_id, not in_sitting, lambda key: by_token.get(section_token(key), ""), whole
+            )
+            if stored is None:
+                shape_text = f"{filename}: {not_yet_extracted_words()}"
+                found_html = ""
+            else:
+                shape_text = f"{filename}: {stored[0]}"
+                found_html = findings_html(stored[1], code_html)
         body = (
             f"<h2>Statement shape</h2><p class=\"muted\">Kept statement "
             f"{artefact_id}, {values}. This address stays put, so the "
             "shape can be read again without uploading the file again.</p>"
             f'<pre class="scroll" style="white-space:pre">'
-            f"{html.escape(shape.describe())}</pre>"
-            + self._reader_found_html(artefact_id, payload)
+            f"{html.escape(shape_text)}</pre>"
+            + found_html
             + (self._assign_form(artefact_id) if self._is_kept(artefact_id) else "")
             + '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
         self._respond(200, render_page("Statement shape", body), no_store=in_sitting)
 
-    def _reader_found_html(self, artefact_id: int, payload: bytes) -> str:
-        """What the reader concluded from a kept statement, beneath its masked shape.
-
-        Masked only, like the shape: dates, counts, and fixed labels (`reader_findings`). The
-        accounts it is assigned to come from the kept-statements listing, which a GET already
-        serves.
-        """
+    def _section_accounts(self, artefact_id: int) -> tuple[dict[str, str], str]:
+        """The account each of a kept statement's sections is assigned to, by section token, and
+        the account a document read whole is filed under ("" while it waits for one). From the
+        kept-statements listing, which a GET already serves."""
         whole = ""
         by_token: dict[str, str] = {}
         listing = self.bound_config.kept_statements
@@ -5072,6 +5094,15 @@ class ConnectionHandler(
                 sections = entry.get("sections")
                 for part in sections if isinstance(sections, list) else []:
                     by_token[str(part["token"])] = str(part.get("account") or "")
+        return by_token, whole
+
+    def _reader_found_html(self, artefact_id: int, payload: bytes) -> str:
+        """What the reader concluded from a kept statement, beneath its masked shape.
+
+        Masked only, like the shape: dates, counts, and fixed labels (`reader_findings`). Read
+        from the bytes, so only where the shape page has no `kept_statement_view` wired.
+        """
+        by_token, whole = self._section_accounts(artefact_id)
         found = findings_of(
             payload,
             account_of=lambda key: by_token.get(section_token(key), ""),

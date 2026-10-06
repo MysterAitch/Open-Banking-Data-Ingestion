@@ -33,6 +33,7 @@ import obdi.statement_extraction as statement_extraction
 import obdi.statement_shape as statement_shape
 import obdi.statement_terms as statement_terms
 from obdi.cli import build_web_config
+from obdi.ingest import import_file
 from obdi.parsers import pdf_statements
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import SCHEMA_VERSION, ExtractionRecord, Store, StoreIsNewer
@@ -176,6 +177,32 @@ class TestAStatementIsExtractedWhenItIsKept:
         assert found is not None
         assert found.sections is None and found.sections_error == ""
         assert "lines across 1 page" in found.masked_shape
+
+
+class TestAPdfImportedToAnAccount:
+    def test_Pdf_WhenImportedToAnAccount_IsReadOnceForTheParseAndKept(
+        self, root, store, reads, tmp_path
+    ):
+        file = tmp_path / "card.pdf"
+        file.write_bytes(santander(D(2026, 8, 10), 1211))
+
+        summary = import_file(store, file, account_id="santander-cc")
+
+        assert summary.artefact_new
+        assert reads.text == 1, "the parse and the keeping share one read of the document"
+        assert only_row(store)["failure"] == ""
+
+    def test_Pdf_WhenImportedAgainAtTheSameVersion_IsNotReadAgain(
+        self, root, store, reads, tmp_path
+    ):
+        file = tmp_path / "card.pdf"
+        file.write_bytes(santander(D(2026, 8, 10), 1211))
+        import_file(store, file, account_id="santander-cc")
+        reads.fresh_process()
+
+        import_file(store, file, account_id="santander-cc")
+
+        assert reads.total == 0
 
 
 class TestAnUnreadablePdf:

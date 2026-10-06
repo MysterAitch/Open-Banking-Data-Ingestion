@@ -276,6 +276,28 @@ def stored(store: Store, digest: str) -> Extracted | None:
         return None
 
 
+def stored_sections(store: Store, digest: str) -> list[SectionReading] | None:
+    """The sections stored for a document: its accounts, an empty list for a document that is
+    not divided or whose sections cannot be told apart, and None where nothing is stored at the
+    current version (or the row is damaged, said aloud).
+
+    Only the sections' columns are read, because this is asked for every assigned section on
+    every page that states a balance.
+    """
+    kept = store.statement_extraction_sections(digest, pdf_statements.EXTRACTOR_VERSION)
+    if kept is None:
+        return None
+    try:
+        return _decode_sections(kept[0]) or []
+    except (ValueError, KeyError, TypeError) as exc:
+        print(
+            f"artefact {digest[:12]}: stored extraction is damaged ({exc}), "
+            "treating it as not extracted",
+            file=sys.stderr,
+        )
+        return None
+
+
 @contextmanager
 def serving(store: Store, *, strict: bool) -> Iterator[None]:
     """Inside the block, every parser reads a document's stored extraction, not its bytes.
@@ -311,6 +333,26 @@ def serving(store: Store, *, strict: bool) -> Iterator[None]:
         return raw
 
     with supplying(supplier):
+        yield
+
+
+@contextmanager
+def serving_extractions(
+    store: Store, media_type: str, digest: str, payload: bytes
+) -> Iterator[None]:
+    """For a door that has just landed a file: extract it first if it is a PDF with no
+    extraction at the current version (and commit), then serve the parsers from the store.
+
+    A file that is not a PDF is left alone. This is the import door's own read of a document it
+    is about to parse anyway, so the read is shared with the parse and with every page after it.
+    """
+    if media_type != "application/pdf":
+        yield
+        return
+    if not is_kept(store, digest):
+        keep_extraction(store, digest, payload)
+        store.connection.commit()
+    with serving(store, strict=False):
         yield
 
 

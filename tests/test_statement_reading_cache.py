@@ -65,7 +65,6 @@ class Extractions:
     def fresh_process(self) -> None:
         """Forget every in-process memo, as a new `obdi pull` starts without them."""
         statement_terms._USABLE_BY_DIGEST.clear()
-        statement_terms._SECTIONS_BY_DIGEST.clear()
         pdf_statements._lines.cache_clear()
         pdf_statements._grid_and_pages.cache_clear()
         pdf_statements._table.cache_clear()
@@ -82,7 +81,10 @@ def stored_readings(store: Store) -> int:
 
 
 def forget_readings(store: Store) -> None:
+    """Back to a store that held statements before anything was kept of them: no reading, and
+    no extraction either, so the documents themselves are the only input left."""
     store.clear_statement_readings()
+    store.clear_statement_extractions()
     store.connection.commit()
 
 
@@ -157,6 +159,23 @@ class TestAStatementHeldAndReadOnce:
         assert from_store == from_documents
 
 
+class TestAStoreThatKeptExtractionsButNoReadings:
+    def test_FoldPass_WhenOnlyTheReadingsAreForgotten_ParsesTheStoredExtractionsAndOpensNoDocument(
+        self, store, tmp_path, extractions
+    ):
+        """The extraction is what reading a PDF costs; the parse over it is not, so a reading
+        lost (a new parser, a store before readings) is made again without opening a file."""
+        build_card(store, tmp_path)
+        store.clear_statement_readings()
+        store.connection.commit()
+        extractions.fresh_process()
+
+        fold_same_money(store)
+
+        assert extractions.count == 0
+        assert stored_readings(store) == STATEMENTS
+
+
 class TestAStoreThatHeldStatementsBeforeReadingsWereKept:
     def test_FoldPass_WhenNoReadingIsStored_ReadsEachDocumentOnceAndNeverAgain(
         self, store, tmp_path, extractions
@@ -221,7 +240,8 @@ class TestAStoredReadingThatCannotBeTrusted:
         report = fold_same_money(store)
 
         assert report.folded == 8
-        assert extractions.count == 1
+        # Read again from the stored extraction: the document's bytes are not opened for it.
+        assert extractions.count == 0
         assert "stored reading" in capsys.readouterr().err
         extractions.fresh_process()
         fold_same_money(store)
