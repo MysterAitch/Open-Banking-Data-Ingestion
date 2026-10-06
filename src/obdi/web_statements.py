@@ -16,7 +16,7 @@ only, as on every GET.
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from urllib.parse import quote
 
 from .account_names import AccountsShown
@@ -44,7 +44,9 @@ def _reader(item: dict[str, object]) -> str:
     return _esc(str(parser)) if parser else "no parser for this layout yet"
 
 
-def _names_found(item: dict[str, object]) -> str:
+def names_found_words(item: Mapping[str, object]) -> str:
+    """The issuer names found in a kept statement, each with its count, as the Kept statements
+    page and Bring in's preview both say them."""
     found = item.get("names")
     return (
         ", ".join(f"{_esc(str(name))} {count}" for name, count in found)
@@ -88,7 +90,7 @@ def _card(
     elif reads:
         facts.append(f"<dt>Reading</dt><dd>{reads}</dd>")
     if not shared_names:
-        facts.append(f"<dt>Names found</dt><dd>{_names_found(item)}</dd>")
+        facts.append(f"<dt>Names found</dt><dd>{names_found_words(item)}</dd>")
     return (
         "<li><details>"
         f"<summary><span>{_esc(str(item['origin']))} - kept {_esc(_kept_at(item))}</span></summary>"
@@ -113,7 +115,7 @@ def _group(
         return ""
     ordered = sorted(items, key=_order)
     reader = _shared(ordered, _reader)
-    shared_names = _shared(ordered, _names_found)
+    shared_names = _shared(ordered, names_found_words)
     said = []
     if not show_whose:
         said.append("No account yet.")

@@ -327,11 +327,12 @@ class TestTenStatementsUploadedAtOnce:
         page = parse(response.text)
         visible = re.sub(r"<style>.*?</style>", "", response.text, flags=re.S)
         # A chooser lists the same options each time, and a reason is data that happens to
-        # agree between files of one account; neither is a sentence said once for every file.
+        # agree between files of one account, and a preview is what each document is, which two
+        # documents of one issuer share; none is a sentence said once for every file.
         for node in list(elements(page, "select")):
             node.children.clear()
         for node in list(elements(page, "p")):
-            if "bi-guess" in node.classes:
+            if "bi-guess" in node.classes or "bi-preview" in node.classes:
                 node.children.clear()
 
         assert MONEY_FIGURE.search(visible) is None

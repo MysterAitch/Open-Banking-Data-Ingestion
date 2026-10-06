@@ -49,6 +49,7 @@ from .bring_in import (
     wanted_heading,
 )
 from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
+from .bring_in_preview import preview_html
 from .callback import render_page
 from .connections import Connection, ConnectionStore
 from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
@@ -149,6 +150,9 @@ class FileResult:
     #: label it prints (digits masked), or "" for a whole document.
     section: str = ""
     section_label: str = ""
+    #: What the document is, as markup (`bring_in_preview`), for a statement waiting for an
+    #: account; "" where the kept listing could not say.
+    preview: str = ""
 
     @property
     def placed_in(self) -> tuple[str, ...]:
@@ -569,6 +573,7 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
         rows.append(
             '<li class="bi-assign-file">'
             f'<p class="bi-assign-name">{_called(item)}</p>'
+            f"{item.preview}"
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
@@ -1090,10 +1095,15 @@ class BringInPages:
             elif not isinstance(parts, list) or not parts:
                 guess = guess_account(entry, listing)
                 resolved.append(
-                    replace(item, guess=guess, all_held=self._all_held(item.artefact, guess))
+                    replace(
+                        item,
+                        guess=guess,
+                        all_held=self._all_held(item.artefact, guess),
+                        preview=preview_html(entry),
+                    )
                 )
             else:
-                resolved.extend(self._section_results(item, parts))
+                resolved.extend(self._section_results(item, entry, parts))
         return resolved, ""
 
     def _all_held(self, artefact: int, guess: Guess | None) -> int:
@@ -1111,7 +1121,9 @@ class BringInPages:
         return preview.total if preview is not None and preview.new == 0 else 0
 
     @staticmethod
-    def _section_results(item: FileResult, parts: list[object]) -> list[FileResult]:
+    def _section_results(
+        item: FileResult, entry: Mapping[str, object], parts: list[object]
+    ) -> list[FileResult]:
         """One result for each account of a document of several that still needs one; a
         document with none left says it is already held."""
         sections = [part for part in parts if isinstance(part, Mapping)]
@@ -1130,7 +1142,7 @@ class BringInPages:
             else:
                 found.append(replace(
                     item, section=str(part["token"]), section_label=label,
-                    guess=section_guess(part),
+                    guess=section_guess(part), preview=preview_html(entry, part),
                 ))
         return found
 

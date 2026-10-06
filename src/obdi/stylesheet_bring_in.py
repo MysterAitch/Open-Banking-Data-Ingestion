@@ -38,6 +38,7 @@ BRING_IN_STYLES = """
  .bi-assign-name { margin: 0 0 var(--s1); font: var(--text-sm)/130% var(--sans); overflow-wrap: anywhere; }
  .bi-assign-file select { width: 100%; min-height: var(--hit); }
  .bi-guess { margin: var(--s1) 0 0; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .bi-preview { margin: 0 0 var(--s1); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
  .bi-assign-bar { position: sticky; bottom: 0; padding: var(--s2) 0; background: var(--paper); border-top: var(--rule-weight) solid var(--rule); }
  .bi-assign-bar button.button { width: 100%; margin: 0; }
  .bi-fold { margin: var(--s3) 0; }
