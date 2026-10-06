@@ -142,6 +142,7 @@ from .web_sections import (
     way_back,
 )
 from .web_set_aside import SetAsidePages
+from .web_statements import refile_form
 from .web_transfer_skips import relinked_pairs_block, skipped_pairs_block
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
@@ -4285,20 +4286,14 @@ class ConnectionHandler(
                 # needed no way back until three statement chunks spent a
                 # night deriving 1,571 rows into a Space.
                 "<h2>Landed under the wrong account?</h2>"
-                '<form method="post" action="/refile-artefact">'
-                f'<input type="hidden" name="id" value="{artefact_id}">'
-                + account_picker(
+                + refile_form(
+                    artefact_id,
                     refile_options,
-                    other_placeholder="or type the correct canonical, "
-                    "e.g. starling-personal",
+                    confirm="I understand this will change which account the artefact is "
+                    "filed under, and a rebuild will derive its transactions again",
+                    button=html.escape(MOVE_ARTEFACT),
+                    placeholder="or type the correct canonical, e.g. starling-personal",
                 )
-                + '<label class="tick">'
-                '<input type="checkbox" name="confirm" value="yes" required> '
-                "I understand this will change which account the artefact is filed under, "
-                "and a rebuild will derive its transactions again</label>"
-                '<p><button class="button" type="submit" '
-                'style="border:0;width:100%;font-size:inherit;cursor:pointer">'
-                f"{html.escape(MOVE_ARTEFACT)}</button></p></form>"
             )
             + "<h2>The stored payload</h2>"
             '<p class="muted">Every amount, name, and reference the artefact holds, '
@@ -5076,6 +5071,8 @@ class ConnectionHandler(
         can_section_assign = self.bound_config.assign_statement_section is not None
         from .web_statements import statements_body
 
+        can_move = self.bound_config.refile_artefact is not None
+
         self._respond(
             200,
             render_page(
@@ -5086,6 +5083,7 @@ class ConnectionHandler(
                     options=options,
                     can_assign=can_assign,
                     can_section_assign=can_section_assign,
+                    can_move=can_move,
                     ref=ref,
                 )
                 + HOME_LINK,

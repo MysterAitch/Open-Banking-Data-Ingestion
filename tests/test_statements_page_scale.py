@@ -19,7 +19,7 @@ from coverage_page_world import repeated_lines
 from obdi.account_names import AccountShown, AccountsShown
 from obdi.callback import render_page
 from obdi.web_statements import statements_body
-from page_dom import parse
+from page_dom import elements, parse
 from test_phone_layout import sync_api
 
 UNASSIGNED = "(unassigned)"
@@ -76,12 +76,18 @@ def body() -> str:
         options={"account-1": "Account 1"},
         can_assign=True,
         can_section_assign=True,
+        can_move=True,
     )
 
 
 class TestNothingIsSaidTwice:
     def test_NoLineOfThreeWordsIsRepeatedMoreThanTwice(self) -> None:
-        assert repeated_lines(parse(render_page("Kept statements", body()).decode())) == {}
+        page = parse(render_page("Kept statements", body()).decode())
+        # A chooser lists the same options each time; that is data, not a sentence said again.
+        for node in list(elements(page, "select")):
+            node.children.clear()
+
+        assert repeated_lines(page) == {}
 
 
 @pytest.fixture(scope="module")

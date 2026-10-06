@@ -233,6 +233,7 @@ def _kept_line(
     *,
     section: str = "",
     whose: str = "",
+    move: str = "",
 ) -> str:
     """One kept document, or one section of one, on one line that opens its masked shape."""
     count = (
@@ -247,13 +248,72 @@ def _kept_line(
     owner = f" - {whose}" if whose else ""
     return (
         '<li><a class="tap" href="/statement-shape?artefact='
-        f'{ident}">{_esc(origin)}</a>{part}{owner} - kept {_esc(kept)}: {_esc(said)}.</li>'
+        f'{ident}">{_esc(origin)}</a>{part}{owner} - kept {_esc(kept)}: {_esc(said)}.{move}</li>'
     )
 
 
-def _lines_for(entries: list[dict[str, object]], ref: str, names: AccountsShown) -> list[str]:
+def refile_form(
+    artefact_id: int,
+    options: dict[str, str],
+    *,
+    confirm: str,
+    button: str,
+    placeholder: str,
+) -> str:
+    """The form that files a kept statement under another account (`/refile-artefact`).
+
+    The one drawing of it, for the artefact's own page and for the Statements page, so the two
+    cannot come to post different fields: the id, the chosen or typed account, and the tick
+    without which the handler refuses.
+    """
+    from .web import account_picker
+
+    return (
+        '<form method="post" action="/refile-artefact">'
+        f'<input type="hidden" name="id" value="{artefact_id}">'
+        + account_picker(options, other_placeholder=placeholder)
+        + '<label class="tick">'
+        f'<input type="checkbox" name="confirm" value="yes" required> {confirm}</label>'
+        '<p><button class="button" type="submit" '
+        f'style="border:0;width:100%;font-size:inherit;cursor:pointer">{button}</button></p>'
+        "</form>"
+    )
+
+
+#: The words of the Statements page's move control are each under three words, because a control
+#: on every assigned statement that said more would repeat one sentence for each of them. The
+#: explanation is said once, above the list (`_MOVE_LEAD`).
+_MOVE_LEAD = (
+    '<p class="muted">A statement given the wrong account is moved with the Move control beside '
+    "it: choose the account, confirm, and press. The transactions it read in follow only when "
+    "Rebuild from raw is run afterwards.</p>"
+)
+
+
+def _move_fold(ident: int, options: dict[str, str]) -> str:
+    return (
+        "<details><summary>Move it</summary>"
+        + refile_form(
+            ident, options, confirm="Confirm", button="Move it",
+            placeholder="or type an account name",
+        )
+        + "</details>"
+    )
+
+
+def _lines_for(
+    entries: list[dict[str, object]],
+    ref: str,
+    names: AccountsShown,
+    move_options: dict[str, str] | None = None,
+) -> list[str]:
     """The lines of the documents kept for one account, newest first: the statements filed under
-    it, and the sections of all-accounts documents assigned to it."""
+    it, and the sections of all-accounts documents assigned to it.
+
+    With `move_options`, each whole statement carries the control that moves it to another
+    account. A section is not offered one: it is assigned once, as declared state, and nothing
+    re-assigns it.
+    """
     found: list[tuple[str, str]] = []
     for item in entries:
         kept = _kept_at(item)
@@ -271,6 +331,7 @@ def _lines_for(entries: list[dict[str, object]], ref: str, names: AccountsShown)
                         item.get("rows"),
                         str(item.get("refusal") or ""),
                         bool(item["parser"]),
+                        move=_move_fold(ident, move_options) if move_options is not None else "",
                     ),
                 )
             )
@@ -315,16 +376,20 @@ def account_statements_body(
 
 
 def _assigned_by_account(
-    assigned: list[dict[str, object]], entries: list[dict[str, object]], names: AccountsShown
+    assigned: list[dict[str, object]],
+    entries: list[dict[str, object]],
+    names: AccountsShown,
+    move_options: dict[str, str] | None = None,
 ) -> str:
     """The assigned statements as the account view lists them, one fold for each account, each
-    with the address of that account's own list."""
+    with the address of that account's own list; with `move_options`, each whole statement can be
+    moved to another account where the mistake is seen."""
     if not assigned:
         return ""
     refs = sorted({str(item["account_ref"]) for item in assigned})
     folds = []
     for ref in refs:
-        lines = _lines_for(entries, ref, names)
+        lines = _lines_for(entries, ref, names, move_options)
         folds.append(
             f"<details><summary><span>{names.of(ref).as_name()} - {plural(len(lines), 'document')}"
             "</span></summary>"
@@ -334,7 +399,8 @@ def _assigned_by_account(
         )
     return (
         '<details class="kept-group">'
-        f"<summary>Assigned ({len(assigned)})</summary>{''.join(folds)}</details>"
+        f"<summary>Assigned ({len(assigned)})</summary>"
+        f"{_MOVE_LEAD if move_options is not None else ''}{''.join(folds)}</details>"
     )
 
 
@@ -345,6 +411,7 @@ def statements_body(
     options: dict[str, str],
     can_assign: bool,
     can_section_assign: bool,
+    can_move: bool = False,
     ref: str = "",
 ) -> str:
     """Everything between the heading and the foot of the kept statements page; with `ref`, the
@@ -442,7 +509,7 @@ def statements_body(
         + several
         + _group("Recognised, but the reading is refused", refused, names=names)
         + _group("No parser yet", no_parser, names=names)
-        + _assigned_by_account(assigned, entries, names)
+        + _assigned_by_account(assigned, entries, names, options if can_move else None)
     )
     return (
         f'{purpose}{summary}<section class="diag-detail"><h2>Every kept statement, by state</h2>'
