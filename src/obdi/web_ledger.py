@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from . import values_sitting
-from .account_about import AccountAbout
+from .account_about import AccountAbout, SourceFacts
 from .account_names import AccountShown, code_html
 from .account_page import (
     LOCKING_ANCHOR,
@@ -94,7 +94,7 @@ from .plural import agree, word
 from .plural import plural as _plural
 from .standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .trust_bar import key_html
-from .web_account_about import declared_html
+from .web_account_about import declared_html, stated_html
 from .web_accounts import archive_controls, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
@@ -2975,9 +2975,14 @@ def _about_html(about: AccountAbout | None, today: date, *, unmasked: bool) -> s
     page that was given nothing to say it from."""
     if about is None:
         return ""
-    return _disclosure(
-        "About this account", declared_html(about, today, unmasked=unmasked), css="about"
+    declared = declared_html(about, today, unmasked=unmasked)
+    stated = stated_html(about, unmasked=unmasked)
+    body = (
+        _part("What is declared", declared) + _part("What the sources state", stated)
+        if stated
+        else declared
     )
+    return _disclosure("About this account", body, css="about")
 
 
 def _closed_on(view: Any) -> date | None:
@@ -3354,7 +3359,15 @@ class LedgerPages(AnswerPages):
         parent = None
         if record is not None and record.parent is not None:
             parent = self._account_names().of(str(record.parent))
-        return AccountAbout(record, parent)
+        facts = SourceFacts()
+        sources = self.bound_config.account_sources
+        if sources is not None:
+            try:
+                facts = sources(ref)
+            except Exception as fault:
+                say("account_about.sources.fault", kind=type(fault).__name__)
+                facts = SourceFacts(unread=("What the sources state could not be read just now.",))
+        return AccountAbout(record, parent, facts=facts)
 
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
         # Nothing in the query string can unmask: only `ref`, `month`, the window's fields, and

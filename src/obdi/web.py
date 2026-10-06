@@ -43,6 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from . import values_sitting
+from .account_about import SourceFacts
 from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
@@ -606,6 +607,9 @@ class WebConfig:
     #: How many statements are kept for one account (filed under it, or sections of all-accounts
     #: documents assigned to it): the count on the account's page that leads to its own list.
     kept_statement_count: Callable[[str], int] | None = None
+    #: What the sources state of one account - the rates and names its kept statements print, and
+    #: the name its provider gives it - for the account page's "About this account" fold.
+    account_sources: Callable[[str], SourceFacts] | None = None
     #: Which artefact ids are kept statements, without reading any of them.
     kept_statement_ids: Callable[[], set[int]] | None = None
     artefact_detail: Callable[..., dict[str, object] | None] | None = None

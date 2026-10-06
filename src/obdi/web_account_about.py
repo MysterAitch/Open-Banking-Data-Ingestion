@@ -11,11 +11,15 @@ import html
 from datetime import date
 
 from .account_about import (
+    DIFFERS,
     AccountAbout,
+    RateCheck,
+    StatedText,
     Window,
     covers,
     date_bases,
     days_to_end,
+    rate_checks,
     windows_in_order,
 )
 from .accounts import AccountRecord, LimitWindow
@@ -23,6 +27,7 @@ from .masking import MASKED_TOTAL
 from .money import format_amount
 from .navigation import account_address
 from .plural import plural
+from .statement_sections import masked
 
 
 def _esc(text: object) -> str:
@@ -97,6 +102,56 @@ def windows_html(record: AccountRecord, today: date, *, unmasked: bool) -> str:
             "</li>"
         )
     return f'<ul class="windows">{"".join(items)}</ul>'
+
+
+def _rate_kind(kind: str) -> str:
+    return f"{_capitalised(kind.strip())} rate" if kind.strip() else "Rate"
+
+
+def _earlier(count: int) -> str:
+    return f" (and {count} earlier)" if count else ""
+
+
+def _source(source: str) -> str:
+    return f"<code>{_esc(source)}</code>"
+
+
+def _check_html(check: RateCheck, *, unmasked: bool) -> str:
+    """One stated rate: what kind, how it stands against what was declared, and which statement
+    from which source said it."""
+    rate = check.rate
+    figure = figure_html(percent_words(rate.percent), unmasked=unmasked)
+    day = _esc(rate.day.isoformat())
+    kind = _esc(_rate_kind(rate.kind))
+    if check.outcome == DIFFERS:
+        return (
+            f'<li class="stated">{kind} - differs: the statement of {day} prints {figure}'
+            f"{_earlier(check.earlier)} - {_source(rate.source)}</li>"
+        )
+    return (
+        f'<li class="stated">{kind} {figure} - {_esc(check.outcome)} - {_source(rate.source)}, '
+        f"statement of {day}{_earlier(check.earlier)}</li>"
+    )
+
+
+def _text_html(text: StatedText, *, unmasked: bool) -> str:
+    value = text.value if unmasked or not text.private else masked(text.value)
+    when = f", {_esc(text.day_words)} {_esc(text.day.isoformat())}" if text.day is not None else ""
+    return (
+        f'<li class="stated">{_esc(text.what)} {_esc(value)} - {_source(text.source)}{when}</li>'
+    )
+
+
+def stated_html(about: AccountAbout, *, unmasked: bool) -> str:
+    """What the sources state: each rate a kept statement prints against the declared window its
+    day falls in, and the names a statement or the provider gives. Empty where nothing is stated
+    and nothing could not be read."""
+    facts = about.facts
+    items = "".join(
+        _check_html(check, unmasked=unmasked) for check in rate_checks(facts.rates, about.record)
+    ) + "".join(_text_html(text, unmasked=unmasked) for text in facts.texts)
+    warnings = "".join(f'<p class="warn">{_esc(line)}</p>' for line in facts.unread)
+    return (f'<ul class="stated">{items}</ul>' if items else "") + warnings
 
 
 def _fact(name: str, value: str) -> str:
