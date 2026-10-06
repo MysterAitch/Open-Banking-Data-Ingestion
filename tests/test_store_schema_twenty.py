@@ -62,12 +62,12 @@ def held(tmp_path):
 class TestAStoreLeftAtVersionNineteen:
     def test_Store_OpenedTwiceUnderTheNewCode_GrowsTheTableOnceAndKeepsItsData(self, held):
         with Store(held) as store:
-            assert stamped(held) == str(SCHEMA_VERSION) == "20"
+            assert stamped(held) == str(SCHEMA_VERSION)
             assert [a.balance_minor for a in stated_anchors(store, ACCOUNT)] == [100000]
             assert store.disregard_balance(ACCOUNT, DAY, "stated", "stated", 100000)
 
         with Store(held) as store:
-            assert stamped(held) == "20"
+            assert stamped(held) == str(SCHEMA_VERSION)
             assert store.disregarded_balance_keys(ACCOUNT) == [(DAY, "stated", "stated")]
             assert [a.balance_minor for a in stated_anchors(store, ACCOUNT)] == [100000]
 

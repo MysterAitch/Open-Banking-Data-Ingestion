@@ -37,7 +37,7 @@ from obdi.cli import build_web_config
 from obdi.errors import DataError
 from obdi.rebuild import rebuild_from_raw
 from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
+from obdi.store import SCHEMA_VERSION, Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from statement_span_world import Spend, statement
 
@@ -365,6 +365,6 @@ class TestASchemaVersion19StoreMovesTo20:
             version = store.connection.execute(
                 "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
             ).fetchone()
-            assert str(version[0]) == "20"
+            assert str(version[0]) == str(SCHEMA_VERSION)
             assert store.disregard_balance(ACCOUNT, DAY, SOURCE, STATEMENT, -11500)
             assert store.disregarded_balance_keys(ACCOUNT) == [(DAY, SOURCE, STATEMENT)]

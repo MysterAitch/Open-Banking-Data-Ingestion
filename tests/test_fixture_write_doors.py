@@ -54,6 +54,13 @@ JUSTIFIED = {
     "whole incident - the observed_date migration was skipped on every real store while "
     "the unstamped fixtures above passed, and the live instance rebuilt twice into an "
     "empty derived layer before anybody noticed",
+    ("test_ledger_window_default.py", "obdi_meta"): "a store STAMPED at the version before "
+    "the preferences table: nothing stamps an older version than the current one, so the "
+    "migration that grows the table is reachable only by writing the stamp (the same reason "
+    "as test_sighting_observed_date.py above)",
+    ("test_ledger_window_default.py", "preferences"): "the served store is shared by the "
+    "module's tests, so each test's end clears what it set; there is deliberately no door "
+    "that forgets a preference, since the application never does",
     ("test_export_cuts.py", "transactions"): "a store that disagrees with the export it "
     "came from: a listed row that is not held, and a held row under another figure. The "
     "importer derives the rows and the artefact from the same bytes, so neither state can "

@@ -110,7 +110,11 @@ from .stated_words import recorded_words
 #: 19 -> 20: the `disregarded_balances` table, likewise: a hand decision to leave one source's
 #: known balance for one day out of the reading, kept across the rebuild from raw. A store
 #: stamped 19 would never have grown it.
-SCHEMA_VERSION = 20
+#:
+#: 20 -> 21: the `preferences` table, likewise: how the owner likes a page set (so far, the window
+#: an account's page opens on), kept across the rebuild from raw. A store stamped 20 would never
+#: have grown it.
+SCHEMA_VERSION = 21
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -633,6 +637,15 @@ CREATE TABLE IF NOT EXISTS record_scopes (
     set_at    TEXT NOT NULL
 );
 
+-- DECLARED: how the owner likes a page set, by name (`window.account` is the window an account's
+-- page opens on). The value is the NAME of a choice, never a figure. Like `protections`, nothing
+-- that regenerates the derived layers may touch it.
+CREATE TABLE IF NOT EXISTS preferences (
+    name   TEXT PRIMARY KEY,
+    value  TEXT NOT NULL,
+    set_at TEXT NOT NULL
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -686,6 +699,10 @@ NOT_STANDING_TABLES: dict[str, str] = {
         "rules and never by a standing"
     ),
     "obdi_meta": "the schema version and migration markers, which describe the file itself",
+    "preferences": (
+        "how the owner likes a page set, such as the window an account's page opens on; it "
+        "changes which days are listed and no figure, nothing is agreed or sent by it"
+    ),
     "provider_facts": (
         "what a pull learned about a connection (cursors, windows, depths), read by the "
         "pull and the coverage page and never by a standing"
@@ -797,6 +814,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'opening_minor', 'pressed_at', 'snapshot', 'span_start', 'through', 'verified_day',
         'verified_minor', 'verified_source',
     ],
+    'preferences': ['name', 'set_at', 'value'],
     'provider_facts': ['connection_id', 'fact', 'observed_at', 'source', 'value'],
     'raw_artefacts': [
         'account_ref', 'connection_id', 'digest', 'fetched_at', 'media_type',
@@ -4138,6 +4156,23 @@ class Store:
             "INSERT OR REPLACE INTO record_scopes (account, first_day, months, set_at) "
             "VALUES (?, ?, ?, ?)",
             (account, first_day, months, at),
+        )
+        self.connection.commit()
+
+    def preference(self, name: str) -> str | None:
+        """The value the owner set for `name`, or None where nothing was set."""
+        row = self.connection.execute(
+            "SELECT value FROM preferences WHERE name = ?", (name,)
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    def set_preference(self, name: str, value: str, *, now: datetime | None = None) -> None:
+        """Keep `value` as the owner's choice for `name`, and commit. Whether it is a value
+        that `name` allows is for the caller to have checked."""
+        self.connection.execute(
+            "INSERT INTO preferences (name, value, set_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET value = excluded.value, set_at = excluded.set_at",
+            (name, value, (now or datetime.now(UTC)).isoformat()),
         )
         self.connection.commit()
 
