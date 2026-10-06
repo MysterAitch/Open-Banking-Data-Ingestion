@@ -114,7 +114,12 @@ from .stated_words import recorded_words
 #: 20 -> 21: the `preferences` table, likewise: how the owner likes a page set (so far, the window
 #: an account's page opens on), kept across the rebuild from raw. A store stamped 20 would never
 #: have grown it.
-SCHEMA_VERSION = 21
+#:
+#: 21 -> 22: the `statement_extractions` table, likewise: what reading a PDF yields (its text, its
+#: table's cells, the names found, the sections of a divided document, its masked shape), kept by
+#: digest and extractor version so no page reads a PDF. It is derived from the raw artefacts, and a
+#: store stamped 21 would never have grown it.
+SCHEMA_VERSION = 22
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -136,6 +141,23 @@ class SectionAssignment:
     account_ref: str
     label: str
     assigned_at: str
+
+
+@dataclass(frozen=True)
+class ExtractionRecord:
+    """One row of `statement_extractions`, its JSON columns still as text.
+
+    `statement_extraction` is what encodes and decodes them; the store only keeps them.
+    """
+
+    failure: str = ""
+    page_count: int = 0
+    lines: str = "[]"
+    cells: str = "[]"
+    names: str = "[]"
+    sections: str = ""
+    sections_error: str = ""
+    masked_shape: str = ""
 
 
 SCHEMA = """
@@ -500,6 +522,26 @@ CREATE TABLE IF NOT EXISTS statement_readings (
     reading TEXT NOT NULL
 );
 
+-- DERIVED: what reading a held PDF yields, kept once so that no page reads a PDF
+-- (`statement_extraction` says what each column is and when it is filled). Keyed by the
+-- artefact's digest, with the extractor version it was made by beside it: a row at another
+-- version is replaced by the rebuild, never by a page. Unlike `statement_readings` it is NOT
+-- wiped by a rebuild, because extraction is the slow step and the bytes it reads cannot change;
+-- it can be dropped and refilled from the raw artefacts alone. `failure` is empty for a document
+-- that was read, and says why where it could not be, so that it is not tried on every read.
+CREATE TABLE IF NOT EXISTS statement_extractions (
+    digest            TEXT PRIMARY KEY,
+    extractor_version INTEGER NOT NULL,
+    failure           TEXT NOT NULL DEFAULT '',
+    page_count        INTEGER NOT NULL DEFAULT 0,
+    lines             TEXT NOT NULL DEFAULT '[]',
+    cells             TEXT NOT NULL DEFAULT '[]',
+    names             TEXT NOT NULL DEFAULT '[]',
+    sections          TEXT NOT NULL DEFAULT '',
+    sections_error    TEXT NOT NULL DEFAULT '',
+    masked_shape      TEXT NOT NULL DEFAULT ''
+);
+
 -- DERIVED: what the last same-money pass concluded at each statement closing of
 -- an account, as `same_money_outcome.AccountOutcome` JSON (dates, counts, and
 -- source names only - no amount, so the masked page may show it). Rewritten
@@ -721,6 +763,11 @@ NOT_STANDING_TABLES: dict[str, str] = {
         "itself deletes from valuations, which moves the epoch"
     ),
     "standing_epoch": "is the epoch: a trigger on it would move itself",
+    "statement_extractions": (
+        "the text, cells, names, sections, and masked shape read out of a held PDF, which no "
+        "standing reads; the readings and assignments a standing does read have their own "
+        "tables, and a document is only ever extracted to the same answer"
+    ),
 }
 
 
@@ -833,6 +880,10 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
     'sighting_words': ['artefact_digest', 'entity_id', 'field', 'source', 'word'],
     'standing_epoch': ['epoch', 'id'],
+    'statement_extractions': [
+        'cells', 'digest', 'extractor_version', 'failure', 'lines', 'masked_shape', 'names',
+        'page_count', 'sections', 'sections_error',
+    ],
     'statement_readings': ['digest', 'reading', 'source'],
     'statement_sections': [
         'account_ref', 'assigned_at', 'digest', 'label', 'section_key',
@@ -4115,6 +4166,87 @@ class Store:
             "reading = excluded.reading",
             (digest, source, reading),
         )
+
+    def statement_extraction(self, digest: str, version: int) -> ExtractionRecord | None:
+        """What was extracted from a held PDF by extractor `version`, or None.
+
+        A row made by another version is not an answer: it is how the rebuild knows to extract
+        the document again, and what a page reports as not yet extracted.
+        """
+        row = self.connection.execute(
+            "SELECT failure, page_count, lines, cells, names, sections, sections_error, "
+            "masked_shape FROM statement_extractions WHERE digest = ? AND extractor_version = ?",
+            (digest, version),
+        ).fetchone()
+        if row is None:
+            return None
+        return ExtractionRecord(
+            failure=str(row["failure"]),
+            page_count=int(row["page_count"]),
+            lines=str(row["lines"]),
+            cells=str(row["cells"]),
+            names=str(row["names"]),
+            sections=str(row["sections"]),
+            sections_error=str(row["sections_error"]),
+            masked_shape=str(row["masked_shape"]),
+        )
+
+    def statement_extraction_sections(self, digest: str, version: int) -> tuple[str, str] | None:
+        """(sections JSON, why they cannot be told apart) from the extraction made by `version`,
+        or None. The columns alone, because a document's text and cells are most of a row and a
+        caller that wants its sections should not decode them."""
+        row = self.connection.execute(
+            "SELECT sections, sections_error FROM statement_extractions "
+            "WHERE digest = ? AND extractor_version = ?",
+            (digest, version),
+        ).fetchone()
+        return None if row is None else (str(row["sections"]), str(row["sections_error"]))
+
+    def extracted_digests(self, version: int) -> set[str]:
+        """The digests that have an extraction made by extractor `version`."""
+        return {
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT digest FROM statement_extractions WHERE extractor_version = ?",
+                (version,),
+            )
+        }
+
+    def keep_statement_extraction(
+        self, digest: str, version: int, record: ExtractionRecord
+    ) -> None:
+        """Keep what a PDF yields, replacing any earlier extraction of it. The caller commits."""
+        self.connection.execute(
+            "INSERT INTO statement_extractions (digest, extractor_version, failure, page_count, "
+            "lines, cells, names, sections, sections_error, masked_shape) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(digest) DO UPDATE SET extractor_version = excluded.extractor_version, "
+            "failure = excluded.failure, page_count = excluded.page_count, "
+            "lines = excluded.lines, cells = excluded.cells, names = excluded.names, "
+            "sections = excluded.sections, sections_error = excluded.sections_error, "
+            "masked_shape = excluded.masked_shape",
+            (
+                digest,
+                version,
+                record.failure,
+                record.page_count,
+                record.lines,
+                record.cells,
+                record.names,
+                record.sections,
+                record.sections_error,
+                record.masked_shape,
+            ),
+        )
+
+    def clear_statement_extractions(self) -> None:
+        """Forget every stored extraction, in the open transaction.
+
+        The table is derived and the rebuild fills it again from the raw artefacts, so this is
+        how a caller shows that it can be dropped; nothing in the application's own paths
+        calls it, because extraction is the cost the table exists to save.
+        """
+        self.connection.execute("DELETE FROM statement_extractions")
 
     def clear_statement_readings(self) -> None:
         """Forget every kept reading, in the open transaction."""

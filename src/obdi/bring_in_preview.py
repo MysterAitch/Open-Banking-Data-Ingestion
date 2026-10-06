@@ -20,6 +20,7 @@ from datetime import date
 from .account_names import AccountsShown, code_html
 from .page_times import range_with_span
 from .plural import plural
+from .statement_extraction import not_yet_extracted_words
 from .web_statements import names_found_words
 
 _esc = html.escape
@@ -57,6 +58,9 @@ def preview_html(
     """
     ident = int(str(entry["id"]))
     shape = f'<a class="tap" href="/statement-shape?artefact={ident}">Masked shape</a>'
+    if entry.get("not_extracted"):
+        # Said in place of every fact, because each of them is read from what extraction gave.
+        return f'<p class="bi-preview">This document is {_esc(not_yet_extracted_words())}.</p>'
     parser = entry.get("parser")
     if not parser:
         return unreadable_html(ident, names_found_words(entry))

@@ -25,6 +25,7 @@ from typing import NewType
 
 from .masking import mask_characters
 from .plural import plural
+from .statement_columns import Row
 from .timings import Timings
 
 #: Text taken verbatim from a statement: payees, addresses, account
@@ -210,18 +211,19 @@ class ShapeReport:
     columns_attempted: bool = True
 
     def describe(self) -> str:
+        # An empty path leaves the name off, so a description can be kept without the name of
+        # whichever file it was read from and have the name put on at the page.
+        name = f"{self.path}: " if self.path else ""
         if not self.readable:
-            return (
-                f"{self.path}: could not be read as a PDF - is it a PDF at all?"
-            )
+            return f"{name}could not be read as a PDF - is it a PDF at all?"
         if not self.line_count:
             return (
-                f"{self.path}: {plural(self.page_count, 'page')} but NO TEXT layer - a "
+                f"{name}{plural(self.page_count, 'page')} but NO TEXT layer - a "
                 "scanned or photographed statement. Text-embedded PDFs only "
                 "for now; OCR is a separate problem."
             )
         header = (
-            f"{self.path}: {plural(self.line_count, 'line')} across "
+            f"{name}{plural(self.line_count, 'line')} across "
             f"{plural(self.page_count, 'page')}"
             + (
                 f", read as {plural(len(self.rows), 'row')} of "
@@ -287,25 +289,54 @@ def shape_report(
         raw = pdf_lines(path)
     report.line_count = len(raw)
     with clock.phase("mask"):
-        if mask:
-            masked_lines = [mask_line(line) for line in raw[:limit]]
-            if len(raw) > limit:
-                masked_lines.append(
-                    MaskedText(f"... {plural(len(raw) - limit, 'further line')} not shown")
-                )
-            report.lines = masked_lines
-        else:
-            raw_lines = list(raw[:limit])
-            if len(raw) > limit:
-                raw_lines.append(
-                    RawText(f"... {plural(len(raw) - limit, 'further line')} not shown")
-                )
-            report.lines = raw_lines
+        _add_line_view(report, raw, mask=mask, limit=limit)
 
     if columns:
         with clock.phase("geometry"):
             _add_column_view(report, path, mask=mask, limit=limit)
     return report
+
+
+def shape_of_extraction(
+    lines: list[str],
+    table: list[Row],
+    page_count: int,
+    *,
+    path: str = "",
+    mask: bool = True,
+    limit: int = 1200,
+) -> ShapeReport:
+    """The shape of a document that has already been read: the report `shape_report` would
+    make of its file, from the text and cells a stored extraction holds.
+
+    Nothing here opens a PDF, which is what lets a page show a kept statement's shape without
+    reading it. `path` is empty where the description is to be kept without a file name.
+    """
+    report = ShapeReport(path=path, masked=mask, page_count=page_count)
+    report.line_count = len(lines)
+    _add_line_view(report, [RawText(line) for line in lines], mask=mask, limit=limit)
+    _add_cells_view(report, table, mask=mask, limit=limit)
+    return report
+
+
+def _add_line_view(
+    report: ShapeReport, raw: list[RawText], *, mask: bool, limit: int
+) -> None:
+    """Attach the text lines, masked unless explicitly asked otherwise."""
+    if mask:
+        masked_lines = [mask_line(line) for line in raw[:limit]]
+        if len(raw) > limit:
+            masked_lines.append(
+                MaskedText(f"... {plural(len(raw) - limit, 'further line')} not shown")
+            )
+        report.lines = masked_lines
+    else:
+        raw_lines = list(raw[:limit])
+        if len(raw) > limit:
+            raw_lines.append(
+                RawText(f"... {plural(len(raw) - limit, 'further line')} not shown")
+            )
+        report.lines = raw_lines
 
 
 def _add_column_view(
@@ -318,12 +349,21 @@ def _add_column_view(
     still yields everything it yielded before, with the rows simply
     absent. Absent rows are visible in the summary rather than silent.
     """
-    from .statement_columns import COLUMN_TOLERANCE, aligned, covering_edges, rows
+    from .statement_columns import rows
 
     try:
         table = rows(path)
     except Exception:
         return
+    _add_cells_view(report, table, mask=mask, limit=limit)
+
+
+def _add_cells_view(
+    report: ShapeReport, table: list[Row], *, mask: bool, limit: int
+) -> None:
+    """Attach the table's cells as equal-length rows, masked unless explicitly asked otherwise."""
+    from .statement_columns import COLUMN_TOLERANCE, aligned, covering_edges
+
     if not table:
         return
     # The edges the rows were ACTUALLY laid out against, not the stricter

@@ -43,6 +43,7 @@ from obdi.cli import build_web_config
 from obdi.identity import artefact_digest
 from obdi.models import RawArtefact
 from obdi.navigation import DESTINATIONS
+from obdi.statement_extraction import keep_extraction
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_empty import empty_section, plan_from_audit
@@ -191,6 +192,10 @@ def worst_case_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 origin=LONG_FILE_NAME.replace("Statement", "AllAccounts"),
             )
         )
+        # Extracted as keeping does: a page says of a kept statement only what was extracted.
+        for held in (payload, every_account):
+            keep_extraction(store, artefact_digest(held), held)
+        store.connection.commit()
     config = build_web_config(db)
     assert config is not None
     handler = type(

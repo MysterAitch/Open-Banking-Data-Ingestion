@@ -18,14 +18,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 
-from ..identity import content_key
+from ..identity import artefact_digest, content_key
 from ..models import SourceTier, Transaction
 from ..namespaces import UK_CARD_STATEMENT_SOURCE
 from ..plural import plural
-from ..statement_columns import Row
+from ..statement_columns import Row, aligned
 from .base import ParseError, StatementParser
 from .capital_one_pdf import read_statement as read_capital_one
 from .card_statement_pdf import read_statement as read_card_statement
@@ -41,6 +43,67 @@ from .statement_reading import StatementReading
 from .virgin_money_pdf import read_statement as read_virgin
 
 PDF_MAGIC = b"%PDF-"
+
+#: Which extractor made a stored extraction (`statement_extraction`). Raise it whenever what a
+#: document yields can change: a different way of reading a page's text or cells, a parser that
+#: now reads sections differently or finds a different set of them, the list of names looked
+#: for, or the masking of the shape. The rebuild extracts again every document whose stored
+#: extraction was made by another version, and nothing else does; a page never reads a PDF, so
+#: a change left unbumped is not seen until somebody drops the table.
+EXTRACTOR_VERSION = 1
+
+
+@dataclass(frozen=True)
+class RawExtraction:
+    """What reading a PDF's pages gives, before any parser has looked at it.
+
+    The text lines and the table's cells are the only two reads of a document's bytes; every
+    parser works from one or the other, so a document that has them needs its bytes no more.
+    """
+
+    lines: list[str]
+    #: The page's words as rows of cells with their positions, before any column is chosen.
+    table: list[Row]
+    page_count: int
+    #: Why the document could not be read at all, "" where it was.
+    failure: str = ""
+
+    def grid_and_pages(self) -> tuple[list[list[str]], list[int]]:
+        """The table by column, and the page each of its rows was printed on."""
+        return aligned(self.table), [row.page for row in self.table]
+
+
+class NotExtracted(Exception):
+    """A page asked for a document that has no stored extraction at the current version.
+
+    Not a `DataError`: the callers that treat a document no parser reads as an answer must not
+    take this one for it, because a document waiting for the rebuild is not a document nothing
+    reads.
+    """
+
+
+#: Where a parser finds a document's extraction instead of reading its bytes: given the
+#: document's digest, the stored extraction, or None to read the bytes. Installed per request or
+#: per rebuild by `statement_extraction.serving`, and only ever consulted by `_supplied`.
+ExtractionSupplier = Callable[[str], RawExtraction | None]
+_SUPPLIER: ContextVar[ExtractionSupplier | None] = ContextVar(
+    "obdi_extraction_supplier", default=None
+)
+
+
+@contextmanager
+def supplying(supplier: ExtractionSupplier) -> Iterator[None]:
+    """Inside the block, a parser asked to read a document asks `supplier` first."""
+    token = _SUPPLIER.set(supplier)
+    try:
+        yield
+    finally:
+        _SUPPLIER.reset(token)
+
+
+def _supplied(payload: bytes) -> RawExtraction | None:
+    supplier = _SUPPLIER.get()
+    return None if supplier is None else supplier(artefact_digest(payload))
 
 
 #: How many payloads keep their readings. Two, because the sequence that
@@ -77,12 +140,56 @@ def _lines(payload: bytes) -> list[str]:
         return [str(line) for line in pdf_lines(temporary)]
 
 
+def read_raw(payload: bytes) -> RawExtraction:
+    """Read a PDF's pages: its text and its table's cells. The one place both are read.
+
+    This is the extraction a stored row saves, and only the doors that keep or rebuild call it.
+    A document pypdf cannot open comes back with a `failure` rather than as an empty reading, so
+    a document with no text layer (which opens, and yields no lines) is told from one that is
+    not a PDF at all.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from .. import statement_shape
+    from ..statement_columns import rows
+
+    with tempfile.TemporaryDirectory() as scratch:
+        temporary = Path(scratch) / "statement.pdf"
+        temporary.write_bytes(payload)
+        try:
+            from pypdf import PdfReader
+
+            pages = len(PdfReader(str(temporary)).pages)
+        except Exception as exc:
+            return RawExtraction([], [], 0, f"could not be opened as a PDF: {type(exc).__name__}")
+        lines = [str(line) for line in statement_shape.pdf_lines(temporary)]
+        return RawExtraction(lines, rows(temporary), pages)
+
+
+def _text_of(payload: bytes) -> list[str]:
+    """A document's text lines: the stored extraction where one is supplied, else read."""
+    supplied = _supplied(payload)
+    return _lines(payload) if supplied is None else supplied.lines
+
+
+def _grid_and_pages_of(payload: bytes) -> tuple[list[list[str]], list[int]]:
+    supplied = _supplied(payload)
+    return _grid_and_pages(payload) if supplied is None else supplied.grid_and_pages()
+
+
+def _table_of(payload: bytes) -> list[Row]:
+    supplied = _supplied(payload)
+    return _table(payload) if supplied is None else supplied.table
+
+
 def statement_lines(payload: bytes) -> list[str]:
     """A statement's text lines, for a caller outside the parsers.
 
-    The same cached reading the parsers use, so asking costs nothing more.
+    The stored extraction where one is supplied (`supplying`), else the cached reading the
+    parsers use, so asking costs nothing more.
     """
-    return _lines(payload)
+    return _text_of(payload)
 
 
 @lru_cache(maxsize=_READINGS_KEPT)
@@ -116,7 +223,7 @@ def _grid_and_pages(payload: bytes) -> tuple[list[list[str]], list[int]]:
 
 def _grid(payload: bytes) -> list[list[str]]:
     """The document's table alone; see `_grid_and_pages`."""
-    return _grid_and_pages(payload)[0]
+    return _grid_and_pages_of(payload)[0]
 
 
 @lru_cache(maxsize=_READINGS_KEPT)
@@ -196,7 +303,7 @@ class PdfStatementParser(StatementParser):
         # Whitespace is squeezed on both sides: the text layer doubles the gap
         # inside a phrase on some documents ("Statement  period:"), and a phrase
         # a parser requires must not depend on how wide that gap came out.
-        lines = [" ".join(line.split()).casefold() for line in _lines(payload)]
+        lines = [" ".join(line.split()).casefold() for line in _text_of(payload)]
         wanted = (self.marker, *self.requires)
         return all(
             any(" ".join(word.split()).casefold() in line for line in lines)
@@ -211,7 +318,7 @@ class PdfStatementParser(StatementParser):
         rather than the reading keeps that a fact about the format instead
         of something each caller has to know.
         """
-        return self.reader(_lines(payload))
+        return self.reader(_text_of(payload))
 
     def refusal_of(self, reading: StatementReading, *, figures: bool = True) -> str:
         """Why a reading may not be stored, or "" when it may.
@@ -354,7 +461,7 @@ class ColumnPdfStatementParser(PdfStatementParser):
     def sections(self, payload: bytes) -> list[SectionReading] | None:
         if self.document_reader is None:
             return None
-        found = self.document_reader(*_grid_and_pages(payload))
+        found = self.document_reader(*_grid_and_pages_of(payload))
         if found is None:
             return None
         return [
@@ -439,7 +546,7 @@ class StarlingStatementPdfParser(PdfStatementParser):
     table_reader: Callable[[list[Row]], StatementReading] = staticmethod(read_starling)
 
     def read(self, payload: bytes) -> StatementReading:
-        return self.table_reader(_table(payload))
+        return self.table_reader(_table_of(payload))
 
 
 class NationwideStatementPdfParser(PdfStatementParser):
@@ -460,7 +567,7 @@ class NationwideStatementPdfParser(PdfStatementParser):
     table_reader: Callable[[list[Row]], StatementReading] = staticmethod(read_nationwide)
 
     def read(self, payload: bytes) -> StatementReading:
-        return self.table_reader(_table(payload))
+        return self.table_reader(_table_of(payload))
 
 
 class HalifaxAccountStatementPdfParser(PdfStatementParser):

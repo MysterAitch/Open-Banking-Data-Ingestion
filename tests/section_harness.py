@@ -19,6 +19,7 @@ import pytest
 from obdi.cli import build_web_config
 from obdi.identity import artefact_digest
 from obdi.models import RawArtefact
+from obdi.statement_extraction import keep_extraction
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
@@ -45,6 +46,10 @@ def keep(store: Store, payload: bytes, name: str, *, order: int = 0) -> int:
             origin=name,
         )
     )
+    # Extracted as keeping does, because no page reads a PDF: what a page says of a kept
+    # statement is what was extracted when it was kept.
+    keep_extraction(store, artefact_digest(payload), payload)
+    store.connection.commit()
     row = store.connection.execute(
         "SELECT rowid FROM raw_artefacts WHERE origin = ?", (name,)
     ).fetchone()

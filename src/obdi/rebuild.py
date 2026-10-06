@@ -60,6 +60,7 @@ from .review_report import FlagClass
 from .review_settlement import SettleReport, settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import FoldRefusal, fold_space_copies
+from .statement_extraction import fill_missing, serving
 from .statement_sections import SectionBatches, replay_batches
 from .store import Store
 from .typed_transactions import transaction_from_entry, withdrawn_entry_ids
@@ -430,6 +431,21 @@ def rebuild_from_raw(
 ) -> RebuildReport:
     """Wipe the derived layers and replay layer 0 in arrival order.
 
+    The replay and the passes after it read each held PDF from its stored extraction, so a
+    document is read from its file at most once in a rebuild - by the fill that precedes the
+    replay, and only where no extraction made by the current version is held.
+    """
+    with serving(store, strict=False):
+        return _rebuild_from_raw(store, progress, account_map)
+
+
+def _rebuild_from_raw(
+    store: Store,
+    progress: Callable[[int, int, RebuildReport], None] | None,
+    account_map: AccountMap | None,
+) -> RebuildReport:
+    """Wipe the derived layers and replay layer 0 in arrival order.
+
     Arrival order matters: occurrence counting and supersession depend on
     which sighting came first, and replaying in arrival order (see
     `arrival_order`) reproduces the history the store actually lived through.
@@ -502,6 +518,11 @@ def rebuild_from_raw(
         # Each rebuild reports its own numbers, not the residue of the
         # last one - or of a scheduled pull that ran in between.
         instrumentation.reset()
+
+    # Before the replay, so every parser below finds its document already read. Left where the
+    # wipe above does not reach: extraction is the slow step and its bytes cannot change.
+    with instrumentation.phase("parse"):
+        fill_missing(store)
 
     # Count the whole job before starting it. Parsing every payload costs
     # under a second across the entire store, which is cheaper than the
