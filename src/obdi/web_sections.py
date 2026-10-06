@@ -32,7 +32,6 @@ from .callback import render_page
 from .connections import ConnectionStore
 from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE
-from .web_scheduler import scheduler_section
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .accounts import AccountRecord
