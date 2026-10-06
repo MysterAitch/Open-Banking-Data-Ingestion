@@ -24,9 +24,13 @@ from .page_times import date_with_age
 from .standing_data import ADDS_UP, NOTHING_TO_CHECK_AGAINST
 from .trust import Trust
 from .trust_bar import axis_html, key_html
-from .web_overview import _row_html, _trust_of, arrange, serial
+from .web_overview import _row_html, _trust_of, arrange, row_reading, serial
 
 _esc = html.escape
+
+#: `row_reading`'s groups from this one up are fine (adds up, quiet, empty): 0 does not add up
+#: and 1 has nothing to check against, and those stay open.
+_FINE_FROM = 2
 
 #: Said once when the Overview could not be read at all, and never per account.
 UNREAD = (
@@ -126,9 +130,18 @@ def list_html(
 
     live = [a for a in reading.held if a.ref not in archived]
     old = [a for a in reading.held if a.ref in archived]
+    # What is fine is one line, as on Today's silence: the accounts that add up fold behind a
+    # count, so the open list is the accounts the figure is least sure of however many there are.
+    asking = [a for a in live if row_reading(a).group < _FINE_FROM]
+    fine = [a for a in live if row_reading(a).group >= _FINE_FROM]
     out = ""
-    if live:
-        out += f'{axis_html(today)}<ul class="alist">{rows(live)}</ul>'
+    if asking:
+        out += f'{axis_html(today)}<ul class="alist">{rows(asking)}</ul>'
+    if fine:
+        out += (
+            f"<details><summary>{len(fine)} add up to the known balances</summary>"
+            f'{axis_html(today)}<ul class="alist">{rows(fine)}</ul></details>'
+        )
     if old:
         out += (
             f"<details><summary>{len(old)} archived, counted like any other</summary>"

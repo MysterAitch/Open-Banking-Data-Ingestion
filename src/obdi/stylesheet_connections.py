@@ -11,7 +11,7 @@ for the occasions that want them is as quiet as the evidence line.
 CONNECTIONS_STYLES = r"""
  .conn-need { margin: 0 0 var(--s4); }
  .conn-out, .conn-in { margin: var(--s4) 0; }
- .out-verdict { margin: 0 0 var(--s1); }
+ .out-verdict { margin: 0 0 var(--s1); font-weight: 400; }
  .out-verdict.bad { color: var(--bad); }
  .out-verdict.warn { color: var(--warn); }
  .sources { list-style: none; margin: var(--s2) 0; padding: 0; }

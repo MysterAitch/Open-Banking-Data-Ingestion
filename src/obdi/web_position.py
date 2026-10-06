@@ -49,6 +49,7 @@ from .date_window import (
 from .logs import say
 from .masking import MASKED_TOTAL, Disclosed
 from .overview import AccountOverview
+from .plural import agree
 from .plural import plural as _plural
 from .position import (
     ChartSeries,
@@ -133,6 +134,53 @@ def _subtotals(view: Any) -> str:
     return f'<ul class="keylist">{items}</ul>'
 
 
+def _check_lines(view: Any) -> str:
+    """What the later known balances say of one account, as the page said it per account before
+    the list became trust bars: where the family's transactions first stop adding up, and where
+    to see it. Empty for an account with nothing to say."""
+    parts = []
+    if view.checks_differ:
+        parts.append(
+            f"{_plural(view.checks_differ, 'later check')} "
+            f"{agree(view.checks_differ, 'differs')}: the transactions between its known "
+            "balances do not add up, so this balance may be wrong. It is still counted. "
+            f'<a class="tap" href="{_ledger_href(view.ref)}">See its ledger</a> or '
+            f'<a class="tap" href="{_periods_href(view.ref)}">where, period by period</a>.'
+        )
+    if view.family_anchors:
+        # The known balances are the whole account's (main plus its Spaces), so a difference
+        # is located against the family's transactions, not main's alone.
+        if view.family_first_differing:
+            parts.append(
+                "The transactions first stop adding up to the whole account's known balances "
+                f"({_esc(str(view.family_anchors))}) on {_esc(view.family_first_differing)}; "
+                f"the difference is {_esc(view.family_pattern)} after that."
+            )
+        else:
+            parts.append(
+                "Checked against the whole account (main plus its Spaces): "
+                f"{_esc(str(view.family_anchors))} known balances, and the transactions add up "
+                "to all of them."
+            )
+        parts.append(_esc(view.family_opening_note))
+    if not parts:
+        return ""
+    name = AccountShown.named(view.ref, view.label).as_name()
+    return f"<li><strong>{name}</strong>: {' '.join(parts)}</li>"
+
+
+def _checks_fold(view: Any) -> str:
+    """The per-account detail of the later balance checks, folded: the trust bars say the
+    verdict and this says where."""
+    items = "".join(_check_lines(a) for g in view.groups for a in g.accounts)
+    if not items:
+        return ""
+    return (
+        "<details><summary>How the later known balances were checked</summary>"
+        f'<ul class="pos-left-out">{items}</ul></details>'
+    )
+
+
 def _plain_list(view: Any) -> str:
     """The counted accounts by name, for when their trust could not be read."""
     items = "".join(
@@ -152,6 +200,13 @@ def _left_out(view: Any) -> str:
         why = f"no opening balance could be derived: {_esc(view.withheld)}"
     else:
         why = "no known balance has been stated for it"
+        if not int(view.rows):
+            # A feedless account is the usual cause, and the way out is to declare it.
+            why += (
+                ", and it holds no transactions, so it may be an account obdi has no feed for: "
+                f"declare its kind as {BALANCE_ONLY_KIND} on its account page to have it "
+                "counted from its first known balance"
+            )
     moved = (
         f"; moved {_figure(view.moved_direction, view.moved)} since {_esc(view.first_row)}"
         if view.first_row
@@ -160,36 +215,29 @@ def _left_out(view: Any) -> str:
     return f'<li><a class="tap" href="{_ledger_href(view.ref)}">{name}</a> - {why}{moved}.</li>'
 
 
+def _observed(view: Any) -> str:
+    """When an asset was last observed and by what, in one clause."""
+    return (
+        f'observed <span class="nowrap">{_esc(view.observed_on)}</span> '
+        f"({_esc(_days(view.age_days))}), from {_esc(view.source)}"
+    )
+
+
 def _asset_card(view: Any) -> str:
     return (
-        '<li class="account">'
-        f'<p class="account-name"><strong>{_esc(view.asset_id)}</strong></p>'
-        f'<span class="muted">{_esc(_KIND_WORDS.get(view.kind, view.kind))}</span>'
-        f'<p class="figure">{_figure(_balance_word(view.direction), view.value)}</p>'
-        '<dl class="facts">'
-        + _fact(
-            "Observed",
-            f'<span class="nowrap">{_esc(view.observed_on)}</span> ({_esc(_days(view.age_days))})',
-        )
-        + _fact("Source", _esc(view.source))
-        + _fact("Observations", _esc(str(view.observations)))
-        + "</dl></li>"
+        f"<li><strong>{_esc(view.asset_id)}</strong> "
+        f'<span class="muted">{_esc(_KIND_WORDS.get(view.kind, view.kind))}</span>: '
+        f"{_figure(_balance_word(view.direction), view.value)}, {_observed(view)}, "
+        f"{_plural(int(view.observations), 'observation')}.</li>"
     )
 
 
 def _entitlement_card(view: Any) -> str:
     return (
-        '<li class="account">'
-        f'<p class="account-name"><strong>{_esc(view.asset_id)}</strong></p>'
-        f'<span class="muted">{_esc(_KIND_WORDS.get(view.kind, view.kind))}</span>'
-        f'<p class="figure"><span class="mono nowrap">{_esc(view.annual_income)}</span> a year</p>'
-        '<dl class="facts">'
-        + _fact(
-            "Observed",
-            f'<span class="nowrap">{_esc(view.observed_on)}</span> ({_esc(_days(view.age_days))})',
-        )
-        + _fact("Source", _esc(view.source))
-        + "</dl></li>"
+        f"<li><strong>{_esc(view.asset_id)}</strong> "
+        f'<span class="muted">{_esc(_KIND_WORDS.get(view.kind, view.kind))}</span>: '
+        f'<span class="mono nowrap">{_esc(view.annual_income)}</span> a year, '
+        f"{_observed(view)}.</li>"
     )
 
 
@@ -1054,7 +1102,7 @@ def _history(
                 '<p data-window-refused-note>The window was not changed, and no chart is drawn '
                 "from a choice that was refused.</p>"
             )
-            return body + _month_table(view)
+            return body + _month_table(view, unmasked=unmasked)
         if narrowed:
             left_out = [_label_and_ref(i) for i in view.chart_items if i.key not in (drawn or ())]
             body += (
@@ -1113,14 +1161,18 @@ def _history(
             "<p>The chart is drawn when values are shown. Its shape would disclose how "
             "large the figures are, so the masked page does not draw one.</p>"
         )
-    return body + _month_table(view)
+    return body + _month_table(view, unmasked=unmasked)
 
 
-def _month_table(view: Any) -> str:
-    """The month table: monthly and whole whatever window the chart is drawn over."""
+def _month_table(view: Any, *, unmasked: bool) -> str:
+    """The month table: monthly and whole whatever window the chart is drawn over.
+
+    Folded where it is long, and always while masked: every figure in it is then the same token,
+    so what it holds is the counts, and a phone screen of one repeated token earns no place.
+    """
     table = _month_rows(view)
     shown = len(view.provisional_history) or len(view.history)
-    if shown > TABLE_FOLD_AFTER:
+    if shown > TABLE_FOLD_AFTER or not unmasked:
         return (
             f"<details><summary>Month table, newest first ({shown} months)"
             f"</summary>{table}</details>"
@@ -1128,7 +1180,7 @@ def _month_table(view: Any) -> str:
     return table
 
 
-_LIMITS_HEAD = '<h2>What this page does not check</h2><ul class="muted">'
+_LIMITS_HEAD = '<details><summary>What this page does not check</summary><ul class="muted">'
 
 #: Shown only while an account is uncounted, so a page with nothing provisional
 #: on it never mentions the idea.
@@ -1218,23 +1270,21 @@ def render_position(
             body += list_html(reading, today, shown_of, balances, archived)
         else:
             body += unread + _plain_list(view)
+        body += _checks_fold(view)
     if view.assets:
         body += (
             "<h2>Observed assets</h2>"
             "<p>Subtotal: <strong>"
             + _figure(_balance_word(view.assets_direction), view.assets_subtotal)
             + "</strong>, each at its latest observed value.</p>"
-            '<ul class="accounts">' + "".join(_asset_card(a) for a in view.assets) + "</ul>"
+            '<ul class="pos-left-out">' + "".join(_asset_card(a) for a in view.assets) + "</ul>"
         )
     if view.uncounted:
         body += (
             "<h2>Left out: no opening balance</h2>"
             "<p>Their balances are unknown, which is not the same as nothing. They are in "
             "no balance, subtotal, or net worth. Open one to state a balance for a date; "
-            "importing older statements later does not make it wrong. An account that holds "
-            "no transactions may have no feed: declare its kind as "
-            f"{BALANCE_ONLY_KIND} on its account page to have it counted from its first known "
-            "balance.</p>"
+            "importing older statements later does not make it wrong.</p>"
             '<ul class="pos-left-out">' + "".join(_left_out(a) for a in view.uncounted) + "</ul>"
         )
     if view.entitlements:
@@ -1242,13 +1292,13 @@ def render_position(
             "<h2>Income entitlements, not counted as wealth</h2>"
             "<p>A promise of income has no pot behind it and no agreed way to put a capital "
             "figure on it, so these are shown as income and never added to the net worth.</p>"
-            '<ul class="accounts">'
+            '<ul class="pos-left-out">'
             + "".join(_entitlement_card(e) for e in view.entitlements)
             + "</ul>"
         )
     body += _history(position, view, unmasked=unmasked, chart_in=chart_in, choice=choice)
     limits = _LIMITS + (_LIMIT_PROVISIONAL if view.uncounted else "")
-    body += _LIMITS_HEAD + limits + "</ul>" + _HOME
+    body += _LIMITS_HEAD + limits + "</ul></details>" + _HOME
     return render_page("Position", body, wide=True)
 
 

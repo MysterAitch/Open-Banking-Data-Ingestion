@@ -175,7 +175,8 @@ class TestMaskedByDefault:
         assert "6 of 6" in page
         assert "5 of 6" in page
         assert "complete from <strong>2026-04</strong>" in page
-        assert "<summary>Month table" not in page, "eleven months are shown, not folded"
+        assert "<summary>Month table" in page, "masked, the table is folded"
+        assert "<summary>Month table" not in lab.show_values().text, "eleven months, not folded"
 
     def test_Get_FoldsTheMonthTableWhenThereAreMoreThanTwelveMonths(self, tmp_path, monkeypatch):
         def long_history(store: Store) -> None:
