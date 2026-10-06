@@ -210,7 +210,11 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
         assert current_section(page) == [section]
         # The Actual page opens with its verdict and Coverage by source with its counts, which
         # is what the lede is for elsewhere: a lede above either spent a line before the first fact.
-        openings = {"/actual": 'id="verdict"', "/coverage": 'class="cov-summary"'}
+        openings = {
+            "/actual": 'id="verdict"',
+            "/coverage": 'class="cov-summary"',
+            "/connections": 'class="conn-out"',
+        }
         opening = openings.get(path, '<p class="lede">')
         assert page.index(opening) < page.index(fragment)
 
@@ -376,29 +380,29 @@ class TestConsentRowsSayWhenAndWeighReconnectByUrgency:
         expires = datetime.now(UTC) + span
         page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
 
-        assert f"30 days left - expires on {expires.date().isoformat()}" in page
-        assert '<a class="button secondary" href="/connect?name=halifax">' in page
+        assert f"expires {expires.date().isoformat()} (in 30 days)" in page
+        assert 'href="/connect?name=halifax"' not in page
 
     def test_Row_AtTheFirstAlertRung_OffersReconnectAsPrimary(self, serve):
         span = timedelta(days=FIRST_RUNG_DAYS, hours=1)
         expires = datetime.now(UTC) + span
         page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
 
-        assert f"expires in {FIRST_RUNG_DAYS} days on {expires.date().isoformat()}" in page
-        assert '<a class="button" href="/connect?name=halifax">' in page
+        assert f"expires {expires.date().isoformat()} (in {FIRST_RUNG_DAYS} days)" in page
+        assert '<a class="button" href="/connect?name=halifax">Reconnect halifax</a>' in page
 
-    def test_Row_OneDayOutsideTheFirstAlertRung_StillOffersReconnectAsSecondary(self, serve):
+    def test_Row_OneDayOutsideTheFirstAlertRung_OffersNoReconnect(self, serve):
         span = timedelta(days=FIRST_RUNG_DAYS + 1, hours=1)
         page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
 
-        assert '<a class="button secondary" href="/connect?name=halifax">' in page
+        assert 'href="/connect?name=halifax"' not in page
 
     def test_Row_WhenExpired_OffersReconnectAsPrimaryAndSaysWhenItLapsed(self, serve):
         lapsed = datetime.now(UTC) - timedelta(days=3)
         page = fetch(serve((connection("halifax", expires_in=timedelta(days=-3)),)), "/connections")
 
-        assert f"expired on {lapsed.date().isoformat()} - reconnect now" in page
-        assert '<a class="button" href="/connect?name=halifax">' in page
+        assert f"expired {lapsed.date().isoformat()}" in page
+        assert '<a class="button" href="/connect?name=halifax">Reconnect halifax</a>' in page
 
     def test_Row_WithNoConsentClock_SaysSoInsteadOfPrintingNoneDays(self, serve):
         store_connection = Connection(connection_id="starlingish", provider="p", refresh_token="r")
@@ -417,7 +421,6 @@ class TestConsentRowsSayWhenAndWeighReconnectByUrgency:
         )
 
         assert inside_details(page, 'action="/rename-connection"')
-        assert not inside_details(page, "Reconnect halifax")
 
 
 class TestElapsedTimeReadsInDaysAndHours:
@@ -466,11 +469,23 @@ class TestExtendHistoryKeepsTheStateOutsideTheFold:
             assert inside_details(page, f'name="days" value="{days}"')
         assert inside_details(page, "Extend as far as possible")
 
-    def test_CoverageLineAndStaleMarker_StayVisibleOutsideTheFold(self, serve):
+    def test_StaleAccount_OpensTheFoldHoldingItSoTheMarkerIsInView(self, serve):
         page = fetch(serve(extendables=lambda: [self._stale_account()]), "/connections")
 
-        assert not inside_details(page, "covered to ")
-        assert not inside_details(page, "stale: 9 days behind")
+        assert "stale: 9 days behind" in page
+        assert '<details class="manage" open>' in page
+
+    def test_AccountThatIsCurrent_LeavesTheFoldShut(self, serve):
+        current = ExtendableAccount(
+            connection="halifax",
+            provider_ref="e9f8",
+            display="Current Account",
+            earliest=date(2024, 8, 2),
+            covered_to=datetime.now(UTC).date(),
+        )
+        page = fetch(serve(extendables=lambda: [current]), "/connections")
+
+        assert '<details class="manage">' in page
 
     def test_ResultPageAfterAPress_KeepsTheButtonsOpenForPressingAgain(self, serve):
         base = serve(
@@ -562,7 +577,7 @@ class TestPagesTolerateHooksAsTheHomePageDid:
             serve(starling_status=boom, provider_knowledge=boom, extendables=boom), "/connections"
         )
 
-        assert "Banks and their consent" in page
+        assert "Where data comes from" in page
 
     def test_Diagnostics_WhenTheRebuildHistoryHookRaises_ThePageStillRenders(self, serve):
         def boom():
@@ -778,4 +793,4 @@ class TestConnectionsHoldsSourcesInAndDestinationsOut:
 
         page = fetch(base, "/connections").split("Where data comes from")[1]
 
-        assert "Banks and their consent" in page and "halifax" in page
+        assert "halifax" in page and "expires" in page

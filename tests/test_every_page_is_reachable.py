@@ -45,6 +45,7 @@ STATEMENT_LINES = [
 NOT_LINKED = {
     "/healthz": "liveness, read by the container's probe",
     "/callback": "the bank's redirect, which no page links to",
+    "/connect": "the Add a bank form's own address, and Reconnect only where a consent is ending",
     **dict.fromkeys(ALIASES, "a destination's own page, kept for the bookmarks that hold it"),
 }
 

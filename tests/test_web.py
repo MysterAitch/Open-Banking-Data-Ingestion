@@ -72,12 +72,12 @@ class TestAuthorisationState:
 class TestIndexPage:
     def test_Page_WhenNoConnections_SaysSoRatherThanShowingAnEmptyList(self, tmp_path):
         page = render_connections(ConnectionStore(tmp_path / "c.json")).decode()
-        assert "No banks connected yet" in page
+        assert "No bank is connected through the aggregator" in page
 
     def test_Page_WhenConsentHealthy_ShowsDaysRemaining(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
         store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
-        assert "89 days left" in render_connections(store).decode()
+        assert "(in 90 days)" in render_connections(store).decode()
 
     def test_Page_WhenConsentNearlyExpired_FlaggedProminently(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
@@ -88,7 +88,7 @@ class TestIndexPage:
             )
         )
         page = render_connections(store).decode()
-        assert "expires in" in page and "warn" in page
+        assert "(in 5 days)" in page and "/connect?name=halifax" in page
 
     def test_Page_WhenConsentExpired_ShownAsExpired(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
@@ -109,7 +109,12 @@ class TestIndexPage:
     def test_Page_WhenConnectionExists_OffersReconnectUnderTheSameName(self, tmp_path):
         # A new name would silently create a second connection to one bank.
         store = ConnectionStore(tmp_path / "c.json")
-        store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
+        old = datetime.now(UTC) - timedelta(days=85)
+        store.put(
+            build_connection(
+                connection_id="halifax", provider="p", token_response=TOKENS, now=old
+            )
+        )
         assert "/connect?name=halifax" in render_connections(store).decode()
 
 

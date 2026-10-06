@@ -47,13 +47,23 @@ class TestSessionDoesNotGrowWithoutBound:
         assert len(session) == 0
 
 
+def _running_out(name: str):
+    """A connection whose consent has five days left, the stage at which Reconnect is offered."""
+    return build_connection(
+        connection_id=name,
+        provider="p",
+        token_response=TOKENS,
+        now=datetime.now(UTC) - timedelta(days=85),
+    )
+
+
 class TestConnectionNamesRoundTripSafely:
     def test_Link_WhenNameContainsAnAmpersand_ReconnectsTheSameConnection(self, tmp_path):
         # HTML-escaping protects the page but not the query string: an
         # unencoded ampersand truncates the name and reconnects something else,
         # which would silently create a second connection to one bank.
         store = ConnectionStore(tmp_path / "c.json")
-        store.put(build_connection(connection_id="m&s bank", provider="p", token_response=TOKENS))
+        store.put(_running_out("m&s bank"))
 
         page = render_connections(store).decode()
 
@@ -62,14 +72,12 @@ class TestConnectionNamesRoundTripSafely:
 
     def test_Link_WhenNameContainsASpace_Encoded(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
-        store.put(
-            build_connection(connection_id="virgin money", provider="p", token_response=TOKENS)
-        )
+        store.put(_running_out("virgin money"))
         assert "virgin%20money" in render_connections(store).decode()
 
     def test_Link_WhenNameIsOrdinary_LeftReadable(self, tmp_path):
         store = ConnectionStore(tmp_path / "c.json")
-        store.put(build_connection(connection_id="halifax", provider="p", token_response=TOKENS))
+        store.put(_running_out("halifax"))
         assert "name=halifax" in render_connections(store).decode()
 
 

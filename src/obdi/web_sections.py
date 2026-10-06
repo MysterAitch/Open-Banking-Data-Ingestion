@@ -30,8 +30,8 @@ from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
+from .web_connections import Hooks, connections_body
 from .web_gaps import FETCH_NEXT_LINE
-from .web_scheduler import scheduler_section
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .accounts import AccountRecord
@@ -257,31 +257,6 @@ def system_strip_html(
 # ---------------------------------------------------------------------- Pages
 
 
-def _destinations_html(
-    actual_status: Callable[[], list[dict[str, object]]] | None,
-    actual_queue: Callable[[], list[dict[str, object]]] | None,
-    actual_heartbeat: Callable[[], str] | None,
-    actual_configured: Callable[[], bool] | None,
-    now: datetime | None,
-) -> str:
-    """The places data is sent out to. There is one: the budgeting tool, in the words of the
-    Actual page's own verdict, which is worked out once (`web_overview.actual_line`)."""
-    from .web_overview import actual_line
-
-    line = actual_line(
-        actual_status,
-        now or datetime.now(UTC),
-        queue=actual_queue,
-        heartbeat=actual_heartbeat,
-        configured=actual_configured,
-    )
-    return (
-        "<h2>Where data goes out</h2>"
-        f'<ul class="hub-list"><li><strong>Actual</strong>: {_esc(line.sentence)} '
-        '<a class="tap" href="/actual">Open the Actual page</a></li></ul>'
-    )
-
-
 def render_connections(
     store: ConnectionStore,
     *,
@@ -297,34 +272,37 @@ def render_connections(
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
     actual_heartbeat: Callable[[], str] | None = None,
     actual_configured: Callable[[], bool] | None = None,
+    push_available: bool = False,
+    audit_available: bool = False,
+    align_available: bool = False,
+    connection_last_answered: Callable[[], dict[str, str]] | None = None,
+    source_connections: Callable[[], dict[tuple[str, str], list[str]]] | None = None,
+    account_names: Callable[[], AccountsShown] | None = None,
     now: datetime | None = None,
 ) -> bytes:
-    from . import web
-
-    body = (
-        web._credential_banner(bank_authorisation)
-        + web._backfill_running_banner(backfill_status)
-        + _lede(
-            "Every place data comes from or goes to: the banks and the aggregator it is "
-            "fetched from, and the budgeting tool it is sent to. A bank makes you reconfirm "
-            "every ninety days, only you can do that at the bank, and the page below says when."
-        )
-        + _destinations_html(actual_status, actual_queue, actual_heartbeat, actual_configured, now)
-        + "<h2>Where data comes from</h2>"
-        + "<h3>Banks and their consent</h3>"
-        + web._connection_rows(store, rename_available=rename_connection is not None)
-        + web._starling_row(starling_status)
-        + scheduler_section(scheduler_heartbeat)
-        + web._add_a_bank_section(bank_authorisation)
-        + (
-            web._fetch_now_rows(store, starling_status, backfill_status)
-            if fetch_now_available
-            else ""
-        )
-        + web._extend_rows(extendables, fetch_now=fetch_now_available)
-        + web._knowledge_rows(provider_knowledge)
+    """Is everything connected, and when did each last answer (`web_connections`)."""
+    hooks = Hooks(
+        bank_authorisation=bank_authorisation,
+        rename_available=rename_connection is not None,
+        starling_status=starling_status,
+        provider_knowledge=provider_knowledge,
+        extendables=extendables,
+        backfill_status=backfill_status,
+        fetch_now_available=fetch_now_available,
+        scheduler_heartbeat=scheduler_heartbeat,
+        actual_status=actual_status,
+        actual_queue=actual_queue,
+        actual_heartbeat=actual_heartbeat,
+        actual_configured=actual_configured,
+        push_available=push_available,
+        audit_available=audit_available,
+        align_available=align_available,
+        last_answered=connection_last_answered,
+        source_connections=source_connections,
+        account_names=account_names,
     )
-    return render_page("Connections", body)
+    body = connections_body(store, hooks, now or datetime.now(UTC))
+    return render_page("Connections", body, body_class="conn-page")
 
 
 #: What More lists: its groups, each with the pages in it and one line of what the page is for.
@@ -589,6 +567,14 @@ class SectionPages:
             actual_queue=config.actual_queue,
             actual_heartbeat=config.actual_heartbeat,
             actual_configured=config.actual_configured,
+            push_available=config.push_actual is not None,
+            audit_available=config.audit_actual is not None,
+            align_available=config.align_actual is not None,
+            connection_last_answered=timer.wrap(
+                "connection_last_answered", config.connection_last_answered
+            ),
+            source_connections=timer.wrap("source_connections", config.source_connections),
+            account_names=timer.wrap("account_names", config.account_names),
         )
         timer.report("/connections")
         self._respond(200, page)

@@ -48,6 +48,7 @@ import re
 
 from .stylesheet_account import ACCOUNT_STYLES
 from .stylesheet_actual import ACTUAL_STYLES
+from .stylesheet_connections import CONNECTIONS_STYLES
 from .stylesheet_flags import FLAGS_STYLES
 from .stylesheet_gaps import GAPS_STYLES
 from .stylesheet_home import HOME_STYLES
@@ -329,7 +330,7 @@ SHARED_STYLES = """
 #: that say why each rule exists.
 STYLESHEET = (
     SHARED_STYLES + HOME_STYLES + ACCOUNT_STYLES + ACTUAL_STYLES + FLAGS_STYLES + SECTION_STYLES
-    + WINDOW_STYLES + POSITION_STYLES + GAPS_STYLES + TIMELINE_STYLES
+    + WINDOW_STYLES + POSITION_STYLES + GAPS_STYLES + TIMELINE_STYLES + CONNECTIONS_STYLES
 )
 
 
