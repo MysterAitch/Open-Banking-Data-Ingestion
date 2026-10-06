@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html
 
+from . import values_sitting
 from .account_names import AccountsShown, code_html
 from .ingest import MatcherPreview, RowOutcome, RowPreview
 from .masking import mask_text
@@ -73,14 +74,21 @@ def _line(row: RowPreview, names: AccountsShown, *, values: bool) -> str:
 
 def dry_run_fold(preview: MatcherPreview, names: AccountsShown, artefact: int) -> str:
     """The closed fold under a row: the summary line, a line for each listed transaction, and
-    the press that shows the same list with its values."""
+    the press that shows the same list with its values.
+
+    Inside a sitting that shows values (`values_sitting`) the lines are the ones the press
+    answers with, and the press is left out: the sitting's banner already says values are shown.
+    The answer carrying such a fold is a POST's, which is never kept by the browser.
+    """
     if not preview.rows:
         return ""
-    lines = "".join(_line(row, names, values=False) for row in preview.rows)
+    values = values_sitting.shown()
+    lines = "".join(_line(row, names, values=values) for row in preview.rows)
     return (
         '<details class="bi-dry"><summary>What reading it in would do</summary>'
         f'<p class="bi-dry-says">{_esc(summary_line(preview))}.</p>'
-        f'<ul class="bi-dry-list">{lines}</ul>{values_button(artefact)}</details>'
+        f'<ul class="bi-dry-list">{lines}</ul>'
+        f"{values_sitting.unless_sitting(values_button(artefact))}</details>"
     )
 
 
