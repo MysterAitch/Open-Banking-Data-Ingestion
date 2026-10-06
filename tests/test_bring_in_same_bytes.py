@@ -179,6 +179,27 @@ class TestIdenticalBytesStillWaitingForAnAccount:
         ]
         assert raw_artefacts(root) == before_rows + 1
 
+    def test_Upload_OfSeveralWaitingFilesAgain_SaysSoOnceNotOncePerFile(self, served):
+        """Re-sending a batch already kept (a folder chosen twice) is ten files already waiting;
+        ten lines saying so pushed the form's first chooser off a phone's first screen, and say
+        one thing ten times. One line, and the rows beneath are the files."""
+        base, root = served
+        files = [
+            (f"Statement-{index}.pdf", santander(D(2026, 8, 10), 1300 + index))
+            for index in range(3)
+        ]
+        upload(base, *files)
+        before_rows = raw_artefacts(root)
+
+        resent = [(f"Again-{index}.pdf", data) for index, (_, data) in enumerate(files)]
+        again = upload(base, *resent)
+
+        assert leads(again) == [
+            "3 files were already kept, waiting for an account; they are the rows below."
+        ]
+        assert len(list(rows_of(assign_form(again)))) == 3
+        assert raw_artefacts(root) == before_rows
+
     def test_Upload_OfKeptBytesScopedToAnAccount_ReadsTheKeptStatementInAsAskedWithoutAClaim(
         self, served
     ):

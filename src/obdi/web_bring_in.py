@@ -507,9 +507,12 @@ def _already_html(results: UploadResults, names: AccountsShown) -> str:
     about it: it is not landed again, so there is nothing to ask and nothing to fold later.
 
     Where the held copy is filed, whose it is; where it waits for an account, that it does and
-    that the one form lists it once (`UploadResults.awaiting`).
+    that the one form lists it once (`UploadResults.awaiting`). Several files already waiting
+    (a folder sent twice) are said once: ten lines saying the same thing pushed the form's
+    first chooser off a phone's first screen.
     """
     lines = []
+    waiting = []
     for item in results.files:
         if not item.twin_name:
             continue
@@ -520,10 +523,22 @@ def _already_html(results: UploadResults, names: AccountsShown) -> str:
                 f"on {_esc(item.twin_day)} as {held}"
             )
         elif item.outcome is Outcome.KEPT and not item.account:
-            said = f"Already kept, waiting for an account, as {held}"
+            waiting.append((item.filename, held))
+            continue
         else:
             continue
         lines.append(f'<p class="bi-already">{code_html(item.filename)}: {said}.</p>')
+    if len(waiting) == 1:
+        filename, held = waiting[0]
+        lines.append(
+            f'<p class="bi-already">{code_html(filename)}: Already kept, waiting for an '
+            f"account, as {held}.</p>"
+        )
+    elif waiting:
+        lines.append(
+            f'<p class="bi-already">{len(waiting)} files were already kept, waiting for an '
+            "account; they are the rows below.</p>"
+        )
     return "".join(lines)
 
 
