@@ -121,6 +121,11 @@ Seen on the real store the first time the rebuilt Today was read there (0.4.337,
 - "Artefact" as a page word is undecided; "rows" remains in some reports.
 - Today shows times in UTC.
 - Whether to state a balance for the cash account and the credit union loan is the owner's.
+- An archived account's own life (`trust_bar.own_life`) begins at the first day anything is
+  held for it, and since 0.4.350 a statement's printed period counts: the credit union loan's
+  bar begins 2022-01-01, the first day of the 2022 document's period, though the loan opened on
+  2022-05-04 (stated). Where an opened date is declared, the life should begin there; a
+  statement covering earlier days is coverage of nothing, not life.
 
 ## Roadmap - not next, but queued
 
