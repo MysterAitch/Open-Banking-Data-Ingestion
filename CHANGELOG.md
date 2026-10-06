@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.342] - 2026-10-06
+
+### Changed
+- **Bring in is one place to upload and the list of what is wanted.** The
+  owner could not find what to download: "Is it on a page I'm just not
+  finding yet? Is it present but blending in and my eyes are glossing over
+  it?" - the list lived on "What to fetch next", two taps away under a tab
+  that did not say so, ten phone screens long with twenty forms. Bring in
+  now opens with one upload control that takes statements and exports
+  together, several at once; then one quiet line of evidence (when every
+  source was last looked at); then what is wanted, grouped by account as he
+  decided, each account with its trust sentence and bar, and one row per
+  file with the days, why in a few words, how long it has waited, "Set
+  aside..." for the existing choices, and Upload. After an upload the page
+  says what each file settled in the trust sentence's terms, what is newly
+  lockable, and what is still wanted. "What to fetch next" redirects here,
+  keeping the account. Nine statements and two exports over eight accounts
+  are three phone screens.
+- **An earlier statement is no longer asked for where the first statement
+  tests those days by what it lists.** The gap was bounded by the
+  statement's printed start, and a card statement lists a purchase by the
+  day it was made, which can fall before it; the listed purchase was then
+  asked for again. Read on the real store, two accounts carried that item
+  on Today.
+
+### Not covered
+- A file that names no account (none does) is read in at once only from an
+  account's own Upload link; otherwise it is kept and the page asks which
+  account, through the existing step. An export still goes through its
+  preview and confirm.
+- Today's and the account page's Upload controls still open the plain
+  upload pages, not Bring in scoped to the account. After assigning a kept
+  file from the results page, the old answer page is shown.
+- The over-ask may remain for an account with Spaces, whose whole-family
+  standing carries no statement checks.
+- Measured over invented households, not the real store.
+
 ## [0.4.341] - 2026-10-06
 
 ### Changed
