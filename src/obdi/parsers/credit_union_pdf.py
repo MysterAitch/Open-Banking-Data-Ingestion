@@ -142,13 +142,14 @@ _FIGURE_REACH = 3
 
 #: Every phrase below tolerates NO space between its words, for the reason
 #: given in the module's account of labels.
-_PERIOD = re.compile(
-    r"Period\s*(\d{2})/(\d{2})/(\d{4})\s*to\s*(\d{2})/(\d{2})/(\d{4})"
-)
+_PERIOD = re.compile(r"Period\s*(\d{2})/(\d{2})/(\d{4})\s*to\s*(\d{2})/(\d{2})/(\d{4})")
 _ISSUED = re.compile(r"Date\s*of\s*Issue\s*(\d{2})/(\d{2})/(\d{4})")
 _OPENING = re.compile(rf"Opening\s*Balance.*?({_AMOUNT.pattern})")
 _CLOSING = re.compile(rf"Closing\s*Balance.*?({_AMOUNT.pattern})")
 _PAGE = re.compile(r"Page\s*(\d+)\s*of\s*(\d+)")
+
+#: The foot label only a loan section prints, without spaces (see `_normalised`).
+_LOAN_FOOT = "closingloanposition"
 
 #: The label whose value - on the row BENEATH it, in the same column - is
 #: the account this section covers.
@@ -267,11 +268,7 @@ def _owner(index: int, columns: list[int]) -> int | None:
 
 def _named_columns(row: list[str]) -> dict[int, str]:
     """The cells of a row that are column names, by position."""
-    return {
-        index: cell.strip()
-        for index, cell in enumerate(row)
-        if _normalised(cell) in _FIELDS
-    }
+    return {index: cell.strip() for index, cell in enumerate(row) if _normalised(cell) in _FIELDS}
 
 
 def _fields_of(names: dict[int, str]) -> dict[int, str]:
@@ -339,11 +336,7 @@ def _figures(row: list[str]) -> dict[int, int]:
     that also carries text is a transaction or a heading and is not this.
     """
     cells = {index: cell.strip() for index, cell in enumerate(row) if cell.strip()}
-    found = {
-        index: minor
-        for index, text in cells.items()
-        if (minor := _amount(text)) is not None
-    }
+    found = {index: minor for index, text in cells.items() if (minor := _amount(text)) is not None}
     return found if cells and len(found) == len(cells) else {}
 
 
@@ -354,9 +347,7 @@ def _balance_labels(row: list[str]) -> dict[int, str] | None:
     figure beneath the row belongs to the nearest label at or left of it and
     that label may be "Interest Due" rather than a balance.
     """
-    cells = {
-        index: _normalised(cell) for index, cell in enumerate(row) if cell.strip()
-    }
+    cells = {index: _normalised(cell) for index, cell in enumerate(row) if cell.strip()}
     if not any(text in _BALANCE_LABELS for text in cells.values()):
         return None
     return cells
@@ -515,6 +506,7 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
     # summary of what has already been counted.
     below_the_table = False
     skip_next = False
+    prints_loan_position = False
     # The labels of a balance row whose figures are still awaited, and how
     # many rows are left to find them in.
     awaiting: dict[int, str] | None = None
@@ -533,11 +525,7 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
                 account_name = account_name or name
             name_column = None
         label = next(
-            (
-                index
-                for index, cell in enumerate(row)
-                if _normalised(cell) == _ACCOUNT_LABEL
-            ),
+            (index for index, cell in enumerate(row) if _normalised(cell) == _ACCOUNT_LABEL),
             None,
         )
         if label is not None:
@@ -546,6 +534,8 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
             name_column = label
 
         joined = " ".join(cell.strip() for cell in row if cell.strip())
+        if _LOAN_FOOT in _normalised(joined):
+            prints_loan_position = True
 
         period = _PERIOD.search(joined)
         if period:
@@ -614,12 +604,16 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
         )
     reading.account_name = account_name
     rate = _rate_in(account_name)
-    if rate is not None:
-        # A loan, which states its rate in its name and its balance as what
-        # is OWED. Held as the negative position it is, so a repayment reads
-        # as money moving the balance toward zero and nothing downstream
-        # needs to know this account is a liability.
-        reading.rates[account_stem(account_name).casefold()] = rate
+    if rate is not None or prints_loan_position:
+        # A loan, which states its balance as what is OWED. Held as the negative position it
+        # is, so a repayment reads as money moving the balance toward zero and nothing
+        # downstream needs to know this account is a liability. A loan is known by the rate in
+        # its name OR by the "Closing Loan Position" its foot prints and a saver's never does:
+        # a loan whose name carries no rate was read as a saver, its balances the wrong way
+        # round for its own rows, and the section refused for rows that do not carry the
+        # balances.
+        if rate is not None:
+            reading.rates[account_stem(account_name).casefold()] = rate
         if reading.opening_balance_minor is not None:
             reading.opening_balance_minor = -reading.opening_balance_minor
         if reading.closing_balance_minor is not None:
@@ -676,9 +670,9 @@ def _numbering_is_whole(marks: list[tuple[int, int, int]]) -> bool:
     if not marks:
         return False
     total = marks[0][2]
-    return all(of == total for _, _, of in marks) and [
-        page for _, page, _ in marks
-    ] == list(range(1, total + 1))
+    return all(of == total for _, _, of in marks) and [page for _, page, _ in marks] == list(
+        range(1, total + 1)
+    )
 
 
 def read_document(grid: list[list[str]]) -> list[StatementSection] | None:
