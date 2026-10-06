@@ -3313,7 +3313,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             names = account_names(store)
             label = names.of(ref).label
-            labels = {account.ref: account.label for account in names if account.label}
             if hold is not None:
                 # The rows are shown as they stand, and the verification - agreement and the
                 # protection's comparison with its span - says the one sentence instead.
@@ -3328,7 +3327,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     movement=None,
                     with_protection=False,
                     window=window,
-                    labels=labels,
+                    names=names,
                 )
                 return replace(built, standing=None, protection=None, rebuilding=hold.sentence())
             return build_ledger(
@@ -3343,7 +3342,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 with_protection=True,
                 opening_reader=held_opening,
                 window=window,
-                labels=labels,
+                names=names,
             )
 
     def balance_chart_data(ref: str) -> BalanceChart:

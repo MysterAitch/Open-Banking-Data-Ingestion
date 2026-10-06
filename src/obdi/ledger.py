@@ -43,11 +43,12 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
+from .account_names import AccountsShown
 from .accounts import AccountRef
 from .agreement import Standing, standing_of
 from .balance_anchors import (
@@ -983,10 +984,12 @@ def build_ledger(
     with_protection: bool = False,
     opening_reader: OpeningReader | None = None,
     window: LedgerWindow | None = None,
-    labels: Mapping[str, str] | None = None,
+    names: AccountsShown | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None, or for a
-    window of days when `window` is given (which `month` is then ignored for).
+    window of days when `window` is given (which `month` is then ignored for). `names` is what
+    the accounts are called (`account_names`), for the other leg of a transfer; nothing here
+    decides a name.
 
     `opening_reader` stands in for `effective_opening` where the caller holds readings of the
     account's balances between requests (the page's data hook does: `cli.ledger_data`). It is
@@ -1026,7 +1029,7 @@ def build_ledger(
         check=check,
         opening_reader=opening_reader or effective_opening,
         window=window,
-        labels=labels or {},
+        names=names,
     )
     return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
 
@@ -1063,7 +1066,7 @@ def _ledger_for(
     check: Check | None,
     opening_reader: OpeningReader,
     window: LedgerWindow | None,
-    labels: Mapping[str, str],
+    names: AccountsShown | None,
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -1226,8 +1229,8 @@ def _ledger_for(
                         other_side[t.entity_id].month if t.entity_id in other_side else ""
                     ),
                     transfer_other_label=(
-                        labels.get(other_side[t.entity_id].account, "")
-                        if t.entity_id in other_side
+                        names.of(other_side[t.entity_id].account).label
+                        if names is not None and t.entity_id in other_side
                         else ""
                     ),
                     booked=t.booking_date,
