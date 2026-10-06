@@ -84,7 +84,10 @@ def row_of(page: str, ref: str) -> str:
 
 
 def rows_in(page: str) -> list[str]:
-    return re.findall(r'<a class="tap arow" href="/ledger\?ref=(acct-[a-z]+)">', page)
+    """The live accounts' rows: the archived accounts' own rows are inside their fold."""
+    live = re.sub(r"<details><summary>\d+ archived accounts?</summary>.*?</details>", "", page,
+                  flags=re.DOTALL)
+    return re.findall(r'<a class="tap arow" href="/ledger\?ref=(acct-[a-z]+)">', live)
 
 
 class TestNeedsAttention:
@@ -246,7 +249,7 @@ class TestAccounts:
 
         assert "acct-old" not in rows_in(page)
         folded = page.split("<summary>1 archived account</summary>")[1].split("</details>")[0]
-        assert 'href="/ledger?ref=acct-old"' in folded and "archived 2026-01-31" in folded
+        assert 'href="/ledger?ref=acct-old"' in folded and "Archived 2026-01-31." in folded
 
     def test_Home_EveryLiveAccount_IsOneTapToItsPage(self, tmp_path, household):
         page = home(tmp_path, lambda fresh: assemble(household))

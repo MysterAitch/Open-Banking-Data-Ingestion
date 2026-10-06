@@ -57,8 +57,8 @@ from .standing_data import (
     verification_of,
 )
 from .todo import Todo, build_todos, grouped, lockable, wanted_days
-from .trust import Trust, trust_of
-from .trust_bar import axis_html, bar_html, key_html
+from .trust import Trust, trust_of, window_start
+from .trust_bar import axis_html, bar_html, ends_html, key_html, own_life
 
 _esc = html.escape
 
@@ -563,7 +563,11 @@ def _row_html(
     *,
     space: bool,
     by_ref: Mapping[str, AccountOverview],
+    archived: bool = False,
 ) -> str:
+    """One account's row. An archived one is the same row, over its own life where it closed
+    before the shared twelve months begin (`trust_bar.own_life`), with its two end dates under
+    the bar, and says when it was archived first."""
     target = _esc(quote(account.ref, safe=""))
     name = shown(account.ref).as_name()
     # A rebuild marks every account that is not archived, so an account that holds nothing is
@@ -588,7 +592,13 @@ def _row_html(
             # What tests a Space is its family, so its bar is the family's stretches: the
             # parent's whole-family agreement where there is one, else the parent's own.
             trust = _family_trust(parent, today)
-        bar = bar_html(trust, today)
+        span = own_life(trust, account.closed, today) if archived and account.closed else None
+        bar = bar_html(trust, today, span)
+        if span is not None:
+            bar = f'<span class="a-bars">{bar}{ends_html(span, "a-ends")}</span>'
+    if archived:
+        when = f"Archived {account.closed.isoformat()}." if account.closed else "Archived."
+        said = f"{when} {said}".strip()
     return (
         f'<li{" class=space" if space else ""}>'
         f'<a class="tap arow" href="/ledger?ref={target}"><span class="a-name">{name}</span>'
@@ -597,20 +607,26 @@ def _row_html(
 
 
 def _archived_html(
-    archived: Sequence[AccountOverview], shown: Callable[[str], AccountShown]
+    archived: Sequence[AccountOverview],
+    shown: Callable[[str], AccountShown],
+    wanted: Mapping[str, list[tuple[date, date]]],
+    today: date,
+    by_ref: Mapping[str, AccountOverview],
 ) -> str:
+    """The archived accounts folded, each as a live account's row; the shared scale's month names
+    are printed once above them where any of them is drawn on it. Closed by default: nothing is
+    asked of an archived account."""
     if not archived:
         return ""
-    names = "".join(
-        f'<li><a class="tap" href="/ledger?ref={_esc(quote(a.ref, safe=""))}">'
-        f"{shown(a.ref).as_name()}</a>"
-        + (f" - archived {_esc(a.closed.isoformat())}" if a.closed else "")
-        + "</li>"
+    rows = "".join(
+        _row_html(a, shown, {}, wanted, today, space=False, by_ref=by_ref, archived=True)
         for a in archived
     )
+    shared = any(a.closed is None or a.closed >= window_start(today) for a in archived)
+    axis = axis_html(today) if shared else ""
     return (
         f"<details><summary>{plural(len(archived), 'archived account')}</summary>"
-        f'<ul class="keylist">{names}</ul></details>'
+        f'{axis}<ul class="alist">{rows}</ul></details>'
     )
 
 
@@ -664,7 +680,7 @@ def _accounts_html(
         live
         + '<div class="p-more">'
         f"<details><summary>What the bars show</summary>{key_html()}</details>"
-        f"{_archived_html(archived, shown)}{manage}</div>"
+        f"{_archived_html(archived, shown, wanted, today, by_ref)}{manage}</div>"
     )
 
 

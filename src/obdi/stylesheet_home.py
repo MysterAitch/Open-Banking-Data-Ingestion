@@ -95,7 +95,10 @@ HOME_STYLES = """
  .a-flag { grid-area: flag; text-align: right; font: 600 var(--text-sm)/130% var(--sans); color: var(--warn); }
  .a-flag.bad { color: var(--bad); font-weight: 700; }
  .a-flag.bad::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
- main a.arow > .bar { grid-area: bar; }
+ main a.arow > .bar, main a.arow > .a-bars { grid-area: bar; }
+ /* An archived account's bar over its own life: its two end dates under it, one at each end. */
+ .a-ends { display: flex; justify-content: space-between; font: var(--text-xs)/130% var(--sans);
+         color: var(--ink-2); }
  .a-trust { grid-area: trust; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
  .alist li.space { padding-left: var(--s4); }
  .alist li.space .a-name { font-size: var(--text-md); font-weight: 500; }

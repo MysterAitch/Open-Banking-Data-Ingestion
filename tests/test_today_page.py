@@ -36,7 +36,7 @@ from obdi.overview import (
 from obdi.rebuild_hold import RebuildHold
 from obdi.standing_data import AccountStanding
 from obdi.web_overview import overview_html
-from page_dom import Node, elements, parse
+from page_dom import Node, elements, inside, parse
 
 TODAY = date(2026, 10, 5)
 NOW = datetime(2026, 10, 5, 8, 12, tzinfo=UTC)
@@ -312,7 +312,11 @@ class TestAnOrdinaryDay:
     def test_Rows_EachLiveAccountIsOneRow_AndTheArchivedOneIsFolded(self) -> None:
         root = self.root()
 
-        links = [a for a in elements(root, "a") if a.attrs.get("class") == "tap arow"]
+        links = [
+            a
+            for a in elements(root, "a")
+            if a.attrs.get("class") == "tap arow" and not inside(a, "details")
+        ]
         assert [a.attrs["href"] for a in links] == [
             "/ledger?ref=everyday",
             "/ledger?ref=joint",
@@ -404,8 +408,10 @@ class TestAnOrdinaryDay:
     def test_Axis_NamesTheMonthsOnceAboveTheList(self) -> None:
         root = self.root()
 
-        axes = by_class(root, "span", "axis")
+        # The folded archived list carries its own, which is shown when the fold is opened.
+        axes = [a for a in by_class(root, "span", "axis") if not inside(a, "details")]
         assert len(axes) == 1
+        assert len([a for a in by_class(root, "span", "axis") if inside(a, "details")]) == 1
         assert [s.text() for s in elements(axes[0], "span")][:3] == ["Oct", "Nov", "Dec"]
 
     def test_LockLine_AnAccountWithDaysThatAddUpAndAreNotLocked_SaysSoWithoutALockButton(
@@ -562,6 +568,84 @@ class TestARebuildIsRunning:
         of, gaps = ordinary()
 
         assert not by_class(page(of, gaps), "p", "paused")
+
+
+class TestArchivedAccountsDrawTheirBars:
+    """Known answers, written before the first run. Today is 2026-10-05, so the shared twelve
+    months begin 2025-10-06 and a day is 100 / 365 percent of a bar.
+
+        "ancient"  held 2022-01-10 to 2024-10-05, closed 2024-10-05: nothing of it lies in the
+                   shared months, so its bar runs over its own life (every held day fills it, from
+                   0 to 100 percent) and its two end dates are printed under it, once;
+        "recent"   held 2025-11-01 to 2026-03-01, closed 2026-03-01: inside the shared months,
+                   which are kept, so its held stretch sits at 26 days in and runs 121 days
+                   (left 7.12 percent, width 33.15 percent) and no end dates are printed;
+        the fold itself stays closed whatever it holds.
+    """
+
+    def root(self) -> Node:
+        of, fetch = ordinary()
+        accounts = (
+            *of.accounts,
+            account(
+                "ancient", "Ancient loan", first="2022-01-10", newest="2024-10-05",
+                state="archived", closed="2024-10-05",
+            ),
+            account(
+                "recent", "Recent card", first="2025-11-01", newest="2026-03-01",
+                state="archived", closed="2026-03-01",
+            ),
+        )
+        return page(replace(of, accounts=accounts), fetch)
+
+    def fold(self, root: Node) -> Node:
+        return next(e for e in elements(root, "details") if "archived account" in e.text())
+
+    def archived_row(self, root: Node, ref: str) -> Node:
+        return next(
+            a for a in elements(self.fold(root), "a") if a.attrs.get("href") == f"/ledger?ref={ref}"
+        )
+
+    def test_Fold_ByDefault_IsClosedAndCountsEveryArchivedAccount(self) -> None:
+        fold = self.fold(self.root())
+
+        assert "open" not in fold.attrs
+        assert next(elements(fold, "summary")).text() == "3 archived accounts"
+
+    def test_EachArchivedAccount_IsTheSameRowAsALiveOne_NameSentenceAndBar(self) -> None:
+        root = self.root()
+
+        for ref, name in (("old", "Old store card"), ("ancient", "Ancient loan"),
+                          ("recent", "Recent card")):
+            archived = self.archived_row(root, ref)
+            assert "arow" in archived.classes
+            assert texts(archived, "span", "a-name") == [name]
+            assert len(texts(archived, "span", "a-trust")) == 1
+            assert len(by_class(archived, "span", "bar")) == 1
+
+    def test_AccountClosedTwoYearsAgo_IsDrawnOverItsOwnLifeWithItsEndsLabelledOnce(self) -> None:
+        archived = self.archived_row(self.root(), "ancient")
+
+        first = next(i for i in elements(archived, "i") if "style" in i.attrs)
+        assert first.attrs["style"].startswith("left:0.00%;width:100.00%")
+        ends = by_class(archived, "span", "a-ends")
+        assert [e.text() for e in ends] == ["2022-01-10 2024-10-05"]
+
+    def test_AccountClosedInsideTheTwelveMonths_KeepsTheSharedScaleAndPrintsNoEnds(self) -> None:
+        archived = self.archived_row(self.root(), "recent")
+
+        assert cells(archived)["b-held"] == "left:7.12%;width:33.15%"
+        assert not by_class(archived, "span", "a-ends")
+
+    def test_TheSharedMonthsAxis_IsPrintedOnceAboveTheFoldedList(self) -> None:
+        fold = self.fold(self.root())
+
+        assert len(by_class(fold, "div", "axis-row")) == 1
+
+    def test_ArchivedAccountsSentence_SaysWhenItWasArchived(self) -> None:
+        archived = self.archived_row(self.root(), "ancient")
+
+        assert texts(archived, "span", "a-trust")[0].startswith("Archived 2024-10-05.")
 
 
 class TestNoFigureReachesToday:

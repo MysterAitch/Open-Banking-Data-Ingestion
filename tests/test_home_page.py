@@ -333,10 +333,9 @@ class TestAccountRows:
         assert "<summary>4 archived accounts</summary>" in page
         folded = page.split("<summary>4 archived accounts</summary>")[1].split("</ul></details>")[0]
         for ref in world.ARCHIVED_SPACES:
-            assert f'<a class="tap" href="/ledger?ref={ref}">' in folded
-            assert f'<a class="tap arow" href="/ledger?ref={ref}">' not in page
+            assert f'<a class="tap arow" href="/ledger?ref={ref}">' in folded
         for ref in world.LIVE_SPACES:
-            assert f'<a class="tap" href="/ledger?ref={ref}">' not in folded
+            assert f'<a class="tap arow" href="/ledger?ref={ref}">' not in folded
             assert f'<a class="tap arow" href="/ledger?ref={ref}">' in page
 
     def test_Counts_OnTheTroubledWorld_AreTheKnownAnswer(self, troubled):
@@ -353,7 +352,8 @@ class TestAccountRows:
     def test_Rows_EachLiveAccountDrawsOneBarWhoseWordsAreItsTrustSentence(self, troubled):
         page = page_of(troubled)
 
-        assert page.count('<span class="bar"') == world.TWENTY - len(world.ARCHIVED_SPACES)
+        # Every account draws one, the archived ones inside their fold.
+        assert page.count('<span class="bar"') == world.TWENTY
 
         def row(ref):
             opening = f'<a class="tap arow" href="/ledger?ref={ref}">'

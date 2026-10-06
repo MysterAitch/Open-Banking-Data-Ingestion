@@ -45,8 +45,8 @@ from .standing_data import (
     verification_of,
 )
 from .todo import Todo, account_page, build_todos, grouped, wanted_days
-from .trust import WINDOW_DAYS, Trust, month_marks, trust_of, window_start
-from .trust_bar import bar_html, source_lane_html
+from .trust import Trust, month_marks, trust_of
+from .trust_bar import bar_html, ends_html, own_life, source_lane_html
 from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
 
@@ -245,18 +245,13 @@ def _headline(kind: str, head: str, sub: str) -> str:
 
 
 def _own_life(reading: AccountReading, closed: date, today: date) -> tuple[date, date] | None:
-    """The days an account was in use, where it closed before the shared twelve months begin:
-    from the first day anything is held for it (a stretch of trust, or a day a source holds) to
-    the day it closed. None where it closed inside them, and the shared scale serves."""
-    if closed >= window_start(today):
-        return None
-    days = [stretch.start for stretch in reading.trust.stretches]
-    if reading.timeline is not None:
-        days += [run.first for lane in reading.timeline.lanes for run in lane.runs]
-    first = min(days, default=None)
-    if first is None or first >= closed:
-        first = closed - timedelta(days=WINDOW_DAYS - 1)
-    return first, closed
+    """`trust_bar.own_life` over the days this account's timeline says a source holds."""
+    held = (
+        [run.first for lane in reading.timeline.lanes for run in lane.runs]
+        if reading.timeline is not None
+        else []
+    )
+    return own_life(reading.trust, closed, today, held)
 
 
 def strip_html(
@@ -307,10 +302,7 @@ def strip_html(
     href = account_address("timeline", ref)
     ends = said = ""
     if span is not None:
-        ends = (
-            '<span></span><span class="ends" aria-hidden="true">'
-            f"<span>{span[0].isoformat()}</span><span>{span[1].isoformat()}</span></span>"
-        )
+        ends = "<span></span>" + ends_html(span, "ends")
         said = (
             f'<p class="muted">Closed {span[1].isoformat()}; the bars span its whole life.</p>'
         )

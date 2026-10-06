@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import html
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 
 from .standing_data import ADDS_UP
-from .trust import MarkKind, Rung, Trust, month_marks, place
+from .trust import WINDOW_DAYS, MarkKind, Rung, Trust, month_marks, place, window_start
 
 _STRETCH_CLASS = {Rung.HELD: "b-held", Rung.ADDS_UP: "b-adds", Rung.LOCKED: "b-lock"}
 _MARK_CLASS = {
@@ -26,6 +26,31 @@ _MARK_CLASS = {
     MarkKind.LOCK_CHANGED: "b-bad",
     MarkKind.FILE_WANTED: "b-want",
 }
+
+
+def own_life(
+    trust: Trust, closed: date, today: date, held_days: Sequence[date] = ()
+) -> tuple[date, date] | None:
+    """The days an account was in use, where it closed before the shared twelve months begin:
+    from the first day anything is held for it (a stretch of trust, or one of `held_days`, the
+    days a source holds) to the day it closed. None where it closed inside them, and the shared
+    scale serves. The one answer both the account page's strip and Today's archived rows draw
+    their bars over."""
+    if closed >= window_start(today):
+        return None
+    first = min([stretch.start for stretch in trust.stretches] + list(held_days), default=None)
+    if first is None or first >= closed:
+        first = closed - timedelta(days=WINDOW_DAYS - 1)
+    return first, closed
+
+
+def ends_html(span: tuple[date, date], css: str) -> str:
+    """The two dates a bar on its own span runs between, printed under it once, in the face the
+    page's `css` class gives them."""
+    return (
+        f'<span class="{css}" aria-hidden="true">'
+        f"<span>{span[0].isoformat()}</span><span>{span[1].isoformat()}</span></span>"
+    )
 
 
 def _cell(css: str, left: float, width: float) -> str:
