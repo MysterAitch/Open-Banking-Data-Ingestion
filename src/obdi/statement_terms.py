@@ -256,6 +256,47 @@ def statement_periods(store: Store) -> list[StatementPeriod]:
                 received.get(balance.digest),
             )
         )
+    found.extend(_unbalanced_section_periods(store))
+    return found
+
+
+def _unbalanced_section_periods(store: Store) -> list[StatementPeriod]:
+    """The periods assigned sections state where they state no closing balance.
+
+    A section with a closing balance is already a period through `statement_balances`. One
+    without, which yields rows but no balance, is left out of that, and with it the days it states
+    it covers: two such sections with a gap of years between them left an account with no known
+    balance and no hole found, because holes were chained from balances alone. The period a
+    section PRINTS is a fact about the document, so it chains where a balance cannot: the closing
+    day is its statement date and the first day its stated start. A section stating no period, or
+    refused, is not offered, and nothing is said of balances it does not state.
+    """
+    found: list[StatementPeriod] = []
+    for assignment, section in assigned_sections(store):
+        if section is None or section.refusal:
+            continue
+        body = section.reading
+        if (
+            body.closing_balance_minor is not None
+            or body.statement_date is None
+            or body.period_start is None
+        ):
+            continue
+        dates = [row.value_date for row in body.transactions]
+        found.append(
+            StatementPeriod(
+                assignment.account_ref,
+                body.statement_date,
+                body.period_start,
+                "",
+                min(dates, default=None),
+                max(dates, default=None),
+                None,
+                None,
+                body.produced,
+                None,
+            )
+        )
     return found
 
 

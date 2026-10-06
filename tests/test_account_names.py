@@ -182,10 +182,7 @@ class TestAReportsPlainText:
 
 class TestThePagesUseIt:
     def test_IdentityHealth_WhenAnAccountIsDeclaredWithALabel_NamesItByLabelFirst(
-        self,
-        served,
-        invented,
-        tmp_path,  # noqa: F811
+        self, served, invented, tmp_path  # noqa: F811
     ):
         db, _ = invented
         with Store(db) as store:
