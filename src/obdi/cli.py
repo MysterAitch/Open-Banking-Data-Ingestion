@@ -67,7 +67,13 @@ from .errors import DataError
 from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
-from .ingest import import_file, pair_transfers_across_store, unconfirmed_transfers
+from .ingest import (
+    MatcherPreview,
+    import_file,
+    pair_transfers_across_store,
+    preview_reconcile,
+    unconfirmed_transfers,
+)
 from .known_accounts import (
     DeclareOutcome,
     KnownAccounts,
@@ -3812,6 +3818,37 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return None
         return checked[3].report
 
+    def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
+        """How the matcher would resolve a kept statement's transactions against an account,
+        counted with the dry run `check_assignment` uses and writing nothing.
+
+        None where the statement is not kept, is not read by any parser, or is refused by the
+        one that reads it: a count of what cannot be read is no answer.
+        """
+        from .namespaces import validate_canonical_name
+        from .parsers.uk_banks import detect
+
+        destination = account_id.strip()
+        try:
+            validate_canonical_name(destination)
+        except ValueError:
+            return None
+        with Store(db_path) as store:
+            row = store.connection.execute(
+                "SELECT payload FROM raw_artefacts WHERE rowid = ? AND source = 'statement'",
+                (artefact_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            payload = bytes(row["payload"])
+            try:
+                incoming = list(detect(payload).parse(payload, account_id=destination))
+            except (DataError, ValueError):
+                return None
+            return preview_reconcile(
+                store, incoming, space_blind=families_of(store, _account_map(store)).blind_in
+            )
+
     def review_statement_section(
         artefact_id: int, section_key: str, account_id: str
     ) -> DoubtReport | None:
@@ -4419,6 +4456,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         assign_kept_statement=assign_kept_statement,
         assign_statement_section=assign_statement_section,
         review_kept_statement=review_kept_statement,
+        preview_kept_statement=preview_kept_statement,
         review_statement_section=review_statement_section,
         kept_statements=kept_statements,
         kept_statement_count=kept_statement_count,

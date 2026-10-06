@@ -141,6 +141,10 @@ class FileResult:
     accounts: tuple[str, ...] = ()
     #: The account a statement waiting for one is probably for, pre-selected in its chooser.
     guess: Guess | None = None
+    #: How many transactions the statement lists, where every one is already held by the account
+    #: guessed for it (reading it in would add nothing but its balances); 0 where not so, or
+    #: where that could not be counted.
+    all_held: int = 0
     #: Which account of a document of several accounts this result is for: its token and the
     #: label it prints (digits masked), or "" for a whole document.
     section: str = ""
@@ -522,6 +526,22 @@ def _reason_html(guess: Guess | None, names: AccountsShown) -> str:
     )
 
 
+def _held_html(item: FileResult, names: AccountsShown) -> str:
+    """The quiet line that reading a statement in would add nothing, or nothing at all."""
+    if not item.all_held or item.guess is None:
+        return ""
+    count = (
+        "Its one transaction is"
+        if item.all_held == 1
+        else f"Every one of its {item.all_held} transactions is"
+    )
+    return (
+        f'<p class="bi-guess bi-held">{count} already held by '
+        f"{names.of(item.guess.account).inline()}; reading it in adds nothing but the "
+        "statement's own balances.</p>"
+    )
+
+
 def _assign_html(results: UploadResults, names: AccountsShown) -> str:
     """The one form for every kept statement that needs an account: a chooser for each, and the
     one control at its foot.
@@ -552,7 +572,7 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
-            f"{_reason_html(item.guess, names)}</li>"
+            f"{_reason_html(item.guess, names)}{_held_html(item, names)}</li>"
         )
     guessed = any(item.guess and item.guess.account for item in waiting)
     lead = "Nothing is read in until you press." + (
@@ -1068,10 +1088,27 @@ class BringInPages:
             if entry is None:
                 resolved.append(item)
             elif not isinstance(parts, list) or not parts:
-                resolved.append(replace(item, guess=guess_account(entry, listing)))
+                guess = guess_account(entry, listing)
+                resolved.append(
+                    replace(item, guess=guess, all_held=self._all_held(item.artefact, guess))
+                )
             else:
                 resolved.extend(self._section_results(item, parts))
         return resolved, ""
+
+    def _all_held(self, artefact: int, guess: Guess | None) -> int:
+        """How many transactions a statement lists where the account guessed for it already holds
+        every one, by the matcher's dry run; 0 for no guess, for a statement with new
+        transactions, or where the count could not be made (nothing is then said, as of any
+        statement the account does not hold in full)."""
+        hook = self.bound_config.preview_kept_statement
+        if hook is None or guess is None or not guess.account:
+            return 0
+        try:
+            preview = hook(artefact, guess.account)
+        except Exception:
+            return 0
+        return preview.total if preview is not None and preview.new == 0 else 0
 
     @staticmethod
     def _section_results(item: FileResult, parts: list[object]) -> list[FileResult]:

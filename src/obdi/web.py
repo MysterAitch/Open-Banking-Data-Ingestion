@@ -69,6 +69,7 @@ from .coverage_timeline import AccountTimeline
 from .doctor import shape_problems
 from .fetch_gaps import FetchReport
 from .fetch_marks import MarkSet, MarkWorld
+from .ingest import MatcherPreview
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import LedgerData
 from .logs import say
@@ -593,6 +594,10 @@ class WebConfig:
     #: (artefact id, section key, account) for a section. None is no doubt.
     review_kept_statement: Callable[[int, str], DoubtReport | None] | None = None
     review_statement_section: Callable[[int, str, str], DoubtReport | None] | None = None
+    #: How the matcher would resolve a kept statement's transactions against an account, counted
+    #: and not done: (artefact id, account) to the counts, or None where the statement cannot be
+    #: read or is not a kept statement.
+    preview_kept_statement: Callable[[int, str], MatcherPreview | None] | None = None
     #: Every kept statement, with no cap: id, origin (file name), fetched_at,
     #: account_ref, and the name of the parser that reads it (None when none does).
     kept_statements: Callable[[], list[dict[str, object]]] | None = None
