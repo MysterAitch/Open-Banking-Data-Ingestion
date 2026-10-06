@@ -286,13 +286,13 @@ class TestRowAnchors:
     def test_EachRowCarriesAnOpaqueUniqueAnchor(self, base):
         page = get(base)
 
-        anchors = re.findall(r'<li class="txn[^"]*" id="(row-[0-9a-f]{12})"', page)
+        anchors = re.findall(r'<li class="txn[^"]*" id="(t-[0-9a-f]{12})"', page)
         assert len(anchors) == NEWEST_MONTH_ROWS
         assert len(set(anchors)) == NEWEST_MONTH_ROWS
 
     def test_Anchors_AreTheSameMaskedAndShown_SoALinkSurvivesPressingShowValues(self, base):
-        masked = re.findall(r'<li class="txn[^"]*" id="(row-[0-9a-f]+)"', get(base))
-        revealed = re.findall(r'<li class="txn[^"]*" id="(row-[0-9a-f]+)"', shown(base).text)
+        masked = re.findall(r'<li class="txn[^"]*" id="(t-[0-9a-f]+)"', get(base))
+        revealed = re.findall(r'<li class="txn[^"]*" id="(t-[0-9a-f]+)"', shown(base).text)
 
         assert masked == revealed
 

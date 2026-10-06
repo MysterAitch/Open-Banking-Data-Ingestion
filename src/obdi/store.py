@@ -990,6 +990,10 @@ class SightingDetail:
     moments: list[tuple[str, str, str, str]]
     #: (field, word) for each coded word the sighting stated (`stated_words`).
     words: list[tuple[str, str]] = field(default_factory=list)
+    #: The first stored artefact with the sighting's digest (its row number, the key the artefact
+    #: page is addressed by) and the day it was captured, or 0 and "" where none is held.
+    artefact: int = 0
+    captured: str = ""
 
 
 @dataclass
@@ -3563,7 +3567,9 @@ class Store:
         extra = () if only is None else tuple(only)
         for row in self.connection.execute(
             "SELECT s.entity_id, s.source, s.artefact_digest, s.basis, "  # noqa: S608
-            "COALESCE(s.source_id, '') LIKE ?, t.field, t.stated, t.kind, t.zone "
+            "COALESCE(s.source_id, '') LIKE ?, t.field, t.stated, t.kind, t.zone, "
+            "(SELECT MIN(a.rowid) FROM raw_artefacts a WHERE a.digest = s.artefact_digest), "
+            "(SELECT MIN(a.fetched_at) FROM raw_artefacts a WHERE a.digest = s.artefact_digest) "
             "FROM transaction_sources s JOIN transactions x ON x.entity_id = s.entity_id "
             "LEFT JOIN sighting_times t ON t.entity_id = s.entity_id AND t.source = s.source "
             "AND t.artefact_digest = s.artefact_digest "
@@ -3575,7 +3581,12 @@ class Store:
             sighting = position.get(key)
             if sighting is None:
                 sighting = SightingDetail(
-                    source=str(row[1]), basis=str(row[3]), copy=bool(row[4]), moments=[]
+                    source=str(row[1]),
+                    basis=str(row[3]),
+                    copy=bool(row[4]),
+                    moments=[],
+                    artefact=int(row[9] or 0),
+                    captured=str(row[10] or "")[:10],
                 )
                 position[key] = sighting
                 found.setdefault(key[0], []).append(sighting)

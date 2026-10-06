@@ -94,9 +94,28 @@ ACCOUNT_STYLES = """
  .t-desc { flex: 1 1 7rem; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
  details[open] > summary .t-desc { white-space: normal; overflow-wrap: anywhere; }
  .t-fig { flex: none; font-weight: 600; font-size: var(--text-sm); text-align: right; }
+ /* The balance after the row: set beneath the amount's weight, in the muted ink, and holding its
+    width where a row has none so the figures beneath stay in line. */
+ .t-bal { flex: none; min-width: 4.25rem; font-size: var(--text-xs); text-align: right; }
+ /* With the balance on the line the description may shrink further before the line wraps: a
+    description is cut to an ellipsis and opens in full, where a wrapped line costs height on
+    every row. */
+ .t-row:has(.t-bal) .t-desc { flex-basis: 3rem; }
  .mk { flex: none; width: 1rem; font: 700 var(--text-sm)/1 var(--sans); text-align: center; color: var(--ink-2); }
  .mk.c { color: var(--ok); }
  .mk.u { color: var(--warn); }
+ /* The one quiet sign that a row opens: a small chevron at the end of the line, in the muted ink
+    so it does not compete with the mark before it, turned down while the row is open. */
+ .txns li.txn summary.t-row::after { content: ""; flex: none; width: .4rem; height: .4rem;
+                border-right: var(--edge-weight) solid var(--ink-2); border-bottom: var(--edge-weight) solid var(--ink-2);
+                transform: rotate(-45deg); }
+ .txns li.txn details[open] > summary.t-row::after { transform: rotate(45deg); }
+ /* A row an address's fragment names is outlined, so the other leg of a transfer is found. */
+ .txns li.txn:target { outline: var(--edge-weight) solid var(--act); outline-offset: 2px; }
+ .t-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s3);
+            margin: var(--s1) 0; color: var(--ink-2); }
+ .t-facts dt { color: var(--ink-2); }
+ .t-facts dd { margin: 0; overflow-wrap: anywhere; }
  .t-extra { padding: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
  .t-extra p { margin: var(--s1) 0; overflow-wrap: anywhere; }
  /* A copy of money counted elsewhere is history: the same line in the muted ink with a lighter

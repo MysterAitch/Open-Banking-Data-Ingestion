@@ -580,7 +580,7 @@ class TestStructureIsDeclaredNotAssumed:
         values = {f.name for f in fields(LedgerRow)} - structural_field_names(LedgerRow)
         assert values == {
             "description", "counterparty", "amount", "review_reason",
-            "send_refusal", "category", "payee",
+            "send_refusal", "category", "payee", "balance_after",
         }
 
     def test_Summary_OnlyTheSumsAreValues(self):
