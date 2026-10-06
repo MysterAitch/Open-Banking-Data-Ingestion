@@ -83,8 +83,10 @@ line of evidence that it was looked at. The design and its decisions are under
   process by name, only by PID.
 - Commit after each working step; keep a short state note in the scratch folder saying what is
   done, half done, and left. Message in a file written with the Write tool, then `git add` as
-  its own command, then `git commit -q -F '<Windows path with backslashes>'` as its own
-  command; if a hook refuses, report what it said and stop. The subject is a claim about
+  its own command, then `git -C <absolute repository path> commit -q -F '<Windows path with
+  backslashes>'` as its own command - the `-C` form, not a `cd` in the same command: the
+  commit hook reads the message file in the first and cannot find it in the second, and
+  refuses. If a hook still refuses, report what it said and stop. The subject is a claim about
   behaviour; the body is 3-8 bullets - what was wrong as the owner met it, why this fix, what
   was run, what remains untrue. No mention of AI, agents, or assistants; no attribution lines.
 - Do not push, and do not touch `CHANGELOG.md` or the version: the changelog entry and the
