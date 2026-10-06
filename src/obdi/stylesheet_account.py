@@ -94,6 +94,13 @@ ACCOUNT_STYLES = """
  .t-desc { flex: 1 1 7rem; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
  details[open] > summary .t-desc { white-space: normal; overflow-wrap: anywhere; }
  .t-fig { flex: none; font-weight: 600; font-size: var(--text-sm); text-align: right; }
+ /* The balance after the row: set beneath the amount's weight, in the muted ink, and holding its
+    width where a row has none so the figures beneath stay in line. */
+ .t-bal { flex: none; min-width: 4.25rem; font-size: var(--text-xs); text-align: right; }
+ /* With the balance on the line the description may shrink further before the line wraps: a
+    description is cut to an ellipsis and opens in full, where a wrapped line costs height on
+    every row. */
+ .t-running .t-desc { flex-basis: 3rem; }
  .mk { flex: none; width: 1rem; font: 700 var(--text-sm)/1 var(--sans); text-align: center; color: var(--ink-2); }
  .mk.c { color: var(--ok); }
  .mk.u { color: var(--warn); }

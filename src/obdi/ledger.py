@@ -78,6 +78,7 @@ from .namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
 from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
+from .row_balances import balances_after
 from .spaces import ArchiveNote
 from .standing_data import statement_checks_for
 from .statement_checks import StatementChecks
@@ -315,6 +316,9 @@ class LedgerRow:
     #: A stable key for the page to anchor the row by (`row_anchor`): derived from the row's id and
     #: carrying nothing of its amount, description, or date.
     anchor: Structural[str] = ""
+    #: The balance the account held after this row, signed, or "" where no balance of the account
+    #: counts the row (`row_balances.balances_after`). A balance: its size is hidden when masked.
+    balance_after: Total[str] = ""
 
 
 def row_anchor(entity_id: str) -> str:
@@ -619,6 +623,9 @@ class Ledger:
     protection: Structural[ProtectionView | None] = None
     #: The account's rows by how their sightings joined, over every month (`join_basis`).
     joins: Structural[JoinCounts | None] = None
+    #: Whether the rows carry the balance after each (`LedgerRow.balance_after`): only where a known
+    #: balance anchors the account, which a page without one says in "How this was checked".
+    running_shown: Structural[bool] = False
     #: The sentence the verification says while a rebuild holds the derived layer
     #: (`rebuild_hold`), in place of the standing and the protection; empty otherwise.
     rebuilding: Structural[str] = ""
@@ -1240,6 +1247,13 @@ def _ledger_for(
         ),
         reverse=True,
     )
+    head = opening.readings[0].anchor if opening.readings and not opening.withheld else None
+    if head is not None:
+        after = balances_after([t for t, _ in in_month], rows, head)
+        in_month = [
+            (t, replace(row, balance_after=_signed_balance(figure, t.currency)))
+            for (t, row), figure in zip(in_month, after, strict=True)
+        ]
 
     def totals(pairs: list[tuple[Transaction, LedgerRow]]) -> tuple[int, int, int]:
         """(store sum, sent sum, rows counted) over the pairs that are money."""
@@ -1353,12 +1367,20 @@ def _ledger_for(
             if with_protection
             else None
         ),
+        running_shown=head is not None,
         joins=join_counts_of_bases(
             (t.value_date, bases.get(t.entity_id, ()))
             for t, row in built
             if not t.status.is_history and row.origin == ""
         ),
     )
+
+
+def _signed_balance(minor: int | None, currency: str) -> str:
+    """A balance as printed beside a row: its sign kept, since a balance may be below nil."""
+    if minor is None:
+        return ""
+    return f"{'-' if minor < 0 else ''}{Money(minor, currency)}"
 
 
 def typed_lines(

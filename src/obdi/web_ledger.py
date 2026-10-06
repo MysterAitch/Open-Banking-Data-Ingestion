@@ -352,7 +352,7 @@ def _sighting_line(sighting: Any) -> str:
     return f'<p class="muted">{code_html(sighting.source)} - {_esc(how)}{tail}</p>'
 
 
-def _line_html(row: Any, line: str, more: str) -> str:
+def _line_html(row: Any, line: str, more: str, *, running: bool = False) -> str:
     """The row's line, and everything else about it one tap away.
 
     Times are London time, the clock the rest of the page uses (`_CLOCK_NOTE`); a date is as stated.
@@ -365,7 +365,7 @@ def _line_html(row: Any, line: str, more: str) -> str:
     """
     lines = "".join(_sighting_line(sighting) for sighting in row.sightings)
     return (
-        f'<details class="t-more"><summary class="t-row">{line}'
+        f'<details class="t-more"><summary class="t-row{" t-running" if running else ""}">{line}'
         '<span class="visually-hidden">What each source reported</span>'
         f'</summary><div class="t-extra">{more}{lines}</div></details>'
     )
@@ -448,7 +448,18 @@ def _row_rail(row: Any) -> str:
     return " doubtful" if row.one_source or row.dates_differ else ""
 
 
-def _row_html(row: Any, unmasked: bool = True) -> str:
+def _balance_after_html(row: Any, unmasked: bool) -> str:
+    """The balance after the row, quieter than its amount; a masked one is the sealed figure.
+
+    A row no balance counts (pending against a bank's figure, or history) holds the column's
+    place with nothing in it, so the figures beneath stay in line.
+    """
+    figure = _esc(row.balance_after)
+    seal = _seal(unmasked) if figure else ""
+    return f'<span class="t-bal mono nowrap muted{seal}">{figure}</span>'
+
+
+def _row_html(row: Any, unmasked: bool = True, *, running: bool = False) -> str:
     """One transaction as a list item that wraps instead of scrolling.
 
     The description and the figure share the first line, the date and time the second, and the
@@ -495,6 +506,7 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
         f"{_esc(row.dated.isoformat())}</span>"
         f'<span class="t-desc"><strong class="txt{seal}">{_esc(row.description)}</strong></span>'
         f'<span class="t-fig mono nowrap fig{seal}">{figure}</span>'
+        f"{_balance_after_html(row, unmasked) if running else ''}"
         f"{_mark_html(row)}"
     )
     kind = " folded" if _is_copy(row) else ""
@@ -507,9 +519,8 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
         f'{stated}<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
         f"{counterparty}{dates}{annotation}"
     )
-    return (
-        f'<li class="txn{kind}{_row_rail(row)}"{ident}>{_line_html(row, line, more)}</li>'
-    )
+    opened = _line_html(row, line, more, running=running)
+    return f'<li class="txn{kind}{_row_rail(row)}"{ident}>{opened}</li>'
 
 
 #: The counts that mean something only when they are not zero: the table's label,
@@ -3029,6 +3040,11 @@ def _how_checked_html(
     limits = _part(
         f"What this page does not check ({_LIMITS.count('<li>')})", _LIMITS + _statement_cost()
     )
+    if view.state == "ok" and not view.running_shown:
+        counts += (
+            '<p class="muted">No balance is shown after each transaction, because the '
+            "account has no known balance to count from.</p>"
+        )
     fields = (
         f'<p><a class="tap" href="{_esc(account_address("account", view.ref))}">'
         f"{_esc(page_name('/account'))} for this account</a></p>"
@@ -3183,9 +3199,11 @@ def render_ledger(
         copies = [row for row in view.rows if _is_copy(row)]
         txns += (
             '<ul class="txns">'
-            + "".join(_row_html(row, unmasked) for row in counted)
+            + "".join(_row_html(row, unmasked, running=view.running_shown) for row in counted)
             + "</ul>"
-            + _copies_html([_row_html(row, unmasked) for row in copies])
+            + _copies_html(
+                [_row_html(row, unmasked, running=view.running_shown) for row in copies]
+            )
         )
     return _frame(
         view,
