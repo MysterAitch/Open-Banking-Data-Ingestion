@@ -270,7 +270,7 @@ class TestALockedStretchChanged:
 
 class TestEveryState:
     @pytest.mark.parametrize("ref", list(LABELS))
-    def test_Page_HoldsExactlyFiveFoldsBesideTheMonth(self, base, ref):
+    def test_Page_HoldsExactlySixFoldsBesideTheMonth(self, base, ref):
         more = next(n for n in elements(parse(get(base, ref)), "div") if "ledger-more" in n.classes)
         folds = [c for c in more.children if isinstance(c, Node) and c.tag == "details"]
 
@@ -283,6 +283,7 @@ class TestEveryState:
         assert summaries == [
             "What the bars show, and the full timeline",
             "Known balances",
+            "About this account",
             "Locking in",
             "How this was checked",
             "Rename or archive",

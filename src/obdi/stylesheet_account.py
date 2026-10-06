@@ -7,7 +7,7 @@ size is declared in this file. The to-do row, the trust bar, and the key are Tod
 
 THE SHAPE. On a phone the page is one column in the order a person asks their questions: whose
 account, how far it can be trusted, what to do about it, the month's transactions, and everything
-else in five folds beneath them. From 60rem the state and the things to do sit in a narrow column
+else in folds beneath them. From 60rem the state and the things to do sit in a narrow column
 beside the transactions, which fill a wide one.
 
 SEALED. A masked figure or masked text carries `.sealed`, drawn as a hatched slot, and a shown
@@ -142,6 +142,13 @@ ACCOUNT_STYLES = """
  .ledger-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
  .part { margin: var(--s3) 0 0; padding-top: var(--s1); border-top: var(--rule-weight) solid var(--rule-2); }
  .part h3 { margin: var(--s2) 0 var(--s1); }
+ /* What an account declares and what its sources state, a quiet list in the muted ink: the same
+    small type as a transaction's facts, a line to a window or a stated fact, and long words wrap
+    rather than push the page wide. The same list is on the account's edit page. */
+ .about .t-facts { font: var(--text-sm)/140% var(--sans); }
+ ul.windows, ul.stated { list-style: none; margin: var(--s2) 0; padding: 0; color: var(--ink-2);
+                         font: var(--text-sm)/140% var(--sans); }
+ ul.windows li, ul.stated li { margin: var(--s1) 0; overflow-wrap: anywhere; }
  details.ledger-danger button.button.secondary { color: var(--bad); border-color: var(--bad); }
 
  @media (min-width: 60rem) {

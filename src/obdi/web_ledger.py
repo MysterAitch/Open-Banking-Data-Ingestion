@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from . import values_sitting
+from .account_about import AccountAbout
 from .account_names import AccountShown, code_html
 from .account_page import (
     LOCKING_ANCHOR,
@@ -93,6 +94,7 @@ from .plural import agree, word
 from .plural import plural as _plural
 from .standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .trust_bar import key_html
+from .web_account_about import declared_html
 from .web_accounts import archive_controls, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
@@ -2968,6 +2970,16 @@ def _archive_html(view: Any, *, archive_wired: bool) -> str:
     return _disclosure("Rename or archive", rename + archive, css="ledger-danger")
 
 
+def _about_html(about: AccountAbout | None, today: date, *, unmasked: bool) -> str:
+    """The fold of what is declared of the account and what its sources state; not drawn for a
+    page that was given nothing to say it from."""
+    if about is None:
+        return ""
+    return _disclosure(
+        "About this account", declared_html(about, today, unmasked=unmasked), css="about"
+    )
+
+
 def _closed_on(view: Any) -> date | None:
     """The day an archived account closed, where the page knows it; None for any other."""
     return closed_on(view.archive)
@@ -3154,8 +3166,11 @@ def render_ledger(
     window_default: str = DEFAULT_KEY,
     can_set_default: bool = False,
     kept_statements: int | None = None,
+    about: AccountAbout | None = None,
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
+
+    `about` is what the "About this account" fold is drawn from; without it the fold is not drawn.
 
     `kept_statements` is how many statements are kept for the account, for the line that leads to
     the account's own list of them; without it the line is not drawn.
@@ -3207,6 +3222,7 @@ def render_ledger(
             state_form=not confirming,
             held_said=hold_is_said(reading, hold),
         )
+        + _about_html(about, end, unmasked=unmasked)
         + _locking_html(view, unmasked, all_balances)
         + _how_checked_html(
             view, unmasked, with_counts=view.state == "ok", kept_statements=kept_statements
@@ -3322,6 +3338,23 @@ class LedgerPages(AnswerPages):
             return hook(ref)
         except Exception:
             return None
+
+    def _about(self, ref: str) -> AccountAbout | None:
+        """What the account's "About this account" fold is drawn from, or None where declared
+        accounts are not wired. A declared record that cannot be read is said on the page and in
+        the log: a fold that read as "nothing declared" would be a false statement."""
+        hook = self.bound_config.declared_accounts
+        if hook is None:
+            return None
+        try:
+            record = next((item for item in hook() if str(item.ref) == ref), None)
+        except Exception as fault:
+            say("account_about.fault", kind=type(fault).__name__)
+            return AccountAbout(None, unread="What is declared could not be read just now.")
+        parent = None
+        if record is not None and record.parent is not None:
+            parent = self._account_names().of(str(record.parent))
+        return AccountAbout(record, parent)
 
     def _ledger_get(self, params: dict[str, list[str]]) -> None:
         # Nothing in the query string can unmask: only `ref`, `month`, the window's fields, and
@@ -3910,6 +3943,7 @@ class LedgerPages(AnswerPages):
                 window_default=default,
                 can_set_default=self.bound_config.window_default_set is not None,
                 kept_statements=self._kept_statement_count(ref),
+                about=self._about(ref) if ledger.state != "unknown" else None,
             ),
             no_store=unmasked or no_store,
         )
