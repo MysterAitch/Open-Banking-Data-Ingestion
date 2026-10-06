@@ -151,6 +151,11 @@ _PAGE = re.compile(r"Page\s*(\d+)\s*of\s*(\d+)")
 #: The foot label only a loan section prints, without spaces (see `_normalised`).
 _LOAN_FOOT = "closingloanposition"
 
+#: The label a closing balance is read from, as a person reads it: the one label this reader
+#: takes a closing balance under, which the shape page names so a section that found none can
+#: be told apart from one that printed it under another label.
+_CLOSING_LABEL = "Closing Balance"
+
 #: The label whose value - on the row BENEATH it, in the same column - is
 #: the account this section covers.
 _ACCOUNT_LABEL = "accountname"
@@ -397,6 +402,7 @@ def _assign_balances(
             reading.opening_balance_minor = minor
         elif kind == "closing":
             reading.closing_balance_minor = minor
+            reading.closing_label = _CLOSING_LABEL
 
 
 def _read_row(reading: StatementReading, cells: dict[str, str]) -> None:
@@ -560,6 +566,7 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
         closing = _CLOSING.search(joined)
         if closing:
             reading.closing_balance_minor = _minor(closing.group(1))
+            reading.closing_label = _CLOSING_LABEL
             below_the_table = True
             continue
 
@@ -604,6 +611,20 @@ def _read_one(grid: list[list[str]]) -> tuple[StatementReading, list[str]]:
         )
     reading.account_name = account_name
     rate = _rate_in(account_name)
+    if rate is not None and prints_loan_position:
+        reading.account_kind, reading.account_kind_basis = (
+            "loan", "the rate in its name and the Closing Loan Position line"
+        )
+    elif rate is not None:
+        reading.account_kind, reading.account_kind_basis = "loan", "the rate in its name"
+    elif prints_loan_position:
+        reading.account_kind, reading.account_kind_basis = (
+            "loan", "the Closing Loan Position line"
+        )
+    else:
+        reading.account_kind, reading.account_kind_basis = (
+            "saver", "no rate in the name and no Closing Loan Position line"
+        )
     if rate is not None or prints_loan_position:
         # A loan, which states its balance as what is OWED. Held as the negative position it
         # is, so a repayment reads as money moving the balance toward zero and nothing

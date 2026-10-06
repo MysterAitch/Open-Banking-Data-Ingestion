@@ -65,6 +65,14 @@ class StatementReading:
     #: format prints one. Never the closing day: `statement_span` uses it, and only it, to tell
     #: a statement that was produced before its period ended from one that was not.
     produced: date | None = None
+    #: What the reader took the account for ("saver" or "loan") and what decided it, for a
+    #: reader that tells the two apart; both empty for one that does not. Evidence only: nothing
+    #: is decided from them, they exist so a page can say what the reader concluded.
+    account_kind: str = ""
+    account_kind_basis: str = ""
+    #: The label the closing balance was read from, as the document prints it; empty where none
+    #: was found, or where the reader does not say.
+    closing_label: str = ""
 
     @property
     def discrepancy_minor(self) -> int:

@@ -16,6 +16,7 @@ otherwise slip through.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
@@ -201,15 +202,20 @@ class PdfStatementParser(StatementParser):
         """
         return self.reader(_lines(payload))
 
-    def refusal_of(self, reading: StatementReading) -> str:
+    def refusal_of(self, reading: StatementReading, *, figures: bool = True) -> str:
         """Why a reading may not be stored, or "" when it may.
 
         The one copy of the arithmetic gate: a whole statement and each
         section of a multi-account document are judged by it, so a section
         cannot pass a rule a statement would fail.
+
+        `figures=False` is the same verdict for a page served on a GET: the
+        difference the rows leave is not said, and every digit in a note (which
+        can carry an account's name, and so its rate) is shown as 9.
         """
         if reading.notes:
-            return "; ".join(reading.notes)
+            said = "; ".join(reading.notes)
+            return said if figures else re.sub(r"\d", "9", said)
         if reading.opening_balance_minor is None or reading.closing_balance_minor is None:
             return (
                 f"{self.source}: the statement's own opening and closing "
@@ -217,10 +223,15 @@ class PdfStatementParser(StatementParser):
                 "rows against them - refusing rather than importing on trust"
             )
         if not reading.reconciles:
+            unexplained = (
+                f"{reading.discrepancy_minor} minor units unexplained"
+                if figures
+                else "the sum did not reach the closing balance"
+            )
             return (
                 f"{self.source}: the rows do not carry the statement's "
                 f"opening balance to its closing one - "
-                f"{reading.discrepancy_minor} minor units unexplained across "
+                f"{unexplained} across "
                 f"{plural(len(reading.transactions), 'row')}. A missed row or a "
                 "credit read as a spend both look like this; the file is "
                 "kept, but nothing derived from it is stored"

@@ -87,6 +87,7 @@ from .period_reconciliation import PeriodReport
 from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
+from .reader_findings import findings_html, findings_of
 from .review_flags import FlagQueue, Outcome
 from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
@@ -95,6 +96,7 @@ from .spaces import RECOVERY_BOUND, ArchiveNote
 from .standing_data import AccountStanding
 from .statement_listing_measure import StatementListingReport
 from .statement_listing_page import statement_listing_html
+from .statement_sections import section_token
 from .statement_shape import ShapeReport
 from .store import Store
 from .timings import Timings
@@ -4985,11 +4987,38 @@ class ConnectionHandler(
             "shape can be read again without uploading the file again.</p>"
             f'<pre class="scroll" style="white-space:pre">'
             f"{html.escape(shape.describe())}</pre>"
+            + self._reader_found_html(artefact_id, payload)
             + (self._assign_form(artefact_id) if self._is_kept(artefact_id) else "")
             + '<p><a class="button" href="/statement-shape">Read another</a></p>'
             + HOME_LINK
         )
         self._respond(200, render_page("Statement shape", body))
+
+    def _reader_found_html(self, artefact_id: int, payload: bytes) -> str:
+        """What the reader concluded from a kept statement, beneath its masked shape.
+
+        Masked only, like the shape: dates, counts, and fixed labels (`reader_findings`). The
+        accounts it is assigned to come from the kept-statements listing, which a GET already
+        serves.
+        """
+        whole = ""
+        by_token: dict[str, str] = {}
+        listing = self.bound_config.kept_statements
+        if listing is not None:
+            for entry in listing():
+                if int(str(entry["id"])) != artefact_id:
+                    continue
+                filed = str(entry.get("account_ref") or "")
+                whole = "" if filed == UNASSIGNED_ACCOUNT else filed
+                sections = entry.get("sections")
+                for part in sections if isinstance(sections, list) else []:
+                    by_token[str(part["token"])] = str(part.get("account") or "")
+        found = findings_of(
+            payload,
+            account_of=lambda key: by_token.get(section_token(key), ""),
+            whole_account=whole,
+        )
+        return findings_html(found, code_html)
 
     def _assign_form(self, artefact_id: int) -> str:
         """Whose is this, and read it in.
