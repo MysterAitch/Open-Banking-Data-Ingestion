@@ -745,11 +745,12 @@ class TestNavigationCoversTheNewRoutes:
 
 
 class TestMoreListsEverythingTheStripDoesNotName:
-    def test_More_WhenOpened_ListsItsThreeGroupsInPlainWords(self, serve):
+    def test_More_WhenOpened_ListsItsFourGroupsInPlainWords(self, serve):
         page = fetch(serve(), "/more")
 
         headings = [h.text() for h in elements(parse(page), "h2")]
-        assert headings == ["Accounts", "Checks", "Diagnostics"]
+        # Values is the sitting's line: whether values are shown on every page, and the control.
+        assert headings == ["Accounts", "Checks", "Diagnostics", "Values"]
         assert "<title>More</title>" in page
 
     def test_More_EveryPageItLists_IsAPageThatAnswers(self, serve):
