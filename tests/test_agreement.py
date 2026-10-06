@@ -41,6 +41,7 @@ from obdi.ledger import build_ledger
 from obdi.models import Transaction, TransactionStatus
 from obdi.movement_completeness import MISSING, MovementCompleteness, RowCountFault
 from obdi.namespaces import CLEARING_SOURCES, SOURCES
+from obdi.page_times import marks_removed
 from obdi.store import Store
 from round_up_corpus import rows_the_provider_makes
 from test_balance_anchors import ACCOUNT, everyday
@@ -180,8 +181,9 @@ class TestAnAccountWithKnownBalances:
 
         found = state(store, MovementCompleteness())
 
-        assert standing_line(found, None) == (
-            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10."
+        assert marks_removed(standing_line(found, None)) == (
+            "The transactions add up to every known balance from 2026-03-05 to 2026-03-10"
+            " (6 days)."
         )
         assert standing_line(found, D(2026, 3, 10)).endswith("protected through 2026-03-10.")
 

@@ -169,6 +169,8 @@ SHARED_STYLES = """
  .pill-bad::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
  .pill-warn::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; }
  .muted { color: var(--ink-2); }
+ /* How long a range of dates is, in words after it: an affordance, so muted, small, never bold. */
+ .span-words { color: var(--ink-2); font-size: var(--text-sm); font-weight: 400; }
  .mono { font-family: var(--mono); font-size: .85em; font-variant-numeric: tabular-nums;
          overflow-wrap: anywhere; }
  /* A date or a figure is read whole. The monospace rule above breaks

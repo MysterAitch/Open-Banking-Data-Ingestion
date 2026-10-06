@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 from .buildinfo import describe
 from .navigation import navigation_html, with_way_out
 from .page_structure import structure_tables
+from .page_times import marks_as_html
 from .stylesheet import SERVED_STYLESHEET
 
 
@@ -114,7 +115,7 @@ def render_page(
     if prefix:
         title = f"[{prefix}] {title}"
         body = banner + body
-    body = structure_tables(body, fallback_name=html.escape(title))
+    body = structure_tables(marks_as_html(body), fallback_name=html.escape(title))
     classes = " ".join(part for part in ("wide" if wide else "", body_class) if part)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">

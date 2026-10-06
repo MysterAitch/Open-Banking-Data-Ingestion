@@ -64,6 +64,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
 
+from .page_times import range_with_span
 from .plural import plural
 
 #: The month and day the tax year starts: the UK's, 6 April to 5 April.
@@ -135,6 +136,12 @@ class WindowSpec:
     period: Period | None = None
     first: date | None = None
     last: date | None = None
+
+    def describe_with_span(self, *, today: date) -> str:
+        """`describe`, with a chosen range's length in marked words after it (`page_times`)."""
+        if self.kind == "between" and self.first and self.last and self.first <= self.last:
+            return f"From {range_with_span(self.first, self.last)}"
+        return self.describe(today=today)
 
     def describe(self, *, today: date) -> str:
         """The choice in words, as the page names it above the chart."""

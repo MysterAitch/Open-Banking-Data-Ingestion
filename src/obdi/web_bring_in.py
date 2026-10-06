@@ -56,7 +56,7 @@ from .fetch_marks import AGGREGATOR
 from .fetch_reasons import gap_lines
 from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import AccountOverview, Overview
-from .page_times import UTC_NOTE, instant_of
+from .page_times import UTC_NOTE, instant_of, span_phrase
 from .plural import plural
 from .pull import STARLING_CONNECTION
 from .rebuild_hold import RebuildInProgress
@@ -291,7 +291,8 @@ def _file_html(item: WantedFile, today: date) -> str:
     css = "bi-file guess" if item.guess else "bi-file"
     return (
         f'<li class="{css}"><p class="bi-what"><b>{what}</b> '
-        f'<span class="mono">{_whole_dates(_esc(days))}</span></p>'
+        f'<span class="mono">{_whole_dates(_esc(days))}</span> '
+        f"{span_phrase(item.first, item.last)}</p>"
         f'<p class="bi-why">{_whole_dates(why)}</p>'
         f'<a class="tap bi-aside" href="{_esc(href)}">Set aside&hellip;</a></li>'
     )

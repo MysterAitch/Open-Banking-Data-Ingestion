@@ -69,7 +69,7 @@ from .coverage_timeline import (
 )
 from .date_window import resolve
 from .logs import say
-from .page_times import range_text
+from .page_times import range_text, range_with_span
 from .plural import plural
 from .web_balance_chart import (
     EDGE,
@@ -464,9 +464,15 @@ def _lane_name(view: AccountTimeline, source: str) -> str:
     return KIND_NAMES[lane.kind] if lane is not None else source
 
 
-def _span(first: date, last: date) -> str:
-    """The days of a gap as the What to fetch next page says them: one date for one day."""
-    return first.isoformat() if first == last else range_text(first, last)
+def _span(first: date, last: date, *, with_length: bool = False) -> str:
+    """The days of a gap as the What to fetch next page says them: one date for one day.
+
+    `with_length` adds the range's length in marked words, for a line in the page's own
+    content; a label or an attribute leaves it off.
+    """
+    if first == last:
+        return first.isoformat()
+    return range_with_span(first, last) if with_length else range_text(first, last)
 
 
 def _gap_sentence(view: AccountTimeline, gap: Gap) -> str:
@@ -1176,7 +1182,7 @@ def _next_list(view: AccountTimeline, drawn: _Drawn) -> str:
         return ""
     items = "".join(
         f'<li><a href="#e-{e.ident}">{_esc(_lane_name(view, e.gap.source))}: '
-        f"{_esc(_span(e.first, e.last))}</a></li>"
+        f"{_esc(_span(e.first, e.last, with_length=True))}</a></li>"
         for e in gaps[:4]
         if e.gap is not None
     )

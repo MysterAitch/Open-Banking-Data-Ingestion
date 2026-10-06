@@ -263,13 +263,26 @@ class TestAnOrdinaryDay:
             "Upload the statement covering 2026-09-18 to 2026-10-05",
         ]
         everyday, joint = texts(root, "p", "todo-why")
-        # The line says the account, the days, and when the first fell due, and nothing else.
+        # The line says the account, the days with how long they are (and, where the cadence
+        # says two files, how many), and when the first fell due, and nothing else.
         assert everyday == (
-            "Everyday card · 2026-07-11 to 2026-09-10 · due since 2026-08-10 (8 weeks ago)"
+            "Everyday card · 2026-07-11 to 2026-09-10 (2 months, 2 statements)"
+            " · due since 2026-08-10 (8 weeks ago)"
         )
         assert joint == (
-            "Joint current · 2026-09-18 to 2026-10-05 · due since 2026-09-18 (2 weeks ago)"
+            "Joint current · 2026-09-18 to 2026-10-05 (3 weeks)"
+            " · due since 2026-09-18 (2 weeks ago)"
         )
+
+    def test_ThingsToDo_TheLengthOfTheDays_IsAMutedSmallSpanNeverTheOrangeBoldAge(self) -> None:
+        root = self.root()
+
+        lengths = [span for span in elements(root, "span") if "span-words" in span.classes]
+        assert [span.text() for span in lengths] == [
+            "(2 months, 2 statements)",
+            "(3 weeks)",
+        ]
+        assert all("age" not in span.classes for span in lengths)
         controls = [a.text() for e in by_class(root, "li", "todo") for a in elements(e, "a")]
         assert controls == ["Upload", "Upload"]
 
@@ -284,7 +297,7 @@ class TestAnOrdinaryDay:
 
         assert texts(root, "p", "todo-what") == [
             "Upload 2 statements",
-            "Upload the statement covering 2026-04-11 to 2026-05-10",
+            "Upload the statement covering 2026-04-11 to 2026-05-10 (a month)",
         ]
         assert texts(root, "p", "todo-why")[1] == (
             "Everyday card · No statement held covers these days (5 months ago)"

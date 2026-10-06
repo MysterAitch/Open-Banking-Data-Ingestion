@@ -18,9 +18,13 @@ from obdi.page_times import (
     date_with_age,
     instant_of,
     instant_text,
+    marks_as_html,
+    marks_removed,
     month_text,
     percent_text,
     range_text,
+    range_with_span,
+    span_words,
 )
 
 
@@ -124,3 +128,70 @@ class TestAgesAndShares:
     )
     def test_Percent_UsesTheSignWithNoSpaceAndNoTrailingZero(self, share, expected):
         assert percent_text(share) == expected
+
+
+class TestSpanWords:
+    """KNOWN ANSWERS: decided before the helper ran, from a calendar, inclusive of both ends."""
+
+    @pytest.mark.parametrize(
+        ("length_in_days", "words"),
+        [
+            (1, "1 day"),
+            (2, "2 days"),
+            (7, "7 days"),
+            (8, "a week"),
+            (10, "a week"),
+            (11, "2 weeks"),
+            (21, "3 weeks"),
+            (26, "4 weeks"),
+            (27, "a month"),
+            (31, "a month"),
+            (45, "a month"),
+            (46, "2 months"),
+            (62, "2 months"),
+            (92, "3 months"),
+            (350, "11 months"),
+            (351, "a year"),
+            (365, "a year"),
+            (400, "1 year 1 month"),
+            (548, "1 year 6 months"),
+            (640, "1 year 9 months"),
+            (730, "2 years"),
+            (1100, "3 years"),
+            (1130, "3 years 1 month"),
+        ],
+    )
+    def test_SpanWords_ForEachBoundary_ChoosesTheLargestUnitThatFits(self, length_in_days, words):
+        first = date(2024, 1, 1)
+        assert span_words(first, first + timedelta(days=length_in_days - 1)) == words
+
+    def test_SpanWords_ForTheStatementPeriodInTheBringInExample_SaysAMonth(self):
+        assert span_words(date(2026, 7, 11), date(2026, 8, 10)) == "a month"
+
+    def test_SpanWords_WhenEndsBeforeStart_Refuses(self):
+        with pytest.raises(ValueError, match="before"):
+            span_words(date(2026, 8, 11), date(2026, 8, 10))
+
+
+class TestRangeWithSpan:
+    def test_RangeWithSpan_AsHtml_PutsTheWordsInAMutedSpanAfterTheRange(self):
+        marked = range_with_span(date(2026, 7, 11), date(2026, 8, 10))
+        assert marks_as_html(marked) == (
+            '2026-07-11 to 2026-08-10 <span class="span-words">(a month)</span>'
+        )
+
+    def test_RangeWithSpan_AsPlainText_DropsTheMarksAndKeepsTheWords(self):
+        marked = range_with_span(date(2026, 7, 11), date(2026, 8, 10))
+        assert marks_removed(marked) == "2026-07-11 to 2026-08-10 (a month)"
+
+    def test_RangeWithSpan_WhenTheCadenceSaysTwoStatements_NamesThemAfterTheLength(self):
+        marked = range_with_span(date(2026, 7, 11), date(2026, 9, 10), statements=2)
+        assert marks_removed(marked) == "2026-07-11 to 2026-09-10 (2 months, 2 statements)"
+
+    @pytest.mark.parametrize("statements", [None, 0, 1])
+    def test_RangeWithSpan_WhenCadenceUnknownOrOneStatement_SaysTheLengthAlone(self, statements):
+        marked = range_with_span(date(2026, 7, 11), date(2026, 8, 10), statements=statements)
+        assert marks_removed(marked) == "2026-07-11 to 2026-08-10 (a month)"
+
+    def test_MarksAsHtml_WhenTextHasNone_IsUnchanged(self):
+        assert marks_as_html("nothing marked") == "nothing marked"

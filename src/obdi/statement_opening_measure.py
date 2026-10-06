@@ -34,6 +34,7 @@ from .balance_anchors import (
 from .family_anchors import OPENED, Families
 from .models import Transaction
 from .opening_edges import directly_follows
+from .page_times import marks_removed
 from .plural import agree, plural
 from .statement_openings import (
     PlacedBy,
@@ -401,7 +402,7 @@ class StatementOpeningReport:
 
 def _standing_today(opening: EffectiveOpening) -> tuple[str, set[date]]:
     agreement = derive_agreement(known_of_opening(opening), [])
-    sentence = standing_line(agreement, None, with_protection=False)
+    sentence = marks_removed(standing_line(agreement, None, with_protection=False))
     held = held_sentence(agreement)
     days: set[date] = set()
     if agreement.through is not None and agreement.known_from is not None:

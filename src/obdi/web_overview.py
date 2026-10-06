@@ -46,7 +46,7 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .page_times import date_with_age
+from .page_times import date_with_age, range_text, span_phrase
 from .plural import plural
 from .rebuild_hold import RebuildInProgress
 from .standing_data import (
@@ -335,7 +335,10 @@ def todo_row_html(
     # to fetch next.
     days = todo.days if todo.kind == "fetch-newer-statement" else None
     if days is not None:
-        parts.append(f"{days[0].isoformat()} to {days[1].isoformat()}")
+        parts.append(
+            f"{days[0].isoformat()} to {days[1].isoformat()} "
+            f"{span_phrase(days[0], days[1], todo.files)}"
+        )
     else:
         parts.append(_esc(todo.why.rstrip(".")))
     if todo.since is not None:
@@ -352,9 +355,18 @@ def todo_row_html(
         control = (
             f'<a class="{button}" href="{_esc(todo.control.href)}">{_esc(todo.control.label)}</a>'
         )
+    # A title that names its days gets their length after it, except a newer statement's, whose
+    # days and length are on the line beneath.
+    length = (
+        f" {span_phrase(todo.days[0], todo.days[1])}"
+        if todo.days is not None
+        and todo.kind != "fetch-newer-statement"
+        and todo.title.endswith(range_text(*todo.days))
+        else ""
+    )
     return (
         f'<li class="{classes}"><div class="todo-text">'
-        f'<p class="todo-what">{_whole_dates(_esc(todo.title))}</p>'
+        f'<p class="todo-what">{_whole_dates(_esc(todo.title))}{length}</p>'
         f'<p class="todo-why">{_whole_dates(" &middot; ".join(parts))}</p></div>'
         f"{control}{extra}</li>"
     )

@@ -17,6 +17,7 @@ from datetime import date
 import pytest
 
 from obdi.agreement import NONE, Agreement, standing_line
+from obdi.page_times import marks_removed
 from obdi.page_words import RETIRED_ON_PAGES
 from page_walk import invented, served, walked_pages  # noqa: F401
 
@@ -86,9 +87,9 @@ def an_agreement(state: str, *, known: int) -> Agreement:
 
 class TestAnAccountNothingProtects:
     def test_StandingLine_WhenNothingIsProtected_SaysNothingOfProtection(self):
-        said = standing_line(an_agreement("agrees", known=3), None)
+        said = marks_removed(standing_line(an_agreement("agrees", known=3), None))
 
-        assert said.endswith("to 2026-06-30.")
+        assert said.endswith("to 2026-06-30 (5 months).")
         assert "protected" not in said
 
     def test_StandingLine_WhenProtected_SaysThroughTheDate(self):

@@ -37,6 +37,7 @@ from datetime import date, timedelta
 from .fetch_gaps import Basis, FetchGap, FetchReport, GapKind
 from .navigation import account_address
 from .overview import HOUSEKEEPING, NOW, SOON, AttentionItem, Overview
+from .page_times import range_text
 from .protection import tested_days_of
 from .standing_data import AccountStanding
 
@@ -223,7 +224,7 @@ def _why(gap: FetchGap) -> str:
 
 
 def _file_title(gap: FetchGap, first: date, last: date) -> str:
-    span = f"{first.isoformat()} to {last.isoformat()}"
+    span = range_text(first, last)
     if gap.kind is GapKind.EXPORT_STOPS:
         return f"Import the export from {first.isoformat()}"
     if gap.kind is GapKind.EXPORT_MONTHS:

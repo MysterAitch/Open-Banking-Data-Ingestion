@@ -12,6 +12,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
+from obdi.page_times import marks_as_html
+
 VOID = frozenset({"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "wbr"})
 HEADINGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 INVISIBLE = frozenset({"script", "style", "head", "template"})
@@ -84,8 +86,10 @@ class _Builder(HTMLParser):
 
 
 def parse(page: str) -> Node:
+    """The page as a tree, with the marked words of a range's length made spans as `render_page`,
+    which assembles every served page, makes them: a page function's body is read as served."""
     builder = _Builder()
-    builder.feed(page)
+    builder.feed(marks_as_html(page))
     builder.close()
     return builder.root
 

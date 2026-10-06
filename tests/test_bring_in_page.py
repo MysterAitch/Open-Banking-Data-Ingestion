@@ -172,6 +172,14 @@ class TestWhatIsWanted:
             "(8 weeks ago)"
         ]
 
+    def test_File_WhenAStatementIsWaiting_SaysHowLongItsDaysAreInAMutedSpanBesideThem(self, world):
+        first = rows_of(account_block(page_of(world), "Behind card"))[0]
+
+        assert first.text().startswith("Statement 2026-07-11 to 2026-08-10 (a month)")
+        lengths = [s for s in elements(first, "span") if "span-words" in s.classes]
+        assert [s.text() for s in lengths] == ["(a month)"]
+        assert "age" not in lengths[0].classes
+
     def test_File_WhenTheDaysAreAnInference_IsDrawnDashed(self, world):
         root = page_of(world)
 

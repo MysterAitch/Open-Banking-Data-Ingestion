@@ -311,7 +311,7 @@ def window_controls(
     spec = choice.spec if choice.spec is not None else everything()
     now = (
         f'<p class="window-now" data-window-now>Window: '
-        f"{_esc(spec.describe(today=date.fromisoformat(today)))}</p>"
+        f"{_esc(spec.describe_with_span(today=date.fromisoformat(today)))}</p>"
         if show_now and not choice.refusal
         else ""
     )

@@ -123,6 +123,7 @@ from .balance_anchors import (
 )
 from .family_anchors import OPENED
 from .masking import Structural
+from .page_times import range_with_span
 from .plural import agree, plural
 from .statement_checks import (
     DOES_NOT_REACH,
@@ -849,10 +850,14 @@ def standing_line(
         if agreement.known_to and agreement.known_to != agreement.through:
             line += f"; the latest known balance is for {_day(agreement.known_to)}"
     else:
-        line = (
-            "The transactions add up to every known balance from "
-            f"{_day(agreement.known_from)} to {_day(agreement.through)}"
+        # The length is marked words (`page_times.range_with_span`), plain text until a page is
+        # assembled, so a caller that writes this to a terminal removes the marks.
+        reached = (
+            range_with_span(agreement.known_from, agreement.through)
+            if agreement.known_from
+            else f"{_day(agreement.known_from)} to {_day(agreement.through)}"
         )
+        line = f"The transactions add up to every known balance from {reached}"
         if agreement.known_to and agreement.known_to != agreement.through:
             line += f"; the latest known balance is for {_day(agreement.known_to)}"
     if not with_protection or not protected_through:

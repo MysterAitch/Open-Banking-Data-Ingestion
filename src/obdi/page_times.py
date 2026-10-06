@@ -89,6 +89,81 @@ def date_with_age(day: date, today: date) -> str:
     return f"{day.isoformat()} ({age})"
 
 
+#: A range of fewer days than `WEEKS_FROM_DAYS` is counted in days, one of fewer than
+#: `MONTHS_FROM_DAYS` in weeks, and a longer one in months and years.
+WEEKS_FROM_DAYS = 8
+MONTHS_FROM_DAYS = 27
+_DAYS_PER_MONTH = 30.4375
+
+
+def _counted(count: int, unit: str) -> str:
+    return f"a {unit}" if count == 1 else f"{count} {unit}s"
+
+
+def span_words(first: date, last: date) -> str:
+    """How long `first` to `last` is, both days counted, in rounded words: `a month`, `2 weeks`.
+
+    The largest unit that fits, rounded to the nearest whole one and never exact: 62 days is
+    `2 months`. The thresholds are stated here and nowhere else: under `WEEKS_FROM_DAYS` days in
+    days (`1 day`, `7 days`); under `MONTHS_FROM_DAYS` in weeks (8 to 10 days is `a week`, 11 to
+    17 `2 weeks`); then in months of 30.4375 days (27 to 45 days is `a month`), which from twelve
+    are years and months (`a year`, `1 year 9 months`). One of a unit is "a", two or more is the
+    numeral; one year with months is `1 year 1 month`, so the numeral reads as a pair there. The
+    words are an affordance beside dates that are exact, so no "about" is written. A range that
+    ends before it starts is a fault in the caller and raises.
+    """
+    if last < first:
+        raise ValueError(f"the range ends {last.isoformat()}, before it starts {first.isoformat()}")
+    days = (last - first).days + 1
+    if days < WEEKS_FROM_DAYS:
+        return "1 day" if days == 1 else f"{days} days"
+    if days < MONTHS_FROM_DAYS:
+        return _counted(round(days / 7), "week")
+    months = round(days / _DAYS_PER_MONTH)
+    if months < 12:
+        return _counted(months, "month")
+    years, rest = divmod(months, 12)
+    if not rest:
+        return _counted(years, "year")
+    return f"{years} year{'s' if years > 1 else ''} {rest} month{'s' if rest > 1 else ''}"
+
+
+#: Wrap the words of a duration inside a sentence that is escaped before it is put in a page, so
+#: that the sentence stays plain text through every layer and `render_page` (the one place that
+#: assembles a page) turns the marks into the muted span. Private-use characters: nothing
+#: escapes them and no source text carries them.
+SPAN_OPEN = chr(0xE000)
+SPAN_CLOSE = chr(0xE001)
+
+
+def range_with_span(first: date, last: date, statements: int | None = None) -> str:
+    """`2026-07-11 to 2026-08-10 (a month)` with the bracketed words marked for `marks_as_html`.
+
+    `statements` is how many statements the range stands for where the cadence of the statements
+    held says so (`2026-07-11 to 2026-09-10 (2 months, 2 statements)`); None, or one, says only
+    the length, because one statement is what a range of days already is.
+    """
+    return f"{range_text(first, last)} {span_phrase(first, last, statements)}"
+
+
+def span_phrase(first: date, last: date, statements: int | None = None) -> str:
+    """The marked `(a month)` alone, for a page that sets the dates in a face of their own."""
+    words = span_words(first, last)
+    if statements is not None and statements >= 2:
+        words += f", {statements} statements"
+    return f"{SPAN_OPEN}({words}){SPAN_CLOSE}"
+
+
+def marks_as_html(page: str) -> str:
+    """Marked words as the muted, smaller span the stylesheet's `.span-words` rule styles."""
+    return page.replace(SPAN_OPEN, '<span class="span-words">').replace(SPAN_CLOSE, "</span>")
+
+
+def marks_removed(text: str) -> str:
+    """Marked text as plain words, for a line written to a terminal or into an attribute."""
+    return text.replace(SPAN_OPEN, "").replace(SPAN_CLOSE, "")
+
+
 def percent_text(share: float) -> str:
     """A share between 0 and 1 as `66.7%`, with no ".0" on a whole percentage."""
     return f"{share * 100:.1f}".removesuffix(".0") + "%"
