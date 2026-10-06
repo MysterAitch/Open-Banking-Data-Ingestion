@@ -84,7 +84,7 @@ from .web_marks import (
     verdict_clauses,
 )
 from .web_overview import _age_words, _whole_dates
-from .web_statements import names_found_words
+from .web_statements import kept_count, names_found_words
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .statement_shape import ShapeReport
@@ -1068,7 +1068,7 @@ class BringInPages:
             and not e.get("refusal")
             and not e.get("sections")
         )
-        return len(entries), waiting
+        return kept_count(entries), waiting
 
     # -- GET ----------------------------------------------------------------------------------
 

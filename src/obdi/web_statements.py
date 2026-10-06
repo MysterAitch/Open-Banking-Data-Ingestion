@@ -16,7 +16,7 @@ only, as on every GET.
 from __future__ import annotations
 
 import html
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from urllib.parse import quote
 
 from .account_names import AccountsShown
@@ -30,6 +30,14 @@ _esc = html.escape
 #: A group of statements waiting for an account is open, so that the way to give each one an
 #: account is not behind a press, while there are few enough for the page to stay short.
 _OPEN_WHILE_AT_MOST = 3
+
+
+def kept_count(entries: Sequence[object]) -> int:
+    """How many statements are kept: every row of the kept listing, whoever it is filed under
+    or whether a reader reads it. The Kept statements page's summary and Bring in's "N files kept"
+    link both say this number, and it changes when a kept copy of statement bytes already filed
+    under an account is folded into that statement as the copy is filed."""
+    return len(entries)
 
 
 def _kept_at(item: dict[str, object]) -> str:
@@ -488,7 +496,7 @@ def statements_body(
     several_count = f"{len(sectioned)} covering several accounts, " if sectioned else ""
     summary = (
         '<section class="diag-summary"><h2>Summary</h2>'
-        f"<p>{len(entries)} kept: {len(waiting)} waiting only for an account, "
+        f"<p>{kept_count(entries)} kept: {len(waiting)} waiting only for an account, "
         f"{refused_count}{several_count}{len(no_parser)} with no parser yet, "
         f"{len(assigned)} assigned.</p>"
         f"{bulk}{upload}</section>"
