@@ -11,11 +11,20 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from fetch_gaps_world import Household, feed, load_household, santander_statements
+from fetch_gaps_world import (
+    MONTHS,
+    Household,
+    _pounds,
+    feed,
+    load_household,
+    santander_statements,
+)
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.fetch_gaps import GapKind, fetch_report, gather_evidence
+from obdi.ingest import import_file
 from obdi.standing_data import standings_for
 from obdi.store import Store
+from obdi.synthetic_pdf import build_pdf
 
 D = date
 TODAY = D(2026, 10, 5)
@@ -88,6 +97,91 @@ def test_FirstStatement_WhenAnotherSourceHoldsEarlierDays_StillAsksForAnEarlierS
     ]
     assert gap.first_day == D(2026, 6, 1)
     assert gap.last_day < D(2026, 8, 20)
+
+
+def _period_statement(
+    store: Store,
+    root: Path,
+    ref: str,
+    opens: date,
+    closes: date,
+    rows: list[tuple[date, str, int]],
+) -> None:
+    """A first card statement that states its own period and lists `rows`, owed 100.00 before."""
+    owed = 10000
+    lines = [
+        f"Statement  period: {opens:%d/%m/%Y} - {closes:%d/%m/%Y}",
+        "Your credit card account is a Virgin Money account (Your credit limit: £4,000)",
+        f"Balance  from your  previous statement                    £{_pounds(owed)}",
+        "Transaction  date    Post date            Description                  Amount",
+        *(
+            f"{when.day:02} {MONTHS[when.month - 1]} {when:%y}   {when.day:02} "
+            f"{MONTHS[when.month - 1]} {when:%y}   {payee}   £{_pounds(minor)}"
+            for when, payee, minor in rows
+        ),
+        f"Your new  balance                                         "
+        f"£{_pounds(owed + sum(m for _, _, m in rows))}",
+    ]
+    path = root / f"{ref}-{closes.isoformat()}.pdf"
+    path.write_bytes(build_pdf(lines))
+    import_file(store, path, account_id=ref)
+
+
+def test_FirstStatement_WhenItListsAPurchaseDatedBeforeItsOwnPeriod_AsksForNothingEarlier(
+    tmp_path,
+):
+    """Card statements list a purchase by the day it was made, which can precede the period the
+    statement opens on. That purchase is listed, so it is accounted for; the account adds up and
+    the days before the period's start hold nothing that is unaccounted for."""
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        _declare(store, "listed-before-start")
+        _period_statement(
+            store,
+            tmp_path,
+            "listed-before-start",
+            D(2026, 8, 11),
+            D(2026, 9, 10),
+            [
+                (D(2026, 8, 9), "Purchase Before Period Zeppelin", 1500),
+                (D(2026, 8, 20), "Purchase In Period Zeppelin", 2500),
+            ],
+        )
+    assert _kinds(_report(db), "listed-before-start") == set()
+
+
+def test_FirstStatement_WhenAFeedHoldsADayBeforeItsPeriod_AsksForExactlyThatEarlierStretch(
+    tmp_path,
+):
+    """The opposite: a feed transaction the statement does not list lies before its period, so
+    the statement does not test its days and the earlier days really are untested, from the
+    feed's first day to the day before the period opens."""
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        _declare(store, "unlisted-before-start")
+        feed(
+            store,
+            "unlisted-before-start",
+            [(D(2026, 7, 1), -1900, "Unlisted Before Period Zeppelin")],
+            digest="before-start",
+        )
+        _period_statement(
+            store,
+            tmp_path,
+            "unlisted-before-start",
+            D(2026, 8, 11),
+            D(2026, 9, 10),
+            [(D(2026, 8, 20), "Purchase In Period Zeppelin", 2500)],
+        )
+    report = _report(db)
+    (gap,) = [
+        g
+        for o in report.accounts
+        if o.account == "unlisted-before-start"
+        for g in o.gaps
+        if g.kind is GapKind.NOTHING_BEFORE
+    ]
+    assert (gap.first_day, gap.last_day) == (D(2026, 7, 1), D(2026, 8, 10))
 
 
 def test_FlaggedPair_WhenTheOneStatementListingBothAddsUp_RaisesNoBalanceNeededGap(tmp_path):

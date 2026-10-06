@@ -419,10 +419,18 @@ def _outlook(
                     "balance you state, would let them be tested.",
                 )
             )
-        elif own.known_from is not None:
-            # A statement is a closing balance, but it also accounts for the rows it lists, so
-            # the rows of the first statement itself are not "before" it: only rows before the
-            # day it says its period begins (or its first row) are.
+        elif own.known_from is not None and not own.listing_tested:
+            # A first statement that adds up by what it lists (`listing_tested`) is held to that
+            # only where no counting transaction before its start is unlisted
+            # (`statement_listing_measure`, `unlisted_before`), so every row before its closing
+            # is accounted for and nothing earlier is wanted. The rule has to be read from the
+            # standing and not from the statement's printed period: a card statement lists a
+            # purchase by the day it was made, which can precede the period it opens on, and the
+            # period alone then asked for the very days the statement lists.
+            #
+            # Otherwise a statement is a closing balance that also accounts for the rows it
+            # lists, so the rows of the first statement itself are not "before" it: only rows
+            # before the day it says its period begins (or its first row) are.
             first_span = described.statements[0] if described.statements else None
             covered = (
                 first_span.first
