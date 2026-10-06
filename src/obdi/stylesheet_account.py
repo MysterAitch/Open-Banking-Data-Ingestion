@@ -1,74 +1,68 @@
 # ruff: noqa: E501
 """An account's page's own rules, joined into the one stylesheet by `stylesheet`.
 
-Only what no other page uses belongs here, written with the shared tokens:
-no colour, face, or size is declared in this file.
+Only what no other page uses belongs here, written with the shared tokens: no colour, face, or
+size is declared in this file. The to-do row, the trust bar, and the key are Today's
+(`stylesheet_home`); this adds the sentence, the strip of lanes, and the month's transactions.
 
-THE SHAPE. On a phone the page is one column, in the order a person asks their questions: whose
-account, how far it is verified, what holds it back, what can be done, then the month's
-transactions, and everything else folded beneath them. From 60rem the same markup is two columns:
-the state, the month, and the folded sections in a narrow one, and the transactions in a wide
-one beside them, as a table-like list of date, description, figure, and sources.
+THE SHAPE. On a phone the page is one column in the order a person asks their questions: whose
+account, how far it can be trusted, what to do about it, the month's transactions, and everything
+else in five folds beneath them. From 60rem the state and the things to do sit in a narrow column
+beside the transactions, which fill a wide one.
 
 SEALED. A masked figure or masked text carries `.sealed`, drawn as a hatched slot, and a shown
 one is plain: the state of the page is visible at a glance without reading the banner. The
 hatch is a rule colour at a fixed pitch, and the characters inside it are never hidden, so the
 slot still says how long the thing is.
 
-RAIL, NOT BOX. A row that is flagged or doubtful has a rail at its edge, as the Overview's
-attention list does; the one tinted box on the page is the account's own hold, the thing to act on.
+RAIL, NOT BOX. A transaction that is flagged or doubtful has a rail at its edge, as the things to
+do have; no box is tinted on this page.
 """
 
 ACCOUNT_STYLES = """
- /* THE PROOF RAIL'S RULES, SHARED: `proof_rail.rail_svg` names no colour and gives each part one
-    of these classes, so every page that draws a rail uses this block as it stands. They belong
-    in the shared rules once a second page carries one. */
- svg.rail { display: block; width: 100%; overflow: visible; }
- .rail-agree { fill: var(--ok); }
- .rail-break { fill: var(--bad); }
- .rail-hatch { stroke-width: 1.5px; fill: none; }
- .rail-hatch-unproven { stroke: var(--warn); }
- .rail-hatch-unknown { stroke: var(--edge); }
- .rail-mark { fill: var(--ink); }
- .rail-mark-broken { fill: var(--bad); }
-
  /* Where the account page begins: its four places stack on a phone. */
  .acct-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
  .acct-grid > * { min-width: 0; }
  .ledger-page h1 { margin: var(--s3) 0 var(--s1); }
- .ledger-page h2 { font-size: var(--text-lg); margin: var(--s3) 0 var(--s1); }
+ .ledger-page h2 { font-size: var(--text-lg); margin: var(--s5) 0 var(--s2); }
  .ledger-page .sub { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
- .ledger-page .ref { margin: 0; font-size: var(--text-sm); color: var(--ink-2); }
+ .meta { margin: 0 0 var(--s2); font: var(--text-xs)/150% var(--sans); color: var(--ink-2); }
+ .next { margin: var(--s1) 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
 
- /* The rail, and the two dates it runs between. */
- .proof { margin: var(--s2) 0 var(--s1); }
- .rail-ends { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--ink-2); }
+ /* The trust sentence: ordinary where all is well. The one that needs the reader is large, with
+    a glyph so it reads in greyscale, and the part that asks something is the amber part. */
+ .trust { margin: var(--s2) 0 var(--s1); font: var(--text-base)/140% var(--serif); }
+ .trust.bad { font: 600 var(--text-xl)/130% var(--serif); color: var(--bad); }
+ .trust.bad::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
+ .trust.none { font: 600 var(--text-xl)/130% var(--serif); }
+ .trust.none::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; color: var(--warn); }
+ .trust .sub { display: block; margin-top: var(--s1); font: 400 var(--text-md)/140% var(--sans); color: var(--ink); }
 
- /* The verdict is the page's display sentence only where something needs the reader: held
-    back, or not verifiable. Agreement with nothing held back is said in ordinary text beside
-    a small teal tick. It was a display-size teal sentence, and the owner's answer was that
-    shouting to say all is well is not required: weight is how the page says where to look. */
- .verdict { font: 600 var(--text-xl)/130% var(--serif); margin: var(--s2) 0; }
- .verdict.clear { font: 400 var(--text-md)/150% var(--sans); color: var(--ink-2); }
- .verdict.clear::before { content: "\\2713\\00a0"; content: "\\2713\\00a0" / ""; color: var(--ok); }
- .verdict.warn::before { content: "\\25CB\\00a0"; content: "\\25CB\\00a0" / ""; }
+ /* The strip: the trust lane over one lane per source, on the same twelve months. The whole
+    strip is the link to the full timeline. */
+ main a.strip { display: grid; grid-template-columns: 5.25rem minmax(0, 1fr); gap: var(--s2);
+         align-items: center; margin: var(--s2) 0 var(--s3); color: inherit; text-decoration: none; }
+ .strip .lane { font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
+ .strip .lane.first { color: var(--ink); font-weight: 600; }
+ .b-src { background: var(--ink-2); }
 
- /* The one tinted box: what holds the account back, and the way to the explanation. */
- .held { margin: var(--s2) 0; padding: var(--s3) var(--s4); background: var(--bad-bg); border-radius: var(--radius); }
- .held p { margin: var(--s1) 0; }
- .held strong { font: 600 var(--text-lg)/130% var(--serif); color: var(--bad); }
- .held strong::before { content: "\\2715\\00a0"; content: "\\2715\\00a0" / ""; }
+ /* Things to do, on this page: the words, then the control under them. An offer is quieter. */
+ .acct-state .todo { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--s2); align-items: start; }
+ .acct-state .todo a.button, .acct-state .todo button.button { min-height: var(--tap); font-size: 1rem; white-space: normal; }
+ .todo.offer { border-left-color: var(--rule); }
+ .todo.offer .todo-what { font-weight: 400; }
+ .acct-state .todo form { margin: 0; }
+ .acct-state .todo form button:not(.button) { margin: 0; }
+ .todo-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s2) var(--s3); }
+ .todo-form label { display: block; }
+ .todo-form button.button { grid-column: 1 / -1; }
+ .acct-state details { margin: var(--s1) 0; }
 
- /* Protection: a quiet line, and the control for the state it describes. */
- .protect { margin: var(--s3) 0; }
- .protect-line { font: var(--text-xs)/150% var(--sans); color: var(--ink-2); margin: var(--s1) 0; }
- .protect-line strong { font-weight: 500; }
- .protect .button { margin: var(--s1) 0; }
- .acct-state p:has(> .button) { margin: 0; }
- .shown { border: var(--edge-weight) solid currentColor; padding: var(--s3); border-radius: var(--radius); }
-
- /* Months. */
- .acct-month .monthnav { margin: 0 0 var(--s1); }
+ /* The month: its heading and the steps beside it, then one line of what it holds. */
+ .txhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--s4); }
+ .txhead h2 { margin-bottom: 0; }
+ .acct-month .monthnav { margin: 0; }
+ .txcount { margin: var(--s1) 0 var(--s2); font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
  details.months > summary { min-height: var(--hit); }
  .year { display: grid; grid-template-columns: 3rem minmax(0, 1fr); align-items: center; gap: var(--s2); margin: var(--s1) 0; }
  .year-label { color: var(--ink-2); }
@@ -85,34 +79,27 @@ ACCOUNT_STYLES = """
  .monthgrid li > [aria-current="true"] { border: var(--edge-weight) solid var(--act); color: var(--ink); }
  .absent { color: var(--ink-2); border: var(--rule-weight) dashed var(--rule); font-weight: 400; }
  .count { font: var(--text-xs)/120% var(--mono); color: var(--ink-2); }
+ .shown { border: var(--edge-weight) solid currentColor; padding: var(--s3); border-radius: var(--radius); }
 
- /* A transaction is one line to read and, where sources sighted it, one line to tap: the line is
-    the summary of the row's own disclosure, so its hit area is the whole row and no control takes
-    a line of its own. On a phone the description and figure are the first line and the date and
-    chips the second; from 60rem the same four parts are columns. */
+ /* A transaction is one line: the day, the description, the figure, and one mark for whether
+    something has cleared it. The line is the summary of the transaction's own disclosure, so its
+    hit area is the whole line and everything else is a tap away. */
  .txns li.txn { padding: 0; }
- .t-row, .txns li.txn summary.t-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
-                grid-template-areas: "desc fig" "meta meta"; gap: 2px var(--s2);
-                align-items: start; padding: calc(var(--s2) - 2px) 0; min-height: var(--hit);
+ .t-row, .txns li.txn summary.t-row { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto 1rem;
+                gap: 0 var(--s2); align-items: center; padding: var(--s1) 0; min-height: var(--hit);
                 color: inherit; font: inherit; }
  .txns li.txn summary.t-row::before { display: none; }
- .t-desc { grid-area: desc; overflow-wrap: anywhere; line-height: 130%; }
- .t-fig { grid-area: fig; font-weight: 600; text-align: right; line-height: 130%; }
- /* The date keeps its width and the chips take the rest of the line and wrap inside it, so no
-    size of text pushes the line wider than the page. */
- .t-meta { grid-area: meta; display: flex; align-items: baseline; gap: 2px var(--s2); min-width: 0; }
- .t-when.mono { flex: none; color: var(--ink-2); line-height: 150%; font-size: var(--text-xs); }
- .t-chips { flex: 1 1 0; min-width: 0; }
- /* The chevron belongs to the date, so a row that opens is told from one that does not. */
- summary.t-row .t-when::before { content: ""; display: inline-block; width: .45rem; height: .45rem;
-                margin-right: .4rem; border-right: var(--edge-weight) solid var(--act);
-                border-bottom: var(--edge-weight) solid var(--act); transform: rotate(-45deg); }
- details[open] > summary.t-row .t-when::before { transform: rotate(45deg); }
- .txns li.txn > .t-note { margin: 0 0 var(--s2); }
- .txns li.txn > .t-more > p { margin: var(--s1) 0 var(--s1) var(--s4); }
- /* A copy of money counted elsewhere is history: the same size and shape as any row, but in the
-    muted ink with a lighter figure and no rail, so a month's copies read as a closed drawer and
-    not as seven faults. They are listed after the counted rows, inside their own disclosure. */
+ .t-when.mono { color: var(--ink-2); font-size: var(--text-xs); }
+ .t-desc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+ details[open] > summary .t-desc { white-space: normal; overflow-wrap: anywhere; }
+ .t-fig { font-weight: 600; font-size: var(--text-sm); text-align: right; }
+ .mk { font: 700 var(--text-sm)/1 var(--sans); text-align: center; color: var(--ink-2); }
+ .mk.c { color: var(--ok); }
+ .mk.u { color: var(--warn); }
+ .t-extra { padding: 0 0 var(--s2); font: var(--text-sm)/140% var(--sans); }
+ .t-extra p { margin: var(--s1) 0; overflow-wrap: anywhere; }
+ /* A copy of money counted elsewhere is history: the same line in the muted ink with a lighter
+    figure, listed after the counted ones inside its own disclosure. */
  .acct-txns details.folded-rows { margin: var(--s3) 0 0; border-top: var(--rule-weight) solid var(--rule-2); }
  .acct-txns details.folded-rows > summary { min-height: var(--hit); color: var(--ink-2); }
  .txns li.txn.folded { color: var(--ink-2); }
@@ -128,45 +115,33 @@ ACCOUNT_STYLES = """
  .txt.sealed { background: none; padding: 0; font-family: var(--mono); font-size: .9em;
                font-weight: 500; border-bottom: var(--rule-weight) dashed var(--edge); }
 
- /* The folded sections, and the one bordered place for what removes something. */
- .ledger-more { margin-top: var(--s2); }
+ /* The five folds, and the parts of one fold. */
+ .ledger-more { margin-top: var(--s4); }
  .ledger-more > details { border-top: var(--rule-weight) solid var(--rule-2); }
- .foot-links { display: flex; flex-wrap: wrap; gap: 0 var(--s5); border-top: var(--rule-weight) solid var(--rule-2); padding-top: var(--s2); }
+ .ledger-more > details:last-of-type { border-bottom: var(--rule-weight) solid var(--rule-2); }
  .ledger-more > details > summary, .acct-month > details > summary, .acct-txns > details > summary { min-height: var(--hit); }
- details.ledger-danger { margin: var(--s5) 0 0; padding: 0 var(--s4); border: var(--rule-weight) solid var(--bad); border-radius: var(--radius); }
+ .part { margin: var(--s3) 0 0; padding-top: var(--s1); border-top: var(--rule-weight) solid var(--rule-2); }
+ .part h3 { margin: var(--s2) 0 var(--s1); }
  details.ledger-danger button.button.secondary { color: var(--bad); border-color: var(--bad); }
- details.ledger-danger > summary { color: var(--bad); font-weight: 600; }
- details.ledger-danger > summary::before { border-color: var(--bad); }
 
  @media (min-width: 60rem) {
-  body.ledger-page { max-width: 80rem; }
-  /* The transactions span the three rows beside them and are far taller than those rows, and a
-     grid shares a spanning item's height out among the rows it spans: the last row is the one
-     that stretches, or the left-hand sections drift a screen apart. */
-  .acct-grid { grid-template-columns: 28rem minmax(0, 1fr); column-gap: var(--s5); align-items: start;
-               grid-template-areas: "head head" "state txns" "month txns" "more txns";
-               grid-template-rows: auto auto auto 1fr; }
+  body.ledger-page { max-width: 64rem; }
+  /* The transactions span the rows beside them and are far taller than those rows, and a grid
+     shares a spanning item's height out among the rows it spans: the last row is the one that
+     stretches, or the left-hand sections drift a screen apart. */
+  .acct-grid { grid-template-columns: 24rem minmax(0, 1fr); column-gap: var(--s6); align-items: start;
+               grid-template-areas: "head head" "state txns" "more txns";
+               grid-template-rows: auto auto 1fr; }
   .acct-head { grid-area: head; }
   .acct-state { grid-area: state; }
-  .acct-month { grid-area: month; }
   .acct-txns { grid-area: txns; }
   .ledger-more { grid-area: more; }
-  .acct-txns h2 { margin-top: var(--s4); }
+  .acct-txns .txhead h2 { margin-top: var(--s3); }
   .monthgrid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2px; }
-  .year { grid-template-columns: 3rem minmax(0, 1fr); }
   .monthgrid li > a.tap, .monthgrid li > button.tap, .absent { padding: 0; font-size: var(--text-xs); }
  }
- /* A transaction is one line of four cells only where the right-hand column can hold them: the
-    date, the figure, and the chips want some 30rem between them before the description gets a
-    word. Between the two widths the page has two columns and each transaction keeps its stacked
-    form; at 60rem the description was squeezed to one character a line (a phone asked for the
-    desktop site is about 61rem wide). */
- @media (min-width: 80rem) {
-  .t-row, .txns li.txn summary.t-row { grid-template-columns: 8.5rem minmax(0, 1fr) auto 13rem;
-                 grid-template-areas: "when desc fig chips"; column-gap: var(--s4); align-items: baseline; }
-  .t-meta { display: contents; }
-  .t-when.mono { grid-area: when; }
-  .t-chips { grid-area: chips; justify-content: flex-end; }
-  .t-fig { align-self: baseline; }
+ @media (min-width: 76rem) {
+  body.ledger-page { max-width: 76rem; }
+  .t-row, .txns li.txn summary.t-row { grid-template-columns: 5rem minmax(0, 1fr) 8rem 1rem; column-gap: var(--s4); }
  }
 """

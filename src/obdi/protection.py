@@ -667,6 +667,14 @@ class ProtectionView:
     offer: Structural[tuple[date, ...]]
     not_offered: Structural[str]
     events: Structural[int]
+    #: What pressing for the newest day offered would newly cover: how many transactions, and the
+    #: first and last day among them. Counts and dates only; zero and None where nothing is offered.
+    offer_rows: Structural[int] = 0
+    offer_first: Structural[date | None] = None
+    offer_last: Structural[date | None] = None
+    #: Whether the account adds up only by what a statement lists, so that nothing is offered for
+    #: lack of a balance by date (the `not_offered` sentence says it in full).
+    listing_only: Structural[bool] = False
 
 
 def protection_line(view: Any) -> str:
@@ -712,7 +720,8 @@ def protection_view(
     if record is None:
         return ProtectionView(
             NONE, None, None, 0, "", None, None, None, None, None, (), 0, True, "", offer,
-            not_offered, 0,
+            not_offered, 0, *_offer_cover(rows, offer, None),
+            _only_by_listing(standing, offer, None),
         )
     check = check if check is not None else check_span(store, record)
     through = date.fromisoformat(str(record["through"]))
@@ -766,7 +775,47 @@ def protection_view(
         offer=offer,
         not_offered=not_offered,
         events=len(store.protection_events(ref)),
+        **_offer_cover_fields(rows, offer, through),
+        listing_only=check.intact and _only_by_listing(standing, offer, through),
     )
+
+
+def _only_by_listing(
+    standing: Standing | None, offer: tuple[date, ...], locked_to: date | None
+) -> bool:
+    """Whether the account adds up beyond what is locked, and only by what a statement lists, so
+    that no day can be offered: a lock records a balance by date and a listing has none."""
+    return (
+        standing is not None
+        and bool(standing.own.listing_tested)
+        and not offer
+        and standing.own.through is not None
+        and (locked_to is None or standing.own.through > locked_to)
+    )
+
+
+def _offer_cover(
+    rows: list[Transaction], offer: tuple[date, ...], after: date | None
+) -> tuple[int, date | None, date | None]:
+    """How many transactions pressing for the newest offered day would newly cover, and the first
+    and last day among them: those dated after what is protected now (`after`, None where nothing
+    is) up to that day, counted as `span_rows` counts what a protection watches."""
+    if not offer:
+        return 0, None, None
+    newest = offer[-1]
+    days = [
+        t.value_date
+        for t in rows
+        if t.value_date <= newest and (after is None or t.value_date > after)
+    ]
+    return (len(days), min(days), max(days)) if days else (0, None, None)
+
+
+def _offer_cover_fields(
+    rows: list[Transaction], offer: tuple[date, ...], after: date | None
+) -> dict[str, Any]:
+    count, first, last = _offer_cover(rows, offer, after)
+    return {"offer_rows": count, "offer_first": first, "offer_last": last}
 
 
 def protected_through(store: Store, ref: str) -> date | None:

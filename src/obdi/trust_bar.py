@@ -14,6 +14,7 @@ twelve months drawn.
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from datetime import date
 
 from .standing_data import ADDS_UP
@@ -45,6 +46,24 @@ def bar_html(trust: Trust, today: date) -> str:
         placed = place(mark.start, mark.end, today)
         if placed is not None:
             cells.append(_cell(_MARK_CLASS[mark.kind], placed.left, placed.width))
+    return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
+
+
+def source_lane_html(
+    held: Sequence[tuple[date, date]], wanted: Sequence[tuple[date, date]], today: date
+) -> str:
+    """One source's lane on the shared scale: the days it holds (`b-src`), and the days a file from
+    it is wanted for (`b-want`, dashed). A bare line where it holds none."""
+    cells = [
+        _cell("b-src", placed.left, placed.width)
+        for start, end in held
+        if (placed := place(start, end, today)) is not None
+    ]
+    cells += [
+        _cell("b-want", placed.left, placed.width)
+        for start, end in wanted
+        if (placed := place(start, end, today)) is not None
+    ]
     return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
 
 

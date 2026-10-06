@@ -275,13 +275,13 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
     def test_Page_ForAnUnboundAccount_NamesTheMissingBinding(self, served):
         page = get(served, ref="savings-account", month="2026-03").text
 
-        assert "not bound to an Actual account" in page
+        assert "not sent to Actual" in page
         assert "<th>Would be sent to Actual</th><td>0</td>" in page
 
     def test_Page_SaysWhatItDoesNotDetect(self, served):
         page = get(served, ref=CURRENT, month="2026-03").text
 
-        assert "booked row that a source reported once and stopped reporting" in page
+        assert "booked transaction that a source reported once and stopped reporting" in page
         assert "not a pass" in page
 
     def test_Page_StatesTheDateFieldAndTheStatementCost(self, served):
@@ -445,7 +445,7 @@ class TestMonthNavigation:
     def test_Navigation_StepsThroughAnEmptyMonthInBothDirections(self, served):
         page = get(served, ref=CURRENT, month="2026-04").text
 
-        assert "No rows are dated in this month" in page
+        assert "No transactions are dated in this month" in page
         assert 'href="/ledger?ref=current-account&amp;month=2026-03"' in page
         assert 'href="/ledger?ref=current-account&amp;month=2026-05"' in page
         assert "Newest month with rows, 2026-05" in page
@@ -630,8 +630,9 @@ class TestEachTransactionKeepsEverythingTheTableShowed:
     def test_Salary_CarriesDateAmountDescriptionStatusAndSourceTogether(self, served):
         item = _item_holding(post(served).text, "SALARY ZEBRA LTD")
 
-        assert 'class="t-when mono nowrap">2026-03-09</span>' in item
+        assert re.search(r'class="t-when mono nowrap" title="[^"]*">2026-03-09</span>', item)
         assert 'class="t-fig mono nowrap fig">in £2,500.00</span>' in item
+        assert 'class="mk ' in item, "one mark for whether it is cleared"
         assert ">booked<" in item
         assert ">src-b<" in item
 

@@ -21,17 +21,26 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .account_names import code_html
+from .account_names import AccountShown, code_html
+from .account_page import (
+    LOCKING_ANCHOR,
+    AccountReading,
+    cannot_lock_yet_html,
+    head_html,
+    lock_offer_html,
+    read_account,
+    strip_html,
+    todos_html,
+    trust_html,
+)
 from .agreement import (
     HELD_MOVEMENT,
     HELD_STATEMENT,
-    NONE,
     STRETCH_MEANINGS,
     closed_before_sentence,
     date_difference_sentence,
     held_sentence,
     listing_tested_sentence,
-    standing_line,
     stretch_sentences,
 )
 from .balance_anchors import parse_calendar_day
@@ -64,10 +73,8 @@ from .page_words import (
 )
 from .plural import agree, word
 from .plural import plural as _plural
-from .proof_rail import build_rail, rail_svg
-from .protection import protection_line
 from .standing_data import ADDS_UP
-from .web_account_timeline import block_for
+from .trust_bar import key_html
 from .web_accounts import archive_controls, archive_label, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
@@ -123,6 +130,12 @@ def _disclosure(
     klass = f' class="{_esc(css)}"' if css else ""
     opened = " open" if open else ""
     return f"<details{ident}{klass}{opened}><summary>{summary}</summary>{body}</details>"
+
+
+def _part(summary: str, body: str) -> str:
+    """One part of a fold that holds several: a heading and its body, with no fold of its own, so
+    that the page's folds are the five the account page keeps and no more."""
+    return f'<section class="part"><h3>{summary}</h3>{body}</section>'
 
 
 def _url(path: str, **params: str) -> str:
@@ -317,24 +330,43 @@ def _sighting_line(sighting: Any) -> str:
     return f'<p class="muted">{code_html(sighting.source)} - {_esc(how)}{tail}</p>'
 
 
-def _line_html(row: Any, line: str) -> str:
-    """The row's line, and what each source stated of it one tap away.
+def _line_html(row: Any, line: str, more: str) -> str:
+    """The row's line, and everything else about it one tap away.
 
     Times are London time, the clock the rest of the page uses (`_CLOCK_NOTE`); a date is as stated.
 
     The whole line is the disclosure's own summary, so the row is its own tap target and takes no
     line for a control (a month of fifty rows was a third taller with the disclosure on a line of
-    its own). The summary's name is the line followed by "Dates and joins", and the line carries
-    the row's date, so no two rows' summaries read alike. A row nothing sighted has nothing to
-    open and carries the line plain.
+    its own). The summary's name is the line followed by "What each source reported", and the line
+    carries the row's date, so no two rows' summaries read alike. `more` is what the tap opens:
+    the sources and flags, what each source stated, and the notes.
     """
-    if not row.sightings:
-        return f'<div class="t-row">{line}</div>'
     lines = "".join(_sighting_line(sighting) for sighting in row.sightings)
     return (
         f'<details class="t-more"><summary class="t-row">{line}'
         '<span class="visually-hidden">What each source reported</span>'
-        f"</summary>{lines}</details>"
+        f'</summary><div class="t-extra">{more}{lines}</div></details>'
+    )
+
+
+def _mark_html(row: Any) -> str:
+    """The one mark at the end of a transaction's line: cleared (a statement, an export, or the
+    bank's own feed lists it), not cleared yet, or counted elsewhere. The word is said to a screen
+    reader and as the mark's title, and the sources that cleared it are named in the title."""
+    if _is_copy(row):
+        return (
+            '<span class="mk" title="counted elsewhere">&middot;'
+            '<span class="visually-hidden">counted elsewhere</span></span>'
+        )
+    if row.cleared_by:
+        named = ", ".join(row.cleared_by)
+        return (
+            f'<span class="mk c" title="cleared by {_esc(named)}">&#10003;'
+            '<span class="visually-hidden">cleared</span></span>'
+        )
+    return (
+        '<span class="mk u" title="not cleared yet">&#9675;'
+        '<span class="visually-hidden">not cleared yet</span></span>'
     )
 
 
@@ -349,7 +381,7 @@ def _joins_html(joins: Any, clock: str = "") -> str:
     counts = dict(joins.by_basis) if joins is not None else {}
     sentence = count_sentence(counts)
     if not sentence:
-        return _disclosure("About the times shown", clock) if clock else ""
+        return _part("About the times shown", clock) if clock else ""
     guessed = joins.heuristic_days
     listing = (
         f"<details><summary>{len(guessed)} matched by a guess from amount, date, and "
@@ -358,7 +390,7 @@ def _joins_html(joins: Any, clock: str = "") -> str:
         if guessed
         else '<p class="muted">No transaction was matched by a guess.</p>'
     )
-    return _disclosure(
+    return _part(
         f"How the sources' reports were matched ({_esc(_joined_gist(counts))})",
         f"<p>{_esc(sentence[0].upper() + sentence[1:])}.</p>{listing}{clock}",
     )
@@ -412,7 +444,7 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
             f'differently.">dates differ: {_esc(said)}</p>'
         )
     counterparty = (
-        f'<br><span class="muted txt{seal}">{_esc(row.counterparty)}</span>'
+        f'<p class="muted t-note"><span class="txt{seal}">{_esc(row.counterparty)}</span></p>'
         if row.has_counterparty
         else ""
     )
@@ -438,18 +470,19 @@ def _row_html(row: Any, unmasked: bool = True) -> str:
     at = f" {_esc(_clock(row.feed_at))}" if row.feed_at is not None else ""
     ident = f' id="row-{_esc(row.anchor)}"' if row.anchor else ""
     line = (
-        f'<span class="t-desc"><strong class="txt{seal}">{_esc(row.description)}</strong>'
-        f"{counterparty}</span>"
+        f'<span class="t-when mono nowrap" title="{_esc(row.dated.isoformat())}{at}">'
+        f"{_esc(row.dated.isoformat())}</span>"
+        f'<span class="t-desc"><strong class="txt{seal}">{_esc(row.description)}</strong></span>'
         f'<span class="t-fig mono nowrap fig{seal}">{figure}</span>'
-        '<span class="t-meta">'
-        f'<span class="t-when mono nowrap">{_esc(row.dated.isoformat())}{at}</span>'
-        f'<span class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</span>'
-        "</span>"
+        f"{_mark_html(row)}"
     )
     kind = " folded" if _is_copy(row) else ""
+    more = (
+        f'<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
+        f"{counterparty}{dates}{annotation}"
+    )
     return (
-        f'<li class="txn{kind}{_row_rail(row)}"{ident}>'
-        f"{_line_html(row, line)}{dates}{annotation}</li>"
+        f'<li class="txn{kind}{_row_rail(row)}"{ident}>{_line_html(row, line, more)}</li>'
     )
 
 
@@ -640,7 +673,7 @@ def _stretches_html(agreement: Any) -> str:
     )
     if any(not s.reproduced and not s.conflict and not s.untested for s in agreement.stretches):
         means = "".join(f"<li>{_esc(item)}</li>" for item in STRETCH_MEANINGS)
-        said += _disclosure(
+        said += _part(
             "What a stretch that does not add up can mean",
             '<p class="muted">The balances and the transactions disagree, and the arithmetic '
             f"cannot say which of these is why:</p><ul>{means}</ul>",
@@ -1754,7 +1787,7 @@ def _anchor_forms(view: Any, ref: str, month: str) -> str:
         '<input name="amount" inputmode="decimal" autocomplete="off" required>'
         "</label></p>" + submit_button("Save known balance") + "</form>"
     )
-    return _disclosure(
+    return _part(
         "State a balance",
         '<p class="muted">Stating a balance for a date already stated replaces it. '
         "The amount you type is never shown on any page you can bookmark; after "
@@ -1932,7 +1965,7 @@ def _clearing_html(clearing: Any) -> str:
         f"<li>{_esc(m.month)}: {m.cleared} cleared, {m.uncleared} uncleared</li>"
         for m in clearing.months
     )
-    return _disclosure(
+    return _part(
         f"Cleared and uncleared by month ({clearing.cleared} cleared, {clearing.uncleared} not)",
         f"<p>Across the account, {_plural(clearing.cleared, 'row')} "
         f"{agree(clearing.cleared, 'is')} cleared and {clearing.uncleared} "
@@ -1947,73 +1980,33 @@ def _clearing_html(clearing: Any) -> str:
 _MOVEMENT_HREF = "/identity-health"
 
 
-def _held_html(agreement: Any, *, boxed: bool) -> str:
-    """What holds the agreement back, and the way to its explanation on this very page.
+def _hold(view: Any) -> tuple[str, str, str] | None:
+    """What holds the account's own agreement back, for the thing to do that says it once: the
+    sentence (`agreement.held_sentence`'s, said once there), where to read the explanation, and
+    what the control says. A movement fault is explained on the identity-health page and a
+    balance's difference in the known balances on this one."""
+    standing = view.standing
+    if standing is None or view.rebuilding:
+        return None
+    own = standing.own
+    sentence = held_sentence(own)
+    if not sentence or own.held is None:
+        return None
+    if own.held.kind == HELD_MOVEMENT:
+        return sentence, _MOVEMENT_HREF, "See the movement checks"
+    return sentence, f"#{OPENING_ANCHOR}", "See the explanation"
 
-    The sentence is `agreement.held_sentence`'s, said once there. A hold is a tinted box and
-    nothing else on the page is; a whole-account reading's hold, and the note that nothing yet
-    tests the rows, are plain lines, since the account's own hold is the one to act on.
-    """
+
+def _held_html(agreement: Any) -> str:
+    """The whole account's hold and the note that nothing yet tests the rows, as plain lines in
+    the known balances: the account's own hold is the thing to do."""
     sentence = held_sentence(agreement)
     if not sentence:
         return ""
     held = agreement.held
     if held is None:
         return f'<p class="sub">{_esc(sentence)}</p>'
-    link = (
-        f'<a class="tap" href="{_MOVEMENT_HREF}">Movement checks</a>'
-        if held.kind == HELD_MOVEMENT
-        else '<a class="tap" href="#opening">See the explanation</a>'
-    )
-    if not boxed:
-        return f'<p class="warn">{_esc(sentence)} {link}</p>'
-    return f'<div class="held"><p><strong>{_esc(sentence)}</strong> {link}</p></div>'
-
-
-def _verdict_text(own: Any, protection: Any) -> str:
-    """The standing sentence, ending in the protection in the page's own words.
-
-    An account nothing protects says nothing of protection (`agreement.standing_line`); here a
-    broken protection says so instead of claiming a date it no longer holds.
-    """
-    if own.state == NONE:
-        return standing_line(own, None)
-    line = standing_line(own, None, with_protection=False)[:-1]
-    state = "none" if protection is None else protection.state
-    if state == "intact":
-        return f"{line}; protected through {protection.through.isoformat()}."
-    if state == "broken":
-        return f"{line}; the protection through {protection.through.isoformat()} is broken."
-    return f"{line}."
-
-
-def _rail_html(view: Any, own: Any, today: date) -> str:
-    """The account's history as one bar, with the two dates it runs between."""
-    protection = view.protection
-    state = "none" if protection is None else protection.state
-    held = own.held
-    first = _month_start(view.oldest_month)
-    # Days a balance's own statement tests (`agreement`, R1) are not "no known balance".
-    starts = [t.start for t in own.listing_tested if t.start is not None]
-    known_from = own.known_from
-    if known_from is not None and starts and min(starts) < known_from:
-        known_from = min(starts)
-    rail = build_rail(
-        first=first,
-        known_from=known_from,
-        known_to=own.known_to,
-        through=own.through,
-        held_day=held.day if held is not None else None,
-        protected_through=protection.through if state in ("intact", "broken") else None,
-        protection_broken=state == "broken",
-        today=today,
-    )
-    return (
-        '<div class="proof">'
-        + rail_svg(rail, uid="account-rail")
-        + f'<div class="rail-ends mono"><span>{_esc(rail.start.isoformat())}</span>'
-        f"<span>{_esc(rail.end.isoformat())}</span></div></div>"
-    )
+    return f'<p class="warn">{_esc(sentence)}</p>'
 
 
 def _month_start(month: str) -> date | None:
@@ -2028,48 +2021,51 @@ def _month_end(month: str) -> date | None:
     return date.fromordinal(following.toordinal() - 1)
 
 
-def _state_html(view: Any, today: date) -> str:
-    """The account's state, first on the page: the rail, the verdict, and what holds it back."""
-    if view.rebuilding:
-        return (
-            f'<h2 class="visually-hidden">{ACCOUNT_CHECK_HEADING}</h2>'
-            f'<p class="warn">{_esc(view.rebuilding)}</p>'
-        )
+def _standing_detail_html(view: Any) -> str:
+    """What the standing says in detail, at the head of the known balances: where the
+    transactions stop adding up and what that can mean, the balances a statement's own listing
+    tests, and the whole account with its Spaces."""
     standing = view.standing
     if standing is None:
         return ""
     own = standing.own
-    verdict_css = "verdict warn" if own.state == NONE else "verdict"
-    if own.state == "agrees" and own.held is None:
-        verdict_css += " clear"
     body = (
-        f'<h2 class="visually-hidden">{ACCOUNT_CHECK_HEADING}</h2>'
-        + _rail_html(view, own, today)
-        + f'<p class="{verdict_css}">{_esc(_verdict_text(own, view.protection))}</p>'
-        + _held_html(own, boxed=True)
-        + _stretches_html(own)
+        _stretches_html(own)
+        + (_held_html(own) if own.held is None else "")
         + _listing_html(own)
-    )
-    if not own.movement_checked:
-        body += (
-            '<p class="sub">The movement checks were not read for this view, so this is from '
-            "the known balances alone.</p>"
+        + (
+            ""
+            if own.movement_checked
+            else '<p class="sub">The movement checks were not read for this view, so this is '
+            "from the known balances alone.</p>"
         )
+    )
     whole = standing.whole
     if whole is not None:
         body += (
             '<p class="sub">The whole account, with its Spaces:</p>'
             + line_html(whole, None, with_protection=False)
-            + _held_html(whole, boxed=False)
+            + _held_html(whole)
         )
     return body
 
 
-def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -> str:
-    """The protection where the state is described: what can be pressed, or the line and its exit.
+def _lock_offer_form(view: Any) -> str:
+    """The one button that offers to lock in through the newest day offered. It asks before it
+    acts (`LedgerPages._confirm_page`), so nothing here acts on a single tap."""
+    protection = view.protection
+    if protection is None or view.rebuilding or not protection.offer:
+        return ""
+    return _post("/protect", view.ref, view.month, _through(protection.offer[-1]), "Lock in")
+
+
+def _locking_html(view: Any, unmasked: bool = False, everything: bool = False) -> str:
+    """The fold for locking in: what is locked and its history, the way to remove the lock, and,
+    where more than one day may be locked through, the choice of an earlier one. The offer to lock
+    in through the newest day is a thing to do (`account_page.lock_offer_html`) and is not here.
 
     Every press goes to a confirmation first (`LedgerPages._confirm_page`), including the
-    withdrawal, so nothing here acts on a single tap.
+    removal, so nothing here acts on a single tap.
 
     The earlier dates offered are the newest `_OFFERED_DATES` unless `everything` asks for the
     full list of known balances: the account whose page held 1,906 known balances offered a date
@@ -2079,14 +2075,16 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
     if protection is None or view.rebuilding:
         return ""
     ref, month = view.ref, view.month
-    body = ""
+    body = f'<div id="{LOCKING_ANCHOR}">'
     state = protection.state
+    gist = "nothing yet"
     if state == "intact":
+        gist = f"to {protection.through.isoformat()}"
         detail = (
-            f"<p>The protected period runs from {_esc(protection.span_start.isoformat())} to "
+            f"<p>The locked stretch runs from {_esc(protection.span_start.isoformat())} to "
             f"{_esc(protection.through.isoformat())}. It is an alarm on change and never a "
             "freeze: a rebuild or an import still does what the rules say, and says here if "
-            "that changed anything inside the protected period.</p>"
+            "that changed anything inside the locked stretch.</p>"
         )
         if protection.healed_on:
             detail += (
@@ -2100,65 +2098,73 @@ def _protect_html(view: Any, unmasked: bool = False, everything: bool = False) -
             )
         detail += f"<p>{_plural(protection.events, 'recorded event')} in its history.</p>"
         body += (
-            f'<p class="protect-line"><strong>{_esc(protection_line(protection))}</strong></p>'
+            f'<p class="protect-line">{_esc(_lock_line(protection))}</p>'
+            + detail
             + _post("/protect-withdraw", ref, month, "", REMOVE_PROTECTION)
-            + _disclosure("About this protection", detail)
         )
     elif state == "broken":
+        gist = f"to {protection.through.isoformat()}, changed"
         said = "".join(f"<li>{_esc(line)}</li>" for line in protection.changes)
         body += (
-            '<p class="bad"><strong>The protection is broken: the protected period, through '
+            '<p class="bad"><strong>The locked stretch, through '
             f"{_esc(protection.through.isoformat())}, has changed since "
             f"{_esc(protection.pressed_on.isoformat())}.</strong></p>"
             f'<ul class="plain">{said}</ul>'
-            '<p class="muted">Nothing was changed back or updated: the protection stays broken '
-            "until a later rebuild restores the protected period, or you accept the new "
+            '<p class="muted">Nothing was changed back or updated: the lock stays broken '
+            "until a later rebuild restores the locked stretch, or you accept the new "
             "state.</p>"
-            + _post("/protect-accept", ref, month, "", "Accept the change and protect again")
+            + _post("/protect-accept", ref, month, "", "Accept the change and lock in again")
             + _post("/protect-withdraw", ref, month, "", REMOVE_PROTECTION)
+        )
+    else:
+        body += (
+            "<p>Nothing is locked in. Locking in says that you accept a stretch that adds up, "
+            "and a later change inside it is reported loudly and never applied quietly.</p>"
         )
     if protection.earlier_said:
         body += (
-            '<p class="warn"><strong>A fault in the data before the protected period, not a '
+            '<p class="warn"><strong>A fault in the data before the locked stretch, not a '
             f"change to it:</strong> {_esc(protection.earlier_said)}</p>"
         )
     offer = protection.offer
-    if offer:
-        newest = offer[-1]
-        body += _post(
-            "/protect", ref, month, _through(newest), f"Protect through {newest.isoformat()}"
+    if len(offer) > 1:
+        dates = list(reversed(offer))
+        held_back = len(dates) - _OFFERED_DATES
+        if held_back > 0 and not everything:
+            dates = dates[:_OFFERED_DATES]
+        options = "".join(
+            f'<option value="{_esc(d.isoformat())}">{_esc(d.isoformat())}</option>' for d in dates
         )
-        if len(offer) > 1:
-            dates = list(reversed(offer))
-            held_back = len(dates) - _OFFERED_DATES
-            if held_back > 0 and not everything:
-                dates = dates[:_OFFERED_DATES]
-            options = "".join(
-                f'<option value="{_esc(d.isoformat())}">{_esc(d.isoformat())}</option>'
-                for d in dates
+        older = (
+            _balances_control(
+                view,
+                f"{_plural(held_back, 'older date')} offered with every known balance listed",
+                unmasked=unmasked,
+                everything=True,
             )
-            older = (
-                _balances_control(
-                    view,
-                    f"{_plural(held_back, 'older date')} offered with every known balance listed",
-                    unmasked=unmasked,
-                    everything=True,
-                )
-                if held_back > 0 and not everything
-                else ""
-            )
-            body += _disclosure(
-                "Protect through an earlier date",
-                '<form method="post" action="/protect"><input type="hidden" name="ref" '
-                f'value="{_esc(ref)}"><input type="hidden" name="month" value="{_esc(month)}">'
-                f'<p><select name="through" aria-label="Protect through">{options}</select></p>'
-                + submit_button("Protect through the date chosen", secondary=True)
-                + "</form>"
-                + older,
-            )
-    elif protection.not_offered and state == "none":
-        body += f'<p class="sub">Not offered: {_esc(protection.not_offered)}.</p>'
-    return f'<div class="protect">{body}</div>' if body else ""
+            if held_back > 0 and not everything
+            else ""
+        )
+        body += _part(
+            "Lock in to an earlier day",
+            '<form method="post" action="/protect"><input type="hidden" name="ref" '
+            f'value="{_esc(ref)}"><input type="hidden" name="month" value="{_esc(month)}">'
+            f'<p><select name="through" aria-label="Lock in to">{options}</select></p>'
+            + submit_button("Lock in to the day chosen", secondary=True)
+            + "</form>"
+            + older,
+        )
+    return _disclosure(f"Locking in ({gist})", body + "</div>", css="locking")
+
+
+def _lock_line(protection: Any) -> str:
+    """The one line an intact lock collapses to: through when, how many transactions, what it was
+    tested against, and when."""
+    return (
+        f"Locked in to {protection.through.isoformat()}, on {protection.pressed_on.isoformat()}: "
+        f"{_plural(protection.rows, 'transaction')}, added up against "
+        f"{protection.verified_source}'s balance of {protection.verified_day.isoformat()}."
+    )
 
 
 def _explained_closing(line: Any, view: Any) -> bool:
@@ -2241,14 +2247,17 @@ def _earlier_balances(view: Any, count: int, *, unmasked: bool, balance_only: bo
 
 
 def _opening_html(
-    view: Any, unmasked: bool, *, held: bool = False, everything: bool = False
+    view: Any, unmasked: bool, *, everything: bool = False, state_form: bool = True
 ) -> str:
-    """The "Known balances and the opening" section, and the forms that edit it.
+    """The "Known balances" fold, and the forms that edit them: stating a balance (unless a thing
+    to do holds that form already), removing one, and the ones removed.
 
-    Folded away, since an account in agreement has no use for it, and open where the account is
-    held back, since the explanation of the difference is in it and the box above links here. It
-    lists the balances worth reading and links to the rest (`_listed_anchors`); `everything` lists
-    them all, and is open because it is what a person asked for.
+    Folded away whatever the account's state: where it does not add up the thing to do says what
+    stops it once and its control opens this fold at the explanation, and an account holding
+    thirty-five known balances must not open them by itself. It lists the balances worth reading
+    and links to the rest (`_listed_anchors`); `everything` lists them all, and is open because it
+    is what a person asked for. A disregard that no longer applies is open too: it is a decision
+    about nothing, which only this fold can remove.
     """
     opening = view.opening
     if opening is None:
@@ -2257,7 +2266,7 @@ def _opening_html(
     def earlier(count: int) -> str:
         return _earlier_balances(view, count, unmasked=unmasked, balance_only=opening.balance_only)
 
-    body = ""
+    body = _standing_detail_html(view)
     if everything and _listed_anchors(opening.anchors, everything=False)[1]:
         body += _balances_control(
             view,
@@ -2355,7 +2364,6 @@ def _opening_html(
                 '<p class="warn"><strong>No opening balance could be derived:</strong> '
                 f"{_esc(opening.withheld)}.</p>"
             )
-    body += _statements_score_html(view)
     body += _shared_days_html(view)
     if opening.unusable_statements:
         body += (
@@ -2371,14 +2379,22 @@ def _opening_html(
         + _meaning_html(opening.meanings)
         + _family_html(opening.family, view.ref)
     )
-    differing = any(line.verdict == "differs" for line in opening.anchors) or (
-        opening.family is not None and bool(opening.family.differing)
-    )
-    # A disregard that no longer applies is a decision about nothing, which only this section can
-    # remove, so it is not left folded away.
     stale = any(entry.stale for entry in opening.disregarded)
+    body += (
+        (_anchor_forms(view, view.ref, view.month) if state_form else "")
+        + _removed_balances_html(view, view.ref, view.month, unmasked)
+        + _unitemised_html(view)
+        + (
+            _part(
+                "Remove a known balance you stated",
+                _remove_forms(view, view.ref, view.month, unmasked=unmasked, everything=everything),
+            )
+            if opening.stated_days
+            else ""
+        )
+    )
     return _disclosure(
-        "Known balances and the opening ("
+        "Known balances ("
         + _opening_gist(
             opening,
             len(view.standing.own.listing_tested) if view.standing is not None else 0,
@@ -2387,9 +2403,8 @@ def _opening_html(
             else frozenset(),
         )
         + ")",
-        body,
-        open=held or differing or everything or stale,
-        anchor=OPENING_ANCHOR,
+        f'<div id="{OPENING_ANCHOR}">{body}</div>',
+        open=everything or stale,
     )
 
 
@@ -2516,10 +2531,11 @@ def _typed_html(view: Any, *, ref: str, month: str) -> str:
             "removed in all. They stay in the record as evidence and count nowhere.</p>"
         )
     return _disclosure(
-        f"Typed transactions ({len(typed.lines)} this month)",
+        "Add a transaction by hand"
+        + (f" ({len(typed.lines)} typed this month)" if typed.lines else ""),
         '<p class="muted">For an account no feed reports, such as a mortgage at another '
-        "bank. Each one is kept as evidence and counted like any other row, and "
-        "becomes one row with the bank's if a feed later reports the same payment. "
+        "bank. Each one is kept as evidence and counted like any other transaction, and "
+        "becomes one transaction with the bank's if a feed later reports the same payment. "
         "The figure and description you type are never shown on any page you can "
         "bookmark; after saving, this page comes back masked.</p>"
         + form
@@ -2532,7 +2548,7 @@ def _position_html(position: Any, *, bound: bool) -> str:
     included = position.opening_included
     word = _balance_word if included else _direction_word
     verdict = _NOTHING_SENT if not bound else f"The two positions {_differ(position.differs)}."
-    return _disclosure("Running position", (
+    return _part("Running position", (
         '<div class="scroll"><table>'
         + _count("Counted through", position.through)
         + _count(
@@ -2567,12 +2583,12 @@ def _position_html(position: Any, *, bound: bool) -> str:
 
 _LIMITS = (
     '<ul class="muted">'
-    "<li>A booked row that a source reported once and stopped reporting in later "
-    "fetches covering the same dates is not detected yet. Void rows are listed, "
-    "because the store records a vanished pending payment; a vanished booked row "
+    "<li>A booked transaction that a source reported once and stopped reporting in later "
+    "fetches covering the same dates is not detected yet. Void transactions are listed, "
+    "because the store records a vanished pending payment; a vanished booked transaction "
     "leaves no record in the merged layer, so a page with no warning is not a "
     "pass.</li>"
-    "<li>Rows are dated by value date, the date Actual is sent.</li>"
+    "<li>Transactions are dated by value date, the date Actual is sent.</li>"
     "<li>The Actual comparison is with what the payload builder would send now, "
     "not with what Actual currently holds.</li>"
     "</ul>"
@@ -2639,7 +2655,7 @@ def _month_picker(view: Any, unmasked: bool) -> str:
             if not held:
                 cells += f'<li><span class="absent">{name}</span></li>'
                 continue
-            said = f"{name} {year}, {held} {'row' if held == 1 else 'rows'}"
+            said = f"{name} {year}, {held} {'transaction' if held == 1 else 'transactions'}"
             here = ' aria-current="true"' if month == view.month else ""
             inner = f'{name}<small class="count">{held}</small>'
             if unmasked:
@@ -2670,21 +2686,21 @@ def _month_picker(view: Any, unmasked: bool) -> str:
     )
 
 
-def _navigation(view: Any, unmasked: bool) -> str:
-    """The way on from the foot of the page: the shape page, and home.
-
-    Months are stepped from beside the month's own heading, where the rows they change are.
-    """
-    shape = f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
-    shape += f"{_esc(page_name('/account'))} for this account</a> "
-    shape += (
-        f'<a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}">'
-        f"{_esc(page_name('/coverage-timeline'))}</a></p>"
+def _bars_html(view: Any) -> str:
+    """The fold that says what the bars show, with the way to the full timeline, which stays on
+    its own page and opens beside this one."""
+    return _disclosure(
+        "What the bars show, and the full timeline",
+        key_html()
+        + f'<p><a class="tap" href="{_url("/coverage-timeline", ref=view.ref)}" '
+        f'target="_blank" rel="noopener">{_esc(page_name("/coverage-timeline"))}, in a new '
+        "tab</a></p>",
     )
-    return f'<div class="foot-links">{shape}{_HOME}</div>'
 
 
-def _mode(view: Any, unmasked: bool, everything: bool = False) -> str:
+def _mode(view: Any, unmasked: bool, everything: bool = False, *, pressing: bool = False) -> str:
+    """The press that reads the values, beside the transactions it unmasks; outlined where the
+    page has a more pressing action, since the page's one filled control is that action."""
     kept = (
         f'<input type="hidden" name="{BALANCES_PARAM}" value="{BALANCES_ALL}">'
         if everything
@@ -2700,23 +2716,25 @@ def _mode(view: Any, unmasked: bool, everything: bool = False) -> str:
             f'href="{_url("/ledger", ref=view.ref, month=view.month, **around)}">'
             "Hide values</a></p>"
         )
-    # The button is the call to action and the sealed slots are the state; what masked means is
-    # one tap away, so a reader who knows it does not scroll past a paragraph every time.
+    # The sealed slots are the state; what masked means is said once, in "How this was checked".
     return (
         '<form method="post" action="/ledger">'
         f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
         f'<input type="hidden" name="month" value="{_esc(view.month)}">'
         + kept
-        + submit_button("Show values")
+        + submit_button("Show values", secondary=pressing)
         + "</form>"
-        + _disclosure(
-            "What masked means",
-            '<p class="sub">Values are masked: every digit shows as 9 and every letter '
-            "as X, with length, case, and punctuation kept. A balance or a sum shows "
-            f"as {MASKED_TOTAL} whatever its size, since its number of digits would "
-            "say how much there is. Counts, dates, sources, directions, and flags "
-            "are real.</p>",
-        )
+    )
+
+
+def _masked_means_html() -> str:
+    return _part(
+        "What masked means",
+        '<p class="sub">Values are masked: every digit shows as 9 and every letter '
+        "as X, with length, case, and punctuation kept. A balance or a sum shows "
+        f"as {MASKED_TOTAL} whatever its size, since its number of digits would "
+        "say how much there is. Counts, dates, sources, directions, and flags "
+        "are real.</p>",
     )
 
 
@@ -2725,73 +2743,55 @@ def _name(view: Any) -> str:
     return str(view.label or view.ref)
 
 
-def _danger_zone(
-    view: Any, *, archive_wired: bool, unmasked: bool = False, everything: bool = False
-) -> str:
-    """The controls that remove or retire something, in one bordered place at the foot.
-
-    A review of the page found two full-width "Remove the known balance" buttons in the middle
-    of it, a thumb's scroll from the transactions. Each control here still asks for
-    confirmation before it acts.
-    """
-    removals = (
-        _remove_forms(view, view.ref, view.month, unmasked=unmasked, everything=everything)
-        if view.opening is not None and view.opening.stated_days
-        else ""
-    )
+def _archive_html(view: Any, *, archive_wired: bool) -> str:
+    """The fold that renames or retires the account, the one place for what takes it out of use.
+    The name is changed where accounts are declared, which this links to; each control here still
+    asks for confirmation before it acts."""
     archive = (
         archive_controls(view.ref, view.archive, offer=view.state != "unknown", with_date=True)
         if archive_wired
         else ""
     )
-    if not (removals or archive):
-        return ""
-    return _disclosure(
-        "Danger zone: remove a known balance, or archive this account",
-        removals + archive,
-        css="ledger-danger",
+    rename = (
+        '<p>Change the name shown for this account on <a class="tap" href="/accounts">'
+        "the declared accounts page</a>.</p>"
     )
+    return _disclosure("Rename or archive", rename + archive, css="ledger-danger")
 
 
 def _head(view: Any) -> str:
-    """Under the name: the reference, where it is fed from, and whether it is sent to Actual."""
-    id_line = f'<p class="ref">{code_html(view.ref)}</p>' if view.label else ""
-    fed = ", ".join(code_html(source) for source in view.sources) or "none"
-    binding = (
-        "bound to an Actual account"
-        if view.actual_bound
-        else "not bound to an Actual account, so nothing in it is sent"
-    )
-    held = (
-        f"Transactions held from {_esc(view.oldest_month)} to {_esc(view.newest_month)}."
-        if view.oldest_month
-        else "No transactions are held."
-    )
+    """Under the name, one muted line: the reference as code, and whether it is sent to Actual."""
     archive = view.archive
     archived = archive is not None and archive.state == "archived"
-    label = f" {archive_label(archive)}" if archived else ""
-    return (
-        f'{id_line}<p class="sub">{label.strip()} '
-        f"Fed by: {fed}. This account is {_esc(binding)}. {held}</p>"
+    return head_html(
+        AccountShown.named(view.ref, view.label),
+        sent=bool(view.actual_bound),
+        archived=archive_label(archive).strip() if archived else "",
     )
 
 
 def _month_line(view: Any) -> str:
-    """The month in one line: how many transactions, and which sources reported them."""
+    """The month in one line: how many transactions, and how many a statement, an export, or the
+    bank's own feed has cleared. Which sources reported them is said in "How this was checked"."""
     summary = view.summary
-    rows = summary.rows
-    noun = "transaction" if str(rows) == "1" else "transactions"
-    sources = _source_pairs(summary.per_source)
+    rows = int(str(summary.rows))
+    noun = "transaction" if rows == 1 else "transactions"
     copies = int(str(summary.folded))
-    if not copies:
-        return f'<p class="sub">{_esc(str(rows))} {noun}. Sources {sources}.</p>'
-    counted = int(str(rows)) - copies - int(str(summary.void))
-    void = f", {summary.void} void" if int(str(summary.void)) else ""
-    return (
-        f'<p class="sub">{_esc(str(rows))} {noun}: {counted} counted, '
-        f"{_copies(copies)}{void}. "
-        f"Sources {sources}.</p>"
-    )
+    void = int(str(summary.void))
+    counted = rows - copies - void
+    cleared = int(str(summary.cleared))
+    said = f"{rows} {noun}"
+    if copies or void:
+        said += f": {counted} counted, {_copies(copies)}" if copies else f": {counted} counted"
+        said += f", {void} void" if void else ""
+    said += "."
+    if not cleared:
+        said += " None is cleared yet."
+    elif cleared == counted:
+        said += " All are cleared."
+    else:
+        said += f" {cleared} {agree(cleared, 'is')} cleared."
+    return f'<p class="txcount">{said}</p>'
 
 
 def _copies_html(rows: list[str]) -> str:
@@ -2821,19 +2821,12 @@ def _statement_cost() -> str:
     )
 
 
-def _held_back(view: Any) -> bool:
-    standing = view.standing
-    return standing is not None and standing.own.held is not None
-
-
-def _frame(
-    view: Any, *, notice: str, head: str, state: str, month: str, txns: str, more: str
-) -> bytes:
+def _frame(view: Any, *, notice: str, head: str, state: str, txns: str, more: str) -> bytes:
     """The page: the account's name as its heading, then four places the stylesheet arranges.
 
-    On a phone they stack in this order. From 60rem the state, the month, and the folded
-    sections sit in a narrow column and the transactions fill a wide one beside them, which is
-    why they are separate elements and not one run of markup.
+    On a phone they stack in this order. From 60rem the state and the folded sections sit in a
+    narrow column and the month's transactions fill a wide one beside them, which is why they
+    are separate elements and not one run of markup.
     """
     announced = f'<p class="ok"><strong>{_esc(notice)}</strong></p>' if notice else ""
     return render_page(
@@ -2842,12 +2835,71 @@ def _frame(
         + '<div class="acct-grid">'
         + f'<div class="acct-head">{head}</div>'
         + f'<div class="acct-state">{state}</div>'
-        + f'<div class="acct-month">{month}</div>'
         + f'<div class="acct-txns">{txns}</div>'
         + f'<div class="ledger-more">{more}</div>'
         + "</div>",
         heading=_name(view),
         body_class="ledger-page",
+    )
+
+
+def _state_html(
+    view: Any, reading: AccountReading, today: date, *, hold: tuple[str, str, str] | None
+) -> str:
+    """The account's state, first on the page: the trust sentence, the strip, and what to do."""
+    heading = f'<h2 class="visually-hidden">{ACCOUNT_CHECK_HEADING}</h2>'
+    if view.rebuilding:
+        return heading + f'<p class="warn">{_esc(view.rebuilding)}</p>'
+    held = sum(count for _, count in view.month_counts)
+    lock = lock_offer_html(view.protection, _lock_offer_form(view))
+    todos = todos_html(reading, view.ref, view.month, today, hold=hold, lock=lock)
+    return (
+        heading
+        + trust_html(
+            reading, held_transactions=held, span=(view.oldest_month, view.newest_month)
+        )
+        + strip_html(reading, view.ref, today)
+        + todos
+        + cannot_lock_yet_html(view.protection, reading.trust.adds_up_to)
+    )
+
+
+def _how_checked_html(view: Any, unmasked: bool, *, with_counts: bool) -> str:
+    """The fold that says how this was checked: how the sources' reports were matched, which of
+    the statements add up by what they list, what is cleared, the month's counts, what this page
+    does not check, and what masked means. Parts of one fold, so the page keeps five."""
+    clock = (
+        f'<p class="sub">{_esc(_CLOCK_NOTE)}</p>'
+        if BANK_SOURCE in view.sources and view.state == "ok"
+        else ""
+    )
+    position = (
+        _position_html(view.position, bound=view.actual_bound) if view.position is not None else ""
+    )
+    counts = ""
+    if with_counts:
+        counts = _part(
+            f"This month's counts and sums ({_plural(view.summary.rows, 'transaction')})",
+            _summary_html(view.summary, bound=view.actual_bound) + position,
+        )
+        position = ""
+    limits = _part(
+        f"What this page does not check ({_LIMITS.count('<li>')})", _LIMITS + _statement_cost()
+    )
+    fields = (
+        f'<p><a class="tap" href="{_url("/account", ref=view.ref)}">'
+        f"{_esc(page_name('/account'))} for this account</a></p>"
+    )
+    return _disclosure(
+        "How this was checked",
+        _joins_html(view.joins, clock)
+        + _statements_score_html(view)
+        + _clearing_html(view.clearing)
+        + counts
+        + position
+        + limits
+        + _masked_means_html()
+        + fields,
     )
 
 
@@ -2859,20 +2911,22 @@ def render_ledger(
     notice: str = "",
     today: date | None = None,
     all_balances: bool = False,
-    timeline: str = "",
+    reading: AccountReading | None = None,
 ) -> bytes:
     """`notice` is a sentence about what the request just did, escaped here.
 
-    `timeline` is the compact coverage timeline's block (`web_account_timeline.block_for`), which
-    sits directly under the state it qualifies.
+    `reading` is what the account's trust and things to do are drawn from
+    (`account_page.read_account`). Without it the page reads the account from this ledger alone,
+    which has no things to do and takes the account's first and newest transactions from its
+    months, so a rendering holds no hook and does not depend on the store.
 
     `all_balances` lists every known balance and not the newest few (`_listed_anchors`).
 
     It is for a confirmation that names a date and a basis; a value must never
     be passed in it, since the masked rendering is the one that carries it.
 
-    `today` is where the proof rail ends. The handler passes the real day; without it the rail
-    ends with the newest month held, so a rendering does not depend on the clock.
+    `today` is where the bars end. The handler passes the real day; without it they end with the
+    newest month held, so a rendering does not depend on the clock.
     """
     view = Disclosed(ledger, unmasked=unmasked)
     head = _head(view)
@@ -2888,11 +2942,22 @@ def render_ledger(
                 "this reference and no account is declared with it. This is not an "
                 "empty account.</p>" + _HOME
             ),
-            month="",
             txns="",
             more="",
         )
-    held = _held_back(view)
+    reading = reading or read_account(None, ledger, end)
+    hold = _hold(view)
+    confirming = any(t.kind == "confirm-balance" for t in reading.todos)
+    offering = bool(view.protection is not None and view.protection.offer)
+    pressing = bool(reading.todos) or hold is not None or offering
+    more = (
+        _bars_html(view)
+        + _opening_html(view, unmasked, everything=all_balances, state_form=not confirming)
+        + _locking_html(view, unmasked, all_balances)
+        + _how_checked_html(view, unmasked, with_counts=view.state == "ok")
+        + _archive_html(view, archive_wired=archive_wired)
+    )
+    typed = _typed_html(view, ref=view.ref, month=view.month)
     if view.state == "no-rows":
         return _frame(
             view,
@@ -2902,89 +2967,44 @@ def render_ledger(
                 '<p class="warn"><strong>This account holds no transactions at all.</strong> '
                 "It is declared, but nothing has been imported or fetched for it, or "
                 "its feed has been silent since it was set up. This is not a clean "
-                "month.</p>" + _state_html(view, end) + _protect_html(view, unmasked, all_balances)
+                "month.</p>" + _state_html(view, reading, end, hold=hold)
             ),
-            month="",
-            txns="",
-            more=(
-                _opening_html(view, unmasked, held=held, everything=all_balances)
-                + _clearing_html(view.clearing)
-                + _anchor_forms(view, view.ref, view.month)
-                + _unitemised_html(view)
-                + _typed_html(view, ref=view.ref, month=view.month)
-                + _removed_balances_html(view, view.ref, view.month, unmasked)
-                + _navigation(view, unmasked)
-                + _danger_zone(
-                    view, archive_wired=archive_wired, unmasked=unmasked, everything=all_balances
-                )
-            ),
+            txns=typed,
+            more=more,
         )
 
-    state = (
-        _state_html(view, end)
-        + timeline
-        + _protect_html(view, unmasked, all_balances)
-        + _mode(view, unmasked, all_balances)
-    )
     month = (
-        f"<h2>{_esc(view.month)}</h2>"
-        + _month_links(view, unmasked)
-        + _month_picker(view, unmasked)
+        '<div class="acct-month"><div class="txhead">'
+        f"<h2>{_esc(view.month)}</h2>{_month_links(view, unmasked)}</div>"
+        f"{_month_picker(view, unmasked)}</div>"
     )
-    counts = ""
-    position = _position_html(view.position, bound=view.actual_bound)
     if view.state == "empty-month":
         month += (
-            '<p class="warn"><strong>No rows are dated in this month.</strong> '
-            f"The account holds rows from {_esc(view.oldest_month)} to "
+            '<p class="warn"><strong>No transactions are dated in this month.</strong> '
+            f"The account holds transactions from {_esc(view.oldest_month)} to "
             f"{_esc(view.newest_month)}, so a quiet month here is a gap to explain, "
             "not a clean result.</p>"
         )
     else:
         month += _month_line(view)
-        counts = _disclosure(
-            f"This month's counts and sums ({_plural(view.summary.rows, 'row')})",
-            _summary_html(view.summary, bound=view.actual_bound) + position,
-        )
-        position = ""
-    clock = (
-        f'<p class="sub">{_esc(_CLOCK_NOTE)}</p>'
-        if BANK_SOURCE in view.sources and view.state == "ok"
-        else ""
-    )
-    txns = ""
+    month += _mode(view, unmasked, all_balances, pressing=pressing)
+    txns = month
     if view.state == "ok":
         counted = [row for row in view.rows if not _is_copy(row)]
         copies = [row for row in view.rows if _is_copy(row)]
-        txns = (
-            "<h2>Transactions, newest first</h2>"
+        txns += (
             '<ul class="txns">'
             + "".join(_row_html(row, unmasked) for row in counted)
             + "</ul>"
             + _copies_html([_row_html(row, unmasked) for row in copies])
         )
-    limits = _disclosure(
-        f"What this page does not check ({_LIMITS.count('<li>')})",
-        _LIMITS + _statement_cost(),
-    )
-    more = (
-        _joins_html(view.joins, clock)
-        + _opening_html(view, unmasked, held=held, everything=all_balances)
-        + _clearing_html(view.clearing)
-        + counts
-        + position
-        + _anchor_forms(view, view.ref, view.month)
-        + _typed_html(view, ref=view.ref, month=view.month)
-        + _unitemised_html(view)
-        + _removed_balances_html(view, view.ref, view.month, unmasked)
-        + limits
-        + _navigation(view, unmasked)
-        + _danger_zone(
-                    view, archive_wired=archive_wired, unmasked=unmasked, everything=all_balances
-                )
-    )
     return _frame(
-        view, notice=notice, head=head, state=state, month=month, txns=txns, more=more
+        view,
+        notice=notice,
+        head=head,
+        state=_state_html(view, reading, end, hold=hold),
+        txns=txns + typed,
+        more=more,
     )
 
 
@@ -3292,7 +3312,7 @@ class LedgerPages(AnswerPages):
         with the MASKED ledger. Nothing typed is echoed except a date that has been read as one."""
         hook = getattr(self.bound_config, hook_name)
         if hook is None:
-            self._respond(404, _page("Not available", "Protection is not wired."))
+            self._respond(404, _page("Not available", "Locking in is not wired."))
             return
         ref = (form.get("ref", [""])[0] or "").strip()
         month = (form.get("month", [""])[0] or "").strip()
@@ -3346,16 +3366,16 @@ class LedgerPages(AnswerPages):
         self._protection_action(
             form,
             hook_name="protect",
-            refused_title="Not protected",
-            refused_lead="Nothing was protected.",
-            done="Protected through {through}. It is an alarm on change and never a freeze.",
+            refused_title="Not locked in",
+            refused_lead="Nothing was locked in.",
+            done="Locked in to {through}. It is an alarm on change and never a freeze.",
             question=(
-                "Protect this account through {through}? From now on a rebuild, import, or "
-                "pull that adds, removes, or changes any row dated up to then, or re-pairs one "
-                "of its transfers, is reported as a broken protection. Nothing is blocked: "
-                "the change still happens."
+                "Lock in this account to {through}? From now on a rebuild, import, or "
+                "pull that adds, removes, or changes any transaction dated up to then, or "
+                "re-pairs one of its transfers, is reported loudly as a change to what you "
+                "locked in. Nothing is blocked: the change still happens."
             ),
-            label="Protect",
+            label="Lock in",
             with_through=True,
         )
 
@@ -3363,11 +3383,11 @@ class LedgerPages(AnswerPages):
         self._protection_action(
             form,
             hook_name="protect_withdraw",
-            refused_title="Protection not removed",
+            refused_title="Lock not removed",
             refused_lead="Nothing was removed.",
-            done=f"{PROTECTION_REMOVED}: the account's protection. The removal is in its history.",
+            done=f"{PROTECTION_REMOVED}: the account's lock. The removal is in its history.",
             question=(
-                "Remove this account's protection? Changes to its rows will no longer be "
+                "Remove this account's lock? Changes to its transactions will no longer be "
                 "reported."
             ),
             label=REMOVE_PROTECTION,
@@ -3379,13 +3399,13 @@ class LedgerPages(AnswerPages):
             hook_name="protect_accept",
             refused_title="Change not accepted",
             refused_lead="Nothing was accepted.",
-            done="Accepted: the protected period is now as it stands, and the acceptance is "
+            done="Accepted: the locked stretch is now as it stands, and the acceptance is "
             "recorded beside the original.",
             question=(
-                "Accept the change and protect again? The protection will describe the period as "
-                "it is now. The original and this acceptance both stay in its history."
+                "Accept the change and lock in again? The lock will describe the stretch as it "
+                "is now. The original and this acceptance both stay in its history."
             ),
-            label="Accept the change and protect again",
+            label="Accept the change and lock in again",
         )
 
     def _typed_save_post(self, form: dict[str, list[str]]) -> None:
@@ -3510,10 +3530,10 @@ class LedgerPages(AnswerPages):
                 notice=notice,
                 today=today,
                 all_balances=all_balances,
-                timeline=(
-                    block_for(self.bound_config, ref, ledger.month, today)
-                    if ledger.state in ("ok", "empty-month")
-                    else ""
+                reading=(
+                    read_account(self.bound_config, ledger, today)
+                    if ledger.state != "unknown"
+                    else None
                 ),
             ),
             no_store=unmasked or no_store,

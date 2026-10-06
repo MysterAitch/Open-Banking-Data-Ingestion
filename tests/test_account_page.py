@@ -74,37 +74,43 @@ def at(page: str, text: str) -> int:
     return page.index(text)
 
 
+def said(page: str) -> str:
+    """The words of the page: no tags (a date is set in a span that never breaks), entities read."""
+    return html.unescape(re.sub(r"<[^>]+>", "", page))
+
+
 class TestTheOrderOfTheFirstScreens:
-    def test_HeldAccount_MaskedPage_RunsNameRailVerdictBoxProtectValuesMonthRowsThenTheFolds(
+    def test_HeldAccount_MaskedPage_RunsNameTrustStripThingsToDoValuesMonthTransactionsThenTheFiveFolds(
         self, base
     ):
         page = get(base)
 
         order = [
             at(page, f"<h1>{HELD}</h1>"),
-            at(page, '<svg class="rail"'),
-            at(page, 'class="verdict'),
-            at(page, 'class="held"'),
-            at(page, "Remove protection"),
-            at(page, "Show values"),
+            at(page, 'class="trust bad"'),
+            at(page, 'class="tap strip"'),
+            at(page, 'class="todos"'),
             at(page, f"<h2>{NEWEST_MONTH}</h2>"),
-            at(page, "<h2>Transactions, newest first</h2>"),
-            at(page, "How the sources' reports were matched"),
-            at(page, "Known balances and the opening"),
-            at(page, "State a balance"),
-            at(page, "Typed transactions"),
-            at(page, "What this page does not check"),
-            at(page, "Danger zone"),
+            at(page, ">Show values</button>"),
+            at(page, '<li class="txn'),
+            at(page, "Add a transaction by hand"),
+            at(page, "What the bars show, and the full timeline"),
+            at(page, "<summary>Known balances ("),
+            at(page, "<summary>Locking in ("),
+            at(page, "<summary>How this was checked</summary>"),
+            at(page, "<summary>Rename or archive</summary>"),
         ]
         assert order == sorted(order)
 
-    def test_AgreeingAccount_MaskedPage_HasNoBoxAndOffersTheProtectionInItsPlace(self, base):
+    def test_AgreeingAccount_MaskedPage_OffersToLockInBeforeTheTransactionsAndHasNoLockToRemove(
+        self, base
+    ):
         page = get(base, AGREEING)
 
-        assert 'class="held"' not in page
-        assert "Protect through 2026-09-30" in page
-        assert at(page, "Protect through 2026-09-30") < at(page, "Show values")
-        assert "Remove protection" not in page, "nothing to remove"
+        assert "Lock in to 2026-09-30" in said(page)
+        assert at(page, "Lock in to <span") < at(page, ">Show values</button>")
+        assert "Remove the lock" not in page, "nothing to remove"
+        assert 'class="trust bad"' not in page and 'class="trust none"' not in page
 
     def test_Page_NamesTheAccountsOwnNameAsItsHeading_AndKeepsLedgerForTheBrowserTitle(
         self, base
@@ -117,38 +123,43 @@ class TestTheOrderOfTheFirstScreens:
 
 
 class TestTheVerdictAndTheBox:
-    def test_HeldAccount_SaysAgreementProtectionAndWhatHoldsItBack(self, base):
-        page = html.unescape(get(base))
+    def test_HeldAccount_SaysWhatIsLockedWhatAddsUpAndWhereItStopsAddingUp(self, base):
+        page = get(base)
 
-        assert (
-            "The transactions add up to every known balance from 2023-10-31 to 2025-02-28; "
-            "the latest known balance is for 2026-09-30; "
-            f"protected through {PROTECTED_THROUGH}." in page
+        assert f"Does not add up from {FAULT_DAY}." in said(page)
+        assert f"Locked in to {PROTECTED_THROUGH}." in said(page)
+        assert "Adds up to the known balances to 2025-02-28." in said(page)
+        assert 'href="#opening"' in page, "the thing to do links into the same page"
+
+    def test_HeldAccount_SaysWhatStopsItOnceAndLeavesTheKnownBalancesFolded(self, base):
+        page = get(base)
+
+        sentence = f"do not add up to the known balance for {FAULT_DAY}"
+        assert said(page).count(sentence) == 1, "once, in the thing to do, and not again in a box"
+        assert "<details><summary>Known balances (" in page
+        assert '<details open><summary>Known balances' not in page, (
+            "thirty-five known balances are never opened by a page that is already asking"
         )
-        assert f"The transactions do not add up to the known balance for {FAULT_DAY}" in page
-        assert 'href="#opening"' in page, "the box links into the same page"
 
-    def test_HeldAccount_OpensTheKnownBalancesBecauseTheBoxLinksIntoThem(self, base):
-        assert '<details id="opening" open>' in get(base)
-
-    def test_AgreeingAccount_SaysNothingOfProtectionAndLeavesTheKnownBalancesFolded(self, base):
+    def test_AgreeingAccount_SaysWhatAddsUpAndNothingOfLockingBeyondTheOfferAndLeavesBalancesFolded(
+        self, base
+    ):
         page = html.unescape(get(base, AGREEING))
 
-        assert (
-            "The transactions add up to every known balance from 2023-10-31 to 2026-09-30."
-            in page
+        state = said(page[at(page, 'class="acct-state"') : at(page, 'class="acct-txns"')])
+        assert "Adds up to the known balances to 2026-09-30." in state
+        assert "Locked in to" not in state, "nothing is locked, so the sentence says nothing of it"
+        assert "<details><summary>Known balances (35 add up, none differ)</summary>" in page, (
+            "36 month ends, the first sets the opening"
         )
-        assert "not protected" not in page
-        assert "protected through nowhere" not in page
-        assert '<details id="opening">' in page
-        assert "(35 add up, none differ)" in page, "36 month ends, the first sets the opening"
 
-    def test_AccountWithNoKnownBalance_SaysSoAndOffersNoProtection(self, base):
+    def test_AccountWithNoKnownBalance_SaysSoAndOffersNoLock(self, base):
         page = get(base, UNKNOWN)
 
-        assert "No known balance, so there is nothing to check the transactions against." in page
+        assert 'class="trust none"' in page
+        assert "Nothing to check against." in page
         assert 'action="/protect"' not in page
-        assert "Known balances and the opening (none stated)" in page
+        assert "Known balances (none stated)" in page
 
 
 class TestTheMonthPicker:
@@ -169,7 +180,7 @@ class TestTheMonthPicker:
             for month in ("2024-02", "2025-03", NEWEST_MONTH):
                 held = len(build_ledger(store, HELD, month, bound=True).rows)
                 assert (
-                    f'aria-label="{_name(month)}, {held} rows"'
+                    f'aria-label="{_name(month)}, {held} transactions"'
                     f'{_current(month)}>{_abbreviation(month)}<small class="count">{held}</small>'
                 ) in page
         assert NEWEST_MONTH_ROWS == 50
@@ -179,11 +190,11 @@ class TestTheMonthPicker:
         body = page[at(page, "<body"):]
 
         assert body.count('aria-current="true"') == 1
-        assert 'month=2026-09" aria-label="Sep 2026, 50 rows" aria-current="true"' in body
+        assert 'month=2026-09" aria-label="Sep 2026, 50 transactions" aria-current="true"' in body
 
     def test_MaskedPicker_IsPlainLinksAndNoForm(self, base):
         page = get(base)
-        picker = page[at(page, "Choose a month") : at(page, "50 transactions. Sources")]
+        picker = page[at(page, "Choose a month") : at(page, 'class="txcount"')]
 
         assert '<a class="tap" href="/ledger?ref=starling-personal&amp;month=2025-03"' in picker
         assert "<form" not in picker and "<button" not in picker
@@ -191,7 +202,7 @@ class TestTheMonthPicker:
     def test_PickerWithValuesShown_IsPostedButtonsAndNeverAnAddress(self, base):
         response = shown(base, month="2026-09")
         page = response.text
-        picker = page[at(page, "Choose a month") : at(page, "50 transactions. Sources")]
+        picker = page[at(page, "Choose a month") : at(page, 'class="txcount"')]
 
         assert response.status_code == 200
         assert "no-store" in response.headers["cache-control"]
@@ -285,12 +296,14 @@ class TestRowAnchors:
 
         summaries = re.findall(
             r'<summary class="t-row">(?:(?!</summary>).)*?'
-            r'<span class="t-when mono nowrap">(\d{4}-\d{2}-\d{2})[^<]*</span>'
+            r'<span class="t-when mono nowrap" title="[^"]*">(\d{4}-\d{2}-\d{2})</span>'
             r'(?:(?!</summary>).)*?<span class="visually-hidden">What each source reported</span>'
             r"</summary>",
             page,
         )
-        dates = re.findall(r'<span class="t-when mono nowrap">(\d{4}-\d{2}-\d{2})', page)
+        dates = re.findall(
+            r'<span class="t-when mono nowrap" title="[^"]*">(\d{4}-\d{2}-\d{2})', page
+        )
         assert summaries == dates and len(dates) == NEWEST_MONTH_ROWS
         assert len(set(dates)) > 20, "the fifty rows are spread over the month"
 
@@ -306,32 +319,35 @@ class TestRowAnchors:
         assert page.count('visually-hidden">booked</span>') == page.count(">cleared by ")
 
 
-class TestTheDangerZone:
-    def test_Removals_SitInTheOneDangerZoneAtTheFootAndNowhereElse(self, base):
+class TestRemovingAndRetiring:
+    def test_Removals_SitInTheKnownBalancesFoldAndNowhereElse(self, base):
         page = httpx.get(f"{base}/ledger", params={"ref": HELD, "balances": "all"}, timeout=60).text
 
-        zone = at(page, '<details class="ledger-danger">')
+        fold = at(page, "<summary>Known balances (")
+        locking = at(page, "<summary>Locking in (")
         removals = [m.start() for m in re.finditer("Remove the known balance for", page)]
         assert len(removals) == 36, "one for each known balance, a month end for 36 months"
-        assert all(position > zone for position in removals)
+        assert all(fold < position < locking for position in removals)
         assert page.count('class="ledger-danger"') == 1
-        assert at(page, "Archive this account") > zone
+        assert at(page, "Archive this account") > at(page, "<summary>Rename or archive</summary>")
 
     def test_Removals_OnTheDefaultPage_AreForTheBalancesListedAndALinkToTheRest(self, base):
         page = get(base)
 
-        zone = at(page, '<details class="ledger-danger">')
+        fold = at(page, "<summary>Known balances (")
+        locking = at(page, "<summary>Locking in (")
         removals = [m.start() for m in re.finditer("Remove the known balance for", page)]
         # The opening's balance, ten agreeing ones, and the nineteen that differ.
         assert len(removals) == 1 + 10 + 19
-        assert all(position > zone for position in removals)
-        assert "Remove an older known balance from the full list" in page[zone:]
+        assert all(fold < position < locking for position in removals)
+        assert "Remove an older known balance from the full list" in page[fold:locking]
 
-    def test_DangerZone_IsTheLastThingOnThePage(self, base):
+    def test_RenameOrArchive_IsTheLastThingOnThePage(self, base):
         page = get(base)
 
         tail = page[at(page, '<details class="ledger-danger">') :]
         assert "Show values" not in tail and "<h2>" not in tail
+        assert "/accounts" in tail, "the name is changed where accounts are declared"
 
     def test_RemovalButton_StillAsksBeforeItActs(self, base):
         response = httpx.post(

@@ -89,20 +89,30 @@ def lab(tmp_path, monkeypatch):
         httpd.shutdown()
 
 
+def said(page: str) -> str:
+    """The words of the page: no tags (a date is set in a span that never breaks), entities read."""
+    return html.unescape(re.sub(r"<[^>]+>", "", page))
+
+
 def assert_no_secret(page: str) -> None:
     for figure in SECRET_FIGURES:
         assert figure not in page, figure
 
 
 class TestOfferingAProtection:
-    def test_Ledger_WhenInAgreement_OffersToProtectThroughTheLatestAgreedKnownBalance(self, lab):
+    def test_Ledger_WhenInAgreement_OffersToLockInToTheLatestAgreedKnownBalanceSayingWhatItCovers(
+        self, lab
+    ):
         page = lab.get().text
 
-        assert "Protect through 2026-03-20" in page
         assert 'action="/protect"' in page
-        assert "known balance from 2026-03-05 to 2026-03-20." in page
-        assert "not protected" not in page, "nothing protects it, and that is not said"
-        assert "protected through nowhere" not in page, "nothing protects it, so no place"
+        words = said(page)
+        assert "Lock in to 2026-03-20" in words
+        assert "5 transactions, 2026-03, would be locked in." in words, "how many, which months"
+        assert "Show values to read them first" in words
+        assert "never applied quietly" in words, "what locking gives"
+        assert "Adds up to the known balances to 2026-03-20." in words
+        assert "not locked" not in words, "nothing is locked, and that is not said"
 
     def test_Ledger_WhenNoBalanceIsKnown_OffersNothingAndSaysWhy(self, tmp_path, lab):
         with Store(lab.db) as store:
@@ -114,7 +124,7 @@ class TestOfferingAProtection:
         page = lab.get().text
 
         assert 'action="/protect"' not in page
-        assert "No known balance, so there is nothing to check the transactions against." in page
+        assert "Nothing to check against." in page
 
     def test_Ledger_OffersEarlierKnownBalancesToo(self, lab):
         page = lab.get().text
@@ -129,17 +139,17 @@ class TestPressingAndConfirming:
 
         assert response.status_code == 200
         assert "Are you sure?" in response.text
-        assert "Protect this account through 2026-03-20?" in response.text
+        assert "Lock in this account to 2026-03-20?" in response.text
         assert lab.record() is None
 
-    def test_Post_WhenConfirmed_ProtectsAndAnswersWithTheMaskedLedger(self, lab):
+    def test_Post_WhenConfirmed_LocksInAndAnswersWithTheMaskedLedger(self, lab):
         response = lab.press()
 
         assert response.status_code == 200
-        assert "Protected through 2026-03-20." in response.text
+        assert "Locked in to 2026-03-20." in response.text
         assert re.search(
-            r"Protected through 2026-03-20: 5 rows, verified against stated's balance of "
-            r"2026-03-20 on \d{4}-\d{2}-\d{2}\.",
+            r"Locked in to 2026-03-20, on \d{4}-\d{2}-\d{2}: 5 transactions, added up against "
+            r"stated's balance of 2026-03-20\.",
             html.unescape(response.text),
         )
         assert_no_secret(response.text)
@@ -151,7 +161,7 @@ class TestPressingAndConfirming:
         response = lab.press("2026-03-12")
 
         assert response.status_code == 400
-        assert "Nothing was protected." in response.text
+        assert "Nothing was locked in." in response.text
         assert "have not been shown to add up to the known balances up to that date" in (
             response.text
         )
@@ -197,67 +207,69 @@ class TestABreakOnThePage:
     def test_Ledger_WhenTheSpanChanged_SaysWhatChangedInCountsAndDates(self, lab):
         page = self.broken(lab)
 
-        assert "The protection is broken" in page
+        assert "The locked stretch, through 2026-03-20, has changed since" in page
         assert "1 row added to the protected period (dated 2026-03-07)" in page
-        assert "Accept the change and protect again" in page
-        assert "the protection through 2026-03-20 is broken" in page, "the verdict says so too"
-        assert "; protected through 2026-03-20" not in page, "a broken span is not claimed"
+        assert "Accept the change and lock in again" in page
+        assert "Locked in to 2026-03-20, but that stretch has changed since." in said(page), (
+            "the sentence says so too"
+        )
+        assert "Locked in to 2026-03-20." not in said(page), "a changed stretch is not claimed intact"
         assert_no_secret(page)
 
-    def test_Ledger_WhenBrokenAndIntact_NeverHidesTheBreakInACollapsedBlock(self, lab):
+    def test_Ledger_WhenBroken_SaysSoInTheSentenceAndInAThingToDoThatLeadsToTheFold(self, lab):
         page = self.broken(lab)
 
-        before = page[: page.index("The protection is broken")]
-        assert before.count("<details") == before.count("</details>"), (
-            "the break is inside a collapsed block"
-        )
+        state = page[page.index('class="acct-state"') : page.index('class="acct-txns"')]
+        assert 'class="trust bad"' in state
+        assert 'href="#locking"' in state, "the control goes to the fold that holds the change"
+        assert '<div id="locking">' in page
 
-    def test_Ledger_WhenIntact_ShowsOneLineWithRemoveVisibleAndTheDetailBehindIt(self, lab):
+    def test_Ledger_WhenIntact_ShowsOneLineWithRemoveInsideTheLockingFold(self, lab):
         lab.press()
 
         page = lab.get().text
 
         assert re.search(
-            r'<p class="protect-line"><strong>Protected through 2026-03-20: 5 rows', page
+            r'<p class="protect-line">Locked in to 2026-03-20, on \d{4}-\d{2}-\d{2}: '
+            r"5 transactions",
+            page,
         )
-        assert "protected through 2026-03-20." in page, "the verdict names the span"
-        before = page[: page.index("Remove protection")]
-        assert before.count("<details") == before.count("</details>"), (
-            "the way out is inside a collapsed block"
-        )
-        assert re.search(r"<summary>About this protection</summary>", page)
-        assert "The protection is broken" not in page
+        assert "Locked in to 2026-03-20." in said(page), "the sentence names the stretch"
+        assert page.index("<summary>Locking in (to 2026-03-20)</summary>") < page.index(
+            "Remove the lock"
+        ), "the way out is in its fold, which is the only place that holds it"
+        assert "The locked stretch, through" not in page
 
-    def test_Ledger_WhenNotProtected_OffersTheProtectionAndNoRemoval(self, lab):
+    def test_Ledger_WhenNotLocked_OffersTheLockAndNoRemoval(self, lab):
         page = lab.get().text
 
-        assert "Protect through 2026-03-20" in page
-        assert "Remove protection" not in page, "there is nothing to remove"
+        assert "Lock in to 2026-03-20" in said(page)
+        assert "Remove the lock" not in page, "there is nothing to remove"
 
-    def test_Accept_AfterConfirmation_ProtectsTheNewStateAndRecordsIt(self, lab):
+    def test_Accept_AfterConfirmation_LocksTheNewStateAndRecordsIt(self, lab):
         self.broken(lab)
 
         asked = lab.post("/protect-accept")
-        assert "Accept the change and protect again?" in asked.text
+        assert "Accept the change and lock in again?" in asked.text
         assert lab.events() == ["pressed"]
 
         accepted = lab.post("/protect-accept", confirmed="yes")
 
         assert accepted.status_code == 200
-        assert "The protection is broken" not in accepted.text
+        assert "The locked stretch, through" not in accepted.text
         assert lab.events() == ["pressed", "accepted"]
 
     def test_Remove_AfterConfirmation_RemovesItAndRecordsIt(self, lab):
         lab.press()
 
         asked = lab.post("/protect-withdraw")
-        assert "Remove this account's protection?" in html.unescape(asked.text)
+        assert "Remove this account's lock?" in html.unescape(asked.text)
         assert lab.record() is not None
 
         done = lab.post("/protect-withdraw", confirmed="yes")
 
         assert done.status_code == 200
-        assert "Protection removed:" in done.text, "the result says the verb the button did"
+        assert "Lock removed:" in done.text, "the result says the verb the button did"
         assert lab.record() is None
         assert lab.events() == ["pressed", "withdrawn"]
 

@@ -309,9 +309,25 @@ def _whole_dates(escaped: str) -> str:
     return _ISO_DAY.sub(lambda found: f'<span class="nowrap">{found.group(0)}</span>', escaped)
 
 
-def _todo_html(todo: Todo, shown: Callable[[str], AccountShown], today: date, *, lead: bool) -> str:
+def todo_row_html(
+    todo: Todo,
+    shown: Callable[[str], AccountShown],
+    today: date,
+    *,
+    lead: bool,
+    named: bool = True,
+    control: str | None = None,
+    extra: str = "",
+    css: str = "",
+) -> str:
+    """One thing to do as a row, which Today and an account's page both draw.
+
+    `named` is False on the account's own page, where the account is the page. `control` replaces
+    the button that follows the to-do's own control (an account's page puts a form there), and
+    `extra` is markup after it inside the row.
+    """
     parts = []
-    names = _names_html(todo, shown)
+    names = _names_html(todo, shown) if named else ""
     if names:
         parts.append(f"<b>{names}</b>")
     # A statement wanted says its days and when it fell due; anything else says its one short
@@ -329,15 +345,23 @@ def _todo_html(todo: Todo, shown: Callable[[str], AccountShown], today: date, *,
             parts.append(f"due since {day}{aged}")
         else:
             parts[-1] += aged
-    named = ("todo", _SEVERITY_CLASS[todo.urgency], "guess" if todo.guess else "")
-    classes = " ".join(part for part in named if part)
+    classed = ("todo", _SEVERITY_CLASS[todo.urgency], "guess" if todo.guess else "", css)
+    classes = " ".join(part for part in classed if part)
     button = "button" if lead else "button secondary"
+    if control is None:
+        control = (
+            f'<a class="{button}" href="{_esc(todo.control.href)}">{_esc(todo.control.label)}</a>'
+        )
     return (
         f'<li class="{classes}"><div class="todo-text">'
         f'<p class="todo-what">{_whole_dates(_esc(todo.title))}</p>'
         f'<p class="todo-why">{_whole_dates(" &middot; ".join(parts))}</p></div>'
-        f'<a class="{button}" href="{_esc(todo.control.href)}">{_esc(todo.control.label)}</a></li>'
+        f"{control}{extra}</li>"
     )
+
+
+def _todo_html(todo: Todo, shown: Callable[[str], AccountShown], today: date, *, lead: bool) -> str:
+    return todo_row_html(todo, shown, today, lead=lead)
 
 
 def todos_html(todos: Sequence[Todo], shown: Callable[[str], AccountShown], today: date) -> str:

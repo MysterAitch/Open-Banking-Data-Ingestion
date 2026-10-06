@@ -44,8 +44,8 @@ import re
 #: deleting a typed transaction), "Refile" is a clerk's word for putting an artefact under another
 #: account, and "Replay into store" named the mechanism and not what a person gets.
 #: Reading the deployed pages named all three; the routes and function names keep their old words.
-REMOVE_PROTECTION = "Remove protection"
-PROTECTION_REMOVED = "Protection removed"
+REMOVE_PROTECTION = "Remove the lock"
+PROTECTION_REMOVED = "Lock removed"
 REMOVE_TYPED_TRANSACTION = "Remove typed transaction"
 TYPED_TRANSACTION_REMOVED = "Typed transaction removed"
 MOVE_ARTEFACT = "Move to another account"
