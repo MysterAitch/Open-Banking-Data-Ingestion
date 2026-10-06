@@ -530,16 +530,18 @@ def _row_html(
 ) -> str:
     target = _esc(quote(account.ref, safe=""))
     name = shown(account.ref).as_name()
-    if account.state == REBUILDING:
-        flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', (
-            "Paused while the rebuild runs."
-        )
-    elif account.balance_only and account.state == EMPTY:
+    # A rebuild marks every account that is not archived, so an account that holds nothing is
+    # told by its rows, not its state.
+    holds_nothing = account.state == EMPTY or (account.state == REBUILDING and account.rows == 0)
+    if account.balance_only and holds_nothing:
         # Declared to be tracked by balances stated by hand: holding no transactions is its
         # design. The date of the last one stated is not carried on the overview, so none is said.
         flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', (
             "Its balance is stated by hand."
         )
+    elif account.state == REBUILDING and not holds_nothing:
+        # `_accounts_html` says once, above the list, that the checks are paused.
+        flag, bar, said = "", '<span class="bar" aria-hidden="true"></span>', ""
     else:
         trust = _trust_of(account, wanted, today)
         flag = _flag_html(first_todo.get(account.ref), today)
@@ -613,8 +615,14 @@ def _accounts_html(
                 rows.append(
                     _row_html(space, shown, first_todo, wanted, today, space=True, by_ref=by_ref)
                 )
+    paused = (
+        '<p class="muted paused">'
+        "The checks on these accounts are paused while the rebuild runs.</p>"
+        if overview.rebuilding is not None
+        else ""
+    )
     live = (
-        f'{axis_html(today)}<ul class="alist">{"".join(rows)}</ul>' if rows else ""
+        f'{paused}{axis_html(today)}<ul class="alist">{"".join(rows)}</ul>' if rows else ""
     )
     return (
         live

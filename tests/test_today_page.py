@@ -9,6 +9,7 @@ is asserted by a pattern over its markup. Today is 2026-10-05, so the shared sca
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 from obdi.agreement import (
@@ -26,11 +27,13 @@ from obdi.overview import (
     EMPTY,
     FILE_ONLY,
     HOUSEKEEPING,
+    REBUILDING,
     SOON,
     AccountOverview,
     AttentionItem,
     Overview,
 )
+from obdi.rebuild_hold import RebuildHold
 from obdi.standing_data import AccountStanding
 from obdi.web_overview import overview_html
 from page_dom import Node, elements, parse
@@ -499,6 +502,53 @@ class TestNothingIsSaidTwice:
             for phrase in RETIRED_ON_PAGES:
                 assert phrase not in text, phrase
             assert "not checked" not in text and "checked to" not in text
+
+
+class TestARebuildIsRunning:
+    """While the derived data is replayed no account is checked: Today says so once, above the
+    accounts, and the accounts that hold transactions say nothing of their own."""
+
+    def root(self) -> Node:
+        accounts = (
+            account("everyday", "Everyday card", first="2024-01-01", held=EVERYDAY),
+            account("joint", "Joint current", first="2025-03-01", held=JOINT),
+            account("bonds", "Premium bonds", first=None, state=EMPTY, balance_only=True),
+            account("pot", "Holiday pot", first=None, state=EMPTY),
+        )
+        # The overview marks every account that is not archived, held or empty alike.
+        paused = tuple(replace(a, state=REBUILDING) for a in accounts)
+        of = replace(overview(paused), rebuilding=RebuildHold("2026-10-05 08:00"))
+        return page(of, None)
+
+    def test_Accounts_DuringARebuild_SayTheChecksArePausedOnceAboveTheList(self) -> None:
+        section = next(
+            e for e in elements(self.root(), "section") if e.attrs.get("id") == "accounts"
+        )
+
+        said = [t for t in texts(section, "p", "paused") if t]
+        assert said == ["The checks on these accounts are paused while the rebuild runs."]
+        blocks = [c for c in section.children if isinstance(c, Node) and c.tag in ("p", "ul")]
+        assert "paused" in blocks[0].classes and "alist" in blocks[1].classes
+
+    def test_Rows_DuringARebuild_DoNotEachSayTheyArePaused(self) -> None:
+        root = self.root()
+
+        assert "Paused while the rebuild runs." not in " ".join(
+            e.text() for e in by_class(root, "span", "a-trust")
+        )
+        assert texts(row(root, "everyday"), "span", "a-trust") == [""]
+        assert texts(row(root, "joint"), "span", "a-trust") == [""]
+
+    def test_Rows_DuringARebuild_AnAccountHoldingNothingStillSaysWhatKindItIs(self) -> None:
+        root = self.root()
+
+        assert texts(row(root, "bonds"), "span", "a-trust") == ["Its balance is stated by hand."]
+        assert texts(row(root, "pot"), "span", "a-trust") == ["Nothing held yet."]
+
+    def test_Accounts_WhenNoRebuildRuns_SayNothingOfBeingPaused(self) -> None:
+        of, gaps = ordinary()
+
+        assert not by_class(page(of, gaps), "p", "paused")
 
 
 class TestNoFigureReachesToday:

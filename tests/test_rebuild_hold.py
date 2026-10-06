@@ -228,7 +228,8 @@ class TestThePagesWhileARebuildRuns:
         verdict = re.search(r'<p class="verdict[^"]*" id="verdict"><span>(.*?)</span>', page)
         assert verdict is not None and PAUSED in verdict.group(1)
         assert page.count(PAUSED) == 1, "said once, not on every row"
-        assert page.count("Paused while the rebuild runs.") == 3, "data, verification, position"
+        assert page.count("Paused while the rebuild runs.") == 1, "the data line, not each row"
+        assert page.count("The checks on these accounts are paused while the rebuild runs.") == 1
         assert "Movement completeness" not in page
         assert "Look at now" not in page
         assert "add up to every known balance" not in page, "no account is given a verdict"
