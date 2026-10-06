@@ -38,7 +38,7 @@ from datetime import date, timedelta
 from enum import StrEnum
 
 from .accounts import is_balance_only
-from .agreement import NONE, UNTESTED
+from .agreement import AGREES, NONE, UNTESTED, Agreement
 from .coverage import coverage, gaps
 from .fetch_marks import MarkSet, OutOfScope, SetAside, partition
 from .namespaces import FILE_SOURCES
@@ -467,7 +467,7 @@ def _outlook(
             )
 
     for need in evidence.flags:
-        if need.account == ref:
+        if need.account == ref and not _listed_by_statement(own, need.day):
             found.append(
                 FetchGap(
                     ref,
@@ -492,6 +492,19 @@ def _outlook(
         next_expected=next_expected,
         source=source,
     )
+
+
+def _listed_by_statement(own: Agreement | None, day: date) -> bool:
+    """Whether a statement tested by what it lists (`agreement`, R1) already accounts for `day`.
+
+    The review flags work out the known balance they lack from the balances alone, which cannot
+    see that a lone statement adds up by its own listing; the standing, read with the statement
+    checks as the pages read it, can.
+    """
+    if own is None or own.state != AGREES or own.through is None:
+        return False
+    starts = [t.start or t.day for t in own.listing_tested]
+    return bool(starts) and min(starts) <= day <= own.through
 
 
 def settle_evidence_text(need: FlagNeed) -> str:
