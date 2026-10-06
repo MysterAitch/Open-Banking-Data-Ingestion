@@ -2879,6 +2879,17 @@ def _archive_html(view: Any, *, archive_wired: bool) -> str:
     return _disclosure("Rename or archive", rename + archive, css="ledger-danger")
 
 
+def _closed_on(view: Any) -> date | None:
+    """The day an archived account closed, where the page knows it; None for any other."""
+    archive = view.archive
+    if archive is None or archive.state != "archived":
+        return None
+    try:
+        return date.fromisoformat(str(archive.closed))
+    except ValueError:
+        return None
+
+
 def _head(view: Any) -> str:
     """Under the name, one muted line: the reference as code, and whether it is sent to Actual."""
     archive = view.archive
@@ -2985,7 +2996,7 @@ def _state_html(
         + trust_html(
             reading, held_transactions=held, span=(view.oldest_month, view.newest_month)
         )
-        + strip_html(reading, view.ref, today)
+        + strip_html(reading, view.ref, today, closed=_closed_on(view))
         + todos
         + cannot_lock_yet_html(view.protection, reading.trust.adds_up_to)
     )

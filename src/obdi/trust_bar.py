@@ -32,37 +32,42 @@ def _cell(css: str, left: float, width: float) -> str:
     return f'<i class="{css}" style="left:{left:.2f}%;width:{width:.2f}%"></i>'
 
 
-def bar_html(trust: Trust, today: date) -> str:
-    """One account's bar on the shared scale."""
+def bar_html(trust: Trust, today: date, span: tuple[date, date] | None = None) -> str:
+    """One account's bar on the shared scale, or on the `span` it is given. On a span nothing lies
+    earlier than the bar's left edge, so no tick says so."""
     cells: list[str] = []
-    if trust.earlier:
+    if trust.earlier and span is None:
         cells.append('<i class="b-edge"></i>')
     for stretch in trust.stretches:
-        placed = place(stretch.start, stretch.end, today)
+        placed = place(stretch.start, stretch.end, today, span)
         if placed is not None:
             cells.append(_cell(_STRETCH_CLASS[stretch.rung], placed.left, placed.width))
     # Marks last, so each is drawn over the stretch beneath it.
     for mark in trust.marks:
-        placed = place(mark.start, mark.end, today)
+        placed = place(mark.start, mark.end, today, span)
         if placed is not None:
             cells.append(_cell(_MARK_CLASS[mark.kind], placed.left, placed.width))
     return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
 
 
 def source_lane_html(
-    held: Sequence[tuple[date, date]], wanted: Sequence[tuple[date, date]], today: date
+    held: Sequence[tuple[date, date]],
+    wanted: Sequence[tuple[date, date]],
+    today: date,
+    span: tuple[date, date] | None = None,
 ) -> str:
-    """One source's lane on the shared scale: the days it holds (`b-src`), and the days a file from
-    it is wanted for (`b-want`, dashed). A bare line where it holds none."""
+    """One source's lane on the shared scale (or the `span` given): the days it holds (`b-src`),
+    and the days a file from it is wanted for (`b-want`, dashed). A bare line where it holds
+    none."""
     cells = [
         _cell("b-src", placed.left, placed.width)
         for start, end in held
-        if (placed := place(start, end, today)) is not None
+        if (placed := place(start, end, today, span)) is not None
     ]
     cells += [
         _cell("b-want", placed.left, placed.width)
         for start, end in wanted
-        if (placed := place(start, end, today)) is not None
+        if (placed := place(start, end, today, span)) is not None
     ]
     return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
 

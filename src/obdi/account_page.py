@@ -21,7 +21,6 @@ import html
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from urllib.parse import quote
 
 from .account_names import AccountShown, AccountsShown
 from .coverage_timeline import (
@@ -34,6 +33,7 @@ from .coverage_timeline import (
 from .fetch_gaps import FetchReport
 from .ledger import Ledger
 from .logs import say
+from .navigation import account_address
 from .overview import HOUSEKEEPING, AccountOverview, Overview
 from .plural import plural
 from .protection import ProtectionView
@@ -45,7 +45,7 @@ from .standing_data import (
     verification_of,
 )
 from .todo import Todo, account_page, build_todos, grouped, wanted_days
-from .trust import Trust, month_marks, trust_of
+from .trust import WINDOW_DAYS, Trust, month_marks, trust_of, window_start
 from .trust_bar import bar_html, source_lane_html
 from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
@@ -244,21 +244,46 @@ def _headline(kind: str, head: str, sub: str) -> str:
 # -------------------------------------------------------------------------------- The strip
 
 
-def strip_html(reading: AccountReading, ref: str, today: date) -> str:
+def _own_life(reading: AccountReading, closed: date, today: date) -> tuple[date, date] | None:
+    """The days an account was in use, where it closed before the shared twelve months begin:
+    from the first day anything is held for it (a stretch of trust, or a day a source holds) to
+    the day it closed. None where it closed inside them, and the shared scale serves."""
+    if closed >= window_start(today):
+        return None
+    days = [stretch.start for stretch in reading.trust.stretches]
+    if reading.timeline is not None:
+        days += [run.first for lane in reading.timeline.lanes for run in lane.runs]
+    first = min(days, default=None)
+    if first is None or first >= closed:
+        first = closed - timedelta(days=WINDOW_DAYS - 1)
+    return first, closed
+
+
+def strip_html(
+    reading: AccountReading, ref: str, today: date, closed: date | None = None
+) -> str:
     """The trust lane over one lane per source, on the shared twelve months, wanted files dashed.
 
     The small form of the coverage timeline, and a link to the full one: the whole strip is the
     link, named for a reader who cannot see it. The trust lane is `trust_bar`'s, and the source
     lanes are the lanes of the timeline's own model, merged by the way in (several statement
     readers are one lane of statements).
+
+    An account CLOSED before the shared twelve months begin has nothing in them, so its strip is
+    drawn by the same bars over its own life, from its first held day to the day it closed, with
+    the two dates under it and a line saying so. One closed inside the twelve months keeps them.
     """
-    axis = "".join(
-        f'<span style="left:{left:.2f}%">{_esc(name)}</span>'
-        for name, left in month_marks(today)[::2]
-    )
+    span = None if closed is None else _own_life(reading, closed, today)
+    if span is None:
+        axis = "".join(
+            f'<span style="left:{left:.2f}%">{_esc(name)}</span>'
+            for name, left in month_marks(today)[::2]
+        )
+        axis_row = f'<span></span><span class="axis" aria-hidden="true">{axis}</span>'
+    else:
+        axis_row = ""
     rows = (
-        f'<span></span><span class="axis" aria-hidden="true">{axis}</span>'
-        f'<span class="lane first">Trust</span>{bar_html(reading.trust, today)}'
+        f'{axis_row}<span class="lane first">Trust</span>{bar_html(reading.trust, today, span)}'
     )
     timeline = reading.timeline
     if timeline is not None:
@@ -277,13 +302,22 @@ def strip_html(reading: AccountReading, ref: str, today: date) -> str:
             name = _LANE_NAMES.get(kind, kind)
             rows += (
                 f'<span class="lane">{_esc(name)}</span>'
-                f"{source_lane_html(by_kind[kind], wanted, today)}"
+                f"{source_lane_html(by_kind[kind], wanted, today, span)}"
             )
-    href = f"/coverage-timeline?ref={quote(ref, safe='')}"
+    href = account_address("timeline", ref)
+    ends = said = ""
+    if span is not None:
+        ends = (
+            '<span></span><span class="ends" aria-hidden="true">'
+            f"<span>{span[0].isoformat()}</span><span>{span[1].isoformat()}</span></span>"
+        )
+        said = (
+            f'<p class="muted">Closed {span[1].isoformat()}; the bars span its whole life.</p>'
+        )
     return (
         f'<a class="tap strip" href="{href}">'
         '<span class="visually-hidden">The full timeline, source by source</span>'
-        f"{rows}</a>"
+        f"{rows}{ends}</a>{said}"
     )
 
 

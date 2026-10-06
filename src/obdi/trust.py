@@ -239,18 +239,24 @@ def window_start(today: date) -> date:
     return today - timedelta(days=WINDOW_DAYS - 1)
 
 
-def place(start: date, end: date, today: date) -> Placed | None:
-    """The days `start` to `end` inclusive on the shared scale, or None where they lie outside it.
+def place(
+    start: date, end: date, today: date, span: tuple[date, date] | None = None
+) -> Placed | None:
+    """The days `start` to `end` inclusive on the scale, or None where they lie outside it.
 
-    A day is a whole step of the scale, so one day is `100 / WINDOW_DAYS` percent wide.
+    The scale is the shared twelve months ending `today`, or with `span` the days from its first
+    to its last (an account closed before the shared months begin is drawn over its own life, by
+    the same drawing on another scale). A day is a whole step of the scale, so on the shared one
+    a day is `100 / WINDOW_DAYS` percent wide.
     """
-    begin = window_start(today)
+    begin, last = span if span is not None else (window_start(today), today)
+    days = (last - begin).days + 1
     low = max(start, begin)
-    high = min(end, today)
+    high = min(end, last)
     if high < low:
         return None
-    left = (low - begin).days / WINDOW_DAYS * 100
-    width = ((high - low).days + 1) / WINDOW_DAYS * 100
+    left = (low - begin).days / days * 100
+    width = ((high - low).days + 1) / days * 100
     return Placed(left, width)
 
 

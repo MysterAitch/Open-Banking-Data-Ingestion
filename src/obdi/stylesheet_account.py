@@ -45,6 +45,7 @@ ACCOUNT_STYLES = """
  .strip .axis { overflow: hidden; }
  .strip .lane { font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
  .strip .lane.first { color: var(--ink); font-weight: 600; }
+ .strip .ends { display: flex; justify-content: space-between; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
  .b-src { background: var(--ink-2); }
 
  /* Things to do, on this page: the words, then the control under them. An offer is quieter. */
