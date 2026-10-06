@@ -48,6 +48,12 @@ from .bring_in import (
     upload_kind,
     wanted_heading,
 )
+from .bring_in_dry_run import (
+    VALUES_BUTTON,
+    decision_line,
+    dry_run_fold,
+    values_page_body,
+)
 from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
 from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
 from .bring_in_preview import preview_html
@@ -57,6 +63,7 @@ from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
 from .fetch_gaps import FetchReport, GapKind
 from .fetch_marks import AGGREGATOR
 from .fetch_reasons import gap_lines
+from .ingest import MatcherPreview
 from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import AccountOverview, Overview
 from .page_times import UTC_NOTE, instant_of, span_phrase
@@ -159,6 +166,11 @@ class FileResult:
     counted: str = ""
     #: What reading it in did for what the owner wanted, as markup (`_outcome_html`).
     outcomes: str = ""
+    #: What reading a statement in to the account guessed for it would do, a transaction at a
+    #: time (`bring_in_dry_run`), as markup, and the sentence beside its chooser that it would
+    #: ask for decisions; "" where no account is guessed or the dry run could not be made.
+    dry_run: str = ""
+    decision: str = ""
 
     @property
     def placed_in(self) -> tuple[str, ...]:
@@ -582,11 +594,11 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
         rows.append(
             '<li class="bi-assign-file">'
             f'<p class="bi-assign-name">{_called(item)}</p>'
-            f"{item.preview}"
+            f"{item.preview}{item.dry_run}"
             f'<select name="{_esc(field)}" aria-label="{_esc(aria)}">'
             '<option value="">choose an account...</option>'
             f"{account_options(texts, selected=selected)}</select>"
-            f"{reason_html(item.guess, names)}{_held_html(item, names)}</li>"
+            f"{reason_html(item.guess, names)}{_held_html(item, names)}{item.decision}</li>"
         )
     guessed = any(item.guess and item.guess.account for item in waiting)
     lead = "Nothing is read in until you press." + (
@@ -1203,6 +1215,7 @@ class BringInPages:
             if r.outcome is Outcome.KEPT and r.kind is UploadKind.STATEMENT and not r.account
         ]
         hook = self.bound_config.kept_statements
+        names = self._account_names()
         if not waiting or hook is None:
             return results, ""
         try:
@@ -1218,31 +1231,33 @@ class BringInPages:
                 resolved.append(item)
             elif not isinstance(parts, list) or not parts:
                 guess = guess_account(entry, listing)
+                dry = self._dry_run(item.artefact, guess)
                 resolved.append(
                     replace(
                         item,
                         guess=guess,
-                        all_held=self._all_held(item.artefact, guess),
+                        all_held=0 if dry is None else (dry.total if dry.new == 0 else 0),
                         preview=preview_html(entry),
+                        dry_run="" if dry is None else dry_run_fold(dry, names, item.artefact),
+                        decision="" if dry is None else decision_line(dry),
                     )
                 )
             else:
                 resolved.extend(self._section_results(item, entry, parts))
         return resolved, ""
 
-    def _all_held(self, artefact: int, guess: Guess | None) -> int:
-        """How many transactions a statement lists where the account guessed for it already holds
-        every one, by the matcher's dry run; 0 for no guess, for a statement with new
-        transactions, or where the count could not be made (nothing is then said, as of any
-        statement the account does not hold in full)."""
+    def _dry_run(self, artefact: int, guess: Guess | None) -> MatcherPreview | None:
+        """What the matcher would do with a statement's transactions against the account guessed
+        for it, one pass that writes nothing; None for no guess, or where it could not be made
+        (nothing is then said). It gives the "already held" line and the per-transaction fold
+        both, so the statement is resolved once."""
         hook = self.bound_config.preview_kept_statement
         if hook is None or guess is None or not guess.account:
-            return 0
+            return None
         try:
-            preview = hook(artefact, guess.account)
+            return hook(artefact, guess.account)
         except Exception:
-            return 0
-        return preview.total if preview is not None and preview.new == 0 else 0
+            return None
 
     @staticmethod
     def _section_results(
@@ -1329,6 +1344,41 @@ class BringInPages:
         summary = self._summarise(results, before, wanted_before=wanted_before)
         self._respond(200, self._answer(self._data(results=summary)), no_store=True)
         return True
+
+    def statement_dry_run(self, form: Mapping[str, list[str]]) -> None:
+        """Answer the press of "Show values" under a statement of the one form with that
+        statement's per-transaction list, values shown, for the account chosen for it.
+
+        The press submits the whole form of choosers, so the account is the one chosen beside
+        the statement at the moment of pressing. Nothing is read in, and the answer is marked
+        as showing values and not kept by the browser.
+        """
+        asked = (form.get(VALUES_BUTTON) or [""])[0].strip()
+        account = (form.get(f"account-{asked}") or [""])[0].strip() if asked.isdigit() else ""
+        hook = self.bound_config.preview_kept_statement
+        listing_hook = self.bound_config.kept_statements
+        if not asked.isdigit() or hook is None or listing_hook is None:
+            notice = "That statement could not be found."
+        elif not account or account not in self._account_names():
+            notice = "Choose an account for that statement first; its list is read against it."
+        else:
+            try:
+                dry = hook(int(asked), account)
+                entries = {int(str(e["id"])): e for e in listing_hook()}
+            except Exception:
+                dry, entries = None, {}
+            entry = entries.get(int(asked))
+            if dry is None or entry is None or not dry.rows:
+                notice = "What reading it in would do could not be worked out for that account."
+            else:
+                body = values_page_body(
+                    dry, self._account_names(), str(entry["origin"]), account
+                )
+                self._respond(
+                    200, render_page("What reading it in would do", body), no_store=True
+                )
+                return
+        self._respond(400, self._answer(self._data(notice=notice)), no_store=True)
 
     def _assigned_or_kept(
         self, entry: Mapping[str, object], ident: int, section: str, account: str

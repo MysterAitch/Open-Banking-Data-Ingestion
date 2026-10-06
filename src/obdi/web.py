@@ -6268,6 +6268,9 @@ class ConnectionHandler(
         if route == "/statement-section-assign":
             self._statement_section_assign()
             return
+        if route == "/statement-dry-run":
+            self.statement_dry_run(self._read_form())
+            return
 
         if route == "/save-account":
             self._save_account(self._read_form())

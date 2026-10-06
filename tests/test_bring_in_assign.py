@@ -243,7 +243,12 @@ class TestTenStatementsUploadedAtOnce:
         for month in ("07", "08", "09"):
             assert sorted(sectioned(rows, month)) == ["Holiday Pot", "Regular Saver"]
         assert len(rows) == 13
-        assert [b.text() for b in elements(form, "button")] == ["Read them all in"]
+        # The one control; a fold under a row may hold its own press of "Show values".
+        controls = [
+            b.text() for b in elements(form, "button")
+            if not any("bi-dry" in above.classes for above in b.ancestors())
+        ]
+        assert controls == ["Read them all in"]
         assert not [
             f for f in elements(page, "form") if f.attrs.get("action") == "/statement-assign"
         ]
@@ -328,9 +333,13 @@ class TestTenStatementsUploadedAtOnce:
         visible = re.sub(r"<style>.*?</style>", "", response.text, flags=re.S)
         # A chooser lists the same options each time, and a reason is data that happens to
         # agree between files of one account, and a preview is what each document is, which two
-        # documents of one issuer share; none is a sentence said once for every file.
+        # documents of one issuer share, and each row's fold of what reading it in would do is
+        # that statement's own answer; none is a sentence said once for every file.
         for node in list(elements(page, "select")):
             node.children.clear()
+        for node in list(elements(page, "details")):
+            if "bi-dry" in node.classes:
+                node.children.clear()
         for node in list(elements(page, "p")):
             if "bi-guess" in node.classes or "bi-preview" in node.classes:
                 node.children.clear()

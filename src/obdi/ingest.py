@@ -12,7 +12,8 @@ import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 from . import instrumentation
@@ -20,6 +21,7 @@ from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
 from .matching import (
     EXACT_RULE_DOUBT,
+    INTERNAL_TRANSFER_WINDOW_DAYS,
     CandidateIndex,
     MatchResult,
     pair_transfer_entities,
@@ -404,12 +406,51 @@ def _numbered(transactions: list[Transaction]) -> list[Transaction]:
     return numbered
 
 
+class RowOutcome(StrEnum):
+    """What the matcher would do with one row of a batch."""
+
+    #: It merges onto a row the account already holds.
+    HELD = "held"
+    #: It is added.
+    NEW = "new"
+    #: It is held or added, and a flag would be raised for a person to decide.
+    DECISION = "decision"
+
+
+@dataclass(frozen=True)
+class RowPreview:
+    """One row of a batch, and what the matcher would do with it."""
+
+    day: date
+    amount_minor: int
+    description: str
+    outcome: RowOutcome
+    #: The source of the stored row it merges onto, "" where it does not.
+    held_source: str = ""
+    #: The reason the flag would carry, "" where none would be raised.
+    reason: str = ""
+    #: The account it is a row of.
+    account: str = ""
+    #: Another account of the household that moved the same amount the other way within a day
+    #: of it, where one did (`with_transfer_legs`); "" where none did or none was looked for.
+    transfer_with: str = ""
+
+    @property
+    def direction(self) -> str:
+        return "in" if self.amount_minor > 0 else "out"
+
+
 @dataclass(frozen=True)
 class MatcherPreview:
-    """What `reconcile_batch` would do with a batch, counted and not done."""
+    """What `reconcile_batch` would do with a batch, counted and not done.
+
+    `rows` says it row by row, in the batch's order: where each merges and onto what, which are
+    new, and which would raise a flag and why.
+    """
 
     merged: int
     new: int
+    rows: tuple[RowPreview, ...] = ()
 
     @property
     def total(self) -> int:
@@ -431,7 +472,11 @@ class MatcherPreview:
 
 
 def preview_reconcile(
-    store: Store, transactions: list[Transaction], *, space_blind: SpaceBlind | None = None
+    store: Store,
+    transactions: list[Transaction],
+    *,
+    space_blind: SpaceBlind | None = None,
+    transfers: bool = False,
 ) -> MatcherPreview:
     """Count how a batch would resolve against what is stored, writing nothing.
 
@@ -443,10 +488,14 @@ def preview_reconcile(
     review flag, and no batch is opened, so a caller can ask before deciding
     whether to read the batch in. A new row is given a stand-in identity,
     which never leaves the index.
+
+    The preview says each row too (`MatcherPreview.rows`); with `transfers` it also names the
+    account whose row it could be the other leg of (`with_transfer_legs`).
     """
     by_account: dict[str, CandidateIndex] = {}
     merged = 0
     new = 0
+    rows: list[RowPreview] = []
     numbered = _numbered(transactions)
     for transaction in numbered:
         if transaction.account_id not in by_account:
@@ -465,6 +514,22 @@ def preview_reconcile(
         existing = by_account[transaction.account_id]
         partner, reserved = plans[position]
         result = resolve(transaction, existing, partner=partner, reserved=reserved)
+        reason = doubt_reason(result.review) or ambiguity_reason(result)
+        rows.append(
+            RowPreview(
+                transaction.value_date,
+                transaction.amount_minor,
+                transaction.description,
+                RowOutcome.DECISION
+                if reason
+                else RowOutcome.NEW
+                if result.existing is None
+                else RowOutcome.HELD,
+                held_source="" if result.existing is None else result.existing.source,
+                reason=reason,
+                account=transaction.account_id,
+            )
+        )
         if result.existing is None:
             occurrence = existing.free_occurrence(
                 transaction.account_id,
@@ -501,7 +566,45 @@ def preview_reconcile(
                 occurrence=_occurrence_once_merged(held, superseded, existing),
             )
         )
-    return MatcherPreview(merged=merged, new=new)
+    return MatcherPreview(
+        merged=merged,
+        new=new,
+        rows=with_transfer_legs(store, rows) if transfers else tuple(rows),
+    )
+
+
+def with_transfer_legs(store: Store, rows: Sequence[RowPreview]) -> tuple[RowPreview, ...]:
+    """The rows, each naming the other account that moved the same amount the other way within
+    `INTERNAL_TRANSFER_WINDOW_DAYS`, where one did: the leg a transfer pairing would take it
+    with (`matching.pair_transfer_entities` states the rule).
+
+    Each stored row is the partner of one row at most, as in the pairing. This is that rule's
+    candidate test over the rows the store holds now, not the store-wide greedy pass, which can
+    choose differently where several rows fit; so a row named here is one that COULD be a leg.
+    """
+    window = timedelta(days=INTERNAL_TRANSFER_WINDOW_DAYS)
+    legs: dict[str, list[tuple[str, date, int]]] = {}
+    for account in {row.account for row in rows}:
+        mine = [row for row in rows if row.account == account]
+        legs[account] = store.counter_legs(
+            {-row.amount_minor for row in mine},
+            min(row.day for row in mine) - window,
+            max(row.day for row in mine) + window,
+            excluding=account,
+        )
+    taken: dict[str, set[int]] = {account: set() for account in legs}
+    found: list[RowPreview] = []
+    for row in rows:
+        partner = ""
+        for at, (other, day, amount) in enumerate(legs[row.account]):
+            if at in taken[row.account] or amount != -row.amount_minor:
+                continue
+            if abs(day - row.day) <= window:
+                taken[row.account].add(at)
+                partner = other
+                break
+        found.append(replace(row, transfer_with=partner) if partner else row)
+    return tuple(found)
 
 
 def reconcile_batch(
@@ -763,16 +866,31 @@ def _reconcile(
     # Only the genuinely ambiguous cases: something matched on amount and date
     # and was kept apart solely by the same-source rule. Flagging every new
     # transaction would bury these under thousands that need no thought.
-    if result.is_ambiguous:
-        store.queue_for_review(
-            fresh.entity_id,
-            f"stored as new, but {len(result.near_misses)} transaction(s) in this account "
-            f"match on amount and date and were kept apart only by the same source rule - "
-            f"confirm this is a repeated payment and not a duplicate report",
-        )
+    if reason := ambiguity_reason(result):
+        store.queue_for_review(fresh.entity_id, reason)
         summary.needs_review += 1
 
     return fresh, None
+
+
+def ambiguity_reason(result: MatchResult) -> str:
+    """What a new row is queued with where something like it was kept apart only by the
+    same-source rule, or "" where nothing is. The one wording of that flag: the import queues it
+    and a dry run says it beforehand."""
+    if not result.is_ambiguous:
+        return ""
+    return (
+        f"stored as new, but {len(result.near_misses)} transaction(s) in this account "
+        f"match on amount and date and were kept apart only by the same source rule - "
+        f"confirm this is a repeated payment and not a duplicate report"
+    )
+
+
+def doubt_reason(review: str) -> str:
+    """What a row is queued with for a doubt the exact rules raised (`MatchResult.review`), or
+    "" where they raised none. The one wording of that flag, as `ambiguity_reason` is of the
+    other."""
+    return f"{review} {EXACT_RULE_DOUBT}" if review else ""
 
 
 def _absorb_second_row(
@@ -817,7 +935,7 @@ def _flag(store: Store, summary: ImportSummary, entity_id: str, reason: str) -> 
     """Queue a doubt the exact rules raised, where there is one."""
     if not reason:
         return
-    store.queue_for_review(entity_id, f"{reason} {EXACT_RULE_DOUBT}")
+    store.queue_for_review(entity_id, doubt_reason(reason))
     summary.needs_review += 1
 
 

@@ -2034,6 +2034,41 @@ class Store:
         ).fetchall()
         return [_row_to_transaction(row) for row in rows]
 
+    def counter_legs(
+        self, amounts: Iterable[int], first: date, last: date, *, excluding: str
+    ) -> list[tuple[str, date, int]]:
+        """The live rows of every account but `excluding` that move one of `amounts` between two
+        days, as (account, day, amount), for finding the other leg of a transfer.
+
+        Read in chunks of amounts so that no statement is too long a list for the database, and
+        in day order so that two callers ask the same question the same way. A folded or
+        reversed row is a report of a payment or one that never moved, and is not a leg.
+        """
+        wanted = sorted(set(amounts))
+        found: list[tuple[str, date, int]] = []
+        for start in range(0, len(wanted), 400):
+            chunk = wanted[start : start + 400]
+            marks = ",".join("?" for _ in chunk)
+            found.extend(
+                (str(row["account_id"]), date.fromisoformat(str(row["value_date"])),
+                 int(row["amount_minor"]))
+                for row in self.connection.execute(
+                    "SELECT account_id, value_date, amount_minor FROM transactions "  # noqa: S608
+                    f"WHERE amount_minor IN ({marks}) AND value_date BETWEEN ? AND ? "
+                    "AND account_id != ? AND status NOT IN (?, ?) "
+                    "ORDER BY value_date, account_id",
+                    [
+                        *chunk,
+                        first.isoformat(),
+                        last.isoformat(),
+                        excluding,
+                        TransactionStatus.FOLDED.value,
+                        TransactionStatus.REVERSED.value,
+                    ],
+                )
+            )
+        return found
+
     def transactions_for_entities(self, entities: Iterable[str]) -> list[Transaction]:
         """The stored transactions with these entity ids, in the order of their ids."""
         names = sorted(set(entities))

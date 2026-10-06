@@ -41,6 +41,12 @@ BRING_IN_STYLES = """
  .bi-assign-file select { width: 100%; min-height: var(--hit); }
  .bi-guess { margin: var(--s1) 0 0; font: var(--text-xs)/130% var(--sans); color: var(--ink-2); }
  .bi-preview { margin: 0 0 var(--s1); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ .bi-dry { margin: 0 0 var(--s1); font: var(--text-xs)/140% var(--sans); color: var(--ink-2); }
+ .bi-dry > summary { min-height: var(--hit); display: flex; align-items: center; cursor: pointer; }
+ .bi-dry-says { margin: var(--s1) 0 0; }
+ .bi-dry-list { list-style: none; margin: var(--s1) 0; padding: 0; }
+ .bi-dry-list li { margin: var(--s1) 0; overflow-wrap: anywhere; }
+ .bi-dry button.button { width: 100%; margin: var(--s1) 0; }
  .bi-assign-bar { position: sticky; bottom: 0; padding: var(--s2) 0; background: var(--paper); border-top: var(--rule-weight) solid var(--rule); }
  .bi-assign-bar button.button { width: 100%; margin: 0; }
  .bi-fold { margin: var(--s3) 0; }
