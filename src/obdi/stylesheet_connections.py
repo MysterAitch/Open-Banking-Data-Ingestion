@@ -17,7 +17,8 @@ CONNECTIONS_STYLES = r"""
  .sources { list-style: none; margin: var(--s2) 0; padding: 0; }
  .source { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
  .source p { margin: 0; }
- .source-name { font: 600 var(--text-base)/130% var(--serif); }
+ .source-name { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); font: 600 var(--text-base)/130% var(--serif); }
+ .source-name a.tap { font-weight: 400; }
  .source-state { font: var(--text-md)/150% var(--sans); overflow-wrap: anywhere; }
  .source-state.warn { color: var(--warn); }
  .source-state.bad { color: var(--bad); }

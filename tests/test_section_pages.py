@@ -381,7 +381,8 @@ class TestConsentRowsSayWhenAndWeighReconnectByUrgency:
         page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
 
         assert f"expires {expires.date().isoformat()} (in 30 days)" in page
-        assert 'href="/connect?name=halifax"' not in page
+        assert 'href="/connect?name=halifax"' in page
+        assert "Reconnect halifax" not in page
 
     def test_Row_AtTheFirstAlertRung_OffersReconnectAsPrimary(self, serve):
         span = timedelta(days=FIRST_RUNG_DAYS, hours=1)
@@ -391,11 +392,14 @@ class TestConsentRowsSayWhenAndWeighReconnectByUrgency:
         assert f"expires {expires.date().isoformat()} (in {FIRST_RUNG_DAYS} days)" in page
         assert '<a class="button" href="/connect?name=halifax">Reconnect halifax</a>' in page
 
-    def test_Row_OneDayOutsideTheFirstAlertRung_OffersNoReconnect(self, serve):
+    def test_Row_OneDayOutsideTheFirstAlertRung_OffersNoThingToDoButStillAQuietReconnect(
+        self, serve
+    ):
         span = timedelta(days=FIRST_RUNG_DAYS + 1, hours=1)
         page = fetch(serve((connection("halifax", expires_in=span),)), "/connections")
 
-        assert 'href="/connect?name=halifax"' not in page
+        assert "Reconnect halifax" not in page
+        assert page.count('href="/connect?name=halifax"') == 1
 
     def test_Row_WhenExpired_OffersReconnectAsPrimaryAndSaysWhenItLapsed(self, serve):
         lapsed = datetime.now(UTC) - timedelta(days=3)

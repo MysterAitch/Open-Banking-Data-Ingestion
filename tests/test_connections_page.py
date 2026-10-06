@@ -100,11 +100,23 @@ def section(root: Node, heading: str) -> Node:
     return holder
 
 
-def reconnect_links(root: Node) -> list[str]:
+def quiet_reconnects(root: Node) -> list[str]:
+    """The Reconnect links on a bank's own line: there at any time, never a thing to do."""
     return [
         node.attrs["href"]
         for node in elements(root, "a")
         if node.attrs.get("href", "").startswith("/connect?")
+        and any("source" in up.classes for up in node.ancestors())
+    ]
+
+
+def todo_reconnects(root: Node) -> list[str]:
+    """The Reconnect links among what needs him: only for a consent running out or ended."""
+    return [
+        node.attrs["href"]
+        for node in elements(root, "a")
+        if node.attrs.get("href", "").startswith("/connect?")
+        and any("todo" in up.classes for up in node.ancestors())
     ]
 
 
@@ -115,11 +127,39 @@ def row_of(root: Node, name: str) -> Node:
 
 
 class TestWhenEverythingIsConnected:
-    def test_Connections_WhenEveryConsentIsFine_OffersNoReconnectAndAsksForNothing(self, tmp_path):
+    def test_Connections_WhenEveryConsentIsFine_AsksForNothingAndOffersReconnectOnlyQuietly(
+        self, tmp_path
+    ):
         root = page_of(store_of(tmp_path, FINE))
 
-        assert reconnect_links(root) == []
+        assert todo_reconnects(root) == []
+        assert quiet_reconnects(root) == ["/connect?name=halifax"]
         assert not [n for n in elements(root, "ul", "ol") if "todos" in n.classes]
+
+    def test_Connections_EveryBankLine_CarriesItsOwnQuietReconnectWhateverItsConsentSays(
+        self, tmp_path
+    ):
+        root = page_of(store_of(tmp_path, FINE, EXPIRING, LAPSED))
+
+        assert sorted(quiet_reconnects(root)) == [
+            "/connect?name=barclays",
+            "/connect?name=halifax",
+            "/connect?name=virgin",
+        ]
+        for name in ("halifax", "virgin", "barclays"):
+            links = [a for a in elements(row_of(root, name), "a") if a.text() == "Reconnect"]
+            assert len(links) == 1, name
+
+    def test_Connections_AConnectionWithNoConsentClock_StillCanBeReconnected(self, tmp_path):
+        root = page_of(store_of(tmp_path, connection("odd", None)))
+
+        assert quiet_reconnects(root) == ["/connect?name=odd"]
+        assert todo_reconnects(root) == []
+
+    def test_Connections_TheBankOwnFeed_HasNoReconnectBecauseItHasNoConsent(self, tmp_path):
+        root = page_of(store_of(tmp_path, FINE), starling_status=lambda: {"ok": True})
+
+        assert quiet_reconnects(root) == ["/connect?name=halifax"]
 
     def test_Connections_WhenEveryConsentIsFine_SaysWhatEachBankFeedsAndWhenItAnswered(
         self, tmp_path
@@ -148,7 +188,7 @@ class TestWhenAConsentIsRunningOut:
     ):
         root = page_of(store_of(tmp_path, FINE, EXPIRING))
 
-        assert reconnect_links(root) == ["/connect?name=virgin"]
+        assert todo_reconnects(root) == ["/connect?name=virgin"]
         needed = [li for li in elements(root, "li") if "todo" in li.classes]
         assert len(needed) == 1
         assert "virgin" in needed[0].text()
@@ -163,26 +203,41 @@ class TestWhenAConsentIsRunningOut:
         assert [li.text() for li in needed if "barclays" in li.text()]
         assert "now" in needed[0].classes
         assert "expired 2026-10-01" in needed[0].text()
-        assert reconnect_links(root) == ["/connect?name=barclays"]
+        assert todo_reconnects(root) == ["/connect?name=barclays"]
 
-    def test_Connections_WithOneFineOneExpiringAndOneLapsed_OffersExactlyTwoReconnects(
+    def test_Connections_WithOneFineOneExpiringAndOneLapsed_PutsExactlyTwoAmongWhatNeedsYou(
         self, tmp_path
     ):
         root = page_of(store_of(tmp_path, FINE, EXPIRING, LAPSED))
 
-        assert sorted(reconnect_links(root)) == ["/connect?name=barclays", "/connect?name=virgin"]
+        assert sorted(todo_reconnects(root)) == ["/connect?name=barclays", "/connect?name=virgin"]
 
     def test_Connections_AReconnectNameWithAnAmpersand_IsEncodedSoItNamesTheSameConnection(
         self, tmp_path
     ):
         odd = connection("a&b #1", datetime(2026, 10, 7, 12, 0, tzinfo=UTC))
+        root = page_of(store_of(tmp_path, odd))
 
-        assert reconnect_links(page_of(store_of(tmp_path, odd))) == ["/connect?name=a%26b%20%231"]
+        assert todo_reconnects(root) == ["/connect?name=a%26b%20%231"]
+        assert quiet_reconnects(root) == ["/connect?name=a%26b%20%231"]
 
-    def test_Connections_WhenAConsentEndsFifteenDaysOut_StillOffersNoReconnect(self, tmp_path):
+    def test_Connections_WhenAConsentEndsFifteenDaysOut_IsNotAThingToDoButCanStillBeReconnected(
+        self, tmp_path
+    ):
         later = connection("virgin", NOW + timedelta(days=15, hours=1))
+        root = page_of(store_of(tmp_path, later))
 
-        assert reconnect_links(page_of(store_of(tmp_path, later))) == []
+        assert todo_reconnects(root) == []
+        assert quiet_reconnects(root) == ["/connect?name=virgin"]
+
+    def test_Connections_WhenAConsentEndsFourteenDaysOut_IsAThingToDoAndStillHasItsQuietLink(
+        self, tmp_path
+    ):
+        edge = connection("virgin", NOW + timedelta(days=14))
+        root = page_of(store_of(tmp_path, edge))
+
+        assert todo_reconnects(root) == ["/connect?name=virgin"]
+        assert quiet_reconnects(root) == ["/connect?name=virgin"]
 
 
 class TestOddConnections:
@@ -191,7 +246,7 @@ class TestOddConnections:
 
         text = root.text()
         assert "no consent expiry recorded" in text and "None" not in text
-        assert reconnect_links(root) == []
+        assert todo_reconnects(root) == []
 
     def test_Connections_AConnectionThatHasNeverAnswered_SaysSo(self, tmp_path):
         root = page_of(store_of(tmp_path, FINE), connection_last_answered=lambda: {})

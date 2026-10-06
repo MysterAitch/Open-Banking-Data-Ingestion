@@ -6,7 +6,9 @@ each feeds, when it last answered, and when its consent ends. The files a person
 himself are Bring in's, so they are one line and a link.
 
 SILENCE WHEN FINE. A page where every consent has time and Actual agrees asks for nothing: no
-Reconnect, no press, no list of things to do. What needs him is a thing-to-do row at the top with
+press and no list of things to do. Each bank's own line does carry a quiet Reconnect at any time,
+because renewing early keeps the connection continuous, as cycling a certificate before it
+expires does. What needs him is a thing-to-do row at the top with
 its one control (`web_overview.todo_row_html`, the row Today draws): a consent that is running out
 or has ended, a scheduler that has failed. Actual's verdict is said where it belongs, in its own
 section, in the tone the Actual page gives it, with the press that page offers beneath it.
@@ -128,10 +130,7 @@ def _reconnect_todo(connection: Connection, now: datetime) -> Todo | None:
         why=f"Consent {words}",
         since=None,
         urgency=NOW if urgent else SOON,
-        # Escaping protects the page but not the query string: an unencoded ampersand or hash
-        # would truncate the name in the link, and a name that does not already exist makes a
-        # second connection to the same bank.
-        control=Control(f"Reconnect {name}", f"/connect?name={quote(name, safe='')}"),
+        control=Control(f"Reconnect {name}", _reconnect_href(name)),
     )
 
 
@@ -178,11 +177,27 @@ def _answered(answered: dict[str, str] | None, name: str, today: date) -> str:
     return f"last answered {date_with_age(day, today)}" if day else "has never answered"
 
 
-def _source_row(name: str, clauses: list[str], tone: str = "muted") -> str:
+def _reconnect_href(name: str) -> str:
+    """The address that renews a connection under its own name; a name that does not already
+    exist would make a second connection to the same bank, and an unencoded ampersand or hash
+    would truncate it."""
+    return f"/connect?name={quote(name, safe='')}"
+
+
+def _source_row(
+    name: str, clauses: list[str], tone: str = "muted", *, reconnect: str | None = None
+) -> str:
+    """One source's line. `reconnect` is the connection's own name where it can be renewed at any
+    time, because renewing early keeps the connection continuous and costs nothing."""
     said = "; ".join(clause for clause in clauses if clause)
+    renew = (
+        f'<a class="tap" href="{_esc(_reconnect_href(reconnect))}">Reconnect</a>'
+        if reconnect is not None
+        else ""
+    )
     return (
         '<li class="source">'
-        f'<p class="source-name"><strong>{name}</strong></p>'
+        f'<p class="source-name"><strong>{name}</strong>{renew}</p>'
         f'<p class="source-state {tone}">{said}.</p></li>'
     )
 
@@ -200,7 +215,11 @@ def _sources_html(store: ConnectionStore, hooks: Hooks, now: datetime) -> str:
             _answered(answered, connection.connection_id, today),
             f"consent {consent}",
         ]
-        rows.append(_source_row(_esc(connection.connection_id), clauses, tone))
+        rows.append(
+            _source_row(
+                _esc(connection.connection_id), clauses, tone, reconnect=connection.connection_id
+            )
+        )
     feed = _read(hooks.starling_status, None)
     if feed:
         clauses = [
