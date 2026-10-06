@@ -258,8 +258,8 @@ class TestTenStatementsUploadedAtOnce:
         rows = rows_of(assign_form(parse(upload_ten(base).text)))
         held = kept(root)
 
-        notes = held["Notes-a.pdf"]
-        assert select_of(rows["Notes-a.pdf"]).attrs["name"] == f"account-{notes['id']}"
+        plain = held["Santander-2026-08.pdf"]
+        assert select_of(rows["Santander-2026-08.pdf"]).attrs["name"] == f"account-{plain['id']}"
         saver = sectioned(rows, "07")["Regular Saver"]
         token = held["All-accounts-2025-07.pdf"]["sections"][0]["token"]  # type: ignore[index]
         assert select_of(saver).attrs["name"] == (
@@ -298,10 +298,13 @@ class TestTenStatementsUploadedAtOnce:
         base, _ = served
         rows = rows_of(assign_form(parse(upload_ten(base).text)))
 
+        for name in ("Santander-2026-08.pdf", "Santander-2026-09.pdf"):
+            assert chosen(rows[name]) == "", name
         for name in ("Santander-2026-08.pdf", "Santander-2026-09.pdf", "Notes-a.pdf",
                      "Notes-b.pdf"):
-            assert chosen(rows[name]) == "", name
             assert "went to" not in flat(rows[name]), name
+        for name in ("Notes-a.pdf", "Notes-b.pdf"):
+            assert list(elements(rows[name], "select")) == [], name
 
     def test_Upload_ReadsInNothingThatWasOnlyGuessed(self, served):
         base, root = served
@@ -318,7 +321,7 @@ class TestTenStatementsUploadedAtOnce:
 
     def test_EachChooser_OffersEveryAccountAndTheEmptyChoice(self, served):
         base, _ = served
-        item = rows_of(assign_form(parse(upload_ten(base).text)))["Notes-a.pdf"]
+        item = rows_of(assign_form(parse(upload_ten(base).text)))["Santander-2026-08.pdf"]
         options = [
             (o.attrs.get("value", ""), o.text()) for o in elements(select_of(item), "option")
         ]
@@ -405,7 +408,7 @@ class TestPressingOnceForAMixOfFiles:
         rows = rows_of(assign_form(page))
 
         assert sorted(rows) == ["Notes-a.pdf", "Notes-b.pdf", "Santander-2026-08.pdf"]
-        assert all(chosen(item) == "" for item in rows.values())
+        assert chosen(rows["Santander-2026-08.pdf"]) == ""
         assert "went to" not in flat(assign_form(page))
 
     def test_Press_WhenEveryFileIsChosen_AsksNoQuestionAfterwards(self, served):
@@ -522,12 +525,24 @@ class TestPressingOnceForAMixOfFiles:
 class TestOneFileAndTheUnchangedWays:
     def test_Upload_OfOneStatementNobodyGuessed_AsksWithOneChooserAndAButtonForOne(self, served):
         base, _ = served
+        page = parse(httpx.post(
+            f"{base}/bring-in",
+            files=[part("Santander-2026-09.pdf", santander(D(2026, 9, 12), 1655))],
+            timeout=60,
+        ).text)
+        form = assign_form(page)
+
+        assert [b.text() for b in elements(form, "button")] == ["Read it in"]
+        assert len(rows_of(form)) == 1
+
+    def test_Upload_OfOneDocumentNoReaderReads_OffersNothingToPressFor(self, served):
+        base, _ = served
         page = parse(httpx.post(f"{base}/bring-in", files=[part("Notes-a.pdf", letter("a"))],
                                 timeout=60).text)
 
         form = assign_form(page)
 
-        assert [b.text() for b in elements(form, "button")] == ["Read it in"]
+        assert list(elements(form, "button")) == []
         assert len(rows_of(form)) == 1
 
     def test_Upload_OfOneStatementWhoseReaderAndNameAreKnown_PreSelectsItAndReadsNothingIn(

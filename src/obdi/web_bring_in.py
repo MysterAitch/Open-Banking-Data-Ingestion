@@ -56,7 +56,7 @@ from .bring_in_dry_run import (
 )
 from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
 from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
-from .bring_in_preview import preview_html
+from .bring_in_preview import preview_html, unreadable_html
 from .callback import render_page
 from .connections import Connection, ConnectionStore
 from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
@@ -620,13 +620,24 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
     waiting = results.awaiting()
     if not waiting:
         return ""
-    one = len(waiting) == 1
+    readable = [item for item in waiting if not item.unreadable]
+    one = len(readable) == 1
     texts = dict(results.options)
     rows = []
     for item in waiting:
         field = f"section-{item.artefact}-{item.section}" if item.section else (
             f"account-{item.artefact}"
         )
+        if item.unreadable:
+            # Named in the press by an empty choice, so that it is skipped and said to be: a
+            # chooser here was set by the owner and then ignored.
+            rows.append(
+                '<li class="bi-assign-file">'
+                f'<p class="bi-assign-name">{_called(item)}</p>'
+                f"{unreadable_html(item.artefact, item.names)}"
+                f'<input type="hidden" name="{_esc(field)}" value=""></li>'
+            )
+            continue
         selected = item.guess.account if item.guess else ""
         aria = f"Account for {item.filename}" + (
             f", {item.section_label}" if item.section_label else ""
@@ -640,7 +651,14 @@ def _assign_html(results: UploadResults, names: AccountsShown) -> str:
             f"{account_options(texts, selected=selected)}</select>"
             f"{reason_html(item.guess, names)}{_held_html(item, names)}{item.decision}</li>"
         )
-    guessed = any(item.guess and item.guess.account for item in waiting)
+    if not readable:
+        # Nothing here can be pressed for: the rows say so, with no lead and no control.
+        return (
+            '<form class="bi-assign" method="post" action="/statements-assign">'
+            f"<h3>Kept, and not yet readable</h3>"
+            f'<ul class="bi-assign-list">{"".join(rows)}</ul></form>'
+        )
+    guessed = any(item.guess and item.guess.account for item in readable)
     lead = "Nothing is read in until you press." + (
         " An account already chosen is a guess from earlier statements, with its reason beside it."
         if guessed

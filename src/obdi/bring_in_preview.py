@@ -36,6 +36,17 @@ def _days(listed: object) -> str:
     return "Lists no dated transactions"
 
 
+def unreadable_html(ident: int, names: str) -> str:
+    """What a kept document no reader reads is, in place of a preview: that it cannot be read in
+    yet, the issuer names found in it (`names`, already as markup), and its masked shape, which is
+    what a reader is written from. It is offered neither an account nor a dry run."""
+    shape = f'<a class="tap" href="/statement-shape?artefact={ident}">Masked shape</a>'
+    return (
+        '<p class="bi-preview">Cannot be read in yet - no reader for this layout. '
+        f"Names found: {names}. {shape}</p>"
+    )
+
+
 def preview_html(
     entry: Mapping[str, object], part: Mapping[str, object] | None = None
 ) -> str:
@@ -48,10 +59,7 @@ def preview_html(
     shape = f'<a class="tap" href="/statement-shape?artefact={ident}">Masked shape</a>'
     parser = entry.get("parser")
     if not parser:
-        return (
-            '<p class="bi-preview">No reader reads this file yet, so nothing more can be said '
-            f"of it. {shape}</p>"
-        )
+        return unreadable_html(ident, names_found_words(entry))
     source = part if part is not None else entry
     refusal = str(source.get("refusal") or "")
     rows = source.get("rows")
@@ -75,4 +83,4 @@ def preview_html(
     return f'<p class="bi-preview">{said}{names}{prints} {shape}</p>'
 
 
-__all__ = ["preview_html"]
+__all__ = ["preview_html", "unreadable_html"]

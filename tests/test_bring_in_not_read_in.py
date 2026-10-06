@@ -155,6 +155,35 @@ class TestTheAnswerLeadsWithAFileNotReadIn:
 
 
 class TestTheRowOfAFileNoReaderReads:
+    def test_Row_SaysItCannotBeReadInYetAndOffersNothingToChooseOrPreview(self, served):
+        base, root = served
+        page = parse(two_files(base).text)
+
+        row = rows_of(assign_form(page))[CARD]
+        said = flat(row)
+        ident = kept(root)[CARD]["id"]
+
+        assert "Cannot be read in yet - no reader for this layout." in said
+        assert "Nationwide 1" in said and "Mastercard 1" in said
+        assert list(elements(row, "select")) == []
+        assert "What reading it in would do" not in said
+        assert "Show values" not in said
+        assert [a.attrs["href"] for a in elements(row, "a") if a.text() == "Masked shape"] == [
+            f"/statement-shape?artefact={ident}"
+        ]
+        assert "No reader reads this file yet" not in said
+
+    def test_Row_AfterAPress_StillSaysItCannotBeReadInAndOffersNoChooser(self, served):
+        base, root = served
+        page = parse(two_files(base).text)
+
+        answer = press(base, page, root, {READABLE: "up-card"})
+        row = rows_of(assign_form(answer))[CARD]
+
+        assert list(elements(row, "select")) == []
+        assert "Cannot be read in yet - no reader for this layout." in flat(row)
+        assert "Nationwide 1" in flat(row)
+
     def test_Row_OfAReadableFile_StillOffersItsChooser(self, served):
         base, _ = served
         page = parse(two_files(base).text)
