@@ -106,6 +106,7 @@ from .web_accounts import (
     submit_button,
 )
 from .web_balance_chart import BalanceChartPages
+from .web_bring_in import BringInPages
 from .web_coverage_timeline import CoverageTimelinePages
 from .web_destinations import DestinationPages
 from .web_empty import (
@@ -115,9 +116,9 @@ from .web_empty import (
     plan_from_audit,
 )
 from .web_flags import FlagPages
-from .web_gaps import FETCH_NEXT_LINE, GapPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
+from .web_marks import FETCH_NEXT_LINE
 from .web_overview import overview_html
 from .web_position import PositionPages
 from .web_prune import (
@@ -138,6 +139,7 @@ from .web_sections import (
     system_strip_html,
     way_back,
 )
+from .web_set_aside import SetAsidePages
 from .web_transfer_skips import relinked_pairs_block, skipped_pairs_block
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
@@ -3553,7 +3555,8 @@ class ConnectionHandler(
     CoverageTimelinePages,
     PositionPages,
     DestinationPages,
-    GapPages,
+    BringInPages,
+    SetAsidePages,
     SectionPages,
     BaseHTTPRequestHandler,
 ):
@@ -3702,10 +3705,10 @@ class ConnectionHandler(
             self._import_page()
             return
         if route == "/bring-in":
-            self._bring_in_page()
+            self._bring_in_page(params)
             return
         if route == "/gaps":
-            self._gaps_page()
+            self._gaps_redirect(params)
             return
         if route == "/gaps-mark":
             self._gaps_mark_form(params)
@@ -6388,6 +6391,14 @@ class ConnectionHandler(
         if route == "/protect-accept":
             self._protect_accept_post(self._read_form())
             return
+        if route == "/bring-in":
+            length = int(self.headers.get("Content-Length") or 0)
+            self._bring_in_post(
+                self.headers.get("Content-Type") or "",
+                length,
+                lambda: self.rfile.read(length),
+            )
+            return
         if route == "/gaps-mark":
             self._gaps_mark_post(self._read_form())
             return
@@ -7765,6 +7776,15 @@ class ConnectionHandler(
             self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _stash(self, payload: bytes, filename: str) -> str:
+        return self.uploads.stash(payload, filename)
 
     def log_message(self, format: str, *args: object) -> None:
         """Silence the access log: the callback URL carries the code."""

@@ -1,51 +1,29 @@
 # ruff: noqa: E501
-"""The What to fetch next page's own rules, joined into the one stylesheet by `stylesheet`.
+"""What the owner has set aside: the rules of the set-aside pages and of the fold on Bring in.
 
-Written with the shared tokens only: no colour, face, or size is declared here, and every rule
-leads with a class of this page's own.
-
-THE SHAPE. An account is a heading and a list of slips, one for each file to fetch. A slip leads
-with the dates the owner types into a bank's site, in the monospace face at the largest size the
-page uses, because that is the one thing read off the screen and typed somewhere else; the
-instruction and the reason follow in the page's ordinary type, the reason quieter. A rail on the
-slip's edge tells fact from guess: solid where the store holds the evidence, dashed where the gap
-is inferred from how regularly the statements arrive, so the two differ without a word being read.
+Written with the shared tokens only: no colour, face, or size is declared here. These rules are
+NOT in the stylesheet every page carries: they are written into the pages that use them
+(`web_marks.MARKS_STYLE_TAG`), because the balance chart's page-size bound sits within a few
+hundred bytes of the limit and a rule that only a few pages need has no business in every page.
+A contradicted mark is the one amber block on Bring in that is not a file wanted: it sits above
+the accounts because it says an earlier decision of the owner's is wrong, and it does not shout,
+for it is his own mark and one tap removes it.
 """
 
-GAPS_STYLES = """
- .gaps-verdict { font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
- .gaps-verdict.quiet-ok { font: 400 var(--text-md)/150% var(--sans); }
- .gaps-account { margin: var(--s5) 0; }
- .gaps-name { margin: 0 0 var(--s2); font: 600 var(--text-xl)/var(--leading-tight) var(--serif); }
- .gaps-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
- .gaps-item { background: var(--card); border: var(--rule-weight) solid var(--rule); border-radius: var(--radius);
-              padding: var(--s3) var(--s4); border-left-width: var(--rail); border-left-color: var(--warn); }
- .gaps-item.gaps-inferred { border-left-style: dashed; }
- .gaps-item p { margin: var(--s1) 0; }
- .gaps-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); }
- .gaps-kind { font: 600 var(--text-sm)/150% var(--sans); }
- .gaps-source { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
- .gaps-item .gaps-range { font-size: var(--text-xl); font-weight: 600; line-height: var(--leading-tight); margin: var(--s2) 0 var(--s1); overflow-wrap: anywhere; }
- .gaps-do { font-size: var(--text-base); line-height: var(--leading-prose); }
- .gaps-why { font: var(--text-md)/150% var(--sans); color: var(--ink-2); }
- .gaps-actions, .gaps-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
- .gaps-item .gaps-links { margin: var(--s1) 0 0; }
- .gaps-quiet-head { margin: var(--s5) 0 var(--s2); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
- .gaps-quiet { list-style: none; margin: 0; padding: 0; font: var(--text-md)/150% var(--sans); }
- .gaps-quiet-item { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
- .gaps-notes { margin-top: var(--s5); font-size: var(--text-sm); }
+MARKS_STYLES = """
  @media (min-width: 60rem) {
   body.gaps-page { max-width: 56rem; }
  }
-"""
-
-# What the owner has set aside. These rules are NOT in the stylesheet every page carries: they
-# are written into the two pages that use them (`web_marks.MARKS_STYLE_TAG`), because the
-# balance chart's page-size bound sits within a few hundred bytes of the limit and a rule that
-# only two pages need has no business in every page. A contradicted mark is the one amber block
-# on the page that is not a gap: it sits above the accounts because it says an earlier decision
-# of the owner's is wrong, and it does not shout, for it is his own mark and one tap removes it.
-MARKS_STYLES = """
+ .gaps-quiet { list-style: none; margin: 0; padding: 0; font: var(--text-md)/150% var(--sans); }
+ .gaps-quiet-item { padding: var(--s2) 0; border-top: var(--rule-weight) solid var(--rule-2); }
+ .gaps-quiet-head { margin: var(--s5) 0 var(--s2); font: 600 var(--text-lg)/var(--leading-tight) var(--serif); }
+ .gaps-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+ .gaps-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s1) var(--s2); }
+ .gaps-kind { font: 600 var(--text-sm)/150% var(--sans); }
+ .gaps-source { font: var(--text-sm)/150% var(--sans); color: var(--ink-2); }
+ .gaps-range { font-size: var(--text-xl); font-weight: 600; line-height: var(--leading-tight); margin: var(--s2) 0 var(--s1); overflow-wrap: anywhere; }
+ .gaps-why { font: var(--text-md)/150% var(--sans); color: var(--ink-2); }
+ .gaps-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
  .gaps-decide { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s4); margin: var(--s2) 0 0; }
  .gaps-ack, .gaps-undo { margin: 0; }
  .gaps-contradictions { list-style: none; margin: var(--s3) 0; padding: 0; display: grid; gap: var(--s3); }

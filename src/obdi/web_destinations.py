@@ -16,29 +16,20 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC
 from functools import lru_cache
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import AccountShown, AccountsShown
-from .alerts import consent_rung
-from .bank_balances import BANK_SOURCE
+from .account_names import AccountsShown
 from .callback import render_page
 from .checks_index import CHECKS, CheckResult, result_of
-from .fetch_gaps import FetchReport
-from .namespaces import UNASSIGNED_ACCOUNT
 from .navigation import PAGE_NAMES, page_name
 from .overview import OVERVIEW_CACHE_SECONDS, Overview
-from .page_times import UTC_NOTE, instant_of
-from .plural import plural
-from .pull import STARLING_CONNECTION
-from .web_gaps import verdict_sentence
+from .page_times import instant_of
 from .web_sections import HookTimer
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .connections import ConnectionStore
     from .web import WebConfig
 
 _esc = html.escape
@@ -153,263 +144,6 @@ def render_checks(overview: Overview | None, *, review_flags_linked: bool = Fals
         '<a class="tap" href="/checks?fresh=1">Check again</a></p>'
     )
     return render_page(page_name("/checks"), body, wide=True, body_class="hub-page")
-
-
-# ------------------------------------------------------------------------------------ Bring in
-
-
-def _connection_line(
-    name: str, expires: str, days: int | None, answered: str | None
-) -> str:
-    heard = f"last answered {_stamp(answered)}" if answered else "has never answered"
-    if days is None:
-        consent = "no consent expiry recorded"
-    else:
-        consent = f"consent expires {_esc(expires)} ({days} days)"
-    return f"<li><strong>{_esc(name)}</strong> - {heard}; {consent}</li>"
-
-
-@dataclass(frozen=True)
-class BankFeed:
-    """What this process can say of the household's own bank's feed, read with its own API.
-
-    `configured` is whether the bank's access token resolved when the process started; a token
-    supplied later is not seen until it restarts. `answered` is the instant the feed last had an
-    ask land, or None when none has. `accounts` are the names of the accounts its rows are held
-    under, which is every account the feed has ever delivered a row for.
-    """
-
-    configured: bool
-    answered: str | None
-    accounts: tuple[AccountShown, ...]
-
-
-#: How many account names are listed before the line says a count alone.
-_NAMED_ACCOUNTS = 3
-
-
-def bank_feed_of(
-    *,
-    configured: bool,
-    answered: str | None,
-    held: dict[tuple[str, str], list[str]],
-    names: AccountsShown,
-) -> BankFeed:
-    """The feed's state from what the page's hooks give: who fed which account, and the names."""
-    refs = sorted({account for account, source in held if source == BANK_SOURCE})
-    return BankFeed(
-        configured=configured, answered=answered, accounts=tuple(names.of(ref) for ref in refs)
-    )
-
-
-def _feed_row(feed: BankFeed | None) -> str:
-    """The bank's own feed as a connection in its own right, quiet where it is not set up.
-
-    It is the way data most reliably comes in, and is reached with a token the owner holds
-    rather than a bank sign-in, so it is neither among the aggregator's connections nor a
-    fault when absent: a deployment without it says so and carries on.
-    """
-    name = "The bank's own feed"
-    if feed is None:
-        return _row("/attempts", name, "Not available on this instance.")
-    if feed.configured:
-        heard = (
-            f"Last answered {_stamp(feed.answered)}." if feed.answered else "Has never answered."
-        )
-        said = [_esc(f"Read directly from the bank, not through the aggregator. {heard}")]
-    else:
-        said = [
-            _esc("Not configured here: the bank's access token is not set, so nothing is read.")
-        ]
-        if feed.answered:
-            said.append(_esc(f"It last answered {_stamp(feed.answered)}."))
-    if feed.accounts:
-        if len(feed.accounts) <= _NAMED_ACCOUNTS:
-            shown = ", ".join(account.inline() for account in feed.accounts)
-            said.append(f"Feeds {_esc(plural(len(feed.accounts), 'account'))}: {shown}.")
-        else:
-            said.append(_esc(f"Feeds {plural(len(feed.accounts), 'account')}."))
-    elif feed.configured:
-        said.append("No account is fed yet.")
-    chip = "" if not feed.configured or feed.answered else _chip("no answer yet", "warn")
-    return _row("/attempts", name, " ".join(said), chip=chip)
-
-
-def _connected_line(feed: BankFeed | None, aggregator: int) -> str:
-    """What is connected, in two terms: the bank's own feed, and the aggregator's banks."""
-    parts = []
-    if feed is not None and feed.configured:
-        parts.append("1 bank's own feed")
-    if aggregator:
-        parts.append(f"{plural(aggregator, 'bank')} through the aggregator")
-    if not parts:
-        return ""
-    return f'<p class="hub-age">Connected: {_esc(" and ".join(parts))}.</p>'
-
-
-def _connections_row(
-    store: ConnectionStore | None,
-    answered: dict[str, str],
-    *,
-    now: datetime,
-) -> str:
-    try:
-        connections = sorted(store, key=lambda c: c.connection_id) if store is not None else []
-    except Exception:
-        return _row("/connections", "Connect a bank", _esc("The connections could not be read."))
-    if not connections:
-        return _row(
-            "/connections",
-            "Connect a bank",
-            "No bank is connected. A bank's own sign-in links its accounts here.",
-        )
-    dated = [
-        (expiry, days)
-        for connection in connections
-        if (expiry := connection.consent_expires_on()) is not None
-        and (days := connection.consent_days_remaining(now=now)) is not None
-    ]
-    count = f"{plural(len(connections), 'bank')} connected through the aggregator"
-    chip = ""
-    sentence = count + "."
-    if dated:
-        soonest, days = min(dated, key=lambda pair: pair[0])
-        sentence = f"{count}. The soonest consent expires {soonest.isoformat()} ({days} days)."
-        if consent_rung(days) is not None:
-            chip = _chip("reconnect soon", "warn")
-    lines = "".join(
-        _connection_line(
-            connection.connection_id,
-            expiry.isoformat() if (expiry := connection.consent_expires_on()) else "",
-            connection.consent_days_remaining(now=now),
-            answered.get(connection.connection_id),
-        )
-        for connection in connections
-    )
-    return _row(
-        "/connections",
-        "Connect a bank",
-        _esc(sentence),
-        chip=chip,
-        more=f'<ul class="hub-list">{lines}</ul>',
-    )
-
-
-def _statements_row(kept: Callable[[], list[dict[str, object]]] | None) -> str:
-    if kept is None:
-        return _row("/statements", "Statements kept", "Not available on this instance.")
-    try:
-        entries = kept()
-    except Exception:
-        return _row("/statements", "Statements kept", "The kept statements could not be read.")
-    if not entries:
-        return _row("/statements", "Statements kept", "No statement has been kept yet.")
-    unassigned = sum(1 for e in entries if e["account_ref"] == UNASSIGNED_ACCOUNT)
-    unread = sum(1 for e in entries if not e.get("parser") or e.get("refusal"))
-    parts = [f"{len(entries)} kept"]
-    parts.append(f"{unassigned} waiting for an account")
-    parts.append(f"{unread} not read")
-    waiting = bool(unassigned or unread)
-    return _row(
-        "/statements",
-        "Statements kept",
-        _esc(", ".join(parts) + "."),
-        chip=_chip("waiting", "warn") if waiting else _chip("all filed", "ok"),
-    )
-
-
-def _fetch_row(report: Callable[[], FetchReport] | None) -> str:
-    """The row that leads the hub: what is still to fetch, in the page's own verdict sentence."""
-    name = page_name("/gaps")
-    if report is None:
-        return ""
-    try:
-        found = report()
-    except Exception:
-        return _row("/gaps", name, "What is still to fetch could not be read just now.")
-    waiting = bool(found.gaps)
-    return _row(
-        "/gaps",
-        name,
-        _esc(verdict_sentence(found)),
-        chip=_chip("to fetch", "warn") if waiting else _chip("nothing due", "ok"),
-        tone="warn" if waiting else "",
-    )
-
-
-def _count_connections(store: ConnectionStore | None) -> int:
-    try:
-        return len(list(store)) if store is not None else 0
-    except Exception:
-        return 0
-
-
-def render_bring_in(
-    store: ConnectionStore | None,
-    *,
-    last_answered: Callable[[], dict[str, str]] | None = None,
-    kept_statements: Callable[[], list[dict[str, object]]] | None = None,
-    bank_feed: Callable[[dict[str, str]], BankFeed] | None = None,
-    fetch_report: Callable[[], FetchReport] | None = None,
-    now: datetime | None = None,
-) -> bytes:
-    """Every way data enters, each with its state, each linking to the page that does it.
-
-    `bank_feed` is given what each connection last answered, since the feed's own answer is among
-    them, and returns what is known of the feed; a hook that fails leaves the row saying the feed
-    could not be read and not the whole page.
-    """
-    moment = now or datetime.now(UTC)
-    answered: dict[str, str] = {}
-    if last_answered is not None:
-        try:
-            answered = last_answered()
-        except Exception:
-            answered = {}
-    feed: BankFeed | None = None
-    unread_feed = False
-    if bank_feed is not None:
-        try:
-            feed = bank_feed(answered)
-        except Exception:
-            unread_feed = True
-    # What is still to fetch leads, since the owner opens this page to find out; then the bank's
-    # own feed, the most direct way in, which the line above names first.
-    rows = [
-        _fetch_row(fetch_report),
-        _row(
-            "/attempts", "The bank's own feed", _esc("The bank's feed could not be read just now.")
-        )
-        if unread_feed
-        else _feed_row(feed),
-        _connections_row(store, answered, now=moment),
-        _row(
-            "/import",
-            "Import an export file",
-            "A bank's CSV or QIF export. The preview checks it against the account before "
-            "anything is stored.",
-        ),
-        _row(
-            "/statement-shape",
-            "Upload a statement",
-            "A PDF statement. It is kept as evidence and its layout shown with every value "
-            "masked, then you say whose it is.",
-        ),
-        _statements_row(kept_statements),
-        _row(
-            "/coverage-timeline",
-            page_name("/coverage-timeline"),
-            "Where each source reaches, day by day, and where to fetch next.",
-        ),
-    ]
-    shows_instant = bool(answered) or (feed is not None and feed.answered is not None)
-    body = (
-        '<p class="lede">Every way data reaches obdi, and where each stands.</p>'
-        + _connected_line(feed, _count_connections(store))
-        + _rows(rows)
-        + (f'<p class="muted hub-age">{_esc(UTC_NOTE)}</p>' if shows_instant else "")
-    )
-    return render_page(page_name("/bring-in"), body, wide=True, body_class="hub-page")
 
 
 # ------------------------------------------------------------------------------------ Diagnostics
@@ -553,7 +287,7 @@ def render_diagnostics(
 #: The pages an account list leads on to, beside the accounts themselves.
 ACCOUNT_LINKS: tuple[tuple[str, str, str], ...] = (
     ("/coverage", "Coverage by source", "what history each source holds for each account"),
-    ("/gaps", "What to fetch next", "the statements and exports still to fetch, with dates"),
+    ("/bring-in", "Bring in", "the statements and exports still to fetch, with dates"),
     ("/coverage-timeline", "Coverage timeline", "where each source reaches, by day, as a chart"),
     ("/spaces", "Spaces", "pots recovered from the bank's feed, to declare or leave"),
     ("/review", "Categorise", "payments that have no category yet"),
@@ -597,33 +331,6 @@ class DestinationPages:
             overview, review_flags_linked=dispatcher_serves("/review-flags")
         )
         timer.report("/checks")
-        self._respond(200, page)
-
-    def _bring_in_page(self) -> None:
-        config, timer = self.bound_config, HookTimer()
-        sources = timer.wrap("source_connections", config.source_connections)
-        names = timer.wrap("account_names", config.account_names)
-        configured = config.starling_probe is not None
-        fetch = timer.wrap("fetch_gaps", config.fetch_gaps)
-
-        def feed(answered: dict[str, str]) -> BankFeed:
-            return bank_feed_of(
-                configured=configured,
-                answered=answered.get(STARLING_CONNECTION),
-                held=sources() if sources is not None else {},
-                names=names() if names is not None else AccountsShown(),
-            )
-
-        page = render_bring_in(
-            config.connection_store,
-            last_answered=timer.wrap("connection_last_answered", config.connection_last_answered),
-            kept_statements=timer.wrap("kept_statements", config.kept_statements),
-            bank_feed=feed,
-            fetch_report=(
-                None if fetch is None else lambda: fetch(datetime.now(UTC).date())
-            ),
-        )
-        timer.report("/bring-in")
         self._respond(200, page)
 
     def _diagnostics_page(self) -> None:

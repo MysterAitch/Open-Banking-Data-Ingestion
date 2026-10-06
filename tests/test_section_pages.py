@@ -222,7 +222,7 @@ class TestEachPageOpensWithWhatItIsForAndMarksItsSection:
         page = fetch(serve(holdings=coverage_rows), "/coverage")
 
         assert page.index('class="cov-summary"') < page.index('href="/coverage-timeline"')
-        assert 'href="/gaps"' in page
+        assert 'href="/bring-in"' in page
 
     def test_ImportPage_ExplainsBothDoorsAndLinksTheStatementUpload(self, serve):
         page = fetch(serve(), "/import")

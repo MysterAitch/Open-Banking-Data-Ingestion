@@ -34,13 +34,15 @@ from obdi.account_names import AccountsShown
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.fetch_gaps import Basis, GapKind, fetch_report, gather_evidence
+from obdi.fetch_reasons import gap_lines as _lines
 from obdi.ingest import import_file
 from obdi.spaces import SPACE_KIND
 from obdi.standing_data import standings_for
 from obdi.statement_span import HoleReason
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store
-from obdi.web_gaps import _lines, render_gaps
+from obdi.web_bring_in import BringInData, render_bring_in
+from page_dom import elements, parse
 from statement_span_world import Spend, feed, statement
 
 D = date
@@ -311,13 +313,21 @@ class TestSpacesAreNotAskedForStatements:
         assert orphan.space_of == ""
         assert [g.kind for g in orphan.gaps] == [GapKind.AUTOMATIC_ONLY]
 
-    def test_ThePage_SaysHowAFamilyIsTestedAndNeverAsksForAStatement(self, household):
+    def test_ThePage_NeverListsASpaceAndNeverAsksForAStatementForOne(self, household):
         report, _ = household
-        page = render_gaps(report, AccountsShown()).decode()
+        page = render_bring_in(
+            BringInData(today=TODAY, report=report, unread="", names=AccountsShown())
+        ).decode()
+        blocks = {
+            s.attrs.get("aria-label")
+            for s in elements(parse(page), "section")
+            if "bi-account" in s.classes
+        }
 
-        assert "a Space of" in page
-        assert "no statement exists for a Space" in page
-        assert "sp-feed" in page
+        assert {"sp-feed", "sp-qif", "sp-one"}.isdisjoint(blocks)
+        # The family's one gap is a balance to state (AUTOMATIC_ONLY), an account page's to-do and
+        # not a file, so no account of the family has a block here.
+        assert "sp-main" not in blocks
 
     def test_TheMainAccountOfSpaces_KeepsItsOwnGap(self, household):
         report, _ = household

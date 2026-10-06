@@ -1151,7 +1151,7 @@ def _entries_html(ref: str, entries: Sequence[_Entry]) -> str:
         for entry in found:
             links = entry.links or _links_for(ref, entry, review=key == "look")
             if key == "fetch":
-                links = [("/gaps", "What to fetch next"), *links]
+                links = [(f"/bring-in#account-{quote(ref, safe='')}", "Bring in"), *links]
             items = "".join(
                 f'<li><a href="{_esc(href)}">{_esc(text)}</a></li>' for href, text in links
             )

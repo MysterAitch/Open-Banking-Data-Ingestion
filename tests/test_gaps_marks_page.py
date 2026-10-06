@@ -36,11 +36,12 @@ from fetch_marks_world import (
     scope,
 )
 from obdi.account_names import accounts_shown
+from obdi.bring_in import files_wanted, wanted_heading
 from obdi.cli import build_web_config
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
-from obdi.web_gaps import render_gaps, verdict_sentence
-from obdi.web_marks import evidence_text
+from obdi.web_bring_in import BringInData, Evidence, render_bring_in
+from obdi.web_marks import evidence_text, verdict_clauses
 from page_dom import elements, parse
 
 VIRGIN = (D(2026, 6, 5), D(2026, 7, 4))
@@ -54,8 +55,26 @@ def db(tmp_path):
     return household(tmp_path)
 
 
-def page(db, today=TODAY) -> str:
-    return render_gaps(report_with(db, read_at(db, today), today), NAMES).decode()
+def page(db, today=TODAY, *, evidence: bool = False) -> str:
+    report = report_with(db, read_at(db, today), today)
+    return render_bring_in(
+        BringInData(
+            today=today,
+            report=report,
+            unread="",
+            names=NAMES,
+            evidence=Evidence("Every source looked at today at 08:12" if evidence else ""),
+        )
+    ).decode()
+
+
+def decided(report) -> list[str]:
+    """What the owner's decisions took out of the list, as the page's evidence line says it."""
+    return verdict_clauses(report.set_aside, report.out_of_scope, len(report.marks.contradicted))
+
+
+def wanted(report) -> str:
+    return wanted_heading(files_wanted(report))
 
 
 def words(markup: str) -> str:
@@ -63,76 +82,68 @@ def words(markup: str) -> str:
     return re.sub(r" ([.,;:?])", r"\1", plain)
 
 
-class TestTheVerdictCountsEachKindApart:
-    def test_Verdict_WhenAHoleIsMarkedNothingToFetch_SaysSoAndCountsOnlyWhatIsStillToFetch(
-        self, db
-    ):
+class TestWhatIsWantedCountsEachKindOfDecisionApart:
+    def test_Count_WhenAHoleIsMarkedNothingToFetch_DropsItAndSaysSoInTheEvidenceLine(self, db):
         mark(db, account="card-virgin", kind="nothing-to-fetch",
              first_day=VIRGIN[0], last_day=VIRGIN[1])
+        report = report_with(db, marks_read(db))
 
-        assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "11 things to fetch for 9 accounts; 4 accounts need nothing; "
-            "1 with nothing to fetch."
-        )
+        assert wanted(report) == "Wanted: 8 statements and 2 exports for 7 accounts"
+        assert decided(report) == ["1 with nothing to fetch"]
+        assert "Set aside by you: 1 with nothing to fetch." in words(page(db, evidence=True))
 
-    def test_Verdict_WhenTheSameHoleIsAcknowledgedInstead_SaysKnownGapNotNothingToFetch(self, db):
+    def test_Count_WhenTheSameHoleIsAcknowledgedInstead_SaysKnownGapNotNothingToFetch(self, db):
         mark(db, account="card-virgin", kind="known-gap", first_day=VIRGIN[0], last_day=VIRGIN[1])
 
-        said = verdict_sentence(report_with(db, marks_read(db)))
+        assert decided(report_with(db, marks_read(db))) == ["1 known gap acknowledged"]
 
-        assert said.endswith("; 1 known gap acknowledged.")
-        assert "nothing to fetch." not in said.split("; ")[-1]
-
-    def test_Verdict_WhenSeveralKindsAreSetAside_NamesEachWithItsOwnCount(self, db):
+    def test_Count_WhenSeveralKindsAreSetAside_NamesEachWithItsOwnCount(self, db):
         mark(db, account="card-virgin", kind="known-gap", first_day=VIRGIN[0], last_day=VIRGIN[1])
         mark(db, account="card-late-one", kind="nothing-to-fetch",
              first_day=D(2026, 6, 11), last_day=D(2026, 7, 31))
         scope(db, first_day=D(2026, 4, 1))
 
-        said = verdict_sentence(report_with(db, marks_read(db)))
+        said = decided(report_with(db, marks_read(db)))
 
         assert "1 known gap acknowledged" in said
         assert "1 before your record begins" in said
 
-    def test_Verdict_WhenNothingIsDecided_IsExactlyWhatItWas(self, db):
-        assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "12 things to fetch for 10 accounts; 3 accounts need nothing."
-        )
+    def test_Count_WhenNothingIsDecided_IsExactlyWhatItWas(self, db):
+        report = report_with(db, marks_read(db))
 
-    def test_Verdict_WhenAMarkIsContradicted_CountsItAndTheGapStillCounts(self, db):
+        assert wanted(report) == "Wanted: 9 statements and 2 exports for 8 accounts"
+        assert decided(report) == []
+        assert "Set aside by you:" not in words(page(db, evidence=True))
+
+    def test_Count_WhenAMarkIsContradicted_CountsItAndTheGapStillCounts(self, db):
         add_feed_rows_in_virgin_hole(db)
         mark(db, account="card-virgin", kind="nothing-to-fetch",
              first_day=VIRGIN[0], last_day=VIRGIN[1])
+        report = report_with(db, marks_read(db))
 
-        assert verdict_sentence(report_with(db, marks_read(db))) == (
-            "12 things to fetch for 10 accounts; 3 accounts need nothing; "
-            "1 mark is contradicted by what is held."
-        )
+        assert wanted(report) == "Wanted: 9 statements and 2 exports for 8 accounts"
+        assert decided(report) == ["1 mark is contradicted by what is held"]
 
 
-class TestEachGapOffersTwoWaysToSetItAside:
-    def test_Gap_OffersOneTapAcknowledgementAndALinkThatOpensTheForm(self, db):
+class TestEachFileOffersToBeSetAside:
+    def test_File_OffersALinkThatOpensTheFormForExactlyItsDays(self, db):
         markup = page(db)
         section = markup.split('aria-label="Virgin card"')[1].split("</section>")[0]
 
-        assert "Acknowledge this gap" in section
-        assert 'action="/gaps-mark"' in section
         assert (
             'href="/gaps-mark?account=card-virgin&amp;first=2026-06-05&amp;last=2026-07-04"'
             in section
         )
-        assert "Nothing to fetch for this period..." in section
+        assert ">Set aside&hellip;<" in section.replace("…", "&hellip;")
 
-    def test_Gap_WhenSplitByAMark_SaysWhatRemainsOfTheOriginal(self, db):
+    def test_File_WhenPartOfItsDaysAreSetAside_IsWantedForWhatRemains(self, db):
         mark(db, account="card-hole", kind="nothing-to-fetch",
              first_day=D(2026, 3, 11), last_day=D(2026, 3, 31))
 
         said = words(page(db).split('aria-label="Hole card"')[1].split("</section>")[0])
 
-        assert "2026-04-01 to 2026-04-10" in said
-        assert (
-            "This is what remains of 2026-03-11 to 2026-04-10 after the part you set aside."
-        ) in said
+        assert "Statement 2026-04-01 to 2026-04-10" in said
+        assert "2026-03-11 to 2026-03-31" not in said.split("Why each")[0]
 
 
 class TestAContradictedMarkStandsOut:
@@ -146,7 +157,7 @@ class TestAContradictedMarkStandsOut:
         markup = page(db)
         warned = markup.split('class="gaps-contradictions"')[1].split("</ul>")[0]
 
-        assert markup.index("gaps-contradictions") < markup.index('class="gaps-account"')
+        assert markup.index("gaps-contradictions") < markup.index('class="bi"')
         assert (
             "You marked this period as having no transactions; another source holds 2 payments "
             "dated in it that no statement held lists, from 2026-06-20 to 2026-07-01."
@@ -173,7 +184,7 @@ class TestEvidenceWords:
     def test_NothingToFetch_WhenNoRowIsListed_SaysSupportedInNoStrongerWords(self, db):
         said = self.evidence(db, "card-virgin", "nothing-to-fetch", *VIRGIN)
 
-        assert said.startswith("No source lists a row in this period.")
+        assert said.startswith("No source lists a transaction in this period.")
         assert "does not prove it" in said
 
     def test_NothingToFetch_WhenRowsAreListed_SaysItWouldDisagreeBeforeItIsMade(self, db):
@@ -201,7 +212,8 @@ class TestEvidenceWords:
                              source="starling-csv")
 
         assert said == (
-            "The aggregator still lists rows in this period, so it can still be had from there."
+            "The aggregator still lists transactions in this period, so it can still be had "
+            "from there."
         )
 
     def test_KnownGap_SaysNothingAboutTheData(self, db):
@@ -213,7 +225,7 @@ class TestTheAggregatorsReach:
         said = words(page(db).split('class="gaps-reach"')[1].split("</section>")[0])
 
         assert "Main account main: the aggregator's history begins 2026-03-15" in said
-        assert "a request for days back to 2026-01-01 came back with no rows" in said
+        assert "a request for days back to 2026-01-01 came back with no transactions" in said
         assert "Mark everything before 2026-03-15 as before its history?" in said
 
     def test_Page_WhenNothingWasAskedFurtherBack_SaysSoAndOffersNothing(self, db):
@@ -243,7 +255,7 @@ class TestTheFoldedSection:
         assert "Set aside by your decision (1)" in said
         assert "Nothing to fetch" in said and "supported by what is held" in said
         assert "2026-06-05 to 2026-07-04" in said
-        assert "No source lists a row in this period." in said
+        assert "No source lists a transaction in this period." in said
         assert "your decision" in said
         assert "the card was frozen &lt;b&gt;that&lt;/b&gt; month" in folded
         assert "<b>that</b>" not in folded, "the note is shown as typed text, never as markup"
@@ -284,7 +296,7 @@ class TestScopeIsSaidOnceQuietly:
         assert (
             "You keep Main account main from 2024-10-05 (the last 24 months); earlier days "
         ) in said
-        assert "Rows before it are still held and still tested." in said
+        assert "Transactions before it are still held and still tested." in said
 
     def test_Page_WhenTheFirstKnownBalanceIsBeforeTheScope_SaysItStillCarriesTheRows(self, db):
         scope(db, first_day=D(2026, 6, 1))
@@ -292,7 +304,7 @@ class TestScopeIsSaidOnceQuietly:
         said = words(page(db).split('class="gaps-scope-lines')[1].split("</ul>")[0])
 
         assert (
-            "first known balance, 2026-01-11, is before that day and still carries the rows"
+            "first known balance, 2026-01-11, is before that day and still carries the transactions"
         ) in said
 
     def test_Page_WhenARollingScopeHasMovedPastAGap_SaysItLeftUnfilledOnTheDay(self, db):
@@ -340,7 +352,7 @@ class TestMakingAndUndoingOverHttp:
 
         said = words(response.text)
         assert response.status_code == 200
-        assert "No source lists a row in this period." in said
+        assert "No source lists a transaction in this period." in said
         assert "Known gap" in said and "Other" in said
         assert "changes nothing about what is verified" in said
         assert response.text.count('type="radio" name="kind"') == 6
@@ -364,7 +376,8 @@ class TestMakingAndUndoingOverHttp:
                          last="2026-07-04").text)
 
         assert (
-            "The aggregator still lists rows in this period, so it can still be had from there."
+            "The aggregator still lists transactions in this period, so it can still be had "
+            "from there."
         ) in said
         assert "after all" not in said
 
@@ -375,7 +388,9 @@ class TestMakingAndUndoingOverHttp:
                         last="2026-05-04", kind="nothing-to-fetch", step="check")
 
         assert response.status_code == 200
-        assert "lists 1 row" in words(response.text) or "No source lists a row" in words(
+        assert "lists 1 transaction" in words(response.text) or (
+            "No source lists a transaction"
+        ) in words(
             response.text)
         assert marks_read(db).readings == ()
 
@@ -398,22 +413,22 @@ class TestMakingAndUndoingOverHttp:
         assert response.status_code == 200, response.text
         assert f"Set aside as {label}: Virgin card (card-virgin)" in words(response.text) or (
             f"Set aside as {label}: card-virgin" in words(response.text))
-        assert 'href="/gaps"' in response.text
+        assert 'href="/bring-in"' in response.text
         (made,) = marks_read(db).readings
         assert made.mark.kind.value == kind
-        listed = get(served, "/gaps").text
+        listed = get(served, "/bring-in").text
         assert "Set aside by your decision" in listed
 
     def test_Mark_WhenAKnownGapIsAcknowledged_TheGapLeavesTheListAndUndoBringsItBack(
         self, served
     ):
-        before = get(served, "/gaps").text
+        before = get(served, "/bring-in").text
         post(served, "/gaps-mark", account="card-virgin", source="", first="2026-06-05",
              last="2026-07-04", kind="known-gap", step="mark")
-        during = get(served, "/gaps").text
+        during = get(served, "/bring-in").text
         mark_id = re.search(r'name="id" value="(\d+)"', during).group(1)
         undone = post(served, "/gaps-mark-undo", id=mark_id)
-        after = get(served, "/gaps").text
+        after = get(served, "/bring-in").text
 
         assert "2026-06-05 to 2026-07-04" in words(
             before.split('aria-label="Virgin card"')[1].split("</section>")[0]
@@ -487,7 +502,7 @@ class TestScopeOverHttp:
         assert "You now keep Main account (main) from " in words(response.text) or (
             "You now keep main from " in words(response.text))
         assert "(the last 24 months)" in words(response.text)
-        assert "earlier days are not looked for" in words(get(served, "/gaps").text)
+        assert "earlier days are not looked for" in words(get(served, "/bring-in").text)
 
     @pytest.mark.parametrize(
         ("fields", "why"),
@@ -510,7 +525,7 @@ class TestScopeOverHttp:
         cleared = post(served, "/gaps-scope", account="", mode="clear")
 
         assert "You now keep all of the past for every account." in words(cleared.text)
-        assert "earlier days are not looked for" not in words(get(served, "/gaps").text)
+        assert "earlier days are not looked for" not in words(get(served, "/bring-in").text)
 
 
 class TestTodaysItemFollowsTheDecisionOverHttp:

@@ -44,6 +44,14 @@ _esc = html.escape
 #: The rules for what is set aside, carried by the pages that use them (see `MARKS_STYLES`).
 MARKS_STYLE_TAG = f"<style>{MARKS_STYLES}</style>"
 
+#: The line the pages about what is held (coverage, kept statements) carry to send a reader who
+#: is looking for a missing file to the page that lists them.
+FETCH_NEXT_LINE = (
+    '<p class="muted">Missing a statement or an export? '
+    '<a class="tap" href="/bring-in">Bring in</a> lists them, account by account, '
+    "with the dates to ask for.</p>"
+)
+
 #: The kinds in the order they are offered: those that make a claim the store can weigh first.
 FORM_KINDS = (
     MarkKind.NOTHING_TO_FETCH,
@@ -88,7 +96,9 @@ def _listed(by_source: Sequence[tuple[str, int]]) -> str:
     counts: Counter[str] = Counter()
     for source, count in by_source:
         counts[source_words(source)] += count
-    return " and ".join(f"{name} lists {plural(n, 'row')}" for name, n in sorted(counts.items()))
+    return " and ".join(
+        f"{name} lists {plural(n, 'transaction')}" for name, n in sorted(counts.items())
+    )
 
 
 def _cap(text: str) -> str:
@@ -124,7 +134,9 @@ def evidence_text(
     verb = "list" if not source else "lists"
     if standing is Standing.SATISFIED:
         if reason == "source-provides":
-            return _cap(f"{named} {verb} {plural(ev.own_rows, 'row')} in this period after all.")
+            return _cap(
+                f"{named} {verb} {plural(ev.own_rows, 'transaction')} in this period after all."
+            )
         return (
             "A statement is held for part of this period now, so there was something to fetch "
             "after all."
@@ -147,7 +159,7 @@ def evidence_text(
                     f"that no statement held lists{span}."
                 )
             return f"{lead}{_listed(ev.by_source)} in it{_rows_span(ev)}."
-        text = "No source lists a row in this period."
+        text = "No source lists a transaction in this period."
         if ev.chain is True:
             text += (
                 " The statement after it opens on the balance the one before closed on, which "
@@ -170,7 +182,7 @@ def evidence_text(
             )
             own = ev.own_rows
             return (
-                f"{lead}{named} {verb} {plural(own, 'row')} before it"
+                f"{lead}{named} {verb} {plural(own, 'transaction')} before it"
                 f"{_rows_span(ev)}."
             )
         reach = ev.reach
@@ -193,10 +205,10 @@ def evidence_text(
             if reach.asked_back_to is not None:
                 said.append(
                     f"It was asked for days back to {reach.asked_back_to.isoformat()} and lists "
-                    f"no row before {before}."
+                    f"no transaction before {before}."
                 )
             return " ".join(said)
-        return _cap(f"{named} {verb} no row before {before}.")
+        return _cap(f"{named} {verb} no transaction before {before}.")
     if kind is MarkKind.NOT_OPEN:
         if standing is Standing.CONTRADICTED:
             if reason == "declared-open":
@@ -226,22 +238,22 @@ def evidence_text(
                 "that."
             )
         if reason == "before-first-row":
-            return "The account holds no row dated before this period ends."
+            return "The account holds no transaction dated before this period ends."
         if reason == "after-last-row":
-            return "The account holds no row dated after this period begins."
+            return "The account holds no transaction dated after this period begins."
         return (
-            "No opening or closing day is declared and the account holds rows either side, so "
-            "nothing held can test this."
+            "No opening or closing day is declared and the account holds transactions either "
+            "side, so nothing held can test this."
         )
     # What remains is NO_LONGER_PROVIDED: the others that reach the period are named.
     if ev.others:
         named_others = sorted({source_words(o) for o in ev.others})
         verb = "still lists" if len(named_others) == 1 else "still list"
         return _cap(
-            f"{' and '.join(named_others)} {verb} rows in this period, so it can still be "
-            "had from there."
+            f"{' and '.join(named_others)} {verb} transactions in this period, so it can "
+            "still be had from there."
         )
-    return "No other source lists a row in this period."
+    return "No other source lists a transaction in this period."
 
 
 def changed_text(reading: Reading) -> str:
@@ -257,8 +269,8 @@ def changed_text(reading: Reading) -> str:
     now = reading.evidence.rows
     return (
         "What this covers has changed since you marked it: "
-        f"then {plural(int(then), 'row')} {agree(int(then), 'was')} listed in it, now "
-        f"{plural(now, 'row')}."
+        f"then {plural(int(then), 'transaction')} {agree(int(then), 'was')} listed in it, now "
+        f"{plural(now, 'transaction')}."
     )
 
 
@@ -397,13 +409,13 @@ def _scope_line(scope: Scope, account: str, names: AccountsShown, today: date,
     start = scope.starts(today)
     said = (
         f"You keep {who} {_esc(scope.describe(today))}; earlier days are not looked for. "
-        "Rows before it are still held and still tested."
+        "Transactions before it are still held and still tested."
     )
     first_known = known.get(account) if account else None
     if first_known is not None and first_known < start:
         said += (
             f" Its first known balance, {first_known.isoformat()}, is before that day and "
-            "still carries the rows after it."
+            "still carries the transactions after it."
         )
     return f'<li class="gaps-scope-line">{said}</li>'
 
@@ -440,15 +452,17 @@ def scope_form_html(names: AccountsShown, accounts: Sequence[str]) -> str:
     return (
         '<form method="post" action="/gaps-scope" class="gaps-form">'
         '<p class="muted">Choose how much of the past you keep. Days before it are not looked '
-        "for, and no gap is reported there. Rows before it are still held and still tested, "
-        "and widening it later brings every gap back that it hid.</p>"
+        "for, and no gap is reported there. Transactions before it are still held and still "
+        "tested, and widening it later brings every gap back that it hid.</p>"
         f'<label class="gaps-field">For <select name="account">{options}</select></label>'
         '<fieldset class="gaps-choice"><legend>How far back</legend>'
         '<label class="tick"><input type="radio" name="mode" value="rolling" checked>'
         '<span>The last <input type="number" name="months" min="1" max="600" '
-        'inputmode="numeric" class="gaps-short"> months, moving on each day</span></label>'
+        'inputmode="numeric" class="gaps-short" aria-label="Months to keep"> months, moving '
+        "on each day</span></label>"
         '<label class="tick"><input type="radio" name="mode" value="fixed">'
-        '<span>From a fixed day <input type="date" name="first"></span></label>'
+        '<span>From a fixed day <input type="date" name="first" aria-label="First day kept">'
+        "</span></label>"
         '<label class="tick"><input type="radio" name="mode" value="clear">'
         "<span>Keep everything (remove the limit)</span></label></fieldset>"
         '<p><button class="button" type="submit">Save how far back I keep</button></p></form>'
@@ -515,7 +529,8 @@ def _offer(offer: ReachOffer, names: AccountsShown) -> str:
         basis.append(f"the provider says its history is cut at {reach.boundary.isoformat()}")
     if reach.asked_back_to is not None and reach.asked_back_to < offer.first_row:
         basis.append(
-            f"a request for days back to {reach.asked_back_to.isoformat()} came back with no rows"
+            f"a request for days back to {reach.asked_back_to.isoformat()} came back with no "
+            "transactions"
         )
     return (
         '<form method="post" action="/gaps-mark" class="gaps-offer">'

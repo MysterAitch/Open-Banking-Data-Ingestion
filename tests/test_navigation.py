@@ -88,7 +88,8 @@ def strip_of(page: str) -> str:
 class TestEveryPageCarriesTheStrip:
     def test_EveryGetRouteTheDispatcherKnows_RendersTheStripWithEveryDestination(self, base):
         for route in get_routes():
-            response = httpx.get(f"{base}{route}", timeout=20)
+            # `/gaps` answers with a redirect to Bring in, whose page carries the strip.
+            response = httpx.get(f"{base}{route}", timeout=20, follow_redirects=True)
             strip = strip_of(response.text)
             for _, label, href in DESTINATIONS:
                 assert f'href="{href}"' in strip and f">{label}</a>" in strip, (route, label)

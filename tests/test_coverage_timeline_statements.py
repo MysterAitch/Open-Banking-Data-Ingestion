@@ -40,12 +40,14 @@ from coverage_timeline_world import (
 from fetch_gaps_world import load_household
 from obdi import coverage_timeline as ct
 from obdi.account_names import AccountsShown
+from obdi.bring_in import BALANCE_KINDS
 from obdi.fetch_gaps import GapKind, gaps_for_account
+from obdi.fetch_reasons import gap_lines
 from obdi.statement_span import Known as SpanKnown
 from obdi.statement_span import Span
 from obdi.store import Store
+from obdi.web_bring_in import BringInData, render_bring_in
 from obdi.web_coverage_timeline import render_account_timeline
-from obdi.web_gaps import render_gaps
 
 
 def d(text: str) -> date:
@@ -260,8 +262,9 @@ class TestNotYetAvailable:
         assert "Next statement expected" not in page
 
 
-def _spans_on_fetch_page(html_text: str) -> list[str]:
-    return re.findall(r'<p class="gaps-range mono">([^<]*)</p>', html_text)
+def _spans_in_reasons(html_text: str) -> list[str]:
+    """The days each file gap is worded with, in Bring in's fold of why each is wanted."""
+    return re.findall(r'<span class="mono bi-range">([^<]*)</span>', html_text)
 
 
 class TestOnePlaceForGaps:
@@ -287,14 +290,18 @@ class TestOnePlaceForGaps:
             ).decode()
             outlook = world.outlook(ref)
             assert outlook is not None
-            fetch_page = render_gaps(world.report, AccountsShown()).decode()
+            fetch_page = render_bring_in(
+                BringInData(today=TODAY, report=world.report, unread="", names=AccountsShown())
+            ).decode()
             for gap in outlook.gaps:
                 span = (
                     gap.first_day.isoformat()
                     if gap.first_day == gap.last_day
                     else f"{gap.first_day.isoformat()} to {gap.last_day.isoformat()}"
                 )
-                assert span in _spans_on_fetch_page(fetch_page), (ref, gap.kind)
+                assert gap_lines(gap)[0] == span, (ref, gap.kind)
+                if gap.kind not in BALANCE_KINDS:
+                    assert span in _spans_in_reasons(fetch_page), (ref, gap.kind)
                 assert f"{ct.gap_anchor(ref, gap.kind, gap.first_day)}" in timeline_page, (
                     ref, gap.kind
                 )
@@ -324,21 +331,15 @@ class TestOnePlaceForGaps:
         )
 
 
-class TestFollowingTheFetchPagesLink:
-    def test_Link_FromTheFetchPage_LandsOnTheGapsOwnSentenceAndMark(self, household):
-        from obdi.web_gaps import _timeline_link
-
+class TestFollowingTheTimelinesLinkToBringIn:
+    def test_Link_FromTheTimelinesGapEntry_NamesTheAccountsBlockOnBringIn(self, household):
+        """The block's anchor is `account-` and the reference, which `test_bring_in_page` holds
+        the page to; the timeline's entry for a file wanted leads there and not to `/gaps`."""
         with Store(household) as store:
             (gap,) = gaps_for_account(store, CARD, TODAY)
         assert gap.kind is GapKind.HOLE_BETWEEN
-        link = _timeline_link(CARD, gap, TODAY)
-        href = re.search(r'href="([^"]*)"', link)
-        assert href is not None
-        address = href.group(1).replace("&amp;", "&")
-        path, _, fragment = address.partition("#")
-        assert fragment == f"e-{ct.gap_anchor(CARD, str(gap.kind), gap.first_day)}"
         with served(household, TODAY) as base:
-            text = httpx.get(f"{base}{path}", timeout=60).text
-        assert f'id="{fragment}"' in text
-        assert f'id="m-{fragment[2:]}"' in text
-        assert f'<a href="#{fragment}" id="m-{fragment[2:]}"' in text
+            timeline = httpx.get(f"{base}/coverage-timeline?ref={CARD}", timeout=60).text
+
+        assert f'href="/bring-in#account-{CARD}"' in timeline
+        assert 'href="/gaps"' not in timeline

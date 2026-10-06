@@ -234,7 +234,9 @@ def _file_title(gap: FetchGap, first: date, last: date) -> str:
     return f"Upload the statement covering {span}"
 
 
-def _gap_todos(gap: FetchGap) -> list[Todo]:
+def gap_todos(gap: FetchGap) -> list[Todo]:
+    """The things to do one gap stands for: a balance to confirm, or one file for each of the
+    periods the gap is split into. Bring in reads the files from here as Today does."""
     if gap.kind in _BALANCE_KINDS:
         return [
             Todo(
@@ -298,7 +300,7 @@ def build_todos(
     if fetch is not None:
         for outlook in fetch.accounts:
             for gap in outlook.gaps:
-                found.extend(_gap_todos(gap))
+                found.extend(gap_todos(gap))
     # Stable: within a band the attention items keep `overview`'s order, then the files and the
     # balances to confirm keep `fetch_report`'s, most urgent account first.
     return tuple(sorted(found, key=lambda todo: todo.urgency))
